@@ -1779,6 +1779,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "destroy-test".into(),
                     text: "Destroy target".into(),
+                    text_params: Default::default(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec!["target-entity".into()],
@@ -1844,6 +1845,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "reach-test".into(),
                     text: "Reach base".into(),
+                    text_params: Default::default(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],
@@ -1923,6 +1925,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "reach-test".into(),
                     text: "Reach base".into(),
+                    text_params: Default::default(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],
@@ -2080,6 +2083,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "patrol-test".into(),
                     text: "Patrol area".into(),
+                    text_params: Default::default(),
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],
@@ -2134,6 +2138,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "patrol-test".into(),
                     text: "Patrol area".into(),
+                    text_params: Default::default(),
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],
@@ -2225,6 +2230,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "destroy-far".into(),
                     text: "Destroy far target".into(),
+                    text_params: Default::default(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![target.into()],
@@ -2337,6 +2343,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "reach-human".into(),
                     text: "Reach".into(),
+                    text_params: Default::default(),
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],
@@ -2417,6 +2424,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "reach".into(),
                     text: "Reach".into(),
+                    text_params: Default::default(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],

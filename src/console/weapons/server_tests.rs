@@ -7275,6 +7275,7 @@ fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) 
             snapshot: ObjectiveSnapshot {
                 id: format!("obj-destroy-{target}"),
                 text: format!("Destroy {target}"),
+                text_params: Default::default(),
                 mandatory: true,
                 status: ObjectiveStatus::Active,
                 targets: vec![target.into()],

@@ -1761,6 +1761,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: format!("obj-destroy-{target_name}"),
                     text: format!("Destroy {target_name}"),
+                    text_params: Default::default(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![target_name.into()],
@@ -1995,6 +1996,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "obj-destroy-any".into(),
                     text: "Engage hostiles".into(),
+                    text_params: Default::default(),
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],

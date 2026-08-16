@@ -665,6 +665,52 @@ fn map_f32(spec: &Map, key: &str) -> Option<f32> {
     d.as_int().ok().map(|i| i as f32)
 }
 
+/// Read an optional `#{ … }` of runtime values to interpolate into a text id's
+/// `{placeholder}` tokens (see `messages::TEXT_PARAMS_SUFFIX`).
+///
+/// Collected into a `BTreeMap` so the wire encoding is key-ordered and the same
+/// authored call always produces the same bytes — a `HashMap` here would make
+/// the payload's encoding depend on hash order.
+///
+/// Values are rendered to `String` at this seam rather than carried as a typed
+/// union, because interpolation is textual substitution and the client has no
+/// use for the distinction. A script authors an INT (this engine is built
+/// `no_float`, so a computed figure arrives as `14`), a string, or a bool;
+/// anything else — a map, an array, a unit — is an authoring error and raises,
+/// discarding the call rather than rendering Rhai's debug form into crew-facing
+/// copy.
+pub(super) fn map_text_params(
+    spec: &Map,
+    key: &str,
+) -> Result<Option<std::collections::BTreeMap<String, String>>, String> {
+    let Some(d) = spec.get(key) else {
+        return Ok(None);
+    };
+    let map = d
+        .clone()
+        .try_cast::<Map>()
+        .ok_or_else(|| format!("`{key}` must be a #{{ name: value }} map"))?;
+    let mut out = std::collections::BTreeMap::new();
+    for (name, value) in map {
+        let type_name = value.type_name();
+        let rendered = if value.is_string() {
+            value
+                .into_string()
+                .map_err(|actual| format!("`{key}.{name}` must be a string, got {actual}"))?
+        } else if let Ok(i) = value.as_int() {
+            i.to_string()
+        } else if let Ok(b) = value.as_bool() {
+            b.to_string()
+        } else {
+            return Err(format!(
+                "`{key}.{name}` must be a string, an integer or a bool, got {type_name}"
+            ));
+        };
+        out.insert(name.to_string(), rendered);
+    }
+    Ok(Some(out))
+}
+
 /// Read an optional array-of-strings field (`targets` / `groups` /
 /// `directive_anchors`). `Ok(None)` when absent; `Err` when present but not an
 /// array of strings, so a malformed spec raises rather than silently dropping.
@@ -854,6 +900,7 @@ fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
         kind: "add_objective".to_string(),
         id: map_str(spec, "id"),
         text: map_str(spec, "text"),
+        text_params: map_text_params(spec, "text_params")?,
         mandatory: map_bool(spec, "mandatory"),
         targets: map_string_array(spec, "targets")?,
         target: map_str(spec, "target"),

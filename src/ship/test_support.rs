@@ -430,6 +430,7 @@ pub fn reach_scored_objective(anchor: &str, score: f32) -> crate::messages::Scor
         snapshot: crate::messages::ObjectiveSnapshot {
             id: format!("reach-{anchor}"),
             text: format!("Reach {anchor}"),
+            text_params: Default::default(),
             mandatory: true,
             status: crate::messages::ObjectiveStatus::Active,
             targets: vec![],
@@ -450,6 +451,7 @@ pub fn retreat_scored_objective(anchor: &str, score: f32) -> crate::messages::Sc
         snapshot: crate::messages::ObjectiveSnapshot {
             id: format!("retreat-{anchor}"),
             text: format!("Retreat to {anchor}"),
+            text_params: Default::default(),
             mandatory: false,
             status: crate::messages::ObjectiveStatus::Active,
             targets: vec![],
@@ -537,6 +539,7 @@ pub fn patrol_scored_objective(anchors: Vec<&str>, score: f32) -> crate::message
         snapshot: crate::messages::ObjectiveSnapshot {
             id: "obj-defend".into(),
             text: "Defend Starbase Alpha".into(),
+            text_params: Default::default(),
             mandatory: true,
             status: crate::messages::ObjectiveStatus::Active,
             targets: vec!["Starbase Alpha".into()],
@@ -561,6 +564,7 @@ pub fn destroy_scored_objective(target: &str, score: f32) -> crate::messages::Sc
         snapshot: crate::messages::ObjectiveSnapshot {
             id: format!("destroy-{target}"),
             text: format!("Destroy {target}"),
+            text_params: Default::default(),
             mandatory: true,
             status: crate::messages::ObjectiveStatus::Active,
             targets: vec![target.into()],

@@ -5326,6 +5326,7 @@ verb = "fire_blaster"
                     snapshot: crate::messages::ObjectiveSnapshot {
                         id: id.to_string(),
                         text: "Patrol".to_string(),
+                        text_params: Default::default(),
                         mandatory: false,
                         status: crate::messages::ObjectiveStatus::Active,
                         targets: vec![],
@@ -5365,6 +5366,7 @@ verb = "fire_blaster"
                         snapshot: crate::messages::ObjectiveSnapshot {
                             id: id.to_string(),
                             text: "Destroy".to_string(),
+                            text_params: Default::default(),
                             mandatory: false,
                             status: crate::messages::ObjectiveStatus::Active,
                             targets: vec![],
@@ -5407,6 +5409,7 @@ verb = "fire_blaster"
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: id.to_string(),
                     text: "Reach".to_string(),
+                    text_params: Default::default(),
                     mandatory: false,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],
@@ -5599,6 +5602,7 @@ verb = "fire_blaster"
                     snapshot: crate::messages::ObjectiveSnapshot {
                         id: "reach-dock".to_string(),
                         text: "Reach the dock".to_string(),
+                        text_params: Default::default(),
                         mandatory: false,
                         status: crate::messages::ObjectiveStatus::Active,
                         targets: vec![],

@@ -7319,6 +7319,7 @@ mod tests {
                 snapshot: ObjectiveSnapshot {
                     id: "destroy-pirates".into(),
                     text: "Destroy pirates".into(),
+                    text_params: Default::default(),
                     mandatory: true,
                     status: ObjectiveStatus::Active,
                     targets: vec![],

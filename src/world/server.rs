@@ -2435,6 +2435,7 @@ pub(crate) fn apply_dispatch_result(
             ActionCmd::AddObjective {
                 id,
                 text,
+                text_params,
                 mandatory,
                 targets,
                 directive,
@@ -2442,9 +2443,10 @@ pub(crate) fn apply_dispatch_result(
                 source,
                 origin_layer,
             } => {
-                let added = objectives.0.add_full(
+                let added = objectives.0.add_full_with_params(
                     id.clone(),
                     text,
+                    text_params,
                     mandatory,
                     targets,
                     directive,
@@ -8638,6 +8640,7 @@ position = [1.0, 0.0, 0.0]
                 TriggerAction::AddObjective {
                     id: "obj-alpha".into(),
                     text: "Add then complete".into(),
+                    text_params: Default::default(),
                     mandatory: false,
                     targets: vec![],
                     directive: crate::messages::AiDirective::None,
@@ -8650,6 +8653,7 @@ position = [1.0, 0.0, 0.0]
                 TriggerAction::AddObjective {
                     id: "obj-beta".into(),
                     text: "Add then fail".into(),
+                    text_params: Default::default(),
                     mandatory: false,
                     targets: vec![],
                     directive: crate::messages::AiDirective::None,

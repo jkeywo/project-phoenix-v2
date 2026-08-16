@@ -1592,9 +1592,17 @@ pub struct DialogueState {
     pub message_id: String,
     /// The thread every message in this conversation shares.
     pub thread_id: String,
-    /// The shown node's body text.
+    /// The shown node's body text, as a `strings.csv` id.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub body: String,
+    /// The runtime values interpolated into `body`'s `{placeholder}` tokens.
+    ///
+    /// Captured rather than re-derived, because there is nothing to re-derive
+    /// from: the figures were computed by the script at the moment the node was
+    /// entered, off state that has since moved on. A resumed save that dropped
+    /// them would re-render the node with its placeholders bare.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub body_params: std::collections::BTreeMap<String, String>,
     /// `(text, important)` per shown response, in the order the player sees them
     /// - the index a `RespondToMessage` submits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1632,6 +1640,7 @@ fn reduce_dialogue_node(message_id: &str, dialogue: &ActiveDialogue) -> Dialogue
         message_id: message_id.to_string(),
         thread_id: dialogue.thread_id.clone(),
         body: node.body.clone(),
+        body_params: node.body_params.clone(),
         responses: node
             .responses
             .iter()
@@ -3566,6 +3575,7 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
                         // reduction.
                         current_node: CommsDialogueNode {
                             body: row.body.clone(),
+                            body_params: row.body_params.clone(),
                             responses: row
                                 .responses
                                 .iter()

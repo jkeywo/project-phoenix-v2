@@ -612,6 +612,11 @@ pub(crate) struct RawActionEntry {
     pub(crate) id: Option<String>,
     #[serde(default)]
     pub(crate) text: Option<String>,
+    /// Runtime values to interpolate into `text`'s `{placeholder}` tokens for an
+    /// `add_objective` action. `BTreeMap` so the wire encoding it ends up in is
+    /// key-ordered and deterministic; see `messages::TEXT_PARAMS_SUFFIX`.
+    #[serde(default)]
+    pub(crate) text_params: Option<std::collections::BTreeMap<String, String>>,
     #[serde(default)]
     pub(crate) mandatory: Option<bool>,
     /// Optional list of entity names to mark on the nav radar for an
@@ -866,6 +871,11 @@ pub enum TriggerAction {
     AddObjective {
         id: String,
         text: String,
+        /// Runtime values interpolated into `text`'s `{placeholder}` tokens by
+        /// the client. Authored as an optional `text_params` map on the
+        /// `add_objective` spec; empty when the objective names a figure-free
+        /// string. See `messages::TEXT_PARAMS_SUFFIX`.
+        text_params: std::collections::BTreeMap<String, String>,
         mandatory: bool,
         targets: Vec<String>,
         /// AI directive attached to this objective (issue #571).
@@ -1299,6 +1309,7 @@ pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerA
                     text: raw_action.text.clone().ok_or_else(|| {
                         "Action 'add_objective' requires a 'text' field".to_string()
                     })?,
+                    text_params: raw_action.text_params.clone().unwrap_or_default(),
                     mandatory: raw_action.mandatory.unwrap_or(false),
                     targets: raw_action.targets.clone().unwrap_or_default(),
                     directive,

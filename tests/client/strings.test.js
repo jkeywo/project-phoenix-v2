@@ -232,6 +232,83 @@ describe('localiseTree', () => {
   });
 });
 
+describe('localiseTree parameterised ids', () => {
+  // The wire shape this exists for: a text id joined by a `<field>_params`
+  // sibling, so a figure the server computed lands inside the sentence rather
+  // than beside it on a panel. `TEXT_PARAMS_SUFFIX` in src/core/messages.rs is
+  // the Rust half of the same contract.
+  beforeEach(() => {
+    setTable(new Map([
+      ['world.skyway.comms.window_opens_short',
+        '[You have {available} against {claimed} asked for. You are short by {shortfall}.]'],
+      ['world.skyway.objective.window.text', '[Short by {shortfall}. Decide who goes.]'],
+      ['entity.cruiser.name', '[Alliance Cruiser]'],
+      ['system.helm.name', '[Helm]'],
+    ]));
+  });
+
+  it('interpolates a comms body from its body_params sibling', () => {
+    const msg = {
+      CommsState: {
+        messages: [{
+          body: 'world.skyway.comms.window_opens_short',
+          body_params: { available: '38', claimed: '52', shortfall: '14' },
+        }],
+      },
+    };
+    expect(localiseTree(msg).CommsState.messages[0].body)
+      .toBe('[You have 38 against 52 asked for. You are short by 14.]');
+  });
+
+  it('interpolates objective text from its text_params sibling', () => {
+    const msg = { objectives: [{ id: 'obj', text: 'world.skyway.objective.window.text', text_params: { shortfall: '14' } }] };
+    expect(localiseTree(msg).objectives[0].text).toBe('[Short by 14. Decide who goes.]');
+  });
+
+  it('resolves an id-valued param before substituting it', () => {
+    // Both strings are still bracketed unapproved copy, so the resolved param
+    // carries its own brackets into the sentence — that is the table's content
+    // showing through, not a nesting bug.
+    setTable(new Map([['msg', '[{who} is offline]'], ['system.helm.name', '[Helm]']]));
+    expect(localiseTree({ text: 'msg', text_params: { who: 'system.helm.name' } }).text)
+      .toBe('[[Helm] is offline]');
+  });
+
+  it('leaves a text id alone when it has no params sibling', () => {
+    // The pre-existing path, and the one every other payload still takes.
+    expect(localiseTree({ name: 'entity.cruiser.name' }).name).toBe('[Alliance Cruiser]');
+  });
+
+  it('leaves an unmatched placeholder standing rather than blanking it', () => {
+    expect(localiseTree({ text: 'world.skyway.objective.window.text', text_params: { other: '1' } }).text)
+      .toBe('[Short by {shortfall}. Decide who goes.]');
+  });
+
+  it('ignores a _params sibling that is not a plain object', () => {
+    // Guarding on shape, not just on the name: a field that merely happens to
+    // end in _params must not change how its neighbour resolves.
+    expect(localiseTree({ text: 'entity.cruiser.name', text_params: 'nonsense' }).text)
+      .toBe('[Alliance Cruiser]');
+    expect(localiseTree({ text: 'entity.cruiser.name', text_params: ['a'] }).text)
+      .toBe('[Alliance Cruiser]');
+    expect(localiseTree({ text: 'entity.cruiser.name', text_params: null }).text)
+      .toBe('[Alliance Cruiser]');
+  });
+
+  it('leaves an unknown id unresolved even when params are present', () => {
+    // Same rule as the bare-string path: only table entries are substituted, so
+    // a uuid with a stray sibling cannot be mangled into an interpolation.
+    expect(localiseTree({ text: 'not-an-id', text_params: { n: '1' } }).text).toBe('not-an-id');
+  });
+
+  it('does not mutate the input', () => {
+    const msg = { text: 'world.skyway.objective.window.text', text_params: { shortfall: '14' } };
+    localiseTree(msg);
+    expect(msg.text).toBe('world.skyway.objective.window.text');
+    expect(msg.text_params).toEqual({ shortfall: '14' });
+  });
+});
+
 describe('applyToDom', () => {
   // Minimal stand-in for the DOM: vitest runs in the `node` environment, and
   // applyToDom only ever touches querySelectorAll/textContent/setAttribute.

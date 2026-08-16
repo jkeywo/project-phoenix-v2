@@ -50,16 +50,21 @@ pub struct CommsResponse {
 /// The dialogue node currently being shown for one message.
 ///
 /// Built by [`project_node`](crate::world::script::comms::project_node) from the
-/// `#{message, responses}` map a node fn returned - the one place script meets
-/// wire shape. It carried a `speaker` override and an injection-gating `trigger`
+/// `#{message, params, responses}` map a node fn returned - the one place script
+/// meets wire shape. It carried a `speaker` override and an injection-gating `trigger`
 /// while `[[comms]]` authored follow-up trees; both were declarative-only and
 /// went with the parser in issue #985 (who is calling is metadata on the OPEN -
 /// `OpenCommsRequest::display_name` - and a node in `active_dialogues` has by
 /// definition already been injected).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommsDialogueNode {
-    /// The message body shown in the inbox.
+    /// The message body shown in the inbox, as a `strings.csv` id.
     pub body: String,
+    /// Runtime values to interpolate into `body`'s `{placeholder}` tokens. A
+    /// `BTreeMap`, so the wire encoding it becomes is key-ordered and
+    /// deterministic; see `messages::TEXT_PARAMS_SUFFIX`. Empty for every node
+    /// whose copy names no figure, which is all of them but one.
+    pub body_params: std::collections::BTreeMap<String, String>,
     /// The response options offered on this node.
     pub responses: Vec<CommsResponse>,
 }

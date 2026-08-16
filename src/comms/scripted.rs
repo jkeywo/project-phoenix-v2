@@ -400,6 +400,7 @@ pub(crate) fn open_scripted_comms_threads(
             sender_uuid,
             sender_name,
             wire_node.body.clone(),
+            wire_node.body_params.clone(),
             responses,
             thread_id.clone(),
             available,

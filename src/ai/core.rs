@@ -662,6 +662,10 @@ pub fn score_doctrine_pool(
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: d.id.clone(),
                     text: d.text.clone(),
+                    // Doctrine text is authored on the hull and names no runtime
+                    // figure — there is no tick at which a standing objective
+                    // acquires one.
+                    text_params: Default::default(),
                     mandatory: d.mandatory,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],
@@ -2458,6 +2462,7 @@ mod tests {
             snapshot: crate::messages::ObjectiveSnapshot {
                 id: "patrol".into(),
                 text: "Patrol".into(),
+                text_params: Default::default(),
                 mandatory: false,
                 status: crate::messages::ObjectiveStatus::Active,
                 targets: vec![],
@@ -2498,6 +2503,7 @@ mod tests {
             snapshot: crate::messages::ObjectiveSnapshot {
                 id: "patrol".into(),
                 text: "".into(),
+                text_params: Default::default(),
                 mandatory: false,
                 status: crate::messages::ObjectiveStatus::Active,
                 targets: vec![],
@@ -2529,6 +2535,7 @@ mod tests {
             snapshot: crate::messages::ObjectiveSnapshot {
                 id: "reach".into(),
                 text: "".into(),
+                text_params: Default::default(),
                 mandatory: false,
                 status: crate::messages::ObjectiveStatus::Active,
                 targets: vec![],
@@ -2785,6 +2792,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "destroy-wave-1".into(),
                     text: "Destroy wave 1".into(),
+                    text_params: Default::default(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec!["wave_1".into()],
@@ -2803,6 +2811,7 @@ mod tests {
                 snapshot: crate::messages::ObjectiveSnapshot {
                     id: "patrol-base".into(),
                     text: "Patrol".into(),
+                    text_params: Default::default(),
                     mandatory: true,
                     status: crate::messages::ObjectiveStatus::Active,
                     targets: vec![],
@@ -3054,6 +3063,7 @@ mod tests {
             snapshot: crate::messages::ObjectiveSnapshot {
                 id: "destroy-wave-1".into(),
                 text: "Destroy".into(),
+                text_params: Default::default(),
                 mandatory: true,
                 status: crate::messages::ObjectiveStatus::Active,
                 targets: vec![],
@@ -3079,6 +3089,7 @@ mod tests {
             snapshot: crate::messages::ObjectiveSnapshot {
                 id: "retreat".into(),
                 text: "Retreat".into(),
+                text_params: Default::default(),
                 mandatory: false,
                 status: crate::messages::ObjectiveStatus::Active,
                 targets: vec![],
@@ -3224,6 +3235,7 @@ mod tests {
             snapshot: crate::messages::ObjectiveSnapshot {
                 id: "destroy-target".into(),
                 text: "".into(),
+                text_params: Default::default(),
                 mandatory: false,
                 status: crate::messages::ObjectiveStatus::Active,
                 targets: vec![target_name.into()],
@@ -3436,6 +3448,7 @@ mod tests {
             snapshot: crate::messages::ObjectiveSnapshot {
                 id: "patrol-base".into(),
                 text: "Patrol".into(),
+                text_params: Default::default(),
                 mandatory: false,
                 status: crate::messages::ObjectiveStatus::Active,
                 targets: vec![],

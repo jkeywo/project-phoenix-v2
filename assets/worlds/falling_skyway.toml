@@ -555,6 +555,46 @@
 # never filled and is survivable now that it is smaller still, but a berth that
 # means "dock here" wants an offset from the hull it docks at, and moving one is
 # a design call rather than a collider fix.
+#
+# ── STILL 0x97143e605be31a1d OVER PARAMETERISED TEXT, and why ────────────────
+#
+# The parameterised-strings slice edits THIS FILE's script band — `window_opens_
+# short` gains a `params` map reading the three window flags — and edits the
+# `strings.csv` row it names. The digest does not move, and that is a claim with
+# two separate legs rather than an oversight.
+#
+# THE FIRST LEG IS THE ONE THIS HEADER ALREADY ESTABLISHED, four times over: a
+# script band folds NOTHING. #1042's own paragraph records the A/B — delete the
+# whole Act-3 script block and the number stays put — and #1043's four-corner
+# matrix found deleting its entire band identical to deleting two mooring
+# orders. Objectives, comms threads and dialogue bodies are authoritative but
+# unfolded; `sim_digest.rs`'s module docs list them among the deferred surfaces
+# by name. A `params` map on a node fn is more of exactly that.
+#
+# THE SECOND LEG IS THE ONE WORTH WRITING DOWN, because a reader who knows about
+# issue #864's script binding will expect the opposite. Editing script text DOES
+# move a digest — the CONTENT digest. `load_world_scripts` records
+# `CompiledScripts::content_hash` into the content ledger under
+# `<world path>#scripts`, and an inline `[script]` block rides in the world
+# TOML's own recorded text besides, so this edit moves that number twice over.
+# But `snapshot::content_digest` is the SAVE-COMPATIBILITY dimension —
+# `Versions::check` refusing a save whose scripts have since moved — and it is
+# NOT what this header blesses. The blessed number is `state_digest`, which
+# `ReplayLedger::seal` computes from `world_digest` alone: run scope, entities,
+# infrastructure, operations, civilians, weapons holds, asteroids, collisions.
+# No script hash is in that fold, and no content-ledger entry reaches it. So a
+# save recorded before this slice is correctly refused afterwards, and the run
+# digest is correctly unmoved — the two answers differ because they are answers
+# to different questions.
+#
+# The `strings.csv` half cannot reach either number: the fold sees a comms body
+# as the id it is, and the id did not change. Only the English behind it did.
+#
+# MEASURED, on the committed tree, all three anchors this slice was asked to
+# check: falling_skyway 10886394782840723997 (0x97143e605be31a1d), combat_test
+# 14942520827746055774 and patrol 11531679067393217131 — every one unmoved, with
+# the headless binary rebuilt from the changed tree rather than reused from
+# before it.
 
 [global]
 seed = 1034
@@ -3358,6 +3398,22 @@ fn head_stands_down(ctx) {
 // them is in the dialogue. The real fix is parameterised strings, and it is
 // nobody's slice yet.
 //
+// [ai] SUPERSEDED IN PART, and the paragraph above is kept because it is the
+// reason the capacity rows exist rather than a mistake to erase. Parameterised
+// strings landed: a text id may now be joined on the wire by a `<field>_params`
+// table (`messages::TEXT_PARAMS_SUFFIX`), a script authors it as an optional
+// `params` key, and the client's `localiseTree` resolves `t(id, params)` at the
+// wire boundary. `window_opens_short` is the first consumer — it reads the three
+// banked flags and the copy interpolates them — so the sentence now carries the
+// digits it used to point at.
+//
+// THE CAPACITY ROWS STAY, and that is a decision rather than an oversight. They
+// are a standing readout a crew can consult at any point in the window, while
+// the dialogue is a single beat that arrives once; and the booking arithmetic
+// below moves those rows as lifts are committed and stood down, which no
+// sentence spoken at open could track. What changed is that the opening line no
+// longer has to say "our manifest carries that figure" instead of the figure.
+//
 // ── THE CLOSE RULE: ABORT ───────────────────────────────────────────────────
 //
 // The window shuts on its deadline whatever is happening. A lift still on the
@@ -3566,7 +3622,28 @@ fn on_transfer_window_opens(ctx) {
 // The two bodies. Each is its own node function because `open_comms` names a
 // FUNCTION, and both say the same thing at a different volume: the window is
 // open, it is short, and that makes it a decision.
-fn window_opens_short(ctx) { #{ message: "world.falling_skyway.comms.window_opens_short", responses: [] } }
+//
+// THE SHORT BODY NOW CARRIES THE DIGITS. Its `params` map is read off the three
+// flags `on_transfer_window_opens` banked a few lines up — the same ledger the
+// bookings are decided against, so the sentence and the manifest cannot disagree
+// about what the chain could do when the window opened. The copy interpolates
+// them as `{available}`, `{claimed}` and `{shortfall}`; see the note above on
+// why the numbers used to live only on a capacity row.
+//
+// The dead body is left as it was, deliberately. It says the lift is nothing at
+// all against three standing claims, which is a sentence with no figure in it
+// that a number would improve — "short by the whole of it" is the point.
+fn window_opens_short(ctx) {
+    #{
+        message: "world.falling_skyway.comms.window_opens_short",
+        params: #{
+            available: ctx.flags.skyway_window_supply,
+            claimed: ctx.flags.skyway_window_demand_total,
+            shortfall: ctx.flags.skyway_window_shortfall_at_open,
+        },
+        responses: [],
+    }
+}
 fn window_opens_dead(ctx)  { #{ message: "world.falling_skyway.comms.window_opens_dead", responses: [] } }
 
 // ── Booking a lift ──────────────────────────────────────────────────────────

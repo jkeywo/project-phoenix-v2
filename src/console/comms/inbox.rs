@@ -151,6 +151,7 @@ mod tests {
             sender_name: "Station Alpha".into(),
             subject: "Distress".into(),
             body: "We are under attack!".into(),
+            body_params: Default::default(),
             responses: vec![
                 crate::messages::CommsResponseView {
                     text: "Understood".into(),

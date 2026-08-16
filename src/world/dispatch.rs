@@ -178,6 +178,9 @@ pub enum ActionCmd {
     AddObjective {
         id: String,
         text: String,
+        /// Runtime values interpolated into `text`'s `{placeholder}` tokens by
+        /// the client. See `messages::TEXT_PARAMS_SUFFIX`.
+        text_params: std::collections::BTreeMap<String, String>,
         mandatory: bool,
         targets: Vec<String>,
         directive: AiDirective,
@@ -570,6 +573,7 @@ fn dispatch_state_action(action: &TriggerAction, context: &DispatchContext) -> D
         TriggerAction::AddObjective {
             id,
             text,
+            text_params,
             mandatory,
             targets,
             directive,
@@ -586,6 +590,7 @@ fn dispatch_state_action(action: &TriggerAction, context: &DispatchContext) -> D
             out.commands.push(ActionCmd::AddObjective {
                 id: id.clone(),
                 text: text.clone(),
+                text_params: text_params.clone(),
                 mandatory: *mandatory,
                 targets: resolved,
                 directive: directive.clone(),
@@ -1370,6 +1375,7 @@ mod tests {
         TriggerAction::AddObjective {
             id: "obj1".to_string(),
             text: "Destroy the convoy".to_string(),
+            text_params: Default::default(),
             mandatory: true,
             targets: targets.into_iter().map(str::to_string).collect(),
             directive: AiDirective::default(),
@@ -1404,6 +1410,7 @@ mod tests {
             vec![ActionCmd::AddObjective {
                 id: "obj1".to_string(),
                 text: "Destroy the convoy".to_string(),
+                text_params: Default::default(),
                 mandatory: true,
                 targets: vec!["alpha".to_string(), "beta".to_string()],
                 directive: AiDirective::default(),
@@ -2651,6 +2658,7 @@ mod tests {
             vec![ActionCmd::AddObjective {
                 id: "obj1".to_string(),
                 text: "Destroy the convoy".to_string(),
+                text_params: Default::default(),
                 mandatory: true,
                 targets: vec!["trigger_ship".to_string()],
                 directive: AiDirective::default(),

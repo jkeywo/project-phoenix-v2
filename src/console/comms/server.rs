@@ -685,6 +685,7 @@ pub(crate) fn handle_respond_to_message(
                 sender_uuid,
                 sender_name,
                 wire_node.body.clone(),
+                wire_node.body_params.clone(),
                 new_responses,
                 thread_id.clone(),
                 available,
@@ -1888,6 +1889,7 @@ mod tests {
             sender_name: "Station Alpha".into(),
             subject: "Test".into(),
             body: "Body text".into(),
+            body_params: Default::default(),
             responses: vec![crate::messages::CommsResponseView {
                 text: "OK".into(),
                 important: false,
@@ -3426,6 +3428,7 @@ mod tests {
                 ActiveDialogue {
                     current_node: CommsDialogueNode {
                         body: "Go ahead.".into(),
+                        body_params: Default::default(),
                         responses: vec![CommsResponse {
                             text: "Acknowledge.".into(),
                             important: false,
@@ -3792,6 +3795,7 @@ response_index = 0
             let dialogue = rt.active_dialogues.get_mut(&msg_id).unwrap();
             dialogue.current_node = CommsDialogueNode {
                 body: "Go ahead.".into(),
+                body_params: Default::default(),
                 responses: vec![
                     CommsResponse {
                         text: "Acknowledge.".into(),
@@ -4041,6 +4045,7 @@ weight = 100.0
                 ActiveDialogue {
                     current_node: CommsDialogueNode {
                         body: body.to_string(),
+                        body_params: Default::default(),
                         responses,
                     },
                     thread_id: "scripted-thread".to_string(),
@@ -4630,6 +4635,7 @@ weight = 100.0
             sender_name: "Starbase Alpha".into(),
             subject: "Old message".into(),
             body: "Old message body".into(),
+            body_params: Default::default(),
             responses: vec![],
             selected_response: None,
             is_read: false,

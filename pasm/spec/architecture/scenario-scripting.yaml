@@ -259,6 +259,66 @@ entities:
       symbols: [ScriptDialogueNode, ScriptDialogueResponse, read_dialogue_node, enter_node]
       tests: [cargo test]
 
+  - component: scenario-text-parameters
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Parameterised Text Ids — A Computed Figure Inside Crew Copy
+      summary: "Crew-facing text crosses the wire as a bare `strings.csv` id and is resolved whole on the client, so until this slice no runtime figure could appear in objective or comms copy — the gap `falling_skyway.toml`'s `[ai]` note recorded when #1042 put the transfer window's three numbers on a capacity row and wrote the sentence around them. A field holding a text id may now be joined by a sibling named `<field>_params` (`TEXT_PARAMS_SUFFIX`), a `BTreeMap<String, String>` that `localiseTree` finds by NAME at the wire boundary and feeds to the client's existing `t(id, params)`. Authored as an optional `params` key on a dialogue node map and an optional `text_params` key on an `add_objective` spec; `ObjectiveSnapshot::text_params` and `CommsMessage::body_params` are the two wire fields carrying one today."
+      rationale:
+        - "[ai] The client's `t(id, params)` has ALWAYS interpolated `{placeholder}` tokens — roughly sixty rows in `strings.csv` already use them. What was missing was never the renderer; it was that nothing but client-computed state could feed it. So this slice adds a table to the wire and one branch to `localiseTree`, and adds nothing to the renderers at all."
+        - "[ai] Resolved at `localiseTree` rather than at the eight console render sites, because that is the doctrine the function already states: it walks a decoded message it knows nothing about so that no console has to learn which of its fields are text. Threading params to each renderer would have inverted that and made every future parameterised field an eight-file change. Text arrives already interpolated, exactly as it already arrived already resolved."
+        - "[ai] The pairing is a NAME convention (`<field>_params`) rather than a type, because the resolver is generic over a payload shape it does not know: the sibling's name is the only thing that can say which table belongs to which id. `paramsFor` still guards on SHAPE — the field must hold a string and the sibling a plain object — so a field that merely happens to end in `_params` cannot change how its neighbour resolves."
+        - "[ai] `BTreeMap`, not `HashMap`. Key order IS serialisation order, so the same authored call always encodes to the same bytes; a `HashMap` would pass every key-presence assertion and still emit a different string on a different run, which is exactly the class of thing a digest-bearing wire must not do."
+        - "[ai] `skip_serializing_if` empty is what made this landable on a shipped wire without a revision bump: a payload naming a figure-free string is BYTE-IDENTICAL to what it was before the field existed, pinned as a literal in `codec.rs` rather than as a key-absence assertion. That byte-identity is also the digest-neutrality argument — nothing folded moved, and the three anchors were re-measured unmoved."
+        - "[ai] Values render to `String` at the script seam rather than crossing as a typed union: interpolation is textual substitution and the client has no use for the distinction. A map or an array raises rather than being stringified, so Rhai's debug form cannot end up in crew-facing copy."
+        - "[ai] `ObjectiveManager::add_full_with_params` is the widest door and the only one that inserts, with `add` and `add_full` delegating to it — extending the `add` to `add_full` delegation the file already had, rather than adding an eighth positional argument to twenty-seven call sites or leaving two insert sites a future field could be missed at."
+        - "[ai] The comms half rides the node fn's RETURN map, not the effect sink, so the ordering question the `ActionCmd` buffer exists to answer does not arise: params are part of the node's shape, materialised by `read_dialogue_node` alongside `message`. The objective half DOES ride the ordered sink — `text_params` travels inside the existing `TriggerAction::AddObjective`, adding no new path."
+        - "[ai] `CommsMessage::subject` is deliberately NOT parameterised. It is a 40-character prefix of the id rather than of the rendered text, so a params table would have nowhere to land. That is a pre-existing property of the derivation — 81 of 134 `world.*.comms.*` ids exceed 40 characters and already render as a chopped id in the inbox preview — and fixing it means giving a node its own subject id, which is a separate slice."
+        - "The capacity rows #1042 added STAY. They are a standing readout a crew can consult at any point in the window, and the booking arithmetic moves them as lifts are committed and stood down; the dialogue is a single beat that arrives once. What changed is that the opening line no longer has to say that the manifest carries the figure instead of carrying the figure."
+    architecture:
+      kind: authoring-front-end
+      authority: authoritative
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: observed
+      # `gui/strings.js` holds the client half — `localiseTree`'s resolution
+      # branch — and is deliberately NOT claimed here, though the summary and
+      # rationale both name it: every console module imports that file, so
+      # listing it makes thirteen unrelated components read as observed
+      # dependencies on scenario scripting. `localiseTree` is left out of
+      # `symbols` for the same reason: a symbol that lives outside every declared
+      # path is exactly what `missing-observed-symbol` exists to flag.
+      paths:
+        - src/core/messages.rs
+        - src/objectives.rs
+        - src/world/script/comms.rs
+        - src/world/script/effects.rs
+        - src/world/config.rs
+        - src/world/dispatch.rs
+        - src/comms/content.rs
+        - src/comms/scripted.rs
+        - assets/worlds/falling_skyway.toml
+      symbols:
+        - TEXT_PARAMS_SUFFIX
+        - map_text_params
+        - add_full_with_params
+        - ObjectiveSnapshot
+        - CommsMessage
+        - CommsDialogueNode
+        - ScriptDialogueNode
+      tests: [cargo test, npx vitest run]
+    evidence:
+      - kind: test
+        reference: "src/core/codec.rs::an_objective_with_no_params_is_byte_identical_to_the_pre_params_wire"
+        summary: "The empty case pinned as a LITERAL encoded string, not as a key-absence assertion: a reader that never heard of the field sees the same bytes, in the same order. Siblings pin sorted key order for a non-empty table, the decode of a payload written before the field existed, and the absence of `body_params` from a comms message that carries none."
+      - kind: test
+        reference: "src/world/script/comms.rs::a_node_fn_can_attach_params_to_its_message"
+        summary: "The authoring seam end to end: a node fn reads two flags into a `params` map, integers render to strings, and `project_node` carries them onto `CommsDialogueNode::body_params` unchanged. Siblings assert a paramless node materialises an empty table and that a non-scalar value raises naming the offending key."
+      - kind: test
+        reference: "tests/client/strings.test.js::localiseTree parameterised ids"
+        summary: "The client half: a comms body and an objective text interpolated from their `_params` siblings, an id-valued param resolved before substitution, an unmatched placeholder left standing, and a `_params` sibling of the wrong shape ignored rather than trusted on its name."
+
   - component: scenario-script-loader-validation
     core:
       status: implemented

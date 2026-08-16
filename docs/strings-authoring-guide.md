@@ -87,6 +87,54 @@ There is no plural rule. Use two ids (`.one` and `.other`) and pick between them
 at the call site. This is deliberate: a real plural system is only worth it once
 a language with non-binary plurals is actually on the roadmap.
 
+### Placeholders in text the SERVER sends
+
+Until recently the paragraph above only applied to text the *client* built,
+because a crew-facing payload carried a bare id and nothing else — so a mission
+that wanted to say "you are short by 14" had to publish the digits on a capacity
+row and write the sentence around them. `falling_skyway.toml` carries that
+workaround's `[ai]` note, and this is the mechanism that retired it.
+
+A wire field holding a text id may be joined by a sibling field named
+`<field>_params`, a string→string map. `localiseTree` finds it by name and
+resolves `t(id, params)` instead of `t(id)`. The fields that carry one today are
+`ObjectiveSnapshot::text_params` and `CommsMessage::body_params`;
+`TEXT_PARAMS_SUFFIX` in `src/core/messages.rs` states the contract, and
+`localiseTree`'s own doc comment states the client half.
+
+Authoring it from a scenario script:
+
+```rhai
+// A comms node: an optional `params` key beside `message`.
+fn window_opens_short(ctx) {
+    #{
+        message: "world.falling_skyway.comms.window_opens_short",
+        params: #{ shortfall: ctx.flags.skyway_window_shortfall_at_open },
+        responses: [],
+    }
+}
+
+// An objective: an optional `text_params` key on the spec map.
+ctx.effects.add_objective(#{
+    id: "obj-a3-window",
+    text: "world.falling_skyway.objective.window.text",
+    text_params: #{ shortfall: ctx.flags.skyway_window_shortfall_at_open },
+});
+```
+
+The CSV row is written the way any other placeholder row is — `{shortfall}` in
+the `en` column, and the `context` column naming what each token means.
+
+Three rules worth knowing:
+
+- **Values are strings.** An integer authored in Rhai is rendered at the script
+  seam; a map or an array raises rather than being stringified into crew copy.
+- **The table is a `BTreeMap`**, so the encoding is key-ordered and the same
+  authored call always produces the same bytes.
+- **An empty table is not sent at all.** A payload naming a figure-free string
+  is byte-identical to what it was before this existed, which is why the change
+  needed no wire-revision bump and moved no digest.
+
 ## Which TOML keys get localised
 
 `display_name`, `label`, `description`, `message`, `text`, `title`, `from`,

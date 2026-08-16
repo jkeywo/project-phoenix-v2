@@ -4,7 +4,7 @@ pub use crate::ship::manual::ShipManualWire;
 use crate::stations_config::ShipStations;
 use bevy::prelude::States;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;
 
 /// Revision of the wire vocabulary in this module — the `ClientMessage` /
@@ -739,6 +739,38 @@ pub struct CommsResponseView {
     pub available: bool,
 }
 
+/// The suffix that pairs a parameter table to the text id it interpolates into.
+///
+/// # The contract, stated once
+///
+/// Crew-facing text crosses this wire as a bare `strings.csv` id and is resolved
+/// whole on the client (AGENTS.md rule 11). That is what stopped any runtime
+/// figure from appearing in objective or comms copy: the client's `t(id, params)`
+/// has always interpolated `{placeholder}` tokens, but nothing fed it params
+/// except client-computed state, so a mission that wanted to say "you are short
+/// by 14" had to put the digits on a capacity row and the sentence in a
+/// dialogue. `falling_skyway.toml` carries that workaround's `[ai]` note.
+///
+/// A field carrying a text id may now be joined by a sibling field named
+/// `<field>_params` holding a `BTreeMap<String, String>`. The client's
+/// `localiseTree` looks for exactly that sibling at the wire boundary and
+/// resolves `t(id, params)` instead of `t(id)`. Three properties make this safe
+/// to add to a shipped wire:
+///
+/// * **`BTreeMap`, not `HashMap`** — serialisation order is the key order, so
+///   the same payload always renders the same bytes. A `HashMap` would emit its
+///   keys in an arbitrary order and make the encoding non-deterministic.
+/// * **`serde(default)`** — a peer that has never heard of the field decodes a
+///   payload that carries one.
+/// * **`skip_serializing_if` empty** — a payload with no params is *byte-identical*
+///   to what it was before the field existed, which is what keeps this
+///   digest-neutral and lets it land without a wire-revision bump.
+///
+/// The suffix is a convention rather than a type because the client resolves it
+/// by name: `localiseTree` walks a decoded message it knows nothing about, and
+/// the name is the only thing that can tell it which table belongs to which id.
+pub const TEXT_PARAMS_SUFFIX: &str = "_params";
+
 /// A single message in the Comms inbox.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CommsMessage {
@@ -750,8 +782,15 @@ pub struct CommsMessage {
     pub sender_name: String,
     /// Short subject line shown in the message list.
     pub subject: String,
-    /// Full message body shown in the expanded chat view.
+    /// Full message body shown in the expanded chat view, as a `strings.csv` id.
     pub body: String,
+    /// Runtime values to interpolate into [`body`](Self::body)'s `{placeholder}`
+    /// tokens — see [`TEXT_PARAMS_SUFFIX`].
+    ///
+    /// Not applied to [`subject`](Self::subject), which is a character prefix of
+    /// the *id* rather than of the rendered text; see [`Self::injected`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub body_params: BTreeMap<String, String>,
     /// Available response options. Empty while awaiting a reply (loading).
     ///
     /// Promoted from `Vec<String>` (issue #761) to a per-response view so the
@@ -801,14 +840,23 @@ impl CommsMessage {
     ///
     /// The four derived fields are the injection invariants: `subject` is the
     /// first [`SUBJECT_CHARS`](Self::SUBJECT_CHARS) characters of `body` (chars,
-    /// not bytes — the body is authored text), nothing is selected or read yet,
-    /// and a message is only ever orphaned later, when its scenario unloads.
+    /// not bytes), nothing is selected or read yet, and a message is only ever
+    /// orphaned later, when its scenario unloads.
+    ///
+    /// `subject` takes its prefix from the id and is therefore NOT parameterised:
+    /// a truncated id resolves against nothing, so `body_params` would have
+    /// nowhere to land. That is a pre-existing property of the derivation rather
+    /// than something this constructor's params argument introduced — the
+    /// inbox preview has shown a chopped id since bodies became ids — and
+    /// fixing it means giving a thread its own subject id, which is a separate
+    /// slice.
     #[allow(clippy::too_many_arguments)] // one arg per non-derived wire field
     pub fn injected(
         id: String,
         sender_uuid: String,
         sender_name: String,
         body: String,
+        body_params: BTreeMap<String, String>,
         responses: Vec<CommsResponseView>,
         thread_id: String,
         sender_in_range: bool,
@@ -820,6 +868,7 @@ impl CommsMessage {
             sender_name,
             subject: body.chars().take(Self::SUBJECT_CHARS).collect(),
             body,
+            body_params,
             responses,
             selected_response: None,
             is_read: false,
@@ -4063,8 +4112,19 @@ pub enum ObjectiveStatus {
 pub struct ObjectiveSnapshot {
     /// Stable identifier for this objective (scoped to the scenario that created it).
     pub id: String,
-    /// Human-readable description shown on the captain panel.
+    /// The objective's crew-facing description, as a `strings.csv` id — never
+    /// English (AGENTS.md rule 11). Resolved client-side by `localiseTree`,
+    /// which interpolates [`text_params`](Self::text_params) into it.
     pub text: String,
+    /// Runtime values to interpolate into [`text`](Self::text)'s `{placeholder}`
+    /// tokens. See [`TEXT_PARAMS_SUFFIX`] for the wire convention this key name
+    /// is an instance of.
+    ///
+    /// Empty for every objective that names a figure-free string, which is all
+    /// of them but one — so `skip_serializing_if` keeps those payloads
+    /// byte-identical to what they were before this field existed.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub text_params: BTreeMap<String, String>,
     /// Mandatory objectives must be completed; optional are bonus.
     pub mandatory: bool,
     pub status: ObjectiveStatus,

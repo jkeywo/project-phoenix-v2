@@ -749,6 +749,7 @@ mod tests {
                     objectives: vec![ObjectiveSnapshot {
                         id: "obj-1".into(),
                         text: "Destroy the convoy".into(),
+                        text_params: Default::default(),
                         mandatory: true,
                         status: ObjectiveStatus::Active,
                         targets: vec!["Axiom Station".into()],
@@ -765,6 +766,7 @@ mod tests {
                         sender_name: "Starbase 12".into(),
                         subject: "Greetings".into(),
                         body: "Welcome to the sector.".into(),
+                        body_params: Default::default(),
                         responses: vec![crate::messages::CommsResponseView {
                             text: "Acknowledged".into(),
                             important: true,
@@ -1539,6 +1541,134 @@ mod tests {
         } else {
             panic!("expected BlasterFired");
         }
+    }
+
+    // ── Parameterised text ids ────────────────────────────────────────────
+
+    /// A text id with no parameter table encodes EXACTLY as it did before the
+    /// table existed — the whole basis on which this could be added to a shipped
+    /// wire without a revision bump, and what makes the change digest-neutral.
+    ///
+    /// Pinned as a literal rather than as "has no `text_params` key", because
+    /// the claim is about bytes: a reader that never heard of the field must see
+    /// the same string, in the same order, with the same punctuation.
+    #[test]
+    fn an_objective_with_no_params_is_byte_identical_to_the_pre_params_wire() {
+        let encoded = JsonCodec
+            .encode_server(&ServerMessage::ObjectiveSummary {
+                objectives: vec![ObjectiveSnapshot {
+                    id: "obj-a3-window".into(),
+                    text: "world.falling_skyway.objective.window.text".into(),
+                    text_params: Default::default(),
+                    mandatory: true,
+                    status: ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
+                }],
+            })
+            .unwrap();
+
+        assert_eq!(
+            encoded,
+            r#"{"type":"ObjectiveSummary","data":{"objectives":[{"id":"obj-a3-window","text":"world.falling_skyway.objective.window.text","mandatory":true,"status":"Active","source":"Mission"}]}}"#,
+            "an objective naming a figure-free string must encode as it always did"
+        );
+    }
+
+    /// The same for a comms body, which carries its table under `body_params`.
+    #[test]
+    fn a_comms_message_with_no_params_carries_no_params_key() {
+        let msg = crate::messages::CommsMessage::injected(
+            "m1".into(),
+            "u1".into(),
+            "entity.skyway_control.name".into(),
+            "world.falling_skyway.comms.window_closes".into(),
+            Default::default(),
+            vec![],
+            "t1".into(),
+            true,
+            false,
+        );
+        let encoded = serde_json::to_string(&msg).unwrap();
+        assert!(
+            !encoded.contains("body_params"),
+            "an empty table must not appear on the wire at all, got {encoded}"
+        );
+    }
+
+    /// A non-empty table rides beside the id, and its keys are in sorted order —
+    /// the `BTreeMap` property the encoding's determinism rests on. A `HashMap`
+    /// would pass an "is the key present" assertion and still emit these three
+    /// names in a different order on a different run.
+    #[test]
+    fn objective_text_params_ride_the_wire_in_sorted_key_order() {
+        let params = ["shortfall", "available", "claimed"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, k)| (k.to_string(), i.to_string()))
+            .collect();
+        let encoded = JsonCodec
+            .encode_server(&ServerMessage::ObjectiveSummary {
+                objectives: vec![ObjectiveSnapshot {
+                    id: "obj".into(),
+                    text: "some.id".into(),
+                    text_params: params,
+                    mandatory: true,
+                    status: ObjectiveStatus::Active,
+                    targets: vec![],
+                    source: crate::messages::ObjectiveSource::Mission,
+                }],
+            })
+            .unwrap();
+
+        let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        let obj = &value["data"]["objectives"][0];
+        assert_eq!(
+            obj.as_object()
+                .expect("objective is an object")
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<&str>>(),
+            std::collections::BTreeSet::from([
+                "id",
+                "text",
+                "text_params",
+                "mandatory",
+                "status",
+                "source"
+            ]),
+            "the params table is the only key a figure-carrying objective adds"
+        );
+
+        // Sorted, not insertion order: the map was built shortfall/available/claimed.
+        let rendered = encoded
+            .split_once("\"text_params\":")
+            .expect("text_params is present")
+            .1;
+        assert!(
+            rendered.starts_with(r#"{"available":"1","claimed":"2","shortfall":"0"}"#),
+            "keys must serialise in sorted order, got {rendered}"
+        );
+
+        // And it survives the round trip it will actually make.
+        let decoded = JsonCodec.decode_server(&encoded).unwrap();
+        let ServerMessage::ObjectiveSummary { objectives } = decoded else {
+            panic!("expected ObjectiveSummary");
+        };
+        assert_eq!(objectives[0].text_params["shortfall"], "0");
+    }
+
+    /// A payload written by a peer that predates the field still decodes — the
+    /// `serde(default)` half of the contract.
+    #[test]
+    fn an_objective_without_the_params_key_still_decodes() {
+        let legacy = r#"{"type":"ObjectiveSummary","data":{"objectives":[{"id":"o","text":"t","mandatory":false,"status":"Active","source":"Mission"}]}}"#;
+        let ServerMessage::ObjectiveSummary { objectives } =
+            JsonCodec.decode_server(legacy).unwrap()
+        else {
+            panic!("expected ObjectiveSummary");
+        };
+        assert!(objectives[0].text_params.is_empty());
     }
 
     // ── GameOver carries the authored outcome (PRD #1023 module 4) ────────

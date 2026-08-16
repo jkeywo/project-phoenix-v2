@@ -8,6 +8,9 @@
 // The public surface is intentionally narrow:
 //   - `ObjectiveManager::add` — register a new active objective (backward compat)
 //   - `ObjectiveManager::add_full` — register with directive + utility config
+//   - `ObjectiveManager::add_full_with_params` — the above plus a table of
+//     runtime values to interpolate into the objective's text
+
 //   - `ObjectiveManager::complete` — transition active → completed
 //   - `ObjectiveManager::fail` — transition active → failed
 //   - `ObjectiveManager::sorted_snapshots` — sorted view (mandatory first)
@@ -19,6 +22,7 @@ use crate::messages::{
     AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
     SystemAffinity,
 };
+use std::collections::BTreeMap;
 
 // ── Utility scoring types ──────────────────────────────────────────────────
 
@@ -237,6 +241,10 @@ pub fn is_visible_objective(o: &ScoredObjective) -> bool {
 struct ObjectiveRecord {
     id: String,
     text: String,
+    /// Values interpolated into `text`'s `{placeholder}` tokens on the client.
+    /// See `messages::TEXT_PARAMS_SUFFIX`. Empty for every objective that names
+    /// a figure-free string.
+    text_params: BTreeMap<String, String>,
     mandatory: bool,
     status: ObjectiveStatus,
     targets: Vec<String>,
@@ -300,6 +308,44 @@ impl ObjectiveManager {
         utility: UtilityConfig,
         source: ObjectiveSource,
     ) -> bool {
+        self.add_full_with_params(
+            id,
+            text,
+            BTreeMap::new(),
+            mandatory,
+            targets,
+            directive,
+            utility,
+            source,
+        )
+    }
+
+    /// Add a new `Active` objective whose text carries runtime values.
+    ///
+    /// The widest door, and the only one that inserts. `add` and `add_full` are
+    /// this with progressively more defaults, the same way `add` was already
+    /// `add_full` with an empty directive and utility — so there is one insert
+    /// site rather than three, and a field added to `ObjectiveRecord` cannot be
+    /// missed at two of them.
+    ///
+    /// `text_params` is empty for every objective that names a figure-free
+    /// string, which is what keeps its `ObjectiveSnapshot` byte-identical on the
+    /// wire (`skip_serializing_if`).
+    ///
+    /// If an objective with this `id` already exists it is **not** duplicated;
+    /// the call is a no-op and returns `false`. Returns `true` when inserted.
+    #[allow(clippy::too_many_arguments)] // one arg per record field
+    pub fn add_full_with_params(
+        &mut self,
+        id: impl Into<String>,
+        text: impl Into<String>,
+        text_params: BTreeMap<String, String>,
+        mandatory: bool,
+        targets: Vec<String>,
+        directive: AiDirective,
+        utility: UtilityConfig,
+        source: ObjectiveSource,
+    ) -> bool {
         let id = id.into();
         if self.objectives.iter().any(|o| o.id == id) {
             return false;
@@ -307,6 +353,7 @@ impl ObjectiveManager {
         self.objectives.push(ObjectiveRecord {
             id,
             text: text.into(),
+            text_params,
             mandatory,
             status: ObjectiveStatus::Active,
             targets,
@@ -456,6 +503,7 @@ fn record_to_snapshot(r: &ObjectiveRecord) -> ObjectiveSnapshot {
     ObjectiveSnapshot {
         id: r.id.clone(),
         text: r.text.clone(),
+        text_params: r.text_params.clone(),
         mandatory: r.mandatory,
         status: r.status.clone(),
         targets: r.targets.clone(),

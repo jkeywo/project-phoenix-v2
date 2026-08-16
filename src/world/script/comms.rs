@@ -84,8 +84,12 @@ pub struct ScriptDialogueResponse {
 /// script analogue of a [`CommsDialogueNode`](crate::comms::content::CommsDialogueNode).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScriptDialogueNode {
-    /// The message body to inject into the inbox.
+    /// The message body to inject into the inbox, as a `strings.csv` id.
     pub message: String,
+    /// Runtime values to interpolate into `message`'s `{placeholder}` tokens,
+    /// authored as an optional `params` key on the node map. Empty when the key
+    /// is absent, which is the shape every node had before this existed.
+    pub params: std::collections::BTreeMap<String, String>,
     /// The response options offered on this node.
     pub responses: Vec<ScriptDialogueResponse>,
 }
@@ -98,7 +102,9 @@ fn take_string(map: &Map, key: &str) -> Option<String> {
 /// Materialize the `Dynamic` a dialogue-node or `on_pick` fn returned.
 ///
 /// A `#{message, responses}` map becomes `Some(node)`; a `()` return (a terminal
-/// response with no follow-up) becomes `None`. Any other shape — a script that
+/// response with no follow-up) becomes `None`. An optional `params` key carries
+/// runtime values to interpolate into `message`'s `{placeholder}` tokens — the
+/// one way a computed figure reaches crew-facing comms copy. Any other shape — a script that
 /// compiled but returned the wrong thing (a bare string, a number, a map missing
 /// `message`) — is an `Err` with an authoring-facing message. This is a shape
 /// error, distinct from a script *error* (a raise or a tripped limit), which
@@ -113,6 +119,10 @@ pub fn read_dialogue_node(value: Dynamic) -> Result<Option<ScriptDialogueNode>, 
     })?;
     let message = take_string(&map, "message")
         .ok_or_else(|| "dialogue node map is missing a string `message` field".to_string())?;
+    // Optional, and absent on every node that names no figure — so a node map
+    // that never heard of params materialises exactly as it always did.
+    let params =
+        crate::world::script::effects::map_text_params(&map, "params")?.unwrap_or_default();
     let responses = match map.get("responses") {
         None => Vec::new(),
         Some(d) => {
@@ -126,7 +136,11 @@ pub fn read_dialogue_node(value: Dynamic) -> Result<Option<ScriptDialogueNode>, 
             out
         }
     };
-    Ok(Some(ScriptDialogueNode { message, responses }))
+    Ok(Some(ScriptDialogueNode {
+        message,
+        params,
+        responses,
+    }))
 }
 
 /// Materialize one entry of a node's `responses` array.
@@ -185,6 +199,7 @@ pub fn project_node(node: &ScriptDialogueNode) -> (CommsDialogueNode, Vec<String
     (
         CommsDialogueNode {
             body: node.message.clone(),
+            body_params: node.params.clone(),
             responses,
         },
         on_pick,
@@ -423,6 +438,76 @@ mod tests {
                     important: true,
                 },
             ]
+        );
+    }
+
+    // ── Parameterised bodies ──────────────────────────────────────────────────
+
+    /// The authoring seam for a computed figure: an optional `params` key on the
+    /// node map, read off whatever the script has to hand (here the flag store,
+    /// which is where `falling_skyway` banks the window ledger).
+    #[test]
+    fn a_node_fn_can_attach_params_to_its_message() {
+        let ast = compile(
+            r#"
+            fn root(ctx) {
+                #{
+                    message: "world.skyway.comms.window_opens_short",
+                    params: #{
+                        available: ctx.flags.supply,
+                        claimed: ctx.flags.demand,
+                        note: "manifest",
+                    },
+                    responses: [],
+                }
+            }
+            "#,
+        );
+        let mut flags = FlagStore::new();
+        flags.set_flag_value("supply", 38);
+        flags.set_flag_value("demand", 52);
+        let host = RuntimeHost::new();
+        let (_e, node) = enter(&host, &ast, "root", &flags).unwrap();
+        let node = node.expect("root returns a node");
+
+        // Integers render to strings at this seam: interpolation is textual
+        // substitution and the client has no use for the distinction.
+        assert_eq!(node.params["available"], "38");
+        assert_eq!(node.params["claimed"], "52");
+        assert_eq!(node.params["note"], "manifest");
+
+        // And they reach the wire shape unchanged.
+        let (wire, _on_pick) = project_node(&node);
+        assert_eq!(wire.body, "world.skyway.comms.window_opens_short");
+        assert_eq!(wire.body_params, node.params);
+    }
+
+    /// A node that names no figure materialises exactly as it always did — the
+    /// property that keeps every existing thread's payload byte-identical.
+    #[test]
+    fn a_node_fn_without_params_materializes_an_empty_table() {
+        let ast = compile(r#"fn root(ctx) { #{ message: "m", responses: [] } }"#);
+        let host = RuntimeHost::new();
+        let (_e, node) = enter(&host, &ast, "root", &FlagStore::new()).unwrap();
+        let node = node.expect("root returns a node");
+        assert!(node.params.is_empty());
+        assert!(project_node(&node).0.body_params.is_empty());
+    }
+
+    /// A params value the client could not render is an authoring error rather
+    /// than a silently-stringified debug form in crew-facing copy.
+    #[test]
+    fn a_params_value_that_is_not_a_scalar_raises() {
+        let ast = compile(
+            r#"fn root(ctx) { #{ message: "m", params: #{ bad: [1, 2] }, responses: [] } }"#,
+        );
+        let host = RuntimeHost::new();
+        let err = enter(&host, &ast, "root", &FlagStore::new())
+            .expect_err("a non-scalar param is a shape error");
+        let rendered = format!("{err:?}");
+        assert!(
+            rendered.contains("params.bad"),
+            "the error must name the offending key, got {rendered}"
         );
     }
 

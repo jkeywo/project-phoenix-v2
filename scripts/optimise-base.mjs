@@ -4,6 +4,9 @@
 //   node scripts/optimise-base.mjs <input.glb> <output.glb> [--budget-mb 8]
 //   node scripts/optimise-base.mjs <in> <out> --budget-mb 8 --plan   # search only, no write
 //
+// With no `--budget-mb`, the budget comes from the OUTPUT model's rig sidecar
+// (`[base_build] budget_mb`) and falls back to 8 MB — see `authoredBudgetMb`.
+//
 // This is the base-level companion to scripts/generate-lods.mjs: that script
 // builds the FAR levels of a model's ladder (decimated _lod1/_lod2), this one
 // builds level 0 — the full-detail model the ladder is derived from — from the
@@ -38,6 +41,8 @@
 // EXT_texture_webp, the same reason scripts/…/optimise.ps1 converts to PNG.
 
 import { NodeIO, getBounds } from '@gltf-transform/core';
+import { parse as parseToml } from 'smol-toml';
+import { readFileSync } from 'node:fs';
 import sharp from 'sharp';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -111,6 +116,45 @@ export function candidates() {
 /** The budget escalation the art direction allows: 8 MB, then +50%, then +50%. */
 export function budgetLadder(baseMb) {
   return [baseMb, baseMb * 1.5, baseMb * 1.5 * 1.5];
+}
+
+/** The rig sidecar that belongs to a base `.glb` output path. */
+export function sidecarForOutput(outputPath) {
+  return outputPath.replace(/\\/g, '/').replace(/\.glb$/i, '.model.toml');
+}
+
+/**
+ * The base byte budget a model AUTHORS in its rig sidecar's `[base_build]`, or
+ * `null` when it authors none and the caller's default should stand.
+ *
+ * The budget was previously only ever a command-line argument, which means it
+ * lived only in whoever last typed the command: a model rebuilt later silently
+ * reverts to the 8 MB default. `alliance_starbase` is the model that made that
+ * expensive — at 8 MB the search has to walk its base-colour map from 2048px
+ * down to 512px, which nobody sees until a fix lets the hull render at its true
+ * size and the base then reads as mush at close range. The number belongs next
+ * to the model, in the same sidecar that already carries `[lod.generate]`
+ * build-time provenance.
+ *
+ * Read from the OUTPUT's sidecar, never the input's: the raw art lives outside
+ * this repository and has no sidecar. An explicit `--budget-mb` still wins, so
+ * a one-off experiment costs no edit to committed data.
+ */
+export function authoredBudgetMb(outputPath, read = readFileSync) {
+  let text;
+  try {
+    text = read(sidecarForOutput(outputPath), 'utf8');
+  } catch {
+    return null; // no sidecar (or unreadable) — the caller's default stands
+  }
+  let doc;
+  try {
+    doc = parseToml(text);
+  } catch {
+    return null;
+  }
+  const mb = doc?.base_build?.budget_mb;
+  return typeof mb === 'number' && mb > 0 ? mb : null;
 }
 
 /** A stable key for a candidate, so identical geometry ratios reuse one build. */
@@ -278,7 +322,10 @@ async function main() {
     process.exit(2);
   }
   const budgetIdx = args.indexOf('--budget-mb');
-  const budgetMb = budgetIdx !== -1 ? Number(args[budgetIdx + 1]) : 8;
+  // Explicit flag wins; otherwise the model's own `[base_build] budget_mb`;
+  // otherwise the 8 MB default.
+  const budgetMb =
+    budgetIdx !== -1 ? Number(args[budgetIdx + 1]) : (authoredBudgetMb(output) ?? 8);
   const plan = args.includes('--plan');
   const voxIdx = args.indexOf('--remesh-voxel');
   const remeshVoxel = voxIdx !== -1 ? Number(args[voxIdx + 1]) : null;

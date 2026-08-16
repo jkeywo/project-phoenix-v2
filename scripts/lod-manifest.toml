@@ -118,23 +118,23 @@ declared_by = ["assets/models/alliance_research_outpost.model.toml"]
 [[output]]
 path = "assets/models/alliance_starbase_lod1.glb"
 source = "assets/models/alliance_starbase.remesh.glb"
-source_sha256 = "bd1872f0ec3c4ca679e81f7d824cb144cbe6a37e722e9dd5fd49a4c275139dc9"
+source_sha256 = "54d71b399255b3a6282b2e900619e32bff0dfd73dd2a0f3527aa2032687cb5b0"
 origin = "assets/models/alliance_starbase.glb"
-origin_sha256 = "91090d753eb0dad3d2bc996beed0dd6bea0eb1ef0eef600697f13ed99cba0a5d"
+origin_sha256 = "08f78a60cd1630bb9fd26c6c6b1e2307000fe0d0a8a68b923ee035bd17786c1e"
 params = { ratio = 0.319, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }
-output_sha256 = "06bea9139d6913c52484ee866f47127aca7a7c849d74878b12e8d0c4097b7022"
-output_bytes = 662132
+output_sha256 = "df38a7e52ee524449a509f178974f56a76737a18db940561dd2263b8ecfbd092"
+output_bytes = 659004
 declared_by = ["assets/models/alliance_starbase.model.toml"]
 
 [[output]]
 path = "assets/models/alliance_starbase_lod2.glb"
 source = "assets/models/alliance_starbase.remesh.glb"
-source_sha256 = "bd1872f0ec3c4ca679e81f7d824cb144cbe6a37e722e9dd5fd49a4c275139dc9"
+source_sha256 = "54d71b399255b3a6282b2e900619e32bff0dfd73dd2a0f3527aa2032687cb5b0"
 origin = "assets/models/alliance_starbase.glb"
-origin_sha256 = "91090d753eb0dad3d2bc996beed0dd6bea0eb1ef0eef600697f13ed99cba0a5d"
+origin_sha256 = "08f78a60cd1630bb9fd26c6c6b1e2307000fe0d0a8a68b923ee035bd17786c1e"
 params = { ratio = 0.113, error = 0.01, texture_size = 128, remesh_voxel_size = 0.0211 }
-output_sha256 = "63a884eeb413d1ed9f510ccd7dec5b40f090ef646e541e109145e87a1d43fad4"
-output_bytes = 232152
+output_sha256 = "355cac95b8eeb427eea9d0457fe987251764a5864b2155ce1fa39e41852e571d"
+output_bytes = 231968
 declared_by = ["assets/models/alliance_starbase.model.toml"]
 
 [[output]]

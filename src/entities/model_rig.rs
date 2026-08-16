@@ -16,6 +16,8 @@
 //! min = [-4.0,-1.2,-6.0]
 //! max = [4.0,1.2,6.0]
 //! size = [8.0,2.4,12.0]
+//! [base_build]            # how the base .glb is cut from raw art (build-time)
+//! budget_mb = 16.0
 //! [markers.fore_emitter]  # free-form name -> single point (raw-GLB space)
 //! position = [0.0,0.0,-6.0]
 //! direction = [0.0,0.0,-1.0]  # unit vector, forward basis (0,0,-1)
@@ -117,6 +119,27 @@ pub struct Extents {
     pub size: [f32; 3],
 }
 
+/// How the base (level-0) `.glb` is cut from the raw art export: the byte
+/// budget `scripts/optimise-base.mjs` searches against.
+///
+/// Build-time provenance, like `[lod.generate]` beside it — the engine parses
+/// it and acts on none of it. It exists because the base level is built from
+/// art that is NOT in this repository, by a script whose budget was otherwise
+/// only ever a command-line argument. A model rebuilt without the number that
+/// built it silently reverts to the 8 MB default, and for
+/// `alliance_starbase` that is the difference between a 2048px base-colour map
+/// and a 512px one — the detail loss John reported once the LOD-scale fix
+/// (ed31e485) let the model render at its true size.
+///
+/// Absent means "the script's own default", so only a model that needs a
+/// different budget has to say so.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BaseBuild {
+    /// Byte budget in MB for the base `.glb`, as `optimise-base --budget-mb`.
+    pub budget_mb: f32,
+}
+
 /// A single named mount point in raw-GLB space. `direction` is a unit vector
 /// with forward basis `(0,0,-1)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -150,6 +173,10 @@ pub struct ModelRig {
     /// Cached bounds, when present.
     #[serde(default)]
     pub extents: Option<Extents>,
+    /// How the base `.glb` is cut from the raw art, when the model needs
+    /// anything other than `optimise-base`'s default budget.
+    #[serde(default)]
+    pub base_build: Option<BaseBuild>,
     /// Free-form marker name -> mount point. smol-toml (editor) and the `toml`
     /// crate (engine) both expand `[markers.<name>]` subtables into this map.
     #[serde(default)]

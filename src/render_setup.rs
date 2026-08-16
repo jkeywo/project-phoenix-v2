@@ -206,6 +206,10 @@ pub const BLOOM_RUNS_ON_THIS_TARGET: bool = cfg!(not(target_arch = "wasm32"));
 /// authored it. HDR and the display transform are NOT affected and ship on
 /// everywhere — they are what stop an emissive of 9.0 being drawn as the same
 /// flat white as 1.0. Bloom is the halo on top.
+///
+/// This is the 3D camera's half of the `[render]` block. Any OTHER camera
+/// sharing that camera's render target needs the same HDR answer, for reasons
+/// that have nothing to do with what it draws — see [`apply_target_hdr`].
 pub fn apply_render_config(commands: &mut Commands, camera: Entity, cfg: &RenderConfig) {
     let mut entity = commands.entity(camera);
     entity.insert(tonemapping_for(cfg.tonemapping));
@@ -221,6 +225,53 @@ pub fn apply_render_config(commands: &mut Commands, camera: Entity, cfg: &Render
         None => {
             entity.remove::<Bloom>();
         }
+    }
+}
+
+/// Put the target's HDR decision onto a camera that SHARES the game camera's
+/// render target but draws none of the 3D scene — the 2D UI camera.
+///
+/// # Why a camera that renders no 3D has an opinion about HDR
+///
+/// [`Hdr`] does not only describe what a camera draws; it selects which
+/// intermediate texture the camera draws INTO. Bevy hands those textures out of
+/// a cache keyed by `(target, texture_usages, hdr, msaa)` — `hdr` is part of
+/// the key (`bevy_render`'s `prepare_view_targets`) — so two cameras aimed at
+/// the same window with different [`Hdr`] do not share a main texture. They get
+/// one each.
+///
+/// Here that is fatal rather than merely wasteful, because the two cameras on
+/// the browser host's canvas are a COMPOSITE PAIR, not two independent views:
+/// the game camera draws the scene at `order: -1`, and the UI camera draws the
+/// viewscreen border and HUD over it at `order: 0` with
+/// `ClearColorConfig::None` precisely so that it does not wipe what the first
+/// one drew. Both graphs end in an `Upscaling` node that blits their OWN main
+/// texture to the surface. Give the two cameras separate textures and the UI
+/// camera's blit — which runs second, being the higher order — replaces the
+/// finished 3D image with its own, which has never had a scene drawn into it.
+///
+/// The result is a viewscreen that is exactly, silently black: every draw is
+/// valid, so wgpu logs nothing, and the HTML around the canvas is untouched
+/// because it is not in the canvas. That is the shape the PRD #1023 HDR
+/// regression took, and it is why `tests/smoke/viewscreen.render.spec.js`
+/// asserts on canvas pixels rather than on the console — a clean console was
+/// the one thing that defect never lacked.
+///
+/// # Why only the marker
+///
+/// Only [`Hdr`] is synced, deliberately: this is not [`apply_render_config`]
+/// called twice. The UI camera keeps the `Tonemapping::None` that Bevy's own
+/// `Core2dPlugin` requires onto every `Camera2d`, because by the time the HUD
+/// is drawn the game camera's tonemapping node has already resolved the shared
+/// texture to display-referred values. A second display transform would tonemap
+/// the HUD and re-tonemap the scene underneath it. Bloom is likewise not the UI
+/// camera's business — it has nothing above white to bloom.
+pub fn apply_target_hdr(commands: &mut Commands, camera: Entity, hdr: bool) {
+    let mut entity = commands.entity(camera);
+    if hdr {
+        entity.insert(Hdr);
+    } else {
+        entity.remove::<Hdr>();
     }
 }
 
@@ -338,9 +389,79 @@ pub fn prepare_space_skybox_cubemap(
 mod tests {
     use super::*;
     use crate::entities::visual_fade::FadeDirection;
+    use bevy::ecs::world::CommandQueue;
 
     fn tuning() -> RenderTuning {
         RenderTuning::default()
+    }
+
+    /// Apply a `[render]` block to a game camera and a companion UI camera the
+    /// way `RendererPlugin` does, and hand back both entities' components.
+    ///
+    /// `seed_hdr` pre-sets the OPPOSITE state so each call has to change it,
+    /// which is what makes this a test of the reversibility both functions
+    /// claim rather than of a lucky initial state.
+    fn apply_to_pair(cfg: &RenderConfig, seed_hdr: bool) -> (bool, bool, bool, bool) {
+        let mut world = World::new();
+        let game = world.spawn_empty().id();
+        let ui = world.spawn_empty().id();
+        if seed_hdr {
+            world.entity_mut(game).insert(Hdr);
+            world.entity_mut(ui).insert(Hdr);
+        }
+
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            apply_render_config(&mut commands, game, cfg);
+            apply_target_hdr(&mut commands, ui, cfg.hdr);
+        }
+        queue.apply(&mut world);
+
+        (
+            world.entity(game).contains::<Hdr>(),
+            world.entity(ui).contains::<Hdr>(),
+            world.entity(ui).contains::<Tonemapping>(),
+            world.entity(ui).contains::<Bloom>(),
+        )
+    }
+
+    /// The invariant the black-viewscreen regression broke.
+    ///
+    /// Bevy keys its main-texture cache on `hdr`, so the game camera and the UI
+    /// camera that composites over it must give the same answer or they stop
+    /// sharing a texture and the UI camera's blit wipes the scene. Both
+    /// directions of the switch, because an authored `hdr = false` that reached
+    /// only one of them would split the pair exactly as badly as the default
+    /// `hdr = true` did.
+    #[test]
+    fn both_cameras_on_the_shared_canvas_agree_about_hdr() {
+        for hdr in [true, false] {
+            let cfg = RenderConfig {
+                hdr,
+                ..Default::default()
+            };
+            let (game_hdr, ui_hdr, _, _) = apply_to_pair(&cfg, !hdr);
+            assert_eq!(game_hdr, hdr, "the game camera takes the authored hdr");
+            assert_eq!(
+                ui_hdr, hdr,
+                "the UI camera sharing the canvas takes the same one"
+            );
+        }
+    }
+
+    /// The UI camera takes the marker and NOTHING else: it keeps the
+    /// `Tonemapping::None` Bevy requires onto every `Camera2d`, because the
+    /// game camera has already tonemapped the texture it draws into.
+    #[test]
+    fn the_ui_camera_takes_the_hdr_marker_but_not_the_display_transform() {
+        let (_, ui_hdr, ui_tonemapping, ui_bloom) = apply_to_pair(&RenderConfig::default(), false);
+        assert!(ui_hdr, "the marker is the point of the call");
+        assert!(
+            !ui_tonemapping,
+            "a second display transform would tonemap the HUD and re-tonemap the scene"
+        );
+        assert!(!ui_bloom, "the UI layer has nothing above white to bloom");
     }
 
     /// Loading a mission is not an arrival. Every visual on the map is a first

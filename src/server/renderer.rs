@@ -25,8 +25,8 @@ use crate::region_effects::RegionEffectKind;
 use crate::region_plugin::RegionMembership;
 use crate::region_shape::RegionShape;
 use crate::render_setup::{
-    apply_render_config, default_ambient_light, game_camera_projection, space_skybox, RenderTuning,
-    SpaceSkyboxAsset, SpaceSkyboxPlugin,
+    apply_render_config, apply_target_hdr, default_ambient_light, game_camera_projection,
+    space_skybox, RenderTuning, SpaceSkyboxAsset, SpaceSkyboxPlugin,
 };
 use crate::server::pfx::PfxPlugin;
 use crate::ship_state::{ShipPhysics, ShipViewMode};
@@ -251,17 +251,19 @@ fn setup(mut commands: Commands, skybox: Res<SpaceSkyboxAsset>) {
     // this as the canonical UI target for all UI nodes. It stays active
     // throughout InProgress so the FPS counter, radar widgets, and viewscreen
     // border continue to render without an explicit UiTargetCamera.
-    commands.spawn((
-        LobbyCamera,
-        Camera2d,
-        Camera {
-            order: 0,
-            clear_color: ClearColorConfig::None,
-            ..default()
-        },
-        CameraRenderGraph::new(Core2d),
-        IsDefaultUiCamera,
-    ));
+    let ui_camera = commands
+        .spawn((
+            LobbyCamera,
+            Camera2d,
+            Camera {
+                order: 0,
+                clear_color: ClearColorConfig::None,
+                ..default()
+            },
+            CameraRenderGraph::new(Core2d),
+            IsDefaultUiCamera,
+        ))
+        .id();
 
     // 3D camera — active during in-game phase, positioned for ship view.
     // order: -1 so the 3D scene composites before the UI layer (LobbyCamera
@@ -285,11 +287,12 @@ fn setup(mut commands: Commands, skybox: Res<SpaceSkyboxAsset>) {
     // frame rather than from whenever a world happens to load. `PostStartup`'s
     // `apply_world_render_config` re-applies this from the world's own
     // `[render]` block, which is why `apply_render_config` is reversible.
-    apply_render_config(
-        &mut commands,
-        game_camera,
-        &crate::world::config::RenderConfig::default(),
-    );
+    let default_render = crate::world::config::RenderConfig::default();
+    apply_render_config(&mut commands, game_camera, &default_render);
+    // ...and the UI camera above takes the SAME hdr answer, because it shares
+    // this canvas with the game camera and a mismatch there is what turns the
+    // viewscreen black. `apply_target_hdr` carries the whole explanation.
+    apply_target_hdr(&mut commands, ui_camera, default_render.hdr);
 
     // Ambient light is now spawned by `spawn_world_ambient_light` in
     // `PostStartup`, which reads `WorldConfig.ambient_light` if present and
@@ -395,11 +398,18 @@ fn spawn_world_ambient_light(
 /// reason: the camera is spawned at `Startup`, before the world config resource
 /// exists. A world with no `[render]` block re-applies the SAME defaults the
 /// camera was spawned with, so this is a no-op rather than a reset.
+///
+/// The UI camera is adopted here too, and must be: an authored `hdr = false`
+/// that reached only the game camera would split the pair's render targets just
+/// as surely as the default `hdr = true` did before this system took both — see
+/// [`apply_target_hdr`]. Both directions of the switch are covered by
+/// `tests/smoke/viewscreen.render.spec.js`.
 fn apply_world_render_config(
     mut commands: Commands,
     mut tuning: ResMut<RenderTuning>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     cameras: Query<Entity, With<GameCamera>>,
+    ui_cameras: Query<Entity, With<LobbyCamera>>,
 ) {
     let cfg = world_config
         .as_ref()
@@ -408,6 +418,9 @@ fn apply_world_render_config(
     *tuning = RenderTuning::from_config(&cfg);
     for camera in cameras.iter() {
         apply_render_config(&mut commands, camera, &cfg);
+    }
+    for camera in ui_cameras.iter() {
+        apply_target_hdr(&mut commands, camera, cfg.hdr);
     }
 }
 

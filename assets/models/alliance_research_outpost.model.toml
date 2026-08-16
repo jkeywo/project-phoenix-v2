@@ -17,6 +17,7 @@ model = "assets/models/alliance_research_outpost.glb"
 [[lod]]
 max_distance = 100.0
 model = "assets/models/alliance_research_outpost_lod1.glb"
+tier_rig = "identity"
 
 [lod.generate]
 source = "assets/models/alliance_research_outpost.glb"
@@ -28,6 +29,7 @@ remesh_voxel_size = 0.0211
 [[lod]]
 max_distance = 400.0
 model = "assets/models/alliance_research_outpost_lod2.glb"
+tier_rig = "identity"
 
 [lod.generate]
 source = "assets/models/alliance_research_outpost.glb"

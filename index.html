@@ -1032,7 +1032,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-c6495ddf01606db3.js" crossorigin="anonymous" integrity="sha384-UHFwZonlATFSodW8/qXH5ylQsBhZNXEVxwwEIXdh7aZeJ1T4ZYDuVBgrV3bw1mOO"><link rel="preload" href="./project-phoenix-c6495ddf01606db3_bg.wasm" crossorigin="anonymous" integrity="sha384-2r3kcEMd9BfXSxdHJ2YEbPxZuZ8CerIn66wm/eHlXpymROMT9AVfmmsJxcB3tLlv" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-ef140ce429b08bb4.js" crossorigin="anonymous" integrity="sha384-+VWAisSDz17syh/BTkEPXDNk1MCIIBIfrEf/tf0doAis2rqskqmV4IKofufxnBTd"><link rel="preload" href="./project-phoenix-ef140ce429b08bb4_bg.wasm" crossorigin="anonymous" integrity="sha384-AZfMKEQpf3kzUeaFt+NZM5/B/3v0QidwovN5hXWRmPedUMeq+KR4Cur6mSVQuy57" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1431,8 +1431,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-c6495ddf01606db3.js';
-const wasm = await init({ module_or_path: './project-phoenix-c6495ddf01606db3_bg.wasm' });
+import init, * as bindings from './project-phoenix-ef140ce429b08bb4.js';
+const wasm = await init({ module_or_path: './project-phoenix-ef140ce429b08bb4_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -3788,9 +3788,19 @@ function startServer() {
         wasmBindings.wasm_push_world_toml(path, toml);
       }
     };
-    wasmBindings.set_world_fetch_callback(function(path) {
+    wasmBindings.set_world_fetch_callback(function(path, optional) {
       fetch(path)
-        .then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then(r => {
+          if (r.ok) return r.text();
+          // `optional` marks a read that is ITSELF an existence test — the
+          // legacy ladder-convention probe, which asks whether a generated LOD
+          // tier ships a rig sidecar. Absence is one of its two valid answers,
+          // and the empty string is how Rust hears it, so a 404 resolves here
+          // rather than being reported as a failed fetch. Any OTHER status is
+          // still a fault, and so is a 404 on a file we expected to exist.
+          if (optional && r.status === 404) return '';
+          return Promise.reject(new Error('HTTP ' + r.status));
+        })
         .then(toml => { pushToml(path, toml); })
         .catch(err => {
           console.error('[Phoenix] Failed to fetch TOML at ' + path + ':', err);

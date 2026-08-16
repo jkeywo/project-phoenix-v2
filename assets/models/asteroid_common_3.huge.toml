@@ -32,6 +32,7 @@ model = "assets/models/asteroid_common_3.glb"
 [[lod]]
 max_distance = 300.0
 model = "assets/models/asteroid_common_3_lod1.glb"
+tier_rig = "baked"
 
 [lod.generate]
 source = "assets/models/asteroid_common_3.glb"
@@ -42,6 +43,7 @@ texture_size = 256
 [[lod]]
 max_distance = 1200.0
 model = "assets/models/asteroid_common_3_lod2.glb"
+tier_rig = "baked"
 
 [lod.generate]
 source = "assets/models/asteroid_common_3.glb"

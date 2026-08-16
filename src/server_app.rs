@@ -5890,6 +5890,7 @@ station = "pilot"
                 shape: crate::entity_config::ColliderShape::Ball,
                 radius: 50.0,
                 length: 0.0,
+                half_height: None,
                 movable: false,
             }),
             radar_appearance: Some(crate::entity_config::RadarAppearanceConfig {
@@ -8375,6 +8376,7 @@ _remove = true
                     shape: ColliderShape::Ball,
                     radius: 5.0,
                     length: 0.0,
+                    half_height: None,
                     movable: true,
                 }),
                 Collider::ball(5.0),
@@ -8394,6 +8396,7 @@ _remove = true
                 shape: ColliderShape::Ball,
                 radius: 5.0,
                 length: 0.0,
+                half_height: None,
                 movable: false,
             }),
             Collider::ball(5.0),
@@ -8531,6 +8534,7 @@ _remove = true
                     shape: ColliderShape::Ball,
                     radius: SHIP_RADIUS,
                     length: 0.0,
+                    half_height: None,
                     movable: true,
                 }),
                 Collider::ball(SHIP_RADIUS),
@@ -8550,6 +8554,7 @@ _remove = true
                 shape: ColliderShape::Ball,
                 radius: ROCK_RADIUS,
                 length: 0.0,
+                half_height: None,
                 movable: false,
             }),
             Collider::ball(ROCK_RADIUS),
@@ -8594,6 +8599,227 @@ _remove = true
                 .remaining_secs
                 > 0.0,
             "the cooldown must still be running for this test to mean anything"
+        );
+    }
+
+    /// Build a bare rapier app with `handle_collisions` registered, one hull at
+    /// `ship_at`, and one static structure at the origin carrying `structure`.
+    /// Returns how much hull the ship had left after three ticks.
+    ///
+    /// Three ticks because the first two let rapier's broad phase publish the
+    /// pair; the fixture matches
+    /// `a_hull_inside_a_collider_is_separated_even_mid_cooldown` above.
+    #[cfg(test)]
+    fn hull_left_after_touching(
+        structure: (
+            crate::entity_config::ColliderConfig,
+            bevy_rapier3d::prelude::Collider,
+        ),
+        ship_at: Vec3,
+    ) -> f32 {
+        use crate::damage::SystemHull;
+        use crate::entity_config::{ColliderConfig, ColliderShape};
+        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::modifiers::ShipModifiers;
+        use bevy_rapier3d::prelude::*;
+
+        const SHIP_RADIUS: f32 = 1.2;
+        const HULL_MAX: f32 = 1000.0;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(50),
+            ))
+            .add_plugins(bevy::transform::TransformPlugin)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .init_asset::<bevy::mesh::Mesh>()
+            .init_resource::<bevy::scene::SceneSpawner>()
+            .add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<GamePhase>()
+            .add_plugins(RapierPhysicsPlugin::<()>::default())
+            .init_resource::<SimOutbox>()
+            .init_resource::<WorldResource>()
+            .insert_resource(GameOverReason(None, None))
+            .init_resource::<DamageLog>()
+            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_systems(Update, handle_collisions);
+        app.world_mut()
+            .resource_mut::<NextState<GamePhase>>()
+            .set(GamePhase::InProgress);
+        app.update();
+
+        let ship = app
+            .world_mut()
+            .spawn((
+                Ship,
+                EntityUuid("hull-over-a-structure".to_string()),
+                Transform::from_translation(ship_at),
+                GlobalTransform::default(),
+                Visibility::default(),
+                ShipPhysicsComponent {
+                    x: ship_at.x,
+                    y: ship_at.y,
+                    z: ship_at.z,
+                    forward_speed: 20.0,
+                    ..Default::default()
+                },
+                CollisionCooldown::default(),
+                EntitySystemHull(SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    HULL_MAX,
+                )])),
+                ShipModifiers::new(),
+                ShipImpulse::default(),
+                ColliderSection(ColliderConfig {
+                    shape: ColliderShape::Ball,
+                    radius: SHIP_RADIUS,
+                    length: 0.0,
+                    half_height: None,
+                    movable: true,
+                }),
+                Collider::ball(SHIP_RADIUS),
+                RigidBody::KinematicPositionBased,
+                ActiveCollisionTypes::KINEMATIC_KINEMATIC | ActiveCollisionTypes::KINEMATIC_STATIC,
+            ))
+            .id();
+
+        let (section, collider) = structure;
+        app.world_mut().spawn((
+            EntityUuid("structure-under-test".to_string()),
+            Transform::from_xyz(0.0, 0.0, 0.0),
+            GlobalTransform::default(),
+            Visibility::default(),
+            ColliderSection(section),
+            collider,
+            RigidBody::Fixed,
+            ActiveCollisionTypes::KINEMATIC_STATIC,
+        ));
+
+        for _ in 0..3 {
+            app.update();
+        }
+
+        app.world()
+            .get::<EntitySystemHull>(ship)
+            .expect("the ship must survive this fixture")
+            .0
+            .total_current()
+    }
+
+    /// The shipped starbase disc, as `station_axiom.toml` and `skyhook.toml`
+    /// author it.
+    #[cfg(test)]
+    fn starbase_disc() -> (
+        crate::entity_config::ColliderConfig,
+        bevy_rapier3d::prelude::Collider,
+    ) {
+        (
+            crate::entity_config::ColliderConfig {
+                shape: crate::entity_config::ColliderShape::Cylinder,
+                radius: 17.04,
+                length: 0.0,
+                half_height: Some(7.16),
+                movable: false,
+            },
+            bevy_rapier3d::prelude::Collider::cylinder(7.16, 17.04),
+        )
+    }
+
+    /// The Ball the disc replaced: right about the width, wrong about the
+    /// height by ten units.
+    #[cfg(test)]
+    fn starbase_ball() -> (
+        crate::entity_config::ColliderConfig,
+        bevy_rapier3d::prelude::Collider,
+    ) {
+        (
+            crate::entity_config::ColliderConfig {
+                shape: crate::entity_config::ColliderShape::Ball,
+                radius: 17.04,
+                length: 0.0,
+                half_height: None,
+                movable: false,
+            },
+            bevy_rapier3d::prelude::Collider::ball(17.04),
+        )
+    }
+
+    /// Containment, in the plane a station is wide in. The `Cylinder` variant
+    /// must not have cost the correction the Ball got right: a hull at deck
+    /// level is inside the disc out to its rim and clear of it beyond.
+    ///
+    /// Both bounds are asserted against the Ball too, because in this plane the
+    /// two shapes are the same body and any difference here would be a
+    /// regression rather than the fix.
+    #[test]
+    fn a_disc_contains_a_hull_out_to_its_rim_and_no_further() {
+        const HULL_MAX: f32 = 1000.0;
+        // Well inside the rim: 10 against a radius of 17.04.
+        for (name, structure) in [("cylinder", starbase_disc()), ("ball", starbase_ball())] {
+            let left = hull_left_after_touching(structure, Vec3::new(10.0, 0.0, 0.0));
+            assert!(
+                left < HULL_MAX,
+                "{name}: a hull at deck level inside the rim must be in contact"
+            );
+        }
+        // Clear of the rim: 25 against 17.04 + the hull's own 1.2.
+        for (name, structure) in [("cylinder", starbase_disc()), ("ball", starbase_ball())] {
+            let left = hull_left_after_touching(structure, Vec3::new(25.0, 0.0, 0.0));
+            assert_eq!(
+                left, HULL_MAX,
+                "{name}: a hull clear of the rim must not be in contact"
+            );
+        }
+    }
+
+    /// The whole point of the variant, stated as the A/B that motivates it.
+    ///
+    /// The starbase draws 14.33 tall — a half-height of 7.16 — and 34.08 across.
+    /// A Ball at the max half-extent covers the width correctly and stands
+    /// 17.04 units tall, so a hull crossing directly over the hub at an
+    /// altitude of 12 hits an invisible ceiling in clear sky, ten units above
+    /// anything the renderer draws. The disc does not.
+    ///
+    /// Asserting BOTH halves in one test, because either alone is satisfiable
+    /// by a body that is simply the wrong size: a cylinder that touched nothing
+    /// at all would pass the first half, and the old Ball passes the second.
+    #[test]
+    fn a_disc_lets_a_hull_pass_over_the_hub_where_the_ball_it_replaced_did_not() {
+        const HULL_MAX: f32 = 1000.0;
+        // Offset in X so the contact normal is not the degenerate straight-down
+        // case; still well inside the 17.04 footprint either way.
+        let over_the_hub = Vec3::new(2.0, 12.0, 0.0);
+
+        assert_eq!(
+            hull_left_after_touching(starbase_disc(), over_the_hub),
+            HULL_MAX,
+            "a hull twelve units up must clear a structure that is 7.16 tall"
+        );
+        assert!(
+            hull_left_after_touching(starbase_ball(), over_the_hub) < HULL_MAX,
+            "this test is only worth having if the Ball it replaced DID collide \
+             there — if this half stops failing, the A/B has gone stale"
+        );
+    }
+
+    /// The vertical boundary, from both sides. A disc's top surface is the one
+    /// edge the Ball never had, so it is the one that needs pinning: 0.36 of a
+    /// unit inside it is a contact, 0.44 outside it is not.
+    ///
+    /// Deliberately not asserted AT tangency (y = 7.16 + 1.2 exactly), which is
+    /// a floating-point coin toss inside rapier and would pin nothing.
+    #[test]
+    fn a_disc_boundary_is_its_own_top_surface_not_its_radius() {
+        const HULL_MAX: f32 = 1000.0;
+        assert!(
+            hull_left_after_touching(starbase_disc(), Vec3::new(2.0, 8.0, 0.0)) < HULL_MAX,
+            "a hull whose underside is below the deck must be in contact"
+        );
+        assert_eq!(
+            hull_left_after_touching(starbase_disc(), Vec3::new(2.0, 8.8, 0.0)),
+            HULL_MAX,
+            "a hull whose underside clears the deck must not be"
         );
     }
 
@@ -8677,6 +8903,7 @@ _remove = true
                         shape: ColliderShape::Ball,
                         radius: 5.0,
                         length: 0.0,
+                        half_height: None,
                         movable: true,
                     }),
                     Collider::ball(5.0),
@@ -8697,6 +8924,7 @@ _remove = true
                         shape: ColliderShape::Ball,
                         radius: 5.0,
                         length: 0.0,
+                        half_height: None,
                         movable: false,
                     }),
                     Collider::ball(5.0),
@@ -8808,6 +9036,7 @@ _remove = true
                     shape: ColliderShape::Ball,
                     radius: R,
                     length: 0.0,
+                    half_height: None,
                     movable: true,
                 }),
                 Collider::ball(R),
@@ -8827,6 +9056,7 @@ _remove = true
                     shape: ColliderShape::Ball,
                     radius: R,
                     length: 0.0,
+                    half_height: None,
                     movable: false,
                 }),
                 Collider::ball(R),
@@ -8917,6 +9147,7 @@ _remove = true
                     shape: ColliderShape::Ball,
                     radius: 5.0,
                     length: 0.0,
+                    half_height: None,
                     movable: true,
                 }),
                 Collider::ball(5.0),
@@ -8937,6 +9168,7 @@ _remove = true
                 shape: ColliderShape::Ball,
                 radius: 5.0,
                 length: 0.0,
+                half_height: None,
                 movable: false,
             }),
             Collider::ball(5.0),
@@ -8962,6 +9194,7 @@ _remove = true
                 shape: ColliderShape::Ball,
                 radius: 5.0,
                 length: 0.0,
+                half_height: None,
                 movable: false,
             }),
             Collider::ball(5.0),
@@ -9058,6 +9291,7 @@ _remove = true
                 shape: ColliderShape::Ball,
                 radius: 5.0,
                 length: 0.0,
+                half_height: None,
                 movable: true,
             }),
             Collider::ball(5.0),
@@ -9075,6 +9309,7 @@ _remove = true
                 shape: ColliderShape::Ball,
                 radius: 5.0,
                 length: 0.0,
+                half_height: None,
                 movable: false,
             }),
             Collider::ball(5.0),

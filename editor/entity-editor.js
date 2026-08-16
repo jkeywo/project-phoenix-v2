@@ -9,7 +9,11 @@ const templates = {
   },
   station: {
     name: 'Station',
-    scaffold: { tags: ['station'], collider: { shape: 'Cylinder', radius: 15.0 }, hull: { hull_integrity: 200 } }
+    // `half_height` is not optional on a Cylinder — the Rust loader rejects one
+    // without it — so a scaffold that omitted it produced a station TOML the
+    // game refuses to load. It had been doing so since before `Cylinder` was a
+    // shape at all.
+    scaffold: { tags: ['station'], collider: { shape: 'Cylinder', radius: 15.0, half_height: 6.0 }, hull: { hull_integrity: 200 } }
   },
   asteroid: {
     name: 'Asteroid',

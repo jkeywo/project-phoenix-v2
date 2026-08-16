@@ -2011,6 +2011,7 @@ mod tests {
                 shape: crate::entity_config::ColliderShape::Ball,
                 radius: 4.0,
                 length: 0.0,
+                half_height: None,
                 movable: false,
             }),
         ));
@@ -2457,6 +2458,7 @@ verb = "fire_blaster"
                 shape: crate::entity_config::ColliderShape::Ball,
                 radius: 4.0,
                 length: 0.0,
+                half_height: None,
                 movable: false,
             }),
         ));
@@ -2616,6 +2618,7 @@ verb = "fire_blaster"
                 shape: crate::entity_config::ColliderShape::Ball,
                 radius: 2.5,
                 length: 0.0,
+                half_height: None,
                 movable: false,
             }),
         ));
@@ -2644,6 +2647,7 @@ verb = "fire_blaster"
                 shape: crate::entity_config::ColliderShape::Ball,
                 radius,
                 length: 0.0,
+                half_height: None,
                 movable,
             })
         };

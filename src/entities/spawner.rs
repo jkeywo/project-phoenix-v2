@@ -203,6 +203,24 @@ pub fn spawn_entity(
             crate::entity_config::ColliderShape::Capsule => {
                 Collider::capsule_y(collider.length / 2.0, collider.radius)
             }
+            // `Collider::cylinder` takes the half-height FIRST and the radius
+            // second, and takes the half-height rather than the full height —
+            // which is why the TOML authors `half_height` instead of reusing
+            // the Capsule's `length`. The number in the file is the number
+            // handed to rapier; nothing is doubled or halved on the way.
+            //
+            // A `Cylinder` cannot reach here without a half-height: the load
+            // path rejects one (`entity_config::validate_collider_config`),
+            // because a zero-thickness disc is a body nothing can ever be
+            // inside — the pass-through bug the station-collider correction
+            // just fixed. The fallback is the belt to that braces, and it errs
+            // UPWARDS to the radius, i.e. to the enclosing sphere this variant
+            // replaces: a degenerate authored body keeps ships outside a hull
+            // rather than letting them through it.
+            crate::entity_config::ColliderShape::Cylinder => Collider::cylinder(
+                collider.half_height.unwrap_or(collider.radius),
+                collider.radius,
+            ),
         };
         entity_commands.insert((
             rapier_collider,
@@ -1899,6 +1917,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
                 shape: ColliderShape::Ball,
                 radius: 3.0,
                 length: 0.0,
+                half_height: None,
                 movable: true,
             }),
             hull: None,
@@ -1949,6 +1968,84 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         assert!(
             world.get::<RigidBody>(spawned).is_some(),
             "should have RigidBody"
+        );
+    }
+
+    /// The `Cylinder` variant's whole meaning is the rapier body it builds, so
+    /// this asserts on that body rather than on the config that produced it.
+    /// The half-height goes in FIRST and the radius second: getting the two the
+    /// wrong way round would build a 17-tall, 7-wide pillar out of a station
+    /// that is 34 across and 14 tall, and no other assertion in the tree would
+    /// notice.
+    ///
+    /// The numbers are the shipped starbase's, so this pins the axis too — a
+    /// `Collider::cylinder` is Y-axis by construction, and the disc it makes is
+    /// the one a station is.
+    #[test]
+    fn a_cylinder_collider_spawns_a_y_axis_disc_of_the_authored_size() {
+        let mut app = test_app();
+        let config = EntityConfig {
+            collider: Some(ColliderConfig {
+                shape: ColliderShape::Cylinder,
+                radius: 17.04,
+                length: 0.0,
+                half_height: Some(7.16),
+                movable: false,
+            }),
+            ..Default::default()
+        };
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+
+        let collider = app
+            .world()
+            .get::<Collider>(spawned)
+            .expect("a [collider] section must build a rapier Collider");
+        let cylinder = collider
+            .as_cylinder()
+            .expect("shape = \"Cylinder\" must build a rapier cylinder, not a ball or a capsule");
+        assert!(
+            (cylinder.half_height() - 7.16).abs() < 1e-5,
+            "expected the authored half-height, got {}",
+            cylinder.half_height()
+        );
+        assert!(
+            (cylinder.radius() - 17.04).abs() < 1e-5,
+            "expected the authored radius, got {}",
+            cylinder.radius()
+        );
+    }
+
+    /// A degenerate `Cylinder` cannot arrive from a TOML template — the load
+    /// path rejects one — but `spawn_entity` takes an `EntityConfig`, and a
+    /// caller that builds one in code bypasses that. The fallback errs UPWARDS
+    /// to the enclosing sphere rather than collapsing to nothing: a zero-height
+    /// disc is a structure ships fly straight through, an over-tall one merely
+    /// stops them early, and only one of those is a bug worth shipping.
+    #[test]
+    fn a_cylinder_built_in_code_without_a_half_height_falls_back_to_its_radius() {
+        let mut app = test_app();
+        let config = EntityConfig {
+            collider: Some(ColliderConfig {
+                shape: ColliderShape::Cylinder,
+                radius: 3.8,
+                length: 0.0,
+                half_height: None,
+                movable: false,
+            }),
+            ..Default::default()
+        };
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+
+        let collider = app.world().get::<Collider>(spawned).unwrap();
+        let cylinder = collider.as_cylinder().expect("still a cylinder");
+        assert!(
+            (cylinder.half_height() - 3.8).abs() < 1e-5,
+            "an unauthored half-height must fall back to the radius, not to zero; got {}",
+            cylinder.half_height()
         );
     }
 

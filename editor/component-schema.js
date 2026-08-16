@@ -91,9 +91,14 @@ export const COMPONENT_SCHEMA = {
     section: 'collider',
     label: 'Collider',
     fields: [
-      { key: 'shape', type: 'string', enum: ['Ball', 'Capsule'] },
+      { key: 'shape', type: 'string', enum: ['Ball', 'Capsule', 'Cylinder'] },
       { key: 'radius', type: 'number' },
       { key: 'length', type: 'number', default: 0 },
+      // Cylinder only, and required for one: the Rust loader rejects a
+      // `Cylinder` that omits it, because a disc with no thickness is a
+      // structure ships fly straight through. Optional here because Ball and
+      // Capsule neither need it nor read it.
+      { key: 'half_height', type: 'number', optional: true },
     ],
   },
 

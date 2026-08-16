@@ -35,9 +35,17 @@ hull_integrity = 400.0
 # two and a half times that: a ship "collided" with this depot while still nearly
 # six units clear of anything on screen.
 #
-# See `station_axiom.toml` for why a Ball at the max half-extent is the shape.
-shape = "Ball"
+# A Cylinder, per `station_axiom.toml` — this hull is a disc too, and a flatter
+# one than the starbase: 7.59 across against 3.37 tall, so a sphere at the max
+# half-extent covered more than twice the height the model has. `half_height`
+# is 1.68, half the sidecar's drawn 3.366.
+#
+# The radius is very nearly exact here, unlike the starbase's: 7.5619 across X
+# and 7.5944 across Z put the two half-extents at 3.781 and 3.797, so a single
+# 3.80 fits both to within two hundredths of a unit.
+shape = "Cylinder"
 radius = 3.8
+half_height = 1.68
 length = 0.0
 
 [radar_appearance]

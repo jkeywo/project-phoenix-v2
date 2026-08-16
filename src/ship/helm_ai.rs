@@ -8164,6 +8164,7 @@ mod tests {
                     shape: crate::entity_config::ColliderShape::Ball,
                     radius,
                     length: 0.0,
+                    half_height: None,
                     // The subject is a ship, so it is a mobile contact in
                     // anyone else's hazard picture (issue #958).
                     movable: true,

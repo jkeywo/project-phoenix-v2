@@ -1148,10 +1148,35 @@ pub struct HullConfig {
     pub system_hull: Vec<SystemHullEntry>,
 }
 
+/// The body shapes a template may author. Each maps to exactly one
+/// `bevy_rapier3d::Collider` constructor in
+/// [`crate::entities::spawner::spawn_entity`], and that mapping is the whole
+/// of the shape's meaning — nothing downstream re-derives geometry from the
+/// variant.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum ColliderShape {
+    /// A sphere of [`ColliderConfig::radius`]. `Collider::ball`.
     Ball,
+    /// A Y-axis capsule — a cylinder of [`ColliderConfig::radius`] with
+    /// hemispherical caps, `length` tall through the straight section.
+    /// `Collider::capsule_y`. Structurally taller than it is wide.
     Capsule,
+    /// A Y-axis cylinder of [`ColliderConfig::radius`] and
+    /// [`ColliderConfig::half_height`]. `Collider::cylinder`.
+    ///
+    /// The shape a DISC needs, and the reason the variant exists (the
+    /// station-collider correction, and John's invariant that collision match
+    /// visible size). A hub station is 34 across and 14 tall: a Ball at the max
+    /// half-extent is right in the wide axis and over-covers the short one by
+    /// ten units, and a Capsule cannot be authored wider than it is tall at
+    /// all. A cylinder is the only one of the three that can be BOTH right —
+    /// so a ship crossing directly over a hub now stops at the visible surface
+    /// rather than well above it.
+    ///
+    /// Flat, not rounded: `Collider::cylinder`, not `round_cylinder`. The rim
+    /// of a station deck is an edge, and a border radius would put the same
+    /// vertical over-coverage back at the rim in miniature.
+    Cylinder,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1160,6 +1185,21 @@ pub struct ColliderConfig {
     pub shape: ColliderShape,
     pub radius: f32,
     pub length: f32,
+    /// Half the body's extent along Y, for [`ColliderShape::Cylinder`] only.
+    ///
+    /// A HALF-extent rather than a full height, because that is the number
+    /// `Collider::cylinder` itself takes: authoring the half means the value in
+    /// the TOML is the value handed to rapier, with no doubling or halving in
+    /// between. (`length` is the other convention — a Capsule authors the full
+    /// length of its straight section and the spawner halves it — and having
+    /// the two spellings differ is precisely what keeps a cylinder from being
+    /// silently authored at twice its intended height.)
+    ///
+    /// `Option` with a serde default so every Ball and Capsule template on disk
+    /// parses unchanged; [`ColliderConfig::cylinder_half_height`] is the single
+    /// reader, and it is where a `Cylinder` that forgot the field is caught.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub half_height: Option<f32>,
     /// Authored hazard fact (issue #958): whether this body moves under its own
     /// power. `true` is a mobile CONTACT (a ship, which can manoeuvre out of the
     /// way); `false` is static TERRAIN (an asteroid, a station, a planet, a
@@ -4573,6 +4613,9 @@ impl EntityConfig {
         if let Some(power) = config.power.as_ref() {
             validate_power_config(power).map_err(SerdeError::custom)?;
         }
+        if let Some(collider) = config.collider.as_ref() {
+            validate_collider_config(collider).map_err(SerdeError::custom)?;
+        }
 
         // Parse the ship_config sub-block via the shared ShipConfig code path.
         // If the ship declares `[[shield_arc]]` blocks, they auto-generate
@@ -5273,6 +5316,44 @@ fn validate_power_config(power: &PowerConfigSection) -> Result<(), String> {
     Ok(())
 }
 
+/// Reject a `[collider]` whose numbers cannot describe the shape it names.
+///
+/// Only [`ColliderShape::Cylinder`] has anything to check, and the check is the
+/// one that matters: a cylinder with no `half_height` is a zero-thickness disc
+/// that nothing can ever be inside, which is exactly the pass-through bug the
+/// station-collider correction was fixing. Serde cannot catch it — the field is
+/// optional so that every Ball and Capsule already on disk parses unchanged —
+/// so it is caught here, at load, in the same place and the same style as
+/// [`validate_power_config`].
+///
+/// Ball and Capsule are deliberately left alone. Their fields were never
+/// validated (a `radius = 0` Ball has always been authorable), and starting now
+/// would reject templates that load today for reasons this change has nothing
+/// to do with.
+fn validate_collider_config(collider: &ColliderConfig) -> Result<(), String> {
+    if collider.shape == ColliderShape::Cylinder {
+        match collider.half_height {
+            None => {
+                return Err(
+                    "collider.half_height is required for shape = \"Cylinder\" — a cylinder \
+                     with no half-height is a zero-thickness disc nothing can collide with"
+                        .to_string(),
+                )
+            }
+            // NaN spelled out rather than left to `!(h > 0.0)`: it is the same
+            // failure as zero — a body rapier cannot make sense of — and it
+            // arrives from the same place, an author typing a number wrong.
+            Some(h) if h.is_nan() || h <= 0.0 => {
+                return Err(format!(
+                    "collider.half_height must be positive for shape = \"Cylinder\", got {h}"
+                ))
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::field_reassign_with_default)]
@@ -5572,6 +5653,92 @@ length = 6.0
             config.collider.as_ref().unwrap().shape,
             ColliderShape::Capsule
         );
+    }
+
+    #[test]
+    fn collider_cylinder_shape_round_trips() {
+        let toml_str = r##"
+[collider]
+shape = "Cylinder"
+radius = 17.04
+half_height = 7.16
+length = 0
+"##;
+        let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
+        let collider = config.collider.as_ref().unwrap();
+        assert_eq!(collider.shape, ColliderShape::Cylinder);
+        assert_eq!(collider.radius, 17.04);
+        assert_eq!(collider.half_height, Some(7.16));
+    }
+
+    /// `half_height` is optional in the serde shape so that every Ball and
+    /// Capsule already on disk parses untouched — which means serde cannot be
+    /// the thing that catches a Cylinder without one.
+    ///
+    /// It has to be caught SOMEWHERE, because the failure is silent and it is
+    /// the exact bug the station-collider work was fixing: a cylinder of zero
+    /// half-height is a body with no interior, so ships fly through a structure
+    /// they can see, and nothing anywhere says why.
+    #[test]
+    fn a_cylinder_without_a_half_height_is_a_load_error() {
+        let err = EntityConfig::from_toml(
+            r##"
+[collider]
+shape = "Cylinder"
+radius = 17.04
+length = 0
+"##,
+        )
+        .expect_err("a Cylinder with no half_height must not load");
+        assert!(
+            err.to_string().contains("half_height"),
+            "the error must name the missing field, got: {err}"
+        );
+    }
+
+    /// Zero and negative are the same failure as absent — a disc with no
+    /// thickness — and are rejected for the same reason.
+    #[test]
+    fn a_cylinder_with_a_non_positive_half_height_is_a_load_error() {
+        for bad in ["0", "0.0", "-7.16"] {
+            let toml_str = format!(
+                r##"
+[collider]
+shape = "Cylinder"
+radius = 17.04
+half_height = {bad}
+length = 0
+"##
+            );
+            let err = EntityConfig::from_toml(&toml_str)
+                .err()
+                .unwrap_or_else(|| panic!("half_height = {bad} must not load"));
+            assert!(
+                err.to_string().contains("half_height"),
+                "the error must name the offending field, got: {err}"
+            );
+        }
+    }
+
+    /// The other two shapes are untouched by the new field: neither reads it,
+    /// and neither is required to author it. A Ball that omits `half_height`
+    /// (which is every Ball and Capsule template in `assets/entities/`) must go
+    /// on loading exactly as it did.
+    #[test]
+    fn ball_and_capsule_do_not_require_a_half_height() {
+        for shape in ["Ball", "Capsule"] {
+            let toml_str = format!(
+                r##"
+[collider]
+shape = "{shape}"
+radius = 1.5
+length = 4.0
+"##
+            );
+            let config = EntityConfig::from_toml(&toml_str)
+                .unwrap_or_else(|e| panic!("a {shape} with no half_height must parse: {e}"));
+            assert_eq!(config.collider.as_ref().unwrap().half_height, None);
+        }
     }
 
     /// Issue #958: `[collider] movable` is the authored dynamic/static split the
@@ -8629,26 +8796,144 @@ hull_max_hp = 6
     }
 
     #[test]
-    fn station_axiom_template_has_explicit_ball_collider() {
+    fn station_axiom_template_has_explicit_disc_collider() {
         // (#474) Explicit collider for robust hit detection.
         //
-        // The radius is the hull's own max half-extent, at John's request that
-        // collision match visible size: `alliance_starbase.glb` measures
-        // 1.8973 x 0.7958 x 1.8936 raw, and the [15, 18, 18] its sidecar applies
-        // draws 28.46 x 14.33 x 34.08 — half of the widest axis is 17.04. The
-        // 12.0 this used to pin was seven-tenths of that, which is what let ships
-        // fly through the outer ring of a station they could see.
+        // Both numbers come off the hull the station is DRAWN as, at John's
+        // request that collision match visible size. `alliance_starbase.glb`
+        // measures 1.8973 x 0.7958 x 1.8936 raw, and the [15, 18, 18] its
+        // sidecar applies draws 28.46 x 14.33 x 34.08 — so the widest half-extent
+        // is 17.04 and the drawn half-height is 7.16.
+        //
+        // The shape is what this test now exists to hold. A Ball at 17.04 was
+        // right about the width and wrong about the height by a factor of two
+        // and a bit; the 12.0 before it was wrong about both. Only a Cylinder
+        // can carry the two independently, so a regression to EITHER of those is
+        // a regression to a body the renderer does not draw.
         let toml_str = include_str!("../../assets/entities/station_axiom.toml");
         let config = EntityConfig::from_toml(toml_str).expect("station_axiom.toml must parse");
         let collider = config
             .collider
             .as_ref()
             .expect("station_axiom must have explicit [collider] (#474)");
-        assert_eq!(collider.shape, ColliderShape::Ball);
+        assert_eq!(collider.shape, ColliderShape::Cylinder);
         assert!(
             (collider.radius - 17.04).abs() < 1e-6,
             "expected the starbase hull's max half-extent, got {}",
             collider.radius
+        );
+        assert!(
+            (collider
+                .half_height
+                .expect("a Cylinder must author a half-height")
+                - 7.16)
+                .abs()
+                < 1e-6,
+            "expected half the starbase hull's drawn height (14.325 / 2), got {:?}",
+            collider.half_height
+        );
+    }
+
+    /// A mesh's users must agree with each other: two bodies of different sizes
+    /// cannot both be the thing one GLB draws. That is what let `skyhook` carry
+    /// a 26 while `station_axiom` carried a 12 off the same starbase model.
+    ///
+    /// WALKED, not listed. `assets/entities/` is enumerated and every template
+    /// whose `[mesh].model` is one of the two station GLBs is checked, so a
+    /// SIXTH user arrives already covered rather than waiting for someone to
+    /// remember this test. A hard-coded list would not have caught the fifth
+    /// one that already exists — `station_research_outpost.toml` draws
+    /// `alliance_research_outpost.glb` and authors no `[collider]` at all.
+    ///
+    /// Which is the one exemption, and it is deliberate rather than an
+    /// oversight being papered over: a template with no `[collider]` collides
+    /// with nothing, so it has no body to disagree about. It is a real gap in
+    /// that template — a station ships fly straight through — but it is a
+    /// DIFFERENT gap from this one, it predates the correction, and inventing a
+    /// collider for a template no world spawns is not this change's business.
+    /// The walk counts it separately so the exemption stays visible.
+    #[test]
+    fn every_station_mesh_user_authors_the_disc_its_mesh_draws() {
+        fn templates_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let entries = std::fs::read_dir(dir)
+                .unwrap_or_else(|e| panic!("{} must be readable: {e}", dir.display()));
+            let mut paths: Vec<std::path::PathBuf> = entries.flatten().map(|e| e.path()).collect();
+            paths.sort();
+            for path in paths {
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|n| n == "fragments") {
+                        continue;
+                    }
+                    templates_under(&path, out);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
+                    out.push(path);
+                }
+            }
+        }
+
+        // (model, radius, half_height) — radius is the widest half-extent of the
+        // drawn hull and half_height is half its drawn height, both read off the
+        // model's own rig sidecar `[extents].size`.
+        let expected: [(&str, f32, f32); 2] = [
+            ("assets/models/alliance_starbase.glb", 17.04, 7.16),
+            ("assets/models/alliance_research_outpost.glb", 3.8, 1.68),
+        ];
+
+        let mut templates = Vec::new();
+        templates_under(std::path::Path::new("assets/entities"), &mut templates);
+        assert!(!templates.is_empty(), "no templates found");
+
+        let (mut checked, mut colliderless) = (0, 0);
+        for path in templates {
+            let key = path.to_string_lossy().replace('\\', "/");
+            let cfg = crate::entity_includes::load_entity_config(&key)
+                .unwrap_or_else(|e| panic!("{key} must parse: {e}"));
+            let Some(model) = cfg.mesh.as_ref().and_then(|m| m.model.as_deref()) else {
+                continue;
+            };
+            let Some(&(_, radius, half_height)) = expected.iter().find(|(m, ..)| *m == model)
+            else {
+                continue;
+            };
+            let Some(collider) = cfg.collider.as_ref() else {
+                colliderless += 1;
+                continue;
+            };
+            checked += 1;
+            assert_eq!(
+                collider.shape,
+                ColliderShape::Cylinder,
+                "{key} draws {model}, so its collider must be the disc that mesh draws"
+            );
+            assert!(
+                (collider.radius - radius).abs() < 1e-6,
+                "{key}: expected radius {radius}, got {}",
+                collider.radius
+            );
+            assert!(
+                (collider
+                    .half_height
+                    .expect("a Cylinder authors a half-height")
+                    - half_height)
+                    .abs()
+                    < 1e-6,
+                "{key}: expected half_height {half_height}, got {:?}",
+                collider.half_height
+            );
+        }
+        // Four users with colliders (station_axiom, skyhook, depot_transfer,
+        // station_outpost) and one without (station_research_outpost). Pinned so
+        // a walk that silently stopped matching anything cannot pass vacuously,
+        // and so a new colliderless station-mesh user is a visible edit here.
+        assert_eq!(
+            checked, 4,
+            "expected four station-mesh users with colliders"
+        );
+        assert_eq!(
+            colliderless, 1,
+            "expected exactly one station-mesh user with no collider at all \
+             (station_research_outpost); a second is a new gap, not this test's \
+             exemption"
         );
     }
 

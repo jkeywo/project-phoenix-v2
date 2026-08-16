@@ -148,7 +148,14 @@ function drawDonut(K, layer, cx, cy, innerR, outerR, fill, opacity) {
 function drawCollider(K, layer, p, cx, cy, w2s) {
   const shape = p.colliderShape;
   const r = w2s(p.colliderRadius || 0);
-  if (shape === 'Ball') {
+  // Ball and Cylinder draw the same outline here, and correctly so: this
+  // preview is a top-down XZ plan, and a Y-axis cylinder's plan IS a circle of
+  // `radius`. The half-height is the one thing a plan view cannot show — which
+  // is a fair part of why four station colliders stayed the wrong height for as
+  // long as they did. Before this branch existed a `Cylinder` drew nothing at
+  // all, which was worse: a station with no outline read as a station with no
+  // collider.
+  if (shape === 'Ball' || shape === 'Cylinder') {
     layer.add(new K.Circle({
       x: cx, y: cy, radius: r,
       stroke: '#ffaa66', strokeWidth: 1.5, opacity: 0.9,

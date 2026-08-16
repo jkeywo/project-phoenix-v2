@@ -122,6 +122,24 @@ describe('renderEntityPreviewView', () => {
     expect(kinds.filter((k) => k === 'RegularPolygon').length).toBe(2);
   });
 
+  it('renders a Cylinder collider as the circle its plan view is', () => {
+    // A Y-axis cylinder seen from above is a circle of `radius`, so it draws
+    // exactly as a Ball of the same radius does. Before the shape reached the
+    // schema this branch was missing, and a station authored as a Cylinder drew
+    // NO collider outline at all — which read as a station that had none.
+    const preview = computeEntityPreview({
+      tags: ['station'],
+      collider: { shape: 'Cylinder', radius: 17.04, half_height: 7.16, length: 0.0 },
+    });
+    const { Konva, created } = makeMockKonva();
+    renderEntityPreviewView(host, preview, { Konva });
+
+    const circles = created.filter((c) => c.kind === 'Circle');
+    expect(circles.length).toBeGreaterThan(0);
+    // No pill geometry: a cylinder is not a capsule.
+    expect(created.filter((c) => c.kind === 'Arc').length).toBe(0);
+  });
+
   it('renders station with diamond radar', () => {
     const preview = computeEntityPreview({
       tags: ['station'],

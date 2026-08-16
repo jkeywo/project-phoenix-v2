@@ -78,10 +78,15 @@ hull_integrity = 1200.0
 # head is still the largest silhouette in the library, because the axiom station
 # is that silhouette too. The 26 was never drawn — only flown into.
 #
-# See `station_axiom.toml` for why a Ball at the max half-extent is the shape,
-# and what a `Cylinder` variant would buy a disc-shaped station.
-shape = "Ball"
+# Sharing the mesh means sharing the shape as well as the size: a Cylinder of
+# radius 17.04 and half_height 7.16 (half the drawn 14.325), exactly as
+# `station_axiom.toml` authors it, and for the reasons set out there. The head
+# is the structure that most wanted this — traffic in this world passes OVER it
+# on the way down the skyway, which is the one approach a Ball got wrong by ten
+# units.
+shape = "Cylinder"
 radius = 17.04
+half_height = 7.16
 length = 0.0
 
 [radar_appearance]

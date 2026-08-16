@@ -84,8 +84,17 @@ impl Plugin for RendererPlugin {
             .init_resource::<NebulaFogState>()
             .init_resource::<NebulaCloudState>()
             .init_resource::<CinematicCameraState>()
-            .add_systems(FixedFirst, restore_authoritative_local_ship_transform)
-            .add_systems(FixedLast, capture_local_ship_render_pose)
+            .add_systems(
+                FixedFirst,
+                (
+                    restore_authoritative_local_ship_transform,
+                    restore_authoritative_ship_transforms,
+                ),
+            )
+            .add_systems(
+                FixedLast,
+                (capture_local_ship_render_pose, capture_ship_render_pose),
+            )
             .add_systems(Startup, setup)
             .add_systems(
                 PostStartup,
@@ -106,6 +115,9 @@ impl Plugin for RendererPlugin {
                     update_view_direction_label,
                     toggle_ship_model_visibility,
                     apply_local_ship_render_interpolation,
+                    // Every non-local hull gets the same frame-rate-independent
+                    // presentation the local hull has (thrust-burst fix).
+                    apply_ship_render_interpolation,
                     // No `.after(SimSet::Physics)` edges since issue #895: the
                     // sim runs in `FixedUpdate`, which always completes before
                     // `Update`, so this frame's camera work reads the latest
@@ -113,6 +125,10 @@ impl Plugin for RendererPlugin {
                     hull_camera.run_if(in_state(GamePhase::InProgress)),
                     cinematic_camera
                         .after(apply_local_ship_render_interpolation)
+                        // Read the INTERPOLATED enemy transform when tracking a
+                        // target, not the fixed-tick one — otherwise the camera
+                        // (and the whole view) steps at the sim tick rate.
+                        .after(apply_ship_render_interpolation)
                         .run_if(in_state(GamePhase::InProgress)),
                     sync_comms_overlay.run_if(in_state(GamePhase::InProgress)),
                 ),
@@ -242,6 +258,74 @@ pub(crate) fn apply_local_ship_render_interpolation(
         interp.current
     };
     write_ship_pose(&mut transform, pose);
+}
+
+// ── Non-local hull interpolation (thrust-burst fix) ─────────────────────────
+//
+// The bracket above smooths only the `LocalShip`. Every OTHER hull — the AI
+// raiders, the wingmen, any NPC — was drawn straight from its authoritative
+// fixed-tick `Transform`, which `sync_ship_position` rewrites once per
+// `sim_tick_hz` step. At a render frame rate above that tick rate (a 144 Hz
+// monitor against the shipped 60 Hz sim) those hulls freeze between ticks and
+// jump on each one: the reported "thrust-burst". The cinematic camera made it
+// worse still — when it tracks an enemy it derives its own position and aim
+// from that enemy's un-interpolated `Transform`, so the whole view stepped,
+// which reads as the player's OWN ship juddering.
+//
+// These three systems give every non-local hull the same presentation bracket
+// the local hull has, so all rendered ship motion is frame-rate independent.
+// They are presentation-only: they never touch `ShipPhysics` (the sole thing
+// `sim_digest` folds) and live only in `RendererPlugin`, which headless and the
+// determinism probe never load — so no digest can move. `restore_*` at
+// `FixedFirst` puts the authoritative pose back before any fixed-schedule
+// reader runs, exactly as the local restore does, so the presentational lerp
+// can never leak into the simulation.
+
+/// Fixed-tick capture for every non-local hull: fold this tick's committed
+/// `ShipPhysics` into its `RenderInterp` (inserting the component the first
+/// time a hull is seen), mirroring `capture_local_ship_render_pose`.
+fn capture_ship_render_pose(
+    mut commands: Commands,
+    mut ship_q: Query<
+        (Entity, &ShipPhysics, Option<&mut RenderInterp>),
+        (With<Transform>, Without<crate::simulation::LocalShip>),
+    >,
+) {
+    for (entity, physics, interp) in ship_q.iter_mut() {
+        if let Some(mut interp) = interp {
+            interp.capture(*physics);
+        } else {
+            commands.entity(entity).insert(RenderInterp::new(*physics));
+        }
+    }
+}
+
+/// Remove last frame's presentation pose from every non-local hull before any
+/// authoritative fixed system can read the root transform, mirroring
+/// `restore_authoritative_local_ship_transform`.
+fn restore_authoritative_ship_transforms(
+    mut ship_q: Query<(&RenderInterp, &mut Transform), Without<crate::simulation::LocalShip>>,
+) {
+    for (interp, mut transform) in ship_q.iter_mut() {
+        write_ship_pose(&mut transform, interp.current);
+    }
+}
+
+/// Draw every non-local hull one fixed interval behind the authoritative pose,
+/// interpolated by the fixed clock's overstep. Unlike the local bracket there
+/// is no view-mode gate: a non-local hull is a world object that is always
+/// drawn, so it always interpolates.
+///
+/// `pub(crate)` for the same reason as the local system: `PfxPlugin` orders
+/// engine-trail spawning after it so trails read the interpolated pose.
+pub(crate) fn apply_ship_render_interpolation(
+    fixed_time: Res<Time<Fixed>>,
+    mut ship_q: Query<(&RenderInterp, &mut Transform), Without<crate::simulation::LocalShip>>,
+) {
+    let alpha = fixed_time.overstep_fraction();
+    for (interp, mut transform) in ship_q.iter_mut() {
+        write_ship_pose(&mut transform, interp.pose(alpha));
+    }
 }
 
 // ── Setup ─────────────────────────────────────────────────────────
@@ -1372,6 +1456,193 @@ mod tests {
         // `Transform` queries panic with Bevy error B0001 before the system
         // body runs.
         app.update();
+    }
+
+    // ── Frame-rate-independent presentation (thrust-burst, track/thrust-burst-v2) ──
+    //
+    // The reported "AI/player thrust-burst" is a PRESENTATION artefact, not a
+    // sim one: the headless digest folds `ShipPhysics` and has held byte-
+    // identical, so the authoritative per-tick motion is provably smooth. The
+    // burst is browser-only and only appears when the render frame rate exceeds
+    // the `sim_tick_hz` (John's 144 Hz monitor against the shipped 60 Hz sim) —
+    // a regime a fixed-timestep headless run cannot exhibit and, because the
+    // sim floor is 30 Hz while a SwiftShader CI browser renders well under that,
+    // one no in-browser CI harness here can reach either.
+    //
+    // This test reaches it deterministically instead: it drives the REAL
+    // presentation bracket (`restore`/`capture`/`apply_local_ship_render_
+    // interpolation`) with a sub-tick `ManualDuration`, so several `Update`
+    // frames fall between each fixed step exactly as they do at 180 fps against
+    // a 30 Hz tick. It samples the drawn `Transform` of two constant-velocity
+    // ships — one `LocalShip`, one not — every frame. Before the fix the non-
+    // local hull is a step function (frozen between ticks, jumping on each one:
+    // the visible burst); the local hull, interpolated, moves a little each
+    // frame. The guard asserts BOTH move smoothly.
+    const REPRO_HZ: f32 = 30.0;
+    const REPRO_SUBFRAMES: u32 = 6; // 180 "fps" against a 30 Hz tick
+    const REPRO_STEP: f32 = 3.0; // world units advanced per fixed tick
+
+    #[derive(Component)]
+    struct ReproOther;
+
+    /// Constant-velocity authoritative motion: every ship advances the same
+    /// `REPRO_STEP` along +X each fixed tick. Runs in `FixedUpdate` before
+    /// `sync_ship_position` writes the authoritative transform.
+    fn repro_advance(mut q: Query<&mut ShipPhysics>) {
+        for mut p in &mut q {
+            p.x += REPRO_STEP;
+        }
+    }
+
+    /// Build an app wired exactly like `RendererPlugin`'s presentation bracket,
+    /// plus authoritative motion, and return the per-frame drawn X of the local
+    /// and the non-local hull. `interpolate_all` mirrors the fix: when true the
+    /// non-local hull is given the same bracket the local hull has.
+    fn presented_x_series(interpolate_all: bool) -> (Vec<f32>, Vec<f32>) {
+        use crate::ship::physics_systems::sync_ship_position;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        let period = std::time::Duration::from_secs_f32(1.0 / REPRO_HZ);
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(period);
+        // Sub-tick pacing: REPRO_SUBFRAMES frames per fixed step.
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            period / REPRO_SUBFRAMES,
+        ));
+
+        app.add_systems(FixedFirst, restore_authoritative_local_ship_transform);
+        app.add_systems(FixedLast, capture_local_ship_render_pose);
+        app.add_systems(FixedUpdate, repro_advance.before(sync_ship_position));
+        app.add_systems(FixedUpdate, sync_ship_position);
+        app.add_systems(Update, apply_local_ship_render_interpolation);
+        if interpolate_all {
+            app.add_systems(FixedFirst, restore_authoritative_ship_transforms);
+            app.add_systems(FixedLast, capture_ship_render_pose);
+            app.add_systems(
+                Update,
+                apply_ship_render_interpolation.after(apply_local_ship_render_interpolation),
+            );
+        }
+
+        let mut view_mode = ShipViewMode::default();
+        view_mode.view_mode = ViewMode::Cinematic;
+        let local = app
+            .world_mut()
+            .spawn((
+                LocalShip,
+                view_mode,
+                ShipPhysics::default(),
+                Transform::default(),
+            ))
+            .id();
+        let other = app
+            .world_mut()
+            .spawn((ReproOther, ShipPhysics::default(), Transform::default()))
+            .id();
+
+        // Baseline frame (zero delta, no fixed step) then run several ticks.
+        app.update();
+        let mut local_xs = Vec::new();
+        let mut other_xs = Vec::new();
+        for _ in 0..(REPRO_SUBFRAMES * 6) {
+            app.update();
+            local_xs.push(app.world().get::<Transform>(local).unwrap().translation.x);
+            other_xs.push(app.world().get::<Transform>(other).unwrap().translation.x);
+        }
+        (local_xs, other_xs)
+    }
+
+    /// The largest single-frame jump in a presented position series, ignoring a
+    /// warm-up prefix (the first fixed step has `prev == curr`, so nothing moves
+    /// until the second tick commits a real delta).
+    fn max_frame_jump(series: &[f32]) -> f32 {
+        let warmup = (REPRO_SUBFRAMES * 2) as usize;
+        series
+            .windows(2)
+            .skip(warmup)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0_f32, f32::max)
+    }
+
+    #[test]
+    fn unfixed_non_local_hull_bursts_while_local_hull_is_smooth() {
+        // Documents the defect: with only the local-ship bracket, the non-local
+        // hull's drawn position is a step function. A smooth frame advances
+        // about REPRO_STEP / REPRO_SUBFRAMES = 0.5; a burst frame advances a
+        // whole REPRO_STEP = 3.0.
+        let (local, other) = presented_x_series(false);
+        let smooth_frame = REPRO_STEP / REPRO_SUBFRAMES as f32;
+        eprintln!(
+            "UNFIXED local presented X per frame: {:?}",
+            local
+                .iter()
+                .map(|x| (x * 100.0).round() / 100.0)
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "UNFIXED non-local presented X per frame: {:?}",
+            other
+                .iter()
+                .map(|x| (x * 100.0).round() / 100.0)
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "UNFIXED max frame jump  local={:.3}  non-local={:.3}  (smooth≈{:.3}, tick step={:.1})",
+            max_frame_jump(&local),
+            max_frame_jump(&other),
+            smooth_frame,
+            REPRO_STEP
+        );
+
+        // The local hull never jumps a whole tick's worth — it interpolates.
+        assert!(
+            max_frame_jump(&local) < smooth_frame * 1.5,
+            "local hull should be smooth, max frame jump was {}",
+            max_frame_jump(&local)
+        );
+        // The non-local hull jumps a full tick's displacement — the burst.
+        assert!(
+            max_frame_jump(&other) > REPRO_STEP * 0.9,
+            "non-local hull should burst by a full tick step, max frame jump was {}",
+            max_frame_jump(&other)
+        );
+    }
+
+    #[test]
+    fn every_hull_presents_smoothly_when_all_ships_interpolate() {
+        // The guard: with the generalised bracket, BOTH hulls move a little each
+        // frame and neither jumps a whole tick's displacement. Red against the
+        // unfixed tree, green with the fix.
+        let (local, other) = presented_x_series(true);
+        let smooth_frame = REPRO_STEP / REPRO_SUBFRAMES as f32;
+        eprintln!(
+            "FIXED non-local presented X per frame: {:?}",
+            other
+                .iter()
+                .map(|x| (x * 100.0).round() / 100.0)
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "FIXED max frame jump  local={:.3}  non-local={:.3}  (smooth≈{:.3}, tick step={:.1})",
+            max_frame_jump(&local),
+            max_frame_jump(&other),
+            smooth_frame,
+            REPRO_STEP
+        );
+
+        assert!(
+            max_frame_jump(&local) < smooth_frame * 1.5,
+            "local hull should be smooth, max frame jump was {}",
+            max_frame_jump(&local)
+        );
+        assert!(
+            max_frame_jump(&other) < smooth_frame * 1.5,
+            "non-local hull should be smooth once all ships interpolate, \
+             max frame jump was {}",
+            max_frame_jump(&other)
+        );
     }
 
     // ── Viewscreen HDR / bloom calibration (PRD #1023, module 5) ──────

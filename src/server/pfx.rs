@@ -310,6 +310,10 @@ impl Plugin for PfxPlugin {
                     spawn_ship_explosions.run_if(in_state(GamePhase::InProgress)),
                     spawn_engine_trails
                         .after(crate::server::renderer::apply_local_ship_render_interpolation)
+                        // Non-local hulls now interpolate too (thrust-burst
+                        // fix), so their engine trails must read the same
+                        // interpolated pose rather than the fixed-tick one.
+                        .after(crate::server::renderer::apply_ship_render_interpolation)
                         .run_if(in_state(GamePhase::InProgress)),
                     tick_engine_trail_materials,
                     tick_lifetime_pfx.run_if(in_state(GamePhase::InProgress)),

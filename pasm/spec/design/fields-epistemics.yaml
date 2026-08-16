@@ -1,0 +1,81 @@
+entities:
+  - decision: fields-are-regions-upgraded
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Environmental Fields Are the Regions System Upgraded In Place
+      summary: "Band B's environmental fields (#1016) are not a parallel system beside src/regions/: the region model gains intensity, falloff, and a motion/growth envelope, and each RegionEffectKind becomes intensity-driven. An existing binary region is the degenerate case — a step falloff at the boundary — so shipped region TOML stays valid or migrates mechanically. The Falling Skyway storm retrofit is the storm's region gaining an intensity profile matched to its current uniform values, behaviour-identical by construction."
+      rationale:
+        - "The overlap was near-total: regions already carry shapes, containment, per-kind effects wired to damage, helm, radar, comms, and sensors, and TOML authoring. Two coexisting spatial-volume vocabularies would be the volumes version of the second-epistemics-system mistake #1016 forbids."
+        - "The migration sequences after the in-flight Falling Skyway worktree tracks land, because that content authors against the current regions system."
+    game_design:
+      must_not_be: [a second spatial-volume system beside regions, verified by raw digest comparison across the representation change — behaviour parity is proven with seeded AAR/balance-event comparison]
+
+  - decision: field-model-analytic-parametric
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Analytic-Parametric Field Model
+      summary: "A field is authored parameters — shape, falloff curve, intensity envelope, motion and growth as functions of the logical tick — and sampling is a pure sample(field, pos, tick). There is no per-tick field mutation; scripts change a field only by replacing parameters through the command boundary, a logged deterministic event. Forecasting is evaluation at a future tick; snapshots carry parameters, never samples."
+      rationale:
+        - "Free forecasting is what gives sensors their occlusion-window and radiation-front play in band C, and tiny parameter snapshots keep P2P join and hashing cheap in the same band the mesh ships."
+        - "Fluid-like evolution is out of scope by the simulation-differentiation doctrine: a dissipating cloud is an authored intensity envelope, not simulation."
+    game_design:
+      must_not_be: [mutated per tick outside the command boundary, represented as sampled grids in the snapshot]
+
+  - decision: field-consumers-band-b
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Band-B Field Consumers
+      summary: "All three field kinds have a gameplay consequence in band B: radiation applies per-tick damage through the existing damage path (storm parity); interference degrades sensor observation quality and comms, applied symmetrically to NPC sensing and the Channel-3 AI bus; debris applies seeded deterministic strike rolls scaled by density and speed, plus helm and navigation hazard advisories."
+      rationale:
+        - "AI crews are blinded by the same fields humans are — no simulation path branches on human-versus-AI downstream of admission."
+    game_design:
+      must_not_be: [advisory-only for every kind, asymmetric between human and NPC perception]
+
+  - decision: evidence-stores-per-ship
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Per-Ship Evidence and Observation Stores
+      summary: "Observation and evidence stores are keyed by the observing ship entity from day one. Evidence crosses ships only via Comms, carrying provenance. This supersedes the band-C per-vessel knowledge-isolation deferral for evidence state."
+      rationale:
+        - "Band B is the band that puts two human crews in one world (#854): a world-global dossier would undercut both the epistemics gameplay and opposed-crew play, and the C-band retrofit would arrive after expectations froze."
+        - "Presenting evidence in dialogue transfers the entry to the receiving actor's knowledge, which makes sharing a real information act rather than a flag flip."
+    game_design:
+      must_not_be: [world-global, silently synchronised between crews outside Comms]
+
+  - decision: observation-confidence-tiers
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Discrete Observation Confidence Tiers
+      summary: "Confidence is a small ordered set of named tiers — detected, rough, fair, precise — advanced by accumulated scan effort per subject. A tier maps to a displayed range width, with a seeded-deterministic offset so the midpoint is not always the truth. Interference caps the reachable tier or slows progression."
+      rationale:
+        - "A tier is readable on a phone summary, author-tunable per field kind, trivially deterministic, and carries in provenance as a word rather than a variance."
+    game_design:
+      must_not_be: [continuous statistics surfaced to players, truth-centred at every tier]
+
+  - decision: scan-modes-wide-focused
+    core:
+      status: accepted
+      confidence: confirmed
+      title: One Scan Axis — Wide Versus Focused
+      summary: "Scan modes extend the existing science/scan.rs machinery with a single focus axis: wide (current behaviour, everything in range accumulates slowly) versus focused (one named subject accumulates fast, the rest pause). Fields become a new ScanSubject kind, which is how field analysis lands with no parallel scanner. The mode toggle lives on the sensors summary surface; the detail screen holds observation history, tier progress, and focus queueing."
+      rationale:
+        - "No active/passive emissions axis in band B: signature play belongs to band E's signature management, and pre-building its hooks would front-load an unproven system."
+    game_design:
+      must_not_be: [a second scanner beside science/scan.rs, toggled only from the detail screen]
+
+  - decision: infrastructure-network-vocabulary
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Band-D Network Vocabulary at Band-B Scope
+      summary: "Borrowed Sun's mirror network (#858) is authored in the producer/conduit/buffer/consumer node vocabulary with generic capacity, dependency, and priority resolution, extending src/infrastructure/condition.rs — scoped strictly to external scenario infrastructure with static topology and no flow simulation beyond capacity resolution. Band D widens this same graph to ship systems; it never renames a mission-shaped one."
+      rationale:
+        - "The mirror network already fits the shape — mirrors produce, relays conduct, habitats consume — so adopting the vocabulary now costs nothing and saves a rename."
+        - "The over-build guard: band B implements only what the habitat-allocation decision needs."
+    game_design:
+      must_not_be: [coupled to ship-side systems in band B, a flow simulation]

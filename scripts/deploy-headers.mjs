@@ -7,11 +7,13 @@
  * canned fixtures instead of against a live site.
  *
  * This is the SAME contract `src/delivery/http.rs` serves from the native host:
- * hashed bundles are immutable for a year, entry points and authored manifests
- * always revalidate, everything else is short-lived, and `.wasm` is
- * `application/wasm` because a browser's streaming instantiation refuses
- * anything else. Two implementations, one contract — which is exactly why this
- * file states it in one place and the checker only applies it.
+ * hashed bundles are cached for 4 hours (matching the deliberate Cloudflare
+ * dashboard Cache Rule, rather than the year-long ceiling the content-addressed
+ * filename would otherwise licence), entry points and authored manifests always
+ * revalidate, everything else is short-lived, and `.wasm` is `application/wasm`
+ * because a browser's streaming instantiation refuses anything else. Two
+ * implementations, one contract — which is exactly why this file states it in
+ * one place and the checker only applies it.
  *
  * Cross-origin isolation is deliberately NOT required. The shipped build is
  * single-threaded (`Cargo.toml`'s wasm stanza; rapier's `parallel` is off on
@@ -21,8 +23,9 @@
  * turns this into a requirement on the day that spike says yes.
  */
 
-/** One year — the value an immutable asset must be cached for, at minimum. */
-export const IMMUTABLE_MIN_MAX_AGE = 31536000;
+/** 4 hours — the floor a content-addressed asset must be cached for, matching
+ * the deliberate Cloudflare dashboard Cache Rule this contract mirrors. */
+export const CONTENT_ADDRESSED_MIN_MAX_AGE = 14400;
 
 /**
  * How a path may be cached. Mirrors `delivery::http::CachePolicy`.
@@ -181,19 +184,12 @@ export function checkProbe(probe, opts = {}) {
     findings.push(finding('error', path, 'no Cache-Control header at all'));
   } else if (policy === 'immutable') {
     const age = maxAgeOf(cache);
-    if (age === null || age < IMMUTABLE_MIN_MAX_AGE) {
+    if (age === null || age < CONTENT_ADDRESSED_MIN_MAX_AGE) {
       findings.push(finding(
         'error',
         path,
-        `content-addressed asset must be cached at least ${IMMUTABLE_MIN_MAX_AGE}s, ` +
+        `content-addressed asset must be cached at least ${CONTENT_ADDRESSED_MIN_MAX_AGE}s, ` +
         `got ${cache !== '' ? cache : '(absent)'}`,
-      ));
-    }
-    if (!/\bimmutable\b/i.test(cache)) {
-      findings.push(finding(
-        'warn',
-        path,
-        `content-addressed asset should be marked immutable, got ${cache}`,
       ));
     }
   } else if (policy === 'revalidate') {
@@ -204,7 +200,7 @@ export function checkProbe(probe, opts = {}) {
         `entry point / authored manifest must revalidate, got ${cache}`,
       ));
     }
-  } else if (maxAgeOf(cache) !== null && maxAgeOf(cache) >= IMMUTABLE_MIN_MAX_AGE) {
+  } else if (maxAgeOf(cache) !== null && maxAgeOf(cache) >= CONTENT_ADDRESSED_MIN_MAX_AGE) {
     findings.push(finding(
       'error',
       path,

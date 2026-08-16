@@ -14,8 +14,10 @@
 //! paid for by the browser build unless it is target-gated, and what is needed
 //! here is a static file server and two JSON endpoints.
 
-/// One year, the conventional maximum for a content-addressed asset.
-pub const IMMUTABLE_MAX_AGE: u32 = 31_536_000;
+/// 4 hours — the deliberate cap for a content-addressed asset, matching the
+/// Cloudflare dashboard Cache Rule this contract mirrors rather than the
+/// year-long ceiling a hashed filename would otherwise licence.
+pub const CONTENT_ADDRESSED_MAX_AGE: u32 = 14_400;
 /// An hour, for assets that are stable within a deploy but not hash-named.
 pub const SHORT_MAX_AGE: u32 = 3_600;
 
@@ -46,7 +48,7 @@ impl CachePolicy {
     pub fn header_value(self) -> String {
         match self {
             CachePolicy::Immutable => {
-                format!("public, max-age={IMMUTABLE_MAX_AGE}, immutable")
+                format!("public, max-age={CONTENT_ADDRESSED_MAX_AGE}, must-revalidate")
             }
             CachePolicy::Revalidate => "no-cache".to_string(),
             CachePolicy::ShortLived => format!("public, max-age={SHORT_MAX_AGE}"),
@@ -380,15 +382,17 @@ mod tests {
     }
 
     #[test]
-    fn a_hashed_bundle_is_cached_for_a_year_and_a_model_for_an_hour() {
+    fn a_hashed_bundle_is_cached_for_4_hours_and_a_model_for_an_hour() {
         assert_eq!(
             cache_policy_for("/project-phoenix-6f3a91b2c4d5e607_bg.wasm"),
             CachePolicy::Immutable
         );
-        assert!(CachePolicy::Immutable.header_value().contains("immutable"));
         assert!(CachePolicy::Immutable
             .header_value()
-            .contains("max-age=31536000"));
+            .contains("max-age=14400"));
+        assert!(CachePolicy::Immutable
+            .header_value()
+            .contains("must-revalidate"));
         assert_eq!(
             cache_policy_for("/assets/models/alliance_destroyer.glb"),
             CachePolicy::ShortLived

@@ -31,15 +31,27 @@
 # The content-addressed bundle: `project-phoenix-<hash>.js` and
 # `project-phoenix-<hash>_bg.wasm` (`.wasm.gz` on the demo, which ships the
 # binary gzipped under the Pages 25 MiB file cap and decompresses it in the
-# page). The filename changes when the bytes do, which is the whole licence for
-# caching it for a year — and it is the single largest download on the site, so
-# it is where nearly all of the caching win lives.
+# page). The filename changes when the bytes do, which would licence caching it
+# for a year — deliberately capped at 4 hours instead, matching the dashboard
+# Cache Rule already in force for this zone, at the cost of a revalidation
+# round-trip on any return visit past the window. It is still the single
+# largest download on the site, so most of the caching win still lands here.
 #
 # Deliberately NOT `/*.js`: `dist/phoenix.js` (scripts/wasm-editor-alias.mjs) is
 # a STABLE name re-exporting the hashed glue, and `gui/*.js` are copied
-# verbatim. Caching either for a year would strand a deploy.
+# verbatim. Caching either for 4 hours the way the hashed bundle is would still
+# strand a deploy for up to that long.
 /project-phoenix-*
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: public, max-age=14400, must-revalidate
+
+# Pages' own extension-based default for `.js` is `application/javascript`, which
+# does not match `text/javascript; charset=utf-8` from `content_type_for` in
+# `src/delivery/http.rs` — the native host and Pages must agree, so it is pinned
+# here rather than left to Pages' default. The `.wasm.gz` sibling under
+# `/project-phoenix-*` needs no such override: Pages' own `.gz` default of
+# `application/gzip` already matches the contract.
+/project-phoenix-*.js
+  Content-Type: text/javascript; charset=utf-8
 
 # Media: stable within a deploy, not content-addressed, so an hour — long enough
 # to spare a returning player the round-trips, short enough that a deploy is

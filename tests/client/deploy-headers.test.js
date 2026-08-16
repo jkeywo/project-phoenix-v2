@@ -19,7 +19,7 @@ import {
   normaliseHeaders,
 } from '../../scripts/deploy-headers.mjs';
 
-const IMMUTABLE = 'public, max-age=31536000, immutable';
+const CONTENT_ADDRESSED = 'public, max-age=14400, must-revalidate';
 const NOSNIFF = { 'x-content-type-options': 'nosniff' };
 
 const probe = (path, headers, status = 200) => ({
@@ -85,16 +85,16 @@ describe('checking one deployed response', () => {
   it('rejects an entry point cached for a year — a deploy could never reach a player', () => {
     const findings = checkProbe(probe('/', {
       'content-type': 'text/html',
-      'cache-control': IMMUTABLE,
+      'cache-control': CONTENT_ADDRESSED,
     }));
     expect(errors(findings)).toHaveLength(1);
     expect(messages(findings)).toMatch(/must revalidate/);
   });
 
-  it('accepts a content-addressed bundle cached for a year', () => {
+  it('accepts a content-addressed bundle cached for the 4-hour floor', () => {
     const findings = checkProbe(probe('/project-phoenix-6f3a91b2c4d5e607.js', {
       'content-type': 'text/javascript; charset=utf-8',
-      'cache-control': IMMUTABLE,
+      'cache-control': CONTENT_ADDRESSED,
     }));
     expect(findings).toEqual([]);
   });
@@ -105,22 +105,21 @@ describe('checking one deployed response', () => {
       'cache-control': 'public, max-age=0, must-revalidate',
     }));
     expect(errors(findings)).toHaveLength(1);
-    expect(messages(findings)).toMatch(/at least 31536000s/);
+    expect(messages(findings)).toMatch(/at least 14400s/);
   });
 
-  it('warns when a cached-for-a-year bundle is not marked immutable', () => {
+  it('accepts a content-addressed bundle cached past the floor, with no immutable flag required', () => {
     const findings = checkProbe(probe('/project-phoenix-6f3a91b2c4d5e607.js', {
       'content-type': 'text/javascript',
       'cache-control': 'public, max-age=31536000',
     }));
-    expect(errors(findings)).toHaveLength(0);
-    expect(messages(findings)).toMatch(/immutable/);
+    expect(findings).toEqual([]);
   });
 
-  it('rejects a NON-hashed asset cached for a year, which a deploy could not evict', () => {
+  it('rejects a NON-hashed asset cached at or past the 4-hour floor, which a deploy could not evict', () => {
     const findings = checkProbe(probe('/assets/models/alliance_destroyer.glb', {
       'content-type': 'model/gltf-binary',
-      'cache-control': IMMUTABLE,
+      'cache-control': CONTENT_ADDRESSED,
     }));
     expect(errors(findings)).toHaveLength(1);
     expect(messages(findings)).toMatch(/name does not change/);
@@ -129,7 +128,7 @@ describe('checking one deployed response', () => {
   it('rejects wasm served as octet-stream', () => {
     const findings = checkProbe(probe('/project-phoenix-6f3a91b2c4d5e607_bg.wasm', {
       'content-type': 'application/octet-stream',
-      'cache-control': IMMUTABLE,
+      'cache-control': CONTENT_ADDRESSED,
     }));
     expect(errors(findings)).toHaveLength(1);
     expect(messages(findings)).toMatch(/application\/wasm/);
@@ -138,7 +137,7 @@ describe('checking one deployed response', () => {
   it('rejects the gzipped wasm arriving with Content-Encoding, which the page cannot then decompress', () => {
     const findings = checkProbe(probe('/project-phoenix-6f3a91b2c4d5e607_bg.wasm.gz', {
       'content-type': 'application/gzip',
-      'cache-control': IMMUTABLE,
+      'cache-control': CONTENT_ADDRESSED,
       'content-encoding': 'gzip',
     }));
     expect(errors(findings)).toHaveLength(1);
@@ -196,7 +195,7 @@ describe('cross-origin isolation', () => {
   it('does not ask an asset to be isolated — only the entry points can be', () => {
     const findings = checkProbe(probe('/project-phoenix-6f3a91b2c4d5e607.js', {
       'content-type': 'text/javascript',
-      'cache-control': IMMUTABLE,
+      'cache-control': CONTENT_ADDRESSED,
     }), { requireIsolation: true });
     expect(findings).toEqual([]);
   });
@@ -205,10 +204,11 @@ describe('cross-origin isolation', () => {
 describe('rolling a whole run up', () => {
   it('is ok only when nothing errored, and counts both levels', () => {
     const result = checkAll([
-      probe('/', { 'content-type': 'text/html', 'cache-control': 'no-cache' }),
+      // No nosniff header here, deliberately — that is this run's one warning.
+      { path: '/', status: 200, headers: { 'content-type': 'text/html', 'cache-control': 'no-cache' } },
       probe('/project-phoenix-6f3a91b2c4d5e607.js', {
         'content-type': 'text/javascript',
-        'cache-control': 'public, max-age=31536000',
+        'cache-control': CONTENT_ADDRESSED,
       }),
     ]);
     expect(result.ok).toBe(true);
@@ -217,7 +217,7 @@ describe('rolling a whole run up', () => {
 
     const bad = checkAll([probe('/assets/scenarios.toml', {
       'content-type': 'text/plain',
-      'cache-control': IMMUTABLE,
+      'cache-control': CONTENT_ADDRESSED,
     })]);
     expect(bad.ok).toBe(false);
     expect(bad.errors).toBe(1);

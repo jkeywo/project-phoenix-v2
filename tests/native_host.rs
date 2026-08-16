@@ -344,12 +344,13 @@ fn a_matching_client_bundle_is_served_from_disk_with_the_caching_contract() {
     );
     assert!(index.contains("Cache-Control: no-cache"), "{index}");
 
-    // A content-addressed bundle is immutable and served as application/wasm —
-    // the header a browser's streaming instantiation refuses to do without.
+    // A content-addressed bundle is cached for 4 hours and served as
+    // application/wasm — the header a browser's streaming instantiation
+    // refuses to do without.
     let wasm = fetch("/project-phoenix-0123456789abcdef_bg.wasm");
     assert!(wasm.contains("Content-Type: application/wasm"), "{wasm}");
     assert!(
-        wasm.contains("Cache-Control: public, max-age=31536000, immutable"),
+        wasm.contains("Cache-Control: public, max-age=14400, must-revalidate"),
         "{wasm}"
     );
 

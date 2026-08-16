@@ -8907,16 +8907,15 @@ hull_max_hp = 6
     /// whose `[mesh].model` is one of the two station GLBs is checked, so a
     /// SIXTH user arrives already covered rather than waiting for someone to
     /// remember this test. A hard-coded list would not have caught the fifth
-    /// one that already exists — `station_research_outpost.toml` draws
-    /// `alliance_research_outpost.glb` and authors no `[collider]` at all.
+    /// one — `station_research_outpost.toml`, which draws
+    /// `alliance_research_outpost.glb` and, until the pass-through fix, authored
+    /// no `[collider]` at all.
     ///
-    /// Which is the one exemption, and it is deliberate rather than an
-    /// oversight being papered over: a template with no `[collider]` collides
-    /// with nothing, so it has no body to disagree about. It is a real gap in
-    /// that template — a station ships fly straight through — but it is a
-    /// DIFFERENT gap from this one, it predates the correction, and inventing a
-    /// collider for a template no world spawns is not this change's business.
-    /// The walk counts it separately so the exemption stays visible.
+    /// That gap is now closed: the outpost authors the same disc its mesh-mates
+    /// do, so every station-mesh user has a body and none is exempt. The walk
+    /// still counts colliderless users separately, so a NEW one (a station-mesh
+    /// template that forgets its collider) is a visible failure here rather than
+    /// a silent pass-through.
     #[test]
     fn every_station_mesh_user_authors_the_disc_its_mesh_draws() {
         fn templates_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -8986,19 +8985,21 @@ hull_max_hp = 6
                 collider.half_height
             );
         }
-        // Four users with colliders (station_axiom, skyhook, depot_transfer,
-        // station_outpost) and one without (station_research_outpost). Pinned so
-        // a walk that silently stopped matching anything cannot pass vacuously,
-        // and so a new colliderless station-mesh user is a visible edit here.
+        // Five users, all with colliders now: station_axiom, skyhook,
+        // depot_transfer, station_outpost, and station_research_outpost (the
+        // last was the colliderless gap, closed by the pass-through fix). Pinned
+        // so a walk that silently stopped matching anything cannot pass
+        // vacuously, and so a new colliderless station-mesh user is a visible
+        // failure here rather than a template ships fly straight through.
         assert_eq!(
-            checked, 4,
-            "expected four station-mesh users with colliders"
+            checked, 5,
+            "expected five station-mesh users with colliders"
         );
         assert_eq!(
-            colliderless, 1,
-            "expected exactly one station-mesh user with no collider at all \
-             (station_research_outpost); a second is a new gap, not this test's \
-             exemption"
+            colliderless, 0,
+            "every station-mesh user must author a collider now that \
+             station_research_outpost has one; a colliderless user is a new \
+             pass-through gap, not an exemption"
         );
     }
 

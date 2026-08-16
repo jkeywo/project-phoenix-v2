@@ -122,7 +122,13 @@ impl Plugin for RendererPlugin {
                     // sim runs in `FixedUpdate`, which always completes before
                     // `Update`, so this frame's camera work reads the latest
                     // stepped `Transform`s without an explicit edge.
-                    hull_camera.run_if(in_state(GamePhase::InProgress)),
+                    hull_camera
+                        // First-person positions the view from the local ship's
+                        // root transform, so it must read the INTERPOLATED pose
+                        // (the first-person half of the thrust-burst fix) — order
+                        // it after the local interpolation that writes it.
+                        .after(apply_local_ship_render_interpolation)
+                        .run_if(in_state(GamePhase::InProgress)),
                     cinematic_camera
                         .after(apply_local_ship_render_interpolation)
                         // Read the INTERPOLATED enemy transform when tracking a
@@ -235,9 +241,21 @@ fn restore_authoritative_local_ship_transform(
     }
 }
 
-/// Draw the local hull one fixed interval behind the authoritative pose. This is
-/// active only in Cinematic mode; first-person and overlay modes keep their exact
-/// tick transform because the local hull is hidden there.
+/// Draw the local hull one fixed interval behind the authoritative pose in the
+/// two view modes that present the ship in the world: Cinematic (the model is
+/// visible and the cinematic camera tracks it) and first-person `Camera` (the
+/// model is hidden, but `hull_camera` positions the view from this root
+/// transform's marker rig). Both would otherwise step at the sim tick rate on a
+/// monitor faster than `sim_tick_hz` — the reported thrust-burst — Cinematic for
+/// the drawn hull, first-person for the whole view. Overlay modes (Radar, Comms,
+/// charts) keep the exact tick transform: the hull is hidden AND `hull_camera`
+/// freezes the last view, so nothing reads the pose.
+///
+/// This never leaks into the simulation: the interpolated pose is written only
+/// in `Update`, and `restore_authoritative_local_ship_transform` at `FixedFirst`
+/// puts the exact-tick pose back before any fixed-schedule reader runs. Aiming
+/// and weapons (`SimSet::Physics`, inside `FixedUpdate`) therefore always read
+/// the authoritative transform, never this presented one.
 ///
 /// `pub(crate)`: `PfxPlugin::build` (src/server/pfx.rs) orders
 /// `spawn_engine_trails` after this system so engine-trail PFX read the
@@ -252,10 +270,9 @@ pub(crate) fn apply_local_ship_render_interpolation(
     let Ok((view_mode, interp, mut transform)) = ship_q.single_mut() else {
         return;
     };
-    let pose = if view_mode.view_mode == ViewMode::Cinematic {
-        interp.pose(fixed_time.overstep_fraction())
-    } else {
-        interp.current
+    let pose = match view_mode.view_mode {
+        ViewMode::Cinematic | ViewMode::Camera(_) => interp.pose(fixed_time.overstep_fraction()),
+        _ => interp.current,
     };
     write_ship_pose(&mut transform, pose);
 }
@@ -1653,6 +1670,99 @@ mod tests {
             "non-local hull should be smooth once all ships interpolate, \
              max frame jump was {}",
             max_frame_jump(&other)
+        );
+    }
+
+    // ── First-person half of the thrust-burst fix ──────────────────────────
+    //
+    // In first-person `Camera` view the local hull is HIDDEN, but `hull_camera`
+    // positions the whole view from the local ship's root `Transform` (a marker
+    // point on its rig). Before this fix `apply_local_ship_render_interpolation`
+    // wrote the exact-tick pose there in every non-Cinematic mode, so on a
+    // >tick-rate monitor the first-person view stepped once per sim tick — the
+    // same burst the Cinematic path already fixed. The fix interpolates the root
+    // transform in `Camera` view too; overlay views (Radar/Comms/charts) keep
+    // the exact tick pose, since the hull is hidden AND `hull_camera` freezes
+    // the last view, so the pose is never read there.
+
+    /// Drive the local-ship presentation bracket with a given view mode and
+    /// return the local hull's per-frame drawn X. Mirrors `presented_x_series`
+    /// but focuses on the local hull under different `ViewMode`s.
+    fn presented_local_x_in_view(view_mode: ViewMode) -> Vec<f32> {
+        use crate::ship::physics_systems::sync_ship_position;
+
+        let mut app = App::new();
+        app.add_plugins(bevy::time::TimePlugin);
+        let period = std::time::Duration::from_secs_f32(1.0 / REPRO_HZ);
+        app.world_mut()
+            .resource_mut::<Time<Fixed>>()
+            .set_timestep(period);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            period / REPRO_SUBFRAMES,
+        ));
+
+        app.add_systems(FixedFirst, restore_authoritative_local_ship_transform);
+        app.add_systems(FixedLast, capture_local_ship_render_pose);
+        app.add_systems(FixedUpdate, repro_advance.before(sync_ship_position));
+        app.add_systems(FixedUpdate, sync_ship_position);
+        app.add_systems(Update, apply_local_ship_render_interpolation);
+
+        let mut vm = ShipViewMode::default();
+        vm.view_mode = view_mode;
+        let local = app
+            .world_mut()
+            .spawn((LocalShip, vm, ShipPhysics::default(), Transform::default()))
+            .id();
+
+        app.update();
+        let mut xs = Vec::new();
+        for _ in 0..(REPRO_SUBFRAMES * 6) {
+            app.update();
+            xs.push(app.world().get::<Transform>(local).unwrap().translation.x);
+        }
+        xs
+    }
+
+    #[test]
+    fn local_hull_presents_smoothly_in_first_person_view() {
+        // The guard for the first-person half of the fix: in `Camera` view the
+        // local ship's root transform (which `hull_camera` reads to place the
+        // view) advances a fraction of a tick each frame instead of a whole
+        // tick's step. Red against the un-interpolated first-person path (which
+        // wrote `interp.current`), green with the fix.
+        let xs = presented_local_x_in_view(ViewMode::Camera(CameraView::default()));
+        let smooth_frame = REPRO_STEP / REPRO_SUBFRAMES as f32;
+        eprintln!(
+            "FIRST-PERSON local presented X per frame: {:?}",
+            xs.iter()
+                .map(|x| (x * 100.0).round() / 100.0)
+                .collect::<Vec<_>>()
+        );
+        eprintln!(
+            "FIRST-PERSON max frame jump = {:.3}  (smooth≈{:.3}, tick step={:.1})",
+            max_frame_jump(&xs),
+            smooth_frame,
+            REPRO_STEP
+        );
+        assert!(
+            max_frame_jump(&xs) < smooth_frame * 1.5,
+            "first-person local hull should present smoothly, max frame jump was {}",
+            max_frame_jump(&xs)
+        );
+    }
+
+    #[test]
+    fn overlay_view_keeps_exact_tick_pose() {
+        // The paired sibling that proves the harness above genuinely detects a
+        // step function: overlay views deliberately keep the exact tick pose (the
+        // hull is hidden and `hull_camera` freezes the view, so nothing reads it)
+        // and therefore still burst by a whole tick. This is exactly the
+        // un-interpolated path the first-person fix moved AWAY from.
+        let xs = presented_local_x_in_view(ViewMode::Radar);
+        assert!(
+            max_frame_jump(&xs) > REPRO_STEP * 0.9,
+            "overlay view keeps the exact tick pose and steps a full tick, jump was {}",
+            max_frame_jump(&xs)
         );
     }
 

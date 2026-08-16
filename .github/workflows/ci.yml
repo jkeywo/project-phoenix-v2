@@ -769,7 +769,7 @@ jobs:
 
   # ── Deploy (main branch only, requires both test + smoke to pass) ─────────────
   deploy:
-    needs: [test, build, editor-test, smoke]
+    needs: [test, build, editor-test, smoke, viewer-test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

@@ -1661,9 +1661,9 @@
           phase: s.phase,
           shipDestroyed: s.shipDestroyed,
           reason: s.gameOverReason,
-          // Authored per world; not published on the wire today. See
-          // gui/game-over-view.js for why this reads a field that is
-          // currently always absent.
+          // Authored per world, and published on `ServerMessage::GameOver`
+          // since the #1023 wire pass; lobby-state parks it here. Null for an
+          // ending that declared no side, which the view frames as ENDED.
           outcome: ls ? ls.gameOverOutcome : null,
           scenarioTitle: ls ? ls.scenarioTitle : '',
         });

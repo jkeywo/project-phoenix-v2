@@ -2268,14 +2268,22 @@ struct WorldSetupBroadcast {
     sent: bool,
 }
 
-/// Broadcast `GameOver { reason }` to all players when the game enters the
-/// GameOver phase. Reads the reason from `GameOverReason` resource and resets
-/// it to `None` after broadcast.
+/// Broadcast `GameOver { reason, outcome }` to all players when the game enters
+/// the GameOver phase. Reads both halves of the `GameOverReason` resource and
+/// resets the REASON to `None` after broadcast.
+///
+/// Only the reason is taken. `.1` is read and left in place, for two separate
+/// reasons that happen to agree: the headless exit report reads it after the
+/// run to classify victory vs defeat (`src/bin/phoenix_headless.rs`), and
+/// `state_digest` folds BOTH halves — clearing the outcome here would move
+/// every digest of a run that reaches `GameOver` inside its window, for no
+/// gain. `Outcome` is `Copy`, so reading it needs no mutation at all.
 fn on_game_over_enter(mut game_over_reason: ResMut<GameOverReason>, mut outbox: ResMut<SimOutbox>) {
+    let outcome = game_over_reason.1.map(|o| o.as_str().to_string());
     let reason = game_over_reason.0.take().unwrap_or_default();
     outbox
         .0
-        .push((Target::All, ServerMessage::GameOver { reason }));
+        .push((Target::All, ServerMessage::GameOver { reason, outcome }));
 }
 
 /// Reset all change-detection caches when entering InProgress so the first
@@ -10889,5 +10897,70 @@ _remove = true
             !app.world().resource::<GodMode>().0,
             "with nothing admitted, GodMode must stay at its default"
         );
+    }
+
+    // ── GameOver publishes the authored outcome (PRD #1023 module 4) ─────
+
+    /// The scenario declares which side won; the message must carry it. Before
+    /// this the flag was latched, digested, reported — and dropped on the way
+    /// to the one screen that exists to say how the session ended.
+    #[test]
+    fn game_over_broadcasts_the_latched_outcome() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.init_resource::<SimOutbox>();
+        world.insert_resource(GameOverReason(
+            Some("world.falling_skyway.ending.held".into()),
+            Some(crate::balance::Outcome::Victory),
+        ));
+
+        world.run_system_once(on_game_over_enter).unwrap();
+
+        let outbox = &world.resource::<SimOutbox>().0;
+        assert_eq!(outbox.len(), 1);
+        match &outbox[0].1 {
+            ServerMessage::GameOver { reason, outcome } => {
+                assert_eq!(reason, "world.falling_skyway.ending.held");
+                assert_eq!(outcome.as_deref(), Some("victory"));
+            }
+            other => panic!("expected GameOver, got {other:?}"),
+        }
+
+        // The reason is TAKEN (it is per-ending display text and the next
+        // round must not inherit it); the outcome is only READ. Two separate
+        // reasons that agree: the headless exit report classifies the run off
+        // `.1` after the run ends, and `state_digest` folds both halves —
+        // clearing it here would move the digest of every run that reaches
+        // GameOver inside its window.
+        let latch = world.resource::<GameOverReason>();
+        assert_eq!(latch.0, None, "the reason is consumed by the broadcast");
+        assert_eq!(
+            latch.1,
+            Some(crate::balance::Outcome::Victory),
+            "the outcome survives the broadcast"
+        );
+    }
+
+    /// An ending nobody declared a side for stays undeclared on the wire. The
+    /// client frames that as ENDED rather than guessing, so `None` is an
+    /// answer here and not a gap.
+    #[test]
+    fn game_over_publishes_no_outcome_when_none_was_declared() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.init_resource::<SimOutbox>();
+        world.insert_resource(GameOverReason(None, None));
+
+        world.run_system_once(on_game_over_enter).unwrap();
+
+        match &world.resource::<SimOutbox>().0[0].1 {
+            ServerMessage::GameOver { reason, outcome } => {
+                assert_eq!(reason, "");
+                assert_eq!(*outcome, None);
+            }
+            other => panic!("expected GameOver, got {other:?}"),
+        }
     }
 }

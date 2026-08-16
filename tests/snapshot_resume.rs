@@ -1486,7 +1486,7 @@ fn a_restored_game_over_reruns_its_entry_effects() {
     let reasons: Vec<&str> = outbox
         .iter()
         .filter_map(|(_, msg)| match msg {
-            ServerMessage::GameOver { reason } => Some(reason.as_str()),
+            ServerMessage::GameOver { reason, .. } => Some(reason.as_str()),
             _ => None,
         })
         .collect();

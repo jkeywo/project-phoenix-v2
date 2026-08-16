@@ -11,6 +11,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { gameOverView } from '../../gui/game-over-view.js';
+import { LobbyState } from '../../gui/lobby-state.js';
 
 describe('gameOverView — visibility', () => {
   it('is visible only in the GameOver phase', () => {
@@ -94,5 +95,69 @@ describe('gameOverView — the frame', () => {
     const vm = gameOverView({ phase: 'GameOver' });
     expect(vm.bodyId).toBeNull();
     expect(vm.bodyText).toBe('');
+  });
+});
+
+// ── End to end: the wire message → lobby-state → the framed ending ──────────
+
+/**
+ * The half the module could not test before: `ServerMessage::GameOver` now
+ * carries `{ reason, outcome }`, so a scenario's declared victory reaches the
+ * screen without the view guessing. These feed the real wire shape through the
+ * real lobby-state reducer and assert on the frame the overlay renders.
+ */
+describe('gameOverView — fed from the wire', () => {
+  const view = (msg) => {
+    const s = new LobbyState();
+    s.apply(msg);
+    return gameOverView({
+      phase: s.phase,
+      reason: s.gameOverReason,
+      outcome: s.gameOverOutcome,
+      scenarioTitle: 'Falling Skyway',
+    });
+  };
+
+  it('lights up the victory frame from a declared win', () => {
+    const vm = view({
+      type: 'GameOver',
+      data: { reason: 'The skyway held.', outcome: 'victory' },
+    });
+    expect(vm.visible).toBe(true);
+    expect(vm.outcome).toBe('victory');
+    expect(vm.headlineId).toBe('client.game_over_victory');
+    expect(vm.bodyText).toBe('The skyway held.');
+    expect(vm.scenarioName).toBe('Falling Skyway');
+  });
+
+  it('lights up the defeat frame from a declared loss, with no hull death', () => {
+    const vm = view({
+      type: 'GameOver',
+      data: { reason: 'The span came down.', outcome: 'defeat' },
+    });
+    expect(vm.outcome).toBe('defeat');
+    expect(vm.headlineId).toBe('client.game_over_defeat');
+  });
+
+  // `outcome: null` is what the server writes for an ending that declared no
+  // side. It is an answer, not a gap, and the honest frame for it is ENDED.
+  it('stays neutral when the ending declared no side', () => {
+    const vm = view({ type: 'GameOver', data: { reason: 'The fleet withdrew.', outcome: null } });
+    expect(vm.outcome).toBe('ended');
+    expect(vm.headlineId).toBe('client.game_over_ended');
+  });
+
+  // A host still sending the pre-#1023 shape.
+  it('stays neutral when the message carries no outcome field at all', () => {
+    const vm = view({ type: 'GameOver', data: { reason: 'The fleet withdrew.' } });
+    expect(vm.outcome).toBe('ended');
+  });
+
+  it('clears the outcome on the way back to the lobby', () => {
+    const s = new LobbyState();
+    s.apply({ type: 'GameOver', data: { reason: 'r', outcome: 'victory' } });
+    s.apply({ type: 'ReturnedToLobby' });
+    expect(s.gameOverOutcome).toBeNull();
+    expect(gameOverView({ phase: s.phase, outcome: s.gameOverOutcome }).visible).toBe(false);
   });
 });

@@ -16,19 +16,24 @@
  * Scenario authors DO declare the outcome: `game_over(message, "victory")` in
  * a world's script, parsed into `balance::Outcome` and latched on the
  * `GameOverReason` resource, which is a two-field resource — reason AND
- * outcome. `ServerMessage::GameOver` then carries `{ reason }` and drops the
- * outcome on the way out. So the flag exists, is authored per world, and is
- * simply not published.
+ * outcome. `ServerMessage::GameOver` carried `{ reason }` and dropped the
+ * outcome on the way out, so the flag existed, was authored per world, and was
+ * simply not published. This module was written to read it anyway, against the
+ * day the wire caught up.
  *
- * Publishing it is a one-field change to src/core/messages.rs, which is
- * outside a visual/UX pass. This module is therefore written to READ the field
- * if it is ever there (`outcome`, absent today, hence undefined, hence
- * ignored) and to fall back on the only end signal the wire does publish:
- * `ShipDestroyed`, which is unambiguously a defeat. Anything else ends as
- * ENDED — a neutral, honest frame — rather than guessing victory from prose.
- * String-matching the reason was considered and rejected for the same reason
- * balance.rs rejected it: the reason is per-world and often a strings.csv key,
- * so no substring reliably tells a win from a loss.
+ * It has. `GameOver` now carries `{ reason, outcome }` — `outcome` being
+ * `balance::Outcome::as_str`, or `null` for an ending that declared no side —
+ * and gui/lobby-state.js parks it on `gameOverOutcome` for the caller to pass
+ * in. Nothing below changed to accommodate that, which was the point of
+ * writing it this way.
+ *
+ * The fallbacks stay, because `null` is still a real answer. With no declared
+ * outcome the only end signal left is `ShipDestroyed`, which is unambiguously
+ * a defeat; anything else ends as ENDED — a neutral, honest frame — rather
+ * than guessing victory from prose. String-matching the reason was considered
+ * and rejected for the reason balance.rs rejected it: the reason is per-world
+ * and often a strings.csv key, so no substring reliably tells a win from a
+ * loss.
  *
  * Pure and DOM-free; client.html renders the result.
  */
@@ -43,8 +48,9 @@ const HEADLINE = {
 /**
  * @param {{ phase?: string, shipDestroyed?: boolean, reason?: string|null,
  *           outcome?: string|null, scenarioTitle?: string|null }} s
- *        `outcome` is the authored victory/defeat flag IF the wire ever
- *        carries it (see the module note); today it is always undefined.
+ *        `outcome` is the authored victory/defeat flag off the wire
+ *        (`ServerMessage::GameOver`), or null/undefined for an ending that
+ *        declared no side. See the module note.
  * @returns {{ visible: boolean, outcome: 'victory'|'defeat'|'ended',
  *             headlineId: string, scenarioName: string,
  *             bodyId: string|null, bodyText: string }}

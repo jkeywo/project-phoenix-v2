@@ -2450,6 +2450,27 @@ pub enum ServerMessage {
     /// Carries a human-readable reason string displayed on the game-over screen.
     GameOver {
         reason: String,
+        /// The authored side of the ending: `"victory"`, `"defeat"`, or
+        /// absent. This is [`crate::balance::Outcome::as_str`] off the
+        /// `GameOverReason` latch — the flag a scenario declares on its
+        /// `game_over` action and the built-in player-death sites set — and
+        /// NOT a guess made from `reason`.
+        ///
+        /// It travels as an `Option<String>` rather than the enum because
+        /// `Outcome` is deliberately not `Serialize` (`crate::balance`): the
+        /// two labels are already this project's report vocabulary, and
+        /// spelling them here keeps a wire-visible variant order from becoming
+        /// pinned surface. `None` means the ending declared no side — an
+        /// undeclared scripted end — and the client frames it as ENDED rather
+        /// than inventing one, so absence is a real answer and not a gap.
+        ///
+        /// `#[serde(default)]` so a peer still sending the pre-#1023 `{reason}`
+        /// shape decodes as `None` instead of failing the message. The field is
+        /// always WRITTEN, though — no `skip_serializing_if` — because the
+        /// key set is what the codec pins and a key that comes and goes is a
+        /// key the client has to test for twice.
+        #[serde(default)]
+        outcome: Option<String>,
     },
     /// Broadcast when all players return to the lobby from the GameOver screen.
     /// Clients should switch back to the lobby panel. Station claims and ready

@@ -808,6 +808,7 @@ mod tests {
                 ServerMessageDiscriminants::GameOver,
                 ServerMessage::GameOver {
                     reason: "server.game_over.ship_destroyed".into(),
+                    outcome: Some("defeat".into()),
                 },
             ),
             (
@@ -1537,6 +1538,69 @@ mod tests {
             );
         } else {
             panic!("expected BlasterFired");
+        }
+    }
+
+    // ── GameOver carries the authored outcome (PRD #1023 module 4) ────────
+
+    /// The whole surface of the message the game-over screen reads. `outcome`
+    /// is written even when it is `null`, so the client tests one shape.
+    #[test]
+    fn game_over_wire_keys_are_reason_and_outcome() {
+        let encoded = JsonCodec
+            .encode_server(&ServerMessage::GameOver {
+                reason: "world.falling_skyway.ending.held".into(),
+                outcome: Some("victory".into()),
+            })
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(
+            value["data"]
+                .as_object()
+                .expect("GameOver data is an object")
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<&str>>(),
+            std::collections::BTreeSet::from(["reason", "outcome"]),
+            "the ending's whole surface: what happened, and which side it was"
+        );
+        assert_eq!(value["data"]["outcome"], "victory");
+
+        // Still written when there is no declared side, because a key that
+        // came and went would make absence and defeat look alike to a client
+        // testing for the field rather than its value.
+        let undeclared = JsonCodec
+            .encode_server(&ServerMessage::GameOver {
+                reason: "r".into(),
+                outcome: None,
+            })
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&undeclared).unwrap();
+        assert!(value["data"].as_object().unwrap().contains_key("outcome"));
+        assert!(value["data"]["outcome"].is_null());
+    }
+
+    #[test]
+    fn game_over_outcome_round_trips_and_defaults_when_absent() {
+        for outcome in [Some("victory".to_string()), Some("defeat".into()), None] {
+            assert_server_roundtrip(
+                &JsonCodec,
+                ServerMessage::GameOver {
+                    reason: "server.game_over.ship_destroyed".into(),
+                    outcome: outcome.clone(),
+                },
+            );
+        }
+
+        // A peer still sending the pre-#1023 `{reason}` shape decodes as an
+        // undeclared ending rather than failing the message.
+        let legacy = r#"{"type":"GameOver","data":{"reason":"Ship destroyed"}}"#;
+        match JsonCodec.decode_server(legacy).unwrap() {
+            ServerMessage::GameOver { reason, outcome } => {
+                assert_eq!(reason, "Ship destroyed");
+                assert_eq!(outcome, None);
+            }
+            other => panic!("expected GameOver, got {other:?}"),
         }
     }
 

@@ -17,7 +17,12 @@
 #   target/debug/phoenix-headless --world assets/worlds/duel.toml \
 #     --seed 42 --ticks 900 --record target/duel.ron --digest-every 0
 #
-# CURRENT VALUE: 95852357729946676, moved from 11542528846502171323 by the
+# CURRENT VALUE: 10785935710004737498 (0x95af5761c50875da), moved from
+# 95852357729946676 by the issue #1053 over-cap bleed. The paragraphs below are
+# the history, oldest first; the first number in them is NOT the one to A/B
+# against.
+#
+# 95852357729946676 was itself moved from 11542528846502171323 by the
 # `thrust_release_threshold` band (the thrust axis's mirror of the battery
 # axis's `min_reserve_*`/`min_restore_*` pair). 11542528846502171323 was itself
 # only ever measured, never written down here; it is recorded above as the
@@ -36,6 +41,36 @@
 # helm power changes across the window here, against 0 in combat_test, patrol
 # and falling_skyway, all three of which field banded hulls but never promote or
 # never reach the band.
+#
+# MOVED BY ISSUE #1053, to 10785935710004737498 (0x95af5761c50875da). A helm
+# power shed used to delete an over-cap velocity in the tick the `MaxSpeed`
+# modifier changed; excess is now bled off on the hull's own `deceleration`, so
+# a ship coasts down over a few ticks instead of lurching.
+#
+# THIS WORLD IS THE ONLY ONE OF THE SEVENTEEN THAT MOVES, and a helm shed is
+# NOT what decides that — the shed has to land while the hull is ACTUALLY over
+# the new cap, which is the one condition the old clamp needed to bite.
+# `rng_coverage` is the proof: it sheds helm power four times in its window and
+# its digest is untouched, because none of those sheds finds a hull above the
+# cap they leave behind. Instrumenting the over-cap branch itself and counting
+# the integration steps that take it:
+#
+#   duel             761        combat_test        0
+#   rng_coverage       0        falling_skyway     0
+#   probe_destroy      0        probe_storm        0
+#
+# 761 of them, in three groups, and the middle group is issue #1053's own
+# measurement reproduced here: 21 steps at a 54-unit cap with up to 13.50 of
+# excess — a hull at 67.5 against a cap of 54, which is the 67.5 -> 54.0 the
+# issue reported off `probe_hostile`. The other two are worse rather than
+# milder: 12 steps at a 22-unit cap (1.89 of excess) and 728 at an 18-unit cap
+# with up to 44.25 — a hull at 62.25 with its cap collapsed to 18, better than
+# three times over, previously deleted in a single tick.
+#
+# The ten-ship brawl is why: every hull is promoted, every hull is under way at
+# or near its cap, and the same power deciders that make this the world the
+# thrust band moves make it the world where a shed most often finds a ship at
+# flank.
 #
 # ── Why the NPC slots are `spawn_entity` effects, not `[[entity]]` blocks ─────
 #

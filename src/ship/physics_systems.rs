@@ -969,4 +969,97 @@ mod tests {
              hull, got {alive:?}"
         );
     }
+
+    /// Issue #1053, through the path the bug actually arrived on.
+    ///
+    /// `compute_physics` is where the clamp lived and where the pure tests pin
+    /// the bleed, but the CAP is not a physics constant — it is
+    /// `config.max_speed` multiplied by this ship's `MaxSpeed` modifier, right
+    /// here in the integrator. The bug was only ever reachable because a power
+    /// decider can move that modifier under a ship at flank. So this drives the
+    /// real thing: a `PowerGroup` MaxSpeed bonus applied, held until the hull
+    /// is sitting on the raised cap, then shed.
+    ///
+    /// The lurch was the observable, so the assertions are about the shape of
+    /// the descent rather than its endpoint alone: not in one tick, monotone
+    /// throughout, and settled exactly on the new cap.
+    #[test]
+    fn a_helm_power_shed_at_the_cap_bleeds_speed_down_over_several_ticks() {
+        use crate::messages::{ModifierSource, PowerGroupId};
+        use crate::modifiers::Modifier;
+
+        let helm = ModifierSource::PowerGroup(PowerGroupId("helm".into()));
+        let base_cap = ShipPhysicsConfig::new().max_speed;
+        let boosted_cap = base_cap * 1.25;
+
+        let mut app = integrator_only_app();
+        let ship = spawn_integrator_ship(&mut app, ControlSource::Ai, false, 1.0, 0.0, 0.0);
+
+        // The x1.25 the issue measured, as a helm power-group bonus.
+        {
+            let mut mods = ShipModifiers::new();
+            mods.add_or_update(Modifier {
+                source: helm.clone(),
+                slot: ModifierSlot::MaxSpeed,
+                bonus: 0.25,
+            });
+            app.world_mut().entity_mut(ship).insert(mods);
+        }
+
+        // Up to the RAISED cap and held there, so the shed lands on a hull
+        // genuinely at flank rather than one still accelerating.
+        for _ in 0..200 {
+            tick(&mut app);
+        }
+        let at_flank = physics_of(&mut app, ship).forward_speed;
+        assert!(
+            (at_flank - boosted_cap).abs() < 1e-3,
+            "the ship must be sitting on its boosted cap before the shed; \
+             got {at_flank} against {boosted_cap}"
+        );
+
+        // The shed: helm power drops a level and the bonus goes with it.
+        app.world_mut()
+            .entity_mut(ship)
+            .get_mut::<ShipModifiers>()
+            .unwrap()
+            .remove(&helm, &ModifierSlot::MaxSpeed);
+
+        tick(&mut app);
+        let after_one = physics_of(&mut app, ship).forward_speed;
+        assert!(
+            after_one > base_cap,
+            "the excess must not be deleted in the tick the modifier changed — \
+             this is the measured 67.5 -> 54.0 lurch (#1053); got {after_one} \
+             against a new cap of {base_cap}"
+        );
+
+        let mut previous = after_one;
+        let mut ticks = 1;
+        for _ in 0..200 {
+            tick(&mut app);
+            let now = physics_of(&mut app, ship).forward_speed;
+            assert!(
+                now <= previous + 1e-5,
+                "the bleed must be monotone; went {previous} -> {now}"
+            );
+            assert!(
+                now >= base_cap - 1e-3,
+                "the bleed must not undershoot the new cap; reached {now}"
+            );
+            previous = now;
+            ticks += 1;
+            if (now - base_cap).abs() < 1e-3 {
+                break;
+            }
+        }
+        assert!(
+            ticks > 3,
+            "a descent this fast is still a lurch; took {ticks} ticks"
+        );
+        assert!(
+            (previous - base_cap).abs() < 1e-3,
+            "the hull must settle ON the new cap, not near it; settled at {previous}"
+        );
+    }
 }

@@ -167,13 +167,70 @@ pub fn compute_physics(
             thrust * max_rev
         };
         let diff = target - state.forward_speed;
-        let step = config.acceleration * dt;
+
+        // ── Over-cap bleed (issue #1053) ──────────────────────────────────
+        // A ship's cap is not a constant. `integrate_ship_physics` multiplies
+        // `max_speed`/`max_reverse_speed` by the `MaxSpeed` modifier, and the
+        // helm power channel moves that modifier — so a shed can leave a ship
+        // ABOVE its own cap without the ship having done anything.
+        //
+        // What used to happen then was the terminal `.clamp` below deleting
+        // the whole excess in the tick the modifier changed: measured on
+        // probe_hostile as 67.5 -> 54.0 in one tick on a x1.25 -> x1.0 swing.
+        // The ship visibly lurched on a power decision, and the power
+        // decider's timing was coupled into physics far harder than the
+        // modifier design intends.
+        //
+        // Excess is now BLED, on the hull's own authored `deceleration` —
+        // the drag rate a coasting hull already slows at, and the one that
+        // belongs here rather than `acceleration`. At the cap under full
+        // throttle the engines are balancing drag; when the cap drops, the
+        // engines cannot sustain the speed the ship has, so what brings it
+        // down is drag alone. Nothing new is authored: `deceleration` is a
+        // per-hull TOML field the zero-thrust arm below has always used.
+        let over_cap = state.forward_speed > max_fwd || state.forward_speed < -max_rev;
+        let step = if over_cap {
+            config.deceleration * dt
+        } else {
+            config.acceleration * dt
+        };
         let delta = if diff.abs() <= step {
             diff
         } else {
             step.copysign(diff)
         };
-        (state.forward_speed + delta).clamp(-max_rev, max_fwd)
+
+        // The clamp is NARROWED, not removed. Its bounds now admit a speed
+        // the ship already had, so it can no longer delete excess — but a
+        // ship inside its cap still cannot push past it, because for an
+        // in-range speed these are exactly the old bounds.
+        //
+        // The bleed cannot overshoot: `diff.abs() <= step` lands exactly on
+        // `target`, which is at or inside the cap, and `target` is `thrust *
+        // cap` with `|thrust|` at most 1, so an over-cap ship's `diff` always
+        // points back toward the cap.
+        //
+        // It cannot STALL either, but only because of the guard below.
+        // `deceleration` has a serde default of 0.0 and nothing rejects a hull
+        // that authors none, and a zero step means `delta` is `-0.0` and the
+        // ship sits over its cap for ever — a state the old unconditional
+        // clamp could not produce. No shipped hull is in that position (all
+        // eleven `[helm_console]` templates author a positive deceleration),
+        // which is exactly why it would go unnoticed. A hull with no drag
+        // keeps the OLD behaviour: it snaps to the cap, because a lurch is
+        // better than a ship that can never come back inside its own limits.
+        let widen = over_cap && step > 0.0;
+        let ceiling = if widen {
+            max_fwd.max(state.forward_speed)
+        } else {
+            max_fwd
+        };
+        let floor = if widen {
+            (-max_rev).min(state.forward_speed)
+        } else {
+            -max_rev
+        };
+        (state.forward_speed + delta).clamp(floor, ceiling)
     } else {
         let decel = config.deceleration * dt;
         if state.forward_speed > 0.0 {
@@ -418,20 +475,52 @@ mod tests {
         assert!(result.z > 0.0);
     }
 
+    /// The reverse cap is a destination, not a snap (issue #1053 re-bless).
+    ///
+    /// This used to assert that ONE step from -100 landed at or inside a
+    /// -12.5 cap, which is the terminal clamp the over-cap bleed narrowed. The
+    /// contract it was really guarding — a ship cannot end up faster astern
+    /// than its cap allows — is unchanged and is what it asserts now; only
+    /// "immediately" became "on the hull's drag rate".
+    ///
+    /// The -100 start is eight times the cap and nothing in the simulation
+    /// produces it: the `MaxSpeed` modifier's whole authored range cannot swing
+    /// that far. It is kept because an over-cap state arriving from anywhere at
+    /// all must converge, and because a bleed that stalled or reversed would
+    /// show up most obviously from absurdly far out.
     #[test]
-    fn reverse_speed_clamped_to_negative_max() {
-        let state = ShipPhysicsState {
-            forward_speed: -100.0,
-            ..default_state()
-        };
+    fn reverse_speed_converges_to_negative_max() {
+        let cfg = config();
         let input = ShipPhysicsInput {
             thrust: -1.0,
             steering: 0.0,
             lateral: 0.0,
             vertical: 0.0,
         };
-        let result = compute_physics(state, input, 0.1, &config());
-        assert!(result.forward_speed >= -config().max_reverse_speed - f32::EPSILON);
+        let mut state = ShipPhysicsState {
+            forward_speed: -100.0,
+            ..default_state()
+        };
+        let mut previous = state.forward_speed;
+        for _ in 0..1000 {
+            let result = compute_physics(state, input, 0.1, &cfg);
+            assert!(
+                result.forward_speed >= previous - f32::EPSILON,
+                "the bleed must move TOWARD the cap, never further from it: \
+                 {previous} -> {}",
+                result.forward_speed
+            );
+            previous = result.forward_speed;
+            state.forward_speed = result.forward_speed;
+            if (state.forward_speed + cfg.max_reverse_speed).abs() < 1e-4 {
+                break;
+            }
+        }
+        assert!(
+            (state.forward_speed + cfg.max_reverse_speed).abs() < 1e-4,
+            "must settle at the reverse cap, got {}",
+            state.forward_speed
+        );
     }
 
     #[test]
@@ -547,6 +636,307 @@ mod tests {
             (s.forward_speed - target).abs() < 1.0,
             "expected ~{target}, got {}",
             s.forward_speed
+        );
+    }
+
+    // ── Over-cap bleed (issue #1053) ────────────────────────────────────────
+    // A ship's speed cap is not a constant: `integrate_ship_physics` multiplies
+    // it by the `MaxSpeed` modifier, which the helm power channel moves. When
+    // that cap SHRINKS under a ship already sitting at the old one, the ship is
+    // over-cap through no act of its own, and what happens next is a physics
+    // question rather than a clamping one.
+
+    /// The measurement in issue #1053, as a test: a helm power shed at the cap.
+    ///
+    /// `probe_hostile` was seen going 67.5 -> 54.0 in a single tick when the
+    /// MaxSpeed modifier swung x1.25 -> x1.0 at t=437. Those are exactly the
+    /// numbers here: a 54-unit cap, a ship at 67.5 because the cap used to be
+    /// 67.5, and full throttle held throughout.
+    ///
+    /// Three properties, because each fails differently. It must not arrive in
+    /// one tick (the bug). It must descend MONOTONICALLY (a bleed that
+    /// oscillates or overshoots would be a new bug wearing the fix's clothes).
+    /// And it must actually ARRIVE, at the cap and not above or below it — a
+    /// ship that bled forever, or settled at 53.9, would pass a "not in one
+    /// tick" assertion and be worse than the clamp.
+    #[test]
+    fn a_cap_that_shrinks_under_a_ship_bleeds_off_instead_of_clamping() {
+        let cfg = ShipPhysicsConfig {
+            max_speed: 54.0,
+            max_reverse_speed: 27.0,
+            ..ShipPhysicsConfig::new()
+        };
+        let dt = 1.0 / 60.0;
+        let full_ahead = ShipPhysicsInput {
+            thrust: 1.0,
+            ..default_input()
+        };
+
+        let mut state = ShipPhysicsState {
+            forward_speed: 67.5,
+            ..default_state()
+        };
+
+        let first = compute_physics(state, full_ahead, dt, &cfg);
+        assert!(
+            first.forward_speed > cfg.max_speed,
+            "the excess must not be deleted in the tick the cap moved; got {} \
+             against a cap of {}",
+            first.forward_speed,
+            cfg.max_speed
+        );
+
+        let mut speeds = vec![state.forward_speed];
+        for _ in 0..600 {
+            let r = compute_physics(state, full_ahead, dt, &cfg);
+            state.forward_speed = r.forward_speed;
+            speeds.push(r.forward_speed);
+            if (r.forward_speed - cfg.max_speed).abs() < 1e-4 {
+                break;
+            }
+        }
+
+        for pair in speeds.windows(2) {
+            assert!(
+                pair[1] <= pair[0] + 1e-6,
+                "the bleed must be monotone; went {} -> {}",
+                pair[0],
+                pair[1]
+            );
+            assert!(
+                pair[1] >= cfg.max_speed - 1e-4,
+                "the bleed must not undershoot the new cap; reached {}",
+                pair[1]
+            );
+        }
+        assert!(
+            speeds.len() > 4,
+            "a bleed spread over fewer than four ticks is the lurch this fixes; \
+             took {} ticks",
+            speeds.len() - 1
+        );
+        assert!(
+            (state.forward_speed - cfg.max_speed).abs() < 1e-4,
+            "the ship must settle AT the new cap, not near it; settled at {}",
+            state.forward_speed
+        );
+    }
+
+    /// The bleed is the hull's DRAG rate, not its engine rate, and it is the
+    /// same number a coasting hull decelerates at. Pinned as a duration rather
+    /// than as an internal, so it stays true through any refactor that keeps
+    /// the behaviour.
+    ///
+    /// 13.5 units of excess at the default 25 u/s deceleration is 0.54 s — 33
+    /// ticks at 60 Hz. At the ACCELERATION rate (25/3, the rate the in-range
+    /// approach step uses) the same excess would take 98, and a ship over its
+    /// cap is not being pushed there by its engines.
+    #[test]
+    fn the_over_cap_bleed_runs_at_the_hulls_deceleration_rate() {
+        let cfg = ShipPhysicsConfig {
+            max_speed: 54.0,
+            max_reverse_speed: 27.0,
+            ..ShipPhysicsConfig::new()
+        };
+        let dt = 1.0 / 60.0;
+        let mut state = ShipPhysicsState {
+            forward_speed: 67.5,
+            ..default_state()
+        };
+        let full_ahead = ShipPhysicsInput {
+            thrust: 1.0,
+            ..default_input()
+        };
+
+        let mut ticks = 0;
+        while state.forward_speed > cfg.max_speed + 1e-4 && ticks < 1000 {
+            state.forward_speed = compute_physics(state, full_ahead, dt, &cfg).forward_speed;
+            ticks += 1;
+        }
+        let expected = ((67.5 - 54.0) / cfg.deceleration / dt).ceil() as i32;
+        assert_eq!(
+            ticks, expected,
+            "expected {expected} ticks at the {} u/s deceleration rate, took {ticks}",
+            cfg.deceleration
+        );
+    }
+
+    /// The clamp is not gone, only narrowed. A ship WITHIN its cap must still
+    /// be unable to push past it — the fix is about excess that already exists,
+    /// not about licence to build more.
+    #[test]
+    fn a_ship_inside_its_cap_still_cannot_exceed_it() {
+        let cfg = config();
+        let mut state = default_state();
+        let full_ahead = ShipPhysicsInput {
+            thrust: 1.0,
+            ..default_input()
+        };
+        for _ in 0..2000 {
+            state.forward_speed =
+                compute_physics(state, full_ahead, 1.0 / 60.0, &cfg).forward_speed;
+            assert!(
+                state.forward_speed <= cfg.max_speed + 1e-6,
+                "an accelerating ship must never pass its own cap; reached {}",
+                state.forward_speed
+            );
+        }
+    }
+
+    /// The reverse arm, which has its own cap and its own modifier.
+    /// `config.max_reverse_speed` is multiplied by the same `MaxSpeed` modifier
+    /// as the forward cap, so a shed astern is the identical situation with the
+    /// sign flipped, and leaving it clamping would have fixed half a bug.
+    #[test]
+    fn a_shrinking_reverse_cap_bleeds_off_the_same_way() {
+        let cfg = ShipPhysicsConfig {
+            max_speed: 54.0,
+            max_reverse_speed: 27.0,
+            ..ShipPhysicsConfig::new()
+        };
+        let dt = 1.0 / 60.0;
+        let full_astern = ShipPhysicsInput {
+            thrust: -1.0,
+            ..default_input()
+        };
+        let state = ShipPhysicsState {
+            forward_speed: -33.75,
+            ..default_state()
+        };
+
+        let first = compute_physics(state, full_astern, dt, &cfg);
+        assert!(
+            first.forward_speed < -cfg.max_reverse_speed,
+            "astern excess must not be deleted in one tick either; got {}",
+            first.forward_speed
+        );
+
+        let mut s = state;
+        for _ in 0..600 {
+            s.forward_speed = compute_physics(s, full_astern, dt, &cfg).forward_speed;
+            if (s.forward_speed + cfg.max_reverse_speed).abs() < 1e-4 {
+                break;
+            }
+        }
+        assert!(
+            (s.forward_speed + cfg.max_reverse_speed).abs() < 1e-4,
+            "must settle at the new reverse cap; settled at {}",
+            s.forward_speed
+        );
+    }
+
+    /// A hull with NO drag keeps the old snap, because the alternative is a
+    /// ship that can never come back inside its own limits.
+    ///
+    /// `deceleration` has a serde default of 0.0 and nothing rejects a hull
+    /// that authors none. A zero bleed rate makes `delta` `-0.0`, so a widened
+    /// ceiling would hold the ship over its cap for ever — a state the
+    /// unconditional clamp this replaced could not produce. Every shipped hull
+    /// authors a positive deceleration, which is precisely why this would never
+    /// be noticed without a test.
+    #[test]
+    fn a_hull_with_no_authored_drag_still_cannot_stay_over_its_cap() {
+        let cfg = ShipPhysicsConfig {
+            max_speed: 54.0,
+            max_reverse_speed: 27.0,
+            deceleration: 0.0,
+            ..ShipPhysicsConfig::new()
+        };
+        let state = ShipPhysicsState {
+            forward_speed: 67.5,
+            ..default_state()
+        };
+        let result = compute_physics(
+            state,
+            ShipPhysicsInput {
+                thrust: 1.0,
+                ..default_input()
+            },
+            1.0 / 60.0,
+            &cfg,
+        );
+        assert!(
+            (result.forward_speed - cfg.max_speed).abs() < 1e-4,
+            "with no drag to bleed on, the cap must still be enforced; got {}",
+            result.forward_speed
+        );
+    }
+
+    /// THE IMPULSE DRIVE IS THE BIG ONE, and this pins what it now does rather
+    /// than leaving it to be discovered.
+    ///
+    /// `MaxSpeed` is not moved only by the helm power channel. `apply_impulse_to`
+    /// writes the same slot at `speed_multiplier - 1.0` — x6 on the shipped
+    /// Alliance Destroyer, x10 for a hull that authors none — so DROPPING
+    /// impulse is a cap reduction of the same kind as a power shed and several
+    /// times the size. The destroyer's numbers: cap 18, impulse cap 108,
+    /// deceleration 15, so the excess is 90 and the bleed runs 6 seconds.
+    ///
+    /// That is a real behaviour change and it is NOT what issue #1053 measured
+    /// (a x1.25 swing, 13.5 of excess, half a second). It is flagged in the
+    /// commit body rather than special-cased here, because carving an exception
+    /// into the physics for one modifier source is a design call — but it is
+    /// pinned, so the number cannot drift unnoticed and nobody has to rediscover
+    /// it from a player report.
+    #[test]
+    fn dropping_impulse_bleeds_for_seconds_because_it_moves_the_same_cap() {
+        // The shipped Alliance Destroyer, as `alliance_destroyer.toml` authors
+        // it: max_speed 18, deceleration 15, impulse speed_multiplier 6.
+        let cfg = ShipPhysicsConfig {
+            max_speed: 18.0,
+            max_reverse_speed: 6.0,
+            deceleration: 15.0,
+            ..ShipPhysicsConfig::new()
+        };
+        let dt = 1.0 / 60.0;
+        let mut state = ShipPhysicsState {
+            forward_speed: 18.0 * 6.0,
+            ..default_state()
+        };
+        let full_ahead = ShipPhysicsInput {
+            thrust: 1.0,
+            ..default_input()
+        };
+
+        let mut ticks = 0;
+        let mut travelled = 0.0f32;
+        while state.forward_speed > cfg.max_speed + 1e-3 && ticks < 10_000 {
+            state.forward_speed = compute_physics(state, full_ahead, dt, &cfg).forward_speed;
+            travelled += state.forward_speed * dt;
+            ticks += 1;
+        }
+        // 90 units of excess at 15 u/s is six seconds, and the hull covers
+        // roughly (108 + 18) / 2 * 6 units of ground getting there.
+        assert_eq!(
+            ticks, 360,
+            "expected a six-second bleed, took {ticks} ticks"
+        );
+        assert!(
+            (370.0..385.0).contains(&travelled),
+            "expected ~378 units of over-cap travel, got {travelled}"
+        );
+    }
+
+    /// Coasting is untouched. A ship over its cap with NO thrust already bled
+    /// down the deceleration path — that arm never had the clamp — and it must
+    /// keep decaying all the way to a stop rather than stopping at the cap.
+    #[test]
+    fn an_over_cap_ship_with_no_thrust_still_coasts_to_a_stop() {
+        let cfg = ShipPhysicsConfig {
+            max_speed: 54.0,
+            ..ShipPhysicsConfig::new()
+        };
+        let mut state = ShipPhysicsState {
+            forward_speed: 67.5,
+            ..default_state()
+        };
+        for _ in 0..600 {
+            state.forward_speed =
+                compute_physics(state, default_input(), 1.0 / 60.0, &cfg).forward_speed;
+        }
+        assert_eq!(
+            state.forward_speed, 0.0,
+            "no thrust means all the way down, not down to the cap"
         );
     }
 

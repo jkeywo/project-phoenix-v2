@@ -663,7 +663,31 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
         // Seed 2 chosen as the simplest surviving candidate, not because it
         // is otherwise special. The sweep harness is
         // `scratch_seed_sweep_probe_radar_kill` below.
-        seed: Some(2),
+        //
+        // RE-BLESSED A THIRD TIME at issue #1053, seed 2 -> seed 5. The
+        // over-cap bleed stopped a helm power shed deleting an over-cap
+        // velocity in one tick, so hulls hold speed through a shed and are
+        // harder to hit — this whole duel resolves LATER. Seed 2's radar no
+        // longer reaches Destroyed at all inside the 90 s window (it did at
+        // 868), which trips the same "never reached Destroyed" panic the two
+        // earlier re-blesses were about. Nothing about the decision under test
+        // moved; the fight it is observed in did.
+        //
+        // Re-swept 1..40 on the same 90 s window and the same battleship. The
+        // whole distribution slid ~300 ticks later — the earliest destroy is
+        // now 1174 against the old 837:
+        //   1:1188      2:none      3:1188      4:none      5:1174
+        //   6:1174      7:1174      8:1795      9:1188      10:1188
+        //   11:1188     12:none     13:none     14:1174     15:1174
+        //   16:1174     17:1807     18:1188     19:1315     20:1188
+        //   21:1188     22:none     23:none     24:none     25:1174
+        //   26:none     27:none     28:none     29:1174     30:1174
+        //   31:1295     32:1174     33:none     34:1315     35:1188
+        //   36:1315     37:1315     38:none     39:1174     40:1188
+        // ("none" = the radar never reached Destroyed inside the window.)
+        // Seed 5 is the earliest clean destroy, at tick 1174 (~39 s), leaving
+        // the full 25 s settle + 15 s check window inside the run.
+        seed: Some(5),
         deterministic: true,
         ..test_args()
     };
@@ -4444,8 +4468,19 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
     // the leg changed — the liveness assertion above still requires BOTH hulls
     // to have landed damage, and the pass surface is still published on >100
     // ticks, so what this number cannot silently become is a standoff.
+    //
+    // RE-BLESSED AGAIN at issue #1053, from `> 250` to `> 200` (observed: 228).
+    // `probe_duel` is where #1053 was MEASURED — `probe_hostile` is the hull
+    // that was seen going 67.5 -> 54.0 in a single tick — so it is the world
+    // the over-cap bleed bites hardest in. A hull that sheds helm power at
+    // flank now keeps its speed for half a second instead of losing it
+    // instantly, which means a higher average speed through the shed and a
+    // wider turn out of it, and a wider turn spends fewer ticks inside the
+    // ring's tangent band. Same character of re-bless as #907's, and the same
+    // guards still stand between this number and a standoff: both hulls land
+    // damage, and the pass surface is published on >100 ticks.
     assert!(
-        duel.orbit > 250,
+        duel.orbit > 200,
         "only {} ticks on the fighting ring across 45 s of a live duel — the hull \
          is not flying a broadside orbit",
         duel.orbit
@@ -4650,12 +4685,16 @@ fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
     );
 
     // The `duel` floor was re-blessed from 300 to 250 at issue #907 (observed:
-    // 280) for the reason recorded at the sibling assertion in
+    // 280) and from 250 to 200 at issue #1053 (observed: 228), both for the
+    // reasons recorded at the sibling assertion in
     // `the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes`:
-    // orbit direction is derived from the ship's uuid, and #907 changed how
-    // uuids are minted. It is a floor on "did this run measure the leg at all",
-    // not a doctrine assertion, and 250 still says yes.
-    for (name, ring, min_ticks) in [("duel", &duel, 250), ("aggressor", &aggressor, 50)] {
+    // orbit direction is derived from the ship's uuid and #907 changed how uuids
+    // are minted; #1053 stopped an over-cap velocity being deleted in one tick,
+    // and `probe_duel` is the world that fix was measured in. It is a floor on
+    // "did this run measure the leg at all", not a doctrine assertion, and 200
+    // still says yes — `overwritten == 0` below is the assertion that matters
+    // and it is unmoved by either re-bless.
+    for (name, ring, min_ticks) in [("duel", &duel, 200), ("aggressor", &aggressor, 50)] {
         assert!(
             ring.ticks >= min_ticks,
             "{name}: only {} ticks were flown on the fighting ring — this run did not \

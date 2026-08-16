@@ -42,6 +42,23 @@
 # NPCs stay at low LOD across the window and `ai_power_allocation` is
 # `With<AiHighFidelity>`.
 #
+# UNMOVED BY ISSUE #1053, and worth writing down because a reader who got this
+# far would expect the opposite. #1053 changed what happens when a helm power
+# shed leaves a hull ABOVE its new speed cap: the excess used to be deleted in
+# the tick the modifier changed, and is now bled off on the hull's own
+# `deceleration`. This world sheds helm power — four times across the window,
+# which is the whole point of the paragraph above — and its digest does not
+# move by a bit.
+#
+# A shed is not the condition. Being over the cap when one lands is, because
+# that is the only case the old clamp ever bit. Instrumenting the over-cap
+# branch itself and counting the integration steps that take it: 761 in `duel`,
+# ZERO here. The lancers dither a throttle around 0.70, so they sit well below
+# any cap the helm channel can hand them, and a shed moves their ceiling without
+# ever touching their speed. `duel` is a ten-ship brawl with every hull at
+# flank, which is where the two conditions coincide — and it is the only one of
+# the seventeen anchors that moves.
+#
 # Layout — everything sits on top of everything else at the origin:
 #   - Player spawns at [0, 0, 0].
 #   - Two RNG-coverage escorts 45u away, inside their own weapons envelope from

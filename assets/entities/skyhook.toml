@@ -78,10 +78,15 @@ hull_integrity = 1200.0
 # head is still the largest silhouette in the library, because the axiom station
 # is that silhouette too. The 26 was never drawn — only flown into.
 #
-# See `station_axiom.toml` for why a Ball at the max half-extent is the shape,
-# and what a `Cylinder` variant would buy a disc-shaped station.
-shape = "Ball"
+# Sharing the mesh means sharing the shape as well as the size: a Cylinder of
+# radius 17.04 and half_height 7.16 (half the drawn 14.325), exactly as
+# `station_axiom.toml` authors it, and for the reasons set out there. The head
+# is the structure that most wanted this — traffic in this world passes OVER it
+# on the way down the skyway, which is the one approach a Ball got wrong by ten
+# units.
+shape = "Cylinder"
 radius = 17.04
+half_height = 7.16
 length = 0.0
 
 [radar_appearance]
@@ -94,9 +99,19 @@ icon = "station"
 # only one that reads as a transfer head rather than as an outpost. The torus is
 # the streaming/flat-render fallback, as on every other station.
 model = "assets/models/alliance_starbase.glb"
+# Same hull as `station_axiom`, through the same sidecar and the same
+# `[base].scale`, so it draws at the same size and takes the same stand-in:
+# 28.46 x 14.33 x 34.08 measured, minor = 7.16 and major = 9.88 derived from it.
+# See `station_axiom.toml` for the arithmetic.
+#
+# The 26.0 / 6.0 this replaces was the render twin of the 26-unit collider the
+# block above corrected: 64 units across against a hull that is 34, so the
+# placeholder was nearly twice the width of the thing it stood in for. Same
+# staleness, and it could no more keep a different size from the axiom station's
+# fallback than it could keep a different collider while sharing its mesh.
 shape = "torus"
-radius = 26.0
-minor_radius = 6.0
+radius = 9.88
+minor_radius = 7.16
 colour = [0.85, 0.74, 0.45]
 
 [comms]

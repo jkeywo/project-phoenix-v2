@@ -188,6 +188,13 @@ export function has(id) {
 // ── Wire boundary ───────────────────────────────────────────────────────────
 
 /**
+ * Suffix pairing a parameter table to the text id it interpolates into. Mirrors
+ * `TEXT_PARAMS_SUFFIX` in `src/core/messages.rs`; the two are one contract and
+ * `tests/client/strings.test.js` pins them together.
+ */
+export const TEXT_PARAMS_SUFFIX = '_params';
+
+/**
  * Resolve string ids anywhere in a decoded server message.
  *
  * The server is deliberately localisation-blind: entity names, system display
@@ -200,6 +207,27 @@ export function has(id) {
  * are the sole thing that changes — uuids, system ids, tokens and numbers pass
  * through as-is. Ids only exist in the table because we minted them during
  * extraction, so a collision with a meaningful non-display value cannot happen.
+ *
+ * ## Parameterised ids
+ *
+ * A text field may be joined by a sibling field named `<field>_params` holding
+ * an object of `{placeholder: value}`. When one is present, the id resolves as
+ * `t(id, params)` instead of `t(id)`, so a runtime figure the server computed
+ * lands inside the sentence rather than beside it on a panel. `ObjectiveSnapshot
+ * .text_params` and `CommsMessage.body_params` are the wire fields that use it;
+ * `TEXT_PARAMS_SUFFIX` in `src/core/messages.rs` is the Rust half of the
+ * contract.
+ *
+ * Resolving by NAME rather than by a list of known fields is the same choice the
+ * rest of this function makes: it walks a decoded message it knows nothing
+ * about, so the sibling's name is the only thing that can tell it which table
+ * belongs to which id. It also means the renderers need no change at all — text
+ * arrives already interpolated, exactly as it always arrived already resolved.
+ *
+ * The params object is itself localised first, so a param whose value is a
+ * string id (a system name, a faction) resolves before being substituted in.
+ * A param the string does not mention is ignored, and a `{placeholder}` with no
+ * param is left standing — both are `t`'s existing behaviour.
  *
  * Returns a new structure; the input is not mutated.
  *
@@ -216,10 +244,38 @@ export function localiseTree(value) {
   }
   if (value !== null && typeof value === 'object') {
     const out = {};
-    for (const key of Object.keys(value)) out[key] = localiseTree(value[key]);
+    for (const key of Object.keys(value)) {
+      const params = paramsFor(value, key);
+      if (params) {
+        const id = value[key];
+        out[key] = table.has(id) ? t(id, params) : id;
+      } else {
+        out[key] = localiseTree(value[key]);
+      }
+    }
     return out;
   }
   return value;
+}
+
+/**
+ * The resolved parameter table for `obj[key]`, or `null` when there is not one.
+ *
+ * Guards on the *shape* rather than trusting the name: a field is only treated
+ * as parameterised when it holds a string AND its `_params` sibling holds a
+ * plain object. Anything else falls through to the ordinary walk, so a field
+ * that merely happens to end in `_params` cannot change how its neighbour is
+ * resolved.
+ *
+ * @param {Record<string, unknown>} obj
+ * @param {string} key
+ * @returns {Record<string, string|number>|null}
+ */
+function paramsFor(obj, key) {
+  if (typeof obj[key] !== 'string') return null;
+  const sibling = obj[`${key}${TEXT_PARAMS_SUFFIX}`];
+  if (sibling === null || typeof sibling !== 'object' || Array.isArray(sibling)) return null;
+  return localiseTree(sibling);
 }
 
 // ── DOM application ─────────────────────────────────────────────────────────

@@ -113,19 +113,26 @@ hull_integrity = 1600
 # the outer five units of the ring carried no collision and ships flew THROUGH
 # the visible structure.
 #
-# A Ball at the max half-extent, not a Capsule and not an average: the shapes
-# `ColliderShape` offers are Ball and Capsule, and `Collider::capsule_y` is a
-# cylinder with hemispherical caps — it can only ever be taller than it is wide.
-# A station is a disc (34 across, 14 tall), which a capsule fits worse than a
-# sphere does from every direction. The max half-extent over-covers vertically
-# (17.04 against a true 7.16 half-height), and that is the honest cost of having
-# no cylinder: a ship crossing directly over the hub stops short of the visible
-# surface. Under-sizing is the bug being fixed, so the remaining error is put
-# where it keeps ships outside the hull rather than inside it. A `Cylinder` would
-# fit a disc properly and is the right follow-up — an engine change, not an
-# authored one.
-shape = "Ball"
+# A CYLINDER, which is the shape a station is. The Ball this replaced was the
+# best of a bad set — `ColliderShape` offered only Ball and Capsule, and
+# `Collider::capsule_y` is a cylinder with hemispherical caps, so it can only
+# ever be taller than it is wide, which a disc 34 across and 14 tall is not. A
+# Ball at the max half-extent was right in the wide axis and over-covered the
+# short one by ten units, so a ship crossing directly over the hub stopped dead
+# in clear sky. That was the honest cost of having no cylinder; the cylinder now
+# exists, so it is not a cost worth paying.
+#
+# `half_height = 7.16` is HALF the drawn height, 14.325 / 2 — the sidecar's own
+# `[extents].size`, not a guess. `radius` stays the max half-extent: a Y-axis
+# cylinder has one radius for two horizontal axes, and this hull is 28.46 across
+# X against 34.08 across Z, so 17.04 fits Z exactly and stands 2.81 proud of X.
+# That residual is deliberate and it is the LAST of it — collision still errs
+# outward rather than inward, so the error keeps ships outside a hull rather
+# than letting them through one, and it is now confined to a single axis
+# instead of two.
+shape = "Cylinder"
 radius = 17.04
+half_height = 7.16
 length = 0
 
 [radar_appearance]
@@ -135,9 +142,29 @@ icon = "station"
 
 [mesh]
 model = "assets/models/alliance_starbase.glb"
+# The torus is the procedural stand-in, drawn only while the GLB above is still
+# streaming or when it is missing entirely. RENDER-ONLY — the simulation reads
+# none of it (the `[collider]` above is the only thing anything collides with),
+# so correcting it moves no digest.
+#
+# Sized off the same measurement the collider is. `alliance_starbase.model.toml`
+# records the drawn hull at 28.46 x 14.33 x 34.08 in its `[extents].size` —
+# already through that sidecar's `[base].scale` of [15, 18, 18] — so the stand-in
+# wants a 34.08-wide, 14.33-tall envelope. A Bevy `Torus` spans
+# `(major_radius + minor_radius) * 2` across and `minor_radius * 2` tall, which
+# pins both numbers:
+#
+#   minor = 14.33 / 2                       = 7.16   (half the measured height)
+#   major = 34.08 / 2 - 7.16 = 17.04 - 7.16 = 9.88
+#
+# The 18 / 4.5 this replaces belonged to the pre-correction era: 45 units across
+# and 9 tall, a third wider than the hull and well under its height. It is the
+# render half of the same staleness the collider block above fixed — and a
+# fallback that size meant the station visibly shrank the moment its GLB
+# finished loading.
 shape = "torus"
-radius = 18
-minor_radius = 4.5
+radius = 9.88
+minor_radius = 7.16
 colour = [ 0.3, 0.8, 0.6 ]
 
 [comms]

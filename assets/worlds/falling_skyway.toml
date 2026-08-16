@@ -189,10 +189,10 @@
 # `pasm/spec/architecture/world-files.yaml`'s `campaign-flag-handoff-state`
 # describes the handoff and names the types that carry it.
 #
-# BASELINE. CURRENT VALUE: 0x97143e605be31a1d (10886394782840723997), last moved
-# by the station-collider correction — the paragraphs below are the history of
-# how it got there, oldest first, and the first number in them is NOT the one to
-# A/B against.
+# BASELINE. CURRENT VALUE: 0x1fa0f17dd3285616 (2279086934165313046), last moved
+# by the berth offsets — the paragraphs below are the history of how it got
+# there, oldest first, and the first number in them is NOT the one to A/B
+# against.
 #
 #   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
 #     --seed 42 --ticks 900 --record target/t1_falling_skyway.ron --digest-every 0
@@ -555,6 +555,120 @@
 # never filled and is survivable now that it is smaller still, but a berth that
 # means "dock here" wants an offset from the hull it docks at, and moving one is
 # a design call rather than a collider fix.
+#
+# ── STILL 0x97143e605be31a1d OVER PARAMETERISED TEXT, and why ────────────────
+#
+# The parameterised-strings slice edits THIS FILE's script band — `window_opens_
+# short` gains a `params` map reading the three window flags — and edits the
+# `strings.csv` row it names. The digest does not move, and that is a claim with
+# two separate legs rather than an oversight.
+#
+# THE FIRST LEG IS THE ONE THIS HEADER ALREADY ESTABLISHED, four times over: a
+# script band folds NOTHING. #1042's own paragraph records the A/B — delete the
+# whole Act-3 script block and the number stays put — and #1043's four-corner
+# matrix found deleting its entire band identical to deleting two mooring
+# orders. Objectives, comms threads and dialogue bodies are authoritative but
+# unfolded; `sim_digest.rs`'s module docs list them among the deferred surfaces
+# by name. A `params` map on a node fn is more of exactly that.
+#
+# THE SECOND LEG IS THE ONE WORTH WRITING DOWN, because a reader who knows about
+# issue #864's script binding will expect the opposite. Editing script text DOES
+# move a digest — the CONTENT digest. `load_world_scripts` records
+# `CompiledScripts::content_hash` into the content ledger under
+# `<world path>#scripts`, and an inline `[script]` block rides in the world
+# TOML's own recorded text besides, so this edit moves that number twice over.
+# But `snapshot::content_digest` is the SAVE-COMPATIBILITY dimension —
+# `Versions::check` refusing a save whose scripts have since moved — and it is
+# NOT what this header blesses. The blessed number is `state_digest`, which
+# `ReplayLedger::seal` computes from `world_digest` alone: run scope, entities,
+# infrastructure, operations, civilians, weapons holds, asteroids, collisions.
+# No script hash is in that fold, and no content-ledger entry reaches it. So a
+# save recorded before this slice is correctly refused afterwards, and the run
+# digest is correctly unmoved — the two answers differ because they are answers
+# to different questions.
+#
+# The `strings.csv` half cannot reach either number: the fold sees a comms body
+# as the id it is, and the id did not change. Only the English behind it did.
+#
+# MEASURED, on the committed tree, all three anchors this slice was asked to
+# check: falling_skyway 10886394782840723997 (0x97143e605be31a1d), combat_test
+# 14942520827746055774 and patrol 11531679067393217131 — every one unmoved, with
+# the headless binary rebuilt from the changed tree rather than reused from
+# before it.
+#
+# UNMOVED BY THE CYLINDER COLLIDER, which is worth recording because it is the
+# only entry in this history that changed a station's shape and did not change
+# this number. `station_axiom`, `skyhook`, `depot_transfer` and
+# `station_outpost` became Y-axis cylinders — same radii, half-heights measured
+# off their rig sidecars (7.16 and 1.68) — and every one of the seventeen
+# anchors held, including this one. Varying the shipped depot cylinder one field
+# at a time, here, at this seed:
+#
+#   r3.8   h1.68  (shipped)   0x97143e605be31a1d
+#   r3.8   h0.01              0x97143e605be31a1d  ← no effect
+#   r3.8   h17.04             0x97143e605be31a1d  ← no effect
+#   r10.0  h1.68              0xad71760f8a82a5ee  ← #1043's, exactly
+#
+# Three orders of magnitude of half-height change nothing and the radius alone
+# reproduces the pre-correction number, because EVERYTHING IN EVERY SHIPPED
+# WORLD FLIES AT Y = 0 — the only non-zero Y authored anywhere in
+# `assets/worlds/` is the ecumenopolis at -900 — and a hull centred on the plane
+# is inside a disc centred there whatever its thickness. The vertical extent is
+# the one dimension no shipped traffic tests, which is why the Ball's error was
+# survivable and why removing it costs nothing here.
+#
+# MOVED BY THE BERTH OFFSETS, to 0x1fa0f17dd3285616 (2279086934165313046) — the
+# design call the paragraph above declined to make, made. `depot_a_berth` and
+# `depot_b_berth` were doing two jobs at once: they were the depots' own spawn
+# positions AND `ladder_run`'s first and third legs, so the shuttle was
+# commanded to the centre of a structure and told to hold there for six seconds.
+# The anchors are now split — `depot_a_hull` / `depot_b_hull` carry the
+# structures' positions unchanged, and the two berths stand twelve units off
+# along the ladder's X axis, toward `ladder_transit`, which is the side the
+# shuttle arrives from on both rungs. See the `[anchors]` table for why twelve.
+#
+# WHAT MOVED THE NUMBER IS THE AIM POINT, NOT A CONTACT, and the A/B is explicit
+# about that because the obvious story is the wrong one. Shrinking the depot's
+# collider from 3.8 to 0.01 moves this digest by nothing, on EITHER side of the
+# offset — so the shuttle was not touching the depot before and is not touching
+# it now. It never got that close: a hauler's 20-unit `waypoint_arrival_radius`
+# ends the leg well short and `cruise_speed` returns 0.0 for the dwell, so it
+# coasts to a stop some fifteen units out. The digest moves because the shuttle
+# is steering at a point twelve units further along its own route, so it arrives
+# on a different tick having flown a slightly different curve. The authoring bug
+# was real and is fixed; the contact it would eventually have caused had not
+# happened yet.
+#
+# THE MECHANISM IS ONE BERTH IN THIS WINDOW, and the A/B says so rather than the
+# prose guessing:
+#
+#   both berths offset                        0x1fa0f17dd3285616
+#   `depot_b_berth` alone offset              0x97143e605be31a1d  ← no effect
+#   `depot_a_berth` alone offset              0x1fa0f17dd3285616  ← the whole of it
+#
+# Depot B is not reachable inside 900 ticks. `shuttle_wick` starts at
+# [700, 0, -120], a hundred units from Depot A, and flies leg 0 at 0.7 of a
+# hauler's 12 u/s — so it makes its first berth around twelve seconds in and is
+# still holding there when the window closes. Depot B is another seven hundred
+# units of route beyond that. Both berths are authored anyway: a mission runs
+# for far longer than a digest window, and offsetting the rung the harness
+# happens to reach while leaving the other would be authoring for the harness.
+#
+# TICK 0 IS UNCHANGED at 3135162069797578640, and that is the shape of the
+# claim: the depots did not move. The `_hull` anchors carry their old
+# coordinates to the metre, so the fold at load is identical and the divergence
+# is entirely what the shuttle does once it flies its route.
+#
+# THE OTHER SIXTEEN ANCHORS ALL HOLD, measured twice on each side of the change,
+# at the values listed two paragraphs above. None of them authors a route leg
+# that lands on a structure: `probe_window` and the six probe worlds that field
+# a depot author no `[anchors]` table at all and place every spawn literally;
+# `probe_civilian_traffic`'s `depot_berth` does sit on its depot, but nothing
+# routes to it — the one order that calls there targets the entity by name, and
+# where a `dock` order puts a hull is `docking_engage_distance`'s business
+# rather than an anchor's. In this world the two remaining candidates clear
+# easily: `station_keeping` is 247.6 units off the skyhook and
+# `head_debris_field` 184.4, against a 17.04 collider.
 
 [global]
 seed = 1034
@@ -615,9 +729,59 @@ corridor_gate = [0.0, 0.0, -260.0]
 corridor_south = [0.0, 0.0, 1000.0]
 
 # The fuel-depot ladder, and the transit leg between its two rungs.
-depot_a_berth = [620.0, 0.0, -180.0]
+#
+# FOUR anchors for two rungs, because a berth and a hull are not the same place
+# and this file used to say they were. `depot_a_berth` and `depot_b_berth` were
+# BOTH the depots' spawn positions AND `ladder_run`'s first and third legs, so
+# the shuttle was commanded to fly to the exact centre of a structure and hold
+# there for six seconds.
+#
+# WHAT SAVED IT WAS NOT THE AUTHORING, and that is the whole reason to fix it.
+# A hauler declares `waypoint_arrival_radius = 20`, so `advance_cursor` calls
+# the leg reached twenty units out; `TrafficState::cruise_speed` then returns
+# 0.0 for the dwell, so the craft coasts down on its own 8.0 deceleration from
+# leg 0's 8.4 u/s — about 4.4 units of run-out — and settles some fifteen units
+# short of the anchor. Measured rather than reasoned: shrinking the depot's
+# collider from 3.8 to 0.01 does not move this world's digest by a bit, so
+# nothing was ever in contact. At the depot's PREVIOUS 10-unit collider it was,
+# which is why #1043's number moved when that was corrected.
+#
+# So the bug was latent, not active: three separate accidents of tuning stood
+# between a commanded course into a solid object and a craft inside one. Tighten
+# an arrival radius, raise a leg speed, grow a collider back, or hand the rung
+# to a hull with less drag, and a hauler parks in a depot. A berth that means
+# "dock here" should not be relying on the craft being bad at arriving.
+#
+# So the `_hull` anchors are where the structures ARE, unmoved to the metre, and
+# the `_berth` anchors are where a craft ties up alongside one.
+depot_a_hull = [620.0, 0.0, -180.0]
+depot_b_hull = [1180.0, 0.0, 240.0]
+
+# TWELVE UNITS, along the ladder's own axis, on the side the run comes from.
+#
+# The number is the clearance the two hulls need, plus room to arrive in. A
+# depot's collider is 3.8, a hauler's is 2.0, and `handle_collisions` separates
+# to `r + r + 0.05` — so 5.85 is the closest a hauler can sit to a depot centre
+# without being pushed off it. Twelve leaves 6.15 on top of that, more than the
+# hauler's own four-unit beam, so a craft that overshoots its berth still stops
+# clear instead of in contact.
+#
+# Not larger, because a berth still has to read as "at the depot". Twelve is
+# inside the hauler's own 20-unit `waypoint_arrival_radius`, so the leg
+# completes where it always did; inside the destroyer's 500-unit `transfer` and
+# 300-unit `tow` ranges by two orders of magnitude; and under a tenth of the
+# 130-unit gap from Depot B to the nearest mooring (`worker_mooring`, at
+# sqrt(70^2 + 110^2) = 130.4), so nothing on that rung has moved relative to
+# anything else.
+#
+# Along X because X is the ladder's axis — the run spans 560 of X against 420 of
+# Z — and toward `ladder_transit` because that is the side the shuttle both
+# arrives from and departs to on each rung. A berth on the far side would have
+# it pass the depot, turn, and come back. [ai] Unratified, like every other
+# coordinate in this table.
+depot_a_berth = [632.0, 0.0, -180.0]
 ladder_transit = [900.0, 0.0, 40.0]
-depot_b_berth = [1180.0, 0.0, 240.0]
+depot_b_berth = [1168.0, 0.0, 240.0]
 
 # Where the two parties sitting on Depot B are moored. Separate anchors rather
 # than one, because "they are both at the depot" is the situation and "they are
@@ -813,7 +977,9 @@ hailable = true
 template_path = "assets/entities/depot_transfer.toml"
 id = "depot_ladder_a"
 name = "world.falling_skyway.entity.depot_ladder_a.name"
-transform = { anchor = "depot_a_berth" }
+# The HULL anchor, not the berth. The structure has not moved; the berth beside
+# it is a separate place now — see the `[anchors]` table.
+transform = { anchor = "depot_a_hull" }
 
 [entity.overrides.infrastructure]
 condition = 62.0
@@ -869,7 +1035,8 @@ label = "world.falling_skyway.threshold.pumping.label"
 template_path = "assets/entities/depot_transfer.toml"
 id = "depot_ladder_b"
 name = "world.falling_skyway.entity.depot_ladder_b.name"
-transform = { anchor = "depot_b_berth" }
+# The HULL anchor, not the berth — same split as Depot A.
+transform = { anchor = "depot_b_hull" }
 
 [entity.overrides.infrastructure]
 condition = 34.0
@@ -3358,6 +3525,22 @@ fn head_stands_down(ctx) {
 // them is in the dialogue. The real fix is parameterised strings, and it is
 // nobody's slice yet.
 //
+// [ai] SUPERSEDED IN PART, and the paragraph above is kept because it is the
+// reason the capacity rows exist rather than a mistake to erase. Parameterised
+// strings landed: a text id may now be joined on the wire by a `<field>_params`
+// table (`messages::TEXT_PARAMS_SUFFIX`), a script authors it as an optional
+// `params` key, and the client's `localiseTree` resolves `t(id, params)` at the
+// wire boundary. `window_opens_short` is the first consumer — it reads the three
+// banked flags and the copy interpolates them — so the sentence now carries the
+// digits it used to point at.
+//
+// THE CAPACITY ROWS STAY, and that is a decision rather than an oversight. They
+// are a standing readout a crew can consult at any point in the window, while
+// the dialogue is a single beat that arrives once; and the booking arithmetic
+// below moves those rows as lifts are committed and stood down, which no
+// sentence spoken at open could track. What changed is that the opening line no
+// longer has to say "our manifest carries that figure" instead of the figure.
+//
 // ── THE CLOSE RULE: ABORT ───────────────────────────────────────────────────
 //
 // The window shuts on its deadline whatever is happening. A lift still on the
@@ -3566,7 +3749,28 @@ fn on_transfer_window_opens(ctx) {
 // The two bodies. Each is its own node function because `open_comms` names a
 // FUNCTION, and both say the same thing at a different volume: the window is
 // open, it is short, and that makes it a decision.
-fn window_opens_short(ctx) { #{ message: "world.falling_skyway.comms.window_opens_short", responses: [] } }
+//
+// THE SHORT BODY NOW CARRIES THE DIGITS. Its `params` map is read off the three
+// flags `on_transfer_window_opens` banked a few lines up — the same ledger the
+// bookings are decided against, so the sentence and the manifest cannot disagree
+// about what the chain could do when the window opened. The copy interpolates
+// them as `{available}`, `{claimed}` and `{shortfall}`; see the note above on
+// why the numbers used to live only on a capacity row.
+//
+// The dead body is left as it was, deliberately. It says the lift is nothing at
+// all against three standing claims, which is a sentence with no figure in it
+// that a number would improve — "short by the whole of it" is the point.
+fn window_opens_short(ctx) {
+    #{
+        message: "world.falling_skyway.comms.window_opens_short",
+        params: #{
+            available: ctx.flags.skyway_window_supply,
+            claimed: ctx.flags.skyway_window_demand_total,
+            shortfall: ctx.flags.skyway_window_shortfall_at_open,
+        },
+        responses: [],
+    }
+}
 fn window_opens_dead(ctx)  { #{ message: "world.falling_skyway.comms.window_opens_dead", responses: [] } }
 
 // ── Booking a lift ──────────────────────────────────────────────────────────

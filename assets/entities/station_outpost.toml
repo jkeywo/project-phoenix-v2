@@ -17,9 +17,14 @@ hull_integrity = 200.0
 # four station colliders, and it could not be left while its own mesh-mate was
 # corrected.
 #
-# See `station_axiom.toml` for why a Ball at the max half-extent is the shape.
-shape = "Ball"
+# Sharing the mesh means sharing the shape: a Cylinder of radius 3.8 and
+# half_height 1.68, exactly as `depot_transfer.toml` authors it. No world spawns
+# this template today, so nothing measurable moves here — it is corrected
+# alongside its mesh-mate for the same reason it was resized alongside it, that
+# one mesh cannot describe two different bodies.
+shape = "Cylinder"
 radius = 3.8
+half_height = 1.68
 length = 0.0
 
 [radar_appearance]
@@ -32,9 +37,17 @@ icon = "station"
 # the torus below is the streaming/flat-render fallback, as on the other
 # stations (see station_axiom, station_research_outpost).
 model = "assets/models/alliance_research_outpost.glb"
+# Same hull as `depot_transfer`, so the same stand-in: 7.56 x 3.37 x 7.59
+# measured, minor = 1.68 and major = 2.12 derived from it. See
+# `depot_transfer.toml` for the arithmetic and `station_axiom.toml` for why the
+# fallback is derived from the sidecar's extents.
+#
+# The 12.0 / 3.0 this replaces drew a 30-unit ring for a 7.6-unit outpost — the
+# worst of the five station fallbacks, just as its 12-unit collider was the
+# worst of the four before the correction above.
 shape = "torus"
-radius = 12.0
-minor_radius = 3.0
+radius = 2.12
+minor_radius = 1.68
 colour = [0.3, 0.8, 0.6]
 
 # Stations broadcast on long-range comms — easily reachable across most of

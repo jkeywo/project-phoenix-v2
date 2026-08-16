@@ -4407,7 +4407,22 @@ fn default_sensors_ai_frequency_hint_delay_secs() -> f32 {
 pub struct EntityConfig {
     /// Display name (top-level scalar). Informational for most entities; used
     /// by triggers/comms to identify named instances.
+    ///
+    /// This doubles as a MACHINE identity: a world `[[entity]] name` overrides
+    /// it with the instance name (e.g. `wave_1`) so triggers can target the
+    /// spawned hull. That is why it cannot also be the crew-facing SHIP name —
+    /// see [`Self::display_name`].
     pub name: Option<String>,
+    /// The crew-facing PROPER NAME of a ship (e.g. "AEV Phoenix"), a
+    /// `strings.csv` id resolved on the client. Distinct from [`Self::name`]:
+    /// a world instance name overwrites `name` for trigger targeting, but a
+    /// ship's proper name is a property of the HULL, not of the spawn, so it
+    /// lives in its own field that the instance name never touches. When present
+    /// it is what scans, comms, the radar and the ship picker SHOW; `name` (or
+    /// the instance name) remains the identity underneath. Absent for anything
+    /// that is not a named ship, which shows `name` exactly as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     pub hull: Option<HullConfig>,
@@ -6623,6 +6638,54 @@ radius = 100.0
         let path = format!("assets/entities/{stem}.toml");
         crate::entity_includes::load_entity_config(&path)
             .unwrap_or_else(|e| panic!("{stem}.toml must compose and parse: {e}"))
+    }
+
+    /// Every shipped ship hull authors a player-facing NAME (`display_name`)
+    /// and a CLASS, so a ship is identified by "AEV Phoenix" / "Cruiser" in
+    /// scans, comms and the picker — never by its bare class, a wave number, or
+    /// an "Unknown" subtitle (player-facing ship names / Unknown→class).
+    #[test]
+    fn every_ship_hull_authors_a_display_name_and_a_class() {
+        // (stem, expected class token — reused by the picker badge label set).
+        let hulls: [(&str, &str); 9] = [
+            ("alliance_cruiser", "cruiser"),
+            ("alliance_destroyer", "destroyer"),
+            ("alliance_battleship", "battleship"),
+            ("alliance_courier", "courier"),
+            ("ship_harrow_patrol", "cruiser"),
+            ("ship_harrow_cruiser", "cruiser"),
+            ("ship_harrow_destroyer", "destroyer"),
+            ("ship_harrow_warhawk", "battleship"),
+            ("ship_requiem_courier", "courier"),
+        ];
+        for (stem, class) in hulls {
+            let config = shipped_hull(stem);
+            let display = config
+                .display_name
+                .as_deref()
+                .unwrap_or_else(|| panic!("{stem}.toml must author a top-level display_name"));
+            assert_eq!(
+                display,
+                format!("entity.{stem}.display_name"),
+                "{stem} display_name must be its own strings id"
+            );
+            assert_eq!(
+                config.class.as_deref(),
+                Some(class),
+                "{stem} must author a class the picker badge can label"
+            );
+        }
+    }
+
+    /// The cruiser's proper name is the flagship John named: "AEV Phoenix". The
+    /// value lives in strings.csv (bracketed per the unratified-copy convention);
+    /// here we pin that the hull points at the id that carries it.
+    #[test]
+    fn the_cruiser_is_the_aev_phoenix() {
+        assert_eq!(
+            shipped_hull("alliance_cruiser").display_name.as_deref(),
+            Some("entity.alliance_cruiser.display_name"),
+        );
     }
 
     #[test]

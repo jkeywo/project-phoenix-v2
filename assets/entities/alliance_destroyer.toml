@@ -1,4 +1,5 @@
 name = "entity.alliance_destroyer.name"
+display_name = "entity.alliance_destroyer.display_name"
 class = "destroyer"
 hull_id = "NCC-0741"
 power_rating = 70

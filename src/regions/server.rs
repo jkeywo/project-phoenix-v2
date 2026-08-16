@@ -575,6 +575,7 @@ mod tests {
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -872,6 +873,7 @@ mod tests {
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -945,6 +947,7 @@ mod tests {
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -1396,6 +1399,7 @@ mod tests {
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -1639,6 +1643,7 @@ mod tests {
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -2139,6 +2144,7 @@ mod tests {
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -2202,6 +2208,7 @@ mod tests {
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,

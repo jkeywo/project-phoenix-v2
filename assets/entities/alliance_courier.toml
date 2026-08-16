@@ -5,6 +5,7 @@
 # client derives the data for each station from those TOML assignments.
 
 name = "entity.alliance_courier.name"
+display_name = "entity.alliance_courier.display_name"
 class = "courier"
 hull_id = "NCC-0912"
 # Independent of the (absent) [power] block: feeds the lobby card and

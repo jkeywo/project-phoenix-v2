@@ -380,6 +380,7 @@ mod tests {
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),

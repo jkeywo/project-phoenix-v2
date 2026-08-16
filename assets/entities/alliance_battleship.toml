@@ -1,4 +1,5 @@
 name = "entity.alliance_battleship.name"
+display_name = "entity.alliance_battleship.display_name"
 class = "battleship"
 hull_id = "NCC-2001"
 power_rating = 120

@@ -3177,6 +3177,7 @@ verb = "fire_blaster"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,

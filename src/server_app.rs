@@ -2516,7 +2516,12 @@ fn snapshot_from_entity_config(
     let mut snapshot = EntitySnapshot {
         uuid,
         id,
-        name: config.name.clone(),
+        // A ship's crew-facing PROPER NAME (issue: player-facing ship names)
+        // when it authors one; otherwise `name`, which for a world instance is
+        // the instance name. The proper name is a property of the hull and is
+        // never overwritten by the spawn, so it survives the `name`-override a
+        // world `[[entity]] name` performs for trigger targeting.
+        name: config.display_name.clone().or_else(|| config.name.clone()),
         position: Some([position.x, position.y, position.z]),
         tags: config.tags.clone(),
         ..EntitySnapshot::default()

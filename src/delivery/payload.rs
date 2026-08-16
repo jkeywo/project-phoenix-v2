@@ -130,7 +130,12 @@ pub fn ship_payload(ship: &AvailableShipEntry) -> ShipPayload {
             out.entries
                 .push(("power_rating", PayloadValue::Number(rating as f64)));
         }
-        if let Some(ref name) = cfg.name {
+        // The picker card's TITLE is the ship's crew-facing proper name when the
+        // hull authors one (e.g. "AEV Phoenix"), falling back to the identity
+        // `name` otherwise (player-facing ship names). The class rides its own
+        // `class` key above and becomes the card's subtitle badge, so the card
+        // reads NAME + CLASS rather than a bare class or an "Unknown" subtitle.
+        if let Some(name) = cfg.display_name.as_ref().or(cfg.name.as_ref()) {
             out.push_text("name", name.clone());
         }
     }

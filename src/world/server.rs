@@ -9219,6 +9219,7 @@ seed = 1
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -9515,6 +9516,7 @@ seed = 1
         let npc_config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,

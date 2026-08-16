@@ -1647,6 +1647,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1736,6 +1737,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1791,6 +1793,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: Some("Sun".to_string()),
+            display_name: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1851,6 +1854,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -1908,6 +1912,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -2060,6 +2065,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             class: None,
             hull_id: None,
             power_rating: None,
@@ -2127,6 +2133,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -2203,6 +2210,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -2303,6 +2311,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -2378,6 +2387,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -2443,6 +2453,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -2532,6 +2543,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,
@@ -2750,6 +2762,7 @@ regen_per_sec = 0.0
         let config = EntityConfig {
             reference_grid: None,
             name: None,
+            display_name: None,
             star: None,
             planet: None,
             class: None,

@@ -85,6 +85,26 @@ describe('PhCommsHailList', () => {
     expect(sender.classList.contains('unread')).toBe(false);
   });
 
+  it('shows a readable preview derived from the resolved body, not a chopped id', () => {
+    const { el } = setup();
+    el.state = {
+      messages: [
+        {
+          id: 'msg-1',
+          sender_name: 'Axiom Station',
+          // Body arrives resolved (localiseTree ran at the wire boundary); the
+          // old behaviour chopped the body ID to 40 chars and showed that.
+          body: 'Phoenix, hold position — we are reading a hull breach on deck four.',
+          subject: 'world.default.comms.hull_breach_report.message',
+          is_read: false,
+        },
+      ],
+    };
+    const preview = el.shadowRoot.querySelector('.preview');
+    expect(preview.textContent).toContain('Phoenix, hold position');
+    expect(preview.textContent).not.toContain('world.');
+  });
+
   it('clicking a message row calls sendAction with select_comms_message', () => {
     const sendAction = vi.fn();
     const { el } = setup({ sendAction });

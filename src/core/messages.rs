@@ -825,9 +825,6 @@ pub struct CommsMessage {
 }
 
 impl CommsMessage {
-    /// How many leading body characters the derived `subject` keeps.
-    const SUBJECT_CHARS: usize = 40;
-
     /// Build a freshly-injected inbox message.
     ///
     /// The ONE constructor behind every server-side injection — a thread's root
@@ -838,18 +835,19 @@ impl CommsMessage {
     /// missed at one site. There were five such sites before issue #985 deleted
     /// the declarative front-end's three.
     ///
-    /// The four derived fields are the injection invariants: `subject` is the
-    /// first [`SUBJECT_CHARS`](Self::SUBJECT_CHARS) characters of `body` (chars,
-    /// not bytes), nothing is selected or read yet, and a message is only ever
-    /// orphaned later, when its scenario unloads.
+    /// The derived fields are the injection invariants: nothing is selected or
+    /// read yet, and a message is only ever orphaned later, when its scenario
+    /// unloads.
     ///
-    /// `subject` takes its prefix from the id and is therefore NOT parameterised:
-    /// a truncated id resolves against nothing, so `body_params` would have
-    /// nowhere to land. That is a pre-existing property of the derivation rather
-    /// than something this constructor's params argument introduced — the
-    /// inbox preview has shown a chopped id since bodies became ids — and
-    /// fixing it means giving a thread its own subject id, which is a separate
-    /// slice.
+    /// `subject` is the SAME id as `body`, not a byte-chopped prefix of it. It
+    /// used to keep the first forty characters of the body, but a body is a
+    /// `strings.csv` id, so a message whose id ran past forty characters showed
+    /// a chopped, unresolvable id in the inbox preview — 81 of the 134 shipped
+    /// `world.*.comms.*` ids did exactly that. Carrying the whole id means
+    /// `localiseTree` resolves it, and the inbox derives its short preview from
+    /// the RESOLVED body text (with `body_params` applied) client-side, so the
+    /// preview reads as words and a parameterised body previews with its figures
+    /// filled in rather than as a chopped id or a raw `{placeholder}`.
     #[allow(clippy::too_many_arguments)] // one arg per non-derived wire field
     pub fn injected(
         id: String,
@@ -865,8 +863,8 @@ impl CommsMessage {
         Self {
             id,
             sender_uuid,
+            subject: body.clone(),
             sender_name,
-            subject: body.chars().take(Self::SUBJECT_CHARS).collect(),
             body,
             body_params,
             responses,

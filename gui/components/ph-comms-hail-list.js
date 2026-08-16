@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { commsPreview } from '../comms-state.js';
 import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhCommsHailList extends HTMLElement {
@@ -69,7 +70,7 @@ export class PhCommsHailList extends HTMLElement {
     raw.forEach(h => {
       const id = h.id || '';
       const sender = h.sender_name || '';
-      const preview = h.subject || '';
+      const preview = commsPreview(h);
       const unread = !h.is_read;
       let row = this.#rowCache.get(id);
       if (!row) {

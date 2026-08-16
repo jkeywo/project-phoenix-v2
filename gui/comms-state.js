@@ -16,6 +16,30 @@ export function effectiveThreadId(msg) {
   return msg.thread_id ? msg.thread_id : msg.id;
 }
 
+/** Longest inbox/hail preview, in characters, before an ellipsis. */
+export const COMMS_PREVIEW_CHARS = 64;
+
+/**
+ * A short, readable inbox/hail preview for a message.
+ *
+ * Derived from the RESOLVED body — `localiseTree` has already turned the body
+ * id into words and applied `body_params` at the wire boundary, so a
+ * parameterised body previews with its figures filled in. Falls back to the
+ * (now equally resolvable) `subject` if a body is somehow absent. This is what
+ * fixes the chopped-id preview: the old `subject` was the first forty
+ * CHARACTERS OF THE ID, so any id past forty characters previewed as an
+ * unresolvable fragment; here the source is real text, truncated on a word
+ * boundary with an ellipsis.
+ */
+export function commsPreview(msg) {
+  const text = String((msg && (msg.body || msg.subject)) || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= COMMS_PREVIEW_CHARS) return text;
+  const cut = text.slice(0, COMMS_PREVIEW_CHARS);
+  const lastSpace = cut.lastIndexOf(' ');
+  const head = lastSpace > COMMS_PREVIEW_CHARS * 0.6 ? cut.slice(0, lastSpace) : cut;
+  return head + '…';
+}
+
 /**
  * The client's view of the Comms console state.
  * Mirrors `ClientCommsState` in src/client_comms.rs.
@@ -150,7 +174,7 @@ export class ClientCommsState {
       return {
         thread_id: tid,
         sender_name: contact ? contact.name : latest.sender_name,
-        subject: latest.subject,
+        subject: commsPreview(latest),
         any_unread: anyUnread,
         any_urgent: anyUrgent,
         latest_out_of_range: latest.sender_in_range === false,

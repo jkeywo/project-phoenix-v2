@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ClientCommsState, commsState, effectiveThreadId,
   hailMessage, selectCommsMessage, respondToMessage, clearCommsMessage,
+  commsPreview, COMMS_PREVIEW_CHARS,
 } from '../../gui/comms-state.js';
 
 function msg(id, overrides = {}) {
@@ -216,18 +217,50 @@ describe('isDirty / markClean', () => {
   });
 });
 
+describe('commsPreview', () => {
+  it('derives the preview from the RESOLVED body, not a chopped id', () => {
+    // The regression: `subject` used to be the first 40 chars of the body id.
+    // A real message's body arrives already resolved by localiseTree, so the
+    // preview is readable words — never `world.default.comms.2.message`.
+    const resolved = 'Axiom Station, this is Phoenix. We read you.';
+    expect(commsPreview({ body: resolved })).toBe(resolved);
+    // A chopped id is exactly what must NOT appear.
+    expect(commsPreview({ body: resolved })).not.toContain('world.');
+  });
+
+  it('truncates a long body on a word boundary with an ellipsis', () => {
+    const long =
+      'Phoenix, be advised the skyway relay is drifting off its anchor and ' +
+      'we need a tow before the storm front closes the corridor entirely.';
+    const preview = commsPreview({ body: long });
+    expect(preview.length).toBeLessThanOrEqual(COMMS_PREVIEW_CHARS + 1);
+    expect(preview.endsWith('…')).toBe(true);
+    // The text before the ellipsis is a whole-word prefix of the body — the
+    // final word was dropped rather than cut mid-token.
+    const head = preview.slice(0, -1);
+    expect(long.startsWith(head)).toBe(true);
+    expect(long[head.length]).toBe(' ');
+  });
+
+  it('prefers body but falls back to subject when a body is absent', () => {
+    expect(commsPreview({ subject: 'Fallback line' })).toBe('Fallback line');
+    expect(commsPreview({})).toBe('');
+  });
+});
+
 describe('sortedThreads', () => {
   it('summarises each thread once with metadata from the latest message', () => {
     const s = new ClientCommsState();
     s.apply(commsStateMsg([
-      msgInThread('m1', 't1', { sender_name: 'Old', subject: 'First', is_read: true }),
-      msgInThread('m2', 't1', { sender_name: 'New', subject: 'Latest', is_read: true, sender_in_range: false, is_orphaned: true }),
+      msgInThread('m1', 't1', { sender_name: 'Old', body: 'First', is_read: true }),
+      msgInThread('m2', 't1', { sender_name: 'New', body: 'Latest', is_read: true, sender_in_range: false, is_orphaned: true }),
     ]));
     const threads = s.sortedThreads();
     expect(threads).toHaveLength(1);
     expect(threads[0]).toEqual({
       thread_id: 't1',
       sender_name: 'New',
+      // The preview is derived from the LATEST message's resolved body.
       subject: 'Latest',
       any_unread: false,
       any_urgent: false,
@@ -273,7 +306,7 @@ describe('multi-speaker thread summaries', () => {
       msgInThread('m2', 'research-scholar', {
         sender_uuid: 'research-uuid',
         sender_name: 'Dr. Myst',
-        subject: 'Signal analysis',
+        body: 'Signal analysis',
       }),
     ], [contact('research-uuid', 'Research Outpost')]));
 

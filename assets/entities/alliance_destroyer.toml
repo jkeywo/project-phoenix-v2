@@ -1,4 +1,5 @@
 name = "entity.alliance_destroyer.name"
+display_name = "entity.alliance_destroyer.display_name"
 class = "destroyer"
 hull_id = "NCC-0741"
 power_rating = 70
@@ -1203,11 +1204,23 @@ major_colour = [ 0.55, 0.74, 0.9, 0.2 ]
 # move without editing two alphas in step.
 opacity = 1.0
 # How far the drawn patch reaches from the ship, and how much of that reach is
-# spent fading to nothing. The band is deliberately more than a third of the
-# radius: anything tighter leaves a visible disc travelling with the ship, which
-# would undo the world-locked illusion the whole feature rests on.
+# spent fading to nothing. [ai] The band was widened from 150 to 250 so the
+# fade starts much closer in — at patch_radius - fade_band = 150 world units
+# from the ship — and the lattice dissolves fast toward the rim rather than
+# carrying legible lines almost to the edge. Wider still would leave no full-
+# strength grid under the ship at all.
 patch_radius = 400.0
-fade_band = 150.0
+fade_band = 250.0
+# [ai] Exponent on the (smoothstepped) radial fade: the curve is
+# smoothstep(...) ^ fade_exponent, and 2.5 pulls the whole band down so the grid
+# is already faint a short way out and gone well before the rim — the harder
+# distance falloff John asked for. The endpoints stay pinned at full and zero,
+# so this never lights a bright far rim. 1.0 would be the plain smoothstep.
+fade_exponent = 2.5
+# [ai] World-space height of the grid plane. Dropped half a unit below the hull
+# so it reads as a floor slightly beneath the ship rather than a lattice
+# co-planar with it; the follow system parks the patch at this y.
+plane_y = -0.5
 # Line widths in PIXELS, not world units. A world-space width makes near lines
 # slabs and far lines sub-pixel shimmer, and this grid is read at every distance
 # at once. Major lines are barely wider — brightness is what separates them.

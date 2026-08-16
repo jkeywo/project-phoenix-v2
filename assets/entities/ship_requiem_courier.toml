@@ -1,4 +1,6 @@
 name = "entity.ship_requiem_courier.name"
+display_name = "entity.ship_requiem_courier.display_name"
+class = "courier"  # [ai] picker badge / scan subtitle
 tags = ["ship", "npc", "comms_contact"]
 faction = "dddddddd-4444-4444-8444-dddddddddddd"
 

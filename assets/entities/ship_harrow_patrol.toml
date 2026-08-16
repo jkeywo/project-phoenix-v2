@@ -47,6 +47,10 @@
 includes = ["fragments/ai/fleet_baseline.toml"]
 
 name = "entity.ship_harrow_patrol.name"
+display_name = "entity.ship_harrow_patrol.display_name"
+# [ai] Ironveil-class patrol cruiser — classed as a cruiser for the picker badge
+# and scan subtitle.
+class = "cruiser"
 tags = ["ship", "npc", "comms_contact"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 

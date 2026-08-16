@@ -178,6 +178,10 @@ includes = [
 ]
 
 name = "entity.ship_harrow_warhawk.name"
+display_name = "entity.ship_harrow_warhawk.display_name"
+# [ai] Warhawk-class capital ship ("Harrow Battleship" in the header) — classed
+# as a battleship for the picker badge and scan subtitle.
+class = "battleship"
 tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
 

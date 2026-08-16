@@ -24,6 +24,15 @@ entity.alliance_courier.power_groups.shields.label,assets/entities/alliance_cour
 entity.alliance_courier.station.captain.description,assets/entities/alliance_courier.toml → [station] description,"[Command the ship, coordinate the mission and manage its support systems.]"
 entity.alliance_courier.station.tactical.description,assets/entities/alliance_courier.toml → [station] description,"[Fly the Courier, track contacts and operate its blaster.]"
 entity.alliance_cruiser.name,assets/entities/alliance_cruiser.toml → name (top level),Alliance Cruiser
+entity.alliance_cruiser.display_name,"Player-facing SHIP NAME (title) for the Alliance cruiser hull. John-specified as ""AEV Phoenix""; bracketed only per the unratified-copy convention, not because the value is a placeholder.",[AEV Phoenix]
+entity.alliance_destroyer.display_name,Player-facing SHIP NAME (title) for the Alliance destroyer hull — [ai] placeholder awaiting John's ratification,[AEV Vanguard]
+entity.alliance_battleship.display_name,Player-facing SHIP NAME (title) for the Alliance battleship hull — [ai] placeholder awaiting John's ratification,[AEV Sovereign]
+entity.alliance_courier.display_name,Player-facing SHIP NAME (title) for the Alliance courier hull — [ai] placeholder awaiting John's ratification,[AEV Kestrel]
+entity.ship_harrow_patrol.display_name,Player-facing SHIP NAME (title) for the Harrow patrol hull — [ai] faction-appropriate placeholder awaiting John's ratification,[Harrow Ravener]
+entity.ship_harrow_cruiser.display_name,Player-facing SHIP NAME (title) for the Harrow cruiser hull — [ai] faction-appropriate placeholder awaiting John's ratification,[Harrow Desolation]
+entity.ship_harrow_destroyer.display_name,Player-facing SHIP NAME (title) for the Harrow destroyer hull — [ai] faction-appropriate placeholder awaiting John's ratification,[Harrow Ironmaw]
+entity.ship_harrow_warhawk.display_name,Player-facing SHIP NAME (title) for the Harrow warhawk hull — [ai] faction-appropriate placeholder awaiting John's ratification,[Harrow Talon]
+entity.ship_requiem_courier.display_name,Player-facing SHIP NAME (title) for the Requiem courier hull — [ai] faction-appropriate placeholder awaiting John's ratification,[Requiem Wren]
 entity.alliance_cruiser.hull.system_hull.science.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Science
 entity.alliance_cruiser.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_cruiser.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_cruiser.toml → [hull.system_hull] display_name,Engine (Starboard)
@@ -842,6 +851,7 @@ chatter.sender.navigation,Coordination chatter/popup — sender label for the Na
 chatter.sender.power,Coordination chatter/popup — sender label for the Power system,Power
 chatter.sender.shields,Coordination chatter/popup — sender label for the Shields system,Shields
 chatter.sender.ai,Coordination chatter/popup — generic sender label when the origin system is unnamed,AI
+chatter.addressee.core,Coordination chatter/popup — sender/target label for a system the ship's Core owns (belongs to no station),Core
 coordination.advisory.fallback_title,Coordination popup — title for a bare advisory that carries no sender label,Advisory
 coordination.alert.fallback_title,Coordination popup — title for an alert that carries no title of its own,Alert
 coordination.frequency_hint.title,"Coordination popup/chatter — Sensors-to-Tactical shield-frequency hint, title",Frequency Hint

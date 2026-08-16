@@ -1,4 +1,6 @@
 name = "entity.alliance_cruiser.name"
+# Player-facing proper name (the flagship). John-specified as "AEV Phoenix".
+display_name = "entity.alliance_cruiser.display_name"
 class = "cruiser"
 hull_id = "NCC-1864"
 power_rating = 90

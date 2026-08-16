@@ -43,6 +43,10 @@ struct ReferenceGridMaterial {
     patch_radius: f32,
     fade_start: f32,
     fade_span: f32,
+    fade_exponent: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0)
@@ -93,10 +97,13 @@ fn lattice_coverage(
 
 // Radial fade, full strength within `fade_start` and gone by the patch edge.
 // `fade_span` is floored above zero CPU-side, so this divides unconditionally
-// and an authored fade band of zero reads as a hard edge.
-fn radial_fade(world_distance: f32, fade_start: f32, fade_span: f32) -> f32 {
+// and an authored fade band of zero reads as a hard edge. The smoothstep is
+// then raised to `fade_exponent` (>1 dissolves the grid faster with distance);
+// the endpoints are pow-invariant, so no exponent lights a bright far rim.
+fn radial_fade(world_distance: f32, fade_start: f32, fade_span: f32, fade_exponent: f32) -> f32 {
     let t = clamp((world_distance - fade_start) / fade_span, 0.0, 1.0);
-    return 1.0 - t * t * (3.0 - 2.0 * t);
+    let smooth = 1.0 - t * t * (3.0 - 2.0 * t);
+    return pow(smooth, fade_exponent);
 }
 
 @fragment
@@ -124,7 +131,7 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // The patch is centred on the ship, so the quad's own UV centre is the
     // fade centre — no ship position needs to reach the shader for this.
     let from_centre = length(in.uv * 2.0 - vec2<f32>(1.0)) * material.patch_radius;
-    let fade = radial_fade(from_centre, material.fade_start, material.fade_span);
+    let fade = radial_fade(from_centre, material.fade_start, material.fade_span, material.fade_exponent);
 
     let minor_alpha = minor_cov * material.minor_a;
     let major_alpha = major_cov * material.major_a;

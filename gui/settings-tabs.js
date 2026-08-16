@@ -15,6 +15,12 @@
 /**
  * The three tabs, in display order.
  *
+ * Debug is LAST, deliberately: it is the developer/cheat tab, so the two tabs a
+ * player actually reaches for — Audio and Gameplay — come first, and the demo
+ * build (where Debug is gated away entirely) opens on Audio rather than on a
+ * blank where Debug used to be. `resolveActiveTab` falls back to `tabs[0]`, so
+ * ordering Debug first would also have made it the default landing tab in dev.
+ *
  * `gated` tabs vanish in the demo build. Only Debug/Cheat is gated: Audio and
  * Gameplay must keep working in the demo, which is why nothing built for those
  * two tabs may reach for debug-only plumbing.
@@ -26,9 +32,9 @@
  * decided per control rather than per tab.
  */
 export const TABS = [
-  { id: 'debug', labelId: 'settings.tab.debug', gated: true },
   { id: 'audio', labelId: 'settings.tab.audio', gated: false },
   { id: 'gameplay', labelId: 'settings.tab.gameplay', gated: false },
+  { id: 'debug', labelId: 'settings.tab.debug', gated: true },
 ];
 
 /** Client-only documentation tabs, always available including in demo builds. */

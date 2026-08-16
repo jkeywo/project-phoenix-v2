@@ -9,6 +9,29 @@ description = "entity.station_research_outpost.target.description"
 [hull]
 hull_integrity = 60.0
 
+[collider]
+# [ai] Added to close the pass-through gap this template was the last to carry:
+# it draws `alliance_research_outpost.glb` but authored no `[collider]`, so ships
+# flew straight through it (found during the band-A collider work). Corrected to
+# the SAME body its mesh-mates `station_outpost` and `depot_transfer` now author,
+# because one mesh cannot describe two different bodies.
+#
+# The shared hull measures 7.56 x 3.37 x 7.59 on screen at the sidecar's
+# `[base].scale` of [4, 4, 4] (recorded in `alliance_research_outpost.model.toml`
+# `[extents].size`): a max half-extent of 3.80 across, and 3.37 tall. A disc,
+# flatter than it is wide, so a Cylinder rather than a Ball — exactly as
+# `depot_transfer.toml` reasons it, and radius 3.80 fits both drawn half-extents
+# (3.781 across X, 3.797 across Z) to within two hundredths of a unit. The
+# `half_height` is 1.68, half the sidecar's drawn 3.37.
+#
+# No shipped world spawns this template, which is why the gap survived this long
+# and why nothing measurable moves by closing it — it is corrected here for the
+# same reason the mesh-mates were: the body must match the mesh.
+shape = "Cylinder"
+radius = 3.8
+half_height = 1.68
+length = 0.0
+
 [radar_appearance]
 colour = [0.3, 0.8, 0.6]
 size = 8.0
@@ -20,11 +43,10 @@ model = "assets/models/alliance_research_outpost.glb"
 # 7.56 x 3.37 x 7.59 measured, minor = 1.68 and major = 2.12 derived from it.
 # See `depot_transfer.toml` for the arithmetic.
 #
-# This template carries no `[collider]`, so it was not part of the collider
-# correction that fixed the other four — but its fallback drew a 20-unit ring
-# for the same 7.6-unit hull, which is the same staleness with nothing to
-# collide with. Left alone it would have been the one station still popping size
-# when its GLB arrived.
+# The `[collider]` above now matches its mesh-mates; this torus is the
+# streaming/flat-render fallback, sized off the same extents. Its old 20-unit
+# ring drew for the same 7.6-unit hull, the same staleness the collider gap
+# carried — corrected together so neither pops size when the GLB arrives.
 shape = "torus"
 radius = 2.12
 minor_radius = 1.68

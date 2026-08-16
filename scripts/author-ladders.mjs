@@ -47,7 +47,12 @@ import { NodeIO } from '@gltf-transform/core';
 import { getBounds } from '@gltf-transform/core';
 import { replaceLadder, sidecarsForStem, variantOfSidecar } from './viewer-lods.mjs';
 import { averageBaseColour, sharpMean } from './average-texture-colour.mjs';
-import { remeshPath, blenderCandidates, BLENDER_SCRIPT } from './generate-lods.mjs';
+import {
+  remeshPath,
+  blenderCandidates,
+  capRemeshTextures,
+  BLENDER_SCRIPT,
+} from './generate-lods.mjs';
 
 const execFileAsync = promisify(execFile);
 const MB = 1024 * 1024;
@@ -159,6 +164,30 @@ export function decimationCandidates(textures, ratios) {
 }
 
 /**
+ * Texture ladders the two decimated levels search, crispest first.
+ *
+ * Named rather than written inline at the two call sites because the voxel
+ * remesh is cut BEFORE the search that picks the real sizes, and the cap
+ * applied to that intermediate has to know the largest size the search could
+ * still land on.
+ */
+export const LOD1_TEXTURES = [512, 384, 256];
+export const LOD2_TEXTURES = [256, 128];
+
+/**
+ * The largest texture any level this script can author will ask for.
+ *
+ * Deliberately the loosest safe answer. `generate-lods.mjs` re-cuts the same
+ * intermediate afterwards and caps it against the sizes actually authored
+ * (`remeshTextureCap`), which is usually tighter — 256 for eight of the nine
+ * remeshed models. This one runs before there is an authored size to read, so
+ * it only has to avoid starving a level the search might still choose.
+ */
+export function candidateTextureCap() {
+  return Math.max(...LOD1_TEXTURES, ...LOD2_TEXTURES);
+}
+
+/**
  * Search for the highest-quality (ratio, texture_size) whose simplify+resize of
  * `source` fits `budgetMb`. Runs the same two steps generate-lods would, into a
  * temp dir, and measures. Returns the winning params (adds nothing to disk).
@@ -218,6 +247,11 @@ export async function authorLadders(stem, opts) {
       '--background', '--factory-startup', '--python', BLENDER_SCRIPT, '--',
       base, effectiveSource, String(voxel),
     ]);
+    // The remesh is a geometry pass, so Blender carries the base's full-size
+    // materials onto it — resolution no level cut from it will ever read. Cap
+    // it here as well as in generate-lods so the budget search below measures
+    // the same intermediate the final `generate-lods.mjs <stem>` decimates.
+    await capRemeshTextures(effectiveSource, candidateTextureCap());
   }
 
   // Tune the two decimated levels against their budgets, once per stem. A remesh
@@ -229,12 +263,12 @@ export async function authorLadders(stem, opts) {
   try {
     lod1 = await tuneLevel(
       cli, effectiveSource, lod1Mb,
-      decimationCandidates([512, 384, 256], remesh ? [0.95, 0.8, 0.6, 0.45, 0.3] : [0.5, 0.35, 0.25, 0.18, 0.12]),
+      decimationCandidates(LOD1_TEXTURES, remesh ? [0.95, 0.8, 0.6, 0.45, 0.3] : [0.5, 0.35, 0.25, 0.18, 0.12]),
       workDir, 'lod1',
     );
     lod2 = await tuneLevel(
       cli, effectiveSource, lod2Mb,
-      decimationCandidates([256, 128], remesh ? [0.25, 0.15, 0.1, 0.06, 0.04] : [0.08, 0.05, 0.03, 0.02]),
+      decimationCandidates(LOD2_TEXTURES, remesh ? [0.25, 0.15, 0.1, 0.06, 0.04] : [0.08, 0.05, 0.03, 0.02]),
       workDir, 'lod2',
     );
   } finally {

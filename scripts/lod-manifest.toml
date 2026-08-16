@@ -12,7 +12,7 @@ version = 1
 [[output]]
 path = "assets/models/alliance_battleship_lod1.glb"
 source = "assets/models/alliance_battleship.remesh.glb"
-source_sha256 = "ae4c365c6b84fa3e2d93c68b62216704ccf5ad08c7e3b048f14ac947e2a035ab"
+source_sha256 = "3b144246c767e4ee8bd79eb77630e4cb07a4cc98f692dbc4e8156eb489b21110"
 origin = "assets/models/alliance_battleship.glb"
 origin_sha256 = "5cd4f952bf4f561fdb8619ff0d427567259fd82ebaaa589d31e2eeb85b8f67d7"
 params = { ratio = 0.19, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }
@@ -23,40 +23,40 @@ declared_by = ["assets/models/alliance_battleship.model.toml"]
 [[output]]
 path = "assets/models/alliance_battleship_lod2.glb"
 source = "assets/models/alliance_battleship.remesh.glb"
-source_sha256 = "ae4c365c6b84fa3e2d93c68b62216704ccf5ad08c7e3b048f14ac947e2a035ab"
+source_sha256 = "3b144246c767e4ee8bd79eb77630e4cb07a4cc98f692dbc4e8156eb489b21110"
 origin = "assets/models/alliance_battleship.glb"
 origin_sha256 = "5cd4f952bf4f561fdb8619ff0d427567259fd82ebaaa589d31e2eeb85b8f67d7"
 params = { ratio = 0.113, error = 0.01, texture_size = 128, remesh_voxel_size = 0.0211 }
-output_sha256 = "6c6f1dc77aebf529454566ee7843f732436b09d05afb5569837cc23ff6c79bc4"
-output_bytes = 246904
+output_sha256 = "9a2eeaca5283b7cf44b7362ac42f9e039bca16a1193138e4eab687fc44abfb1e"
+output_bytes = 247416
 declared_by = ["assets/models/alliance_battleship.model.toml"]
 
 [[output]]
 path = "assets/models/alliance_courier_lod1.glb"
 source = "assets/models/alliance_courier.remesh.glb"
-source_sha256 = "970ffad0d99bed24aa130e94346137efb0801328a0c62d2c77cb3e7a78848f5e"
+source_sha256 = "6f23b75419679435baf79593a58fb42f2d7b230b06d7c4ce36fa5779c5839c54"
 origin = "assets/models/alliance_courier.glb"
-origin_sha256 = "af2711579d762f4719d61dfbaf2ebcf42609d8b07914127001eaea640cdf572a"
+origin_sha256 = "a4d2833ab0066ce9710aed2515aebdf0187dcff886475a70b98d9bd10adfcf96"
 params = { ratio = 0.113, error = 0.01, texture_size = 128, remesh_voxel_size = 0.021 }
-output_sha256 = "2d96e6a3100d219bd7c50b134a06cee21ae5913c694c864bbb6b7d45d4263c71"
-output_bytes = 136332
+output_sha256 = "c73a956790f96ab33bcd8bec947d83dc7a6133c89c8080f413530226d665ed0b"
+output_bytes = 137412
 declared_by = ["assets/models/alliance_courier.model.toml"]
 
 [[output]]
 path = "assets/models/alliance_courier_lod2.glb"
 source = "assets/models/alliance_courier.remesh.glb"
-source_sha256 = "970ffad0d99bed24aa130e94346137efb0801328a0c62d2c77cb3e7a78848f5e"
+source_sha256 = "6f23b75419679435baf79593a58fb42f2d7b230b06d7c4ce36fa5779c5839c54"
 origin = "assets/models/alliance_courier.glb"
-origin_sha256 = "af2711579d762f4719d61dfbaf2ebcf42609d8b07914127001eaea640cdf572a"
+origin_sha256 = "a4d2833ab0066ce9710aed2515aebdf0187dcff886475a70b98d9bd10adfcf96"
 params = { ratio = 0.19, error = 0.01, texture_size = 256, remesh_voxel_size = 0.021 }
-output_sha256 = "470a51f55b496e8d3c972c4a750db73551a57d868c8efb8c6a9216317179a735"
-output_bytes = 375168
+output_sha256 = "f6f01872fda1df24151aad3fcb744e5f3997cf9a6fb099667500bdb400b5d687"
+output_bytes = 375496
 declared_by = ["assets/models/alliance_courier.model.toml"]
 
 [[output]]
 path = "assets/models/alliance_cruiser_lod1.glb"
 source = "assets/models/alliance_cruiser.remesh.glb"
-source_sha256 = "cb929e32f7c05643454d03e4949502b5724eb5fff94cdd69363063232745f8a5"
+source_sha256 = "33e7d3750eab837cd3b89460da76a4f42bd4dc36901682a3141eda17489b62de"
 origin = "assets/models/alliance_cruiser.glb"
 origin_sha256 = "d4acec9cd9de37056b8f3157987a586c0e384a299de65eee0de5266a655891cb"
 params = { ratio = 0.19, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }
@@ -67,12 +67,12 @@ declared_by = ["assets/models/alliance_cruiser.model.toml"]
 [[output]]
 path = "assets/models/alliance_cruiser_lod2.glb"
 source = "assets/models/alliance_cruiser.remesh.glb"
-source_sha256 = "cb929e32f7c05643454d03e4949502b5724eb5fff94cdd69363063232745f8a5"
+source_sha256 = "33e7d3750eab837cd3b89460da76a4f42bd4dc36901682a3141eda17489b62de"
 origin = "assets/models/alliance_cruiser.glb"
 origin_sha256 = "d4acec9cd9de37056b8f3157987a586c0e384a299de65eee0de5266a655891cb"
 params = { ratio = 0.113, error = 0.01, texture_size = 128, remesh_voxel_size = 0.0211 }
-output_sha256 = "aacb17501415e23c7015d917319cea63a906db97cf50357fade04e367422ab84"
-output_bytes = 221688
+output_sha256 = "e7984638571f488f9b566edf89fe025a1aa74288f0432d041fcef7fbe4f0c74d"
+output_bytes = 222432
 declared_by = ["assets/models/alliance_cruiser.model.toml"]
 
 [[output]]
@@ -96,7 +96,7 @@ declared_by = ["assets/models/alliance_destroyer.model.toml"]
 [[output]]
 path = "assets/models/alliance_research_outpost_lod1.glb"
 source = "assets/models/alliance_research_outpost.remesh.glb"
-source_sha256 = "701f2d75786ece49c150491d5842fb12821f9dc4f703971f68471038347a760d"
+source_sha256 = "c7a70afb282ff881e2a36a3b0ecb012fd27635f2279705c1815557416b39fd20"
 origin = "assets/models/alliance_research_outpost.glb"
 origin_sha256 = "897b113f83cd6a85072d6c6733fd30955236358c989f74196daeba1a202fbd07"
 params = { ratio = 0.319, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }
@@ -107,18 +107,18 @@ declared_by = ["assets/models/alliance_research_outpost.model.toml"]
 [[output]]
 path = "assets/models/alliance_research_outpost_lod2.glb"
 source = "assets/models/alliance_research_outpost.remesh.glb"
-source_sha256 = "701f2d75786ece49c150491d5842fb12821f9dc4f703971f68471038347a760d"
+source_sha256 = "c7a70afb282ff881e2a36a3b0ecb012fd27635f2279705c1815557416b39fd20"
 origin = "assets/models/alliance_research_outpost.glb"
 origin_sha256 = "897b113f83cd6a85072d6c6733fd30955236358c989f74196daeba1a202fbd07"
 params = { ratio = 0.113, error = 0.01, texture_size = 128, remesh_voxel_size = 0.0211 }
-output_sha256 = "90a1253db50f24c4aee63d2b0dad67f8e1631f8b7adc9f6f8bd5faea67e8e4db"
-output_bytes = 282372
+output_sha256 = "69b6d999f501ab15bc095dd6479c081dcfeccf93f01b4409e38813576e913005"
+output_bytes = 282556
 declared_by = ["assets/models/alliance_research_outpost.model.toml"]
 
 [[output]]
 path = "assets/models/alliance_starbase_lod1.glb"
 source = "assets/models/alliance_starbase.remesh.glb"
-source_sha256 = "54d71b399255b3a6282b2e900619e32bff0dfd73dd2a0f3527aa2032687cb5b0"
+source_sha256 = "be89a28c7f2b8380f42df9c5240159fd1fb1ba78d8eb4ee0fd3869d646ae55e1"
 origin = "assets/models/alliance_starbase.glb"
 origin_sha256 = "08f78a60cd1630bb9fd26c6c6b1e2307000fe0d0a8a68b923ee035bd17786c1e"
 params = { ratio = 0.319, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }
@@ -129,12 +129,12 @@ declared_by = ["assets/models/alliance_starbase.model.toml"]
 [[output]]
 path = "assets/models/alliance_starbase_lod2.glb"
 source = "assets/models/alliance_starbase.remesh.glb"
-source_sha256 = "54d71b399255b3a6282b2e900619e32bff0dfd73dd2a0f3527aa2032687cb5b0"
+source_sha256 = "be89a28c7f2b8380f42df9c5240159fd1fb1ba78d8eb4ee0fd3869d646ae55e1"
 origin = "assets/models/alliance_starbase.glb"
 origin_sha256 = "08f78a60cd1630bb9fd26c6c6b1e2307000fe0d0a8a68b923ee035bd17786c1e"
 params = { ratio = 0.113, error = 0.01, texture_size = 128, remesh_voxel_size = 0.0211 }
-output_sha256 = "355cac95b8eeb427eea9d0457fe987251764a5864b2155ce1fa39e41852e571d"
-output_bytes = 231968
+output_sha256 = "4f0670ae159792a2dabe5ab1b1707bae8f417b59e1dd4e4a20501ef1e56c04ea"
+output_bytes = 232872
 declared_by = ["assets/models/alliance_starbase.model.toml"]
 
 [[output]]
@@ -378,29 +378,29 @@ declared_by = ["assets/models/dynasty_battleship.model.toml"]
 [[output]]
 path = "assets/models/dynasty_courier_lod1.glb"
 source = "assets/models/dynasty_courier.remesh.glb"
-source_sha256 = "77f147b31e9e7dae4dc8867d824341d44fe417ef10452f093c9ca449adece01d"
+source_sha256 = "c985abbd934ffe91c530cd108bd2962fb8710c83d78496fccc23035144ee4922"
 origin = "assets/models/dynasty_courier.glb"
-origin_sha256 = "6645dce163cfd384349a3af3063061ca64f52164805c478afec51c0475ea324d"
+origin_sha256 = "3722aa7d377f1f0fc3dbe000125f72e9079d469da7fbd02f68253dd57b166b38"
 params = { ratio = 0.19, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }
-output_sha256 = "4b95ea51a01e4e515a30a414725107d8984fb1134b3cc096d6a4e1cec00901a8"
-output_bytes = 389184
+output_sha256 = "f051ea4f2c40ada03b618526e7ab23f163798cfbf62c9ea7ddfbe19bb3823a74"
+output_bytes = 389560
 declared_by = ["assets/models/dynasty_courier.model.toml"]
 
 [[output]]
 path = "assets/models/dynasty_courier_lod2.glb"
 source = "assets/models/dynasty_courier.remesh.glb"
-source_sha256 = "77f147b31e9e7dae4dc8867d824341d44fe417ef10452f093c9ca449adece01d"
+source_sha256 = "c985abbd934ffe91c530cd108bd2962fb8710c83d78496fccc23035144ee4922"
 origin = "assets/models/dynasty_courier.glb"
-origin_sha256 = "6645dce163cfd384349a3af3063061ca64f52164805c478afec51c0475ea324d"
+origin_sha256 = "3722aa7d377f1f0fc3dbe000125f72e9079d469da7fbd02f68253dd57b166b38"
 params = { ratio = 0.19, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }
-output_sha256 = "4b95ea51a01e4e515a30a414725107d8984fb1134b3cc096d6a4e1cec00901a8"
-output_bytes = 389184
+output_sha256 = "f051ea4f2c40ada03b618526e7ab23f163798cfbf62c9ea7ddfbe19bb3823a74"
+output_bytes = 389560
 declared_by = ["assets/models/dynasty_courier.model.toml"]
 
 [[output]]
 path = "assets/models/dynasty_cruiser_lod1.glb"
 source = "assets/models/dynasty_cruiser.remesh.glb"
-source_sha256 = "262714f459bf5c8c829244132ba1a2cae48d9bb34ec022afed7af1b2113d0f6e"
+source_sha256 = "86df7c50e95daa20a2f172c8a14741ed420477189f0ac1ed11f57ad955aca66e"
 origin = "assets/models/dynasty_cruiser.glb"
 origin_sha256 = "0ba41912292fdd425d8d4c00441a8ffff2bdd0d403cc182a32c6228c465db14b"
 params = { ratio = 0.319, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }
@@ -411,18 +411,18 @@ declared_by = ["assets/models/dynasty_cruiser.model.toml"]
 [[output]]
 path = "assets/models/dynasty_cruiser_lod2.glb"
 source = "assets/models/dynasty_cruiser.remesh.glb"
-source_sha256 = "262714f459bf5c8c829244132ba1a2cae48d9bb34ec022afed7af1b2113d0f6e"
+source_sha256 = "86df7c50e95daa20a2f172c8a14741ed420477189f0ac1ed11f57ad955aca66e"
 origin = "assets/models/dynasty_cruiser.glb"
 origin_sha256 = "0ba41912292fdd425d8d4c00441a8ffff2bdd0d403cc182a32c6228c465db14b"
 params = { ratio = 0.113, error = 0.01, texture_size = 128, remesh_voxel_size = 0.0211 }
-output_sha256 = "991b40d3137fce6945f8c333d076e5f63ae9064c338f2e14072a8ad69b58f2fd"
-output_bytes = 249872
+output_sha256 = "9371be2d566f8101be9e5f2f30f6ab5849e03041e43a2a98031e362787715c08"
+output_bytes = 250128
 declared_by = ["assets/models/dynasty_cruiser.model.toml"]
 
 [[output]]
 path = "assets/models/dynasty_destroyer_lod1.glb"
 source = "assets/models/dynasty_destroyer.remesh.glb"
-source_sha256 = "1faa384bd1061af453aa7af11bef47b750ec197732b7611fec4737a4661f8182"
+source_sha256 = "eeb55568c37065261793ac48aa4a3498ec929dc96791acce2e681471c571ff52"
 origin = "assets/models/dynasty_destroyer.glb"
 origin_sha256 = "8f3b09997ee1435f6d78073ee0b6cce380875a3ab2da5e7b4c8ad823f0a4f6f6"
 params = { ratio = 0.19, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }
@@ -433,7 +433,7 @@ declared_by = ["assets/models/dynasty_destroyer.model.toml"]
 [[output]]
 path = "assets/models/dynasty_destroyer_lod2.glb"
 source = "assets/models/dynasty_destroyer.remesh.glb"
-source_sha256 = "1faa384bd1061af453aa7af11bef47b750ec197732b7611fec4737a4661f8182"
+source_sha256 = "eeb55568c37065261793ac48aa4a3498ec929dc96791acce2e681471c571ff52"
 origin = "assets/models/dynasty_destroyer.glb"
 origin_sha256 = "8f3b09997ee1435f6d78073ee0b6cce380875a3ab2da5e7b4c8ad823f0a4f6f6"
 params = { ratio = 0.19, error = 0.01, texture_size = 256, remesh_voxel_size = 0.0211 }

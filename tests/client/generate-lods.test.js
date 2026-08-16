@@ -7,6 +7,7 @@ import {
   planSteps,
   remeshStep,
   remeshPath,
+  remeshTextureCap,
   blenderCandidates,
   sha256,
   manifestEntry,
@@ -301,6 +302,72 @@ describe('the Blender pre-pass', () => {
     ]);
     // Elsewhere there is nothing to guess at: PATH or nothing.
     expect(blenderCandidates({ env: {}, platform: 'linux' })).toEqual(['blender']);
+  });
+});
+
+describe('remeshTextureCap — how big a remesh intermediate’s textures need to be', () => {
+  /** A hull whose two far levels are both cut from one voxel remesh. */
+  function remeshLadder(lod1Texture, lod2Texture) {
+    const level = (name, ratio, texture) => `
+[[lod]]
+model = "assets/models/hull_${name}.glb"
+[lod.generate]
+source = "assets/models/hull.glb"
+ratio = ${ratio}
+error = 0.01
+${texture === null ? '' : `texture_size = ${texture}`}
+remesh_voxel_size = 0.0211
+`;
+    return sidecar(
+      'assets/models/hull.model.toml',
+      `
+[[lod]]
+max_distance = 15.0
+model = "assets/models/hull.glb"
+${level('lod1', 0.319, lod1Texture)}${level('lod2', 0.113, lod2Texture)}`,
+    );
+  }
+
+  const REMESH = 'assets/models/hull.remesh.glb';
+
+  it('takes the largest size any level sharing the intermediate cuts', () => {
+    const { targets } = collectTargets([remeshLadder(256, 128)]);
+    expect(remeshTextureCap(targets, REMESH)).toBe(256);
+  });
+
+  // The shipped `dynasty_battleship` shape, and the reason the cap is derived
+  // rather than written as 256: exactly one level in the tree asks for more,
+  // and a fixed number would have silently halved it.
+  it('does not clamp a ladder whose near level asks for more than the usual 256', () => {
+    const { targets } = collectTargets([remeshLadder(512, 128)]);
+    expect(remeshTextureCap(targets, REMESH)).toBe(512);
+  });
+
+  // Order must not matter: the cap is applied once to a file both levels read,
+  // so whichever level the generator happens to process first cannot be allowed
+  // to starve the other.
+  it('is the same whichever level is declared first', () => {
+    const { targets } = collectTargets([remeshLadder(128, 512)]);
+    expect(remeshTextureCap(targets, REMESH)).toBe(512);
+  });
+
+  it('leaves the file alone when a consumer declares no texture_size at all', () => {
+    const { targets } = collectTargets([remeshLadder(256, null)]);
+    expect(remeshTextureCap(targets, REMESH)).toBeNull();
+  });
+
+  it('leaves a file alone that nothing is cut from', () => {
+    const { targets } = collectTargets([remeshLadder(256, 128)]);
+    expect(remeshTextureCap(targets, 'assets/models/other.remesh.glb')).toBeNull();
+  });
+
+  // A level with no voxel pre-pass decimates the base .glb directly, and that
+  // file is the one that SHIPS — its textures are not an intermediate and are
+  // never capped by this.
+  it('does not offer a cap for a source that is not a remesh intermediate', () => {
+    const { targets } = collectTargets([sidecar('assets/models/rock.large.toml', ROCK_LADDER)]);
+    expect(remeshTextureCap(targets, 'assets/models/rock.glb')).toBe(512);
+    expect(targets.every((t) => t.effectiveSource === t.source)).toBe(true);
   });
 });
 

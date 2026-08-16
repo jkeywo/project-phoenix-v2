@@ -120,6 +120,28 @@ export function remeshPath(source) {
 }
 
 /**
+ * The largest `texture_size` any level cut from `remeshFile` asks for — the
+ * resolution above which that intermediate's textures buy nothing.
+ *
+ * DERIVED from the sidecars rather than fixed at a number, because the shipped
+ * ladders disagree: most models cut 256 and 128 from their remesh, but
+ * `dynasty_battleship_lod1` authors `texture_size = 512`. A hardcoded 256 would
+ * have quietly halved the one level in the tree that asks for more.
+ *
+ * The MAXIMUM over every consumer is what makes a single cap safe to apply to a
+ * file two levels share: capping to either level's own size would starve the
+ * other. `null` means leave the file alone — either nothing is cut from it, or
+ * some consumer declares no `texture_size` at all and therefore ships the
+ * intermediate's textures exactly as they are.
+ */
+export function remeshTextureCap(targets, remeshFile) {
+  const consumers = targets.filter((t) => t.effectiveSource === remeshFile);
+  if (!consumers.length) return null;
+  if (consumers.some((t) => t.params.textureSize === null)) return null;
+  return Math.max(...consumers.map((t) => t.params.textureSize));
+}
+
+/**
  * One line describing a target's parameters, used to compare a manifest entry
  * against what the sidecars now say. Every key is present even when unset, so
  * *removing* a parameter reads as a change rather than as a match.
@@ -653,6 +675,62 @@ function observe(root, targets) {
   });
 }
 
+/**
+ * Shrink a remesh intermediate's textures to `cap` pixels, in place.
+ *
+ * A voxel remesh is a GEOMETRY pass: Blender rebuilds the surface and carries
+ * the source's materials across untouched, so the intermediate inherits the
+ * full-size base-colour and normal maps of the hero model — 2048px on both
+ * couriers and on the starbase. Nothing ever sees a pixel of that. Every level
+ * cut from a remesh runs `resize` down to its own `texture_size` first, so
+ * everything above the largest of those is decoded, re-encoded and committed
+ * purely to be thrown away by the next step: `alliance_starbase.remesh.glb`
+ * carried 6.2 MB of texture to feed a 256px cut and a 128px one.
+ *
+ * Images already within the cap are left BYTE-FOR-BYTE alone rather than
+ * re-encoded, so a model whose textures were always small keeps its
+ * intermediate's hash and nothing downstream of it churns.
+ *
+ * PNG throughout, never WebP/KTX2 — Bevy's glTF loader rejects
+ * EXT_texture_webp, the same constraint scripts/optimise-base.mjs works under.
+ *
+ * The two imports are dynamic on purpose: `--check` is what CI runs, it never
+ * touches a texture, and it should not pay to load sharp and the glTF core to
+ * re-hash nine files.
+ *
+ * Returns `{ resized, before, after }` — the count and the texture bytes either
+ * side, for the caller's log.
+ */
+export async function capRemeshTextures(file, cap) {
+  const { NodeIO } = await import('@gltf-transform/core');
+  const { default: sharp } = await import('sharp');
+  const io = new NodeIO();
+  const document = await io.read(file);
+  let resized = 0;
+  let before = 0;
+  let after = 0;
+  for (const texture of document.getRoot().listTextures()) {
+    const image = texture.getImage();
+    if (!image) continue;
+    before += image.length;
+    const meta = await sharp(Buffer.from(image)).metadata();
+    if (meta.width <= cap && meta.height <= cap) {
+      after += image.length;
+      continue;
+    }
+    const shrunk = await sharp(Buffer.from(image))
+      .resize(cap, cap, { fit: 'inside', withoutEnlargement: true })
+      .png()
+      .toBuffer();
+    texture.setImage(new Uint8Array(shrunk));
+    texture.setMimeType('image/png');
+    after += shrunk.length;
+    resized += 1;
+  }
+  if (resized) await io.write(file, document);
+  return { resized, before, after };
+}
+
 async function resolveBlender(root) {
   let installedDirs = [];
   const foundation = path.win32.join(
@@ -789,6 +867,21 @@ async function main() {
       if (cli.remesh) {
         console.error(`  ${remesh.label}`);
         await execFileAsync(remesh.argv[0], remesh.argv.slice(1));
+        // Blender hands back the source's full-size materials on a geometry
+        // pass; cap them at what this intermediate's own consumers actually
+        // cut. `allTargets`, not `selected` — the cap has to account for every
+        // level that shares the file, including ones this run filtered out.
+        const cap = remeshTextureCap(allTargets, target.effectiveSource);
+        if (cap !== null) {
+          const capped = await capRemeshTextures(
+            path.join(root, target.effectiveSource),
+            cap,
+          );
+          console.error(
+            `  cap textures at ${cap}px — ${capped.resized} resized, ` +
+              `${formatBytes(capped.before)} → ${formatBytes(capped.after)} of texture`,
+          );
+        }
       } else if (!existsSync(path.join(root, target.effectiveSource))) {
         console.error(
           `  ${target.effectiveSource} is missing — this level declares a voxel pre-pass; ` +

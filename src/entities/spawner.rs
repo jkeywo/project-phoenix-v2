@@ -224,6 +224,29 @@ pub fn spawn_entity(
         };
         entity_commands.insert((
             rapier_collider,
+            // Pin the physics shape to its AUTHORED size regardless of the
+            // entity's `Transform.scale` (issue: starbase collider oversize).
+            //
+            // Rapier's `apply_scale` folds `GlobalTransform.scale` into the
+            // collider shape by default (`ColliderScale::Relative(ONE)`). That is
+            // fine while the transform's scale is 1, which it always is HEADLESS —
+            // nothing scales an entity's transform there. But under `render`
+            // (`opts.render`, i.e. the browser), `update_mesh_lod` writes the
+            // model's `[base].scale` onto this same entity's `Transform` for every
+            // non-near LOD tier, because the generated LOD meshes are authored at
+            // raw model size and the parent has to supply the base scale (see
+            // `tier_parent_scale`). For the starbase that base scale is [15,18,18],
+            // so its authored radius-17.04 cylinder was silently inflated to a
+            // ~300-unit disc the moment the station dropped to LOD1/2 — a ship
+            // dead-stopped and took ram damage hundreds of units out in clear sky,
+            // and only in the browser (headless, with no LOD system, never saw it,
+            // so no digest ever recorded the inflation). The render comment on
+            // `render_spawned_entities` already asserts the invariant this makes
+            // true: "an entity's transform is simulation state ... a visual effect
+            // has no business animating it." `Absolute(ONE)` REPLACES the transform
+            // scale rather than multiplying it, so the shape stays the authored
+            // size in both worlds and the physics matches what the renderer draws.
+            ColliderScale::Absolute(Vect::ONE),
             RigidBody::KinematicPositionBased,
             ActiveCollisionTypes::KINEMATIC_KINEMATIC | ActiveCollisionTypes::KINEMATIC_STATIC,
             ColliderSection(collider.clone()),

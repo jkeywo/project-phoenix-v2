@@ -8839,6 +8839,145 @@ _remove = true
         );
     }
 
+    /// Regression: the physics collider must stay its AUTHORED size even when
+    /// the render LOD system scales the entity's `Transform`.
+    ///
+    /// Under `render` (the browser), `update_mesh_lod` writes the model's
+    /// `[base].scale` — [15, 18, 18] for the starbase — onto the structure's own
+    /// `Transform` for every non-near LOD tier, because the generated LOD meshes
+    /// are authored at raw model size and the parent supplies the base scale. By
+    /// default rapier's `apply_scale` folds that `GlobalTransform.scale` into the
+    /// collider shape, inflating the authored 17.04 disc to a ~300-unit one, so a
+    /// ship dead-stopped and took ram damage hundreds of units out in clear sky —
+    /// and ONLY in the browser, because headless runs no LOD system and its
+    /// transforms keep scale 1, which is why no digest ever recorded it.
+    ///
+    /// `spawn_entity` now pins `ColliderScale::Absolute(ONE)` on every authored
+    /// collider, which REPLACES the transform scale rather than multiplying it.
+    /// This fixture reproduces the LOD scale directly (there is no camera or LOD
+    /// system in a bare rapier app) and asserts a hull far outside the visible
+    /// rim — 100 units against a 17.04 radius — stays clear. The A/B half proves
+    /// the test bites: the SAME scaled structure WITHOUT the pin (rapier's
+    /// default `Relative`) swallows that hull whole.
+    #[test]
+    fn a_collider_ignores_the_render_lod_transform_scale() {
+        use crate::damage::SystemHull;
+        use crate::entity_config::{ColliderConfig, ColliderShape};
+        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::modifiers::ShipModifiers;
+        use bevy_rapier3d::prelude::*;
+
+        const SHIP_RADIUS: f32 = 1.2;
+        const HULL_MAX: f32 = 1000.0;
+        // The starbase's on-screen `[base].scale`. This is what `update_mesh_lod`
+        // stamps onto the entity transform at LOD1/2.
+        const LOD_SCALE: Vec3 = Vec3::new(15.0, 18.0, 18.0);
+        // Far outside the authored 17.04 rim, deep inside a ~300-unit inflation.
+        const SHIP_AT: Vec3 = Vec3::new(100.0, 0.0, 0.0);
+
+        // `pin` = insert `ColliderScale::Absolute(ONE)` as production does.
+        fn hull_left(pin: bool) -> f32 {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    std::time::Duration::from_millis(50),
+                ))
+                .add_plugins(bevy::transform::TransformPlugin)
+                .add_plugins(bevy::asset::AssetPlugin::default())
+                .init_asset::<bevy::mesh::Mesh>()
+                .init_resource::<bevy::scene::SceneSpawner>()
+                .add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<GamePhase>()
+                .add_plugins(RapierPhysicsPlugin::<()>::default())
+                .init_resource::<SimOutbox>()
+                .init_resource::<WorldResource>()
+                .insert_resource(GameOverReason(None, None))
+                .init_resource::<DamageLog>()
+                .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+                .add_systems(Update, handle_collisions);
+            app.world_mut()
+                .resource_mut::<NextState<GamePhase>>()
+                .set(GamePhase::InProgress);
+            app.update();
+
+            let ship = app
+                .world_mut()
+                .spawn((
+                    Ship,
+                    EntityUuid("hull-vs-scaled-structure".to_string()),
+                    Transform::from_translation(SHIP_AT),
+                    GlobalTransform::default(),
+                    Visibility::default(),
+                    ShipPhysicsComponent {
+                        x: SHIP_AT.x,
+                        y: SHIP_AT.y,
+                        z: SHIP_AT.z,
+                        forward_speed: 20.0,
+                        ..Default::default()
+                    },
+                    CollisionCooldown::default(),
+                    EntitySystemHull(SystemHull::from_config(&[(
+                        SystemId("captain".into()),
+                        HULL_MAX,
+                    )])),
+                    ShipModifiers::new(),
+                    ShipImpulse::default(),
+                    ColliderSection(ColliderConfig {
+                        shape: ColliderShape::Ball,
+                        radius: SHIP_RADIUS,
+                        length: 0.0,
+                        half_height: None,
+                        movable: true,
+                    }),
+                    Collider::ball(SHIP_RADIUS),
+                    RigidBody::KinematicPositionBased,
+                    ActiveCollisionTypes::KINEMATIC_KINEMATIC
+                        | ActiveCollisionTypes::KINEMATIC_STATIC,
+                ))
+                .id();
+
+            // The starbase disc, at LOD1/2 scale on its own transform.
+            let (section, collider) = starbase_disc();
+            let mut structure = app.world_mut().spawn((
+                EntityUuid("scaled-structure".to_string()),
+                Transform::from_translation(Vec3::ZERO).with_scale(LOD_SCALE),
+                GlobalTransform::default(),
+                Visibility::default(),
+                ColliderSection(section),
+                collider,
+                RigidBody::Fixed,
+                ActiveCollisionTypes::KINEMATIC_STATIC,
+            ));
+            if pin {
+                structure.insert(ColliderScale::Absolute(Vect::ONE));
+            }
+
+            for _ in 0..3 {
+                app.update();
+            }
+
+            app.world()
+                .get::<EntitySystemHull>(ship)
+                .expect("the ship must survive this fixture")
+                .0
+                .total_current()
+        }
+
+        assert_eq!(
+            hull_left(true),
+            HULL_MAX,
+            "with the collider pinned to its authored size, a hull 100 units out \
+             must be in clear sky — the render LOD scale must not reach physics"
+        );
+        assert!(
+            hull_left(false) < HULL_MAX,
+            "this test is only worth having if the UNPINNED collider DID inflate \
+             with the transform and swallow a hull 100 units out; if this half \
+             stops failing, the LOD scale no longer reaches physics and the pin \
+             is moot"
+        );
+    }
+
     /// Issue #896, AC-3: which of several simultaneous contacts a ship is
     /// resolved against is decided by world id, not by whichever pair rapier
     /// hands back first.

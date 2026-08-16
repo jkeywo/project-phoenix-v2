@@ -626,6 +626,14 @@ pub type RockBundle = (
     Transform,
     Visibility,
     bevy_rapier3d::prelude::Collider,
+    // Pin the physics shape to the authored radius regardless of the rock's
+    // `Transform.scale`. Field rocks carry LOD ladders too, so under `render`
+    // `update_mesh_lod` writes the model's `[base].scale` onto this transform at
+    // the far tiers — the same leak that inflated the starbase collider (see
+    // `entity_spawner::spawn_entity`). `Absolute(ONE)` keeps the rock's collision
+    // radius equal to `config.collider.radius` in the browser as it already is
+    // headless, so it moves no digest and stops a distant rock over-colliding.
+    bevy_rapier3d::prelude::ColliderScale,
     bevy_rapier3d::prelude::RigidBody,
 );
 
@@ -652,6 +660,7 @@ pub fn rock_bundle(
         Transform::from_translation(translation).with_rotation(rotation),
         Visibility::default(),
         bevy_rapier3d::prelude::Collider::ball(config.collider.radius),
+        bevy_rapier3d::prelude::ColliderScale::Absolute(bevy_rapier3d::prelude::Vect::ONE),
         bevy_rapier3d::prelude::RigidBody::Fixed,
     )
 }

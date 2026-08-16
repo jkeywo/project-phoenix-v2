@@ -127,16 +127,21 @@ pub fn resolve_sidecar_rig(
 ///
 /// * A **hull ladder** (every ship, the starbase, the research outpost) ships
 ///   no sidecar beside its generated tier GLBs. Each generated tier therefore
-///   resolves an identity rig, and the ladder's non-GLB tiers — the billboard's
-///   `scale`, a procedural level's radius — are authored in RAW model units, so
-///   the parent must supply the whole base scale. This is the case bf4c4b02
-///   fixed: before it, a starbase at `[base].scale = [15, 18, 18]` snapped back
-///   to raw model size the moment it left its near band.
+///   resolves an identity rig, so the parent must supply the whole base scale.
+///   This is the case bf4c4b02 fixed: before it, a starbase at
+///   `[base].scale = [15, 18, 18]` snapped back to raw model size the moment it
+///   left its near band.
 /// * A **pipeline ladder** (every asteroid class, since e20a5035) writes a
 ///   sidecar beside EVERY tier GLB carrying the primary's `[base]` rig
-///   verbatim, and records that model's `[extents]` — and the billboard `scale`
-///   derived from them — already in post-scale WORLD units. The child applies
-///   the base scale itself, so the parent must supply NONE of it.
+///   verbatim. The child applies the base scale itself, so the parent must
+///   supply NONE of it.
+///
+/// This is a question about GLB TIERS ONLY. A billboard level's `scale` is the
+/// quad's world size on both conventions — `capture-billboards.mjs` records it
+/// that way on both — so nothing here is folded onto it. bf4c4b02 did fold it,
+/// and drew every hull ladder's imposter at its own `[base].scale` too large;
+/// see [`crate::entities::billboard::billboard_quad_size`], which is the one
+/// place that rule lives.
 ///
 /// Dividing the base scale by whatever a generated tier already carries covers
 /// both without either convention having to know about the other: an identity
@@ -479,6 +484,102 @@ mod tests {
             ambiguous, 2,
             "expected alliance_cruiser and dynasty_destroyer — authored at world \
              size, so [base].scale is 1 and the conventions coincide"
+        );
+    }
+
+    /// The blind spot in the test above, closed.
+    ///
+    /// `every_shipped_ladder_holds_one_world_size_across_its_tiers` walks
+    /// `levels.iter().skip(1)` and `continue`s on any level with no `model` — so
+    /// it inspects a ladder's GLB tiers and NOTHING else. Every shipped ladder
+    /// ends in a level with no `model`: a billboard imposter. That tier was
+    /// therefore free to be any size at all while the test stayed green, and it
+    /// was: `alliance_starbase` shipped a 204-unit-wide imposter over a 34-unit
+    /// station, and John watched it blink down to size on approach with the whole
+    /// suite passing.
+    ///
+    /// What holds it now is that a billboard's world size does not depend on the
+    /// tier scale AT ALL — the authored number is already world units on both
+    /// conventions. So the size a ladder's imposter draws at must come out the
+    /// same whichever convention that ladder turns out to be in, and it must
+    /// match the size the ladder's own resolved tier scale produces. A
+    /// reintroduced fold fails this on every hull ladder at once, rather than
+    /// waiting for someone to look at a station from 400 units.
+    ///
+    /// The magnitudes themselves — is a starbase imposter the same size as the
+    /// starbase MESH — are held where the meshes can actually be measured, in
+    /// `tests/client/billboard-world-size.test.js`; a `.glb` bounding box is not
+    /// something this crate can read.
+    #[test]
+    fn every_shipped_billboard_tier_is_convention_independent() {
+        let mut billboards = 0usize;
+
+        let dir = std::fs::read_dir("assets/models").expect("assets/models must be readable");
+        let mut sidecars: Vec<std::path::PathBuf> = dir
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("toml"))
+            .collect();
+        sidecars.sort();
+
+        for path in sidecars {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let text = std::fs::read_to_string(&path).expect("read sidecar");
+            let Ok(rig) = crate::model_rig::ModelRig::from_toml(&text) else {
+                continue;
+            };
+            if rig.lod.is_empty() {
+                continue;
+            }
+            let variant = crate::model_rig::sidecar_variant(&name);
+            let parent = resolve_tier_parent_scale(&rig.lod, rig.base.scale, variant)
+                .expect("native sidecar reads are synchronous");
+
+            for level in rig.lod.iter() {
+                if level.billboard.is_none() {
+                    continue;
+                }
+                billboards += 1;
+                let authored = level
+                    .scale
+                    .unwrap_or_else(|| panic!("{name}: a shipped billboard authors its size"));
+                let actual = crate::entities::billboard::billboard_quad_size(level.scale, parent);
+
+                // The size this ladder actually draws IS the authored world
+                // size — not it scaled by anything.
+                assert!(
+                    (actual[0] - authored[0]).abs() < 1e-3
+                        && (actual[1] - authored[1]).abs() < 1e-3,
+                    "{name}: imposter draws {actual:?} from an authored world size of \
+                     [{}, {}] — a billboard's recorded extents are world units on both \
+                     ladder conventions, so nothing may be folded onto them",
+                    authored[0],
+                    authored[1]
+                );
+
+                // And it is the same answer under the OTHER convention's parent
+                // scale, which is what makes the tier safe against a ladder
+                // whose convention is misread.
+                let other = if (parent - Vec3::ONE).length() < 1e-4 {
+                    Vec3::from_array(rig.base.scale)
+                } else {
+                    Vec3::ONE
+                };
+                let under_other =
+                    crate::entities::billboard::billboard_quad_size(level.scale, other);
+                assert_eq!(
+                    actual, under_other,
+                    "{name}: imposter size moves with the tier scale ({parent:?} vs \
+                     {other:?}) — that is exactly the size change an LOD crossing \
+                     must not have"
+                );
+            }
+        }
+
+        assert_eq!(
+            billboards, 42,
+            "expected every one of the 42 shipped ladders to end in a billboard \
+             imposter — a ladder that stopped shipping one is a ladder this test \
+             silently stopped covering"
         );
     }
 }

@@ -69,16 +69,32 @@ const POSE_QUAD_SEPARATION: f32 = 0.001;
 
 /// The world width and height of a billboard level's quad.
 ///
-/// The authored `scale` on a billboard level is the model's extents — width and
-/// height — recorded in whatever space its own ladder records extents in, so
-/// `tier_parent_scale` is folded in here the same way the GLB tiers fold it into
-/// their parent transform. On a hull ladder that is the full `[base].scale`,
-/// because the atlas was captured off RAW model extents and would otherwise
-/// render at raw size while the near GLB renders scaled — the model snapping
-/// smaller at range. On a pipeline ladder it is 1, because the recorded extents
-/// are already post-scale WORLD units and scaling them a second time is what
-/// inflated a distant rock. Width rides the horizontal (z) axis, height the
-/// vertical (y).
+/// The authored `scale` on a billboard level IS the quad's world size, on both
+/// ladder conventions, because `scripts/capture-billboards.mjs` records it that
+/// way on both. It writes what the `capture-billboard` tool measured, and that
+/// tool renders the model under the primary sidecar's `[base]` rig and reads the
+/// composed `GlobalTransform` Aabb — so a hull's number already carries its
+/// `[base].scale`. An asteroid is the one case that needs arithmetic, and the
+/// script does it there: rocks ship no `<stem>.model.toml`, so the tool renders
+/// them at identity and the script multiplies each variant's quad by that
+/// variant's own `[base].scale` before writing it. Either way the number on
+/// disk is world units, and this function's whole job is to not touch it.
+///
+/// So `tier_parent_scale` — which the GLB tiers genuinely need, because THEY
+/// resolve their own absent sidecars to an identity rig — must NOT be folded in
+/// on top. bf4c4b02 folded it, on the stated claim that a hull atlas is captured
+/// off RAW model extents; it is not, and the result was that every hull ladder's
+/// far billboard rendered its `[base].scale` times too large. That is invisible
+/// on the hulls authored at scale 1 and worth 1.5x–4x on the rest, and on
+/// `alliance_starbase` — `[base].scale` `[15, 18, 18]`, against an atlas whose
+/// size was still the one captured back when the model was `[5, 6, 6]` — it
+/// came to 6x: a 204-unit-wide imposter for a 34-unit-wide station. That is the
+/// starbase John saw drawn huge at distance and blinking down to its true size
+/// the moment the approach crossed inside the 400-unit billboard band.
+///
+/// Width rides the horizontal (z) axis, height the vertical (y). A level that
+/// authors no size states no world size, and falls back to the tier scale
+/// itself — what the renderer has always done for an unsized billboard.
 ///
 /// Lives here, next to the spawn it feeds, because the game's LOD swap and the
 /// standalone model viewer both need the answer and a second copy of this rule
@@ -86,9 +102,7 @@ const POSE_QUAD_SEPARATION: f32 = 0.001;
 /// (see [`crate::entities::glb_visual::tier_parent_scale`]).
 pub fn billboard_quad_size(level_scale: Option<[f32; 3]>, tier_parent_scale: Vec3) -> [f32; 2] {
     let bs = tier_parent_scale;
-    level_scale
-        .map(|s| [s[0] * bs.z, s[1] * bs.y])
-        .unwrap_or([bs.z, bs.y])
+    level_scale.map(|s| [s[0], s[1]]).unwrap_or([bs.z, bs.y])
 }
 
 /// How many yaw tiles a billboard level's atlas packs.
@@ -401,23 +415,51 @@ mod tests {
 
     // ── Quad sizing ──────────────────────────────────────────────────────
 
-    /// A HULL ladder's billboard carries the whole `[base].scale` on the quad,
-    /// because the atlas was captured off raw model extents. `alliance_starbase`
-    /// numbers: width rides z, height rides y.
+    /// A HULL ladder's billboard is its authored size, NOT that size times the
+    /// model's `[base].scale`: the capture tool rendered the model under its own
+    /// `[base]` rig, so the recorded number is already world units. Folding the
+    /// base scale in here is what drew `alliance_starbase` — scale `[15,18,18]` —
+    /// as a 204-unit imposter for a 34-unit station.
     #[test]
-    fn a_hull_billboard_takes_the_whole_base_scale() {
+    fn a_hull_billboard_is_its_authored_world_size() {
         let got = billboard_quad_size(Some([4.0, 2.0, 1.0]), Vec3::new(15.0, 18.0, 18.0));
-        assert_eq!(got, [4.0 * 18.0, 2.0 * 18.0]);
+        assert_eq!(
+            got,
+            [4.0, 2.0],
+            "a hull billboard's authored scale is already world units"
+        );
     }
 
-    /// A PIPELINE ladder records its extents already in world units, so the
-    /// parent scale is 1 and the authored size is the size.
+    /// A PIPELINE ladder records its extents already in world units too, so the
+    /// two conventions agree here and the authored size is the size. This is the
+    /// case that was always right; the hull case now matches it.
     #[test]
-    fn a_pipeline_billboard_takes_none_of_it() {
+    fn a_pipeline_billboard_is_its_authored_world_size_too() {
         assert_eq!(
             billboard_quad_size(Some([3.0, 5.0, 1.0]), Vec3::ONE),
             [3.0, 5.0]
         );
+    }
+
+    /// The rule is one rule: the same authored size answers regardless of what
+    /// the ladder's GLB tiers need from their parent. A billboard that changed
+    /// size with the tier scale is a billboard that changes size across the LOD
+    /// crossing it exists to hide.
+    #[test]
+    fn a_billboards_size_does_not_depend_on_the_tier_scale() {
+        let authored = Some([7.5, 2.25, 1.0]);
+        for tier in [
+            Vec3::ONE,
+            Vec3::new(15.0, 18.0, 18.0),
+            Vec3::splat(0.4),
+            Vec3::splat(12.675_623),
+        ] {
+            assert_eq!(
+                billboard_quad_size(authored, tier),
+                [7.5, 2.25],
+                "tier scale {tier:?} must not move the quad"
+            );
+        }
     }
 
     /// A level with no authored size falls back to the tier scale itself, which

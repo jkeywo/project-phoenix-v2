@@ -434,10 +434,11 @@ mod tests {
 
     /// The preview is the size the GAME draws, on both ladder conventions —
     /// which is the whole reason the size rule lives in the billboard module
-    /// rather than being restated here. A rock's ladder records its extents in
-    /// world units already, so its imposter is its authored `scale`; a hull's
-    /// atlas was captured off raw model extents, so its imposter takes the
-    /// model's whole `[base].scale`.
+    /// rather than being restated here. Both conventions record a billboard's
+    /// extents in WORLD units (the capture tool renders a hull under its own
+    /// `[base]` rig, and the capture script scales a rock's quad by its
+    /// variant's), so on both an imposter is exactly its authored `scale` and
+    /// neither takes the model's `[base].scale` a second time.
     #[test]
     fn a_billboard_preview_is_the_size_the_game_draws() {
         let rock = "assets/models/asteroid_common_1.glb";
@@ -475,11 +476,14 @@ mod tests {
             .last()
             .and_then(|l| l.scale)
             .expect("the destroyer's billboard authors its size");
-        // 0.75 is the destroyer's `[base].scale`; a hull ladder's far tier owes
-        // the parent all of it, and a billboard folds it into the quad instead.
+        // The destroyer's `[base].scale` is 0.75, and it must NOT appear here:
+        // its atlas was measured with that rig already applied, so the authored
+        // number is the world size and multiplying by it again would draw the
+        // hull three-quarters size at range — the same fault the starbase showed
+        // at 6x.
         assert!(
-            (hull_imposter.size[0] - hull_authored[0] * 0.75).abs() < 1e-3,
-            "a hull imposter takes the base scale, got {:?} for {hull_authored:?}",
+            (hull_imposter.size[0] - hull_authored[0]).abs() < 1e-3,
+            "a hull imposter is its authored world size, got {:?} for {hull_authored:?}",
             hull_imposter.size
         );
     }

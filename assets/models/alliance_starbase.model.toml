@@ -41,7 +41,7 @@ remesh_voxel_size = 0.0211
 
 [[lod]]
 billboard = "assets/models/alliance_starbase_lod3.png"
-scale = [ 11.3616, 4.775, 1.0 ]
+scale = [ 34.0849, 14.325, 1.0 ]
 
 [lod.capture]
 source = "assets/models/alliance_starbase.glb"

@@ -25,6 +25,7 @@
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 /**
  * Provenance code → the strings.csv id for how the crew learned something.
@@ -70,32 +71,35 @@ export class PhDossierPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; min-height: 0; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .heading { font-size: 0.6rem; letter-spacing: 0.2em; color: var(--ink-dim); padding: 0 0.2rem 0.3rem; flex-shrink: 0; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.5rem 0; letter-spacing: 0.2em; }
+    .heading { font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-dim); padding: 0 0.2rem 0.3rem; flex-shrink: 0; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.5rem 0; letter-spacing: 0.2em; }
     .list { display: flex; flex-direction: column; gap: 0.35rem; overflow-y: auto; min-height: 0; }
     .subject { display: flex; flex-direction: column; gap: 0.1rem; text-align: left; width: 100%;
                font-family: inherit; color: inherit; background: transparent; cursor: pointer;
-               border: 1px solid var(--line-soft); border-radius: 2px; padding: 0.35rem 0.4rem; }
-    .subject .name { font-size: 0.72rem; letter-spacing: 0.06em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .subject .count { font-size: 0.6rem; color: var(--ink-dim); letter-spacing: 0.1em; }
+               border: 1px solid var(--line-soft); border-radius: 2px; padding: 0.35rem 0.4rem; min-height: var(--control-hit-min); }
+    .subject .name { font-size: var(--text-sm); letter-spacing: 0.06em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .subject .count { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.1em; }
     .sheet { display: flex; flex-direction: column; gap: 0.3rem; overflow-y: auto; min-height: 0; }
-    .sheet .name { font-size: 0.8rem; letter-spacing: 0.08em; }
-    .sheet .summary { font-size: 0.65rem; color: var(--ink-dim); line-height: 1.35; }
-    .fact { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.7rem; line-height: 1.3; padding: 0.1rem 0.2rem; }
+    .sheet .name { font-size: var(--text-md); letter-spacing: 0.08em; }
+    .sheet .summary { font-size: var(--text-xs); color: var(--ink-dim); line-height: 1.35; }
+    .fact { display: flex; align-items: baseline; gap: 0.5rem; font-size: var(--text-sm); line-height: 1.3; padding: 0.1rem 0.2rem; }
     .fact .label { flex: 1; min-width: 0; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fact .value { flex-shrink: 0; color: var(--cyan); font-variant-numeric: tabular-nums; }
-    .gathered { border-top: 1px solid var(--edge, var(--line-soft)); margin-top: 0.3rem; padding-top: 0.3rem; }
+    .gathered { border-top: 1px solid var(--edge); margin-top: 0.3rem; padding-top: 0.3rem; }
     .gathered .heading { padding-bottom: 0.2rem; }
-    .entry { font-size: 0.68rem; line-height: 1.35; padding: 0.1rem 0.2rem; }
-    .entry .provenance { color: var(--amber, #d4a820); font-size: 0.6rem; letter-spacing: 0.12em; }
-    button.back { align-self: flex-start; font-family: inherit; font-size: 0.6rem; letter-spacing: 0.15em;
+    .entry { font-size: var(--text-xs); line-height: 1.35; padding: 0.1rem 0.2rem; }
+    .entry .provenance { color: var(--gold); font-size: var(--text-xs); letter-spacing: 0.12em; }
+    button.back { align-self: flex-start; font-family: inherit; font-size: var(--text-xs); letter-spacing: 0.15em;
                   padding: 0.2rem 0.5rem; margin-bottom: 0.2rem; background: transparent; color: var(--ink);
-                  border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; }
+                  border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; min-height: var(--control-hit-min); }
   </style>
   <div class="heading" id="heading"></div>
   <div id="body"></div>

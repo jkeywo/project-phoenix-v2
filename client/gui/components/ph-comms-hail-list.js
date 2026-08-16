@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhCommsHailList extends HTMLElement {
   #state = null;
@@ -13,22 +14,25 @@ export class PhCommsHailList extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
     .list { display: flex; flex-direction: column; gap: 0.25rem; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
-    .row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.7rem; padding: 0.35rem 0.4rem; cursor: pointer; border-radius: 2px; transition: background 0.15s ease; }
-    .row:hover { background: #161b24; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .row { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-sm); padding: 0.35rem 0.4rem; cursor: pointer; border-radius: 2px; transition: background 0.15s ease; min-height: var(--control-hit-min); }
+    .row:hover { background: var(--cyan-deep); }
     .dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; flex-shrink: 0; }
-    .dot.unread { background: #4a8fd4; }
+    .dot.unread { background: var(--science); }
     .dot.read { background: transparent; }
     .sender { font-weight: 400; color: var(--ink); min-width: 4rem; }
     .sender.unread { font-weight: 700; }
     .preview { color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
-    .timestamp { color: #4a5060; font-size: 0.6rem; flex-shrink: 0; }
+    .timestamp { color: var(--edge); font-size: var(--text-xs); flex-shrink: 0; }
   </style>
   <div class="list" id="list"></div>
 `;

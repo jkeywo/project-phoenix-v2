@@ -104,8 +104,28 @@ description = "entity.station_axiom.target.description"
 hull_integrity = 1600
 
 [collider]
+# Sized to the hull this station actually draws, at John's request: collision has
+# to match visible size.
+#
+# `alliance_starbase.glb` measures 1.8973 x 0.7958 x 1.8936 in raw model units,
+# and its sidecar's `[base].scale` of [15, 18, 18] puts 28.46 x 14.33 x 34.08 on
+# screen — a max half-extent of 17.04. The 12 here was seven-tenths of that, so
+# the outer five units of the ring carried no collision and ships flew THROUGH
+# the visible structure.
+#
+# A Ball at the max half-extent, not a Capsule and not an average: the shapes
+# `ColliderShape` offers are Ball and Capsule, and `Collider::capsule_y` is a
+# cylinder with hemispherical caps — it can only ever be taller than it is wide.
+# A station is a disc (34 across, 14 tall), which a capsule fits worse than a
+# sphere does from every direction. The max half-extent over-covers vertically
+# (17.04 against a true 7.16 half-height), and that is the honest cost of having
+# no cylinder: a ship crossing directly over the hub stops short of the visible
+# surface. Under-sizing is the bug being fixed, so the remaining error is put
+# where it keeps ships outside the hull rather than inside it. A `Cylinder` would
+# fit a disc properly and is the right follow-up — an engine change, not an
+# authored one.
 shape = "Ball"
-radius = 12
+radius = 17.04
 length = 0
 
 [radar_appearance]

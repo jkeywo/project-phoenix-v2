@@ -19,6 +19,11 @@
   <meta name="phoenix-build-demo" content="false" />
   <title data-i18n="client.doc_title">Project Phoenix — Console</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico" />
+<!-- The shared design vocabulary (PRD #1023 module 1): colours, edges, ink,
+     accents, space, the type ramp and its legibility floor, and the control
+     sizes. Defined once and consumed by this page, the host viewscreen, and
+     every console document (which reaches it through gui/console.css). -->
+<link rel="stylesheet" href="gui/tokens.css" />
   <!-- Keep rAF-driven UI (scheduleRender, radar sweeps, joystick decay in
        the console iframes) running at full rate even when this tab loses
        focus — see gui/bg-raf-keepalive.js. Must load before any other
@@ -42,6 +47,13 @@
   <script type="module" src="gui/station-roster.js"></script>
   <script type="module" src="gui/client-router.js"></script>
   <script type="module" src="gui/lobby-view.js"></script>
+  <!-- Onboarding/session-flow state (PRD #1023 module 4): the in-flight
+       scenario/ship pick, the game-over frame, and whether a console's link is
+       live, still loading or dead. All three are pure rules the inline script
+       renders; none of them touch the DOM themselves. -->
+  <script type="module" src="gui/scenario-pick.js"></script>
+  <script type="module" src="gui/game-over-view.js"></script>
+  <script type="module" src="gui/link-state.js"></script>
   <script type="module" src="gui/coordination-popup.js"></script>
   <!-- Per-tab session identity (issue: multiple clients on one desktop).
        localStorage is shared across all tabs of an origin, so every console
@@ -79,54 +91,47 @@
   <!-- Settings panel: client controls plus Station Help and Ship Manual. -->
   <script type="module" src="gui/settings-panel.js"></script>
   <style>
-    /* -- CSS variables (lobby + shared) -------------------------------- */
-    :root {
-      --signal-cyan: #5fd8e8;
-      --alert-red: #ff3344;
-      --bg: #07080c;
-      --surface: #0e1117;
-      --surface2: #161a22;
-      --edge: #282c38;
-      --dim: #6a7178;
-      --amber: #f0a030;
-    }
-    html, body { margin: 0; padding: 0; background: var(--bg); color: #cce; font-family: monospace; }
+    /* The lobby's vocabulary is gui/tokens.css, linked above — it used to keep
+       a parallel `:root` here whose `--edge` was a different colour from the
+       consoles' and whose `--dim` sat below the contrast floor. Retired into
+       the shared ramp; tests/client/console-tokens.test.js keeps it retired. */
+    html, body { margin: 0; padding: 0; background: var(--surface-abyss); color: var(--ink); font-family: monospace; }
     body { box-sizing: border-box; }
-    label { display: block; margin-bottom: 0.5rem; font-size: 0.85rem; }
+    label { display: block; margin-bottom: 0.5rem; font-size: var(--text-md); }
     input[type="text"] { display: block; width: 100%; box-sizing: border-box;
-      background: #111; color: #eef; border: 1px solid #446; padding: 0.5rem; margin-top: 0.25rem; }
-    button { display: block; width: 100%; background: #224; color: #eef;
-      border: 1px solid #446; padding: 0.75rem; margin: 0.4rem 0; cursor: pointer;
-      font-family: monospace; font-size: 1rem; text-align: left; }
-    button:active { background: #336; }
+      background: var(--surface-panel); color: var(--ink); border: 1px solid var(--edge); padding: 0.5rem; margin-top: 0.25rem; }
+    button { display: block; width: 100%; background: var(--surface-lift); color: var(--ink);
+      border: 1px solid var(--edge); padding: 0.75rem; margin: 0.4rem 0; cursor: pointer;
+      font-family: monospace; font-size: var(--text-lg); text-align: left; min-height: var(--control-hit-min); }
+    button:active { background: var(--surface-ridge); }
     button:disabled { opacity: 0.4; cursor: default; }
-    button.mine { border-color: #8af; color: #8af; }
+    button.mine { border-color: var(--sky); color: var(--sky); }
     /* Status line: bottom-left, above canvas. z-index 25 keeps it above the
        phone bezel (15) so connection status isn't obscured by the corner. */
-    #status { position: fixed; bottom: 0.5rem; left: 0.75rem; color: #778; font-size: 0.75rem; z-index: 25; }
+    #status { position: fixed; bottom: 0.5rem; left: 0.75rem; color: var(--edge-bright); font-size: var(--text-sm); z-index: 25; }
     /* Connection diagnostics readout: sits above #status, same corner. Shows
        relay reachability + per-attempt ICE stage so a phone user can report
        why a connection is stuck without opening devtools. */
-    #conn-diag { position: fixed; bottom: 1.6rem; left: 0.75rem; color: #667;
-      font-size: 0.65rem; z-index: 25; white-space: pre-line; max-width: 85vw; }
+    #conn-diag { position: fixed; bottom: 1.6rem; left: 0.75rem; color: var(--edge-strong);
+      font-size: var(--text-xs); z-index: 25; white-space: pre-line; max-width: 85vw; }
     section { display: none; }
     section.active { display: block; }
     #top-bar {
       position: fixed; top: 0.75rem; right: 0.75rem; z-index: 20;
       display: flex; align-items: center; gap: 0.5rem; font-family: monospace;
     }
-    #conn-label { font-size: 0.75rem; color: #f44; }
-    #conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #4c4; flex-shrink: 0; }
+    #conn-label { font-size: var(--text-sm); color: var(--fire-hot); }
+    #conn-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--loaded); flex-shrink: 0; }
     #retry-now-btn {
-      display: none; width: auto; background: #422; color: #fbb;
-      border: 1px solid #a55; padding: 0.2rem 0.5rem; margin: 0;
-      font-size: 0.7rem; cursor: pointer;
+      display: none; width: auto; background: var(--fire-deep); color: var(--tactical-bright);
+      border: 1px solid var(--fire); padding: 0.2rem 0.5rem; margin: 0;
+      font-size: var(--text-sm); cursor: pointer; min-height: var(--control-hit-min);
     }
     #retry-now-btn.visible { display: inline-block; }
-    #retry-now-btn:active { background: #633; }
+    #retry-now-btn:active { background: var(--reloading-dim); }
     #fullscreen-btn {
-      display: inline; width: auto; background: none; border: none; color: #cce;
-      font-size: 1.1rem; cursor: pointer; padding: 0; margin: 0; line-height: 1;
+      display: inline; width: auto; background: none; border: none; color: var(--ink);
+      font-size: var(--text-lg); cursor: pointer; padding: 0; margin: 0; line-height: 1; min-height: var(--control-hit-min);
     }
     /* View selector cross and Red Alert button moved to Bevy WASM (#48). */
     /* Console container: full-screen flex column layout host for all console
@@ -143,6 +148,51 @@
     #console-container > *, #console-container section.active > * {
       pointer-events: auto;
     }
+    /* -- Link state (PRD #1023 module 4, user stories 14 and 15) ---------
+       A console renders from local state, so it looks the same whether the
+       numbers behind it are live, stale or absent. [data-link] is what makes
+       that difference visible.
+
+       `connecting` is dimmed but still live to the touch: it is "not yet", and
+       it resolves on its own. `dead` is "no longer" — dimmed harder, drained
+       of colour, and inert, so a thumb cannot keep firing torpedoes into a
+       link that closed thirty seconds ago. pointer-events on the container is
+       what actually stops the taps: the controls themselves live inside
+       console iframes and shadow roots this page does not own. */
+    #console-container[data-link="connecting"] { opacity: 0.55; }
+    #console-container[data-link="dead"] {
+      opacity: 0.32; filter: grayscale(0.85);
+      pointer-events: none;
+    }
+    #console-container[data-link="dead"] > *,
+    #console-container[data-link="dead"] section.active > * {
+      pointer-events: none;
+    }
+    #console-container[data-link] { transition: opacity .25s ease, filter .25s ease; }
+    #link-banner[aria-hidden="true"] { display: none; }
+    #link-banner {
+      position: fixed; z-index: 188;
+      top: max(env(safe-area-inset-top), 3.2rem); left: 50%;
+      transform: translateX(-50%);
+      max-width: min(92vw, 46ch);
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      padding: 10px 18px; border-radius: 6px;
+      font-family: 'Chakra Petch', monospace; text-align: center;
+      background: var(--scrim-panel);
+      border: 1px solid var(--edge-strong);
+      pointer-events: none;
+    }
+    #link-banner[data-mode="dead"] {
+      border-color: var(--fire); background: rgba(var(--rgb-fire), 0.18);
+    }
+    #link-banner .link-banner-title {
+      font-size: var(--text-md); font-weight: 700;
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+      color: var(--ink);
+    }
+    #link-banner[data-mode="dead"] .link-banner-title { color: var(--fire-bright); }
+    #link-banner .link-banner-detail { font-size: var(--text-sm); color: var(--ink-dim); }
+    #link-banner .link-banner-detail:empty { display: none; }
     /* Helm console UI moved to Bevy WASM (#49). */
     /* Weapons console: full-viewport iframe overlay when active (issue #422).
        Padding leaves room for the phone bezel (issue #439); see --bezel-inset
@@ -174,10 +224,10 @@
        is purely cosmetic; pointer-events: none lets clicks through. */
 
     :root {
-      --bezel-frame: rgba(80, 150, 230, 0.7);
+      --bezel-frame: rgba(var(--rgb-science), 0.7);
       --bezel-glow-size: 4px;
       --bezel-pulse-intensity: 0.6;
-      --bezel-red: #ff2a2a;
+      --bezel-red: var(--fire-hot);
       --bezel-inset: 0px;
     }
 
@@ -191,44 +241,71 @@
     #phone-bezel.alert-on {
       border-color: var(--bezel-red);
       box-shadow: 0 0 var(--bezel-glow-size) calc(var(--bezel-glow-size) * 3) var(--bezel-frame);
-      animation: bezel-pulse 2.8s ease-in-out forwards;
+      /* `infinite`, not `forwards`: the alert is a STATE, and the bezel is how
+         the whole crew reads that state off each other's phones across a room.
+         With no iteration count the pulse ran exactly once — about three
+         seconds of alarm at the moment the captain raised it, and then a
+         static red frame for the rest of the engagement. The keyframes were
+         always written for a loop (the comment inside says "a steady slow
+         pulsing loop"); only the iteration count was missing. */
+      animation: bezel-pulse 2.8s ease-in-out infinite;
     }
 
     #phone-bezel.alert-on::after {
       /* Extra outer ring visible while the slow pulse continues so corners and edges look like an actual
          glowing frame without extra DOM nodes per edge/corner piece. */
       content: ''; position: absolute; inset: -2px;
-      border: 1.5px solid rgba(230, 50, 50, var(--bezel-pulse-intensity));
+      border: 1.5px solid rgba(var(--rgb-fire), var(--bezel-pulse-intensity));
       border-radius: inherit; pointer-events: none; opacity: 0.85;
     }
 
     @keyframes bezel-pulse {
        /* Initial fade-in up to peak intensity, then a steady slow pulsing loop. */
-      0%   { box-shadow: inset 0 0 4px transparent; border-color: rgba(255,80,60,0.5); opacity: 1; }
-     50%   { box-shadow: inset 0 0 8px var(--bezel-red), 0 0 16px calc(var(--bezel-glow-size) * 4) rgba(230,60,30,0.9); border-color: #ff5a44; opacity: 0.95; }
-    100%   { box-shadow: inset 0 0 4px transparent; border-color: rgba(255,80,60,0.5); opacity: 1; }
+      0%   { box-shadow: inset 0 0 4px transparent; border-color: rgba(var(--rgb-fire), 0.5); opacity: 1; }
+     50%   { box-shadow: inset 0 0 8px var(--bezel-red), 0 0 16px calc(var(--bezel-glow-size) * 4) rgba(var(--rgb-fire), 0.9); border-color: var(--fire-hot); opacity: 0.95; }
+    100%   { box-shadow: inset 0 0 4px transparent; border-color: rgba(var(--rgb-fire), 0.5); opacity: 1; }
 }
+
+    /* Reduced motion: still the pulse, keep the alert.
+       A looping red flash across the whole screen edge is exactly the kind of
+       thing a player who asks for reduced motion is asking not to be given.
+       The answer is to stop the ANIMATION, not to hide the STATE — so the
+       bezel holds at the keyframe's peak: full red border and full glow,
+       simply not moving. Someone reading the room still sees a ship at red
+       alert. This is the reduced-motion contract, and module 3 of PRD #1023
+       generalises it to every indefinitely looping animation. The rest of the
+       lobby's live at the END of this stylesheet, for the reason written
+       there; this one can stay beside the loop it stills because the loop is
+       declared above it. */
+    @media (prefers-reduced-motion: reduce) {
+      #phone-bezel.alert-on {
+        animation: none;
+        border-color: var(--fire-hot);
+        box-shadow: inset 0 0 8px var(--bezel-red),
+                    0 0 16px calc(var(--bezel-glow-size) * 4) rgba(var(--rgb-fire), 0.9);
+      }
+    }
 
      #phone-bezel[aria-hidden="true"] { display: none; }
     #coordination-popup {
       display: none;
       position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
       z-index: 180;
-      background: #1a2a3a;
-      border: 1px solid #4af;
+      background: var(--surface-panel-up);
+      border: 1px solid var(--science);
       border-radius: 8px;
       padding: 12px 18px;
       max-width: 320px;
-      color: #d0e4f0;
+      color: var(--ink);
       font-family: 'Chakra Petch', monospace;
-      font-size: 1.275rem;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+      font-size: var(--text-xl);
+      box-shadow: 0 4px 20px rgba(var(--rgb-void), 0.6);
       cursor: pointer;
       user-select: none;
     }
     #coordination-popup .popup-sender {
-      font-size: 1.05rem;
-      color: #8af;
+      font-size: var(--text-lg);
+      color: var(--sky);
       margin-bottom: 4px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
@@ -238,8 +315,8 @@
       margin-bottom: 2px;
     }
     #coordination-popup .popup-body {
-      font-size: 1.2rem;
-      color: #a0b8c8;
+      font-size: var(--text-xl);
+      color: var(--ink-dim);
     }
 
     /* -- Asset loading overlay (shown during Loading phase) ---------- */
@@ -249,21 +326,21 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: var(--bg);
-      color: #8af;
+      background: var(--surface-abyss);
+      color: var(--sky);
       font-family: 'Chakra Petch', monospace;
-      font-size: 1rem;
+      font-size: var(--text-lg);
       text-align: center;
       gap: 16px;
     }
     #asset-loading .spinner-ring {
       width: 40px; height: 40px;
-      border: 3px solid #335;
-      border-top-color: #8af;
+      border: 3px solid var(--surface-ridge);
+      border-top-color: var(--sky);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
-    #asset-loading .pct { font-size: 1.4rem; font-weight: 600; }
+    #asset-loading .pct { font-size: var(--text-xl); font-weight: 600; }
 
     /* -- Game-over overlay (shown when GamePhase::GameOver) ---------- */
     #game-over-overlay {
@@ -272,14 +349,45 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: rgba(0, 0, 0, 0.88);
-      color: #cde;
+      background: rgba(var(--rgb-void), 0.88);
+      color: var(--ink);
       font-family: 'Chakra Petch', monospace;
       text-align: center;
       padding: 32px;
     }
+    /* The frame, outermost first (PRD #1023 module 4): the scenario that just
+       ended, the result it ended in, then the world's own closing prose. The
+       accent is the only thing the outcome changes — the layout is identical
+       for a win and a loss, so neither reads as the "special" ending. */
+    #game-over-overlay .game-over-scenario {
+      font-size: var(--text-md);
+      letter-spacing: var(--tracking-widest);
+      text-transform: uppercase;
+      color: var(--ink-dim);
+      margin-bottom: 10px;
+    }
+    #game-over-overlay .game-over-scenario:empty { display: none; }
+    #game-over-overlay .game-over-headline {
+      font-size: var(--text-display);
+      font-weight: 700;
+      letter-spacing: var(--tracking-wide);
+      text-transform: uppercase;
+      line-height: 1.1;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--edge-strong);
+    }
+    #game-over-overlay[data-outcome="victory"] .game-over-headline {
+      color: var(--loaded-bright); border-bottom-color: var(--loaded);
+    }
+    #game-over-overlay[data-outcome="defeat"] .game-over-headline {
+      color: var(--fire-bright); border-bottom-color: var(--fire);
+    }
+    #game-over-overlay[data-outcome="ended"] .game-over-headline {
+      color: var(--ink); border-bottom-color: var(--edge-strong);
+    }
     #game-over-overlay .game-over-message {
-      font-size: clamp(0.95rem, 2.5vw, 1.15rem);
+      font-size: var(--text-lg);
       white-space: pre-wrap;
       line-height: 1.7;
       max-width: 64ch;
@@ -289,14 +397,14 @@
       margin-top: 32px;
       padding: 12px 32px;
       font-family: 'Chakra Petch', monospace;
-      font-size: 1rem;
+      font-size: var(--text-lg);
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: #cde;
-      background: rgba(140, 180, 220, 0.12);
-      border: 1px solid #8ac;
+      color: var(--ink);
+      background: rgba(var(--rgb-cyan), 0.12);
+      border: 1px solid var(--ink-dim);
       border-radius: 2px;
-      cursor: pointer;
+      cursor: pointer; min-height: var(--control-hit-min);
     }
 
     /* -- Waiting-for-scenario overlay (shown after ReturnToLobby until host picks) */
@@ -306,20 +414,20 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      background: rgba(0, 0, 0, 0.92);
-      color: #9ab;
+      background: rgba(var(--rgb-void), 0.92);
+      color: var(--ink-dim);
       font-family: 'Chakra Petch', monospace;
       text-align: center;
       padding: 32px;
-      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      font-size: var(--text-lg);
       letter-spacing: 0.06em;
     }
     #waiting-overlay .spinner-ring {
       display: inline-block;
       width: 32px; height: 32px;
       margin-bottom: 24px;
-      border: 2px solid rgba(140, 180, 220, 0.2);
-      border-top-color: #8ac;
+      border: 2px solid rgba(var(--rgb-cyan), 0.2);
+      border-top-color: var(--ink-dim);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
@@ -331,8 +439,8 @@
       flex-direction: column;
       align-items: stretch;
       justify-content: flex-start;
-      background: rgba(0, 0, 0, 0.94);
-      color: #9ab;
+      background: rgba(var(--rgb-void), 0.94);
+      color: var(--ink-dim);
       font-family: 'Chakra Petch', monospace;
       padding: 24px 18px;
       gap: 16px;
@@ -340,9 +448,9 @@
     }
     #scenario-picker-heading {
       text-align: center;
-      font-size: clamp(1rem, 3vw, 1.3rem);
+      font-size: var(--text-xl);
       letter-spacing: 0.08em;
-      color: #cde;
+      color: var(--ink);
       text-transform: uppercase;
     }
     #scenario-picker-body { display: flex; flex-direction: column; gap: 12px; }
@@ -350,23 +458,44 @@
       display: block; width: 100%;
       padding: 16px 18px;
       font-family: 'Chakra Petch', monospace;
-      font-size: 1rem; letter-spacing: 0.06em;
-      color: #d8e2ff; text-align: left;
-      background: rgba(140, 180, 220, 0.1);
-      border: 1px solid #558; border-radius: 6px;
-      cursor: pointer;
+      font-size: var(--text-lg); letter-spacing: 0.06em;
+      color: var(--ink); text-align: left;
+      background: rgba(var(--rgb-cyan), 0.1);
+      border: 1px solid var(--edge-control); border-radius: 6px;
+      cursor: pointer; min-height: var(--control-hit-min);
     }
-    #scenario-picker-body .scenario-btn:active { background: rgba(140, 180, 220, 0.22); }
-    #scenario-picker-body .scenario-desc { font-size: 0.75rem; color: #8a98c4; margin-top: 6px; letter-spacing: 0.02em; }
-    #scenario-picker-body .scenario-locked-note { text-align: center; color: #8a98c4; font-size: 0.85rem; letter-spacing: 0.05em; }
+    #scenario-picker-body .scenario-btn:active { background: rgba(var(--rgb-cyan), 0.22); }
+    /* In-flight pick (PRD #1023 user story 16). The tapped button keeps its
+       accent and gains a line saying the request is out; every other button
+       recedes, because the arbiter will ignore a second request anyway and a
+       picker that keeps taking taps it will not act on is what made the stage
+       change feel arbitrary. */
+    #scenario-picker-body .scenario-btn:disabled { opacity: 0.45; cursor: default; }
+    #scenario-picker-body .scenario-btn.pending:disabled {
+      opacity: 1; border-color: var(--signal); background: rgba(var(--rgb-cyan), 0.2);
+    }
+    #scenario-picker-body .scenario-pending {
+      margin-top: 6px; font-size: var(--text-sm); color: var(--signal);
+      letter-spacing: var(--tracking-wide); text-transform: uppercase;
+    }
+    /* Another phone won the race. Stated, and naming what it chose, so the
+       stage the player was moved to has a cause. */
+    #scenario-picker-body .scenario-race-note {
+      padding: 10px 14px; border-radius: 6px; text-align: center;
+      font-size: var(--text-md); color: var(--ink);
+      background: rgba(var(--rgb-gold), 0.14); border: 1px solid var(--gold);
+      letter-spacing: 0.03em;
+    }
+    #scenario-picker-body .scenario-desc { font-size: var(--text-sm); color: var(--ink-dim); margin-top: 6px; letter-spacing: 0.02em; }
+    #scenario-picker-body .scenario-locked-note { text-align: center; color: var(--ink-dim); font-size: var(--text-md); letter-spacing: 0.05em; }
     /* Mod-origin badge on a scenario button (issue #990): a base scenario gets
        none, a mod-supplied one wears the applied pack's name. */
     #scenario-picker-body .scenario-origin {
       display: inline-block; margin-top: 8px;
       padding: 2px 8px; border-radius: 4px;
-      font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase;
-      color: #cfe0ff; background: rgba(120, 160, 220, 0.22);
-      border: 1px solid #6a7fb8;
+      font-size: var(--text-xs); letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--ink); background: rgba(var(--rgb-cyan), 0.22);
+      border: 1px solid var(--ink-faint);
     }
 
     /* -- "Mods active" lobby list (issue #990) --------------------------- */
@@ -377,13 +506,13 @@
       font-family: 'Chakra Petch', monospace;
     }
     #lobby-mods .mods-active-heading {
-      font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase;
-      color: #8a98c4;
+      font-size: var(--text-xs); letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--ink-dim);
     }
     #lobby-mods .mods-active-row {
-      font-size: 0.8rem; letter-spacing: 0.03em; color: #cfe0ff;
+      font-size: var(--text-md); letter-spacing: 0.03em; color: var(--ink);
     }
-    #lobby-mods .mods-active-version { color: #8a98c4; margin-left: 6px; }
+    #lobby-mods .mods-active-version { color: var(--ink-dim); margin-left: 6px; }
 
 
     /* -- Lobby section: full-viewport when active ------------------------ */
@@ -402,8 +531,8 @@
          station list beneath it; 4px of slack over the 40px the cog reaches.
          Pinned by tests/client/settings-panel.test.js. */
       padding: 44px 12px 6px;
-      background: var(--bg);
-      color: #d8dde2;
+      background: var(--surface-abyss);
+      color: var(--ink);
       font-family: 'Chakra Petch', system-ui, sans-serif;
       -webkit-user-select: none; user-select: none;
       pointer-events: auto;
@@ -412,109 +541,117 @@
     #lobby-header { display: flex; align-items: center; justify-content: space-between;
       padding: 4px 0 8px; border-bottom: 1px solid var(--edge); flex-shrink: 0; }
     #ship-info { display: flex; flex-direction: column; gap: 1px; }
-    #ship-name { font-size: 1rem; font-weight: 600; color: #eef; letter-spacing: .06em; }
-    #ship-mission { font-size: 0.6rem; color: var(--dim); letter-spacing: .04em; }
+    #ship-name { font-size: var(--text-lg); font-weight: 600; color: var(--ink); letter-spacing: .06em; }
+    #ship-mission { font-size: var(--text-xs); color: var(--ink-faint); letter-spacing: .04em; }
     #crew-ready { display: flex; align-items: center; gap: 8px; }
-    #crew-display { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--dim); }
-    #ready-pill { padding: 2px 10px; border-radius: 10px; font-size: 0.6rem;
+    #crew-display { font-family: 'JetBrains Mono', monospace; font-size: var(--text-sm); color: var(--ink-faint); }
+    #ready-pill { padding: 2px 10px; border-radius: 10px; font-size: var(--text-xs);
       font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
-      background: #221e10; color: var(--amber); border: 1px solid var(--amber);
+      background: var(--reloading-deep); color: var(--reloading); border: 1px solid var(--reloading);
       transition: all .3s ease; }
-    #ready-pill.go { background: #0a2830; color: var(--signal-cyan); border-color: var(--signal-cyan);
+    #ready-pill.go { background: var(--surface-panel-up); color: var(--signal); border-color: var(--signal);
       animation: pill-pulse 1.5s ease-in-out infinite; }
      @keyframes spin { to { transform: rotate(360deg); } }
 
      @keyframes pill-pulse {
-        0%, 100%{ box-shadow: 0 0 4px rgba(95,216,232,0.2); }
-       50%      { box-shadow: 0 0 12px rgba(95,216,232,0.5); }
+        0%, 100%{ box-shadow: 0 0 4px rgba(var(--rgb-signal), 0.2); }
+       50%      { box-shadow: 0 0 12px rgba(var(--rgb-signal), 0.5); }
     }
 
     /* Name input row */
     #lobby-name-row { flex-shrink: 0; padding: 6px 0 2px; }
-    #lobby-name-row label { font-size: 0.7rem; color: var(--dim); margin: 0;
+    #lobby-name-row label { font-size: var(--text-sm); color: var(--ink-faint); margin: 0;
       display: flex; align-items: center; gap: 8px; }
-    #lobby-name-row input { flex: 1; background: var(--surface); color: #d8dde2;
+    #lobby-name-row input { flex: 1; background: var(--surface-panel); color: var(--ink);
       border: 1px solid var(--edge); padding: 4px 8px; border-radius: 3px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.8rem;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-md);
       display: inline; width: auto; margin: 0; }
     /* Station list */
     #station-list { flex: 1; overflow-y: auto; padding: 8px 0; display: flex;
       flex-direction: column; gap: 6px; }
     .station-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
-      border-radius: 6px; background: var(--surface); border: 1px solid var(--edge);
+      border-radius: 6px; background: var(--surface-panel); border: 1px solid var(--edge);
       transition: border-color .2s, background .2s; }
-    .station-row.mine { border-color: var(--signal-cyan); background: #0a1a24; }
+    .station-row.mine { border-color: var(--signal); background: var(--cyan-deep); }
     .station-row.taken { opacity: 0.7; }
     .station-row .glyph { width: 36px; height: 36px; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      font-size: 0.7rem; font-weight: 700; flex-shrink: 0;
-      background: var(--surface2); color: var(--dim); border: 1px solid var(--edge); }
-    .station-row.mine .glyph { border-color: var(--signal-cyan); color: var(--signal-cyan); }
+      font-size: var(--text-sm); font-weight: 700; flex-shrink: 0;
+      background: var(--surface-panel-up); color: var(--ink-faint); border: 1px solid var(--edge); }
+    .station-row.mine .glyph { border-color: var(--signal); color: var(--signal); }
     .station-row .info { flex: 1; min-width: 0; }
-    .station-row .info .name { font-size: 0.85rem; font-weight: 600; }
-    .station-row .info .meta { font-size: 0.6rem; color: var(--dim);
+    .station-row .info .name { font-size: var(--text-md); font-weight: 600; }
+    .station-row .info .meta { font-size: var(--text-xs); color: var(--ink-faint);
       display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
     .station-row .info .meta .cons { padding: 1px 5px; border-radius: 2px;
-      background: var(--surface2); font-size: 0.55rem; color: #7aa; }
-    .station-row .info .occupant { font-size: 0.7rem; color: var(--signal-cyan); }
+      background: var(--surface-panel-up); font-size: var(--text-xs); color: var(--ink-dim); }
+    /* What the seat does, read before it is claimed (PRD #1023 module 4).
+       --ink-dim rather than --ink-faint: this is copy meant to be read at
+       arm's length, not a de-emphasised label. */
+    .station-row .info .desc { font-size: var(--text-sm); color: var(--ink-dim);
+      margin-top: 2px; line-height: 1.4; }
+    .station-row .info .occupant { font-size: var(--text-sm); color: var(--signal); }
     .station-row .action { flex-shrink: 0; }
     .station-row .action button { padding: 4px 12px; border-radius: 4px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.7rem;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-sm);
       font-weight: 600; letter-spacing: .06em; cursor: pointer; border: 1px solid;
-      transition: background .15s; display: block; width: auto; margin: 0; text-align: center; }
-    .station-row .action .claim-btn { background: #0a2830; color: var(--signal-cyan);
-      border-color: var(--signal-cyan); }
-    .station-row .action .claim-btn:hover { background: #1a3848; }
-    .station-row .action .mine-btn { background: #0a1a24; color: var(--signal-cyan);
-      border-color: var(--signal-cyan); }
-    .station-row .action .taken-btn { background: #111; color: var(--dim);
+      transition: background .15s; display: block; width: auto; margin: 0; text-align: center; min-height: var(--control-hit-min); }
+    .station-row .action .claim-btn { background: var(--surface-panel-up); color: var(--signal);
+      border-color: var(--signal); }
+    .station-row .action .claim-btn:hover { background: var(--cyan-dim); }
+    .station-row .action .mine-btn { background: var(--cyan-deep); color: var(--signal);
+      border-color: var(--signal); }
+    .station-row .action .taken-btn { background: var(--surface-panel); color: var(--ink-faint);
       border-color: var(--edge); cursor: default; }
     /* Detail panel */
     #detail-panel { flex-shrink: 0; border-top: 1px solid var(--edge);
       padding: 8px 0 4px; margin-top: 4px; transition: opacity .3s ease; }
     #detail-panel.idle { opacity: 0.4; }
     #detail-panel .detail-header { display: flex; align-items: center; justify-content: space-between; }
-    #detail-panel .detail-station-name { font-size: 0.85rem; font-weight: 600; color: var(--dim); }
-    #detail-panel.active .detail-station-name { color: var(--signal-cyan); }
+    #detail-panel .detail-station-name { font-size: var(--text-md); font-weight: 600; color: var(--ink-faint); }
+    #detail-panel.active .detail-station-name { color: var(--signal); }
+    #detail-panel .detail-station-desc:empty { display: none; }
+    #detail-panel .detail-station-desc { font-size: var(--text-sm); color: var(--ink-dim);
+      margin: 3px 0 0; line-height: 1.4; }
     #detail-panel .detail-consoles { display: flex; gap: 4px; margin: 4px 0; flex-wrap: wrap; }
     #detail-panel .detail-consoles .chip { padding: 2px 8px; border-radius: 3px;
-      font-size: 0.6rem; background: var(--surface2); color: #7aa; border: 1px solid var(--edge);
-      cursor: pointer; transition: background .15s, border-color .15s, color .15s; }
-    #detail-panel .detail-consoles .chip:hover { border-color: var(--signal-cyan); color: var(--signal-cyan); }
-    #detail-panel .detail-consoles .chip.selected { background: #0a2830;
-      border-color: var(--signal-cyan); color: var(--signal-cyan); }
+      font-size: var(--text-xs); background: var(--surface-panel-up); color: var(--ink-dim); border: 1px solid var(--edge);
+      cursor: pointer; transition: background .15s, border-color .15s, color .15s; display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-hit-min); }
+    #detail-panel .detail-consoles .chip:hover { border-color: var(--signal); color: var(--signal); }
+    #detail-panel .detail-consoles .chip.selected { background: var(--surface-panel-up);
+      border-color: var(--signal); color: var(--signal); }
     #detail-panel .detail-ratings { display: flex; gap: 2px; margin: 4px 0; }
     #detail-panel .detail-ratings .rating-btn { padding: 2px 10px; border-radius: 3px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.6rem;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-xs);
       font-weight: 500; cursor: pointer; border: 1px solid var(--edge);
-      background: var(--surface); color: var(--dim); display: block; width: auto; margin: 0;
-      transition: background .15s, border-color .15s; }
-    #detail-panel .detail-ratings .rating-btn.active { background: #0a2830;
-      border-color: var(--signal-cyan); color: var(--signal-cyan); }
+      background: var(--surface-panel); color: var(--ink-faint); display: block; width: auto; margin: 0;
+      transition: background .15s, border-color .15s; min-height: var(--control-hit-min); }
+    #detail-panel .detail-ratings .rating-btn.active { background: var(--surface-panel-up);
+      border-color: var(--signal); color: var(--signal); }
     #detail-panel .detail-release-btn { padding: 2px 10px; border-radius: 3px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.6rem;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-xs);
       font-weight: 600; letter-spacing: .06em; cursor: pointer;
-      border: 1px solid var(--alert-red); background: transparent; color: var(--alert-red);
+      border: 1px solid var(--fire-hot); background: transparent; color: var(--fire-hot);
       display: block; width: auto; margin: 0; flex-shrink: 0;
-      transition: background .15s; }
-    #detail-panel .detail-release-btn:hover { background: rgba(255,51,68,0.1); }
+      transition: background .15s; min-height: var(--control-hit-min); }
+    #detail-panel .detail-release-btn:hover { background: rgba(var(--rgb-fire), 0.1); }
     /* Lobby footer */
     #lobby-footer { flex-shrink: 0; display: flex; align-items: center;
       justify-content: space-between; padding: 6px 0 4px;
       border-top: 1px solid var(--edge); margin-top: auto; }
-    #status-line { font-size: 0.65rem; color: var(--dim); }
+    #status-line { font-size: var(--text-xs); color: var(--ink-faint); }
     #ready-btn { padding: 6px 16px; border-radius: 4px;
-      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: 0.75rem;
+      font-family: 'Chakra Petch', system-ui, sans-serif; font-size: var(--text-sm);
       font-weight: 700; letter-spacing: .12em; cursor: pointer;
-      border: 1px solid var(--edge); background: var(--surface); color: var(--dim);
-      transition: all .3s ease; display: none; width: auto; margin: 0; }
-    #ready-btn.armed { display: block; background: #0a2830;
-      border-color: var(--signal-cyan); color: var(--signal-cyan); }
-    #ready-btn.armed:hover { background: #1a3848; }
+      border: 1px solid var(--edge); background: var(--surface-panel); color: var(--ink-faint);
+      transition: all .3s ease; display: none; width: auto; margin: 0; min-height: var(--control-hit-min); }
+    #ready-btn.armed { display: block; background: var(--surface-panel-up);
+      border-color: var(--signal); color: var(--signal); }
+    #ready-btn.armed:hover { background: var(--cyan-dim); }
     #ready-btn.armed.glow { animation: ready-pulse 1s ease-in-out infinite; }
     @keyframes ready-pulse {
-      0%, 100% { box-shadow: 0 0 6px rgba(95,216,232,0.3); }
-      50%       { box-shadow: 0 0 18px rgba(95,216,232,0.7); }
+      0%, 100% { box-shadow: 0 0 6px rgba(var(--rgb-signal), 0.3); }
+      50%       { box-shadow: 0 0 18px rgba(var(--rgb-signal), 0.7); }
     }
     #ready-btn:disabled { opacity: 0.4; cursor: default; animation: none !important; }
 
@@ -543,30 +680,30 @@
       align-items: center;
       justify-content: center;
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 1.15rem;
+      font-size: var(--text-lg);
       line-height: 1;
-      color: var(--dim);
-      background: rgba(14, 17, 23, 0.7);
+      color: var(--ink-faint);
+      background: rgba(var(--rgb-panel), 0.7);
       border: 1px solid var(--edge);
       border-radius: 3px;
       cursor: pointer;
       user-select: none;
       touch-action: manipulation;
-      padding: 0;
+      padding: 0; min-height: var(--control-hit-min);
     }
-    .settings-btn:hover { color: #cce; border-color: #6a8; }
-    .settings-btn:active { background: rgba(30, 40, 60, 0.85); }
+    .settings-btn:hover { color: var(--ink); border-color: var(--loaded); }
+    .settings-btn:active { background: rgba(var(--rgb-panel-up), 0.85); }
     .settings-overlay {
       position: fixed; inset: 0; z-index: 1000;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
-      background: rgba(5, 8, 24, 0.88);
+      background: rgba(var(--rgb-deep), 0.88);
       cursor: pointer;
     }
     .settings-overlay[hidden] { display: none; }
     .settings-overlay .settings-popup {
       cursor: auto;
-      background: var(--surface);
+      background: var(--surface-panel);
       border: 1px solid var(--edge);
       border-radius: 6px;
       padding: 1.25rem 1.5rem;
@@ -587,17 +724,17 @@
       display: block; width: auto; margin: 0; flex: 1;
       padding: 0.35rem 0.4rem;
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.7rem; font-weight: 600;
+      font-size: var(--text-sm); font-weight: 600;
       letter-spacing: 0.06em; text-transform: uppercase;
       cursor: pointer;
       border: 1px solid var(--edge); border-radius: 3px;
-      background: var(--surface2); color: var(--dim);
+      background: var(--surface-panel-up); color: var(--ink-faint);
       text-align: center;
-      touch-action: manipulation;
+      touch-action: manipulation; min-height: var(--control-hit-min);
     }
     .settings-tab.active {
-      background: #0a2830; border-color: var(--signal-cyan);
-      color: var(--signal-cyan);
+      background: var(--surface-panel-up); border-color: var(--signal);
+      color: var(--signal);
     }
     .settings-body {
       display: flex; flex-direction: column; gap: 1rem;
@@ -607,27 +744,27 @@
     .station-help-group { display: flex; flex-direction: column; gap: 0.65rem; }
     .station-help-heading {
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.78rem; font-weight: 600; letter-spacing: 0.12em;
-      color: var(--signal-cyan); text-transform: uppercase;
+      font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.12em;
+      color: var(--signal); text-transform: uppercase;
     }
     .station-help-sections { display: flex; flex-direction: column; gap: 0.65rem; }
     .station-help-section-title {
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; color: #cce;
+      font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.08em; color: var(--ink);
     }
     .station-help-section-body {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.72rem; line-height: 1.45; color: var(--dim); margin-top: 0.15rem;
+      font-size: var(--text-sm); line-height: 1.45; color: var(--ink-faint); margin-top: 0.15rem;
     }
     .settings-section { display: flex; flex-direction: column; gap: 0.4rem; }
     .settings-section-hint {
-      font-size: 0.7rem; color: var(--dim); line-height: 1.35;
+      font-size: var(--text-sm); color: var(--ink-faint); line-height: 1.35;
     }
     .settings-section-heading {
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.75rem; font-weight: 600;
+      font-size: var(--text-sm); font-weight: 600;
       letter-spacing: 0.12em;
-      color: var(--signal-cyan);
+      color: var(--signal);
       text-transform: uppercase;
     }
     .settings-rating-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
@@ -635,18 +772,18 @@
       display: block; width: auto; margin: 0;
       padding: 0.35rem 0.7rem;
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.7rem; font-weight: 600;
+      font-size: var(--text-sm); font-weight: 600;
       letter-spacing: 0.08em; text-transform: uppercase;
       cursor: pointer;
       border: 1px solid var(--edge); border-radius: 3px;
-      background: var(--surface2); color: var(--dim);
-      touch-action: manipulation;
+      background: var(--surface-panel-up); color: var(--ink-faint);
+      touch-action: manipulation; min-height: var(--control-hit-min);
     }
     .settings-rating-btn.active {
-      background: #0a2830; border-color: var(--signal-cyan);
-      color: var(--signal-cyan);
+      background: var(--surface-panel-up); border-color: var(--signal);
+      color: var(--signal);
     }
-    .settings-rating-btn:active { background: #1a3848; }
+    .settings-rating-btn:active { background: var(--cyan-dim); }
     .settings-vol-row {
       display: flex; align-items: center; gap: 0.6rem;
     }
@@ -659,56 +796,56 @@
     .settings-vol-row input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none; appearance: none;
       width: 1rem; height: 1rem; border-radius: 50%;
-      background: var(--signal-cyan); cursor: pointer; border: none;
+      background: var(--signal); cursor: pointer; border: none;
     }
     .settings-vol-row input[type="range"]::-moz-range-thumb {
       width: 1rem; height: 1rem; border-radius: 50%;
-      background: var(--signal-cyan); cursor: pointer; border: none;
+      background: var(--signal); cursor: pointer; border: none;
     }
     .settings-vol-label {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem; color: var(--dim);
+      font-size: var(--text-sm); color: var(--ink-faint);
       min-width: 2.5rem; text-align: right;
     }
     .settings-action-btn {
       display: block; width: 100%; margin: 0;
       padding: 0.5rem 0.75rem;
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.75rem; font-weight: 600;
+      font-size: var(--text-sm); font-weight: 600;
       letter-spacing: 0.08em; text-transform: uppercase;
       cursor: pointer;
       border: 1px solid var(--edge); border-radius: 3px;
-      background: var(--surface2); color: #cce;
+      background: var(--surface-panel-up); color: var(--ink);
       text-align: center;
-      touch-action: manipulation;
+      touch-action: manipulation; min-height: var(--control-hit-min);
     }
-    .settings-action-btn:active { background: #1a3848; }
+    .settings-action-btn:active { background: var(--cyan-dim); }
     .settings-leave-btn {
-      border-color: var(--alert-red); color: var(--alert-red);
+      border-color: var(--fire-hot); color: var(--fire-hot);
     }
-    .settings-leave-btn:active { background: rgba(255,51,68,0.1); }
+    .settings-leave-btn:active { background: rgba(var(--rgb-fire), 0.1); }
 
     /* ── Ship manual content in the Settings menu ──────────────── */
     .manual-tabs { display: flex; gap: 0.3rem; flex-wrap: wrap; }
     .manual-tab {
       padding: 0.3rem 0.6rem;
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.65rem; font-weight: 600;
+      font-size: var(--text-xs); font-weight: 600;
       letter-spacing: 0.06em; text-transform: uppercase;
       cursor: pointer;
       border: 1px solid var(--edge); border-radius: 3px;
-      background: var(--surface2); color: var(--dim);
-      touch-action: manipulation;
+      background: var(--surface-panel-up); color: var(--ink-faint);
+      touch-action: manipulation; min-height: var(--control-hit-min);
     }
     .manual-tab.active {
-      background: #0a2830; border-color: var(--signal-cyan);
-      color: var(--signal-cyan);
+      background: var(--surface-panel-up); border-color: var(--signal);
+      color: var(--signal);
     }
     .manual-panel-host { overflow-y: auto; }
     .manual-station-panel { display: flex; flex-direction: column; gap: 0.7rem; }
     .manual-overview {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem; line-height: 1.5; color: #cce;
+      font-size: var(--text-sm); line-height: 1.5; color: var(--ink);
       white-space: pre-wrap;
     }
     .manual-section {
@@ -717,28 +854,67 @@
     }
     .manual-section-heading {
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.7rem; font-weight: 600;
+      font-size: var(--text-sm); font-weight: 600;
       letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--signal-cyan);
+      color: var(--signal);
     }
     .manual-metric {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.72rem; color: var(--dim);
+      font-size: var(--text-sm); color: var(--ink-faint);
     }
     .manual-automation-heading {
       margin-top: 0.35rem;
       font-family: 'Chakra Petch', sans-serif;
-      font-size: 0.62rem; font-weight: 600;
+      font-size: var(--text-xs); font-weight: 600;
       letter-spacing: 0.08em; text-transform: uppercase;
-      color: var(--dim);
+      color: var(--ink-faint);
     }
     .manual-automation-row {
       display: flex; gap: 0.5rem;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 0.68rem; color: var(--dim);
+      font-size: var(--text-xs); color: var(--ink-faint);
     }
-    .manual-rating-name { color: var(--signal-cyan); min-width: 5rem; }
+    .manual-rating-name { color: var(--signal); min-width: 5rem; }
     .manual-rating-systems { flex: 1; word-break: break-word; }
+
+    /* ── Reduced motion, continued ──────────────────────────────
+       LAST in the stylesheet, and that position is the whole point.
+
+       A media query adds no specificity. `@media (prefers-reduced-motion)
+       { #ready-pill.go { animation: none } }` and the `#ready-pill.go` that
+       starts the pulse are the same weight, so the one written LATER wins —
+       and these four loops are all declared further down the file than the
+       red-alert bezel is. Written up beside the bezel, as they first were,
+       every one of them silently lost, and the page went on pulsing at a
+       player who had asked it not to. A reduced-motion rule that loses the
+       cascade is indistinguishable from one nobody wrote.
+
+       So they live here, after everything they override. The alternative —
+       `!important` on each — wins the same argument by shouting, and leaves
+       the next reader unable to tell which rules genuinely need it.
+       tests/client/control-floors.test.js asserts the ORDER, not just the
+       presence, for exactly this reason. */
+    @media (prefers-reduced-motion: reduce) {
+      /* The two spinners. A spinner says "still working", and a ring with one
+         arc in a different colour still reads as a progress indicator that has
+         stopped moving — which is honest, because the work IS proceeding.
+         Removing it would leave a blank panel reading as broken, which is a
+         defect this same PRD fixes elsewhere. */
+      #asset-loading .spinner-ring,
+      #waiting-overlay .spinner-ring {
+        animation: none;
+      }
+      /* The two "you are good to go" glows, held at the peak of their own
+         pulse so the ready state is still the brightest thing in the footer. */
+      #ready-pill.go {
+        animation: none;
+        box-shadow: 0 0 12px rgba(var(--rgb-signal), 0.5);
+      }
+      #ready-btn.armed.glow {
+        animation: none;
+        box-shadow: 0 0 18px rgba(var(--rgb-signal), 0.7);
+      }
+    }
   </style>
 </head>
 <body>
@@ -790,6 +966,7 @@
         <div class="detail-header">
           <span class="detail-station-name" data-i18n="client.no_station">No station assigned</span>
         </div>
+        <div class="detail-station-desc"></div>
         <div id="detail-console-area">
           <div class="detail-consoles"></div>
           <div class="detail-ratings"></div>
@@ -830,8 +1007,18 @@
   <!-- Game-over overlay: shown when GamePhase::GameOver. Displays either
        "Ship Destroyed" (hull death) or the scenario's game_over message. -->
   <div id="game-over-overlay">
+    <div class="game-over-scenario" id="game-over-scenario"></div>
+    <div class="game-over-headline" id="game-over-headline"></div>
     <div class="game-over-message" id="game-over-message"></div>
     <button id="return-to-lobby-btn" class="game-over-return-btn" data-i18n="client.return_to_lobby">Return to Lobby</button>
+  </div>
+
+  <!-- Link banner (PRD #1023 module 4): says out loud what the dimmed console
+       behind it means — either the host is gone, or its first state has not
+       landed yet. Hidden whenever the link is live. -->
+  <div id="link-banner" aria-hidden="true" role="status">
+    <div class="link-banner-title"></div>
+    <div class="link-banner-detail"></div>
   </div>
 
   <!-- Waiting-for-scenario overlay: shown after ReturnToLobby while the
@@ -888,6 +1075,24 @@
       if (window.phStrings && window.phStrings.has(key)) return window.phStrings.t(key);
       return st.name || st.id || '';
     }
+    // Resolve a value that arrived over the wire and MAY be a string id.
+    // A phone's copy came through localiseTree and is already resolved text;
+    // a mod pack's literal prose never was an id. Substitute only what the
+    // table actually holds — the same passthrough rule as
+    // gui/components/ph-ship-picker.js.
+    function wireText(value) {
+      if (!value) return '';
+      if (window.phStrings && window.phStrings.has(value)) return window.phStrings.t(value);
+      return String(value);
+    }
+    // What a station DOES, shown on its lobby row before the claim tap (PRD
+    // #1023 module 4). The copy is already authored per hull as
+    // `entity.<hull>.station.<id>.description` and rides the wire in
+    // StationDef.description — this reuses those ids rather than minting a
+    // second, diverging set.
+    function stationDescription(st) {
+      return st ? wireText(st.description) : '';
+    }
 
     // -- Click sound --------------------------------------------------------
     // Message types that should NOT trigger a click (continuous / connection
@@ -912,12 +1117,59 @@
 
     // -- Connection status --------------------------------------------------
 
+    /// The connection-manager status verbatim, and whether the host has said
+    /// anything at all since the link came up. Together they decide whether a
+    /// console is live, still loading, or dead (gui/link-state.js).
+    let linkStatus = 'connecting';
+    let linkHasData = false;
+
+    /// Dim + disable the console, or mark it as still loading, per
+    /// gui/link-state.js. Game shell only: in the lobby the status line and
+    /// the ready pill already carry this, and dimming the roster the player is
+    /// trying to claim from would be worse than useless.
+    function renderLinkState(inGame) {
+      const container = document.getElementById('console-container');
+      const banner = document.getElementById('link-banner');
+      if (!container || typeof window.linkView !== 'function') return;
+      const lv = window.linkView(linkStatus, linkHasData);
+      const mode = inGame ? lv.mode : 'live';
+      container.dataset.link = mode;
+      // aria-disabled rather than the disabled attribute: the controls live
+      // inside console iframes and shadow roots this page does not own, so the
+      // container's own pointer-events is what actually stops the taps.
+      container.setAttribute('aria-disabled', (inGame && lv.disable) ? 'true' : 'false');
+      if (banner) {
+        const showBanner = inGame && lv.bannerId;
+        banner.setAttribute('aria-hidden', showBanner ? 'false' : 'true');
+        banner.dataset.mode = mode;
+        if (showBanner) {
+          const title = banner.querySelector('.link-banner-title');
+          const detail = banner.querySelector('.link-banner-detail');
+          if (title) title.textContent = t(lv.mode === 'dead' ? 'client.link_dead' : 'client.link_connecting');
+          // The dead case says BOTH that the link is gone and what the client
+          // is doing about it; connecting has nothing to add to its own title.
+          if (detail) detail.textContent = lv.mode === 'dead' ? t(lv.bannerId) : '';
+        }
+      }
+    }
+
     function setConnectionStatus(state) {
+      linkStatus = state;
+      // A link that dropped has to re-earn "has data": whatever the console is
+      // showing when it comes back is from before the gap, so the console goes
+      // back through CONNECTING rather than straight to live with stale
+      // numbers on it (PRD #1023 user story 15).
+      //
+      // No scheduleRender() here, deliberately: this runs once at boot, ABOVE
+      // the scheduler's own `let _renderFrame`, and touching it from here put
+      // the whole inline script in a temporal dead zone. The onStatus callback
+      // that drives every LATER transition repaints instead.
+      if (state !== 'ready') linkHasData = false;
       const dot = document.getElementById('conn-dot');
       const label = document.getElementById('conn-label');
       const retryBtn = document.getElementById('retry-now-btn');
       if (state === 'disconnected') {
-        dot.style.background = '#f44';
+        dot.style.background = 'var(--fire-hot)';
         label.textContent = t('client.reconnecting'); // — reconnecting…';
         if (retryBtn) retryBtn.classList.add('visible');
       } else if (state === 'error') {
@@ -925,11 +1177,11 @@
         // retrying with backoff even after an 'error' signal, so this still
         // shows the retry-now affordance rather than telling the user to
         // refresh the page.
-        dot.style.background = '#f44';
+        dot.style.background = 'var(--fire-hot)';
         label.textContent = t('client.conn_error'); // — reconnecting…';
         if (retryBtn) retryBtn.classList.add('visible');
       } else {
-        dot.style.background = '#4c4';
+        dot.style.background = 'var(--loaded)';
         label.textContent = '';
         if (retryBtn) retryBtn.classList.remove('visible');
       }
@@ -1146,14 +1398,57 @@
     // rebuilt when the stage actually changes — the render loop runs at rAF
     // cadence and must not tear down a half-tapped picker.
     let _pickerStageKey = null;
+    /// The request this phone has sent and not yet seen answered, and the
+    /// "another phone got there first" record left by the last one that lost
+    /// the race. Both are pure-rule state — see gui/scenario-pick.js — kept
+    /// here because the arbiter never addresses an acknowledgement to us.
+    let _pick = null;
+    let _pickNotice = null;
+
+    /// Settle an outstanding pick against a freshly-arrived lock. Called from
+    /// handleMessage on every ScenarioCatalog broadcast (PRD #1023 module 4).
+    function settleScenarioPick() {
+      const ls = window.lobbyState;
+      if (!ls || !window.scenarioPick) return;
+      const settled = window.scenarioPick.settlePick(_pick, ls.selectionLocked);
+      _pick = settled.pending;
+      if (settled.state === 'lost') {
+        // Name what actually won, not just that we lost. `lostTo` is a
+        // scenario id or a template_path; resolve it back to its catalogue
+        // label so the message reads as prose.
+        _pickNotice = { choice: pickChoiceLabel(settled.lostTo) };
+      } else if (settled.state === 'won') {
+        _pickNotice = null;
+      }
+    }
+
+    /// Catalogue label for a locked scenario id or ship template_path.
+    function pickChoiceLabel(id) {
+      const ls = window.lobbyState;
+      const catalog = (ls && ls.scenarioCatalog) || [];
+      for (const sc of catalog) {
+        if (!sc) continue;
+        if (sc.id === id) return wireText(sc.label) || sc.id;
+        for (const sh of (sc.ships || [])) {
+          if (sh && sh.template_path === id) {
+            return wireText(sh.label) || wireText(sh.name) || id;
+          }
+        }
+      }
+      return String(id || '');
+    }
+
     function renderScenarioPicker() {
       const ls = window.lobbyState;
       const body = document.getElementById('scenario-picker-body');
       const heading = document.getElementById('scenario-picker-heading');
-      if (!ls || !body) return;
+      if (!ls || !body || !window.scenarioPick) return;
       const catalog = ls.scenarioCatalog || [];
       const activePacks = ls.activePacks || [];
       const locked = ls.selectionLocked || { scenario_id: null, template_path: null };
+      const pv = window.scenarioPick.scenarioPickView({
+        catalog, locked, pending: _pick, notice: _pickNotice,
+      });
 
       let stage;
       if (locked.scenario_id == null) stage = 'scenario';
@@ -1162,17 +1457,33 @@
       // Pack count is in the key so a change to the applied mods re-renders the
       // scenario buttons' mod-origin badges (issue #990), not only a catalog
       // change (the two arrive together, but a later pack edit updates one).
-      const key = stage + '|' + catalog.length + '|' + activePacks.length;
+      // The pending id and the race notice are in it too: a tap must repaint
+      // the picker WITHOUT waiting for a stage change, since waiting for the
+      // stage change is exactly the silence the pending state exists to fill.
+      const key = stage + '|' + catalog.length + '|' + activePacks.length
+        + '|' + (pv.pendingId || '') + '|' + (pv.noticeParams ? pv.noticeParams.choice : '');
       if (key === _pickerStageKey) return;
       _pickerStageKey = key;
 
       body.innerHTML = '';
+      // "Another phone chose X" — rendered above whichever stage the player
+      // was moved to, so the stage change has a stated cause (PRD #1023 user
+      // story 16).
+      if (pv.noticeId) {
+        const notice = document.createElement('div');
+        notice.className = 'scenario-race-note';
+        notice.setAttribute('role', 'status');
+        notice.textContent = t(pv.noticeId, pv.noticeParams);
+        body.appendChild(notice);
+      }
       if (stage === 'scenario') {
         if (heading) heading.textContent = t('client.select_scenario');
-        if (catalog.length === 0) {
+        if (pv.emptyId) {
           const note = document.createElement('div');
           note.className = 'scenario-locked-note';
-          note.textContent = t('client.waiting_scenario');
+          // NOT "waiting for the host to select a scenario": the host has
+          // already broadcast its catalogue and the catalogue is empty.
+          note.textContent = t(pv.emptyId);
           body.appendChild(note);
           return;
         }
@@ -1199,7 +1510,24 @@
             badgeEl.textContent = t('client.scenario_mod_origin', { name: badge.name });
             btn.appendChild(badgeEl);
           }
+          // Immediate feedback (PRD #1023 user story 16). The arbiter sends no
+          // acknowledgement, so between the tap and the next catalogue
+          // broadcast the picker used to look untouched — which is how a phone
+          // on a slow link ends up tapping twice.
+          if (pv.pendingId === sc.id) {
+            btn.classList.add('pending');
+            btn.setAttribute('aria-busy', 'true');
+            const wait = document.createElement('div');
+            wait.className = 'scenario-pending';
+            wait.textContent = t('client.pick_pending');
+            btn.appendChild(wait);
+          }
+          btn.disabled = !pv.accepting;
           btn.addEventListener('click', () => {
+            if (!pv.accepting) return;
+            _pick = window.scenarioPick.pendingPick('scenario', sc.id);
+            _pickNotice = null;
+            scheduleRender();
             // Same action map as the host page — two transports (issue #755).
             if (typeof window.dispatchConsoleAction === 'function') {
               window.dispatchConsoleAction({ action: 'select_scenario', scenario_id: sc.id }, send);
@@ -1217,9 +1545,14 @@
           if (_pickerStageKey !== key) return; // stage changed meanwhile
           const picker = document.createElement('ph-ship-picker');
           body.appendChild(picker);
-          picker.state = { ships };
+          // The picker greys itself out and marks the tapped card while the
+          // request is unacknowledged (PRD #1023 user story 16).
+          picker.state = { ships, pendingTemplate: pv.pendingId, accepting: pv.accepting };
           picker.addEventListener('ship-selected', (e) => {
             const tp = e.detail.template_path;
+            _pick = window.scenarioPick.pendingPick('ship', tp);
+            _pickNotice = null;
+            scheduleRender();
             if (typeof window.dispatchConsoleAction === 'function') {
               window.dispatchConsoleAction({ action: 'select_player_ship', template_path: tp }, send);
             } else {
@@ -1311,12 +1644,36 @@
       const container = $('console-container');
       if (container) container.dataset.orientation = orientation;
 
+      // Link state (PRD #1023 module 4): the console dims and stops taking
+      // taps when the host is gone, and reads as LOADING rather than broken
+      // before the first state lands. Game shell only — the lobby has its own
+      // status line and ready pill for the same information.
+      renderLinkState(inGame);
+
       // Game-over overlay: covers the game shell when phase is GameOver.
+      // Framed with the scenario's name and the run's outcome (PRD #1023
+      // module 4, user story 17) rather than a bare line of text.
       const gameOverEl = document.getElementById('game-over-overlay');
       const gameOverMsgEl = document.getElementById('game-over-message');
-      if (gameOverEl && gameOverMsgEl) {
-        if (s.phase === 'GameOver') {
-          gameOverMsgEl.textContent = s.shipDestroyed ? t('client.ship_destroyed') : (s.gameOverReason || '');
+      if (gameOverEl && gameOverMsgEl && typeof window.gameOverView === 'function') {
+        const ls = window.lobbyState;
+        const gv = window.gameOverView({
+          phase: s.phase,
+          shipDestroyed: s.shipDestroyed,
+          reason: s.gameOverReason,
+          // Authored per world, and published on `ServerMessage::GameOver`
+          // since the #1023 wire pass; lobby-state parks it here. Null for an
+          // ending that declared no side, which the view frames as ENDED.
+          outcome: ls ? ls.gameOverOutcome : null,
+          scenarioTitle: ls ? ls.scenarioTitle : '',
+        });
+        if (gv.visible) {
+          gameOverEl.dataset.outcome = gv.outcome;
+          const scenarioEl = document.getElementById('game-over-scenario');
+          if (scenarioEl) scenarioEl.textContent = wireText(gv.scenarioName);
+          const headlineEl = document.getElementById('game-over-headline');
+          if (headlineEl) headlineEl.textContent = t(gv.headlineId);
+          gameOverMsgEl.textContent = gv.bodyId ? t(gv.bodyId) : wireText(gv.bodyText);
           gameOverEl.style.display = 'flex';
         } else {
           gameOverEl.style.display = 'none';
@@ -1382,6 +1739,7 @@
       if (typeof window.lobbyViewModel !== 'function') return;
       const vm = window.lobbyViewModel(s, myToken, lobbyConsole, {
         labelFor: stationLabel,
+        describeFor: stationDescription,
         stationRatings: window.simState ? window.simState.stationRatings : null,
       });
       // Detail-panel console auto-select (and clear on release) is part of
@@ -1441,6 +1799,15 @@
           meta.appendChild(chip);
         }
         info.appendChild(meta);
+        // The job, before the claim (PRD #1023 module 4). Rendered for every
+        // row kind — free, taken and mine — so the roster reads as a crew
+        // manifest rather than a list of buttons.
+        if (row.description) {
+          const desc = document.createElement('div');
+          desc.className = 'desc';
+          desc.textContent = row.description;
+          info.appendChild(desc);
+        }
         if (row.occupant) {
           const occ = document.createElement('div');
           occ.className = 'occupant';
@@ -1490,6 +1857,10 @@
           releaseBtn.textContent = inProgress && releaseArmed ? t('client.release_confirm') : t('client.leave');
           releaseBtn.addEventListener('click', () => releaseStation());
           detailHeader.appendChild(releaseBtn);
+          // The same authored line the row carried, restated where the player
+          // now sits (PRD #1023 module 4).
+          const descEl = detail.querySelector('.detail-station-desc');
+          if (descEl) descEl.textContent = vm.detail.stationDescription || '';
           const consolesArea = detail.querySelector('.detail-consoles');
           consolesArea.innerHTML = '';
           for (const c of vm.detail.consoles) {
@@ -1527,6 +1898,8 @@
           nameSpan.className = 'detail-station-name';
           nameSpan.textContent = t('client.no_station');
           detailHeader.appendChild(nameSpan);
+          const idleDesc = detail.querySelector('.detail-station-desc');
+          if (idleDesc) idleDesc.textContent = '';
           detail.querySelector('.detail-consoles').innerHTML = '';
           detail.querySelector('.detail-ratings').innerHTML = '';
         }
@@ -1845,6 +2218,11 @@
     // -- Incoming message handler --------------------------------
 
     function handleMessage(msg) {
+      // The host has said something, so the console's panels are showing real
+      // numbers rather than their empty shape — it may leave CONNECTING (PRD
+      // #1023 user story 15). Any message counts: the point is that the link
+      // is carrying traffic, not which traffic.
+      if (msg && !linkHasData) { linkHasData = true; scheduleRender(); }
       // JS state modules (issue #460) — every inbound ServerMessage is applied
       // to the pure state modules first. window.simState is the ONLY sim
       // store (issue #819): the console builders read it directly. Guards
@@ -1854,7 +2232,7 @@
       if (window.commsState)      window.commsState.apply(msg);
       // The QR-first ScenarioCatalog message (issue #755) is not part of the
       // client-router case table, so force a render to (re)draw the picker.
-      if (msg && msg.type === 'ScenarioCatalog') scheduleRender();
+      if (msg && msg.type === 'ScenarioCatalog') { settleScenarioPick(); scheduleRender(); }
       // The host's debug/session read-back (issue #940) only arrives on change,
       // and it is the one push that can change what an OPEN settings panel
       // shows — so repaint here rather than from the render loop, which would
@@ -1999,19 +2377,24 @@
         }
 
         console.log('[PeerJS] fetching ICE servers');
-        const { servers: iceServers, relayAvailable } = await window.fetchIceServers();
+        const { servers: iceServers, relayAvailable, relaySource } = await window.fetchIceServers();
         console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
 
         // Connection diagnostics readout (#conn-diag). A phone stuck behind
         // CGNAT shows "connecting…" forever with the real story buried in an
         // unreachable console — this mirrors the relay + ICE stage on screen.
         const diagEl = document.getElementById('conn-diag');
-        const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable };
+        const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable, relaySource };
         function renderDiag() {
           if (!diagEl) return;
           const lines = [];
           if (!diag.relayAvailable) lines.push(t('client.diag_no_relay'));
           else if (diag.probe === 'unreachable') lines.push(t('client.diag_relay_fail'));
+          else if (diag.relaySource === 'openrelay') {
+            lines.push(diag.probe === 'reachable'
+              ? t('client.diag_relay_fallback_ok')
+              : t('client.diag_relay_fallback'));
+          }
           else if (diag.probe === 'reachable') lines.push(t('client.diag_relay_ok'));
           if (diag.attempt > 0) {
             lines.push(t('client.diag_stage', {
@@ -2042,6 +2425,9 @@
           onData: handleMessage,
           onStatus: (state) => {
             setConnectionStatus(state);
+            // The console's live/connecting/dead treatment is part of render()
+            // (PRD #1023 module 4); a status change has to repaint it.
+            scheduleRender();
             // Diagnostics only matter while the link is down; hide them once
             // the DataChannel is up so they don't sit under the lobby.
             if (diagEl) diagEl.style.display = state === 'ready' ? 'none' : '';

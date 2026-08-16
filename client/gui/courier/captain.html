@@ -6,29 +6,29 @@
   <title data-i18n="console.courier_captain.doc_title">Project Phoenix — Courier Captain</title>
   <link rel="stylesheet" href="../console.css">
   <style>
-    body { margin: 0; background: #000; overflow: hidden; }
+    body { margin: 0; background: var(--surface-void); overflow: hidden; }
     .frame { height: 100%; position: relative; }
     .panel-inner { height: 100%; box-sizing: border-box; padding: 18px 32px; display: flex; flex-direction: column; gap: 10px; }
     .hero, .footer { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-    .hero h1 { margin: 0 auto 0 0; font-size: 24px; letter-spacing: .2em; color: var(--ink); }
-    .hero h1 small { display: block; font: 11px "JetBrains Mono", monospace; letter-spacing: .2em; color: var(--ink-faint); }
-    button { background: rgba(14,17,23,.85); border: 1px solid var(--edge); color: var(--ink); font: 600 12px "Chakra Petch", sans-serif; letter-spacing: .16em; padding: 7px 11px; text-transform: uppercase; }
+    .hero h1 { margin: 0 auto 0 0; font-size: var(--text-2xl); letter-spacing: .2em; color: var(--ink); }
+    .hero h1 small { display: block; font: var(--text-xs) "JetBrains Mono", monospace; letter-spacing: .2em; color: var(--ink-faint); }
+    button { background: rgba(var(--rgb-panel), .85); border: 1px solid var(--edge); color: var(--ink); font: 600 var(--text-sm) "Chakra Petch", sans-serif; letter-spacing: .16em; padding: 7px 11px; text-transform: uppercase; min-height: var(--control-hit-min); }
     button.active { color: var(--cyan); border-color: var(--cyan); }
     .body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-    .col { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--edge); background: rgba(14,17,23,.6); }
-    h2 { margin: 0; border-bottom: 1px solid var(--edge); padding-bottom: 5px; color: var(--ink-dim); font: 600 11px "Chakra Petch", sans-serif; letter-spacing: .24em; text-transform: uppercase; }
+    .col { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--edge); background: rgba(var(--rgb-panel), .6); }
+    h2 { margin: 0; border-bottom: 1px solid var(--edge); padding-bottom: 5px; color: var(--ink-dim); font: 600 var(--text-xs) "Chakra Petch", sans-serif; letter-spacing: .24em; text-transform: uppercase; }
     ph-objective-list, ph-shield-facings, ph-power-controls, ph-repair-teams { flex: 1; min-height: 0; }
     /* Compact threat-bearing readout (issue #926) — same standing fact the
        battleship's dedicated Shields console shows, condensed to one line
        for this column's tighter layout. Hidden when Sensors holds no threat. */
-    .threat-readout { display: flex; justify-content: space-between; gap: 8px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--ink-faint); padding: 0 0 8px; flex-shrink: 0; visibility: hidden; }
+    .threat-readout { display: flex; justify-content: space-between; gap: 8px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); padding: 0 0 8px; flex-shrink: 0; visibility: hidden; }
     .threat-readout.active { visibility: visible; }
-    .threat-readout strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: 14px; }
-    .footer { color: var(--ink-faint); font: 11px "JetBrains Mono", monospace; }
+    .threat-readout strong { color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-md); }
+    .footer { color: var(--ink-faint); font: var(--text-xs) "JetBrains Mono", monospace; }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }.spacer { flex: 1; }
-    .overlay { display: none; position: absolute; inset: 0; z-index: 2; padding: 18px; box-sizing: border-box; background: rgba(5,8,24,.97); flex-direction: column; gap: 9px; }
+    .overlay { display: none; position: absolute; inset: 0; z-index: 2; padding: 18px; box-sizing: border-box; background: rgba(var(--rgb-deep), .97); flex-direction: column; gap: 9px; }
     .overlay.open { display: flex; }.overlay > :last-child { flex: 1; min-height: 0; }
-    @media (orientation: portrait) { .panel-inner { padding: 10px; }.body { grid-template-columns: 1fr; overflow: auto; }.hero h1 { font-size: 19px; } }
+    @media (orientation: portrait) { .panel-inner { padding: 10px; }.body { grid-template-columns: 1fr; overflow: auto; }.hero h1 { font-size: var(--text-xl); } }
   </style>
 </head>
 <body>

@@ -1,9 +1,13 @@
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 export class PhDamageBar extends HTMLElement {
   #state = null;
 
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
@@ -19,7 +23,7 @@ export class PhDamageBar extends HTMLElement {
        colour bleeding across the whole bar. */
     /* Deliberately no transition here, unlike .fill above: capability loss is instantaneous, so .lost snaps to its new width; the 0.5s glide is only for ordinary HP movement. */
     .bar-wrap .lost { position: absolute; top: 0; right: 0; height: 100%; border-left: 1px solid var(--fire); background: repeating-linear-gradient(135deg, var(--fire-dim) 0 3px, var(--fire) 3px 6px); }
-    .bar-wrap .label { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; letter-spacing: 0.1em; color: var(--ink); text-shadow: 0 0 4px #000; pointer-events: none; }
+    .bar-wrap .label { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: var(--text-xs); letter-spacing: 0.1em; color: var(--ink); text-shadow: 0 0 4px var(--surface-void); pointer-events: none; }
   </style>
   <div class="bar-wrap">
     <div class="fill" id="bar-fill" style="width:100%"></div>

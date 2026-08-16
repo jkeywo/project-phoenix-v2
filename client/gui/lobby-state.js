@@ -64,6 +64,15 @@ export class LobbyState {
     this.shipConfig = {};
     /** Reason string for game over, if the game has ended. */
     this.gameOverReason = null;
+    /** The authored victory/defeat flag for the run that just ended, when the
+     *  wire carries one (PRD #1023 module 4). Scenario authors DO declare it —
+     *  `game_over(message, "victory")` latches a `balance::Outcome` on the
+     *  server's `GameOverReason` resource — but `ServerMessage::GameOver`
+     *  publishes only `{ reason }`, so it is null today. Read rather than
+     *  assumed absent, so publishing the field becomes a one-line server
+     *  change with no client work; gui/game-over-view.js documents the
+     *  fallback the overlay uses meanwhile. */
+    this.gameOverOutcome = null;
     this.scenarioTitle = '';
     this.scenarioBody = '';
     /** Remaining seconds in the pre-game countdown, 0 when not counting. */
@@ -198,10 +207,12 @@ export class LobbyState {
       case 'GameOver':
         this.phase = 'GameOver';
         this.gameOverReason = d.reason != null ? d.reason : '';
+        this.gameOverOutcome = d.outcome != null ? d.outcome : null;
         break;
       case 'ReturnedToLobby':
         this.phase = 'Lobby';
         this.gameOverReason = null;
+        this.gameOverOutcome = null;
         this.countdownSecs = 0;
         this.waitingForScenario = true;
         break;

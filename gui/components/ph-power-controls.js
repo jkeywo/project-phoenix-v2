@@ -32,19 +32,31 @@ export class PhPowerControls extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
     .group { border: 1px solid var(--line-faint); background: var(--bg-card); padding: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
     .group-top { display: flex; justify-content: space-between; align-items: center; }
-    .group-label { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.2em; color: var(--ink); }
+    .group-label { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.2em; color: var(--ink); }
     /* One visual unit per power group: [− button] [pips] [+ button], so the
        controls a group's stepper operates on sit right beside its gems
        instead of floating in a detached row underneath (issue #1005). */
     .pip-cluster { display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
     .pip-row { display: flex; align-items: center; gap: 0.4rem; }
-    .pip { width: 1.2rem; height: 1.2rem; border-radius: 50%; border: 2px solid var(--line-faint); background: var(--bg-deep); cursor: pointer; transition: all 0.15s ease; }
+    /* The one control in the fleet that genuinely cannot BE the touch floor
+       (PRD #1023 module 3): five rungs to a group, three groups, on a 375px
+       phone. Five 44px pips is 220px of pip before either stepper, and a 44px
+       circle has stopped being a pip and become a button.
+
+       So it keeps its drawn size and takes the documented escape. The floor is
+       taken in FULL on the vertical, where the row has room to give — 13.5px
+       of target becomes 44 — and held at the pip's own width on the horizontal,
+       where a wider target would reach across the gap and start answering for
+       the rung beside it. Selecting the WRONG power level under fire is a worse
+       outcome than a narrow target, because it does something rather than
+       nothing. */
+    .pip { width: 1.2rem; height: 1.2rem; --hit-expand-w: 100%; border-radius: 50%; border: 2px solid var(--line-faint); background: var(--bg-deep); cursor: pointer; transition: all 0.15s ease; }
     .pip:hover:not(.disabled) { border-color: var(--ink-dim); }
-    .pip.active { background: var(--loaded); border-color: var(--loaded); box-shadow: 0 0 6px rgba(78,200,112,0.5); }
+    .pip.active { background: var(--loaded); border-color: var(--loaded); box-shadow: 0 0 6px rgba(var(--rgb-loaded), 0.5); }
     .pip.inactive { background: transparent; border-color: var(--line-faint); }
     /* A rung the order asks for that the reactor's battery floor is refusing:
        outlined in the reloading amber, hollow, so the officer can see the gap
@@ -52,8 +64,8 @@ export class PhPowerControls extends HTMLElement {
     .pip.held { background: transparent; border-color: var(--reloading); box-shadow: none; }
     .pip.disabled { cursor: default; opacity: 0.3; }
     .level-text.held { color: var(--reloading); }
-    .level-text { font-size: 0.6rem; color: var(--ink-dim); letter-spacing: 0.1em; min-width: 1.5rem; text-align: center; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .level-text { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.1em; min-width: 1.5rem; text-align: center; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header">
     <span>${t('component.power.title')}</span>
@@ -181,7 +193,7 @@ export class PhPowerControls extends HTMLElement {
         let pip = this.#pipCache.get(key);
         if (!pip) {
           pip = document.createElement('div');
-          pip.className = 'pip';
+          pip.className = 'pip hit-expand';
           pip.dataset.level = i;
           this.#pipCache.set(key, pip);
           pipRow.appendChild(pip);
@@ -189,7 +201,7 @@ export class PhPowerControls extends HTMLElement {
         let stateClass = ' inactive';
         if (i <= level) stateClass = ' active';
         else if (i <= commanded) stateClass = ' held';
-        pip.className = 'pip' + stateClass + (auto ? ' disabled' : '');
+        pip.className = 'pip hit-expand' + stateClass + (auto ? ' disabled' : '');
       }
       for (const [key, pip] of this.#pipCache) {
         if (key.startsWith(gid + ':') && !livePips.has(key)) { pip.remove(); this.#pipCache.delete(key); }

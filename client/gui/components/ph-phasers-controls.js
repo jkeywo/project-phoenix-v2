@@ -18,21 +18,21 @@ export class PhPhasersControls extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .bank-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; padding: 0.3rem 0; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .bank-row { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-xs); padding: 0.3rem 0; }
     .bank-row .lbl { min-width: 2.5rem; color: var(--ink-dim); }
     .cooldown-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
     .cooldown-fill { height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.3s ease; }
     .cooldown-fill.cooling { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
-    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
-    .status { font-size: 0.5rem; letter-spacing: 0.15em; min-width: 4.5rem; text-align: right; color: var(--ink-dim); }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; margin-left: 0.3rem; }
+    .status { font-size: var(--text-xs); letter-spacing: 0.15em; min-width: 4.5rem; text-align: right; color: var(--ink-dim); }
     .bank-row.blocked .status { color: var(--fire); }
     .bank-row.unavailable .status { color: var(--ink-faint); }
     .bank-row.ready .status { color: var(--loaded); }
-    .mode-toggle { font-family: 'Chakra Petch', sans-serif; font-size: 0.55rem; font-weight: 700; padding: 0.1rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: var(--bg-card); transition: all 0.15s ease; }
+    .mode-toggle { font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs); font-weight: 700; padding: 0.1rem 0.5rem; letter-spacing: 0.15em; text-transform: uppercase; cursor: pointer; border: 1px solid var(--ink-dim); color: var(--ink-dim); background: var(--bg-card); transition: all 0.15s ease; min-height: var(--control-hit-min); }
     .mode-toggle:hover { border-color: var(--ink); color: var(--ink); }
     .mode-toggle.auto { border-color: var(--reloading); color: var(--reloading); }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
   </style>
   <div class="header"><span>${t('component.phasers.title')}</span><button class="mode-toggle" id="mode-toggle" type="button">${t('component.phasers.manual')}</button></div>
   <div id="banks"></div>

@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhDamageDetail extends HTMLElement {
   #state = null;
@@ -12,22 +13,25 @@ export class PhDamageDetail extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
     .list { display: flex; flex-direction: column; gap: 0.2rem; }
-    .row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.65rem; }
+    .row { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-xs); }
     .row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row .bar-wrap { width: 4rem; height: 0.6rem; background: var(--bg-deep); border: 1px solid var(--line-faint); position: relative; overflow: hidden; flex-shrink: 0; }
     .row .bar-wrap .fill { position: absolute; top: 0; left: 0; height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); }
     .row .bar-wrap .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .row .bar-wrap .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
-    .row .tier { font-size: 0.55rem; color: var(--ink-dim); letter-spacing: 0.1em; min-width: 1.6rem; text-align: right; flex-shrink: 0; }
+    .row .tier { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.1em; min-width: 1.6rem; text-align: right; flex-shrink: 0; }
     .row.destroyed .name { color: var(--fire); letter-spacing: 0.15em; }
     .row.destroyed .bar-wrap .fill { background: var(--fire-dim); opacity: 0.5; }
-    .destroyed-label { color: var(--fire); font-size: 0.55rem; letter-spacing: 0.2em; flex-shrink: 0; }
+    .destroyed-label { color: var(--fire); font-size: var(--text-xs); letter-spacing: 0.2em; flex-shrink: 0; }
   </style>
   <div class="list" id="list"></div>
 `;

@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhCommsContactList extends HTMLElement {
   #state = null;
@@ -13,23 +14,26 @@ export class PhCommsContactList extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
     .list { display: flex; flex-direction: column; gap: 0.25rem; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
-    .pill { display: flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; padding: 0.35rem 0.4rem; border: 1px solid var(--line-faint); border-radius: 3px; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .pill { display: flex; align-items: center; gap: 0.5rem; font-size: var(--text-sm); padding: 0.35rem 0.4rem; border: 1px solid var(--line-faint); border-radius: 3px; }
     .pill.out-of-range { opacity: 0.45; }
     .name { flex: 1; min-width: 0; }
-    .badge { font-size: 0.55rem; padding: 0.1rem 0.35rem; border-radius: 2px; letter-spacing: 0.1em; text-transform: uppercase; }
-    .badge.hostile { background: #3a1515; color: #e05555; }
-    .badge.friendly { background: #153a1e; color: #55e070; }
-    .badge.neutral { background: #15283a; color: #5590e0; }
-    .badge.allied { background: #153a1e; color: #55e070; }
-    .hail-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: 0.6rem; font-weight: 600; padding: 0.25rem 0.5rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; }
-    .hail-btn:hover:not(:disabled) { background: #161b24; border-color: #4a5060; }
+    .badge { font-size: var(--text-xs); padding: 0.1rem 0.35rem; border-radius: 2px; letter-spacing: 0.1em; text-transform: uppercase; }
+    .badge.hostile { background: var(--tactical-deep); color: var(--fire); }
+    .badge.friendly { background: var(--loaded-deep); color: var(--loaded); }
+    .badge.neutral { background: var(--surface-panel-up); color: var(--science); }
+    .badge.allied { background: var(--loaded-deep); color: var(--loaded); }
+    .hail-btn { background: var(--bg-card); border: 1px solid var(--line-faint); color: var(--ink); font-family: 'Chakra Petch', sans-serif; font-size: var(--text-xs); font-weight: 600; padding: 0.25rem 0.5rem; cursor: pointer; letter-spacing: 0.1em; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
+    .hail-btn:hover:not(:disabled) { background: var(--cyan-deep); border-color: var(--edge); }
     .hail-btn:disabled { opacity: 0.35; cursor: default; }
   </style>
   <div class="list" id="list"></div>

@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhBatteryBar extends HTMLElement {
   #state = null;
@@ -11,6 +12,9 @@ export class PhBatteryBar extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
@@ -21,8 +25,8 @@ export class PhBatteryBar extends HTMLElement {
     .bar-wrap .fill.amber { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .bar-wrap .fill.red { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
     .bar-wrap .threshold-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: 0.7; pointer-events: none; }
-    .bar-wrap .label { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; letter-spacing: 0.1em; color: var(--ink); text-shadow: 0 0 4px #000; pointer-events: none; }
-    .charging-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: none; align-items: center; justify-content: center; font-size: 0.55rem; letter-spacing: 0.15em; color: var(--loaded); pointer-events: none; animation: pulse-glow 1.5s ease-in-out infinite; }
+    .bar-wrap .label { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: var(--text-xs); letter-spacing: 0.1em; color: var(--ink); text-shadow: 0 0 4px var(--surface-void); pointer-events: none; }
+    .charging-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: none; align-items: center; justify-content: center; font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--loaded); pointer-events: none; animation: pulse-glow 1.5s ease-in-out infinite; }
     /* Vertical orientation (orientation="vertical"): a tall narrow gutter that
        fills from the bottom instead of left→right. The host stretches to its
        flex container's height; the gauge takes a thin fixed width. */
@@ -33,7 +37,18 @@ export class PhBatteryBar extends HTMLElement {
     :host([orientation="vertical"]) .bar-wrap .fill.red { background: linear-gradient(180deg, var(--fire-dim), var(--fire)); }
     :host([orientation="vertical"]) .bar-wrap .threshold-marker { top: auto; left: 0; width: 100%; height: 2px; }
     :host([orientation="vertical"]) .bar-wrap .label,
-    :host([orientation="vertical"]) .charging-indicator { writing-mode: vertical-rl; text-orientation: mixed; font-size: 0.55rem; letter-spacing: 0.18em; }
+    :host([orientation="vertical"]) .charging-indicator { writing-mode: vertical-rl; text-orientation: mixed; font-size: var(--text-xs); letter-spacing: 0.18em; }
+    /* Reduced motion (PRD #1023 module 3). The pulse says "charging"; held
+       at the bright end of its own loop it still says charging, without a
+       glow breathing at the edge of an officer's vision for the whole of a
+       long recharge. */
+    @media (prefers-reduced-motion: reduce) {
+      .charging-indicator {
+        animation: none;
+        opacity: 1;
+        text-shadow: 0 0 8px var(--loaded), 0 0 16px var(--loaded-dim);
+      }
+    }
     @keyframes pulse-glow {
       0%, 100% { opacity: 0.5; text-shadow: 0 0 2px var(--loaded); }
       50% { opacity: 1; text-shadow: 0 0 8px var(--loaded), 0 0 16px var(--loaded-dim); }

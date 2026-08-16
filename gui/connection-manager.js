@@ -7,14 +7,26 @@ import './strings-boot.js';
 import { localiseTree } from './strings.js';
 
 export function defaultIceServers() {
-  // STUN only. The OpenRelay TURN fallbacks that used to live here are gone:
-  // Metered discontinued the free service and openrelay.metered.ca no longer
-  // resolves, so those entries could never connect — they only stalled ICE
-  // gathering. Relay now comes exclusively from the credential worker via
-  // fetchIceServers(); callers must treat relayAvailable=false as degraded.
+  // STUN only. TURN relay comes from the credential worker via
+  // fetchIceServers(), with openRelayFallbackServers() as the last resort —
+  // never bake TURN entries into this base list, or relaySource would lie.
   return [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+  ];
+}
+
+export function openRelayFallbackServers() {
+  // Metered's free shared OpenRelay TURN, used only when the credential
+  // worker is unreachable. Note the staticauth. hostname: the bare
+  // openrelay.metered.ca the code used pre-2026-08 has no DNS records any
+  // more (NODATA from public resolvers), while staticauth. is what Metered's
+  // docs currently advertise. Shared and rate-limited — better than no relay
+  // on CGNAT, but callers should surface that they're on the fallback.
+  return [
+    { urls: 'turn:staticauth.openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:staticauth.openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turns:staticauth.openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
   ];
 }
 
@@ -28,10 +40,15 @@ export function hasRelayServer(servers) {
 
 /**
  * Fetch relay credentials from the worker and combine with the STUN base.
- * Returns { servers, relayAvailable }. relayAvailable=false means no TURN
- * relay is in the list — on CGNAT/hotspot networks the connection will
- * almost certainly fail, so callers should warn the user rather than let
- * the retry loop spin silently.
+ * Returns { servers, relayAvailable, relaySource }:
+ *   relaySource 'worker'    — dedicated Metered.ca credentials, the good path
+ *   relaySource 'openrelay' — worker unreachable; free shared OpenRelay TURN
+ *                             appended instead (congested, rate-limited —
+ *                             callers should show a mild degraded notice)
+ *   relaySource null        — no TURN relay at all (worker responded ok but
+ *                             without TURN entries); on CGNAT/hotspot networks
+ *                             the connection will almost certainly fail, so
+ *                             callers must warn rather than retry silently.
  */
 export async function fetchIceServers() {
   const base = defaultIceServers();
@@ -41,13 +58,18 @@ export async function fetchIceServers() {
       const extra = await r.json();
       console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);
       const servers = [...base, ...extra];
-      return { servers, relayAvailable: hasRelayServer(servers) };
+      const relayAvailable = hasRelayServer(servers);
+      return { servers, relayAvailable, relaySource: relayAvailable ? 'worker' : null };
     }
-    console.warn('[ICE] Metered.ca fetch returned', r.status, '— STUN only, no relay');
+    console.warn('[ICE] Metered.ca fetch returned', r.status, '— falling back to shared OpenRelay TURN');
   } catch (e) {
-    console.warn('[ICE] Metered.ca fetch failed — STUN only, no relay:', e.message);
+    console.warn('[ICE] Metered.ca fetch failed — falling back to shared OpenRelay TURN:', e.message);
   }
-  return { servers: base, relayAvailable: false };
+  return {
+    servers: [...base, ...openRelayFallbackServers()],
+    relayAvailable: true,
+    relaySource: 'openrelay',
+  };
 }
 
 /**

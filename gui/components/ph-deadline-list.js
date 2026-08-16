@@ -18,6 +18,7 @@
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 /**
  * Format whole seconds as `M:SS`, or `H:MM:SS` past an hour.
@@ -44,20 +45,23 @@ export class PhDeadlineList extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .heading { font-size: 0.6rem; letter-spacing: 0.2em; color: var(--ink-dim); padding: 0 0.2rem 0.3rem; }
+    .heading { font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-dim); padding: 0 0.2rem 0.3rem; }
     .list { display: flex; flex-direction: column; gap: 0.35rem; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.5rem 0; letter-spacing: 0.2em; }
-    .row { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.7rem; line-height: 1.3; border-radius: 2px; padding: 0.1rem 0.2rem; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.5rem 0; letter-spacing: 0.2em; }
+    .row { display: flex; align-items: baseline; gap: 0.5rem; font-size: var(--text-sm); line-height: 1.3; border-radius: 2px; padding: 0.1rem 0.2rem; }
     .row .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .row .clock { flex-shrink: 0; font-variant-numeric: tabular-nums; letter-spacing: 0.05em; color: var(--cyan); }
     .row.spent .label { text-decoration: line-through; color: var(--ink-dim); }
     .row.spent .clock { color: var(--ink-dim); }
-    .row.fired { background: #2a1a1a; border-left: 2px solid var(--ink-dim); }
+    .row.fired { background: var(--reloading-deep); border-left: 2px solid var(--ink-dim); }
     .row.fired .clock { color: var(--ink); }
   </style>
   <div class="heading" id="heading"></div>

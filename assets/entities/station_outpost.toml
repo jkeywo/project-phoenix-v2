@@ -10,8 +10,16 @@ description = "entity.station_outpost.target.description"
 hull_integrity = 200.0
 
 [collider]
+# Matched to the visible hull, at John's request. Shares
+# `alliance_research_outpost.glb` with `depot_transfer`, so it shares its size:
+# 7.56 x 3.37 x 7.59 on screen at the sidecar's `[base].scale` of [4, 4, 4], a max
+# half-extent of 3.80. The 12 here was over three times that — the worst of the
+# four station colliders, and it could not be left while its own mesh-mate was
+# corrected.
+#
+# See `station_axiom.toml` for why a Ball at the max half-extent is the shape.
 shape = "Ball"
-radius = 12.0
+radius = 3.8
 length = 0.0
 
 [radar_appearance]

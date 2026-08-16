@@ -49,14 +49,18 @@ export function releaseConfirmStep(phase, armed) {
  * @param {string|null} myToken
  * @param {string|null} lobbyConsole  console selection before auto-select
  * @param {{ labelFor?: (station: object) => string,
+ *           describeFor?: (station: object) => string,
  *           stationRatings?: Object<string,string>|null }} [opts]
  *        labelFor resolves a station row to its display label (client.html
- *        passes its string-table stationLabel); stationRatings is
+ *        passes its string-table stationLabel); describeFor resolves the
+ *        station's "what this seat does" line (PRD #1023 module 4 — see the
+ *        `description` field below); stationRatings is
  *        simState.stationRatings for the active-rating highlight.
  * @returns {object} view model — see the return literal.
  */
 export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
   const labelFor = opts.labelFor || (st => (st && (st.name || st.id)) || '');
+  const describeFor = opts.describeFor || (st => (st && st.description) || '');
   const stationRatings = opts.stationRatings || null;
 
   const myPlayer = (s.players || []).find(p => p.token === myToken) || null;
@@ -77,6 +81,10 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
         + (st.holder_name && !isMine ? ' taken' : ''),
       glyph: st.short_code ? st.short_code.substring(0, 2).toUpperCase() : '--',
       label: labelFor(st),
+      // What the seat does. Present on EVERY row regardless of button kind —
+      // the whole point (PRD #1023 user story 2) is that a free station is
+      // readable before it is claimed, not after.
+      description: describeFor(st),
       rank: st.rank || null,
       chipId: st.id || null,
       occupant: (st.holder_name && !isMine) ? st.holder_name : null,
@@ -89,6 +97,7 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
     ? {
         active: true,
         stationName: labelFor(myStation),
+        stationDescription: describeFor(myStation),
         consoles: myStation.id ? [myStation.id] : [],
         selectedConsole,
         ratings: (myStation.ratings && myStation.ratings.length > 1)
@@ -98,7 +107,7 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
             }
           : null,
       }
-    : { active: false, stationName: null, consoles: [], selectedConsole: null, ratings: null };
+    : { active: false, stationName: null, stationDescription: '', consoles: [], selectedConsole: null, ratings: null };
 
   let readyBtn;
   if (myPlayer && hasStation && selectedConsole) {

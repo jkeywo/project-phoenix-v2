@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 /**
  * `hide-shield-rows` (boolean attribute): suppresses the SHIELD and SHIELD
@@ -35,35 +36,38 @@ export class PhSensorPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .header .v { color: var(--cyan); font-weight: 600; }
-    .blip-count { font-size: 0.65rem; color: var(--ink-dim); }
+    .blip-count { font-size: var(--text-xs); color: var(--ink-dim); }
     .target-card { background: var(--bg-card); border: 1px solid var(--line-faint); padding: 0.5rem; }
-    .target-card .name { font-family: 'Chakra Petch', sans-serif; font-size: 1rem; font-weight: 600; color: var(--ink); letter-spacing: 0.07em; }
-    .target-card .name.empty { font-size: 0.75rem; color: var(--ink-dim); letter-spacing: 0.28em; }
+    .target-card .name { font-family: 'Chakra Petch', sans-serif; font-size: var(--text-lg); font-weight: 600; color: var(--ink); letter-spacing: 0.07em; }
+    .target-card .name.empty { font-size: var(--text-sm); color: var(--ink-dim); letter-spacing: 0.28em; }
     .target-card .badges { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-top: 0.25rem; }
-    .target-card .badge { font-size: 0.55rem; letter-spacing: 0.18em; padding: 0.1rem 0.35rem; border: 1px solid; }
-    .target-card .badge.hostile { color: var(--fire); border-color: #8a2a1e; }
+    .target-card .badge { font-size: var(--text-xs); letter-spacing: 0.18em; padding: 0.1rem 0.35rem; border: 1px solid; }
+    .target-card .badge.hostile { color: var(--fire); border-color: var(--fire-dim); }
     .target-card .badge.friendly { color: var(--loaded); border-color: var(--loaded-dim); }
-    .target-card .badge.neutral { color: #6cb6d0; border-color: #3a5a68; }
-    .target-card .pos-row { display: flex; gap: 0.75rem; margin-top: 0.4rem; padding-top: 0.3rem; border-top: 1px solid var(--line-faint); font-size: 0.65rem; }
+    .target-card .badge.neutral { color: var(--cyan); border-color: var(--edge); }
+    .target-card .pos-row { display: flex; gap: 0.75rem; margin-top: 0.4rem; padding-top: 0.3rem; border-top: 1px solid var(--line-faint); font-size: var(--text-xs); }
     .target-card .pos-row .k { color: var(--ink-dim); }
-    .target-card .pos-row .v { font-family: 'Chakra Petch', sans-serif; font-size: 1rem; font-weight: 600; color: var(--ink); }
-    .target-card .pos-row .u { color: var(--ink-dim); font-size: 0.55rem; }
-    .no-target { font-size: 0.7rem; color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
-    .scan-data { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.6rem; }
-    .scan-row { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px solid rgba(40,44,56,0.5); }
+    .target-card .pos-row .v { font-family: 'Chakra Petch', sans-serif; font-size: var(--text-lg); font-weight: 600; color: var(--ink); }
+    .target-card .pos-row .u { color: var(--ink-dim); font-size: var(--text-xs); }
+    .no-target { font-size: var(--text-sm); color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
+    .scan-data { display: flex; flex-direction: column; gap: 0.2rem; font-size: var(--text-xs); }
+    .scan-row { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px solid rgba(var(--rgb-panel-up), 0.5); }
     .scan-row .k { color: var(--ink-dim); }
     .scan-row .v { color: var(--ink); }
     @media (orientation: portrait) {
       :host { gap: 0.35rem; }
       .target-card { padding: 0.35rem; }
-      .target-card .name { font-size: 0.85rem; }
+      .target-card .name { font-size: var(--text-md); }
     }
   </style>
   <div class="header">

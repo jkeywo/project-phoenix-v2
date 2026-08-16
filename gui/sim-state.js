@@ -6,8 +6,9 @@
  * `{ type: 'VariantName', data: {...} }` (serde tag/content wire format).
  *
  * Radar *projection* is deliberately NOT duplicated here — client-side blip
- * projection already lives in gui/radar-math.js and gui/console-state.js
- * (`buildBlips`). This module only carries the per-console radar configs
+ * projection already lives in gui/console-state.js
+ * (`buildBlips`, `buildWaypointBlip`, `buildTargetBlip`). This module only
+ * carries the per-console radar configs
  * (range + tag filter) that mirror the Rust `*_radar_config()` functions.
  *
  * DOM-free; exposed on `window` as `window.simState` (singleton).

@@ -1,0 +1,22 @@
+{
+  "assets/entities/alliance_battleship.toml": {
+    "image": "assets/ship-cards/alliance_battleship.png",
+    "views": 8,
+    "tile": 3
+  },
+  "assets/entities/alliance_courier.toml": {
+    "image": "assets/ship-cards/alliance_courier.png",
+    "views": 8,
+    "tile": 3
+  },
+  "assets/entities/alliance_cruiser.toml": {
+    "image": "assets/ship-cards/alliance_cruiser.png",
+    "views": 8,
+    "tile": 3
+  },
+  "assets/entities/alliance_destroyer.toml": {
+    "image": "assets/ship-cards/alliance_destroyer.png",
+    "views": 8,
+    "tile": 3
+  }
+}

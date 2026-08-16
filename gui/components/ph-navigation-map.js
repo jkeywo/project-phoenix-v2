@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
 
 export class PhNavigationMap extends HTMLElement {
   #state = null;
@@ -45,6 +46,9 @@ export class PhNavigationMap extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = [
       '<style>',
@@ -54,24 +58,24 @@ export class PhNavigationMap extends HTMLElement {
       '#overlay {',
       '  position: absolute; bottom: 0; left: 0; right: 0;',
       '  padding: 10px 14px 14px;',
-      '  background: linear-gradient(0deg, rgba(5,8,24,0.95) 0%, rgba(5,8,24,0.7) 70%, transparent 100%);',
-      '  border-top: 1px solid rgba(40,50,80,0.45);',
+      '  background: linear-gradient(0deg, rgba(var(--rgb-deep), 0.95) 0%, rgba(var(--rgb-deep), 0.7) 70%, transparent 100%);',
+      '  border-top: 1px solid rgba(var(--rgb-cyan-dim), 0.45);',
       '  font-family: "JetBrains Mono", monospace;',
       '  pointer-events: none; display: none;',
       '}',
       '#overlay.show { display: block; }',
-      '#overlay .ov-name { font-size: 16px; color: var(--ink); font-weight: 600; letter-spacing: 0.05em; }',
-      '#overlay .ov-detail { font-size: 11px; color: var(--ink-dim); margin-top: 3px; letter-spacing: 0.15em; display: flex; gap: 10px; }',
-      '.st-hostile { color: #ff6040; }',
+      '#overlay .ov-name { font-size: var(--text-lg); color: var(--ink); font-weight: 600; letter-spacing: 0.05em; }',
+      '#overlay .ov-detail { font-size: var(--text-xs); color: var(--ink-dim); margin-top: 3px; letter-spacing: 0.15em; display: flex; gap: 10px; }',
+      '.st-hostile { color: var(--fire-hot); }',
       '.st-friendly { color: var(--loaded); }',
-      '.st-neutral { color: #7a90c0; }',
+      '.st-neutral { color: var(--ink-dim); }',
       '.st-unknown { color: var(--ink-dim); }',
       '.wp-bar { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: flex-end; gap: 8px; z-index: 2; pointer-events: none; }',
-      '.wp-btn { pointer-events: auto; font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan, #6cb6d0); background: rgba(10,14,28,0.88); border: 1px solid rgba(70,95,165,0.5); padding: 6px 12px; cursor: pointer; display: none; white-space: nowrap; }',
+      '.wp-btn { pointer-events: auto; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.14em; text-transform: uppercase; color: var(--cyan); background: rgba(var(--rgb-panel), 0.88); border: 1px solid rgba(var(--rgb-edge-control), 0.5); padding: 6px 12px; cursor: pointer; display: none; white-space: nowrap; min-height: var(--control-hit-min); }',
       '.wp-btn.show { display: block; }',
-      '.wp-btn.active { color: #d4a820; border-color: #d4a820; }',
+      '.wp-btn.active { color: var(--gold); border-color: var(--gold); }',
       '.wp-btn:active { opacity: 0.7; }',
-      '.toast { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: "JetBrains Mono", monospace; font-size: 12px; letter-spacing: 0.3em; color: var(--tactical, #d4a820); background: rgba(5,8,24,0.92); border: 1px solid var(--tactical, #d4a820); box-shadow: 0 0 24px rgba(240,132,56,0.25); padding: 10px 24px; pointer-events: none; opacity: 0; transition: opacity 0.22s ease; z-index: 3; }',
+      '.toast { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.3em; color: var(--tactical); background: rgba(var(--rgb-deep), 0.92); border: 1px solid var(--tactical); box-shadow: 0 0 24px rgba(var(--rgb-tactical), 0.25); padding: 10px 24px; pointer-events: none; opacity: 0; transition: opacity 0.22s ease; z-index: 3; }',
       '.toast.show { opacity: 1; }',
       '</style>',
       '<div style="position:relative;width:100%;height:100%">',
@@ -254,7 +258,7 @@ export class PhNavigationMap extends HTMLElement {
       octx = this.#offscreen.getContext('2d');
     }
 
-    octx.fillStyle = '#07080c';
+    octx.fillStyle = phColor(this, 'var(--surface-abyss)');
     octx.fillRect(0, 0, W, H);
 
     // World-anchored, north-up chart: the camera is fixed on the world origin
@@ -287,7 +291,7 @@ export class PhNavigationMap extends HTMLElement {
       this.#drawBlipShape(octx, b.kind, sx, sy, blipR, color);
       if (showNames && b.name) {
         octx.font = namePx + 'px "JetBrains Mono", monospace';
-        octx.fillStyle = color;
+        octx.fillStyle = phColor(this, color);
         octx.fillText(b.name, sx + blipR + 4, sy + 4);
       }
       this.#projectedBlips.push({ uuid: b.uuid, sx, sy, hitR: Math.max(14, blipR + 6), blip: b });
@@ -325,7 +329,7 @@ export class PhNavigationMap extends HTMLElement {
       return [cx + this.#panX + rx * scale * this.#zoom, cy + this.#panY + rz * scale * this.#zoom];
     };
 
-    octx.strokeStyle = 'rgba(40,58,120,0.18)';
+    octx.strokeStyle = phColor(this, 'rgba(var(--rgb-edge), 0.18)');
     octx.lineWidth = 0.5;
     for (let gx = Math.ceil(minWX / minor) * minor; gx < maxWX; gx += minor) {
       const [x1, y1] = toScreen(gx, minWZ);
@@ -338,7 +342,7 @@ export class PhNavigationMap extends HTMLElement {
       octx.beginPath(); octx.moveTo(x1, y1); octx.lineTo(x2, y2); octx.stroke();
     }
 
-    octx.strokeStyle = 'rgba(70,95,165,0.28)';
+    octx.strokeStyle = phColor(this, 'rgba(var(--rgb-edge-control), 0.28)');
     octx.lineWidth = 0.8;
     for (let gx = Math.ceil(minWX / major) * major; gx < maxWX; gx += major) {
       const [x1, y1] = toScreen(gx, minWZ);
@@ -356,14 +360,14 @@ export class PhNavigationMap extends HTMLElement {
     const r = Math.max(6, R * 0.025);
     octx.save();
     octx.translate(sx, sy);
-    octx.strokeStyle = 'rgba(108,182,208,0.2)';
+    octx.strokeStyle = phColor(this, 'rgba(var(--rgb-cyan), 0.2)');
     octx.lineWidth = 1;
     octx.beginPath(); octx.arc(0, 0, r * 2.2, 0, Math.PI * 2); octx.stroke();
     // Orient the ship glyph to its heading (north-up chart, 0 rad = north/up).
     octx.rotate(headingRad || 0);
-    octx.shadowColor = '#6cb6d0';
+    octx.shadowColor = phColor(this, 'var(--cyan)');
     octx.shadowBlur = 14;
-    octx.fillStyle = '#6cb6d0';
+    octx.fillStyle = phColor(this, 'var(--cyan)');
     octx.beginPath();
     octx.moveTo(0, -r);
     octx.lineTo(r * 0.65, r * 0.45);
@@ -379,10 +383,10 @@ export class PhNavigationMap extends HTMLElement {
     const [px, py] = this.#worldToScreen(wp.x, wp.z, 0, 0, 0, scale, cx, cy);
     const d = 8;
     octx.save();
-    octx.fillStyle = 'rgba(212,168,32,0.18)';
-    octx.strokeStyle = '#d4a820';
+    octx.fillStyle = phColor(this, 'rgba(var(--rgb-gold), 0.18)');
+    octx.strokeStyle = phColor(this, 'var(--gold)');
     octx.lineWidth = 1.5;
-    octx.shadowColor = '#d4a820';
+    octx.shadowColor = phColor(this, 'var(--gold)');
     octx.shadowBlur = 10;
     octx.beginPath();
     octx.moveTo(px, py - d); octx.lineTo(px + d, py);
@@ -392,7 +396,7 @@ export class PhNavigationMap extends HTMLElement {
     octx.shadowBlur = 0;
     if (this.#zoom >= 0.5) {
       octx.font = wpPx + 'px "JetBrains Mono", monospace';
-      octx.fillStyle = '#d4a820';
+      octx.fillStyle = phColor(this, 'var(--gold)');
       octx.textAlign = 'left';
       octx.fillText('WP', px + d + 4, py + 3);
     }
@@ -424,7 +428,9 @@ export class PhNavigationMap extends HTMLElement {
    * gold instead of its own colour: for a sphere or box that gold outline
    * sits around the region's own fill, but a torus never has a fill to
    * begin with, so its single stroked ring renders entirely gold. That is
-   * exact parity with `gui/radar-widget.js`. The Rust viewscreen renderer
+   * exact parity with the scope in `gui/components/ph-radar.js`, which is where
+   * that rule survived the deletion of the dormant radar widget. The Rust
+   * viewscreen renderer
    * differs: it keeps a region's own authored colour and adds a small gold
    * ring only to icon-carrying objective entities, so gold-marking region
    * shapes is a chart-side extension (known parity gap), not shared
@@ -444,16 +450,16 @@ export class PhNavigationMap extends HTMLElement {
       const [sx, sy] = this.#worldToScreen(region.x || 0, region.z || 0, 0, 0, 0, scale, cx, cy);
       const [r, g, b] = this.#regionRgb(region.color);
       const fill = 'rgba(' + r + ',' + g + ',' + b + ',0.3)';
-      const stroke = region.objective_target ? '#d4a820' : 'rgb(' + r + ',' + g + ',' + b + ')';
+      const stroke = region.objective_target ? 'var(--gold)' : 'rgb(' + r + ',' + g + ',' + b + ')';
       let labelOffset;
 
       if (region.shape === 'sphere') {
         const rPx = Math.max(4, (region.radius || 0) * pxPerWorld);
         octx.beginPath();
         octx.arc(sx, sy, rPx, 0, Math.PI * 2);
-        octx.fillStyle = fill;
+        octx.fillStyle = phColor(this, fill);
         octx.fill();
-        octx.strokeStyle = stroke;
+        octx.strokeStyle = phColor(this, stroke);
         octx.lineWidth = 1.5;
         octx.stroke();
         labelOffset = rPx;
@@ -465,16 +471,16 @@ export class PhNavigationMap extends HTMLElement {
         octx.beginPath();
         octx.arc(sx, sy, (outerPx + innerPx) / 2, 0, Math.PI * 2);
         octx.lineWidth = Math.max(1, outerPx - innerPx);
-        octx.strokeStyle = stroke;
+        octx.strokeStyle = phColor(this, stroke);
         octx.stroke();
         labelOffset = outerPx;
       } else if (region.shape === 'box') {
         const he = region.half_extents || [0, 0];
         const halfW = Math.max(4, (he[0] || 0) * pxPerWorld);
         const halfH = Math.max(4, (he[1] || 0) * pxPerWorld);
-        octx.fillStyle = fill;
+        octx.fillStyle = phColor(this, fill);
         octx.fillRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
-        octx.strokeStyle = stroke;
+        octx.strokeStyle = phColor(this, stroke);
         octx.lineWidth = 1.5;
         octx.strokeRect(sx - halfW, sy - halfH, halfW * 2, halfH * 2);
         labelOffset = halfW;
@@ -486,7 +492,7 @@ export class PhNavigationMap extends HTMLElement {
       // Same label treatment as blip names, including the zoom-out floor.
       if (showNames && region.name) {
         octx.font = namePx + 'px "JetBrains Mono", monospace';
-        octx.fillStyle = stroke;
+        octx.fillStyle = phColor(this, stroke);
         octx.fillText(region.name, sx + labelOffset + 4, sy + 4);
       }
     }
@@ -496,7 +502,7 @@ export class PhNavigationMap extends HTMLElement {
   /** Plain gold ring marking an objective contact (no target-lock ticks). */
   #drawObjectiveRing(octx, sx, sy, ringR) {
     octx.save();
-    octx.strokeStyle = '#d4a820';
+    octx.strokeStyle = phColor(this, 'var(--gold)');
     octx.lineWidth = 2;
     octx.beginPath();
     octx.arc(sx, sy, ringR, 0, Math.PI * 2);
@@ -505,15 +511,15 @@ export class PhNavigationMap extends HTMLElement {
   }
 
   #blipColor(stance) {
-    if (stance === 'hostile') return '#ff6040';
-    if (stance === 'friendly') return '#4ec870';
-    if (stance === 'neutral') return '#7a90c0';
-    return '#a8b0c0';
+    if (stance === 'hostile') return 'var(--fire-hot)';
+    if (stance === 'friendly') return 'var(--loaded)';
+    if (stance === 'neutral') return 'var(--ink-dim)';
+    return 'var(--ink-dim)';
   }
 
   #drawBlipShape(octx, kind, sx, sy, r, color) {
     octx.save();
-    octx.fillStyle = color;
+    octx.fillStyle = phColor(this, color);
     if (kind === 'star') {
       const spikes = 5;
       const outerR = r * 1.4;

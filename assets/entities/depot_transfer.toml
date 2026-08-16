@@ -29,8 +29,15 @@ description = "entity.depot_transfer.target.description"
 hull_integrity = 400.0
 
 [collider]
+# Matched to the visible hull, at John's request. `alliance_research_outpost.glb`
+# measures 1.8905 x 0.8416 x 1.8986 raw, and its sidecar's `[base].scale` of
+# [4, 4, 4] draws 7.56 x 3.37 x 7.59 — a max half-extent of 3.80. The 10 here was
+# two and a half times that: a ship "collided" with this depot while still nearly
+# six units clear of anything on screen.
+#
+# See `station_axiom.toml` for why a Ball at the max half-extent is the shape.
 shape = "Ball"
-radius = 10.0
+radius = 3.8
 length = 0.0
 
 [radar_appearance]

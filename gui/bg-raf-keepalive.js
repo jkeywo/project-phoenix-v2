@@ -4,7 +4,7 @@
  * Browsers cap requestAnimationFrame to ~1 Hz once a document is hidden
  * (tab backgrounded, window minimized). Fine for a page that's idling, but
  * several consoles run continuous rAF loops that other crew are actively
- * relying on — the radar sweep (radar-widget.js), the helm joystick decay
+ * relying on — the radar scope (components/ph-radar.js), the helm joystick decay
  * loop, the repair countdown timers — and those need to keep ticking at
  * full rate even when this console's browser tab isn't the focused one.
  *

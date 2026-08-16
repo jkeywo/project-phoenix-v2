@@ -5,6 +5,11 @@ import './ph-radar.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import {
+  SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
+  applyArcCompositeCap, cappedArcAlpha,
+} from './ph-scope-chrome.js';
 
 export class PhHelmRadar extends HTMLElement {
   #state = null;
@@ -13,6 +18,9 @@ export class PhHelmRadar extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = [
       '<style>',
@@ -20,27 +28,25 @@ export class PhHelmRadar extends HTMLElement {
       '.container { position: relative; width: 100%; height: 100%; }',
       'ph-radar { display: block; width: 100%; height: 100%; }',
       '.svg-overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }',
-      '.thrust-arc { fill: none; stroke: #6cb6d0; stroke-width: 4; stroke-linecap: round; }',
+      '.thrust-arc { fill: none; stroke: var(--cyan); stroke-width: 4; stroke-linecap: round; }',
       '.hostile-arc { stroke: none; }',
-      '.corner-label {',
-      '  position: absolute; pointer-events: none; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: 0.6rem;',
-      '  letter-spacing: 0.1em; color: #5a6a7e;',
-      '}',
-      '.corner-label.top-left { top: 4%; left: 6%; }',
-      '.corner-label.top-right { top: 4%; right: 6%; text-align: right; }',
-      '.corner-label.bottom-left { bottom: 6%; left: 6%; }',
+      SCOPE_CHROME_CSS,
       '.on-screen-btn {',
       '  position: absolute; bottom: 6%; right: 6%;',
       '  pointer-events: auto; z-index: 10;',
-      '  font-family: \'JetBrains Mono\', monospace; font-size: 0.65rem;',
-      '  letter-spacing: 0.15em; color: #8899b0; background: rgba(5,8,22,0.85);',
+      '  font-family: \'JetBrains Mono\', monospace; font-size: var(--text-xs);',
+      '  letter-spacing: 0.15em; color: var(--ink-dim); background: rgba(var(--rgb-deep), 0.85);',
       '  border: 1px solid var(--line-faint); border-radius: 2px; padding: 2px 12px;',
       '  cursor: pointer; text-transform: uppercase;',
       '  transition: border-color 0.15s, color 0.15s, background 0.15s;',
+      /* The touch floor (PRD #1023 module 3). inline-flex because min-height
+         does nothing to an inline box, and the label has to stay centred in a
+         control that is now taller than its own text. */
+      '  display: inline-flex; align-items: center; justify-content: center;',
+      '  min-height: var(--control-hit-min);',
       '}',
-      '.on-screen-btn:hover { border-color: #6cb6d0; }',
-      '.on-screen-btn.active { border-color: #6cb6d0; color: #6cb6d0; background: rgba(108,182,208,0.18); }',
+      '.on-screen-btn:hover { border-color: var(--cyan); }',
+      '.on-screen-btn.active { border-color: var(--cyan); color: var(--cyan); background: rgba(var(--rgb-cyan), 0.18); }',
       '</style>',
       '<div class="container">',
       '  <ph-radar id="inner-radar"></ph-radar>',
@@ -55,14 +61,16 @@ export class PhHelmRadar extends HTMLElement {
       '    <path class="thrust-arc" id="arc-port" />',
       '    <path class="thrust-arc" id="arc-stbd" />',
       '  </svg>',
-      '  <div class="corner-label top-left" id="label-pos">X: 0  Z: 0</div>',
-      '  <div class="corner-label top-right" id="label-bearing">000°</div>',
-      '  <div class="corner-label bottom-left" id="label-speed">0.0 km/s</div>',
+      scopeChromeMarkup(),
       '  <button class="on-screen-btn" id="on-screen-btn" type="button">' + t('console.common.on_screen') + '</button>',
       '</div>',
     ].join('\n');
     this.shadowRoot.appendChild(tpl.content.cloneNode(true));
     this.#innerRadar = this.shadowRoot.getElementById('inner-radar');
+    // Every hostile on the scope contributes its own banks to this one group,
+    // so it stacks harder than the tactical scope's does — a three-ship
+    // engagement can put a dozen wedges over the same pixel.
+    applyArcCompositeCap(this.shadowRoot.getElementById('hostile-arcs'));
   }
 
   connectedCallback() {
@@ -100,24 +108,9 @@ export class PhHelmRadar extends HTMLElement {
     this.#updateThrustArcs(s);
     this.#renderHostileArcs(s);
 
-    const posLabel = this.shadowRoot.getElementById('label-pos');
-    if (posLabel) {
-      const x = s.x != null ? s.x : 0;
-      const z = s.z != null ? s.z : 0;
-      posLabel.textContent = t('console.common.radar_pos', { x: x.toFixed(0), z: z.toFixed(0) });
-    }
-
-    const bearingLabel = this.shadowRoot.getElementById('label-bearing');
-    if (bearingLabel) {
-      const h = s.heading != null ? ((s.heading % 360) + 360) % 360 : 0;
-      bearingLabel.textContent = String(h.toFixed(0)).padStart(3, '0') + '\u00B0';
-    }
-
-    const speedLabel = this.shadowRoot.getElementById('label-speed');
-    if (speedLabel) {
-      const spd = s.speed != null ? s.speed : 0;
-      speedLabel.textContent = (spd * 3.6).toFixed(1) + ' km/s';
-    }
+    updateScopeChrome(this.shadowRoot, {
+      x: s.x, z: s.z, headingDeg: s.ship_heading, speed: s.speed,
+    });
 
     const btn = this.shadowRoot.getElementById('on-screen-btn');
     if (btn) {
@@ -185,7 +178,7 @@ export class PhHelmRadar extends HTMLElement {
     const range = s.range > 0 ? s.range : 1;
     const shipX = s.x || 0;
     const shipZ = s.z || 0;
-    const heading = s.heading || 0;
+    const heading = s.ship_heading || 0;
     const yaw = heading * Math.PI / 180;
     const cosY = Math.cos(yaw), sinY = Math.sin(yaw);
 
@@ -219,8 +212,10 @@ export class PhHelmRadar extends HTMLElement {
         g.appendChild(path);
       }
       path.setAttribute('d', d);
-      path.setAttribute('fill', fill);
-      path.setAttribute('fill-opacity', String(opacity));
+      path.setAttribute('fill', phColor(this, fill));
+      // The authored 0.07 keeps ONE wedge legible; the group's cap is what
+      // keeps a dozen of them legible. See `applyArcCompositeCap`.
+      path.setAttribute('fill-opacity', String(cappedArcAlpha(opacity)));
     });
   }
 

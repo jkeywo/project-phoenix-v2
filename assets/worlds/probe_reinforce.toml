@@ -1,0 +1,115 @@
+# Probe world for issue #863 — a MID-RUN spawn, and whether a resume can put it
+# back.
+#
+# Every other probe world in this repo spawns whatever it spawns at t=0, which
+# is exactly the case a resume never has to think about: a fresh boot of the
+# same scenario runs the same `on_timer(0, …)` before it has finished coming up,
+# so the ship is already standing by the time a restore looks for it. That made
+# `snapshot::restore` an overwrite and nothing else, and it hid a dependency
+# nobody had written down — the resume was relying on the fresh app REPLAYING
+# the run, not on the save carrying it.
+#
+# So the reinforcement here arrives at t=3, and the whole world exists to make
+# that gap real:
+#
+#   t=0    the escort is authored, not spawned. It is what a fresh boot puts
+#          back by itself, and the restore has to keep waiting for it — a world
+#          with nothing authored could not tell the two kinds apart.
+#   t=3    `on_reinforce` spawns TWO Harrow cruisers by script, each with an
+#          `overrides` block that is the entire reason they are dangerous: the
+#          template is the same Alliance cruiser the escort flies, and only the
+#          override makes a raider of it. A rebuild from the bare template would
+#          put back two friendly ships in the raiders' positions, which is a
+#          worse answer than none — hence the assertion in
+#          `tests/snapshot_resume.rs` reads the FACTION and the TAGS off the
+#          restored hull rather than merely counting ships.
+#   t=3+   the two sides are mutually hostile from `on_load`, so the run that
+#          follows is a real fight and the capture is of a world in motion.
+#
+# A capture taken after t=3 therefore names four ships, two of which no fresh
+# boot of this file will produce for another three mission seconds — and a
+# browser session resuming with nobody at the consoles never produces them at
+# all, because it is not replaying anything.
+#
+# The reinforcements are spawned into a group so `name_to_uuid` and
+# `entity_groups` both carry runtime rows: the point of the payload's
+# `name_to_uuid` (issue #863) is that a resumed scenario can still say which
+# ship it means.
+#
+# No asteroid field, on purpose. The streamed-belt half of #863 is measured on
+# combat_test, which has two; this world is about the roster and nothing else,
+# so `belt_ready` is trivially true here and a failure is readable.
+#
+# BASELINE (this world is new in #863, so this is its first recorded digest):
+# `--seed 42 --ticks 900` gives final digest 9446242647445422197
+# (3905547180860912765 at tick 0). A NEW number with nothing to compare it
+# against — written down here to be what a later change is A/B'd against, the
+# way the shipped worlds' digests already are.
+#
+# The shipped worlds are unmoved by this file's existence, which is the trivial
+# half of the claim: nothing here is shared with them. The half worth measuring
+# is `probe_destroy`, which spawns two storm bands from script and therefore
+# gains an `EntitySpawnOrigin` component on each: it reproduces
+# 14665104268980394769 (9365114570161849778 at tick 0) exactly, because the
+# record is written to the entity and folded by nothing.
+
+[global]
+seed = 863
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The player ship — spawned by `spawn_game_start_entities` at game start.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The escort: AUTHORED, so a fresh boot puts it back without any help from a
+# save. It is the control for every claim this world makes about the spawned
+# pair — if a resume could not restore this one either, the failure would be
+# about restores in general rather than about mid-run spawns.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_reinforce.entity.escort.name"
+transform = { position = [0.0, 0.0, 260.0] }
+
+[script]
+setup = """
+on_world_loaded("on_load");
+on_timer(3, "on_reinforce");
+
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+}
+
+// The mid-run arrival. Two hulls, one call each, both carrying the override
+// that makes them Harrow raiders rather than a second pair of Alliance
+// cruisers — the difference a rebuild has to reproduce.
+fn on_reinforce(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_cruiser.toml",
+        name: "probe_raider_a",
+        position: [420, 0, 60],
+        groups: ["raiders"],
+        overrides: #{
+            faction: "cccccccc-3333-4333-8333-cccccccccccc",
+            tags: ["ship", "probe_raider"],
+        }
+    });
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_cruiser.toml",
+        name: "probe_raider_b",
+        position: [420, 0, -60],
+        groups: ["raiders"],
+        overrides: #{
+            faction: "cccccccc-3333-4333-8333-cccccccccccc",
+            tags: ["ship", "probe_raider"],
+        }
+    });
+    ctx.flags.increment("reinforced", 1);
+}
+"""

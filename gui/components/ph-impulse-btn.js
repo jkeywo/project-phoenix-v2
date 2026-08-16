@@ -5,6 +5,7 @@ import { observeGamepadButton, GAMEPAD_BUTTON } from '../gamepad-button.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhImpulseBtn extends HTMLElement {
   #state = null;
@@ -13,15 +14,18 @@ export class PhImpulseBtn extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
-    .binding { margin-left: auto; font-size: 0.55rem; letter-spacing: 0.15em; color: var(--ink-faint); }
-    .auto-badge { font-size: 0.6rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
-    .btn { --charge: 0; width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: 0.9rem; font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: background 0.3s ease; }
+    .header { display: flex; justify-content: space-between; align-items: center; gap: 0.4rem; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; margin-bottom: 0.4rem; }
+    .binding { margin-left: auto; font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--ink-faint); }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.1rem 0.4rem; letter-spacing: 0.2em; }
+    .btn { --charge: 0; width: 100%; font-family: 'Chakra Petch', sans-serif; font-size: var(--text-md); font-weight: 700; padding: 0.7rem 0; letter-spacing: 0.2em; text-transform: uppercase; cursor: pointer; border: 2px solid; transition: background 0.3s ease; }
     .btn.ready { background: var(--bg-card); border-color: var(--loaded); color: var(--loaded); }
     .btn.ready:hover:not(:disabled) { background: var(--loaded-dim); }
     .btn.charging { background: linear-gradient(90deg, var(--reloading) calc(var(--charge) * 100%), var(--bg-card) calc(var(--charge) * 100%)); border-color: var(--reloading); color: var(--reloading); }

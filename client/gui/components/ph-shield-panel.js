@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhShieldPanel extends HTMLElement {
   #state = null;
@@ -13,23 +14,26 @@ export class PhShieldPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
     .header .v { color: var(--tactical); font-weight: 600; }
-    .hull-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.65rem; }
+    .hull-row { display: flex; align-items: center; gap: 0.5rem; font-size: var(--text-xs); }
     .hull-row .lbl { color: var(--ink-dim); min-width: 3rem; }
     .hull-row .bar-wrap { flex: 1; height: 0.7rem; background: var(--bg-deep); border: 1px solid var(--line-faint); position: relative; overflow: hidden; }
     .hull-row .bar-wrap .fill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: width 0.5s ease; }
     .hull-row .bar-wrap .fill.warn { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .hull-row .bar-wrap .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
-    .hull-row .val { min-width: 3rem; text-align: right; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 0.9rem; }
+    .hull-row .val { min-width: 3rem; text-align: right; font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: var(--text-md); }
     .facings { display: flex; flex-direction: column; gap: 0.25rem; }
-    .facing-row { display: flex; align-items: center; gap: 0.4rem; font-size: 0.6rem; border-left: 2px solid transparent; padding-left: 0.3rem; }
-    .facing-row.focused { border-left-color: var(--loaded); background: rgba(78,200,112,0.08); }
+    .facing-row { display: flex; align-items: center; gap: 0.4rem; font-size: var(--text-xs); border-left: 2px solid transparent; padding-left: 0.3rem; }
+    .facing-row.focused { border-left-color: var(--loaded); background: rgba(var(--rgb-loaded), 0.08); }
     .facing-row .lbl { color: var(--ink-dim); min-width: 2.5rem; letter-spacing: 0.15em; }
     .facing-row.focused .lbl { color: var(--ink); font-weight: 600; }
     .facing-row .bar-wrap { flex: 1; height: 0.5rem; background: var(--bg-deep); border: 1px solid var(--line-faint); position: relative; overflow: hidden; }
@@ -38,11 +42,11 @@ export class PhShieldPanel extends HTMLElement {
     .facing-row .bar-wrap .fill.crit { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
     .facing-row .bar-wrap .fill.down { background: var(--line-faint); opacity: 0.4; }
     .facing-row .pct { min-width: 2rem; text-align: right; color: var(--ink-dim); }
-    .status { font-size: 0.6rem; color: var(--ink-dim); letter-spacing: 0.2em; }
+    .status { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.2em; }
     .grid-online { color: var(--loaded); }
     .grid-offline { color: var(--fire); }
     @media (orientation: portrait) {
-      .hull-row .val { font-size: 0.75rem; }
+      .hull-row .val { font-size: var(--text-sm); }
     }
   </style>
   <div class="header">
@@ -102,7 +106,7 @@ export class PhShieldPanel extends HTMLElement {
     }
 
     if (facings.length === 0) {
-      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.style.cssText = 'font-size:0.6rem;color:var(--ink-dim);padding:0.5rem 0;text-align:center'; this.#emptyEl.textContent = t('console.common.no_shield_data'); container.appendChild(this.#emptyEl); }
+      if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.style.cssText = 'font-size:var(--text-xs);color:var(--ink-dim);padding:0.5rem 0;text-align:center'; this.#emptyEl.textContent = t('console.common.no_shield_data'); container.appendChild(this.#emptyEl); }
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }

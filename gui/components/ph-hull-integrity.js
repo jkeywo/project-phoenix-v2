@@ -7,6 +7,7 @@ import { t } from '../strings.js';
 
 import './ph-damage-bar.js';
 import './ph-damage-detail.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhHullIntegrity extends HTMLElement {
   #state = null;
@@ -16,14 +17,17 @@ export class PhHullIntegrity extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .placeholder { font-size: 0.65rem; color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
-    .systems-label { font-size: 0.65rem; letter-spacing: 0.2em; color: var(--ink-dim); margin-top: 0.25rem; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .placeholder { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.2em; padding: 0.5rem 0; text-align: center; }
+    .systems-label { font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-dim); margin-top: 0.25rem; }
   </style>
   <div class="header"><span>${t('component.hull_integrity.title')}</span></div>
   <div id="bar-container"></div>

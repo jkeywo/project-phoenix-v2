@@ -189,9 +189,10 @@
 # `pasm/spec/architecture/world-files.yaml`'s `campaign-flag-handoff-state`
 # describes the handoff and names the types that carry it.
 #
-# BASELINE. CURRENT VALUE: 0xad71760f8a82a5ee (12497900250050242030), last moved
-# by #1043 — the paragraphs below are the history of how it got there, oldest
-# first, and the first number in them is NOT the one to A/B against.
+# BASELINE. CURRENT VALUE: 0x97143e605be31a1d (10886394782840723997), last moved
+# by the station-collider correction — the paragraphs below are the history of
+# how it got there, oldest first, and the first number in them is NOT the one to
+# A/B against.
 #
 #   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
 #     --seed 42 --ticks 900 --record target/t1_falling_skyway.ron --digest-every 0
@@ -500,6 +501,60 @@
 # seconds. The full headless suite was re-run across the fix and every
 # assertion this world owns still holds, including the Act-3 save margin
 # (#1040) and the civilian divert.
+#
+# MOVED BY THE STATION-COLLIDER CORRECTION, to 0x97143e605be31a1d
+# (10886394782840723997). John asked for the station colliders to match the
+# hulls they are drawn as, and four templates were authored against sizes their
+# meshes do not have. This world fields three of them.
+#
+# THE MECHANISM IS ONE TEMPLATE, and the A/B says so rather than the prose
+# guessing. Reverting each correction alone, on this world, at this seed:
+#
+#   all four corrected                        0x97143e605be31a1d
+#   `station_axiom` alone reverted to 12      0x97143e605be31a1d  ← no effect
+#   `skyhook` alone reverted to 26            0x97143e605be31a1d  ← no effect
+#   `depot_transfer` alone reverted to 10     0xad71760f8a82a5ee  ← #1043's, exactly
+#
+# So the whole delta is the two ladder depots, and the reason is the geometry
+# this file already authors: `depot_ladder_a` and `depot_ladder_b` sit ON
+# `depot_a_berth` and `depot_b_berth`, and `ladder_run`'s first and third legs
+# fly a hauler to those same two anchors. A civilian on that route is commanded
+# to the depot's own centre, so it spends the run inside the depot's collider,
+# and the size of that collider is the size of the contact it resolves against.
+# `alliance_research_outpost.glb` draws 7.56 x 3.37 x 7.59 at its `[base].scale`
+# of [4, 4, 4] — a max half-extent of 3.80 against the 10 that was authored — so
+# the hauler now settles against a ball a little over a third of the width it
+# used to. The other two structures moved nothing because nothing in this world's
+# 900-tick window goes near them: `skyway_control` sits at [-320, 0, -120], some
+# 349 units off the nearest corridor anchor, and the skyhook's correction is a
+# SHRINK from 26 to 17.04, which can only ever remove contacts.
+#
+# TICK 0 IS UNCHANGED at 3135162069797578640, and that is the shape of the
+# claim: a collider radius is not spawn state, so the fold at load is identical
+# and the divergence is entirely what the haulers do once they reach their
+# berths.
+#
+# THE OTHER SIXTEEN ANCHORS ALL HOLD, measured twice on each side of the change:
+# combat_test 14942520827746055774, patrol 11531679067393217131, probe_evidence
+# 5001167740764356580, probe_strike (--ticks 1800) 535291289754814419,
+# probe_scan 7851858877582205234, probe_storm (--ticks 6480)
+# 13908044596492949404, probe_scandiff 2488189563210329022, probe_corroborate
+# 6231558379626882143, probe_restraint 1078282553163286478, probe_collapse
+# (--ticks 3600) 5992449400465842350, probe_window (--ticks 2400)
+# 8563713307821982951, probe_destroy 14665104268980394769, probe_operations
+# 14238567263822110364, duel 95852357729946676, rng_coverage
+# 8393867315677906854 and probe_reinforce 9446242647445422197. Eleven of those
+# sixteen DO field one of the corrected structures — every probe world with a
+# depot or a skyhook in it — and they hold anyway, because a station collider
+# only folds into a digest when something is touching it. This world is the one
+# that parks traffic on top of one.
+#
+# NOT re-authored, and flagged instead: the berth anchors ARE the depot
+# positions, so `ladder_run` steers civilians into a structure rather than
+# alongside it. That was survivable while the collider was a phantom the model
+# never filled and is survivable now that it is smaller still, but a berth that
+# means "dock here" wants an offset from the hull it docks at, and moving one is
+# a design call rather than a collider fix.
 
 [global]
 seed = 1034

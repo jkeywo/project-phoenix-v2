@@ -29,6 +29,7 @@
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 /**
  * Whole-percent condition, rendered at the precision the answering band bought.
@@ -63,26 +64,29 @@ export class PhScanReadout extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .heading { font-size: 0.6rem; letter-spacing: 0.2em; color: var(--ink-dim); padding: 0 0.2rem 0.3rem; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.5rem 0; letter-spacing: 0.2em; }
-    .subject { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.7rem; padding: 0.1rem 0.2rem; }
+    .heading { font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-dim); padding: 0 0.2rem 0.3rem; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.5rem 0; letter-spacing: 0.2em; }
+    .subject { display: flex; align-items: baseline; gap: 0.5rem; font-size: var(--text-sm); padding: 0.1rem 0.2rem; }
     .subject .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .subject .band { flex-shrink: 0; letter-spacing: 0.1em; color: var(--cyan); }
     .rows { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.15rem 0.2rem 0; }
-    .row { display: flex; align-items: baseline; gap: 0.5rem; font-size: 0.66rem; line-height: 1.3; }
+    .row { display: flex; align-items: baseline; gap: 0.5rem; font-size: var(--text-xs); line-height: 1.3; }
     .row .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-dim); }
     .row .value { flex-shrink: 0; font-variant-numeric: tabular-nums; }
-    .row.down .value { color: var(--warn, var(--ink-dim)); }
-    .tolerance { color: var(--ink-dim); font-size: 0.9em; margin-left: 0.3rem; }
-    .reason { font-size: 0.62rem; color: var(--warn, var(--ink-dim)); padding: 0.2rem; letter-spacing: 0.05em; }
-    button { width: 100%; font-family: inherit; font-size: 0.65rem; letter-spacing: 0.15em;
+    .row.down .value { color: var(--reloading); }
+    .tolerance { color: var(--ink-dim); font-size: var(--text-md); margin-left: 0.3rem; }
+    .reason { font-size: var(--text-xs); color: var(--reloading); padding: 0.2rem; letter-spacing: 0.05em; }
+    button { width: 100%; font-family: inherit; font-size: var(--text-xs); letter-spacing: 0.15em;
              padding: 0.35rem; margin-top: 0.25rem; background: transparent; color: var(--ink);
-             border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; }
+             border: 1px solid var(--line-soft); border-radius: 2px; cursor: pointer; min-height: var(--control-hit-min); }
     button:disabled { color: var(--ink-dim); cursor: default; }
   </style>
   <div class="heading" id="heading"></div>

@@ -340,6 +340,23 @@ export function mountSettings({
 
   let activeTab = null;
 
+  // The documentation surface's own state, deliberately NOT `activeTab`.
+  //
+  // The panel keeps one tab slot, and the Ship Manual has a second tab strip
+  // INSIDE it — one tab per station. That inner selection used to live only in
+  // a closure created by `renderManual`, which meant it existed for exactly as
+  // long as the DOM `buildContent()` had most recently thrown away. Every
+  // settings-driven repaint therefore reset the reader to the first station:
+  // switching Settings tabs and back, and — worse, because it is not the
+  // reader's doing — any `DebugState` push, which client.html forwards to
+  // `rebuildContent()` while the panel is open.
+  //
+  // A debug flag changing on the host has nothing to do with which page of the
+  // manual a player is reading. Settings state and documentation state are
+  // separate facts, so they get separate slots: `renderManual` is handed the
+  // remembered index and reports back when the reader moves.
+  let manualStationIndex = 0;
+
   // Master volume owns every audio channel the page hands it. `audioEl` is the
   // pre-#940 single-element argument, kept working so client.html's existing
   // call site did not have to change in the same commit as the panel.
@@ -566,7 +583,13 @@ export function mountSettings({
   function buildShipManualTab(body) {
     const host = doc.createElement('div');
     host.className = 'settings-documentation';
-    renderManual(host, typeof getManual === 'function' ? getManual() : null);
+    const manual = typeof getManual === 'function' ? getManual() : null;
+    const stations = renderManual(host, manual, manualStationIndex, (index) => {
+      manualStationIndex = index;
+    });
+    // A shorter manual (a different ship) must not leave the remembered index
+    // pointing past the end of the new one.
+    if (stations > 0 && manualStationIndex >= stations) manualStationIndex = stations - 1;
     body.appendChild(host);
   }
 

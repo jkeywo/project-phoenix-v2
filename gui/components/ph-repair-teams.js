@@ -20,24 +20,24 @@ export class PhRepairTeams extends HTMLElement {
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
-    .header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
-    .auto-badge { font-size: 0.55rem; color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
+    .header { display: flex; justify-content: space-between; align-items: center; font-size: var(--text-sm); letter-spacing: 0.2em; color: var(--ink-dim); text-transform: uppercase; }
+    .auto-badge { font-size: var(--text-xs); color: var(--reloading); border: 1px solid var(--reloading); padding: 0.05rem 0.3rem; letter-spacing: 0.2em; }
     .card { border: 1px solid var(--line-faint); background: var(--bg-card); padding: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; }
     .card-top { display: flex; justify-content: space-between; align-items: center; }
-    .team-label { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.15em; }
-    .status-badge { font-size: 0.55rem; padding: 0.05rem 0.3rem; letter-spacing: 0.15em; border: 1px solid; }
+    .team-label { font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.15em; }
+    .status-badge { font-size: var(--text-xs); padding: 0.05rem 0.3rem; letter-spacing: 0.15em; border: 1px solid; }
     .status-badge.idle { color: var(--ink-dim); border-color: var(--ink-dim); }
     .status-badge.travelling { color: var(--reloading); border-color: var(--reloading); }
     .status-badge.repairing { color: var(--loaded); border-color: var(--loaded); }
     .status-badge.returning { color: var(--cyan); border-color: var(--cyan); }
-    .target-label { font-size: 0.6rem; color: var(--ink-dim); }
+    .target-label { font-size: var(--text-xs); color: var(--ink-dim); }
     .progress-wrap { width: 100%; height: 0.4rem; background: var(--bg-deep); border: 1px solid var(--line-faint); overflow: hidden; }
     .progress-fill { height: 100%; background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); transition: none; }
     .progress-fill.repairing { background: linear-gradient(90deg, var(--loaded-dim), var(--loaded)); }
     .progress-fill.travelling { background: linear-gradient(90deg, var(--reloading-dim), var(--reloading)); }
     .progress-fill.returning { background: linear-gradient(90deg, var(--cyan-dim), var(--cyan)); }
     .dispatch-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
     /* Damaged-systems list (issue #1015). Rows are buttons: tapping one asks
        the host to make that system the next job of whichever team is already
        sweeping its station. */
@@ -48,17 +48,17 @@ export class PhRepairTeams extends HTMLElement {
       display: flex; align-items: center; gap: 0.4rem; width: 100%;
       background: var(--bg-card); border: 1px solid var(--line-faint);
       color: inherit; font: inherit; text-align: left; cursor: pointer;
-      padding: 0.25rem 0.35rem;
+      padding: 0.25rem 0.35rem; min-height: var(--control-hit-min);
     }
     .dmg-row:disabled { cursor: default; opacity: 0.5; }
     .dmg-row.prioritised { border-color: var(--cyan); }
-    .dmg-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.65rem; }
-    .dmg-row .tier-chip { font-size: 0.5rem; letter-spacing: 0.15em; border: 1px solid; padding: 0.02rem 0.25rem; flex-shrink: 0; }
+    .dmg-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+    .dmg-row .tier-chip { font-size: var(--text-xs); letter-spacing: 0.15em; border: 1px solid; padding: 0.02rem 0.25rem; flex-shrink: 0; }
     .dmg-row .tier-chip.damaged { color: var(--reloading); border-color: var(--reloading); }
     .dmg-row .tier-chip.disabled { color: var(--fire); border-color: var(--fire); }
     .dmg-row .tier-chip.destroyed { color: var(--fire); border-color: var(--fire); background: var(--fire-dim); }
-    .dmg-row .pct { font-size: 0.55rem; color: var(--ink-dim); min-width: 2.4rem; text-align: right; flex-shrink: 0; }
-    .dmg-row .flag { font-size: 0.5rem; letter-spacing: 0.15em; color: var(--cyan); flex-shrink: 0; }
+    .dmg-row .pct { font-size: var(--text-xs); color: var(--ink-dim); min-width: 2.4rem; text-align: right; flex-shrink: 0; }
+    .dmg-row .flag { font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--cyan); flex-shrink: 0; }
   </style>
   <div class="header">
     <span>${t('component.repair_teams.title')}</span>

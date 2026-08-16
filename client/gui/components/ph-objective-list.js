@@ -4,6 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { phAdoptConsoleStyles } from './ph-console-styles.js';
 
 export class PhObjectiveList extends HTMLElement {
   #state = null;
@@ -13,22 +14,25 @@ export class PhObjectiveList extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
+    // Every component adopts the shared control family (module 1 of PRD
+    // #1023): custom properties cross a shadow boundary, class rules do not.
+    phAdoptConsoleStyles(this.shadowRoot);
     const tpl = document.createElement('template');
     tpl.innerHTML = `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
     .list { display: flex; flex-direction: column; gap: 0.35rem; }
-    .empty { font-size: 0.65rem; color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
-    .row { display: flex; align-items: flex-start; gap: 0.4rem; font-size: 0.7rem; line-height: 1.3; }
-    .row .indicator { flex-shrink: 0; width: 0.7rem; height: 0.7rem; margin-top: 0.2rem; border: 1px solid #4a5060; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .empty { font-size: var(--text-xs); color: var(--ink-dim); text-align: center; padding: 0.75rem 0; letter-spacing: 0.2em; }
+    .row { display: flex; align-items: flex-start; gap: 0.4rem; font-size: var(--text-sm); line-height: 1.3; min-height: var(--control-hit-min); }
+    .row .indicator { flex-shrink: 0; width: 0.7rem; height: 0.7rem; margin-top: 0.2rem; border: 1px solid var(--edge); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
     .row .indicator.done { background: var(--loaded-dim); border-color: var(--loaded); }
-    .row .indicator.done::after { content: '\\2713'; font-size: 0.5rem; color: var(--loaded); }
-    .row .indicator.pending { background: transparent; border-color: #4a5060; }
+    .row .indicator.done::after { content: '\\2713'; font-size: var(--text-xs); color: var(--loaded); }
+    .row .indicator.pending { background: transparent; border-color: var(--edge); }
     .row .text { flex: 1; min-width: 0; }
     .row.done .text { text-decoration: line-through; color: var(--ink-dim); }
     .row { cursor: pointer; border-radius: 2px; padding: 0.1rem 0.2rem; }
-    .row.boosted { background: #1a2a3a; border-left: 2px solid var(--cyan); }
+    .row.boosted { background: var(--surface-panel-up); border-left: 2px solid var(--cyan); }
   </style>
   <div class="list" id="list"></div>
 `;

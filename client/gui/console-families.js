@@ -27,6 +27,16 @@
  *
  * Enforced by tests/client/npc-hull-console-coverage.test.js, which fails loudly
  * on either a family gap or a shape mismatch (issue #925, AC4).
+ *
+ * VISITING PANELS ARE NOT COVERAGE (issue #984). Every destroyer console now
+ * carries a Nav and a Comms overlay for the human seek to park a system in, and
+ * none of them declares those families below. This map answers "what may this
+ * seat OWN", and a visitor is by definition not owned: it arrives for as long
+ * as the seek holds it there, under `systems[<id>]` on whatever shape the
+ * console already has, and leaves again. Claiming the coverage would say a hull
+ * may AUTHOR comms on Helm — which would flip Helm's seat to two families and
+ * so to the keyed payload its flat HTML cannot read, the exact defect this map
+ * exists to prevent.
  */
 
 /**

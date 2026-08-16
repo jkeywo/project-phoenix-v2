@@ -125,6 +125,36 @@ export function setAutoState(button, badge, isAuto) {
 }
 
 /**
+ * Hero-bar toggle for a human-seeking system that is visiting this console
+ * (issue #984, pasm decision `console-complexity-human-seeking-systems`).
+ *
+ * Comms and Navigation follow the crew rather than the hull: while the seek
+ * has parked one on this station its payload arrives as `s.systems[<id>]` and
+ * the console offers it as one more button beside the AUTO badge; when the seek
+ * moves on, the payload stops arriving and the button goes with it.
+ *
+ * Hiding the button is not enough on its own. The overlay it opens is a
+ * full-frame panel, so a seek that moves while the panel is OPEN would leave
+ * the operator looking at a console they no longer hold with no way back —
+ * closing it here is the whole reason this is a shared helper and not
+ * `button.hidden = !present` written out four times.
+ *
+ * @param {HTMLElement|null} button - the hero-bar toggle
+ * @param {HTMLElement|null} overlay - the panel that toggle opens
+ * @param {boolean} present - true while this console hosts the system
+ */
+export function setSoughtToggle(button, overlay, present) {
+  if (button) {
+    button.hidden = !present;
+    if (!present) {
+      button.dataset.active = 'false';
+      button.classList.remove('active');
+    }
+  }
+  if (overlay && !present) overlay.classList.remove('open');
+}
+
+/**
  * Text content + optional class/colour update.
  *
  * @param {HTMLElement|null} el

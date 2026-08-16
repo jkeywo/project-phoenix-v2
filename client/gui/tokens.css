@@ -1,0 +1,264 @@
+/* ───────────────────────────────────────────────────────────────
+   gui/tokens.css — the design vocabulary, defined once.
+
+   Three documents render this game's 2D chrome: the lobby (client.html), the
+   host viewscreen (server.html), and each console (an iframe over
+   gui/console.css). Before this file they each carried their own `:root`
+   block, which is why the lobby's `--edge` was a different colour from the
+   consoles' and why the consoles' `--edge` was not defined at all — the two
+   vocabularies had drifted far enough apart that a token could exist in one
+   and simply not in the other.
+
+   So the vocabulary lives here and nowhere else. Every colour, edge, ink,
+   accent, space, type size and control dimension the chrome may use is named
+   below; nothing else may hard-code one.
+
+   How each surface gets it:
+     - console documents  →  gui/console.css `@import`s this file
+     - lobby / viewscreen →  <link rel="stylesheet" href="gui/tokens.css">
+     - ph-* components    →  custom properties inherit THROUGH a shadow
+                             boundary, so a component reads these from its
+                             document's :root for free. What a component
+                             cannot inherit is class rules, which is what
+                             gui/components/ph-console-styles.js carries.
+
+   Retinting the whole fleet is therefore an edit to this file alone.
+   tests/client/design-tokens.test.js fails if a stylesheet reaches past it.
+   ─────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Surfaces ───────────────────────────────────────────────────
+     Darkest to lightest. The console panels are a navy ramp lifted from
+     panel-bg.png; the lobby sits on the same ramp rather than the near-black
+     neutrals it used to define for itself. */
+  --surface-void:      #000000;   /* the page behind everything */
+  --surface-abyss:     #03050e;   /* frame vignette edge */
+  --surface-deep:      #050818;
+  --surface-base:      #0a1028;   /* the reference background for contrast */
+  --surface-card:      #0d1430;
+  --surface-raised:    #131a3a;
+  --surface-high:      #161e44;
+  --surface-lift:      #1a2148;   /* chamfer stroke floor, pressed states */
+  --surface-ridge:     #2a3568;
+  /* The neutral fill every console draws behind a content column. Warmer and
+     less saturated than the navy ramp, which is why it is its own rung rather
+     than being collapsed into --surface-base. */
+  --surface-panel:     #0e1117;
+  --surface-panel-up:  #1e2332;
+
+  /* Legacy names for the same six rungs. The console documents and every
+     component already speak these; they are aliases, not a second ramp. */
+  --bg-deep:           var(--surface-deep);
+  --bg-mid:            var(--surface-base);
+  --bg-up:             var(--surface-raised);
+  --bg-card:           var(--surface-card);
+  --bg-card-up:        var(--surface-high);
+
+  /* ── Edges ──────────────────────────────────────────────────────
+     Two floors apply, and they are different floors.
+
+     `--edge-control` bounds a CONTROL — a button, a stepper, a selection
+     ring. WCAG 1.4.11 asks 3:1 for "visual information required to identify
+     user interface components", so this one is tuned to clear 3:1 against
+     --surface-base (measured 3.00).
+
+     `--edge` and `--edge-faint` divide CONTENT: the border around a console's
+     panel column, a rule under a heading. Those carry no information a player
+     must perceive to operate the ship — the column is legible without its
+     border — so they are held at the authored navy and deliberately exempt.
+     The exemption is named in design-tokens.test.js rather than left silent. */
+  --edge-faint:        #1f2750;
+  --edge:              #3a4674;   /* the panel border (see console.css) */
+  --edge-control:      #4d5d9b;   /* 3.00:1 on --surface-base */
+  --edge-strong:       #5a6694;
+  --edge-bright:       #6a7ca4;
+
+  --line:              var(--edge-bright);
+  --line-soft:         var(--edge);
+  --line-faint:        var(--edge-faint);
+
+  /* ── Ink ────────────────────────────────────────────────────────
+     Every rung is text, so every rung clears WCAG AA (4.5:1) against
+     --surface-base at any size. `--ink-faint` was #5a6694 and measured 3.37 —
+     it passed only as large text, and it was being used for 0.6rem console
+     footers. Lifted to 4.53. */
+  --ink:               #d8e2ff;   /* 14.53:1 */
+  --ink-dim:           #8a98c4;   /*  6.59:1 */
+  --ink-faint:         #6f7ba7;   /*  4.53:1 */
+
+  /* ── Accents ────────────────────────────────────────────────────
+     Four rungs each: `-bright` for a lit highlight, the bare name for the
+     accent as text or stroke, `-dim` for a filled state, `-deep` for the
+     recessed body of a control. The bare rung is used as text and clears AA
+     on --surface-base; `--fire` was #e0402c at 4.42 and is nudged to 4.52. */
+  --tactical-bright:   #ffb89a;
+  --tactical:          #f08438;   /*  7.21:1 — weapons orange */
+  --tactical-dim:      #8c4818;
+  --tactical-deep:     #3a1e0c;
+
+  --fire-hot:          #ff2a2a;   /* the red-alert bezel */
+  --fire-bright:       #ff5a3a;   /*  6.06:1 */
+  --fire:              #e14330;   /*  4.52:1 — danger red */
+  --fire-dim:          #6c1a14;
+  --fire-deep:         #2c0a08;
+
+  --loaded-bright:     #aef0c0;
+  --loaded:            #4ec870;   /*  8.79:1 — armed / ready */
+  --loaded-dim:        #1e5028;
+  --loaded-deep:       #0e2818;
+
+  --reloading-bright:  #ffd896;
+  --reloading:         #d8a040;   /*  8.07:1 — amber */
+  --reloading-dim:     #5a3c10;
+  --reloading-deep:    #2a2410;
+
+  --cyan-bright:       #d0f0ff;
+  --cyan:              #6cb6d0;   /*  8.27:1 */
+  --cyan-dim:          #1a3848;
+  --cyan-deep:         #0a1c24;
+
+  --science:           #3399ff;   /*  5.55:1 — informational blue: science
+                                      targets, comms attention */
+  --signal:            #5fd8e8;   /* 11.16:1 — the lobby's active accent */
+  --gold-bright:       #e8c84a;
+  --gold:              #d4a820;   /*  8.43:1 — waypoints, torpedo badges */
+  --sky:               #88aaff;   /*  8.27:1 — links, "this is mine" */
+  --violet:            #8c64c8;
+
+  /* The lobby's parallel set — `--bg`, `--surface`, `--surface2`, `--dim`,
+     `--signal-cyan`, `--alert-red`, `--amber` — is deliberately NOT aliased
+     here. Keeping the old names alive as aliases would have let the two
+     vocabularies go on quietly coexisting, which is the state this file
+     exists to end; every call site now names a rung above.
+     tests/client/console-tokens.test.js fails if the lobby grows a `:root`
+     of its own again. */
+
+  /* ── Channel triplets ───────────────────────────────────────────
+     Alpha is genuinely per-use — a scrim, a glow, a translucent arc fill —
+     but the COLOUR underneath it is not. These let a rule write
+     `rgba(var(--rgb-cyan), 0.35)` and stay inside the vocabulary. */
+  --rgb-void:            0, 0, 0;
+  --rgb-white:           255, 255, 255;
+  --rgb-deep:            5, 8, 24;
+  --rgb-base:            10, 16, 40;
+  --rgb-panel:           14, 17, 23;
+  --rgb-panel-up:        30, 35, 50;
+  --rgb-ink:             216, 226, 255;
+  --rgb-edge:            58, 70, 116;
+  --rgb-edge-control:    77, 93, 155;
+  --rgb-edge-strong:     90, 102, 148;
+  --rgb-tactical:        240, 132, 56;
+  --rgb-fire:            225, 67, 48;
+  --rgb-loaded:          78, 200, 112;
+  --rgb-loaded-bright:   153, 255, 217;
+  --rgb-reloading:       216, 160, 64;
+  --rgb-cyan:            108, 182, 208;
+  --rgb-cyan-dim:        26, 56, 72;
+  --rgb-signal:          95, 216, 232;
+  --rgb-gold:            212, 168, 32;
+  --rgb-sky:             136, 170, 255;
+  --rgb-science:         51, 153, 255;
+  --rgb-violet:          140, 100, 200;
+
+  /* Scrims — a panel over a scene, in the one place each is used. */
+  --scrim-panel:       rgba(var(--rgb-base), 0.60);
+  --scrim-overlay:     rgba(var(--rgb-deep), 0.92);
+  --scrim-control:     rgba(var(--rgb-deep), 0.85);
+
+  /* ── Space ──────────────────────────────────────────────────────
+     One geometric-ish ramp, replacing the 2/4/5/6/8/10/12/16/18/20/24 spread
+     the consoles had grown. */
+  --space-1:           2px;
+  --space-2:           4px;
+  --space-3:           6px;
+  --space-4:           8px;
+  --space-5:           12px;
+  --space-6:           16px;
+  --space-7:           24px;
+
+  /* ── Type ───────────────────────────────────────────────────────
+     WITH A FLOOR, which is the point of writing a ramp at all.
+
+     The console root font-size is `clamp(11px, 3vw, 15px)` in portrait, so a
+     `0.6rem` label — and there were plenty — rendered at 6.6px on a narrow
+     phone. Every rung below is a `max()` against an absolute floor, so a rung
+     can shrink with the viewport but cannot cross into unreadable.
+
+     `--text-min` is that floor, named separately because module 3's sweep
+     enforces it over every rendered string, not just the ones using a rung. */
+  --text-min:          11px;
+  --text-xs:           max(var(--text-min), 0.65rem);   /* eyebrows, badges */
+  --text-sm:           max(12px, 0.75rem);              /* labels, readouts */
+  --text-md:           max(13px, 0.875rem);             /* body */
+  --text-lg:           max(15px, 1rem);
+  --text-xl:           max(18px, 1.25rem);
+  --text-2xl:          max(24px, 1.75rem);
+  --text-display:      max(28px, 2.625rem);             /* console title */
+
+  /* The console root itself, which is what every `rem` above is relative to.
+     Named here because it is the reason the ramp needs a floor at all: at
+     11px root, a bare `0.6rem` label renders at 6.6px. */
+  --root-size-portrait:   clamp(11px, 3vw, 15px);
+  --root-size-landscape:  clamp(13px, 1.65vw, 16px);
+
+  /* SVG user-space type. A radar overlay draws into `viewBox="0 0 100 100"`,
+     where a font-size is in VIEWBOX UNITS and scales with the element — so it
+     is not on the CSS ramp and the px floor above does not apply to it. Its
+     rendered size is a radar-module concern (PRD #1023 module 2); it is named
+     here so it is still a value with a home rather than a magic number. */
+  --svg-badge-size:       3.2px;
+
+  --tracking-tight:    0.02em;
+  --tracking:          0.12em;
+  --tracking-wide:     0.18em;
+  --tracking-widest:   0.32em;
+
+  --font-display:      "Chakra Petch", system-ui, sans-serif;
+  --font-mono:         "JetBrains Mono", ui-monospace, monospace;
+
+  /* ── Controls ───────────────────────────────────────────────────
+     One family, three sizes. See gui/components/ph-console-styles.js for the
+     rules these drive.
+
+     `--control-hit-min` is the 44px touch floor. It is DEFINED here and not
+     yet enforced: raising every packed console control to it re-flows layouts
+     that need looking at on a phone, which is module 3's sweep. The three
+     heights below are today's rendered sizes, named rather than changed, so
+     that sweep has one place to move them from. */
+  --control-hit-min:   44px;
+
+  --control-h-sm:      1.4rem;    /* square stepper */
+  --control-h-md:      1.9rem;    /* the compact LED pill */
+  --control-h-lg:      5.5rem;    /* the full-screen console pill */
+
+  /* Control labels ride the ramp, so the legibility floor reaches them too —
+     `0.62rem` was 6.8px on a narrow phone. The control HEIGHTS above are
+     unchanged; raising those to --control-hit-min is module 3's sweep. */
+  --control-font-sm:   var(--text-sm);
+  --control-font-md:   var(--text-xs);
+  --control-font-lg:   var(--text-2xl);
+
+  /* Outer silhouette, and the slightly tighter one the recessed body inside it
+     clips to. The inner radius is a separate token rather than the outer minus
+     a bit, because `--btn-cham: calc(var(--btn-cham) - 0.04rem)` is a CYCLE —
+     a custom property that references itself is guaranteed-invalid, and the
+     symptom is a body that quietly renders unclipped. */
+  --control-cham-sm:        0.22rem;
+  --control-cham-sm-inner:  0.18rem;
+  --control-cham-md:        0.34rem;
+  --control-cham-md-inner:  0.3rem;
+  --control-cham-lg:        0.875rem;
+  --control-cham-lg-inner:  0.8125rem;
+
+  --control-pad-sm:    0;
+  --control-pad-md:    0 0.65rem 0 1.6rem;
+  --control-pad-lg:    0 1.75rem 0 4rem;
+
+  --control-inset:     1.5px;     /* the recessed body's inset */
+
+  /* ── Chamfers ───────────────────────────────────────────────────
+     The panel silhouette, shared by .panel / .panel-inner / .inset. */
+  --cham-panel:        0.875rem;
+  --cham-panel-inner:  0.8125rem;
+  --cham-inset:        1.125rem;
+}

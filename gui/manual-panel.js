@@ -82,8 +82,23 @@ export function renderStationPanel(doc, station) {
   return panel;
 }
 
-/** Render the manual's station selector and active station detail. */
-export function renderManual(root, manual, activeIndex = 0) {
+/**
+ * Render the manual's station selector and active station detail.
+ *
+ * The CALLER owns which station is showing. This module renders it and reports
+ * a change back through `onSelect`; it deliberately keeps no state of its own,
+ * because the Settings dialog hosting it destroys and rebuilds its body
+ * whenever anything about *settings* changes — and where a reader has got to
+ * in the manual is not a settings fact.
+ *
+ * @param {object} root         Element to render into.
+ * @param {object|null} manual  The replicated manual.
+ * @param {number} activeIndex  Which station to show.
+ * @param {(index: number) => void} [onSelect]  Called when the reader picks a
+ *        different station, so the caller can remember it across a rebuild.
+ * @returns {number} how many stations the manual has.
+ */
+export function renderManual(root, manual, activeIndex = 0, onSelect) {
   if (!root) return 0;
   const doc = root.ownerDocument || (typeof document !== 'undefined' ? document : null);
   if (!doc) return 0;
@@ -121,6 +136,7 @@ export function renderManual(root, manual, activeIndex = 0) {
       event.preventDefault();
       event.stopPropagation();
       active = index;
+      if (typeof onSelect === 'function') onSelect(index);
       drawPanel();
     });
     tabBar.appendChild(tab);

@@ -482,6 +482,8 @@ console.navigation.none,Navigation console — selected-entity readout when noth
 console.common.nav_toggle,Button that toggles the navigation chart overlay,Nav
 console.common.comms_toggle,Button that toggles the comms overlay,Comms
 console.common.intel_toggle,Button that toggles the intelligence-files overlay (issue #1030),Intel
+console.common.navigation_panel,"Heading on the full-frame Navigation panel a console opens when the seek parks Navigation on it (issue #984)",Navigation
+console.common.comms_panel,"Heading on the full-frame Comms panel a console opens when the seek parks Comms on it (issue #984)",Comms
 console.common.objectives_toggle,Button that toggles the objectives overlay,Objectives
 console.common.red_alert_badge,Badge shown while the ship is at red alert,Red Alert
 console.pilot.cam_cinematic,Courier pilot — cinematic camera button,Cinematic
@@ -652,6 +654,7 @@ settings.debug.session,"Server settings menu — Debug tab, heading over the ses
 settings.debug.teleport,Server settings menu — jump the ship to the shared Navigation waypoint; disabled when there is no waypoint,[Teleport to Waypoint]
 settings.debug.save_snapshot,Server settings menu — save the running session to the browser,Save Session
 settings.debug.resume_snapshot,Server settings menu — reload the page and resume the saved session,[Resume Saved Session]
+settings.debug.export_snapshot,Server settings menu — download the running session as a portable save file (issue #866),[Export Session To File]
 settings.gameplay.simulation,"Server settings menu — Gameplay tab, heading over the pause control",Simulation
 settings.gameplay.pause,Server settings menu — button that pauses the simulation clock,Pause
 settings.gameplay.resume,Server settings menu — button that resumes a paused simulation clock,Resume
@@ -778,6 +781,12 @@ server.mod_pack_reading,Host scenario picker — status while an uploaded mod pa
 server.mod_pack_applied,Host scenario picker — status when an uploaded mod pack passed validation and its scenarios were added,[Mod pack applied]
 server.mod_pack_rejected,Host scenario picker — status heading when an uploaded mod pack failed validation and nothing was applied,[Mod pack rejected — nothing applied]
 server.mod_pack_read_error,Host scenario picker — status when the uploaded file could not be read at all,[Could not read the uploaded file]
+server.import_snapshot,Host scenario picker — button that opens the saved-game file chooser (issue #866),[Import saved game]
+server.import_snapshot_reading,Host scenario picker — status while an imported save file is being read,[Reading saved game…]
+server.import_snapshot_read_error,Host scenario picker — status when the chosen save file could not be read off disk at all,[Could not read that file]
+server.import_snapshot_damaged,"Host scenario picker — status when the chosen file is not a save this build can parse: truncated, edited, or never a save. {detail} is the parser's own reason","[That file is damaged and could not be read as a saved game. {detail}]"
+server.import_snapshot_incompatible,"Host scenario picker — status when the chosen file IS a save but this build cannot honour it. {detail} is vellum-save's own sentence naming which version dimension moved","[That saved game was made by a different build. {detail}]"
+server.import_snapshot_loading,Host scenario picker — status while the world an imported save names is being loaded on its behalf,[Loading the world that save was taken in…]
 server.hud_nominal,Viewscreen HUD — ship condition when undamaged,NOMINAL
 server.hud_alert,Viewscreen HUD — ship condition while the ship is at red alert,ALERT
 server.hud_designation,Viewscreen HUD — default ship designation,PHOENIX
@@ -796,6 +805,7 @@ server.slots_reserved.one,"Host lobby compact chip, exactly one reserved station
 server.slots_reserved.other,"Host lobby compact chip, zero or several reserved station slots. {n} is the count, {max} the total slots",[↻ {n} station slots reserved (max {max})]
 server.spectator_waiting,Host lobby pill for a connected player holding no station yet. {name} is the player name,[{name} (waiting)]
 server.no_relay_warning,Host lobby warning under the QR when no TURN relay credentials could be fetched,[⚠ No relay server — players on mobile networks may fail to connect]
+server.relay_fallback_notice,Host lobby notice under the QR when the credential worker is down and the free shared OpenRelay TURN is in use,[Using free fallback relay — connections may be slower than usual]
 server.client_ice_state,"Host lobby line for an inbound client stuck mid-connection. {id} is the client short id, {state} the ICE state",[client {id}…: connection {state}]
 client.status_connected,Connection status once the WebRTC link is up,Connected
 client.status_no_host_id,Connection status when the URL carries no host id,[No host ID in URL. Scan the QR code on the view screen.]
@@ -807,6 +817,8 @@ client.status_host_not_found,Connection status when the host peer id is unknown,
 client.status_peer_error,Connection status on an unexpected peer error. {type} is the error kind,[Peer error: {type}]
 client.diag_no_relay,Connection diagnostics line when no TURN relay credentials could be fetched,[⚠ No relay server — connection may fail on mobile networks]
 client.diag_relay_ok,Connection diagnostics line when the TURN relay probe succeeds,[Relay server: reachable]
+client.diag_relay_fallback,Connection diagnostics line when the credential worker is down and the free shared OpenRelay TURN is in use,[Using free fallback relay — connection may be slower than usual]
+client.diag_relay_fallback_ok,Connection diagnostics line when the free fallback relay is in use and the probe confirmed it reachable,[Free fallback relay: reachable — connection may be slower than usual]
 client.diag_relay_fail,Connection diagnostics line when the TURN relay probe fails,[⚠ Relay server unreachable — this network may block relay traffic]
 client.diag_stage,"Connection diagnostics stage line. {attempt} is the attempt number, {ice} the ICE connection state, {types} the candidate types gathered",[attempt {attempt} — ICE: {ice} — candidates: {types}]
 client.diag_none,Connection diagnostics placeholder when no ICE candidates have been gathered yet,[none]
@@ -1314,3 +1326,20 @@ world.falling_skyway.evidence.word_none,"Evidence text — no commitments made a
 world.falling_skyway.comms.committee_reprices,Dialogue body — the strike committee reacting to the transfer manifest moving in Falling Skyway,[Control's board just moved. Are we still on that manifest or are we not?]
 world.falling_skyway.comms.havelock_reprices,Dialogue body — Havelock reacting to the transfer manifest moving in Falling Skyway,"[The manifest has changed since we last spoke, Destroyer. Say plainly whether Havelock is on it.]"
 world.falling_skyway.comms.convoy_reprices,Dialogue body — the convoy reacting to the transfer manifest moving in Falling Skyway,"[Skyway — Meridian. Something just came off that board. Is that us?]"
+server.fatal.title,Host fatal-error panel — heading shown when the ship or world TOML cannot be used,[Fatal configuration error]
+server.fatal.remedy,Host fatal-error panel — what the operator should do next,[Fix the TOML and reload the page.]
+server.fatal.station_config,Host fatal-error detail when a ship template fails station validation. {detail} is the validator's own message,[Station config error: {detail}]
+server.fatal.load_failed,Host fatal-error detail when a ship template file cannot be fetched. {path} is the file path and {detail} the fetch error,[Could not load {path}: {detail}]
+server.preload.failed,Host loading panel — the world or entity preload could not complete,[Failed to load game configuration. See the browser console for details.]
+world.probe_reinforce.entity.escort.name,assets/worlds/probe_reinforce.toml -> [[entity]] name,[Escort]
+console.radar.scale,"Radar scope scale readout, drawn against the outermost range ring. {range} is that ring's distance from the ship in world units, so the scope says what its own radius means and changes when damage or doctrine changes the range",[R {range}]
+client.no_scenarios,"Phone scenario picker — shown when the host's catalogue arrived with nothing in it. NOT ""waiting for the host to pick"": the host has already broadcast, and the broadcast was empty",[No scenarios available]
+client.pick_pending,Phone scenario/ship picker — shown on the option a player just tapped while the request is in flight and the host has not yet broadcast the lock,[Sending…]
+client.pick_taken,"Phone scenario/ship picker — shown when another phone's pick landed first and locked the choice. {choice} is what that phone chose, named so the stage change has a stated cause",[Another phone chose {choice} first.]
+client.game_over_victory,Game-over overlay headline when the run ended in the scenario's victory condition,[VICTORY]
+client.game_over_defeat,Game-over overlay headline when the run ended in defeat — the scenario's loss condition or the hull reaching zero,[DEFEAT]
+client.game_over_ended,Game-over overlay headline when the run ended without a declared win or loss,[ENGAGEMENT ENDED]
+client.link_connecting,Console banner before the first state arrives from the host — an empty console is loading rather than broken,[Linking to the ship…]
+client.link_dead,Console banner headline while the link to the host is down. The console behind it is dimmed and stops accepting commands,[LINK LOST]
+server.qr_caption,Host viewscreen join panel — caption above the QR code telling guests what scanning it does,[Scan to join the crew]
+server.qr_url_label,Host viewscreen join panel — label above the join URL in text for anyone whose camera will not scan the code,[or type this in]

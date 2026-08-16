@@ -378,6 +378,7 @@ mod tests {
         radius: f32,
     ) -> bevy::ecs::entity::Entity {
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             light: Vec::new(),
             ship_config: None,

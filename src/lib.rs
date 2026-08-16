@@ -128,6 +128,11 @@ pub mod infrastructure;
 pub mod operations;
 pub mod radar;
 pub mod radar_config;
+/// The viewscreen's reference grid: the authored `[reference_grid]` table, its
+/// validation, and the world-lattice maths `assets/shaders/reference_grid.wgsl`
+/// mirrors. Bevy-free and unit-tested here; the render half is
+/// `server::reference_grid` and exists only under `SimPluginOptions::render`.
+pub mod reference_grid;
 /// The science scan (issue #1032): the pure derivation that turns a structure's
 /// live condition track into a fidelity-banded sensor reading, and its Bevy
 /// adapter. There is no authored scan text anywhere behind it — see

@@ -1160,6 +1160,60 @@ id = "repair"
 kind = "repair"
 station = "engineering"
 
+# ── Reference grid ───────────────────────────────────────────────────────────
+#
+# A faint lattice lying in the y = 0 plane, drawn under THIS hull on the
+# viewscreen when it is the ship the player is flying. Space is featureless: a
+# destroyer at full burn against a skybox reads as stationary, and the crew lose
+# the only cue that says the helm is doing anything. The lines are locked to
+# WORLD coordinates and the drawn patch follows the ship, so what moves on
+# screen is the ship — which is the entire point of the table.
+#
+# Authoring one of these is opt-in per hull. An NPC never gets a grid whatever
+# it authors: the renderer only ever reads the LOCAL ship's resolved config.
+#
+# [ai] Every number below is unratified. The two that most want a human eye are
+# `patch_radius` and the two alphas — see the calibration note.
+#
+# HDR CALIBRATION. The viewscreen camera is HDR and tonemaps through
+# `tony_mc_mapface`, with bloom thresholded at 1.0 and a softness of 0.4 (so the
+# knee starts near 0.6) — `[render]` in the world file. Two consequences:
+#   - keep the RGB components well under 0.6. They are pre-multiply values in a
+#     linear buffer, and a navigation aid that blooms is louder than the ships
+#     it is meant to sit behind.
+#   - carry "faint" in the ALPHA, not the brightness. tony_mc_mapface has a
+#     filmic toe that lifts near-black, so a dim-but-opaque line survives the
+#     display transform far more assertively than its authored number suggests.
+#     These values composite to roughly 0.07 linear over empty space, which the
+#     transform brings up to a faint but legible grey. To make the grid quieter,
+#     halve an alpha; halving an RGB triple mostly just changes its hue.
+[reference_grid]
+# The round-number idiom the radar rings already read in: ten and fifty. Major
+# lines MUST fall on a whole multiple of minor ones — the loader refuses
+# anything else — so that a major line brightens a minor line rather than
+# sitting a fraction beside it.
+minor_spacing = 10.0
+major_spacing = 50.0
+# Linear RGBA 0-1. Same desaturated instrument blue for both classes; the major
+# lines are distinguished by being twice as opaque, not by being a second
+# colour.
+minor_colour = [ 0.45, 0.62, 0.78, 0.1 ]
+major_colour = [ 0.55, 0.74, 0.9, 0.2 ]
+# Master dimmer over both classes, so the whole grid can be taken down in one
+# move without editing two alphas in step.
+opacity = 1.0
+# How far the drawn patch reaches from the ship, and how much of that reach is
+# spent fading to nothing. The band is deliberately more than a third of the
+# radius: anything tighter leaves a visible disc travelling with the ship, which
+# would undo the world-locked illusion the whole feature rests on.
+patch_radius = 400.0
+fade_band = 150.0
+# Line widths in PIXELS, not world units. A world-space width makes near lines
+# slabs and far lines sub-pixel shimmer, and this grid is read at every distance
+# at once. Major lines are barely wider — brightness is what separates them.
+minor_line_width_px = 1.0
+major_line_width_px = 1.6
+
 [cinematic_camera]
 position = [0, 6, 12]
 default_pitch_deg = 12

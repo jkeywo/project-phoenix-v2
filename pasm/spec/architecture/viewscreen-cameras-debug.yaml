@@ -135,6 +135,38 @@ entities:
       # procedural sphere long after the imposter atlases replaced it.
       tests: [cargo test, cargo test --features viewer]
 
+  - component: reference-grid
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Reference Grid — World-Locked Motion Cue Under the Local Ship
+      summary: "A faint lattice drawn in the y = 0 plane under the ship the player is flying: lines locked to world coordinates, a bounded patch that follows the ship and fades toward its own edge. Authored per hull in [reference_grid] on the entity TOML, read only off the LOCAL ship's resolved template, and registered only under SimPluginOptions::render, so it is digest-neutral by construction."
+      rationale:
+        - "[ai] The problem is that space is featureless. With nothing but a skybox behind it a ship under thrust reads as stationary, so the helm's own work is invisible to the crew watching the viewscreen. The grid supplies the parallax that empty space cannot."
+        - "[ai] THE LINES ARE WORLD-ALIGNED AND THE PATCH IS NOT. These are two different objects and conflating them destroys the feature: a lattice line sits at every integer multiple of the authored spacing forever, while the drawn quad is a moving window onto it kept centred under the ship. A grid that travelled with the ship would convey nothing at all, which is the failure mode any future refactor here has to stay clear of."
+        - "[ai] Implemented as one quad plus a fragment shader that derives line coverage from the fragment's WORLD position, not as a generated line mesh. This repo already carries six world-space custom materials on exactly that pattern (star_surface, star_halo, planet_surface, planet_clouds, dust_mote, engine_trail), so there is no new plumbing and no first-of-its-kind risk; a line mesh would need a vertex buffer proportional to patch_radius / minor_spacing, rebuilt on a cadence set by how fast the ship is flying, and would visibly jump each time it re-snapped to the lattice."
+        - "[ai] Line widths are authored in PIXELS, not world units, and the screen-space distance comes from fwidth(). That is what antialiases the grid: a line seen nearly edge-on covers a fraction of a pixel and dims, where a fixed world-space width would alias into a moire pattern at exactly the grazing angles the viewscreen spends most of its time at. The derivative is taken once, in uniform control flow, before the fragment can discard."
+        - "[ai] Faintness is carried in ALPHA rather than in brightness, which is the same calibration model-presentation records. The camera is HDR with bloom thresholded at 1.0, so an RGB triple pushed for visibility would start to glow - a navigation aid louder than the ships it sits behind. tony_mc_mapface's filmic toe also lifts near-black, so a dim-but-opaque line survives the display transform far more assertively than its authored number suggests. Halving an alpha quietens the grid; halving an RGB triple mostly changes its hue."
+        - "[ai] THE PATCH IS ITS OWN ENTITY AND ATTACHES NOTHING TO THE SHIP. Not a child - a child inherits rotation and translation, and this must hold y = 0 and stay axis-aligned while the ship rolls, pitches and climbs off the plane. More importantly it inserts no component on any simulation entity: Bevy allocates archetype ids in creation order, and a mid-run archetype move on the player hull has been MEASURED to re-order query iteration across every NPC and move the authoritative digest (see LocalShip in server_app.rs). A render feature has no business being able to do that, so the authored table is read once at startup into a resource and the patch is a render entity this module owns outright."
+        - "[ai] An absent table means no grid, and only the LOCAL ship's config is ever consulted. NPC hulls therefore never carry one as a structural fact rather than as a filter that could be forgotten - the gating function has no input that could express a non-local ship. Asserted from both ends: by exhausting the gate's input space, and against the shipped content, which no hostile hull authors."
+        - "[ai] Every number is unratified. The two that most want a human eye are patch_radius and the two line alphas. The grid's visual output cannot be asserted in CI any more than any other shader in this repo can, so the maths is unit-tested as a pure reference implementation and the appearance is left to an eyes-on pass."
+    architecture:
+      kind: presentation-layer
+      authority: derived
+      reads: [resolved-entity-template-state]
+      renders: [viewscreen-resolution-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/reference_grid.rs, src/server/reference_grid.rs, assets/shaders/reference_grid.wgsl, src/entities/config.rs, src/server_app.rs]
+      symbols: [ReferenceGridConfig, ReferenceGridPlugin, ReferenceGridMaterial, ReferenceGridTuning, ReferenceGridPatch, decide_patch_action, material_from_config, distance_to_nearest_line, line_coverage, radial_fade]
+      # The WGSL half is not executed by any gate - no shader in this repo is,
+      # and `cargo test` cannot reach a fragment stage. What IS tested is the
+      # reference implementation of the same three expressions in
+      # src/reference_grid.rs, which the shader mirrors deliberately. Change one,
+      # change the other; the tests are what say what the answer should be.
+      tests: [cargo test]
+
   - component: viewscreen-hud-effects
     core:
       status: implemented

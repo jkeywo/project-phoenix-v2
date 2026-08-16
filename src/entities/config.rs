@@ -4432,6 +4432,18 @@ pub struct EntityConfig {
     /// says what an entity can *read*.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan: Option<crate::science::ScanConfig>,
+    /// The faint world-locked lattice drawn under this hull on the viewscreen.
+    /// Present only on a hull meant to be FLOWN — the grid is a motion cue for
+    /// the crew looking out of their own ship, and it is only ever read off the
+    /// LOCAL ship's resolved config, so an NPC copy of an authored hull still
+    /// draws nothing. Absent for everything else, which renders exactly as it
+    /// did before this table existed.
+    ///
+    /// Inert outside a rendering build: nothing in the simulation reads it, no
+    /// component carries it, and `server::reference_grid` — the only reader —
+    /// is registered solely under `SimPluginOptions::render`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_grid: Option<crate::reference_grid::ReferenceGridConfig>,
     /// Civilian traffic (issue #1028). Present for a hull that flies an authored
     /// `[[route]]` and can be given `hold` / `divert` / `dock` orders. Absent for
     /// everything else, which behaves exactly as it did before this section
@@ -4811,6 +4823,16 @@ impl EntityConfig {
         // for the rest of the mission.
         if let Some(ref scan) = config.scan {
             scan.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Validation: a [reference_grid] table has to describe a lattice that
+        // can actually be drawn and read. A spacing of zero, a major spacing
+        // that is not a whole multiple of the minor one, a fade band wider than
+        // the patch it fades, or an over-range colour that would bloom on an
+        // HDR viewscreen are all author mistakes whose only other symptom would
+        // be a grid that is invisible, doubled, or louder than the ships.
+        if let Some(ref reference_grid) = config.reference_grid {
+            reference_grid.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [civilian] table has to name a lane something can fly

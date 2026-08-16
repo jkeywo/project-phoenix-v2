@@ -9217,6 +9217,7 @@ seed = 1
 
     fn spawn_region_with_uuid(app: &mut App, x: f32, z: f32, radius: f32, uuid: &str) -> Entity {
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -9512,6 +9513,7 @@ seed = 1
         // entity (no Ship marker) at (110, 0). The membership system
         // ignores it because the only Ship is the player ship at origin.
         let npc_config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,

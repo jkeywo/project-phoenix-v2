@@ -1008,6 +1008,12 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             broadcast_loading_start, poll_asset_preload,
         };
         app.add_plugins(crate::server::ServerViewscreenRadarPlugin)
+            // The reference grid reads the SAME hull config the viewscreen
+            // radar above does, through the same `SelectedShipResource` +
+            // config-cache path, so the two can never disagree about which hull
+            // the player is flying. It attaches nothing to any simulation
+            // entity — see the module note on why that matters for the digest.
+            .add_plugins(crate::server::ReferenceGridPlugin)
             .init_resource::<crate::server::asset_preload::AssetPreloadResource>()
             .add_systems(Update, begin_asset_preload)
             .add_systems(Update, poll_asset_preload)

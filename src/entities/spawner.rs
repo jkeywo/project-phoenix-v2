@@ -1645,6 +1645,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_with_comms_inserts_comms_range_component() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             class: None,
             hull_id: None,
@@ -1733,6 +1734,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_without_comms_omits_comms_range_component() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             class: None,
             hull_id: None,
@@ -1787,6 +1789,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_with_name_inserts_entity_name_component() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: Some("Sun".to_string()),
             class: None,
             hull_id: None,
@@ -1846,6 +1849,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_without_name_omits_entity_name_component() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             class: None,
             hull_id: None,
@@ -1902,6 +1906,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_with_collider_has_rapier_components() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -2053,6 +2058,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_with_lights_inserts_lights_component() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             class: None,
             hull_id: None,
@@ -2119,6 +2125,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         use crate::entity_config::AsteroidFieldConfig;
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -2194,6 +2201,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_with_appearance_section() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -2293,6 +2301,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_with_region_shape_and_effects() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -2367,6 +2376,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_with_shape_alone_has_no_effects_comp() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -2431,6 +2441,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let mut app = test_app();
         let faction_id = uuid::Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -2519,6 +2530,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
     fn spawn_entity_with_hull_integrity_attaches_captain_chair_slot() {
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -2736,6 +2748,7 @@ regen_per_sec = 0.0
         // Stations and asteroids still use hull_integrity in TOML â€” must keep working.
         let mut app = test_app();
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,

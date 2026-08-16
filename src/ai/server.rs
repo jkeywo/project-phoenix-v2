@@ -3175,6 +3175,7 @@ verb = "fire_blaster"
 
         // Build a minimal EntityConfig with a weapons_console section.
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,

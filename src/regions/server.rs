@@ -573,6 +573,7 @@ mod tests {
     /// caller's next `update()` runs.
     fn spawn_region(app: &mut App, x: f32, z: f32, shape: RegionShape) -> Entity {
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -869,6 +870,7 @@ mod tests {
 
     fn spawn_blocks_impulse_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -941,6 +943,7 @@ mod tests {
         shield_pierce: f32,
     ) -> Entity {
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -1391,6 +1394,7 @@ mod tests {
         multiplier: f32,
     ) -> Entity {
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -1633,6 +1637,7 @@ mod tests {
     ) -> Entity {
         use crate::region_effects::RegionEffectsConfig as EffectsCfg;
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -2132,6 +2137,7 @@ mod tests {
     /// Spawn a region with the CommsJam effect at the given position.
     fn spawn_comms_jam_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,
@@ -2194,6 +2200,7 @@ mod tests {
     /// Spawn a region with the SensorBlind effect at the given position.
     fn spawn_sensor_blind_region(app: &mut App, x: f32, z: f32, radius: f32) -> Entity {
         let config = EntityConfig {
+            reference_grid: None,
             name: None,
             star: None,
             planet: None,

@@ -1,0 +1,120 @@
+entities:
+  - decision: p2p-delta-tick-is-fixedupdate
+    core:
+      status: accepted
+      confidence: confirmed
+      title: The Logical Tick Is FixedUpdate, Not a Stallable Accumulator
+      summary: "#620 specified a manual accumulator explicitly decoupled from the engine's fixed-timestep scheduling, so the netcode could stall the tick on network readiness, pause on demand, and fast-forward a joining peer. What shipped under #895/#896 is Bevy's own FixedUpdate: SimTick advances in FixedLast, the rate comes from [global] sim_tick_hz, Rapier's TimestepMode::Fixed is derived from the same sim_tick_period call, and a second StateTransition schedule is inserted after FixedUpdate so GamePhase writes land on tick boundaries. #854's lockstep gate therefore cannot be an accumulator branch: it must be expressed as control over Time<Fixed> (relative speed / stall) or as a run-condition gating the FixedUpdate sim sets, and catch-up fast-forward becomes repeated fixed steps rather than a variable-size advance."
+      rationale:
+        - "The FixedUpdate choice was settled deliberately in #894/#895 after #620 was written, and physics shares that clock — reintroducing a hand-rolled accumulator now would re-fork the sim and physics timelines that decision joined."
+        - "Pause already exists as a game-phase concept on a tick boundary, which is the seam a join pause should reuse rather than a second pausing mechanism inside a bespoke accumulator."
+    game_design:
+      must_not_be: [a second timestep accumulator beside Time<Fixed>, a stall implemented by skipping systems inside a tick rather than withholding the tick]
+
+  - decision: p2p-delta-command-log-shape
+    core:
+      status: accepted
+      confidence: confirmed
+      title: The Future-Tick Command Log Already Exists, With Delay Shipped at Zero
+      summary: "#620 treated tick-stamping and the shared command log as work to be built, with a small fixed input delay applied from the start so the future-tick path is exercised. What shipped (#898) is CommandLog, PendingCommands keyed (tick, arrival), and CommandDelay — but CommandDelay ships at 0 for the single host, with the future-tick path covered only by a test that sets it to 2. Ordering is (apply_tick, arrival) where arrival is a run-wide monotonic counter assigned in inbound-drain order, i.e. local wire-decode order. #854 must therefore supply a peer-independent total order for the same tick — commands from different peers cannot be ordered by any peer's local arrival counter — and must set CommandDelay to a real value rather than adding a parallel queue."
+      rationale:
+        - "stamp_accepted_command records and enqueues atomically so log order and apply order cannot drift; a mesh-side reordering step must live at or before that call, not after it."
+        - "Session tokens are stripped before logging (a bearer credential never enters the record), which is already the right property for a log that crosses the wire to other hosts."
+    game_design:
+      must_not_be: [ordered across peers by local arrival index, a second command queue beside PendingCommands]
+
+  - decision: p2p-delta-ai-output-is-not-logged
+    core:
+      status: accepted
+      confidence: confirmed
+      title: AI Output Is Re-Derived, Not Logged — Which Removes #620's Distributed-NPC Escape Hatch
+      summary: "#620's distributed NPC ownership rested on one claim: AI itself need not be deterministic, because each owning peer's AI emits ordinary tick-stamped commands into the shared log that every peer replays. What shipped inverts this. ai_emit::emit_ai_command passes the identical validate_and_admit seam a human command does, but lands same-tick in the target ship's AdmittedCommands and is deliberately NOT written to CommandLog — replay re-derives AI decisions from seed, tick and per-stream RNG position instead of double-applying them. #854's ownership work must therefore either (a) make AI-origin commands loggable and network-shipped, accepting that replay must then stop re-deriving them, or (b) drop rendezvous-hashed distribution and keep every peer computing every NPC, which is deterministic today but abandons the load-sharing rationale. Choosing (a) is the smaller change to the AI runtime and the larger change to the replay contract."
+      rationale:
+        - "The re-derivation choice is what keeps a replay artifact small and keeps the admission seam free of human-versus-AI branching; it was not made in ignorance of #854, but it does invalidate the specific argument #620 used."
+        - "AiTokenRegistry keys every AI decision by EntityUuid, and ai::cadence derives the decision tick as an integer multiple of SimTick, so per-ship ownership gating is expressible either way — the open question is the log, not the scoping."
+    game_design:
+      must_not_be: [resolved by branching the admission seam on command origin, left ambiguous so replay and the mesh disagree about who produced a command]
+
+  - decision: p2p-delta-rng-state-is-serialized
+    core:
+      status: accepted
+      confidence: confirmed
+      title: RNG Is Six Persisted Streams, Not Stateless Per-Call-Site Derivation
+      summary: "#620 specified randomness derived per call site from world seed plus tick plus entity plus purpose tag, chosen so that no RNG state ever needs serializing or transmitting. What shipped in src/sim_rng.rs is a SimRng holding one seeded vellum_rng::Pcg32 per named SimStream (six of them, selected by a hash of the stream's name string), whose full SimRngState — seed, source, and all stream positions — is folded into the digest and captured in the snapshot. Stream independence delivers #620's real goal (one consumer's draw count cannot perturb another's), but position is now state: a joining or resyncing peer must restore stream positions exactly, and any peer that draws a different number of times from a stream diverges permanently rather than self-correcting on the next call."
+      rationale:
+        - "Pcg32 was chosen over rand's SmallRng specifically because it serializes, and from_state refuses a state whose stream count disagrees with SimStream::ALL — the design already assumes state transfer."
+        - "SimStream::EntityUuid is retired: identity minting moved off the RNG entirely under #907, precisely because draw-order-derived ids are stable within one instance but not across two."
+    game_design:
+      must_not_be: [assumed reconstructible from seed and tick alone, restored partially on join]
+
+  - decision: p2p-delta-identity-is-minted
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Entity Identity Is a Tick-Scoped Mint, Not a Content-Derived Id
+      summary: "#620 required all order-sensitive logic to be keyed by a stable, content-meaningful identifier rather than the engine's entity handle. Delivered #907 satisfies the ordering requirement but by a different mechanism: WorldIdMint issues (namespace, tick, seq) ids, advanced in FixedFirst alongside SimTick so tick and mint cannot skew, and sim_digest's FoldKey sorts on the parsed numeric namespace/tick/seq rather than the rendered string. The consequence for #854 is stronger than #620 anticipated: an id is a function of when and in what order a peer minted it, so any spawn a peer performs locally rather than from the shared command stream produces an id no other peer has. Ship spawn on join, NPC spawns from a distributed AI, and script-driven spawns must all originate from one logged command applied at one agreed tick."
+      rationale:
+        - "Asteroid ids remain derived from cell coordinates and key as (0, 0) with a string tiebreak, so the procedural field is exempt from the mint discipline and stays comparable across peers."
+        - "LocalShip #[require]s HumanSeekingHosts specifically to avoid a mid-run archetype move that measurably perturbed the authoritative digest — evidence that digest equality is sensitive to structural events, not only to gameplay values."
+    game_design:
+      must_not_be: [minted independently per peer for shared entities, compared as rendered strings]
+
+  - decision: p2p-delta-snapshot-is-whole-payload-ron
+    core:
+      status: accepted
+      confidence: confirmed
+      title: The Snapshot Record Is a Whole-Payload RON Save With a Version Gate, Not a Chunked Stream
+      summary: "#620 assumed join, desync recovery and save/load share one serialization, and specified chunked snapshot transfer over the host channel. Delivered #862/#866 give the shared record — PhoenixSnapshot over vellum_save, a Versions::check gate that runs before any component is written, LocalStorage slots and a TransferStore-backed single-file export (phoenix-save.ron) — but the payload is one RON string with no chunking, framing, or resumable transfer anywhere. #854 owns the transport half only: chunking, reassembly and integrity checking of an existing whole-payload record, plus deciding whether a mesh join reuses the human-readable RON export or needs a compact encoding. It must not fork the capture/restore walks to get there."
+      rationale:
+        - "The version gate is already the build-identity check #620 wanted for joiners, and it refuses before restoring rather than restoring then refusing — so a rejected join leaves the joiner's world untouched."
+        - "Snapshot capture is a strict superset of the digest fold (weapon state machines, RepairState, AI continuation state, CommsState, full WorldData), so a joiner restores state the digest will not verify — the join handshake needs its own post-restore agreement check rather than assuming digest equality proves a correct join."
+    game_design:
+      must_not_be: [a second serialization beside PhoenixSnapshot, transferred without the Versions gate a local load performs]
+
+  - decision: p2p-delta-scenario-state-must-ride-the-join
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Rhai Scenario State Postdates #620 and Must Ride Join and Resync
+      summary: "#620 predates embedded scenario scripting entirely; it describes worlds whose only per-run state is simulation state. Scenario logic now runs as deterministic Rhai (src/world/script/) with serializable scheduled work — ScheduledCall { fire_tick, script_path, fn_name } in PendingCallbacks — plus FlagStore counters (base and per-layer), trigger latches, mission clock and CommsState. All of this is captured by the snapshot, and none of it is folded by sim_digest. #854 therefore inherits two obligations #620 never stated: a joining or resyncing peer must receive script scheduling state and flags as part of the record, and cross-peer hash exchange cannot detect scenario-state divergence until the digest is widened. Determinism of the script layer is pinned (integer-only Rhai, fixed op/call budgets, a crate-wide pinned hashing seed so anonymous closure names resolve identically across processes) — that pinning is a prerequisite the mesh depends on, not something it can relax."
+      rationale:
+        - "There is one scenario front-end and applier; a mesh that carried scenario state through a bespoke side channel would be the second one."
+        - "A joiner running a different scenario script text would pass a payload-version check and still diverge, so scenario content identity belongs in the join handshake alongside build identity."
+    game_design:
+      must_not_be: [omitted from the join payload, verified only by the simulation digest as it stands today]
+
+  - decision: p2p-delta-transport-is-a-star-today
+    core:
+      status: accepted
+      confidence: confirmed
+      title: The Delivered PeerJS Layer Is a Crew Star With a TURN Worker, Not a Mesh
+      summary: "#620 assumed the host-to-host mesh sits beside an unchanged crew star, and that is still the right shape — but nothing mesh-shaped exists yet. Delivered: one host tab running the WASM sim, crew clients connecting over PeerJS DataChannels (gui/connection-manager.js) with exponential backoff and connect-timeout schedules, PeerJS cloud signalling, a Cloudflare Worker minting short-lived ICE credentials from Metered and Cloudflare Realtime TURN behind an ALLOWED_ORIGIN CORS gate, an OpenRelay fallback, and a BroadcastChannel-backed peerjs-shim for multi-tab browser tests. #854 must add symmetric peer discovery by world/session code, a host-to-host message set separate from ClientMessage/ServerMessage, and mesh routing in the shim — and must treat the TURN worker's origin allowlist as a first-class deployment concern, since a stale deployed ALLOWED_ORIGIN has already silently stripped TURN once."
+      rationale:
+        - "The crew protocol stays JSON over the MessageCodec seam and stays unchanged, exactly as #620 required; the host-to-host set is free to choose its own encoding for large snapshot payloads without touching it."
+        - "The existing shim already simulates severed and offline pairs, so partition and rejoin cases are testable in-browser without new infrastructure once it routes host-to-host traffic."
+    game_design:
+      must_not_be: [layered onto ClientMessage/ServerMessage, dependent on a TURN allowlist that is not verified at deploy time]
+
+  - decision: p2p-delta-backfill-replaces-auto-crew
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Auto-Crew Is Now Backfill Over Station Ratings and Human-Seeking Systems
+      summary: "#620 spoke of unmanned stations being auto-crewed by AI and of a departing host's ship falling back to AI control, against a codebase that still had per-ship AI controllers. What shipped is finer: a fixed roster with per-station star ratings where star 0 is Backfill, an AI_BACKFILL_TOKEN routed to LocalShip for a ship with no EntityUuid, per-system policy runtimes with their own memory atoms, and human-seeking systems (comms, navigation) that walk an authored station order to find a human. Drop-out fallback in #854 is consequently a per-station and per-system transition, not a single ship-level AI switch, and it must be a logged tick-stamped event so every peer performs the same transition at the same tick. A departing host's human-seeking systems must also re-seek — they cannot silently keep pointing at a station whose holder is gone."
+      rationale:
+        - "No simulation path branches on human-versus-AI downstream of admission, so fallback is a change of control source, not a change of code path."
+        - "Reclaiming stations after a reconnect (#620 story 10) now means re-acquiring named stations at their prior ratings, which the crew lobby already models per ship."
+    game_design:
+      must_not_be: [a ship-level AI toggle, applied at different ticks on different peers]
+
+  - decision: p2p-delta-per-ship-epistemics
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Per-Ship Evidence Stores Land Before the Mesh and Change What a Join Must Carry
+      summary: "#620 has no concept of per-ship knowledge; its snapshot is world-global by assumption. Band B's #1016 makes observation and evidence stores keyed by the observing ship from day one, with evidence crossing ships only through Comms carrying provenance, explicitly because band B is the band that puts two human crews in one world. For #854 this means the join and resync record is inherently multi-tenant: a joining host restores every ship's store, including stores describing what the other crews know, and must not surface another ship's entries to its own consoles. Field parameters are authored analytic parameters rather than sampled grids, so they stay small in the snapshot and cheap to hash — the epistemics stores, not the fields, are the payload-growth risk."
+      rationale:
+        - "Restoring only the joiner's own store would leave the other peers' knowledge unrepresented on the joiner and guarantee divergence the moment any ship acts on what it knows."
+        - "A world-global dossier would undercut opposed-crew play, which is the product reason #854 exists at all."
+    game_design:
+      must_not_be: [flattened to a world-global store for transfer, projected to consoles that do not own the observing ship]

@@ -102,7 +102,7 @@ impl Plugin for RendererPlugin {
                 // runs after Startup (where `insert_world_config_resource`
                 // lives), but the annotation makes the ordering contract
                 // visible at the registration site.
-                (spawn_world_ambient_light, apply_world_render_config)
+                (apply_world_ambient_light, apply_world_render_config)
                     .after(crate::world::server::insert_world_config_resource),
             )
             .add_systems(
@@ -378,9 +378,9 @@ fn setup(mut commands: Commands, skybox: Res<SpaceSkyboxAsset>) {
     // viewscreen black. `apply_target_hdr` carries the whole explanation.
     apply_target_hdr(&mut commands, ui_camera, default_render.hdr);
 
-    // Ambient light is now spawned by `spawn_world_ambient_light` in
-    // `PostStartup`, which reads `WorldConfig.ambient_light` if present and
-    // falls back to the default warm fill otherwise.
+    // Ambient light is set by `apply_world_ambient_light` in `PostStartup`,
+    // which reads `WorldConfig.ambient_light` if present and falls back to the
+    // default warm fill otherwise.
 
     // View-screen crew roster — visible only during InProgress phase.
     commands.spawn((
@@ -447,11 +447,22 @@ fn setup(mut commands: Commands, skybox: Res<SpaceSkyboxAsset>) {
 
 // ── Systems ───────────────────────────────────────────────────────
 
-/// PostStartup: spawn the scene's ambient light. Reads the optional
+/// PostStartup: set the scene's ambient fill. Reads the optional
 /// `[ambient_light]` block from `WorldConfig` if present; otherwise falls back
 /// to [`crate::render_setup::default_ambient_light`]. Stars contribute
 /// per-system point lights on top of this fill.
-fn spawn_world_ambient_light(
+///
+/// Writes the [`GlobalAmbientLight`] RESOURCE, which is what lights the whole
+/// scene, rather than spawning an [`AmbientLight`] COMPONENT. The two are easy
+/// to confuse and this used to spawn the component: in Bevy 0.18 `AmbientLight`
+/// is `#[require(Camera)]` — a PER-VIEW override that only applies to the camera
+/// it sits on — so spawning it as a lone entity did two wrong things at once. It
+/// lit nothing (the fill never reached the game camera, which fell back to the
+/// engine-default `GlobalAmbientLight`), and its required `Camera` conjured a
+/// bare, render-graphless camera entity that Bevy warned about on every single
+/// boot. The resource has no such requirement and is the scene-wide control the
+/// authored `[ambient_light]` block was always meant to reach.
+fn apply_world_ambient_light(
     mut commands: Commands,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
@@ -468,7 +479,7 @@ fn spawn_world_ambient_light(
         })
         .unwrap_or((fallback.color, fallback.brightness));
 
-    commands.spawn(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         color,
         brightness,
         ..default()
@@ -478,7 +489,7 @@ fn spawn_world_ambient_light(
 /// Adopt the world's `[render]` block: HDR, tonemapping and bloom onto the game
 /// camera, and the fade/materialise timings into [`RenderTuning`] (PRD #1023).
 ///
-/// Runs at `PostStartup` beside `spawn_world_ambient_light`, and for the same
+/// Runs at `PostStartup` beside `apply_world_ambient_light`, and for the same
 /// reason: the camera is spawned at `Startup`, before the world config resource
 /// exists. A world with no `[render]` block re-applies the SAME defaults the
 /// camera was spawned with, so this is a no-op rather than a reset.

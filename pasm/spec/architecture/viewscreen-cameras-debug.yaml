@@ -121,13 +121,15 @@ entities:
       status: declared
       paths: [src/render_setup.rs, src/entities/visual_fade.rs, src/entities/billboard.rs, src/server_app.rs, src/server/renderer.rs, src/world/config.rs, src/viewer/lod.rs, src/viewer/subject.rs]
       symbols: [RenderConfig, BloomConfig, RenderTuning, apply_render_config, VisualFade, drive_visual_fades, retire_lod_visual, yaw_blend, billboard_quad_size, orient_lod_billboards]
-      # The viewer half of this runs under `--features viewer`, which NO CI job
-      # executes: `cargo test` and the test job's `--all-features` clippy both
-      # COMPILE it, but the viewer's own tests are run only by a developer
-      # typing the second command below. That gap is why the billboard-preview
-      # test in src/viewer/lod.rs went stale rather than red for a whole
-      # release — it asserted a far level was a procedural sphere long after
-      # the imposter atlases replaced it.
+      # The viewer half of this runs under `--features viewer`, and CI now
+      # EXECUTES it: the `viewer-test` job in .github/workflows/ci.yml runs the
+      # second command below concurrently with the rest of the workflow. It did
+      # not always, and the reason it exists is worth keeping — for a whole
+      # release nothing ran that command except a developer typing it, because
+      # `cargo test` and the test job's `--all-features` clippy only COMPILE the
+      # viewer's tests. The billboard-preview test in src/viewer/lod.rs went
+      # stale rather than red in exactly that gap: it asserted a far level was a
+      # procedural sphere long after the imposter atlases replaced it.
       tests: [cargo test, cargo test --features viewer]
 
   - component: viewscreen-hud-effects

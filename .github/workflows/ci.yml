@@ -131,6 +131,59 @@ jobs:
           PHOENIX_DEMO_BUILD: 'true'
         run: cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
 
+  # ── Viewer tests (`--features viewer`) ────────────────────────────────────────
+  #
+  # The standalone model/shader viewer's own tests, EXECUTED. Until this job
+  # existed they were compiled by two steps and run by none: `test`'s
+  # `cargo clippy --all-targets --all-features` type-checks them, and nothing
+  # else in this workflow ever passes `--features viewer` to `cargo test`. A
+  # viewer test could therefore go stale rather than red indefinitely, and one
+  # did — the billboard-preview assertion in `src/viewer/lod.rs` claimed a far
+  # level was a procedural sphere for a whole release after the imposter atlases
+  # replaced it, because the only thing that would have said otherwise was a
+  # developer typing the command by hand.
+  #
+  # A SEPARATE JOB RATHER THAN A STEP IN `test`, and that is the whole point:
+  # `viewer` and `headless` are different feature sets, so appending this to
+  # `test` would serialise a second full codegen of the crate and its test
+  # binaries behind the first and add all of it to that job's wall time. Here it
+  # runs concurrently with `test`, `build`, `editor-test`, `pasm` and
+  # `native-build`, none of which it needs and none of which need it — so the
+  # marginal cost to the workflow's critical path (still `build` → `smoke` →
+  # `perf`, where the release WASM build alone is ~20 minutes) is zero, and the
+  # marginal cost overall is this job's own runner minutes.
+  #
+  # Same toolchain action and the same apt packages as every other Rust job, so
+  # rust-cache carries bevy/rapier/nalgebra between runs exactly as it does for
+  # `test`, `build` and `native-build`. The action exposes no shared-key and
+  # rust-cache's default key is per-job, so this job gets its own cache entry —
+  # cold once, warm thereafter, which is the same deal the other three have and
+  # the reason the steady-state marginal wall time here is the test RUN and not
+  # a from-scratch dependency build.
+  #
+  # No fmt and no clippy: `test` already runs both, and its clippy pass is
+  # `--all-features`, which is what type-checks this feature set. Duplicating
+  # them here would buy nothing and cost a second lint pass.
+  viewer-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@08b5fdb7608fa732de44885aac8c7af9791e2052
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
+      # `viewer` implies `server` (see Cargo.toml), so this is the default
+      # feature set plus the viewer plugin — the same command the viewer's own
+      # tests were always meant to be run with, now run by something other than
+      # a person remembering to.
+      - name: Run the viewer test suite
+        run: cargo test --features viewer
+
   # ── WASM build ────────────────────────────────────────────────────────────────
   #
   # Deliberately NOT gated on `test`: the release WASM build is ~20 minutes and

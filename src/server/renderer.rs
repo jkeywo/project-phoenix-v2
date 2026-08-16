@@ -1404,16 +1404,52 @@ mod tests {
             Some(&Tonemapping::TonyMcMapface),
             "the display transform is named rather than inherited"
         );
-        assert!(
-            app.world().get::<Bloom>(camera).is_none(),
-            "bloom ships off — Bevy 0.18.1 cannot run it on WebGL2, which is \
-             what the browser host is; see `BloomConfig`"
+        assert_eq!(
+            app.world().get::<Bloom>(camera).is_some(),
+            crate::render_setup::BLOOM_RUNS_ON_THIS_TARGET,
+            "the default calibration asks for bloom and the PLATFORM answers: \
+             attached where the backend can draw it, absent on WebGL2, which is \
+             what every browser target here is. See `BloomConfig`."
         );
     }
 
-    /// The bloom calibration is authored and reachable even though it does not
-    /// ship on, so that turning it on is one line rather than a re-derivation:
-    /// thresholded at exactly screen white, composited additively.
+    /// The gate is the whole platform story, so it gets its own assertion rather
+    /// than being left implied by the default: a world that explicitly asks for
+    /// bloom still does not get it where the backend cannot draw it.
+    ///
+    /// This is the case that used to be only a comment. Before the gate, an
+    /// authored `enabled = true` reached the browser host's camera and failed
+    /// its render graph, and the only thing between a designer and that was
+    /// documentation.
+    #[test]
+    fn an_authored_bloom_is_refused_where_the_backend_cannot_draw_it() {
+        let mut cfg = RenderConfig::default();
+        cfg.bloom.enabled = true;
+        let mut app = adopt(Some(WorldConfig {
+            render: Some(cfg),
+            ..Default::default()
+        }));
+        let camera = game_camera(&mut app);
+        assert_eq!(
+            app.world().get::<Bloom>(camera).is_some(),
+            crate::render_setup::BLOOM_RUNS_ON_THIS_TARGET,
+            "authoring cannot override a platform that has no bloom pass"
+        );
+        assert!(
+            app.world().get::<Hdr>(camera).is_some(),
+            "HDR and the display transform are unaffected by the bloom gate — \
+             they are what stop the clamp, and they run on every target"
+        );
+    }
+
+    /// The authored calibration is what reaches the camera where it can run:
+    /// thresholded at exactly screen white, composited additively. The numbers
+    /// are `[ai]`-flagged in `BloomConfig` and this pins them, so a platform
+    /// gaining bloom inherits the calibration rather than Bevy's own preset.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        ignore = "no bloom component on a WebGL2 target — see BLOOM_RUNS_ON_THIS_TARGET"
+    )]
     #[test]
     fn the_bloom_calibration_is_authored_and_one_line_away() {
         let mut cfg = RenderConfig::default();
@@ -1463,6 +1499,16 @@ mod tests {
     /// `apply_render_config` runs twice — once when the camera is spawned, once
     /// when the world lands — so it has to be able to reverse itself, or a
     /// world's `[render]` block could only ever add effects.
+    ///
+    /// The reversal is now driven by an explicit `enabled = false` rather than
+    /// by the absent-config default, because that default asks for bloom since
+    /// the platform gate took over the "can it be drawn" question. This is the
+    /// stronger test of the two: it proves a world can decline an effect the
+    /// platform is perfectly able to run.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        ignore = "nothing to take back off on a WebGL2 target"
+    )]
     #[test]
     fn bloom_can_be_taken_back_off_while_hdr_stays() {
         let mut app = App::new();
@@ -1478,7 +1524,13 @@ mod tests {
         app.world_mut().flush();
         assert!(app.world().get::<Bloom>(camera).is_some());
 
-        // No world config → the shipped default, which is bloom off.
+        // A world that declines it: HDR stays, the bloom pass goes.
+        let mut off = RenderConfig::default();
+        off.bloom.enabled = false;
+        app.world_mut().insert_resource(WorldConfig {
+            render: Some(off),
+            ..Default::default()
+        });
         app.update();
         assert!(app.world().get::<Hdr>(camera).is_some());
         assert!(app.world().get::<Bloom>(camera).is_none());

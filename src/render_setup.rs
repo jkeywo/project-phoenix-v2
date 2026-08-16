@@ -150,6 +150,47 @@ pub fn bloom_for(cfg: &BloomConfig) -> Option<Bloom> {
     })
 }
 
+/// Whether this build's render backend can actually run bloom.
+///
+/// # The platform fact, enforced rather than documented
+///
+/// Bevy 0.18.1's bloom cannot run on WebGL2. Two upstream facts, both read out
+/// of the vendored 0.18.1 sources rather than inferred:
+///
+/// 1. Bloom's downsample chain binds individual mip LEVELS of one texture for
+///    sampling, which WebGL2 does not support. `bevy_post_process` carries a
+///    separate-texture-per-mip fallback behind its own `webgl` feature — but
+///    `bevy_internal`'s `webgl` feature forwards to eight sub-crates and
+///    `bevy_post_process` is not among them, so `bevy/webgl2` never turns it on.
+/// 2. Turning that feature on directly does not compile:
+///    `prepare_bloom_bind_groups` reads `bloom_texture.texture.texture.id()` for
+///    its bind-group cache key with no `cfg`, and under the fallback `texture`
+///    is a `Vec<CachedTexture>`.
+///
+/// Until this constant existed, that fact lived only in `BloomConfig`'s doc
+/// comment and in a default of `false` — which a world TOML could override.
+/// `[render.bloom] enabled = true` on the browser host would have produced a
+/// viewscreen whose render graph fails, and nothing in the code would have
+/// stopped it. The gate is here, at the point the component is inserted, so the
+/// authored calibration stays exactly as written on every platform and the
+/// PLATFORM decides whether the component is attached.
+///
+/// # Why the target arch, and not a runtime adapter query
+///
+/// The backend is a build-time choice in this project, not a runtime discovery:
+/// `Cargo.toml` pins `bevy = { features = ["webgl2", …] }`, so a `wasm32` build
+/// selects the WebGL2 backend and a native build gets full wgpu (Vulkan/DX12/
+/// Metal), where bloom runs. Asking wgpu at startup would be answering a
+/// question the build already settled, and would have to answer it before the
+/// camera is spawned.
+///
+/// It is `cfg!` rather than `#[cfg]` deliberately: both arms compile on both
+/// targets, so this adds no conditional compilation, leaves the wasm build's
+/// dependency graph byte-identical (`bevy_post_process` is already linked there
+/// — `Bloom` is imported unconditionally at the top of this file today), and
+/// leaves the value readable by a test on either platform.
+pub const BLOOM_RUNS_ON_THIS_TARGET: bool = cfg!(not(target_arch = "wasm32"));
+
 /// Put an authored `[render]` block onto a 3D camera: the HDR intermediate
 /// target, the display transform, and bloom.
 ///
@@ -159,6 +200,12 @@ pub fn bloom_for(cfg: &BloomConfig) -> Option<Bloom> {
 /// back off as well as put one on. `Bloom` requires `Hdr`, so an authored
 /// `hdr = false` takes bloom with it: there would be nothing above white left to
 /// bloom, and leaving it on would only cost frame time.
+///
+/// Bloom is additionally gated on [`BLOOM_RUNS_ON_THIS_TARGET`]: where the
+/// backend cannot draw it, the component is not attached however the world
+/// authored it. HDR and the display transform are NOT affected and ship on
+/// everywhere — they are what stop an emissive of 9.0 being drawn as the same
+/// flat white as 1.0. Bloom is the halo on top.
 pub fn apply_render_config(commands: &mut Commands, camera: Entity, cfg: &RenderConfig) {
     let mut entity = commands.entity(camera);
     entity.insert(tonemapping_for(cfg.tonemapping));
@@ -167,7 +214,7 @@ pub fn apply_render_config(commands: &mut Commands, camera: Entity, cfg: &Render
         return;
     }
     entity.insert(Hdr);
-    match bloom_for(&cfg.bloom) {
+    match bloom_for(&cfg.bloom).filter(|_| BLOOM_RUNS_ON_THIS_TARGET) {
         Some(bloom) => {
             entity.insert(bloom);
         }

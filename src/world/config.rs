@@ -242,11 +242,11 @@ pub enum TonemapChoice {
 /// what should glow is the handful of things authored brighter than white, not
 /// every lit hull and every star in the skybox.
 ///
-/// # Why this ships OFF, and what has to change for it to ship on
+/// # Where this runs, and where the platform refuses it
 ///
-/// **Bevy 0.18.1's bloom cannot run on WebGL2, which is what the browser host
-/// is** (Key Constraint 9). Two separate upstream facts, both verified against
-/// the vendored sources rather than inferred:
+/// **Bevy 0.18.1's bloom cannot run on WebGL2, which is what every browser
+/// target here is** (Key Constraint 9). Two separate upstream facts, both
+/// verified against the vendored sources rather than inferred:
 ///
 /// 1. Bloom's downsample chain binds individual mip LEVELS of one texture for
 ///    sampling, which WebGL2 does not support. `bevy_post_process` carries a
@@ -259,20 +259,57 @@ pub enum TonemapChoice {
 ///    `cfg`, and under that feature `texture` is a `Vec<CachedTexture>`. The
 ///    fallback path does not compile in 0.18.1.
 ///
-/// So the effect is authored, calibrated and reachable in one line — and left
-/// off, because the alternative is a viewscreen whose render graph fails. HDR
-/// and the display transform are NOT affected by any of this and do ship on:
-/// they are what stop an emissive of 9.0 being drawn as the same flat white as
-/// 1.0, which is the PRD's actual complaint. Bloom is the halo on top.
+/// That fact is now ENFORCED rather than merely documented:
+/// [`BLOOM_RUNS_ON_THIS_TARGET`](crate::render_setup::BLOOM_RUNS_ON_THIS_TARGET)
+/// gates the component insertion, so this block is authored the same way on
+/// every platform and the platform decides whether the camera gets it. Before
+/// that gate existed, a world writing `enabled = true` would have produced a
+/// browser viewscreen whose render graph fails, and nothing would have stopped
+/// it.
 ///
-/// What would let it ship on, in rough order of likelihood: a Bevy release that
-/// fixes the cfg gap above; a move to the WebGPU backend; or a native host.
+/// HDR and the display transform are NOT affected by any of this and ship on
+/// everywhere: they are what stop an emissive of 9.0 being drawn as the same
+/// flat white as 1.0, which is the PRD's actual complaint. Bloom is the halo on
+/// top.
+///
+/// # The platform matrix, as it actually stands
+///
+/// | Target | Backend | Bloom |
+/// |---|---|---|
+/// | `server.html` (the game host) | WebGL2 | no — upstream |
+/// | `viewer.html` (`--features viewer`) | WebGL2 | no — upstream |
+/// | `capture-billboard`, `tune-lods` | native wgpu | no — by design |
+/// | a future native host, or a WebGPU build | full wgpu | yes |
+///
+/// Worth being plain about: **no shipped target renders natively today.** The
+/// game host and the model viewer are both Trunk/WASM pages on WebGL2, and the
+/// only native renderers are the two offscreen bakers, which never call
+/// [`apply_render_config`](crate::render_setup::apply_render_config) at all and
+/// deliberately bake with `Tonemapping::None` — a halo burnt into a billboard
+/// atlas would be a defect, not a feature. So the gate changes nothing visible
+/// right now; what it does is make the calibration correct by construction the
+/// moment any of the three rows below the line becomes real.
+///
+/// What would put bloom on a screen, in rough order of likelihood: a Bevy
+/// release that fixes the cfg gap above; a move to the WebGPU backend; or a
+/// native host. None has been filed upstream by this repo.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct BloomConfig {
-    /// `[ai] ` OFF by default — see the type's own documentation. Not a
-    /// judgement about how it looks; a statement about whether the browser host
-    /// can draw it at all.
+    /// `[ai] ` ON by default, which is a change: it was `false` while the only
+    /// thing standing between an authored `true` and a failed render graph was
+    /// this comment. Now that
+    /// [`BLOOM_RUNS_ON_THIS_TARGET`](crate::render_setup::BLOOM_RUNS_ON_THIS_TARGET)
+    /// enforces the platform fact at the component site, the authored default
+    /// can say what the calibration was authored to say — the emissive
+    /// strengths this makes visible were authored FOR it — and the platform can
+    /// answer the separate question of whether it is drawable. On a WebGL2
+    /// target that answer is still no, so the observable default is unchanged
+    /// wherever anything currently renders.
+    ///
+    /// Setting it to `false` remains the way to say "this world should not
+    /// bloom even where it could", which is now a distinct statement from "this
+    /// platform cannot bloom" rather than the same flag doing both jobs.
     pub enabled: bool,
     /// How much scattered light is added back into the image.
     ///
@@ -334,7 +371,7 @@ pub struct BloomConfig {
 impl Default for BloomConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             intensity: 0.15,
             low_frequency_boost: 0.7,
             low_frequency_boost_curvature: 0.95,
@@ -5271,10 +5308,34 @@ brightness = 150.0
         let effective = cfg.render.unwrap_or_default();
         assert!(effective.hdr, "HDR is the half the browser host can run");
         assert!(
-            !effective.bloom.enabled,
-            "bloom is authored but off — see BloomConfig for the WebGL2 reason"
+            effective.bloom.enabled,
+            "the authored default asks for the calibration it was written for; \
+             whether the platform can DRAW it is BLOOM_RUNS_ON_THIS_TARGET's \
+             question, not this flag's"
         );
         assert!(effective.lod_fade_secs > 0.0 && effective.materialise_secs > 0.0);
+    }
+
+    /// The authored config is platform-BLIND: the same TOML parses to the same
+    /// `BloomConfig` on every target, so a world file cannot mean two things.
+    /// The platform enters one place only — the component insertion.
+    #[test]
+    fn the_authored_bloom_block_parses_the_same_on_every_target() {
+        let on = parse_world("[render.bloom]\nenabled = true\nintensity = 0.15\n")
+            .expect("must parse")
+            .render
+            .expect("render block")
+            .bloom;
+        assert!(on.enabled);
+        assert_eq!(on.intensity, 0.15);
+
+        // And a world that does not want it says so, everywhere.
+        let off = parse_world("[render.bloom]\nenabled = false\n")
+            .expect("must parse")
+            .render
+            .expect("render block")
+            .bloom;
+        assert!(!off.enabled);
     }
 
     /// A designer can author one number and inherit the rest — the same partial

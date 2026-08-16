@@ -251,6 +251,14 @@ fn setup_camera(mut commands: Commands, skybox: Res<SpaceSkyboxAsset>) {
     // (PRD #1023). The viewer exists to be a valid reference for how things
     // look; one that resolved light differently from the viewscreen would be a
     // tool for tuning a picture nobody sees.
+    //
+    // That parity now includes the platform gate, and it costs nothing to state:
+    // the viewer is a Trunk/WASM page on WebGL2 exactly like the game host, so
+    // `BLOOM_RUNS_ON_THIS_TARGET` is false in every build of it that exists and
+    // the camera gets HDR and the display transform but no bloom pass — the same
+    // picture the viewscreen shows, which is the whole point of this call. A
+    // native viewer would get bloom here without a line changing, because the
+    // gate lives in `apply_render_config` rather than in either camera's setup.
     crate::render_setup::apply_render_config(
         &mut commands,
         camera,

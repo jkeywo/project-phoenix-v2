@@ -71,6 +71,7 @@ non-asteroid entries spawn via `server_app::setup_world` (PRD #337).
 | `[[workforce]]` | array of tables | `[]` | The sides of a labour dispute: who staffs a structure, whether they are out, and what they make of the crew (see §1.12). |
 | `[ambient_light]` | table | none | World ambient light override; omitted sub-fields fall back to renderer constants. |
 | `[dust]` | table | none | Ambient dust / velocity-mote effect (see §1.3). |
+| `[render]` | table | none | How the camera resolves light (HDR, tonemapping, bloom) and how long a visual takes to arrive or leave (see §1.4). |
 
 ### `[global]`
 
@@ -118,6 +119,73 @@ directive does not remove the rest.
 
 Sub-worlds resolve against their base world's table as well as their own, so a
 layer whose ships fly a route the base world declares needs no copy of it.
+
+### 1.4 `[render]`
+
+How the camera resolves light, and how long a visual takes to arrive or leave.
+Parsed by `world::config::RenderConfig`; applied to the camera at `PostStartup`
+by `server::renderer::apply_world_render_config` through
+`render_setup::apply_render_config`. Every field is optional and a partial block
+inherits the rest, so this is a tuning knob rather than a full re-specification.
+No shipped world authors one — the defaults below are what actually ships.
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `hdr` | bool | `true` | Render to a float intermediate target instead of clamping at screen white. This is what stops an emissive of 9.0 being drawn identically to one of 1.0. Turning it off takes bloom with it. |
+| `tonemapping` | string | `"tony_mc_mapface"` | Display transform. One of `none`, `reinhard`, `reinhard_luminance`, `aces_fitted`, `agx`, `somewhat_boring_display_transform`, `tony_mc_mapface`, `blender_filmic`. |
+| `lod_fade_secs` | f32 | `0.25` | Seconds an LOD tier change cross-fades over. `0` restores the hard cut. |
+| `materialise_secs` | f32 | `0.6` | Seconds a mid-mission arrival materialises over. `0` restores the pop. |
+| `materialise_start_scale` | f32 | `0.25` | Fraction of full size an arrival starts at. |
+| `[render.bloom]` | table | see below | Scattered light added back into the image. |
+
+#### `[render.bloom]` — and which platforms actually get it
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `enabled` | bool | `true` | Whether this world *wants* bloom. Whether it can be *drawn* is a separate, platform-decided question — see below. |
+| `intensity` | f32 | `0.15` | How much scattered light is added back. |
+| `low_frequency_boost` | f32 | `0.7` | How much the widest, softest blur contributes. |
+| `low_frequency_boost_curvature` | f32 | `0.95` | Curvature of that blend. |
+| `high_pass_frequency` | f32 | `1.0` | How tightly light scatters; `1.0` is the widest. |
+| `threshold` | f32 | `1.0` | Pixels dimmer than this do not bloom. `1.0` is exactly screen white — so what glows is precisely what the old clamped pipeline threw away, and nothing authored at or below white changes appearance. |
+| `threshold_softness` | f32 | `0.4` | How softly the threshold is approached; `0` is a hard cutoff. |
+| `composite` | string | `"additive"` | `additive` or `energy_conserving`. A non-zero threshold wants additive. |
+| `max_mip_dimension` | u32 | `512` | Largest dimension of the bloom mip chain. The cost knob. |
+
+**`enabled = true` does not mean bloom appears.** The component is attached only
+where the render backend can draw it, gated by
+`render_setup::BLOOM_RUNS_ON_THIS_TARGET`:
+
+| Target | Backend | Bloom |
+|---|---|---|
+| `server.html` — the game host | WebGL2 | **no** — upstream limitation |
+| `viewer.html` — `npm run dev:viewer` | WebGL2 | **no** — same, and deliberately so: the viewer must show the picture the viewscreen shows |
+| `capture-billboard`, `tune-lods` | native wgpu | **no** — by design; these bake atlases and never apply a `[render]` block at all |
+| a native host, or a WebGPU build | full wgpu | **yes** |
+
+The reason is upstream and was read out of the vendored Bevy 0.18.1 sources
+rather than inferred. Bloom's downsample chain binds individual mip *levels* of
+one texture for sampling, which WebGL2 does not support. `bevy_post_process`
+carries a separate-texture-per-mip fallback behind its own `webgl` feature — but
+`bevy_internal`'s `webgl` feature forwards to eight sub-crates and
+`bevy_post_process` is not among them, so `bevy/webgl2` never turns it on. And
+enabling that feature directly does not compile: `prepare_bloom_bind_groups`
+reads `bloom_texture.texture.texture.id()` for its bind-group cache key with no
+`cfg`, while the fallback makes `texture` a `Vec<CachedTexture>`.
+
+**Nothing has been filed upstream from this repo.** If you want to: the bug is
+the missing `cfg` on that cache-key read in
+`bevy_post_process/src/bloom/mod.rs`, which makes the crate's own `webgl`
+feature uncompilable; the feature-forwarding gap in `bevy_internal` is arguably
+working as intended until the first is fixed.
+
+Worth being plain: since both browser pages are WebGL2 and the only native
+renderers are the two offscreen bakers, **no target renders bloom today**. What
+the gate buys is that the authored calibration is now correct by construction —
+before it existed, a world writing `enabled = true` reached the browser host's
+camera and failed its render graph, and the only thing standing in the way was a
+doc comment. HDR and the display transform are unaffected and ship on
+everywhere.
 
 ### `[dust]`
 

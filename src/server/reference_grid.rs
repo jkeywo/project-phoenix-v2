@@ -26,9 +26,10 @@
 //! # Why the patch is its own entity
 //!
 //! It is NOT a child of the ship. A child inherits rotation and translation,
-//! and this thing must hold `y = 0` and stay axis-aligned while the ship rolls,
-//! pitches and climbs above or below the plane. So it is a sibling that copies
-//! the ship's X and Z each frame and ignores everything else about it.
+//! and this thing must hold its authored `plane_y` and stay axis-aligned while
+//! the ship rolls, pitches and climbs above or below the plane. So it is a
+//! sibling that copies the ship's X and Z each frame and ignores everything
+//! else about it.
 //!
 //! # Why nothing here touches the ship
 //!
@@ -80,8 +81,11 @@ pub struct ReferenceGridPatch;
 /// Flat `f32` fields rather than `Vec4`s, following the `star.rs` /
 /// `dust_mote` precedent: `AsBindGroup` concatenates same-index uniform fields
 /// in declaration order, and scalars sidestep the std140 alignment traps that
-/// the WebGL2 backend is least forgiving about. Sixteen floats — 64 bytes, a
-/// whole number of 16-byte rows, so no explicit padding is needed.
+/// the WebGL2 backend is least forgiving about. Seventeen live floats plus
+/// three `_pad`s — twenty in all, 80 bytes, five whole 16-byte rows, the same
+/// explicit-padding idiom `StarHaloMaterial` uses to round out its rows.
+/// `plane_y` is NOT here: the plane's height is a transform on the patch
+/// entity, and the shader never needs it.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct ReferenceGridMaterial {
     #[uniform(0)]
@@ -116,6 +120,14 @@ pub struct ReferenceGridMaterial {
     pub fade_start: f32,
     #[uniform(0)]
     pub fade_span: f32,
+    #[uniform(0)]
+    pub fade_exponent: f32,
+    #[uniform(0)]
+    pub _pad0: f32,
+    #[uniform(0)]
+    pub _pad1: f32,
+    #[uniform(0)]
+    pub _pad2: f32,
 }
 
 impl Material for ReferenceGridMaterial {
@@ -165,6 +177,10 @@ pub fn material_from_config(config: &ReferenceGridConfig) -> ReferenceGridMateri
         patch_radius: config.patch_radius,
         fade_start: config.fade_start(),
         fade_span: config.fade_span(),
+        fade_exponent: config.fade_exponent,
+        _pad0: 0.0,
+        _pad1: 0.0,
+        _pad2: 0.0,
     }
 }
 
@@ -179,7 +195,7 @@ pub enum PatchAction {
     /// Create the patch under this world XZ.
     Spawn(Vec2),
     /// Move the existing patch to this world XZ. Y is not this type's business:
-    /// the plane is always y = 0.
+    /// the plane's height is the authored `plane_y`, applied by the system.
     Follow(Vec2),
     /// Remove the patch — the ship it belonged to is gone.
     Despawn,
@@ -262,7 +278,7 @@ fn resolve_reference_grid_config(
     commands.insert_resource(ReferenceGridTuning(authored));
 }
 
-/// Keep the patch under the local ship, at world height zero.
+/// Keep the patch under the local ship, at the authored `plane_y`.
 ///
 /// Runs every rendered frame rather than on the sim tick: it writes nothing the
 /// simulation reads, and a patch that lagged the ship by up to a tick would
@@ -281,6 +297,11 @@ fn sync_reference_grid_patch(
         .map(|transform| transform.translation.xz());
     let existing = patch.iter_mut().next();
 
+    // The plane rides at the authored `plane_y` — below the hull, so the grid
+    // reads as a floor rather than a lattice co-planar with the ship. Absent a
+    // table (only reachable via Despawn/Idle) this is never consulted.
+    let plane_y = tuning.0.map(|config| config.plane_y).unwrap_or(0.0);
+
     match decide_patch_action(ship_xz, tuning.0.is_some(), existing.is_some()) {
         PatchAction::Idle => {}
         PatchAction::Despawn => {
@@ -290,7 +311,7 @@ fn sync_reference_grid_patch(
         }
         PatchAction::Follow(xz) => {
             if let Some((_, mut transform)) = existing {
-                transform.translation = Vec3::new(xz.x, 0.0, xz.y);
+                transform.translation = Vec3::new(xz.x, plane_y, xz.y);
             }
         }
         PatchAction::Spawn(xz) => {
@@ -308,7 +329,7 @@ fn sync_reference_grid_patch(
                 ReferenceGridPatch,
                 Mesh3d(mesh),
                 MeshMaterial3d(material),
-                Transform::from_xyz(xz.x, 0.0, xz.y),
+                Transform::from_xyz(xz.x, plane_y, xz.y),
                 // Never shadow-casts and never receives: it is a navigation
                 // aid drawn in the y = 0 plane, not a surface in the scene.
                 NotShadowCaster,
@@ -409,6 +430,13 @@ mod tests {
         assert_eq!(material.major_a, config.major_colour[3]);
         assert_eq!(material.opacity, config.opacity);
         assert_eq!(material.patch_radius, config.patch_radius);
+        assert_eq!(material.fade_exponent, config.fade_exponent);
+        // The three pads exist only to round the uniform to whole 16-byte rows;
+        // they must carry nothing the shader could read as data.
+        assert_eq!(
+            (material._pad0, material._pad1, material._pad2),
+            (0.0, 0.0, 0.0)
+        );
     }
 
     #[test]
@@ -454,6 +482,11 @@ mod tests {
             .expect("the shipped table must pass the same validator a load does");
         assert_eq!(config.minor_spacing, 10.0);
         assert_eq!(config.major_spacing, 50.0);
+        // [ai] The retuned floor/fade values John signed off on. Pinned so a
+        // future edit to the TOML that drops one is caught here.
+        assert_eq!(config.plane_y, -0.5);
+        assert_eq!(config.fade_band, 250.0);
+        assert_eq!(config.fade_exponent, 2.5);
         // The uniform it produces is the one the shader is calibrated against.
         let material = material_from_config(&config);
         assert!(

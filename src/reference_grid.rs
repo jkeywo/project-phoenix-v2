@@ -69,11 +69,34 @@ fn default_patch_radius() -> f32 {
     400.0
 }
 
-/// How much of that radius is spent fading to nothing. `150` — a band wide
-/// enough that the patch has no perceptible edge; the alternative is a visible
-/// disc travelling with the ship, which would undo the world-locked illusion.
+/// How much of that radius is spent fading to nothing. `250` — [ai] widened
+/// from 150 so the fade starts much closer in (at `patch_radius - fade_band`,
+/// i.e. 150 world units from the ship rather than 250): the lattice is meant to
+/// dissolve *fast* toward the rim, not carry legible lines almost to the edge.
+/// The alternative failure — a band too tight — leaves a visible disc
+/// travelling with the ship, which would undo the world-locked illusion.
 fn default_fade_band() -> f32 {
-    150.0
+    250.0
+}
+
+/// Exponent applied to the (smoothstepped) radial fade multiplier. `2.5` —
+/// [ai]. The fade curve is `smoothstep(...) ^ fade_exponent`; because the base
+/// is in `[0, 1]`, an exponent above 1 pulls the whole curve down so the grid
+/// is already faint a short way into the band and gone well before the rim,
+/// which is the "dissolve harder with distance" John asked for. `1.0` is the
+/// plain smoothstep. The endpoints are unaffected — full strength at
+/// `fade_start`, exactly zero at the edge — so no exponent ever lights a bright
+/// far rim.
+fn default_fade_exponent() -> f32 {
+    2.5
+}
+
+/// World-space height of the grid plane. `-0.5` — [ai]. The grid reads as a
+/// floor lying just beneath the ship rather than a lattice co-planar with it;
+/// half a world unit is enough to separate the two without the grid pulling
+/// away into its own depth. The follow system holds the patch at this `y`.
+fn default_plane_y() -> f32 {
+    -0.5
 }
 
 /// Minor line width in PIXELS. Screen-space rather than world-space on purpose:
@@ -143,6 +166,14 @@ pub struct ReferenceGridConfig {
     /// Width of the fade band inside `patch_radius`. `0` restores a hard edge.
     #[serde(default = "default_fade_band")]
     pub fade_band: f32,
+    /// Exponent on the radial fade curve; `>1` dissolves the grid faster with
+    /// distance, `1.0` is a plain smoothstep. Must be positive and finite.
+    #[serde(default = "default_fade_exponent")]
+    pub fade_exponent: f32,
+    /// World-space height of the grid plane. The follow system parks the patch
+    /// at this `y`; negative sits it below the ship like a floor.
+    #[serde(default = "default_plane_y")]
+    pub plane_y: f32,
     /// Minor line width in pixels.
     #[serde(default = "default_minor_line_width_px")]
     pub minor_line_width_px: f32,
@@ -163,6 +194,8 @@ impl Default for ReferenceGridConfig {
             opacity: default_opacity(),
             patch_radius: default_patch_radius(),
             fade_band: default_fade_band(),
+            fade_exponent: default_fade_exponent(),
+            plane_y: default_plane_y(),
             minor_line_width_px: default_minor_line_width_px(),
             major_line_width_px: default_major_line_width_px(),
         }
@@ -231,6 +264,20 @@ impl ReferenceGridConfig {
                 "[reference_grid] fade_band ({}) is wider than patch_radius ({}) — the fade \
                  has to start inside the patch or the grid never reaches full strength",
                 self.fade_band, self.patch_radius
+            ));
+        }
+        if !self.fade_exponent.is_finite() || self.fade_exponent <= 0.0 {
+            return Err(format!(
+                "[reference_grid] fade_exponent must be a positive, finite number (got {}); it \
+                 is the power the radial fade is raised to, and zero or negative would invert \
+                 the fade instead of steepening it",
+                self.fade_exponent
+            ));
+        }
+        if !self.plane_y.is_finite() {
+            return Err(format!(
+                "[reference_grid] plane_y must be a finite world-space height (got {})",
+                self.plane_y
             ));
         }
         if !(0.0..=1.0).contains(&self.opacity) {
@@ -336,8 +383,24 @@ pub fn line_coverage(world_distance: f32, half_width_px: f32, world_per_px: f32)
 
 /// Radial fade multiplier, 0-1, for a fragment `distance` world units from the
 /// patch centre. Full strength within `fade_start`, smoothstepped to nothing
-/// over `fade_span` beyond it.
-pub fn radial_fade(world_distance: f32, fade_start: f32, fade_span: f32) -> f32 {
+/// over `fade_span` beyond it, then raised to `fade_exponent` so a value above
+/// `1.0` dissolves the grid faster across the band. The endpoints are fixed —
+/// `1.0` at `fade_start`, `0.0` at the edge — for any positive exponent, so the
+/// steepening never lights a bright far rim.
+///
+/// `std::f32::powf` rather than `simmath::powf` (issue #908) deliberately: this
+/// is a PRESENTATION reference that must match the GPU's `pow()` in
+/// `reference_grid.wgsl` expression-for-expression, and its output is never
+/// folded into the authoritative digest — the whole module is inert data on a
+/// headless run. A deterministic polynomial approximation here would diverge
+/// from the very shader this function exists to mirror.
+#[allow(clippy::disallowed_methods)]
+pub fn radial_fade(
+    world_distance: f32,
+    fade_start: f32,
+    fade_span: f32,
+    fade_exponent: f32,
+) -> f32 {
     if world_distance >= fade_start + fade_span {
         return 0.0;
     }
@@ -345,7 +408,8 @@ pub fn radial_fade(world_distance: f32, fade_start: f32, fade_span: f32) -> f32 
         return 1.0;
     }
     let t = ((world_distance - fade_start) / fade_span).clamp(0.0, 1.0);
-    1.0 - t * t * (3.0 - 2.0 * t)
+    let smooth = 1.0 - t * t * (3.0 - 2.0 * t);
+    smooth.powf(fade_exponent)
 }
 
 #[cfg(test)]
@@ -377,6 +441,8 @@ mod tests {
             opacity = 0.5
             patch_radius = 200.0
             fade_band = 50.0
+            fade_exponent = 3.0
+            plane_y = -1.25
             minor_line_width_px = 2.0
             major_line_width_px = 3.0
             "#,
@@ -389,6 +455,8 @@ mod tests {
         assert_eq!(cfg.opacity, 0.5);
         assert_eq!(cfg.patch_radius, 200.0);
         assert_eq!(cfg.fade_band, 50.0);
+        assert_eq!(cfg.fade_exponent, 3.0);
+        assert_eq!(cfg.plane_y, -1.25);
         assert_eq!(cfg.minor_line_width_px, 2.0);
         assert_eq!(cfg.major_line_width_px, 3.0);
     }
@@ -572,8 +640,14 @@ mod tests {
             cfg.fade_span() > 0.0,
             "the span is what the shader divides by; it must never be zero"
         );
-        assert_eq!(radial_fade(399.0, cfg.fade_start(), cfg.fade_span()), 1.0);
-        assert_eq!(radial_fade(400.0, cfg.fade_start(), cfg.fade_span()), 0.0);
+        assert_eq!(
+            radial_fade(399.0, cfg.fade_start(), cfg.fade_span(), 1.0),
+            1.0
+        );
+        assert_eq!(
+            radial_fade(400.0, cfg.fade_start(), cfg.fade_span(), 1.0),
+            0.0
+        );
     }
 
     // ── Lattice maths ─────────────────────────────────────────────────────
@@ -695,10 +769,10 @@ mod tests {
     fn the_radial_fade_is_full_inside_and_gone_outside() {
         let fade_start = 250.0;
         let fade_span = 150.0;
-        assert_eq!(radial_fade(0.0, fade_start, fade_span), 1.0);
-        assert_eq!(radial_fade(250.0, fade_start, fade_span), 1.0);
-        assert_eq!(radial_fade(400.0, fade_start, fade_span), 0.0);
-        assert_eq!(radial_fade(10_000.0, fade_start, fade_span), 0.0);
+        assert_eq!(radial_fade(0.0, fade_start, fade_span, 1.0), 1.0);
+        assert_eq!(radial_fade(250.0, fade_start, fade_span, 1.0), 1.0);
+        assert_eq!(radial_fade(400.0, fade_start, fade_span, 1.0), 0.0);
+        assert_eq!(radial_fade(10_000.0, fade_start, fade_span, 1.0), 0.0);
     }
 
     #[test]
@@ -707,7 +781,7 @@ mod tests {
         let mut previous = 1.0_f32;
         let mut distance = 250.0_f32;
         while distance <= 400.0 {
-            let fade = radial_fade(distance, fade_start, fade_span);
+            let fade = radial_fade(distance, fade_start, fade_span, 1.0);
             assert!(
                 fade <= previous + 1.0e-6,
                 "fade rose from {previous} to {fade} at {distance}"
@@ -721,7 +795,31 @@ mod tests {
     #[test]
     fn the_fade_is_half_way_through_at_the_middle_of_the_band() {
         // smoothstep's midpoint. Asserted because it is the one point on the
-        // curve a re-implementation is most likely to get subtly wrong.
-        assert!((radial_fade(325.0, 250.0, 150.0) - 0.5).abs() < 1.0e-6);
+        // curve a re-implementation is most likely to get subtly wrong. At the
+        // neutral exponent of 1.0 the fade is the bare smoothstep.
+        assert!((radial_fade(325.0, 250.0, 150.0, 1.0) - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    // The expected value mirrors radial_fade's own std powf — this is
+    // presentation math, never a digest input (see radial_fade's note).
+    #[allow(clippy::disallowed_methods)]
+    fn a_higher_fade_exponent_dissolves_the_band_faster() {
+        // The steepening knob John asked for: at any interior point the fade is
+        // strictly dimmer for a larger exponent, while the endpoints stay
+        // pinned at full and nothing — so the grid dissolves harder toward the
+        // rim without ever lighting a bright far edge.
+        let (start, span) = (250.0_f32, 150.0_f32);
+        let mid = 325.0_f32; // smoothstep = 0.5 here
+        let plain = radial_fade(mid, start, span, 1.0);
+        let steep = radial_fade(mid, start, span, 2.5);
+        assert!(
+            steep < plain,
+            "exponent 2.5 must dim the mid-band below plain"
+        );
+        assert!((steep - 0.5_f32.powf(2.5)).abs() < 1.0e-6);
+        // Endpoints are exponent-invariant.
+        assert_eq!(radial_fade(start, start, span, 2.5), 1.0);
+        assert_eq!(radial_fade(start + span, start, span, 2.5), 0.0);
     }
 }

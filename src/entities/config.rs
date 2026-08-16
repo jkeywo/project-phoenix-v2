@@ -8629,6 +8629,13 @@ hull_max_hp = 6
     #[test]
     fn station_axiom_template_has_explicit_ball_collider() {
         // (#474) Explicit collider for robust hit detection.
+        //
+        // The radius is the hull's own max half-extent, at John's request that
+        // collision match visible size: `alliance_starbase.glb` measures
+        // 1.8973 x 0.7958 x 1.8936 raw, and the [15, 18, 18] its sidecar applies
+        // draws 28.46 x 14.33 x 34.08 — half of the widest axis is 17.04. The
+        // 12.0 this used to pin was seven-tenths of that, which is what let ships
+        // fly through the outer ring of a station they could see.
         let toml_str = include_str!("../../assets/entities/station_axiom.toml");
         let config = EntityConfig::from_toml(toml_str).expect("station_axiom.toml must parse");
         let collider = config
@@ -8636,7 +8643,11 @@ hull_max_hp = 6
             .as_ref()
             .expect("station_axiom must have explicit [collider] (#474)");
         assert_eq!(collider.shape, ColliderShape::Ball);
-        assert!((collider.radius - 12.0).abs() < 1e-6);
+        assert!(
+            (collider.radius - 17.04).abs() < 1e-6,
+            "expected the starbase hull's max half-extent, got {}",
+            collider.radius
+        );
     }
 
     #[test]

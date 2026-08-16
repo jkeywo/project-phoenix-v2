@@ -67,8 +67,21 @@ description = "entity.skyhook.target.description"
 hull_integrity = 1200.0
 
 [collider]
+# Matched to the visible hull, at John's request. This structure draws the SAME
+# `alliance_starbase.glb` as `station_axiom`, through the same sidecar and the
+# same `[base].scale` of [15, 18, 18], so it is exactly the same size on screen:
+# 28.46 x 14.33 x 34.08, a max half-extent of 17.04. It cannot have a different
+# collider from the axiom station while sharing its mesh, and it had one — 26,
+# half again too big, an invisible wall nine units out from the visible surface.
+#
+# Nothing about "the biggest thing in the sky over the city" is lost here: the
+# head is still the largest silhouette in the library, because the axiom station
+# is that silhouette too. The 26 was never drawn — only flown into.
+#
+# See `station_axiom.toml` for why a Ball at the max half-extent is the shape,
+# and what a `Cylinder` variant would buy a disc-shaped station.
 shape = "Ball"
-radius = 26.0
+radius = 17.04
 length = 0.0
 
 [radar_appearance]

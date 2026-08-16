@@ -976,6 +976,11 @@ fn tick_weapons_arc_request(
                             family: withdrawn_family,
                         },
                         sender_label: crate::ship::coordination::CHATTER_SENDER_WEAPONS.to_string(),
+                        sender_system: arc_request_sender_system(
+                            withdrawn_family,
+                            blaster_opt,
+                            torpedo_opt,
+                        ),
                     });
                 }
             }
@@ -1012,6 +1017,7 @@ fn tick_weapons_arc_request(
                 arcs,
             },
             sender_label: crate::ship::coordination::CHATTER_SENDER_WEAPONS.to_string(),
+            sender_system: arc_request_sender_system(family, blaster_opt, torpedo_opt),
         });
     }
 }

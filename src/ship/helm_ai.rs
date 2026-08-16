@@ -11710,6 +11710,7 @@ verb = "engage_boost"
                 target: crate::system_registry::helm_station_key(),
                 payload: crate::messages::CoordinationPayload::ArcBearingWithdraw { family },
                 sender_label: "Weapons".to_string(),
+                sender_system: crate::messages::SystemId(String::new()),
             });
         tick(app);
     }

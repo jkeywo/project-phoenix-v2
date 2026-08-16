@@ -553,6 +553,7 @@ pub fn tick_power_brownout_advisory(
                         allocated_level: level,
                     },
                     sender_label: crate::ship::coordination::CHATTER_SENDER_POWER.to_string(),
+                    sender_system: crate::system_registry::power_reactor_system_id(),
                 });
             }
         }

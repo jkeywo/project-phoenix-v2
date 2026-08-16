@@ -277,6 +277,9 @@ pub fn tick_intent_narration(
                 // Emit the station's derived display-name id (issue #975), not
                 // the English `name` — `localiseTree` resolves it on the client.
                 sender_label: format!("station.{}.name", station_id.0),
+                // Already a resolved station id, so opt out of the enqueue-time
+                // system→station resolution with an empty `sender_system`.
+                sender_system: SystemId(String::new()),
             });
         }
     }

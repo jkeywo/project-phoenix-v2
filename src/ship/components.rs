@@ -236,7 +236,16 @@ pub struct CoordinationEnqueue {
     pub sender_origin: ControlSource,
     pub target: crate::messages::SystemId,
     pub payload: CoordinationPayload,
+    /// Fallback origin label, used only when `sender_system` does not resolve to
+    /// a station (a human sender's name, or an already-resolved `station.*.name`
+    /// id). For an AI system the resolved station overrides it at enqueue.
     pub sender_label: String,
+    /// The fine system this message speaks FOR. Channel-3 addresses crew by
+    /// STATION, so the enqueue handler resolves this to the owning station's
+    /// display id (or Core) via [`crate::ship::coordination::station_addressee_label`].
+    /// An empty id opts out — the pre-resolved `sender_label` is kept as-is
+    /// (the intent-narration path, which already stamps its own station id).
+    pub sender_system: crate::messages::SystemId,
 }
 
 /// Load `ShipConfigComponent` from `assets/entities/alliance_battleship.toml`.

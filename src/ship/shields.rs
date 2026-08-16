@@ -452,6 +452,9 @@ pub fn emit_shields_coordination(
                         target: crate::system_registry::helm_station_key(),
                         payload,
                         sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
+                        sender_system: first_arc_sid
+                            .clone()
+                            .unwrap_or_else(crate::system_registry::shields_system_id),
                     });
                 }
             } else {
@@ -473,6 +476,9 @@ pub fn emit_shields_coordination(
                         target: crate::system_registry::helm_station_key(),
                         payload,
                         sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
+                        sender_system: first_arc_sid
+                            .clone()
+                            .unwrap_or_else(crate::system_registry::shields_system_id),
                     });
                 }
 

@@ -18,6 +18,36 @@ pub const CHATTER_SENDER_NAVIGATION: &str = "chatter.sender.navigation";
 pub const CHATTER_SENDER_POWER: &str = "chatter.sender.power";
 pub const CHATTER_SENDER_SHIELDS: &str = "chatter.sender.shields";
 
+/// Sender/target label id for a channel-3 message a ship's Core owns — the
+/// systems that belong to no station. A message from or to an ownerless system
+/// is addressed to "Core" rather than to a bare system name.
+pub const CHATTER_ADDRESSEE_CORE: &str = "chatter.addressee.core";
+
+/// Client-resolvable display id naming the STATION that owns `target`, or
+/// [`CHATTER_ADDRESSEE_CORE`] when the target is ownerless.
+///
+/// Channel-3 (the AI-coordination bus) addresses crew by STATION, not by the
+/// fine system underneath it: John's playtest note is that "Navigation → Helm
+/// Navigation" should read "Helm" on both sides — the station alone, never the
+/// station+system pair, and never the raw system. Both the sender identity
+/// (resolved at enqueue from the emitting system) and the target label (resolved
+/// at delivery from the routed system) run through here, so the viewscreen
+/// chatter bubble and the phone popup name the same station from the same
+/// [`station_for_target`] resolution the router already trusts.
+///
+/// The returned value is a `station.<id>.name` string id (or the Core id),
+/// resolved to words by `localiseTree` on the client exactly as the
+/// `chatter.sender.*` ids were — nothing downstream composes the word.
+pub fn station_addressee_label(
+    config: &crate::ship::config::ShipConfig,
+    target: &SystemId,
+) -> String {
+    match station_for_target(config, target) {
+        Some(station) => format!("station.{}.name", station.0),
+        None => CHATTER_ADDRESSEE_CORE.to_string(),
+    }
+}
+
 /// What to do with a delivered coordination message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeliverAction {
@@ -1117,5 +1147,48 @@ human_seeking = true
         });
         let due = queue.due_messages(2.0);
         assert_eq!(due[0].target, target);
+    }
+
+    /// Channel-3 addresses crew by STATION, not by the fine system: a message
+    /// whose target is the `navigation` SYSTEM must name the station that OWNS
+    /// navigation (here `tactical`), rendered as that station's display id — the
+    /// station ALONE, never a `station.tactical.navigation` composite, and never
+    /// the bare `chatter.sender.navigation` system label (Task 2/3).
+    #[test]
+    fn station_addressee_names_the_owning_station_not_the_system() {
+        let config = seeking_config();
+
+        // A system that belongs to a station → that station's display id.
+        assert_eq!(
+            station_addressee_label(&config, &crate::system_registry::navigation_system_id()),
+            "station.tactical.name",
+            "navigation is owned by the tactical station on this hull, so it \
+             addresses as the STATION alone"
+        );
+
+        // A station-level target key → the same station id, resolved once.
+        assert_eq!(
+            station_addressee_label(&config, &SystemId("comms".into())),
+            "station.comms.name"
+        );
+
+        // An ownerless / unknown target → the ship's Core, never a bare system.
+        assert_eq!(
+            station_addressee_label(&config, &SystemId("repair".into())),
+            CHATTER_ADDRESSEE_CORE,
+            "a target no station owns is addressed to Core, not to a system name"
+        );
+
+        // The resolved id carries no system suffix in either shape.
+        for id in [
+            station_addressee_label(&config, &crate::system_registry::navigation_system_id()),
+            station_addressee_label(&config, &SystemId("comms".into())),
+        ] {
+            assert!(
+                id.starts_with("station.") && id.ends_with(".name"),
+                "a station addressee is a `station.<id>.name` id with no system \
+                 half, got {id}"
+            );
+        }
     }
 }

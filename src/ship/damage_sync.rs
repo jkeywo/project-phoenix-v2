@@ -190,6 +190,7 @@ pub fn detect_damage_tier_crossings(
                             body: format!("{} destroyed.", system_id.0),
                         },
                         sender_label: system_id.0.clone(),
+                        sender_system: system_id.clone(),
                     });
                     // NO `continue` here (issue #1013). The Alert is an
                     // addition to the RepairRequest below, not a replacement
@@ -237,6 +238,7 @@ pub fn detect_damage_tier_crossings(
                         deficit: Some(deficit),
                     },
                     sender_label: system_id.0.clone(),
+                    sender_system: system_id.clone(),
                 });
             } else if current_tier == DamageTier::Operational && prev_tier > DamageTier::Operational
             {

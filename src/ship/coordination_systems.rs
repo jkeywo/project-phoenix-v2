@@ -37,11 +37,21 @@ pub fn handle_coordination_enqueue(
             continue;
         };
         let lag = ship_config.0.coordination_lag_secs;
+        // Channel-3 addresses crew by STATION, not by the fine system that
+        // spoke (Task 2). Resolve the emitting system to its owning station's
+        // display id here, where the SOURCE ship's config is in scope; an empty
+        // `sender_system` opts out and keeps the pre-resolved `sender_label`
+        // (the intent-narration path already stamps its own station id).
+        let sender_label = if ev.sender_system.0.is_empty() {
+            ev.sender_label.clone()
+        } else {
+            coordination::station_addressee_label(&ship_config.0, &ev.sender_system)
+        };
         queue.0.enqueue(QueuedCoordination {
             sender_origin: ev.sender_origin,
             target: ev.target.clone(),
             payload: ev.payload.clone(),
-            sender_label: ev.sender_label.clone(),
+            sender_label,
             due_time: now + lag,
         });
     }
@@ -554,10 +564,11 @@ pub fn process_coordination_lag(
                     // The typed payload crosses to the client, which turns it
                     // into words through the same `gui/coordination-popup.js`
                     // normaliser the phone popup uses (issue #975) — no sentence
-                    // is composed here. `from_label` is a `chatter.sender.*`
-                    // string id (or a player name) resolved on the client;
-                    // `to_label` is the raw target key, shown as-is so the
-                    // viewscreen and the popup agree.
+                    // is composed here. `from_label` is the sender's owning
+                    // STATION id (resolved at enqueue), and `to_label` is the
+                    // target's owning STATION id (resolved here) — the station
+                    // ALONE, never the station+system pair (Task 3). Both are
+                    // `station.*.name` ids the client's `localiseTree` resolves.
                     if is_local && msg.sender_origin == ControlSource::Ai {
                         let from_label = if msg.sender_label.is_empty() {
                             coordination::CHATTER_SENDER_AI.to_string()
@@ -566,7 +577,10 @@ pub fn process_coordination_lag(
                         };
                         chatter_writer.write(AiChatterEvent {
                             from_label,
-                            to_label: msg.target.0.clone(),
+                            to_label: coordination::station_addressee_label(
+                                &ship_config.0,
+                                &msg.target,
+                            ),
                             payload: msg.payload.clone(),
                         });
                     }
@@ -1299,6 +1313,7 @@ mod tests {
                 target,
                 payload,
                 sender_label: "Sensors".into(),
+                sender_system: crate::messages::SystemId(String::new()),
             });
     }
 
@@ -1403,10 +1418,68 @@ mod tests {
         );
         tick(&mut ai_sender);
         tick(&mut ai_sender);
+        let chatter = drain_chatter(&mut ai_sender);
         assert_eq!(
-            drain_chatter(&mut ai_sender).len(),
+            chatter.len(),
             1,
             "AI→AI coordination remains visible on the viewscreen"
+        );
+        // Task 3: the TARGET is named by the owning STATION alone, as a
+        // `station.<id>.name` id — never the raw system key and never a
+        // station+system composite. The target here is the Tactical station.
+        assert_eq!(
+            chatter[0].to_label, "station.tactical.name",
+            "the viewscreen names the target STATION, not the bare system key"
+        );
+        assert!(
+            !chatter[0].to_label.contains(' '),
+            "a station addressee carries no 'Station System' composite, got {:?}",
+            chatter[0].to_label
+        );
+    }
+
+    /// Task 2, end to end: an AI system speaking on channel-3 is addressed FROM
+    /// the station that owns it, resolved at enqueue from `sender_system` — the
+    /// viewscreen `from_label` is a `station.<id>.name` id, never the bare
+    /// `chatter.sender.*` system label.
+    #[test]
+    fn a_senders_system_is_addressed_as_its_owning_station() {
+        let mut app = routing_test_app();
+        start_game_with_sensors_officer(&mut app);
+        backfill_tactical_to_ai(&mut app);
+        give_ship_tactical_frequency_surface(&mut app);
+        let ship = find_ship_entity(&mut app);
+        app.world_mut()
+            .resource_mut::<Messages<CoordinationEnqueue>>()
+            .write(CoordinationEnqueue {
+                source_entity: ship,
+                sender_origin: ControlSource::Ai,
+                target: crate::system_registry::tactical_station_key(),
+                payload: CoordinationPayload::FrequencyHint { frequency: 0.83 },
+                // A raw `chatter.sender.*` fallback that MUST be overridden by
+                // the station the sensors system resolves to.
+                sender_label: coordination::CHATTER_SENDER_SENSORS.to_string(),
+                sender_system: crate::system_registry::sensors_system_id(),
+            });
+        tick(&mut app);
+        tick(&mut app);
+        let chatter = drain_chatter(&mut app);
+        assert_eq!(
+            chatter.len(),
+            1,
+            "AI→AI coordination reaches the viewscreen"
+        );
+        assert!(
+            chatter[0].from_label.starts_with("station.")
+                && chatter[0].from_label.ends_with(".name"),
+            "the sender is addressed as its owning STATION, not the \
+             chatter.sender.* system label, got {:?}",
+            chatter[0].from_label
+        );
+        assert_ne!(
+            chatter[0].from_label,
+            coordination::CHATTER_SENDER_SENSORS,
+            "the system-level fallback label must not survive resolution"
         );
     }
 

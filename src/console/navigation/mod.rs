@@ -355,6 +355,7 @@ fn issue_navigate_to_clearance(
                     z: snapshot.z,
                 },
                 sender_label: crate::ship::coordination::CHATTER_SENDER_NAVIGATION.to_string(),
+                sender_system: crate::system_registry::navigation_system_id(),
             });
             state.issued_generation = Some(generation);
         }

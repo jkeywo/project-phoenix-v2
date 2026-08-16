@@ -858,8 +858,15 @@ pub fn is_pending_sidecar_delivered(path: &str) -> bool {
 }
 
 /// Fire the JS fetch callback for a sidecar `path` if not already requested.
+///
+/// `optional` is passed to the page as the callback's second argument: it says
+/// this read is an EXISTENCE TEST, so a 404 is one of its expected answers and
+/// the page must resolve it to the empty string without logging a failed fetch.
+/// Only the legacy ladder-convention probe sets it (see
+/// [`crate::entities::glb_visual::Absence`]); every other sidecar read still
+/// wants a missing file reported.
 #[cfg(target_arch = "wasm32")]
-pub fn request_sidecar_fetch(path: String) {
+pub fn request_sidecar_fetch(path: String, optional: bool) {
     let already = SIDECAR_FETCH_REQUESTED.with(|s| s.borrow().contains(&path));
     if already {
         return;
@@ -867,7 +874,11 @@ pub fn request_sidecar_fetch(path: String) {
     SIDECAR_FETCH_REQUESTED.with(|s| s.borrow_mut().insert(path.clone()));
     WORLD_FETCH_CB.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {
-            let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&path));
+            let _ = cb.call2(
+                &JsValue::NULL,
+                &JsValue::from_str(&path),
+                &JsValue::from_bool(optional),
+            );
         }
     });
 }
@@ -1142,7 +1153,7 @@ pub fn request_world_fetch(_path: String) {}
 // directly in `load_sidecar_toml`). The pure-Rust take/is/push functions
 // above are shared by both targets.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn request_sidecar_fetch(_path: String) {}
+pub fn request_sidecar_fetch(_path: String, _optional: bool) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn wasm_load_faction(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {

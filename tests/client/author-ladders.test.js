@@ -55,3 +55,39 @@ describe('the bands buildLadder lays out for each variant', () => {
     expect(huge).toEqual(large.map((d) => d * 3));
   });
 });
+
+describe('the tier_rig convention buildLadder records', () => {
+  const ladder = () =>
+    buildLadder({
+      stem: 'alliance_destroyer',
+      near: 15,
+      mid: 100,
+      far: 400,
+      colour: [0, 0, 0],
+      sphere: { radius: 1, scale: [1, 1, 1] },
+      lod1Gen: {},
+      lod2Gen: {},
+    });
+
+  // This script writes only a stem's PRIMARY sidecars and never one beside a
+  // generated .glb, so its generated tiers resolve an identity rig. Recording
+  // that here is what stops the renderer fetching the absent file to find out —
+  // a 404 per hull model per browser session.
+  it('marks both generated tiers identity', () => {
+    expect(ladder().map((l) => l.tier_rig)).toEqual([
+      undefined,
+      'identity',
+      'identity',
+      undefined,
+    ]);
+  });
+
+  it('leaves the near tier and the far sphere unmarked', () => {
+    const [near, , , sphere] = ladder();
+    // The near level's model IS the primary GLB, whose sidecar is the file
+    // being read; the sphere has no GLB to have a rig at all.
+    expect(near.tier_rig).toBeUndefined();
+    expect(sphere.tier_rig).toBeUndefined();
+    expect(sphere.model).toBeUndefined();
+  });
+});

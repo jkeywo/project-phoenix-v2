@@ -172,6 +172,65 @@ describe('renderLadder', () => {
   it('omits max_distance on the fallback level', () => {
     expect(renderLadder([{ shape: 'sphere' }])).toBe('[[lod]]\nshape = "sphere"');
   });
+
+  // `tier_rig` says whether a rig sidecar sits beside this level's .glb. It has
+  // to ride LEVEL_KEYS — the list ladderFromDoc reads and renderLadder writes —
+  // or a ladder rewritten by capture-billboards.mjs would silently lose it, and
+  // the renderer would go back to fetching the absent file to find out.
+  it('writes tier_rig as a quoted string beside the model it describes', () => {
+    const text = renderLadder([
+      { max_distance: 100, model: 'a_lod1.glb', tier_rig: 'identity' },
+    ]);
+    expect(text).toBe(
+      '[[lod]]\nmax_distance = 100.0\nmodel = "a_lod1.glb"\ntier_rig = "identity"',
+    );
+  });
+
+  it('omits tier_rig on a level that declares none', () => {
+    expect(renderLadder([{ max_distance: 50, model: 'a.glb' }])).not.toContain('tier_rig');
+  });
+});
+
+describe('the tier_rig round trip through a whole sidecar', () => {
+  const LADDER = [
+    '[base]',
+    'scale = [ 1.5, 1.5, 1.5 ]',
+    '',
+    '[[lod]]',
+    'max_distance = 15.0',
+    'model = "assets/models/hull.glb"',
+    '',
+    '[[lod]]',
+    'max_distance = 100.0',
+    'model = "assets/models/hull_lod1.glb"',
+    'tier_rig = "identity"',
+    '',
+    '[[lod]]',
+    'shape = "sphere"',
+    '',
+  ].join('\n');
+
+  it('survives ladderFromDoc → replaceLadder byte for byte', () => {
+    const levels = ladderFromDoc(parseToml(LADDER));
+    expect(levels[1].tier_rig).toBe('identity');
+    expect(replaceLadder(LADDER, levels)).toBe(LADDER);
+  });
+
+  it('carries "baked" the same way', () => {
+    const baked = LADDER.replace('"identity"', '"baked"');
+    const levels = ladderFromDoc(parseToml(baked));
+    expect(levels[1].tier_rig).toBe('baked');
+    expect(replaceLadder(baked, levels)).toBe(baked);
+  });
+
+  // A sidecar written before the field existed — a mod pack's, in practice.
+  // Re-saving it must not invent a convention it was never told.
+  it('does not fabricate one for a ladder that declares none', () => {
+    const legacy = LADDER.replace('tier_rig = "identity"\n', '');
+    const levels = ladderFromDoc(parseToml(legacy));
+    expect(levels[1].tier_rig).toBeUndefined();
+    expect(replaceLadder(legacy, levels)).toBe(legacy);
+  });
 });
 
 describe('splitLadder', () => {

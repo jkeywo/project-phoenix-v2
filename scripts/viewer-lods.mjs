@@ -35,6 +35,13 @@ const LEVEL_KEYS = [
   'max_distance',
   'model',
   'variant',
+  // Whether a rig sidecar sits beside this level's `.glb`: "identity" (none —
+  // every hull, written by author-ladders.mjs) or "baked" (one per tier,
+  // written by import-asteroids.mjs). The renderer reads it instead of
+  // fetching the tier sidecar to find out, which on wasm meant a 404 per hull
+  // model per session. It rides LEVEL_KEYS so every writer that rewrites a
+  // ladder rewrites this too, and it cannot fall out of step with the files.
+  'tier_rig',
   'billboard',
   'shape',
   'colour',

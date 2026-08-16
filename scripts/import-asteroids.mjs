@@ -384,6 +384,11 @@ function ladderBlock(model, { remeshVoxelSize = null, scale = 1 } = {}) {
       "[[lod]]",
       `max_distance = ${band(level.max_distance)}`,
       `model = "assets/models/${model}${level.suffix}.glb"`,
+      // `importClass` writes a rig sidecar beside every one of these generated
+      // .glb files (the loop right after this ladder is emitted), so the tier
+      // applies the base scale itself. Saying so here is what stops the
+      // renderer having to fetch the file to find out.
+      `tier_rig = "baked"`,
       "",
       "[lod.generate]",
       `source = "assets/models/${model}.glb"`,

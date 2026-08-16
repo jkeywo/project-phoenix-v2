@@ -317,9 +317,17 @@
     // delivered back through this callback. Identical to the wiring in
     // server.html — an empty string on 404 tells Rust to stop re-requesting and
     // fall back to an identity rig.
-    wasm.set_world_fetch_callback((path) => {
+    // The second argument marks a read that is itself an existence test (the
+    // legacy ladder-convention probe); server.html uses it to keep an expected
+    // 404 out of the console. This page reports nothing either way, so it only
+    // needs to accept the argument to keep the two callbacks the same shape.
+    wasm.set_world_fetch_callback((path, optional) => {
       fetch(path)
-        .then((r) => (r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status))))
+        .then((r) => {
+          if (r.ok) return r.text();
+          if (optional && r.status === 404) return '';
+          return Promise.reject(new Error('HTTP ' + r.status));
+        })
         .then((toml) => wasm.wasm_push_sidecar_toml(path, toml))
         .catch(() => wasm.wasm_push_sidecar_toml(path, ''));
     });

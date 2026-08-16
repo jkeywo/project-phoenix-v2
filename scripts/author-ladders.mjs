@@ -132,12 +132,28 @@ export function bandMultiplier(variant) {
  * Build the four-level ladder for one sidecar. `lod1Gen`/`lod2Gen` are the
  * complete `[lod.generate]` blocks (already mode-specific), so this function
  * only lays out the levels and never decides how they are made.
+ *
+ * The two generated levels are marked `tier_rig = "identity"` because this
+ * script writes ONLY the primary sidecars of a stem (`sidecarsForStem`) and
+ * never a sidecar beside a generated `.glb` — so by construction there is none
+ * there for the renderer to read. Recorded here, at the one place that decides
+ * it, rather than discovered later by fetching the file and getting a 404.
  */
 export function buildLadder({ stem, near, mid, far, colour, sphere, lod1Gen, lod2Gen }) {
   return [
     { max_distance: near, model: `${MODELS_DIR}/${stem}.glb` },
-    { max_distance: mid, model: `${MODELS_DIR}/${stem}_lod1.glb`, generate: lod1Gen },
-    { max_distance: far, model: `${MODELS_DIR}/${stem}_lod2.glb`, generate: lod2Gen },
+    {
+      max_distance: mid,
+      model: `${MODELS_DIR}/${stem}_lod1.glb`,
+      tier_rig: 'identity',
+      generate: lod1Gen,
+    },
+    {
+      max_distance: far,
+      model: `${MODELS_DIR}/${stem}_lod2.glb`,
+      tier_rig: 'identity',
+      generate: lod2Gen,
+    },
     { shape: 'sphere', colour, radius: sphere.radius, scale: sphere.scale },
   ];
 }

@@ -59,6 +59,7 @@ model = "assets/models/alliance_cruiser.glb"
 [[lod]]
 max_distance = 100.0
 model = "assets/models/alliance_cruiser_lod1.glb"
+tier_rig = "identity"
 
 [lod.generate]
 source = "assets/models/alliance_cruiser.glb"
@@ -70,6 +71,7 @@ remesh_voxel_size = 0.0211
 [[lod]]
 max_distance = 400.0
 model = "assets/models/alliance_cruiser_lod2.glb"
+tier_rig = "identity"
 
 [lod.generate]
 source = "assets/models/alliance_cruiser.glb"

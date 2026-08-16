@@ -236,6 +236,40 @@ export function captureServerPageErrors(page) {
   return errors;
 }
 
+/** Capture asset fetches that came back 4xx/5xx, plus the page's own report of
+ * them, for the whole life of `page`.
+ *
+ * A 404 is not a Playwright `requestfailed` — the request succeeded and the
+ * server answered "no" — so this listens on `response`, and separately on the
+ * console line `server.html` prints when a TOML fetch does not resolve.
+ *
+ * The defect this exists for: the renderer used to work out a model's LOD-ladder
+ * convention by FETCHING the first generated tier's rig sidecar and seeing
+ * whether it 404'd. Hull ladders deliberately ship none, so every ship in the
+ * scenario begged for a file that was never written and logged an error for it —
+ * shipped content, behaving as designed, filling the console with what looked
+ * like a broken build. The ladder now states its convention (`tier_rig` in the
+ * primary sidecar), so nothing asks. A run that starts asking again is a
+ * regression, and it is invisible to every native test: on native the same
+ * question is a filesystem read that costs nothing and says nothing.
+ *
+ * Returns the live `string[]` seen so far — assert on it AFTER the work under
+ * test, not at the point of the call.
+ */
+export function captureFetchFailures(page) {
+  const failures = [];
+  page.on('response', (res) => {
+    if (res.status() < 400) return;
+    failures.push(`HTTP ${res.status()} ${new URL(res.url()).pathname}`);
+  });
+  page.on('console', (msg) => {
+    if (msg.type() !== 'error') return;
+    const text = msg.text();
+    if (text.includes('Failed to fetch TOML')) failures.push(text);
+  });
+  return failures;
+}
+
 // ── Test client helper ────────────────────────────────────────────────────────
 // Creates a blank page at localhost:3000 (same BroadcastChannel origin),
 // connects to the host peer, sends Identify, and waits for Welcome.

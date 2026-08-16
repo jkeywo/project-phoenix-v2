@@ -22,6 +22,7 @@ import {
   waitForWasmReady,
   stripHeavyEntities,
   countTableArray,
+  captureFetchFailures,
 } from './fixtures';
 import fs from 'fs';
 import path from 'path';
@@ -94,6 +95,7 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
   );
 
   const serverPage = await context.newPage();
+  const fetchFailures = captureFetchFailures(serverPage);
   await serverPage.goto('/?scenario=assets/worlds/combat_test.toml');
 
   // combat_test.toml declares more than one [[available_ships]], so
@@ -187,6 +189,19 @@ test('combat_test scenario: starbase + objective + player + first wave appear af
       { timeout: 5_000 },
     );
   }
+
+  // Nothing this scenario loads may 404. The preload walk asks for every asset
+  // the world names, and a scenario full of ships used to make it ask for each
+  // hull's per-tier rig sidecars — files the pipeline deliberately never wrote,
+  // because a hull's generated tiers carry no rig of their own. The ladder now
+  // says so (`tier_rig`), so nothing goes looking. See `captureFetchFailures`.
+  expect(
+    fetchFailures,
+    `The combat_test load requested assets that came back missing:\n  ${
+      fetchFailures.join('\n  ')
+    }\nShipped content must not 404. If these are LOD tier sidecars, a ladder has \
+lost its tier_rig — re-run the pipeline that wrote it.`,
+  ).toEqual([]);
 
   await captain.close();
 });

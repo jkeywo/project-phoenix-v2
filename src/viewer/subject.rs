@@ -163,6 +163,7 @@ pub fn poll_pending_model(
     mut star_halo: ResMut<Assets<StarHaloMaterial>>,
     mut planet_surface: ResMut<Assets<PlanetSurfaceMaterial>>,
     mut planet_cloud: ResMut<Assets<PlanetCloudMaterial>>,
+    ladder: Option<Res<crate::viewer::lod::LadderState>>,
     subjects: Query<(Entity, Option<&PendingSceneHandle>), With<Subject>>,
 ) {
     if state.settled {
@@ -249,6 +250,15 @@ pub fn poll_pending_model(
         // Every respawn starts from a fresh subject at identity, so this is
         // the level's scale rather than a correction of a previous one.
         commands.entity(entity).insert(Transform::from_scale(scale));
+        // When the thing on screen is a LADDER TIER that declares it ships no
+        // sidecar, hand over the identity rig it would resolve rather than
+        // asking for a file the pipeline never wrote. The base model (no level
+        // showing) always has its own sidecar, so it resolves normally.
+        let declared = level_glb
+            .as_ref()
+            .and(ladder.as_deref())
+            .and_then(|l| l.current.and_then(|i| l.levels.get(i)))
+            .and_then(crate::entities::glb_visual::declared_tier_rig);
         match spawn_glb_visual(
             &mut commands,
             &asset_server,
@@ -257,7 +267,7 @@ pub fn poll_pending_model(
             &model_path,
             variant.as_deref(),
             pending,
-            None,
+            declared.as_ref(),
         ) {
             GlbSpawnOutcome::Pending => {}
             GlbSpawnOutcome::Failed => {
@@ -265,11 +275,19 @@ pub fn poll_pending_model(
                 state.settled = true;
             }
             GlbSpawnOutcome::Spawned(_) => {
-                state.extents = crate::entities::glb_visual::resolve_sidecar_rig(
-                    &model_path,
-                    variant.as_deref(),
-                )
-                .and_then(|rig| rig.extents.map(|e| Vec3::from_array(e.size)));
+                // Re-reading the sidecar `spawn_glb_visual` just resolved is a
+                // cache hit — EXCEPT on a tier that declared it has none, where
+                // it would be the very fetch the declaration exists to avoid.
+                // That tier's rig is the identity one, which carries no extents,
+                // so the answer is `None` either way; take it without asking.
+                state.extents = match &declared {
+                    Some(rig) => rig.extents.as_ref().map(|e| Vec3::from_array(e.size)),
+                    None => crate::entities::glb_visual::resolve_sidecar_rig(
+                        &model_path,
+                        variant.as_deref(),
+                    )
+                    .and_then(|rig| rig.extents.map(|e| Vec3::from_array(e.size))),
+                };
                 state.settled = true;
             }
         }
@@ -391,7 +409,9 @@ fn fetch_toml(path: &str) -> Option<String> {
     #[cfg(target_arch = "wasm32")]
     {
         crate::config_cache::take_pending_sidecar_toml(path).or_else(|| {
-            crate::config_cache::request_sidecar_fetch(path.to_string());
+            // Not optional: this reads the entity TOML `?entity=` names, which
+            // the caller asked for by name and which therefore ought to exist.
+            crate::config_cache::request_sidecar_fetch(path.to_string(), false);
             None
         })
     }

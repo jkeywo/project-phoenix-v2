@@ -55,6 +55,7 @@ model = "assets/models/alliance_destroyer.glb"
 [[lod]]
 max_distance = 100.0
 model = "assets/models/alliance_destroyer_lod1.glb"
+tier_rig = "identity"
 
 [lod.generate]
 source = "assets/models/alliance_destroyer.glb"
@@ -65,6 +66,7 @@ texture_size = 256
 [[lod]]
 max_distance = 400.0
 model = "assets/models/alliance_destroyer_lod2.glb"
+tier_rig = "identity"
 
 [lod.generate]
 source = "assets/models/alliance_destroyer.glb"

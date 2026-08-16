@@ -4805,8 +4805,13 @@ fn update_mesh_lod(
 
         if let Some(model_path) = level.model.as_deref() {
             let variant = level.variant.clone().or_else(|| lods.base.variant.clone());
-            // This level's own sidecar hasn't been resolved yet this frame —
-            // let spawn_glb_visual resolve it.
+            // A tier whose ladder declares it ships NO sidecar is handed the
+            // identity rig it would have resolved anyway, so nothing requests a
+            // file that was deliberately never written — on wasm that request is
+            // a fetch, and its 404 is the console error this path used to print
+            // for every hull model in the scene. Any other tier's sidecar hasn't
+            // been resolved yet this frame; let spawn_glb_visual resolve it.
+            let declared = crate::entities::glb_visual::declared_tier_rig(&level);
             match spawn_glb_visual(
                 &mut commands,
                 &asset_server,
@@ -4815,7 +4820,7 @@ fn update_mesh_lod(
                 model_path,
                 variant.as_deref(),
                 pending,
-                None,
+                declared.as_ref(),
             ) {
                 // Keep the current visual until the new GLB resolves — avoids a
                 // visible gap. `current` is left unchanged so we retry next frame.

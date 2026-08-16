@@ -666,11 +666,54 @@ pub struct LodLevel {
     /// see [`LodGeneration`]; the renderer never reads it.
     #[serde(default)]
     pub generate: Option<LodGeneration>,
+    /// Whether this level's `model` ships a rig sidecar of its own — the
+    /// ladder's *convention*, recorded at build time by whichever pipeline
+    /// script wrote the ladder (issue: sidecar-probe-404).
+    ///
+    /// Only a GENERATED tier carries it: level 0's model IS the primary GLB, so
+    /// its sidecar is the one being read right now, and a billboard level has no
+    /// GLB to ask about.
+    ///
+    /// `None` means the sidecar predates the field — a mod pack's hand-authored
+    /// ladder, chiefly. The renderer then falls back to probing the tier sidecar
+    /// as it always did; see [`crate::entities::glb_visual::resolve_tier_parent_scale`].
+    #[serde(default)]
+    pub tier_rig: Option<TierRig>,
     /// How this level's `billboard` atlas was captured. Authored as a
     /// `[lod.capture]` sub-table. Build-time provenance only — see
     /// [`LodCapture`]; the renderer never reads it.
     #[serde(default)]
     pub capture: Option<LodCapture>,
+}
+
+/// Whether a generated LOD tier's `.glb` ships a rig sidecar beside it.
+///
+/// Two pipelines write ladders and they differ on this, which is the whole
+/// reason [`crate::entities::glb_visual::tier_parent_scale`] exists. The fact
+/// was previously *inferred at runtime* by reading the tier's sidecar and
+/// seeing what came back — and on wasm "seeing what came back" is an HTTP
+/// fetch, so every hull ladder in a browser session begged a 404 for a file
+/// deliberately not shipped. It is knowable when the ladder is authored, so it
+/// is authored.
+///
+/// Recorded per level rather than once per ladder because TOML root keys must
+/// precede every table header, so a ladder-wide key could not live beside the
+/// `[[lod]]` blocks that `scripts/viewer-lods.mjs` rewrites — and a field the
+/// ladder writer does not rewrite is a field that goes stale. On the level it
+/// rides the same `LEVEL_KEYS` round trip as `model` itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TierRig {
+    /// No sidecar beside this tier's `.glb` — every ship hull, the starbase, the
+    /// research outpost. The tier resolves an identity rig, so the parent
+    /// transform owes it the whole `[base].scale`. Nothing may fetch its
+    /// sidecar: there has never been one to fetch.
+    Identity,
+    /// A sidecar sits beside this tier's `.glb` carrying the primary's `[base]`
+    /// rig verbatim — every asteroid class, written by
+    /// `scripts/import-asteroids.mjs`. The tier applies the base scale itself,
+    /// so the parent owes it none.
+    Baked,
 }
 
 /// Decimation parameters that produced a generated LOD level's `.glb`

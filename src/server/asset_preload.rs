@@ -206,6 +206,18 @@ pub fn discover_sidecar_lod_assets(
         if !manifest.glb_models.contains(&rel) {
             manifest.glb_models.push(rel);
         }
+        // A tier that declares it ships no sidecar contributes no sidecar to
+        // preload. Listing one anyway is what put `<hull>_lod1.model.toml` in
+        // the manifest for every ship in the scenario, and the preloader duly
+        // fetched all of them — the 404s John saw in the console before a single
+        // LOD band had been crossed. The identity rig those tiers resolve needs
+        // no file and no wait.
+        if matches!(
+            level.tier_rig,
+            Some(crate::entity_config::TierRig::Identity)
+        ) {
+            continue;
+        }
         let sc = sidecar_path(lod_model, level.variant.as_deref().or(own_variant));
         if !manifest.sidecars.contains(&sc) {
             manifest.sidecars.push(sc);
@@ -646,10 +658,13 @@ pub fn begin_asset_preload(
         icon_handles.push((path.clone(), handle));
     }
 
-    // Request sidecar fetches (WASM) — on native these are read synchronously later
+    // Request sidecar fetches (WASM) — on native these are read synchronously later.
+    // Never optional: this list is the entity-declared PRIMARY sidecars plus the
+    // ladder tiers that said they have one, so every path here is a file that is
+    // supposed to exist and a 404 on one is worth reporting.
     #[cfg(target_arch = "wasm32")]
     for sc_path in &manifest.sidecars {
-        crate::config_cache::request_sidecar_fetch(sc_path.clone());
+        crate::config_cache::request_sidecar_fetch(sc_path.clone(), false);
     }
 
     let mut seen_worlds = HashSet::new();
@@ -815,7 +830,12 @@ pub fn poll_asset_preload(
         }
         for sc_path in &ladder.sidecars {
             if preload.registered_sidecars.insert(sc_path.clone()) {
-                crate::config_cache::request_sidecar_fetch(sc_path.clone());
+                // NOT optional. `discover_sidecar_lod_assets` has already
+                // dropped every tier whose ladder declared it ships no sidecar,
+                // so what is left either declared one (it is there) or predates
+                // the declaration entirely (mod-pack content), and for that
+                // second case a missing tier sidecar is worth the word it costs.
+                crate::config_cache::request_sidecar_fetch(sc_path.clone(), false);
                 preload.pending_sidecars.push(sc_path.clone());
             }
         }
@@ -900,7 +920,8 @@ pub fn poll_asset_preload(
             // model already seen in the base world. Pushing a duplicate would leave
             // a pending entry that can never be popped (JS delivers the TOML once).
             if preload.registered_sidecars.insert(sc_path.clone()) {
-                crate::config_cache::request_sidecar_fetch(sc_path.clone());
+                // Not optional, for the reason the base-world walk above is not.
+                crate::config_cache::request_sidecar_fetch(sc_path.clone(), false);
                 preload.pending_sidecars.push(sc_path.clone());
             }
         }
@@ -1348,6 +1369,85 @@ shape = "sphere"
         );
         // A level that omits `variant` inherits the sidecar's own — which is
         // the same fallback `update_mesh_lod` applies from `[mesh] variant`.
+        assert_eq!(
+            manifest.sidecars,
+            vec![
+                "assets/models/rock.large.toml",
+                "assets/models/rock_lod2.large.toml"
+            ]
+        );
+    }
+
+    /// A tier that declares it ships no sidecar contributes its GLB and NOTHING
+    /// else. This is where the 404 John saw actually came from: the preloader
+    /// listed `<hull>_lod1.model.toml` for every ship in the scenario and duly
+    /// fetched all of them, at page load, before any LOD band had been crossed.
+    ///
+    /// The GLB must still be listed — the tier is real and has to stream — so a
+    /// blanket "skip declared-identity tiers" would break the preload instead.
+    #[test]
+    fn a_declared_identity_tier_preloads_its_glb_but_asks_for_no_sidecar() {
+        let sidecar = r#"
+[base]
+scale = [1.5, 1.5, 1.5]
+
+[[lod]]
+max_distance = 15.0
+model = "assets/models/hull.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/hull_lod1.glb"
+tier_rig = "identity"
+
+[[lod]]
+shape = "sphere"
+"#;
+        let mut manifest = AssetManifest::default();
+        discover_sidecar_lod_assets(
+            sidecar,
+            "assets/models/hull.model.toml",
+            None,
+            &mut manifest,
+        );
+
+        assert_eq!(
+            manifest.glb_models,
+            vec!["models/hull.glb", "models/hull_lod1.glb"],
+            "both real GLB tiers still stream"
+        );
+        assert_eq!(
+            manifest.sidecars,
+            vec!["assets/models/hull.model.toml"],
+            "only the PRIMARY sidecar, which exists — nothing may ask for \
+             hull_lod1.model.toml, a file the pipeline deliberately never wrote"
+        );
+    }
+
+    /// The other half: a `baked` tier's sidecar IS there and must be preloaded,
+    /// or the renderer stalls waiting for a fetch nobody started.
+    #[test]
+    fn a_declared_baked_tier_still_contributes_its_sidecar() {
+        let sidecar = r#"
+[[lod]]
+max_distance = 50.0
+model = "assets/models/rock.glb"
+
+[[lod]]
+max_distance = 150.0
+model = "assets/models/rock_lod2.glb"
+tier_rig = "baked"
+
+[[lod]]
+shape = "sphere"
+"#;
+        let mut manifest = AssetManifest::default();
+        discover_sidecar_lod_assets(
+            sidecar,
+            "assets/models/rock.large.toml",
+            None,
+            &mut manifest,
+        );
         assert_eq!(
             manifest.sidecars,
             vec![

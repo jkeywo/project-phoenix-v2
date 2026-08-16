@@ -296,6 +296,45 @@ shape = "sphere"
     expect(parsedRaw.target_points).toHaveLength(2);
   });
 
+  // `tier_rig` records whether a generated LOD tier ships a rig sidecar of its
+  // own. The renderer trusts it INSTEAD of fetching the tier sidecar to find
+  // out, so a Models Mode save that quietly dropped it would put the 404 back —
+  // and a level that lost its convention could also be composed at the wrong
+  // size. The editor understands no part of `[[lod]]` and must not start now:
+  // carrying the array verbatim is what keeps this key safe.
+  it('carries a level’s tier_rig through a Models Mode save untouched', () => {
+    const sidecar = `[base]
+scale = [ 1.5, 1.5, 1.5 ]
+
+[markers.engine]
+position = [ 0, 0, 2 ]
+direction = [ 0, 0, 1 ]
+
+[[lod]]
+max_distance = 15.0
+model = "assets/models/hull.glb"
+
+[[lod]]
+max_distance = 100.0
+model = "assets/models/hull_lod1.glb"
+tier_rig = "identity"
+
+[[lod]]
+shape = "sphere"
+`;
+
+    const rig = parseRigToml(sidecar);
+    expect(rig.lod[1].tier_rig).toBe('identity');
+
+    updateMarker(rig, 'engine', { position: [0, 0, 3] });
+    const rebuilt = buildRigToml(rig);
+
+    // Assert on the bytes that hit disk, not just the in-memory shape.
+    expect(rebuilt).toContain('tier_rig = "identity"');
+    expect(parse(rebuilt).lod[1].tier_rig).toBe('identity');
+    expect(parseRigToml(rebuilt).lod).toEqual(rig.lod);
+  });
+
   it('a rig with no [[lod]] / [[target_points]] serializes without those sections', () => {
     const rig = defaultRig();
     addMarker(rig, 'm', { position: [1, 2, 3] });

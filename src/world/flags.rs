@@ -121,6 +121,23 @@ impl FlagStore {
         self.set_flag_value(name, after);
         (before, after)
     }
+
+    /// Iterate the SET `(name, counter)` pairs.
+    ///
+    /// Order is unspecified — the store is a `HashMap` — so a caller that lets
+    /// this reach a payload, a fold or a rendered list sorts it. The two that
+    /// exist do (`campaign::projection`, issue #867).
+    ///
+    /// "Set" is the whole vocabulary here: `set_flag_value(name, 0)` REMOVES the
+    /// entry rather than storing a zero, so an unset name and a cleared one are
+    /// the same thing to every reader, this one included. That is what makes
+    /// #1043's exclusivity invariant legible — a family's answer is the member
+    /// that is present.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, i64)> {
+        self.values
+            .iter()
+            .map(|(name, value)| (name.as_str(), *value))
+    }
 }
 
 /// Resolve `name` against a layer chain, walking up `parent:` prefixes.

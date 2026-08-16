@@ -143,6 +143,50 @@ entities:
         reference: "tests/headless_runner.rs::falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word; ::a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back; ::the_lift_runs_out_and_the_third_claimant_is_never_offered_one; ::the_early_collapse_leaves_one_berth_and_control_asks_for_a_name"
         summary: "Four whole runs of `falling_skyway.toml` from the lobby to the debrief, each taking a different road and each asserting all six families plus the exclusivity invariant. Between them they cover both strike resolutions, all three evidence depths, both skyhook fates, every pairing the window can carry and the early-collapse variant where it carries none; the casualty families differ per run and the same claimant costs 3 on one road and 4 on another. The commitments family is exercised at every value it can take: two kept and none broken, none kept and one broken, one of each, and a run where nothing was ever promised."
 
+  - component: campaign-projection
+    core:
+      status: implemented
+      confidence: confirmed
+      title: The Campaign Projection — What Survives a Mission Boundary
+      summary: "Issue #867 (parent #848). The pure fold from a finished mission's `vellum-save` snapshot to the facts the next mission may open on: the mission and its outcome, #1043's `campaign.*` handoff counters carried verbatim, the promises the run settled, what the crew found out, where they stand with each declared party, the named things still on the board, and what was done to the structures. `seed_flags` is the other end — the same facts back as the counters a later mission's script reads. Owns no state, registers no component or resource, and runs in no schedule: it is a function of a save."
+      rationale:
+        - "[ai] THE OUTPUT IS THE DECLARATION, because the input cannot be. `dossier-projection` excludes hidden truth by narrowing its input PORT — a fact with no field to arrive through cannot leak — and this fold cannot do that: its acceptance criteria fix the input as a whole authoritative snapshot, because that is the artifact a finished mission produces. So the gate moves to the far end. `CampaignFacts` has a field per declared family and no field for anything else, so a hull fraction, a beam's remaining seconds, a tube's load timer, an asteroid or an RNG position has nowhere to go; carrying one is a new field in a diff, next to the paragraph forbidding it."
+        - "[ai] THE EXCLUSION TEST NAMES NOTHING IT EXCLUDES, and that is what keeps it true. It varies the transient state — mauls the hulls, arms the weapons, moves the ships, fills the belt, moves the tick and drops the generators — and asserts the facts are byte-identical. A list of excluded FIELDS goes stale the first time a component is added; a claim that nothing but the declared families can move the output does not. The end-to-end test repeats it on a real payload by serialising the facts and asserting no combat vocabulary appears in the text."
+        - "[ai] IT IS A CONSUMER OF #1043's VOCABULARY, NOT A SECOND DECLARATION. `campaign-flag-handoff-state` says the prefix is the contract and there is deliberately no registry of family names; this module honours that by FILTERING on the prefix and carrying the counters verbatim, sorted, under the names the writing mission wrote. It knows no mission names and no family names. What it adds is the rest of the handoff — promises, findings, standing, assets, structures — which are already authoritative RECORDS rather than counters, and which a later mission would otherwise have to re-derive from a flag somebody remembered to write."
+        - "[ai] SEEDING WRITES ONLY NAMES THAT ALREADY HAD OWNERS, for the same reason. `seed_flags` puts back the `campaign.*` tallies and `commitment.<id>.kept`/`.broken` through `commitments::kept_flag`/`broken_flag` — the two functions a mission writes with while it is running — and seeds standing, assets and structures NOWHERE, because no declared flag name owns them and minting one here would be the parallel registry #1043 refuses. Those travel as data for a later world's `[[entity]] overrides`, which is a different consumption shape and not a flag. A test asserts every seeded name starts with one of the two owned prefixes."
+        - "[ai] IDENTITY IS THE AUTHORED NAME, NEVER THE UUID. A uuid is minted per run, so the skyhook in the mission that ends is not the skyhook in the mission that follows even where the fiction says it is. Every identity that leaves is `name_to_uuid`'s key, resolved backwards; a fact about an entity no name answers to is DROPPED rather than carried under a number the next mission cannot match. Proved by re-projecting the same payload with every uuid rewritten and asserting the facts are unchanged."
+        - "[ai] A `campaign.` NAME IS SCRIPT-READABLE, NOT PREDICATE-READABLE, and this was measured rather than assumed. The predicate lexer's identifiers are `[A-Za-z_][A-Za-z0-9_:-]*` (`world::flags`), so a DOTTED name cannot appear inside `counter(...)`/`flag(...)` in a `when` clause at all — it is a parse error, not a false. The read that works is a script's `ctx.flags[\"campaign.skyway.strike.negotiated\"]`, which is what `falling_skyway` already does with its own record. Both families `seed_flags` writes are dotted, so both are script reads."
+        - "[ai] NO I/O AND NO OPINION ABOUT THE BACKEND. `project` takes `&Run` and returns a value: it opens nothing, reads no clock, and cannot tell whether the save came from `LocalStorage`, a file, or the `TransferStore` an import travelled through (#866). A campaign is continuity between missions, not between storage backends."
+        - "[ai] `FlagStore` gained one read-only accessor — `iter()` over the SET `(name, counter)` pairs — because the store had no enumeration at all and the prefix filter needs one. `set_flag_value(name, 0)` removes the entry rather than storing a zero, so an unset name and a cleared one are the same thing to every reader; that is what makes #1043's exclusivity invariant legible, since a family's answer is the member that is PRESENT."
+    architecture:
+      kind: subsystem
+      authority: derived
+      reads: [campaign-flag-handoff-state, world-flag-state, infrastructure-condition-state, dossier-evidence-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/campaign/projection.rs
+        - src/world/flags.rs
+      symbols:
+        - CampaignFacts
+        - CampaignPromise
+        - CampaignFinding
+        - CampaignStanding
+        - CampaignAsset
+        - CampaignStructure
+        - CAMPAIGN_FACTS_VERSION
+        - CAMPAIGN_FLAG_PREFIX
+        - project
+        - seed_flags
+      tests:
+        - cargo test
+        - "cargo test --features headless --test headless_runner the_next_mission_opens"
+    evidence:
+      - kind: test
+        reference: "tests/headless_runner.rs::the_next_mission_opens_on_what_this_one_left_behind"
+        summary: "A whole run of `falling_skyway.toml` down its early-collapse road — the head comes down before the transfer window opens, Control offers one berth on the rung, the convoy takes it and two claimants are left on the rock — then the save a host would have taken, projected. Every `campaign.` counter the mission actually wrote is asserted present at its written value (read off the live store rather than from an expectation list, so a dropped family is caught even where the test does not presume which member answered), all six families are represented by prefix, the structures travel under their authored names, and the serialised facts are asserted to contain no combat vocabulary. It then does the two things a later mission would: seeds a flag store and reads the counters its script would read, and maps the structures onto the condition an `[[entity]] overrides` would carry."
+
   - component: infrastructure-condition-tracker
     core:
       status: implemented

@@ -14802,3 +14802,250 @@ fn the_early_collapse_leaves_one_berth_and_control_asks_for_a_name() {
         "this captain gave nobody their word, which is a different record from keeping it"
     );
 }
+
+// ── What the next mission is handed (issue #867) ─────────────────────────────
+
+/// **Issue #867 — the handoff fixture, on a real finished mission.**
+///
+/// `src/campaign/projection.rs` proves the projection's rules against payloads
+/// built by hand; that is where inclusion, exclusion, identity and defaults are
+/// settled, because they are claims about a pure function. What a hand-built
+/// payload cannot prove is that the fold matches the shape a mission ACTUALLY
+/// leaves behind — that the flag names are the ones a scenario wrote, that the
+/// ledger is settled by the time the save is taken, that the structures are the
+/// ones the crew wrecked. So this drives a whole mission to its ending, takes
+/// the save the host would have taken, and reads the next mission's opening out
+/// of it.
+///
+/// The road is the early collapse — the cheapest of the four endings to reach
+/// and the harshest to inherit: the head comes down before the transfer window
+/// opens, so the corridor carries nobody, Control offers one berth on the rung
+/// instead, and the crew give it to the convoy. Two claimants are left on the
+/// rock, the skyhook is gone, and no promise was ever made.
+///
+/// The demonstration at the end is deliberately NOT a second mission. It is the
+/// two things a second mission would do with these facts: seed its flag store
+/// (`campaign::seed_flags`) and read the counters its script would read, and
+/// take the structures as the configuration a next world's `[[entity]]`
+/// overrides would carry. Building an actual follow-on world would prove the
+/// world file, not the projection.
+#[test]
+fn the_next_mission_opens_on_what_this_one_left_behind() {
+    use project_phoenix::campaign::{project, seed_flags, CAMPAIGN_FACTS_VERSION};
+    use project_phoenix::content_ledger;
+    use project_phoenix::snapshot::{capture, run_for, versions};
+
+    let (mut app, ship) = skyway_at_act_two();
+
+    // Nothing is done about anything: the head comes down before the window
+    // opens, and the one berth left on the rung goes to the convoy.
+    let opens_at = skyway_deadline_secs(&app, "skyway_transfer_window") as f64;
+    parley_run_to(&mut app, ship, opens_at + 6.0, WINDOW_STATION);
+    assert_eq!(
+        skyway_flag(&app, "skyway_skyhook_lost"),
+        1,
+        "precondition: this is the road where the structure is lost"
+    );
+    skyway_pick(
+        &mut app,
+        WINDOW_CONTROL,
+        "world.falling_skyway.comms.berth_to_convoy",
+    );
+    run(&mut app, 8);
+    run_to_the_endings(&mut app, ship, WINDOW_STATION);
+    assert_the_campaign_record_is_complete(&app);
+
+    // The save a host would have taken at the debrief, through the ordinary
+    // capture — not a hand-built payload.
+    let payload = capture(app.world());
+    let run = run_for(
+        payload,
+        project_phoenix::sim_digest::world_digest(app.world()),
+        42,
+        SKYWAY_WORLD,
+        versions(&content_ledger::frozen_or_live()),
+    );
+
+    let facts = project(&run);
+
+    // ── What travelled ───────────────────────────────────────────────────────
+
+    assert_eq!(facts.version, CAMPAIGN_FACTS_VERSION);
+    assert_eq!(facts.mission, SKYWAY_WORLD);
+
+    // THE CLAIM, stated against the live world rather than against a road this
+    // test thinks it took: every `campaign.` counter the mission actually wrote
+    // is in the facts, at the value the mission wrote it. Written this way on
+    // purpose — an expectation list asserts what the author believed the ending
+    // was, and the first thing to go wrong with a projection is that it drops a
+    // family nobody thought to name.
+    let live: std::collections::BTreeMap<String, i64> = app
+        .world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .flags
+        .iter()
+        .filter(|(name, _)| name.starts_with("campaign."))
+        .map(|(name, value)| (name.to_string(), value))
+        .collect();
+    assert!(
+        !live.is_empty(),
+        "precondition: the mission reached its close and wrote its record"
+    );
+    for (name, value) in &live {
+        assert_eq!(
+            facts.tally(name),
+            *value,
+            "`{name}` was written by the mission and must survive the save"
+        );
+    }
+    assert_eq!(
+        facts.tallies.len(),
+        live.len(),
+        "and nothing else came with them"
+    );
+
+    // All six families are represented, by prefix — the shape #1043 guarantees,
+    // checked here so a projection that silently dropped one is caught even
+    // though this test does not presume which member each family answered with.
+    for family in [
+        "campaign.skyway.passage.",
+        "campaign.skyway.strike.",
+        "campaign.skyway.evidence.",
+        "campaign.skyway.casualties.",
+        "campaign.skyway.skyhook.",
+        "campaign.skyway.commitments.",
+    ] {
+        assert!(
+            facts
+                .tallies
+                .iter()
+                .any(|(name, _)| name.starts_with(family)),
+            "the `{family}` family reached the next mission"
+        );
+    }
+
+    // The road-specific facts this variant exists for, and the ones a follow-on
+    // mission would actually branch on.
+    assert_eq!(
+        facts.tally("campaign.skyway.skyhook.lost"),
+        1,
+        "the structure came down, and that is what the next mission inherits"
+    );
+    assert_eq!(facts.tally("campaign.skyway.skyhook.held"), 0);
+    assert_eq!(
+        facts.tally("campaign.skyway.passage.left_committee"),
+        1,
+        "the workers were left on the rock"
+    );
+
+    // Every tally is a `campaign.` name and every one is sorted — the filter and
+    // the order the payload's own flag store cannot supply.
+    assert!(
+        facts
+            .tallies
+            .iter()
+            .all(|(name, _)| name.starts_with("campaign.")),
+        "a mission-local counter is not a handoff fact: {:?}",
+        facts.tallies
+    );
+    let sorted = {
+        let mut names: Vec<&String> = facts.tallies.iter().map(|(name, _)| name).collect();
+        names.sort();
+        names
+    };
+    assert_eq!(
+        facts
+            .tallies
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>(),
+        sorted
+    );
+
+    // The structures, by their AUTHORED names — the identity a later mission can
+    // actually match, and the one thing a uuid could never be.
+    assert!(
+        !facts.structures.is_empty(),
+        "this mission has structures and wrecked one of them"
+    );
+    for structure in &facts.structures {
+        assert!(
+            structure.name.starts_with("world.falling_skyway."),
+            "a structure travels under the name the scenario wrote, not a uuid: \
+             {structure:?}"
+        );
+        assert!((0.0..=1.0).contains(&structure.condition));
+    }
+
+    // ── What did not travel ──────────────────────────────────────────────────
+
+    // The mission ends in a fight it does not win cleanly, so there is transient
+    // state to leave behind — and the facts have no field it could arrive in.
+    // Asserted here on a REAL payload as well as on the unit tests' built one,
+    // because the payload this fold is handed in production is this one.
+    let serialised = ron::ser::to_string(&facts).expect("the facts serialise");
+    for absent in [
+        "physics",
+        "hull",
+        "red_alert",
+        "weapons",
+        "beams",
+        "torpedo",
+        "asteroid",
+        "rng",
+        "collision",
+        "blackboard",
+        "patrol",
+        "pass_surface",
+    ] {
+        assert!(
+            !serialised.contains(absent),
+            "`{absent}` reached the campaign facts — the next mission is being \
+             handed this mission's combat state"
+        );
+    }
+
+    // ── What a later mission does with them ──────────────────────────────────
+
+    // (1) The flag store a follow-on world would open with. These are the reads
+    // its script makes — `ctx.flags["campaign.skyway…"]` — and the names are the
+    // ones THIS mission wrote, carried through unchanged.
+    let seeded = seed_flags(&facts);
+    assert_eq!(seeded.counter("campaign.skyway.skyhook.lost"), 1);
+    assert_eq!(
+        seeded.counter("campaign.skyway.passage.left_committee"),
+        1,
+        "a mission after this one opens knowing who was left behind, and can say          so without knowing which file left them"
+    );
+    for (name, value) in &live {
+        assert_eq!(
+            seeded.counter(name),
+            *value,
+            "`{name}` reads in the next mission exactly as it read in this one"
+        );
+    }
+
+    // (2) The structures as CONFIGURATION: a follow-on world authoring the same
+    // skyhook would carry the condition this mission left it in as an
+    // `[[entity]] overrides` value rather than the template's own. Computed here
+    // to show the shape; a world file consuming it is that world file's test.
+    let overrides: Vec<(String, f32)> = facts
+        .structures
+        .iter()
+        .map(|structure| (structure.name.clone(), structure.condition * 100.0))
+        .collect();
+    assert!(
+        overrides
+            .iter()
+            .all(|(_, condition)| (0.0..=100.0).contains(condition)),
+        "condition points a next world could author directly: {overrides:?}"
+    );
+
+    // And the whole thing survives being written down between missions, which is
+    // what a campaign runner does with it.
+    let text = ron::ser::to_string(&facts).expect("serialises");
+    assert_eq!(
+        ron::from_str::<project_phoenix::campaign::CampaignFacts>(&text).expect("parses back"),
+        facts
+    );
+}

@@ -49,9 +49,22 @@ icon = "station"
 # Shares the Alliance research-outpost hull with the other stations; the torus
 # is the streaming/flat-render fallback, as on station_outpost.
 model = "assets/models/alliance_research_outpost.glb"
+# Sized off the same measurement the collider is, and render-only the same way
+# (see `station_axiom.toml` for why the stand-in is derived from the sidecar's
+# extents at all, and for the `Torus` envelope arithmetic).
+# `alliance_research_outpost.model.toml` records the drawn hull at
+# 7.56 x 3.37 x 7.59 in its `[extents].size`, already through that sidecar's
+# `[base].scale` of [4, 4, 4]:
+#
+#   minor = 3.37 / 2                      = 1.68   (half the measured height)
+#   major = 7.59 / 2 - 1.68 = 3.80 - 1.68 = 2.12
+#
+# The 10.0 / 2.5 this replaces drew a 25-unit ring for a 7.6-unit depot — over
+# three times too wide, and stale in exactly the way the 10-unit collider above
+# was before it was corrected to 3.80.
 shape = "torus"
-radius = 10.0
-minor_radius = 2.5
+radius = 2.12
+minor_radius = 1.68
 colour = [0.72, 0.62, 0.32]
 
 [comms]

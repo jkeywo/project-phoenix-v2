@@ -135,9 +135,29 @@ icon = "station"
 
 [mesh]
 model = "assets/models/alliance_starbase.glb"
+# The torus is the procedural stand-in, drawn only while the GLB above is still
+# streaming or when it is missing entirely. RENDER-ONLY — the simulation reads
+# none of it (the `[collider]` above is the only thing anything collides with),
+# so correcting it moves no digest.
+#
+# Sized off the same measurement the collider is. `alliance_starbase.model.toml`
+# records the drawn hull at 28.46 x 14.33 x 34.08 in its `[extents].size` —
+# already through that sidecar's `[base].scale` of [15, 18, 18] — so the stand-in
+# wants a 34.08-wide, 14.33-tall envelope. A Bevy `Torus` spans
+# `(major_radius + minor_radius) * 2` across and `minor_radius * 2` tall, which
+# pins both numbers:
+#
+#   minor = 14.33 / 2                       = 7.16   (half the measured height)
+#   major = 34.08 / 2 - 7.16 = 17.04 - 7.16 = 9.88
+#
+# The 18 / 4.5 this replaces belonged to the pre-correction era: 45 units across
+# and 9 tall, a third wider than the hull and well under its height. It is the
+# render half of the same staleness the collider block above fixed — and a
+# fallback that size meant the station visibly shrank the moment its GLB
+# finished loading.
 shape = "torus"
-radius = 18
-minor_radius = 4.5
+radius = 9.88
+minor_radius = 7.16
 colour = [ 0.3, 0.8, 0.6 ]
 
 [comms]

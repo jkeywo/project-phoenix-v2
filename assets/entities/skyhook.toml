@@ -94,9 +94,19 @@ icon = "station"
 # only one that reads as a transfer head rather than as an outpost. The torus is
 # the streaming/flat-render fallback, as on every other station.
 model = "assets/models/alliance_starbase.glb"
+# Same hull as `station_axiom`, through the same sidecar and the same
+# `[base].scale`, so it draws at the same size and takes the same stand-in:
+# 28.46 x 14.33 x 34.08 measured, minor = 7.16 and major = 9.88 derived from it.
+# See `station_axiom.toml` for the arithmetic.
+#
+# The 26.0 / 6.0 this replaces was the render twin of the 26-unit collider the
+# block above corrected: 64 units across against a hull that is 34, so the
+# placeholder was nearly twice the width of the thing it stood in for. Same
+# staleness, and it could no more keep a different size from the axiom station's
+# fallback than it could keep a different collider while sharing its mesh.
 shape = "torus"
-radius = 26.0
-minor_radius = 6.0
+radius = 9.88
+minor_radius = 7.16
 colour = [0.85, 0.74, 0.45]
 
 [comms]

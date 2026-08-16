@@ -16,9 +16,18 @@ icon = "station"
 
 [mesh]
 model = "assets/models/alliance_research_outpost.glb"
+# Same hull as `depot_transfer` and `station_outpost`, so the same stand-in:
+# 7.56 x 3.37 x 7.59 measured, minor = 1.68 and major = 2.12 derived from it.
+# See `depot_transfer.toml` for the arithmetic.
+#
+# This template carries no `[collider]`, so it was not part of the collider
+# correction that fixed the other four — but its fallback drew a 20-unit ring
+# for the same 7.6-unit hull, which is the same staleness with nothing to
+# collide with. Left alone it would have been the one station still popping size
+# when its GLB arrived.
 shape = "torus"
-radius = 8.0
-minor_radius = 2.0
+radius = 2.12
+minor_radius = 1.68
 colour = [0.4, 0.7, 0.9]
 
 [comms]

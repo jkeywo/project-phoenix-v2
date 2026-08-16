@@ -317,10 +317,15 @@
     // delivered back through this callback. Identical to the wiring in
     // server.html — an empty string on 404 tells Rust to stop re-requesting and
     // fall back to an identity rig.
-    // The second argument marks a read that is itself an existence test (the
-    // legacy ladder-convention probe); server.html uses it to keep an expected
-    // 404 out of the console. This page reports nothing either way, so it only
-    // needs to accept the argument to keep the two callbacks the same shape.
+    //
+    // The second argument marks a read that is ITSELF an existence test (the
+    // legacy ladder-convention probe): absence is one of its two valid answers,
+    // so an `optional` 404 resolves to '' in the `.then` below and never reaches
+    // the `.catch`. Every OTHER failure — a real 404 on a file we expected, a
+    // 500, a dropped connection — is a genuine fault, and this page must surface
+    // it exactly as server.html does rather than silently feeding Rust an empty
+    // string that a good load is indistinguishable from. So the `.catch` logs
+    // before it unblocks Rust, matching server.html's post-#sidecar behaviour.
     wasm.set_world_fetch_callback((path, optional) => {
       fetch(path)
         .then((r) => {
@@ -329,7 +334,11 @@
           return Promise.reject(new Error('HTTP ' + r.status));
         })
         .then((toml) => wasm.wasm_push_sidecar_toml(path, toml))
-        .catch(() => wasm.wasm_push_sidecar_toml(path, ''));
+        .catch((err) => {
+          console.error('[Phoenix] Failed to fetch TOML at ' + path + ':', err);
+          // Push empty string so Rust stops re-requesting.
+          wasm.wasm_push_sidecar_toml(path, '');
+        });
     });
 
     // Start Bevy from a fresh, NON-async task.

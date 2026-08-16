@@ -136,8 +136,8 @@ describe('selectOutput', () => {
 });
 
 describe('visibleTabs', () => {
-  it('a dev build shows all three tabs', () => {
-    expect(visibleTabs(false).map((tab) => tab.id)).toEqual(['debug', 'audio', 'gameplay']);
+  it('a dev build shows all three tabs, Debug last', () => {
+    expect(visibleTabs(false).map((tab) => tab.id)).toEqual(['audio', 'gameplay', 'debug']);
   });
 
   it('the demo build drops the gated Debug/Cheat tab and keeps the rest', () => {
@@ -160,11 +160,11 @@ describe('the settings cog', () => {
     $('#server-settings-btn').click();
     expect(mounted.isOpen()).toBe(true);
     const tabs = [...document.querySelectorAll('.server-settings-tab')];
-    expect(tabs.map((el) => el.getAttribute('data-tab'))).toEqual(['debug', 'audio', 'gameplay']);
+    expect(tabs.map((el) => el.getAttribute('data-tab'))).toEqual(['audio', 'gameplay', 'debug']);
     expect(tabs.map((el) => el.textContent)).toEqual([
-      t('settings.tab.debug'),
       t('settings.tab.audio'),
       t('settings.tab.gameplay'),
+      t('settings.tab.debug'),
     ]);
   });
 
@@ -186,6 +186,9 @@ describe('the Debug/Cheat tab', () => {
     expect(dock.classList.contains('open')).toBe(false);
 
     mounted.open();
+    // Debug is now the LAST tab, so the panel opens on Audio; select Debug to
+    // exercise its controls (only the active tab's body is built).
+    mounted.selectTab('debug');
     expect(dock.classList.contains('open'), 'opening the menu must not open the output panel')
       .toBe(false);
     expect(bindings.calls.length, 'opening the menu must not enable any debug resource')
@@ -200,6 +203,7 @@ describe('the Debug/Cheat tab', () => {
     let bindings;
     ({ menu: mounted, bindings } = mount());
     mounted.open();
+    mounted.selectTab('debug');
 
     control('entities').click();
     expect(bindings.calls.map((c) => c[0])).toEqual(['wasm_toggle_debug_entities']);
@@ -215,6 +219,7 @@ describe('the Debug/Cheat tab', () => {
     let bindings;
     ({ menu: mounted, bindings } = mount());
     mounted.open();
+    mounted.selectTab('debug');
     control('modifiers').click();
     control('modifiers').click();
 
@@ -228,6 +233,7 @@ describe('the Debug/Cheat tab', () => {
   it('switching outputs while both are on keeps the panel open on the new stream', () => {
     ({ menu: mounted } = mount());
     mounted.open();
+    mounted.selectTab('debug');
     control('modifiers').click();
     control('damage').click();
     expect($('#debug-dock').classList.contains('open')).toBe(true);
@@ -237,6 +243,7 @@ describe('the Debug/Cheat tab', () => {
   it('every declared output is offered and reads its own stream', () => {
     ({ menu: mounted } = mount());
     mounted.open();
+    mounted.selectTab('debug');
     for (const entry of DEBUG_OUTPUTS) {
       expect(control(entry.id), `missing control for ${entry.id}`).not.toBeNull();
     }
@@ -246,6 +253,7 @@ describe('the Debug/Cheat tab', () => {
     let bindings;
     ({ menu: mounted, bindings } = mount());
     mounted.open();
+    mounted.selectTab('debug');
 
     control('godmode').click();
     expect(bindings.state.godmode).toBe(true);
@@ -264,6 +272,7 @@ describe('the Debug/Cheat tab', () => {
     bindings.state.waypoint = false;
     ({ menu: mounted } = mount({ bindings }));
     mounted.open();
+    mounted.selectTab('debug');
 
     expect(control('teleport-waypoint').disabled).toBe(true);
     control('teleport-waypoint').click();
@@ -279,6 +288,7 @@ describe('the Debug/Cheat tab', () => {
   it('save/resume keep the attributes server.html flags outcomes by', () => {
     ({ menu: mounted } = mount());
     mounted.open();
+    mounted.selectTab('debug');
     const save = document.querySelector('.debug-action[data-action="save-snapshot"]');
     expect(save, 'flagSnapshotButton() finds the button by this selector').not.toBeNull();
     expect(document.querySelector('.debug-action[data-action="resume-snapshot"]')).not.toBeNull();
@@ -393,11 +403,16 @@ describe('the demo build gate', () => {
     let demo = false;
     ({ menu: mounted } = mount({ isDemo: () => demo }));
     mounted.open();
+    // Debug is now the LAST tab, so the panel opens on Audio; select Debug to
+    // reach godmode in the dev build.
+    mounted.selectTab('debug');
     expect(control('godmode')).not.toBeNull();
     mounted.close();
 
     demo = true;
     mounted.open();
+    // In the demo build Debug is gated away entirely, so godmode is absent no
+    // matter which tab is active.
     expect(control('godmode')).toBeNull();
   });
 });

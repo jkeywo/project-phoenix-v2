@@ -185,11 +185,11 @@ describe('mountSettings — cog and overlay', () => {
     expect(overlay.hidden).toBe(true);
   });
 
-  it('opens on the client controls and documentation tabs, Debug first', () => {
+  it('opens on the client controls and documentation tabs, Debug last among the settings tabs', () => {
     const inst = mount(doc);
     inst.open();
     const labels = tabBarOf(doc).children.map((c) => c.getAttribute('data-tab'));
-    expect(labels).toEqual(['debug', 'audio', 'gameplay', 'station-help', 'ship-manual']);
+    expect(labels).toEqual(['audio', 'gameplay', 'debug', 'station-help', 'ship-manual']);
     expect(tabBarOf(doc).children[0].classList.contains('active')).toBe(true);
   });
 
@@ -345,6 +345,9 @@ describe('a debug toggle waits for the host', () => {
   it('sends on click but stays un-pressed until DebugState arrives', () => {
     const inst = mountWatched();
     inst.open();
+    // Debug is now the LAST settings tab, so the panel opens on Audio; select
+    // Debug to reach its controls (only the active tab's body is built).
+    inst.selectTab('debug');
 
     const wireframes = control('wireframes');
     expect(wireframes.getAttribute('aria-pressed')).toBe('false');
@@ -370,6 +373,7 @@ describe('a debug toggle waits for the host', () => {
   it('does the same for god mode, which a demo build refuses outright', () => {
     const inst = mountWatched();
     inst.open();
+    inst.selectTab('debug');
 
     control('godmode').click();
     expect(sent).toEqual([
@@ -691,6 +695,7 @@ describe('the client → server debug messages', () => {
     const sent = [];
     const inst = mount(doc, { send: (type, data) => sent.push({ type, data }) });
     inst.open();
+    inst.selectTab('debug');
     for (const entry of CLIENT_DEBUG_FLAGS) {
       const btn = bodyButtons(doc).find((b) => b.getAttribute('data-control') === entry.id);
       expect(btn, `no button for ${entry.id}`).toBeDefined();
@@ -705,6 +710,7 @@ describe('the client → server debug messages', () => {
     const sent = [];
     const inst = mount(doc, { send: (type, data) => sent.push({ type, data }) });
     inst.open();
+    inst.selectTab('debug');
     bodyButtons(doc).find((b) => b.getAttribute('data-control') === 'godmode').click();
     expect(sent).toHaveLength(1);
     expect(sent[0]).toEqual(godModeMessage());

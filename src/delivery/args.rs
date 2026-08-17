@@ -44,7 +44,7 @@ pub enum ParseOutcome {
     Run(Box<HostArgs>),
 }
 
-pub const DEFAULT_ADDR: &str = "127.0.0.1:8080";
+pub const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 pub const DEFAULT_MANIFEST: &str = "assets/scenarios.toml";
 pub const DEFAULT_CONTENT_DIR: &str = ".";
 
@@ -72,8 +72,10 @@ CONTENT
                           [default: .]
 
 NETWORK
-    --addr <ADDR>         Bind address [default: 127.0.0.1:8080]. Use
-                          0.0.0.0:<port> to accept connections from the LAN.
+    --addr <ADDR>         Bind address [default: 0.0.0.0:8080] — accepts
+                          connections from the LAN by default; Windows will
+                          prompt to allow it through the firewall on first run.
+                          Use 127.0.0.1:<port> to restrict to this machine only.
 
     -h, --help            Show this help
 
@@ -143,9 +145,10 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_invocation_serves_the_full_catalogue_to_localhost_with_no_bundle() {
+    fn a_bare_invocation_serves_the_full_catalogue_to_the_lan_with_no_bundle() {
         let a = run(&[]);
         assert_eq!(a.addr, DEFAULT_ADDR);
+        assert_eq!(a.addr, "0.0.0.0:8080");
         assert_eq!(a.manifest, DEFAULT_MANIFEST);
         assert_eq!(a.content_dir, DEFAULT_CONTENT_DIR);
         assert_eq!(a.client, ClientSource::Hosted);

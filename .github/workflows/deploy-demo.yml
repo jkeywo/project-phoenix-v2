@@ -345,6 +345,18 @@ jobs:
           fi
           echo "ok: no file in dist/ exceeds 25 MiB"
 
+      # Feeds package-native-demo below, so the native release bundle is built
+      # from the EXACT dist/ this run deploys to Pages — same curated
+      # manifest, same demo-flag stamp, same patched TURN URL, same gzipped
+      # WASM. 1-day retention: only this run's own downstream job ever reads
+      # it.
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
       - name: Deploy demo TURN worker
         uses: cloudflare/wrangler-action@v3
         with:
@@ -378,3 +390,93 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy dist --project-name project-phoenix-demo
+
+  # ── Native host demo build → GitHub Release (delivery-checklist.md #4) ────
+  #
+  # Bundles the EXACT dist/ this run just deployed to Pages (via the dist
+  # artifact above) with a release phoenix-host.exe and the assets/ content
+  # dir, so a release download and the web demo are always the same build.
+  # `needs: [deploy-demo]` means this never runs if the Pages/TURN deploy
+  # itself failed.
+  #
+  # Windows only, unsigned: the honest current answer to the signing question
+  # in the checklist is "Windows only, unsigned, with instructions" — a
+  # signed build or a macOS/Linux pair nobody asked for yet is future work,
+  # not silently implied by this job existing.
+  #
+  # Republishes the SAME `demo-latest` tag every run (deleting the previous
+  # release first) instead of accumulating one release per deploy. There is
+  # no version history to manage here, only "whatever the demo currently is"
+  # — matching how the Pages site itself has no history either.
+  package-native-demo:
+    needs: [deploy-demo]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@582a61206d39c13d051d2e73bf463bb5d167d484
+
+      - name: Build phoenix-host (release)
+        run: cargo build --release --features host --bin phoenix-host
+
+      # `--content-dir assets` is the full assets/ tree, same as the browser
+      # build ships (curation is enforced by the swapped-in demo manifest and
+      # by wasm_add_mod_pack being compiled out, not by physically pruning
+      # files) — so shipping it here keeps the native bundle consistent with
+      # what the web demo already does.
+      - name: Assemble the release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf release
+          mkdir -p release
+          cp target/release/phoenix-host.exe release/
+          cp -r dist release/dist
+          cp -r assets release/assets
+          cat > release/README.txt <<'EOF'
+          Project Phoenix demo -- native host (Windows, unsigned)
+
+          Run:
+            phoenix-host.exe --client-dir dist --content-dir assets
+
+          Windows will show a SmartScreen warning ("Windows protected your PC")
+          because this binary is not code-signed. Click "More info" then "Run
+          anyway" to continue.
+
+          By default the host accepts connections from other devices on the
+          same network (binds 0.0.0.0:8080) -- allow it through Windows
+          Defender Firewall when prompted; Private network is enough for a
+          home LAN, Public is not needed and should be left unchecked. To
+          restrict it to this machine only, run with --addr 127.0.0.1:8080.
+
+          This host serves the client, the manifest, and game content only. It
+          does not run the simulation (still the browser host or
+          phoenix-headless), does not do PeerJS signalling, and is not safe to
+          expose to the public internet (no TLS, no auth, no rate limiting).
+          EOF
+          cd release
+          7z a -tzip ../phoenix-host-demo-windows.zip .
+
+      - name: Publish the demo-latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release delete demo-latest --repo "${{ github.repository }}" --yes --cleanup-tag || true
+          gh release create demo-latest phoenix-host-demo-windows.zip \
+            --repo "${{ github.repository }}" \
+            --title "Demo build (native host, Windows)" \
+            --target "${{ github.sha }}" \
+            --notes "Auto-published by deploy-demo.yml. Windows only, unsigned -- see README.txt inside the zip. Bundles the same dist/ deployed to https://pp-demo.kiwigamedesign.co.uk/ in this same run."

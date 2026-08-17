@@ -140,8 +140,12 @@ open browser tab.
 
 ```bash
 cargo build --release --features host --bin phoenix-host
-./target/release/phoenix-host --client-dir dist --addr 0.0.0.0:8080
+./target/release/phoenix-host --client-dir dist
 ```
+
+Binds `0.0.0.0:8080` by default, so it's LAN-reachable out of the box —
+Windows prompts to allow it through the firewall on first run. Pass
+`--addr 127.0.0.1:8080` to restrict it to this machine only.
 
 - `--manifest assets/scenarios.demo.toml` is the catalogue restriction — the
   same lever `?manifest=` pulls in the browser.

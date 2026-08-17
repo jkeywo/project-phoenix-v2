@@ -175,26 +175,42 @@ promise. Everything below still needs doing.
 
 ```
 cargo build --release --features host --bin phoenix-host
-./target/release/phoenix-host --client-dir dist --addr 0.0.0.0:8080
+./target/release/phoenix-host --client-dir dist
 ```
 
-- [ ] **Decide whether a binary is published at all**, and where — a GitHub
+- [x] **Decide whether a binary is published at all**, and where — a GitHub
       release asset is the cheap answer and needs no new infrastructure.
-- [ ] **Decide the bundle shape.** The host needs a `--client-dir` (a built
+      **Decided 2026-08-17:** yes, a GitHub Release. `deploy-demo.yml`'s
+      `package-native-demo` job builds and publishes it automatically on every
+      demo deploy, under the rolling `demo-latest` tag — no manual step.
+- [x] **Decide the bundle shape.** The host needs a `--client-dir` (a built
       `dist/`) and a `--content-dir` (the `assets/` tree the manifest and worlds
       are read from). A release archive that carries both, with the binary,
       makes the version pin trivially satisfiable; two separate downloads make
       it the user's problem.
-- [ ] **Code signing.** An unsigned binary is a SmartScreen warning on Windows
+      **Decided 2026-08-17:** one archive — `phoenix-host.exe`, `dist/`, and
+      `assets/` together, plus a `README.txt` with run instructions.
+- [x] **Code signing.** An unsigned binary is a SmartScreen warning on Windows
       and a Gatekeeper refusal on macOS. Signing needs a paid certificate and an
       identity decision; until it is made, the honest answer is "Windows only,
       unsigned, with instructions", and the release notes should say so rather
       than let a player discover it.
-- [ ] **Decide the LAN story.** The default bind is `127.0.0.1:8080`, which is
-      correct for a single machine and useless for a bridge crew.
-      `--addr 0.0.0.0:8080` is the LAN form and will prompt a Windows Firewall
-      dialogue on first run; whether that is documented or pre-approved by an
-      installer is a packaging decision.
+      **Decided 2026-08-17:** staying unsigned for now. Windows only; the
+      release's `README.txt` documents the SmartScreen click-through. Revisit
+      once there's a real distribution need beyond people who can be walked
+      through it.
+- [x] **Decide the LAN story.** The default bind was `127.0.0.1:8080`, correct
+      for a single machine and useless for a bridge crew. `--addr 0.0.0.0:8080`
+      is the LAN form and will prompt a Windows Firewall dialogue on first run;
+      whether that is documented or pre-approved by an installer is a packaging
+      decision.
+      **Decided 2026-08-17:** the default is now `0.0.0.0:8080` — LAN-reachable
+      out of the box, no flag needed. Trade-off accepted deliberately: every
+      run, including solo play, now triggers the Windows Firewall prompt on
+      first launch, and the listening surface is broader by default. Pass
+      `--addr 127.0.0.1:8080` to restrict to this machine only. No installer or
+      pre-approved firewall rule — manual flag/prompt is still the whole story,
+      just inverted from what used to be the default.
 - [ ] **Nothing here is a public-internet server.** `phoenix-host` speaks plain
       HTTP, has no TLS, no authentication and no rate limiting. It is for a LAN
       or a machine behind something else. Do not put it on a public address; if

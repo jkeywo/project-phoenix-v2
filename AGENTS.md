@@ -84,7 +84,10 @@ node scripts/build-client.mjs                  # → dist/client/, then serve di
 # server.html or phoenix-headless, PeerJS signalling is unchanged, and there is
 # no TLS or auth — LAN or behind something else, never a public address.
 cargo build --release --features host --bin phoenix-host
-./target/release/phoenix-host --client-dir dist --addr 0.0.0.0:8080
+./target/release/phoenix-host --client-dir dist
+#   Binds 0.0.0.0:8080 by default — LAN-reachable out of the box; Windows
+#   prompts to allow it through the firewall on first run. Pass
+#   --addr 127.0.0.1:8080 to restrict to this machine only.
 ./target/release/phoenix-host --help
 #   --manifest assets/scenarios.demo.toml  IS the catalogue restriction — the
 #     same lever `?manifest=` pulls in the browser (issue #917).

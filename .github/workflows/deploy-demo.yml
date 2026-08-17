@@ -294,11 +294,19 @@ jobs:
         run: |
           set -euo pipefail
           GLUE="dist/$(basename "$(ls dist/*_bg.wasm)" _bg.wasm).js"
-          if ! grep -qF 'wasm_get_scenario_catalog' "$GLUE"; then
+          if ! grep -qE '^export function wasm_get_scenario_catalog\b' "$GLUE"; then
             echo "$GLUE does not look like the wasm-bindgen glue — build layout changed?" >&2
             exit 1
           fi
-          if grep -qF 'wasm_add_mod_pack' "$GLUE"; then
+          # Match an EXPORT, not a mention. wasm-bindgen copies Rust doc comments
+          # verbatim into the glue as JSDoc, and `validate_manifest`'s doc comment
+          # (src/server/bridge.rs) names `wasm_add_mod_pack` in prose — so a bare
+          # `grep -F` on the identifier matches that comment and fails even when the
+          # function is correctly compiled out. That false positive red-failed the
+          # first deploy this guard ever ran (run 32008232369). The
+          # generated binding, when present, is a top-level `export function
+          # wasm_add_mod_pack(...)`; its absence is the property we actually want.
+          if grep -qE '^export function wasm_add_mod_pack\b' "$GLUE"; then
             echo "$GLUE still exports wasm_add_mod_pack — the demo build would let a player widen the curated catalogue (PRD #855)" >&2
             exit 1
           fi

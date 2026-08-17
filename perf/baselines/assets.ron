@@ -109,7 +109,9 @@
 //   `.remesh.glb` intermediates. Warns at 50% growth and fails at 100%;
 //   reductions pass.
 // - assets.glb.bytes — the single largest model, the one that dominates a cold
-//   load.
+//   load. Raised to 13,601,536 on 2026-08-17: alliance_starbase.glb (7a0b08bf)
+//   overtook dynasty_cruiser as the largest after being rebuilt with a
+//   deliberate 2048×2048 texture. See perf/baselines/assets-mesh.ron.
 // - assets.glb.without_lod — LOD coverage, counted as templates with no ladder
 //   at all. A rise is "someone changed the LOD story, look at it".
 // - assets.lod.levels — how deep the ladders that exist go. A deeper ladder is
@@ -138,7 +140,7 @@
         "assets.glb.bytes": (
             unit: bytes,
             statistic: max,
-            expected: 8319504.0,
+            expected: 13601536.0,
             tolerance: (
                 warn: 0.5,
                 fail: 1.0,

@@ -1,0 +1,117 @@
+# Ship customisation — per-station materiel loadout, settled in the 2026-08-17 grill.
+# Roadmap home: roadmap-ship-customisation (band E MVP, band F flesh-out).
+# Hard dependency: the band-D supply/demand power redesign (see design/power.yaml
+# power-supply-demand-model and roadmap-broken-tithe-foundation) — the soft budget
+# IS the power economy, so this feature cannot precede it.
+entities:
+  - role: loadout-customiser
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Loadout Customiser
+      summary: A connected player who, having claimed a station in the pre-scenario lobby, chooses the materiel loadout for that station's systems. The choice is what the ship CARRIES, not how it is operated.
+    game_design:
+      architecture_links: [pre-scenario-lobby-surface, station-claim-router]
+      responsibilities: [choose per-station loadout variants, understand the run-time power cost of the choice]
+      player_verbs: [set-station-loadout]
+
+  - verb: set-station-loadout
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Set Station Loadout
+      summary: The claimant of a station selects, from that station's authored options, the variant for each of its customisable systems. Choices resolve into the one deterministic ship template before spawn.
+    game_design:
+      architecture_links: [pre-scenario-lobby-surface, entity-template-composition-resolver]
+      owner_role: loadout-customiser
+      inputs: [claimed station, authored variant option]
+      resolution: host-authoritative
+      outputs: [resolved per-station loadout folded into the spawn template]
+
+  - decision: customisation-is-materiel-sidegrade
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Materiel Sidegrades, Not Upgrades
+      summary: "Customisation is materiel — the systems the ship carries — and every option is a net-neutral SIDEGRADE, never a raw power gain. The single sanctioned exception is a mission-authored starbase reward mid-campaign (see starbase-refit-and-reward). 'Not-upgrade' holds emergently rather than structurally: a stronger component costs more to run under the soft power budget, so it cannot be sustained, and the #835 duel harness — not playtest — is the guard that no loadout dominates."
+      rationale:
+        - "Operational/ergonomic customisation (fire groups, control schemes, default presets) was considered and set aside: John wants the materiel layer, the thing the attached report is mostly about."
+    game_design:
+      must_not_be: [a raw power gain outside a mission-authored starbase reward, balanced by author fiat instead of harness evidence]
+
+  - decision: soft-power-budget
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Soft Power Budget
+      summary: "The fit budget is SOFT and denominated in the band-D supply/demand power model. Nothing is rejected in the lobby — you may fit components that out-draw your reactor. Over-fitting is self-limiting at RUN TIME: higher summed per-component demand drives the battery toward the exhaustion lock sooner, and components pushed into the overpower band overheat offline-to-cool. Because every system draws power, every station customises under one currency, and the reactor itself is a customisable component (power-reactor-customisable-profile) whose {generation, battery, recovery, dissipation} profile is the diegetic budget dial."
+      rationale:
+        - "John's correction to an assumed fit-time gate: a hard lobby ceiling was rejected in favour of the run-time economy doing the limiting, which is more diegetic and reuses band D rather than inventing an abstract OP-style currency."
+        - "The balance contract that gives the soft budget teeth: hulls are authored so a MAXED loadout's baseline demand exceeds sustainable generation, forcing a real choice; enforced by the duel harness, not a validator."
+    game_design:
+      must_not_be: [a fit-time rejection in the lobby, an abstract currency separate from the power economy, denominated so a maxed loadout is sustainable]
+
+  - decision: loadout-authority-claimant-owns
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Claimant Owns, Default Backfills
+      summary: "The player who has claimed a station owns that station's loadout section in the lobby. An unclaimed or AI-backfilled station flies the hull's authored DEFAULT variant — which is exactly what the Backfill AI already flies, so AI/human symmetry holds and no simulation path branches on who set the loadout. One authority per station makes contention impossible."
+      rationale:
+        - "Fits the fluid claim/backfill model: claims clear each round, so a ship-level resolved config that any holder or the AI inherits is the only coherent target; 'per-station' is an authoring and UI organisation over that single artifact, not a second ownership model."
+    game_design:
+      enforcement_links: [scenario-ship-selection-arbiter, entity-template-composition-resolver]
+      owner_role: loadout-customiser
+      protected: true
+      must_not_be: [editable by a player who does not hold the station, a source of a human-vs-AI branch downstream of command admission]
+
+  - decision: loadout-frozen-at-spawn
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Frozen At Spawn, Refit Only At A Starbase
+      summary: "Unlike station ratings, which are live-switchable mid-round, the loadout is FROZEN AT SPAWN. All per-station choices resolve into one deterministic ship template that rides the initial-state hash exactly as ship selection does, so P2P peers and the snapshot see an identical resolved ship. The only mid-mission change is a starbase refit, itself a discrete authored event expressible as a lockstep command."
+      rationale:
+        - "Determinism is the reason: a live lobby-style refit would be a per-tick mutable ship topology; freezing at spawn keeps the resolved template a single hashed artifact and confines change to authored, discrete starbase events."
+    game_design:
+      must_not_be: [changed live mid-round like a rating, resolved differently on different peers]
+
+  - mechanic: variant-swap-composition
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Variant-Swap Via Fragment Composition (Band E MVP)
+      summary: "The MVP represents a loadout choice as fragment COMPOSITION on the delivered #869/#911 machinery: each customisable system ships as N balanced variant fragments (e.g. a focused vs a wide phaser), and the lobby choice selects which fragment composes into the resolved template. No new data primitive, no new validator — the choice is one more entry in the existing includes/merge resolution. The MVP is a tracer bullet: ONE hull, TWO axes — the reactor profile (Engineering) and one Tactical combat variant."
+      rationale:
+        - "Reusing composition is what lets the MVP sit inside band E, the balance-closure band, without carrying a schema change; the mount primitive that would carry one is deferred to F."
+    game_design:
+      architecture_links: [entity-template-composition-resolver, resolved-entity-template-state]
+      must_not_be: [a runtime inheritance or lookup path, a second merge rule-set separate from the delivered composition]
+
+  - decision: customisation-mvp-tracer-scope
+    core:
+      status: proposed
+      confidence: confirmed
+      title: MVP Tracer Scope Protects Balance Closure
+      summary: "Band E is the full-matrix, mixed-fleet balance-closure band (#922), and a fit budget multiplies the matchup matrix, so the MVP is deliberately narrow: one hull, two axes (reactor profile + one combat variant), landing AFTER #922 closes the base hulls, with each variant authored net-neutral and validated by the #835 seeded duel harness sweeping profile x variant x matchup. A non-blocking lobby sustainability meter (sustained vs peak draw vs reactor) ships with E's polish PRD so the soft budget is legible. Recommended tracer hull: the battleship (band-D power-network hull, biggest reactor); alternative: the destroyer (most-onboarded). Not yet John-confirmed."
+    game_design:
+      must_not_be: [broadened to all hulls in the closure band, layered before base-hull balance closes, validated by playtest rather than the harness]
+
+  - mechanic: typed-mounts
+    core:
+      status: proposed
+      confidence: provisional
+      title: Typed And Sized Mounts (Band F Flesh-Out)
+      summary: "Band F adds the genuinely new data primitive the MVP avoids: a hull authors mounts with a type and a size, some able to sit empty, and module fragments install into compatible mounts (Star Citizen itemport plus Elite power-ceiling shape, but with the soft power budget rather than a hard cap). This carries mount topology plus its validator, reactor profiles and variant breadth fleet-wide."
+    game_design:
+      must_not_be: [introduced in the balance-closure band E, a hard fit-time budget rather than the soft power economy]
+
+  - mechanic: starbase-refit-and-reward
+    core:
+      status: proposed
+      confidence: provisional
+      title: Starbase Refit And Mission-Authored Reward (Band F)
+      summary: "A starbase is the mid-campaign refit point: it unlocks the frozen loadout for re-selection within budget (still pure customisation) and is the ONE place a mission-authored reward may raise the soft ceiling — canonically an upgraded reactor. The campaign/skirmish split that keeps closed balance closed is by AUTHORING, not a mode toggle: only campaign scenarios author upgrade rewards, so skirmish and versus stay fixed-budget sidegrade. Requires a mid-sim refit command and campaign persistence (#863/#867)."
+    game_design:
+      architecture_links: [world-snapshot-artifact]
+      must_not_be: [available outside a starbase, a raw upgrade in skirmish or versus, a live refit that breaks the frozen-at-spawn determinism outside the authored starbase event]

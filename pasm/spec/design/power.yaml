@@ -103,3 +103,56 @@ entities:
       paths: [src/console_ai/server.rs, src/entities/config.rs, src/ship/power.rs, src/ai/policy.rs, src/modifiers/power_system.rs, assets/entities/alliance_battleship.toml]
       symbols: [ai_power_allocation, AiPolicy, resolve_channel, resolve_channel_ranked, seed_power_facts, POWER_SET_ALLOCATION_VERB, PowerAiPolicy, authored_power_group_seed, plan_allocation, AllocationBid, max_commanded_total]
       tests: [cargo test]
+
+  # --- Band-D supply/demand redesign (2026-08-17 customisation grill). ---
+  # These decisions REDESIGN the model above. The entities above describe the
+  # delivered boost/amplifier model (a group level is a group-wide multiplier);
+  # the entities below describe the per-component supply/demand model band D
+  # migrates it onto. See roadmap-broken-tithe-foundation and, for why the
+  # redesign is forced, roadmap-ship-customisation.
+
+  - decision: power-supply-demand-model
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Per-Component Supply/Demand Power
+      summary: "Band D replaces the group-wide boost/amplifier model with a per-component supply/demand economy: every system draws power to run, and ship demand is the SUM of its per-component draws rather than a per-group boost level. This is what makes materiel customisation possible — a stronger component costs more to run — and is the sole reason the redesign happens (a boost model makes a stronger component a strict upgrade, not a sidegrade). The delivered three power groups [helm, weapons, shields] survive as the COARSE control tier that distributes a group budget across its member consumers via limited AI; direct per-system allocation is the detailed tier. Idle ships still rest sustainably: baseline demand is heat-cheap and generation covers it, so 'everything draws power' does not make an idle ship brown out."
+      rationale:
+        - "Reference model is EmptyEpsilon (per-system power with a simpler default management mode over it); phoenix keeps the three-group abstraction as that default mode."
+        - "'ops' — today's authored fourth group that drives no modifier — becomes the aux bucket into which non-combat draw (sensors, comms, navigation, repair) rolls at the coarse tier. Ratifiable, not yet John-confirmed."
+    game_design:
+      must_not_be: [expressed as a group-wide multiplier that makes a stronger component cost nothing extra, allowed to brown out an idle ship, a second control intelligence separate from the fine-system policy runtime]
+
+  - decision: power-energy-exhaustion-lock-retained
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Energy Failure — Battery Then Exhaustion Lock (Retained)
+      summary: "The energy side of the economy is ship-wide and HARD, and deliberately keeps the delivered failure model. Demand above generation draws the battery; while the battery holds charge ALL demand is met (no per-system energy degradation); the battery empty trips the exhaustion LOCK (every group forced to minimum, allocation controls frozen) until charge recovers past the authored emergency_threshold. Only the demand INPUT changes from the delivered model — per-component draw instead of group boost-level — so a maxed loadout drains the battery and reaches the lock sooner. The 2026-08-10 no-floors revert stands: no reactor-side floors are reintroduced; avoidable brownouts stay an AI-side min_reserve discipline."
+      rationale:
+        - "John's exact call, 2026-08-17: 'battery then hard lock while it recharges.' The 'lose the lot, which is the point' stance is preserved under supply/demand rather than overturned; graceful degradation lives on the heat axis, not the energy axis."
+    game_design:
+      must_not_be: [replaced by graceful per-system energy degradation, given reactor-side battery floors, made to brown out an idle ship]
+
+  - decision: power-heat-overpower-band
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Heat — The Per-System Overpower Band
+      summary: "Heat is the second, independent pressure: per-system and GRACEFUL. A system run at baseline is heat-cheap; pushing it above 100% into the OVERPOWER band buys more output (this is the delivered boost model re-homed, not deleted) paid in both energy draw and heat. Dissipation removes heat; a system that overheats drops offline to cool and then recovers — self-correcting, per-system, and never touching the ship-wide energy lock. Coolant is a detail-tier resource: the coarse three-group tier auto-cools the hottest system via limited AI, while the detailed Engineering screen lets a human route coolant (EmptyEpsilon Advanced-Engineering style). Reactor 'dissipation' sets the total coolant budget."
+      rationale:
+        - "The overpower band is where 'spend power to amplify' survives the redesign, so nothing the delivered model does is lost — it is re-expressed as a per-system, heat-taxed choice instead of a group-wide free multiplier over sustainable output."
+        - "Coolant is optional depth per the console-complexity phone-depth doctrine, not a mandatory chore; making it detail-tier keeps the coarse tier at two coupled variables."
+    game_design:
+      must_not_be: [a ship-wide heat pool that removes per-system management, allowed to destroy a system on a single overheat rather than dropping it offline-to-cool, a mandatory chore at the coarse control tier]
+
+  - decision: power-reactor-customisable-profile
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Reactor As A Customisable Component
+      summary: "The reactor is itself a customisable component with a profile trading {generation, battery capacity, recovery rate, heat dissipation} against one another, so choosing headroom in one dimension costs another. It is the diegetic budget dial for materiel customisation (roadmap-ship-customisation) and the ONE component a starbase may upgrade — a mission-authored reward is the sole sanctioned way to raise the soft ceiling, campaign-gated by authoring so skirmish balance stays fixed."
+      rationale:
+        - "A profile swap must re-author the [power] scalars coherently with the hull's authored AI min_reserve guards; the guards stay AI-side and relative, never reactor-side floors."
+    game_design:
+      must_not_be: [an unconditional upgrade available outside a mission-authored starbase reward, a way to reintroduce reactor-side power floors]

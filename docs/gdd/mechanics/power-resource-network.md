@@ -56,6 +56,12 @@ Coolant and thermal detail should be tiered. The default console presents action
 
 Reactor profiles are sidegrades, not a linear upgrade ladder. Authored profiles trade generation, battery capacity, recovery and heat dissipation. Campaign rewards may unlock a sanctioned starbase refit, but ordinary mission progression should not turn early hulls into strictly obsolete versions of themselves.
 
+Band D includes life support as a damageable resource-network consumer. Its failure creates authored ship-wide or compartment survival clocks, degraded crewed-system availability, evacuation pressure or emergency-power choices. It does not introduce hunger, sleep, individual oxygen consumption or continuous crew location.
+
+Band D presets include hull-authored defaults and a small number of run-local player-adjusted configurations. Applying a preset requests a network state and reports deviations caused by damage or unavailable components. Personal campaign-wide preset persistence remains uncommitted.
+
+Band D resources are named bulk amounts with capacity, transfer and consumption. Main-drive propellant and repair material enter here; coolant remains detail-tier and batteries remain part of the energy model. Later generated-mode work adds discrete cargo lots without turning inventory into a slot grid.
+
 ## Resource-network boundary
 
 The generic node vocabulary can also describe external scenario infrastructure: producers, conduits, buffers and consumers with capacity, dependency and priority. Ship power and external infrastructure should converge on compatible concepts without sharing presentation or allowing a scenario script to bypass ship-system authority.

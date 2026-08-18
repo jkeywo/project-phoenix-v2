@@ -40,6 +40,14 @@ The last successful reading is a snapshot of what the crew saw at that tick. It 
 
 Taking a scan latches `scan.<entity-id>.taken` for scenario logic, but completion does not automatically add prose evidence. A scenario that wants the result preserved as a finding appends an authored string entry with scan provenance.
 
+## Knowledge ladder
+
+The accepted scan ladder moves from detection, through identification and classification, to tactical assessment and intrusive analysis. Detection supplies location and broad category. Identification adds transponder, faction or declared identity. Classification adds hull class, role and known capabilities. Tactical assessment adds observable shields, damage, emissions and active systems. Individual entities may omit or falsify authored fields, while evidence records how each claim was obtained.
+
+Band B covers detection through tactical assessment using confidence and focused observation. Band E adds intrusive analysis of protected internals, cargo, personnel or vulnerabilities. Intrusive scanning accelerates or unlocks deep information, emits a detectable signature and may trigger authored diplomatic or tactical reactions.
+
+Band E also adds the EWar MVP: Jam degrades Sensors and Comms while raising the attacker's signature; Spoof produces uncertain contacts that observation can disprove; Harden protects the ship's Sensors and Comms at an authored power, heat or capability cost. Broader remote disruption remains unscheduled.
+
 ## Evidence and dossiers
 
 Evidence is an append-only log. Each entry names the subject entity, a string-catalogue finding, one of the typed provenances—scan, dialogue, records or briefing—and the tick when it was learned. Repeating the same subject, provenance and text is a no-op that preserves the first discovery time. Contradictions are appended rather than rewriting history.

@@ -42,6 +42,12 @@ Once on site, the team repairs at an authored rate. Engineering can prioritise w
 
 Team count, travel time and repair rate are tuning levers. More teams increase parallelism, while longer travel increases the cost of guessing. These values should produce consequential triage, not long periods where Engineering has made every available decision and can only wait.
 
+## Band D symptom-to-order diagnosis
+
+Band D's detailed Repair surface adds a station-local symptom and an Engineering repair order. The local station reports the observed symptom; Engineering uses its station database to map that symptom to an order for the team. An incorrect order costs diagnostic time, after which the team reports the mismatch and awaits another instruction. It does not consume material or cause additional damage.
+
+Lower-complexity and accessibility-assisted control may reveal or select the correct order after an authored delay. Console mastery therefore rewards learning the symptom-to-order map without making memorisation a participation requirement.
+
 ## Requests and station ownership
 
 Damage requests are advisory. A station can ask Engineering for attention, and AI-owned stations should issue the same level-three coordination request when their authored policy judges repair necessary. Engineering remains free to choose a different priority.

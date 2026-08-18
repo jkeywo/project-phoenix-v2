@@ -137,14 +137,14 @@ Phoenix deliberately does not pursue:
 - moment-to-moment simulation of every member of a large NPC crew as an autonomous person;
 - galaxy-scale traversal or billions of star systems;
 - valve-level or component-by-component hardware manipulation;
-- explorable planetary surfaces;
+- terrain-following atmospheric or character-scale planetary exploration; a coarse wrapping Orbital Mode is accepted but unscheduled;
 - astronomical formation simulation;
 - isolated station minigames whose state does not matter to the rest of the ship;
 - a setup flow that requires every player to install software or configure a local network.
 
 A detail earns simulation depth when another bridge officer can make a consequential decision about it within the span of a mission. A scenario may still mention any of the above as fiction without turning it into a permanent game system.
 
-This boundary does not prohibit a trait-bearing crew roster. Named or abstract crew may be assigned to ship systems or away missions, with traits influencing results in the style of a duty-officer system, without individually simulating their continuous lives and actions. The earlier design for that feature was not found in the current repository or its visible history during this pass and should be linked here when recovered.
+This boundary does not prohibit the accepted [Duty Team and Duty Officer model](../mechanics/duty-teams-and-operations.md). Fixed anonymous typed teams perform internal tasks or Away Missions, while named Duty Officers lead teams or occupy compatible system slots and contribute authored traits. Their assignment and consequences are explicit; individual ensigns, watches and continuous lives remain unsimulated.
 
 ## Target audience
 

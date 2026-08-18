@@ -59,7 +59,7 @@ No officer is merely there to confirm the protagonist’s decisions. Each role h
 
 ## Scale and everyday reality
 
-Thin Margin focuses on inhabited systems, stations, orbital infrastructure, shipping lanes, patrol areas, and the organisations that depend on them. It does not need galaxy-scale travel, simulated planetary surfaces, or a continuous civilian-life model. A world can imply vast populations and histories while the playable situation remains a bounded operational space the bridge can affect during one session.
+Thin Margin focuses on inhabited systems, stations, orbital infrastructure, shipping lanes, patrol areas, and the organisations that depend on them. It does not need a continuously simulated galaxy, terrain-level planetary flight or a continuous civilian-life model. A future coarse Orbital Mode may turn a planet into a wrapping operational map of points of interest while keeping the playable situation bounded and bridge-scale.
 
 Infrastructure matters culturally as well as mechanically. A skyhook, depot, convoy, starbase, or comms relay exists because people rely on it. Their failures create work, bargaining power, migration, danger, and moral pressure. Civilian traffic should make space feel inhabited without requiring every ship to become a full character.
 

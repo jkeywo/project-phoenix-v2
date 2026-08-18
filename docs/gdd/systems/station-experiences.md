@@ -44,6 +44,9 @@ The accepted future direction extends this into an authored star ladder. Star 0 
 | Shields | Which facing needs protection and when should focus change? | Focused arc and defensive posture | Sensors, Helm, Power, Repair |
 | Power | Which systems receive scarce temporary capacity and how much reserve is acceptable? | Group allocations and recovery posture | Helm, Tactical, Shields, Repair |
 | Repair | Where should limited teams go, and what should they fix first? | Dispatch and on-site repair priority | All damaged station owners, Power, Captain |
+| Command | What posture should each AI-controlled station adopt? | Station stance and objective-specific direction | Captain, objectives, every AI-controlled station |
+| Operations | Which external or away mission should launch, with which people and transport? | Mission plan, assignments, support and extraction | Duty Teams, relevant stations, Medical, Sensors, Comms |
+| Medical | Who needs treatment and which biological risks affect the crew? | Triage, treatment priority, recovery and medical readiness | Science, Operations, Duty Officers, scenario hazards |
 
 ## Captain
 
@@ -206,6 +209,16 @@ Station owners know exact local damage and request help socially or through advi
 ### Failure and automation
 
 A team in transit reveals no new detail and cannot be reprioritised as if already present. Destroyed or unavailable systems continue to impair the ship until repaired; all repairable system hull reaching zero ends the player ship. Backfill ranks candidates from the same visible aggregate/request facts. Lists and team states need explicit labels, progress, and confirmation that do not depend on animation or colour.
+
+## Future Command
+
+Band A2's human-seeking Command system is normally hosted by Captain through hull data. It lists AI-controlled stations and sets authored standard, alert-neutral or objective-specific stances at station scale. It does not operate individual systems. Its complete lifecycle is defined in [Command and Crew Control](../mechanics/command-and-crew-control.md).
+
+## Future Operations and Medical
+
+Accepted unscheduled Operations systems plan and support external and Away Missions. A hull may carry several Operations systems with different mission tags, transport, capacity and personnel authority. Medical triages and treats Duty Officer consequences, supports missions and reads medical results while requesting specialist scans from Science.
+
+Both use the common station-database framework and are detailed in [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md).
 
 ## Shared viewscreen
 

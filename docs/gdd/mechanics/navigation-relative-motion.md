@@ -66,6 +66,10 @@ The accepted movement extension allows Navigation to contribute desired three-di
 
 Orbital or strongly relative scenarios should build on the same identity, waypoint and reference-frame rules. They must not require a separate navigation command model for every scenario. Zero-setup and simple combat remain valid with a primarily planar chart.
 
+Band C adds docking as a relative-motion operation: approach, request clearance, enter the authored docking envelope, dock and undock. Band D adds docked repair, replenishment and resource transfer. Band F adds loadout refit and campaign reactor rewards at authored starbases.
+
+Band F's generated-world foundation uses discrete warp jumps between systems rather than continuous interstellar flight. Warp fuel is distinct from local propellant and normally abundant; aid, damage, sabotage, unusual route costs or hazards may make it consequential. Planetary Orbital Mode is accepted but unscheduled and described in [Planned but Not Scheduled](../future/planned-not-scheduled.md).
+
 ## Authoring and tuning
 
 Chart range and filters, selectable tags, navigation AI policy, traffic routes, response clocks and movement constraints belong in hull, entity or scenario TOML as appropriate. Rhai coordinates narrative reactions and changes objectives; it should not become a second physics solver.
@@ -85,4 +89,3 @@ Chart range and filters, selectable tags, navigation AI policy, traffic routes, 
 - [Navigation architecture](../../../pasm/spec/architecture/navigation.yaml)
 - [Helm controls design](../../../pasm/spec/design/helm-controls.yaml)
 - [Navigation console wiki](../../../wiki/entities/navigation-console.md)
-

@@ -41,10 +41,13 @@ The Project Phoenix GDD is federated: short design documents explain player-faci
 | [Navigation and Relative Motion](./mechanics/navigation-relative-motion.md) | Chart, waypoints, Helm boundary, traffic orders, reference frames and 3D direction |
 | [Comms and Commitments](./mechanics/comms-commitments.md) | Dialogue, reachability, response authority, promises, settlement and continuity |
 | [External Operations](./mechanics/external-operations.md) | Stabilise, tow, escort, transfer and field-repair holds across ship systems |
+| [Command and Crew Control](./mechanics/command-and-crew-control.md) | Band A2 Command stances, AI direction, spectators, AFK and human-seeking placement |
+| [Duty Teams, Officers and Operations](./mechanics/duty-teams-and-operations.md) | Unscheduled workforce, personnel, Away Missions, boarding, Medical and Operations systems |
+| [Planned but Not Scheduled](./future/planned-not-scheduled.md) | Accepted future clusters outside Bands B–F and their dependency boundaries |
 
 ## What these documents now cover
 
-Together, the set defines the game’s high-level identity, complete session and campaign journeys, principal authoring layers, station experiences, detailed interconnected mechanics, current and future control model, shared-setting relationship, onboarding/accessibility target, balance framework, world systems, current ship families, both current scenarios, and boundaries for future modes. Each page distinguishes shipped behaviour from accepted direction, roadmap scope, and speculative extension; detailed schemas and tunables remain in their canonical sources.
+Together, the set defines the game’s high-level identity, complete session and campaign journeys, principal authoring layers, station experiences, detailed interconnected mechanics, Band A2 crew control, B–F direction, accepted unscheduled dependency clusters, shared-setting relationship, onboarding/accessibility target, balance framework, world systems, current ship families and both current scenarios. Each page distinguishes shipped behavior from accepted direction and unscheduled extension; detailed schemas and tunables remain in their canonical sources.
 
 ## Remaining gaps
 
@@ -83,12 +86,13 @@ These should remain visibly deferred rather than filled with speculative recomme
 
 ## Recommended next sequence
 
-1. Review and ratify the Phoenix-era setting relationship, especially the Imperium name, House identities, chronology, and which facts are inherited versus local.
-2. Choose the first episode that consumes Falling Skyway’s projection and define its input bindings before expanding the full campaign shell.
-3. Run Combat Test and Falling Skyway playtests using the station, onboarding, AI, accessibility, balance, debrief, and continuity questions; ratify crew counts, pacing, workload, and measurable targets.
-4. Turn the accessibility target into an implementation/audit matrix for the supported browser route.
-5. Review the detailed mechanic pages against playtest evidence and use their diffs to drive PASM amendments or implementation issues.
-6. Write each future scenario or mode’s detailed GDD when its roadmap band enters active design, preserving the status boundaries in [Future Modes](./future/future-modes.md).
+1. Break [Band A2](./mechanics/command-and-crew-control.md) into implementation work before Band B begins.
+2. Review and ratify the Phoenix-era setting relationship, especially the Imperium name, House identities, chronology, and which facts are inherited versus local.
+3. Choose the first episode that consumes Falling Skyway’s projection and define its input bindings before expanding the full campaign shell.
+4. Run Combat Test and Falling Skyway playtests using the station, onboarding, AI, accessibility, balance, debrief, and continuity questions; ratify crew counts, pacing, workload, and measurable targets.
+5. Turn the accessibility target into an implementation/audit matrix for the supported browser route.
+6. Review the detailed mechanic pages against playtest evidence and use their diffs to drive PASM amendments or implementation issues.
+7. Write each future scenario, mode or [unscheduled cluster](./future/planned-not-scheduled.md) as it enters active design, preserving its dependency and status boundaries.
 
 ## Maintenance rule
 

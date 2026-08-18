@@ -56,6 +56,14 @@ Promises appear on the dossier of the party they were made to when that party ha
 
 Campaign continuity preserves the declared promise and settlement, not the whole transient inbox. A later scenario may react to the fact and terms; it should not depend on reconstructing every previous message bubble.
 
+## Intelligence database
+
+Band F's database/library work gives Comms the primary Intelligence search and correlation surface. It organises known entities, registry codes, dossiers, reports, pursuit estimates and mission history over the shared evidence model. Other station databases remain focused projections and do not obsolete Intelligence.
+
+Comms-specialist Away Missions may acquire sources, records or other durable entries for the Intelligence database. Those missions follow the unscheduled Operations and Duty Team framework rather than adding an espionage mode to ordinary dialogue.
+
+Surrender is accepted but unscheduled. Comms may offer or demand authored terms; the receiving actor may accept, refuse, counteroffer or feign compliance. Acceptance changes objectives, hostility and vessel orders without automatically despawning or transferring ownership.
+
 ## AI and backfill
 
 AI Comms uses authored policy to choose whom to hail and which offered response to select. It submits ordinary admitted commands and receives the same range, jamming and confirmation constraints appropriate to its control surface.
@@ -83,4 +91,3 @@ Every important response should have a distinct operational meaning, a clear act
 - [Comms architecture](../../../pasm/spec/architecture/comms.yaml)
 - [Scenario scripting architecture](../../../pasm/spec/architecture/scenario-scripting.yaml)
 - [Comms panel wiki](../../../wiki/concepts/comms-panel.md)
-

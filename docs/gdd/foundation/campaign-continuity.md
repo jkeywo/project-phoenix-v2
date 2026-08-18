@@ -99,7 +99,7 @@ Persistent ship condition should remain legible and bounded. The default between
 
 Player identity is not the same as character identity. Session tokens currently reconnect browsers to a live host; they are not accounts, campaign profiles, or officer characters. A campaign should allow different human players to occupy the same stations across episodes without treating absence as desertion or losing the ship’s history.
 
-The future crew-assignment concept is a roster of named personnel with traits who can be assigned to systems or away missions, inspired by *Star Trek Online*. It is not a persistent simulation of every person aboard. If added, the campaign may carry roster membership, traits, availability, injuries, relationships, and assignment outcomes as explicit campaign fields. Hunger, sleep, continuous location, and autonomous daily schedules remain outside scope.
+The accepted unscheduled personnel model carries named Duty Officers and fixed anonymous Duty Teams. Officers have traits, system or mission assignments and availability states; teams have a type, leader and current assignment. Campaign continuity may carry officer recruitment, promotion, fatigue, injury, disappearance and death together with mission outcomes. Watches, hunger, sleep, continuous location and individual ensign simulation remain outside scope. See [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md).
 
 ## Episode input and output contract
 
@@ -203,7 +203,7 @@ Modded scenarios may read and write campaign facts only through declared namespa
 - Campaign file structure, storage backend, slot/branch presentation, autosave cadence, backup retention, and migration policy.
 - Whether a campaign follows one named ship, a fleet, a command, or supports all three as explicit frames.
 - The minimum ship identity fields and when hull changes preserve the same campaign ship.
-- Crew roster size, trait vocabulary, injury/death rules, away-mission resolution, and player ownership.
+- Duty Officer roster size, trait vocabulary, recruitment and promotion rules, and concrete recovery timings remain open within the accepted [Duty Teams and Operations](../mechanics/duty-teams-and-operations.md) model.
 - Which customisation choices and strategic resources persist, and which scenarios opt out for fixed balance.
 - Episode availability rules, repeatability, authored campaign endings, and how Patrol Mode assignments enter the sequence.
 - Whether campaign history can be edited by a GM and what audit/recovery guarantees such edits require.

@@ -164,9 +164,9 @@ A station can be held by at most one connected player. New players are never aut
 
 ### Stationless participants
 
-When all stations are held, another player joins without a station. There is currently no spectator queue and no automatic promotion when a station opens. The player must claim an available station themselves.
+When all stations are held, another player currently joins without a station. Band A2 formalises this as a Spectator role with one crew-public summary screen. Spectators do not count toward readiness, cannot issue simulation commands and may manually claim an eligible open station.
 
-Current readiness counts every connected session, including a stationless participant. This prevents the crew starting while a newly joined person is still deciding what to do, but it also lets a stationless client hold the lobby. Whether Phoenix needs an explicit spectator role that does not count toward readiness is an open design decision.
+Current readiness counts every connected session, including a stationless participant. Band A2 changes that contract so explicit spectators do not count toward collective readiness.
 
 ### Collective readiness
 
@@ -353,7 +353,7 @@ No current client-side action may shut down the host or end the session for ever
 
 - Define and implement the clean round-reset/world-reload contract, including selecting a different scenario after GameOver.
 - Admit reconnect and terminal-state reconstruction during GameOver.
-- Decide whether a stationless spectator role exists and whether spectators count toward collective readiness.
+- Implement Band A2's spectator role, readiness exclusion, summary surface and manual claim flow.
 - Decide whether GameOver needs a minimum acknowledgement period before any participant can dismiss it for everyone.
 - Define an explicit participant Leave Game action and whether disconnected session records expire.
 - Define explicit host End Session presentation and the client experience after intentional shutdown versus host failure.

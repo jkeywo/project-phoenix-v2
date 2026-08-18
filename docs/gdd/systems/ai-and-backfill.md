@@ -13,6 +13,8 @@ Phoenix uses AI to keep every authored ship functional at any crew size and to o
 
 Related documents: [Station Experiences](./station-experiences.md), [Ships and Ship Systems](./ships-and-systems.md), [Difficulty, Balance, and Playtesting](../foundation/difficulty-balance-playtesting.md), [Alliance Ships](../content/ships/alliance-ships.md), [Harrow Ships](../content/ships/harrow-ships.md), and [Onboarding, Tutorials, and Accessibility](../foundation/onboarding-accessibility.md).
 
+Band A2 crew direction is specified in [Command and Crew Control](../mechanics/command-and-crew-control.md).
+
 ## Design goals
 
 - A session remains playable from zero human crew through the ship’s station maximum.
@@ -138,4 +140,3 @@ Backfill is primarily workload support, not a difficulty selector. Making a stat
 - `src/entities/ai_flag_hosts.rs`, `src/command_admission/`, and fine-system AI hosts.
 - `assets/entities/fragments/ai/` and shipped hull TOML.
 - `wiki/concepts/information-parity-audit.md`.
-

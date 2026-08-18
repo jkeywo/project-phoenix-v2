@@ -10,6 +10,8 @@ External operations let the crew use the ship as a working vessel, not only as a
 
 Related documents: [World and Environmental Systems](../systems/world-environmental-systems.md), [Damage, Diagnosis and Repair](./damage-repair.md), [Power and Resource Network](./power-resource-network.md), [Navigation and Relative Motion](./navigation-relative-motion.md), and [Falling Skyway](../content/scenarios/falling-skyway.md).
 
+Future personnel and mission operations are specified separately in [Duty Teams, Officers and Operations](./duty-teams-and-operations.md). They reuse the operation principles without turning every external hold into an Away Mission.
+
 ## Experience goals
 
 - Give scenarios strong non-combat verbs with the same authority and feedback quality as weapons.

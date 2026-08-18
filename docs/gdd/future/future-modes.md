@@ -6,12 +6,12 @@
 | Status | Directional design; most sections are roadmap or permitted extension, not committed current functionality |
 | Owner | Unassigned |
 | Last updated | 2026-08-18 |
-| Scope | Multi-ship, generated Patrol Mode, ship customisation, crew assignments, native/physical bridges, event outputs, and GM tools |
+| Scope | Multi-ship, generated Patrol Mode, ship customisation, generated-mode foundations, native/physical bridges, event outputs, and GM tools |
 | Authority | Product/design direction only. PASM roadmap and specific future PRDs govern implementation commitments. |
 
 Phoenix may scale from a browser, television, and phones to multi-ship sessions and purpose-built bridge venues. Every extension must preserve the complete zero-setup route and the same authoritative station/system model. Optional depth should add ways to participate, author, and present the game without splitting it into incompatible “real” and “casual” versions.
 
-Related documents: [Game Design Overview](../foundation/overview.md), [Game and Session Lifecycle](../foundation/game-lifecycle.md), [Campaign Continuity and Persistence](../foundation/campaign-continuity.md), [Station Experiences](../systems/station-experiences.md), [Onboarding, Tutorials, and Accessibility](../foundation/onboarding-accessibility.md), [AI and Backfill](../systems/ai-and-backfill.md), [Scenario Authoring](../systems/scenario-authoring.md), and [Difficulty, Balance, and Playtesting](../foundation/difficulty-balance-playtesting.md).
+Related documents: [Game Design Overview](../foundation/overview.md), [Game and Session Lifecycle](../foundation/game-lifecycle.md), [Campaign Continuity and Persistence](../foundation/campaign-continuity.md), [Station Experiences](../systems/station-experiences.md), [Onboarding, Tutorials, and Accessibility](../foundation/onboarding-accessibility.md), [AI and Backfill](../systems/ai-and-backfill.md), [Scenario Authoring](../systems/scenario-authoring.md), [Planned but Not Scheduled](./planned-not-scheduled.md), and [Difficulty, Balance, and Playtesting](../foundation/difficulty-balance-playtesting.md).
 
 ## Non-negotiable baseline
 
@@ -25,11 +25,12 @@ Related documents: [Game Design Overview](../foundation/overview.md), [Game and 
 
 | Direction | Current foundation | Status in this GDD |
 |---|---|---|
+| Band A2 crew control | Station ownership, system-level human/AI control, human-seeking placement and authored AI policy. | Accepted immediate band before B |
 | Native delivery | Native `phoenix-host` can serve a built bundle/catalogue/version pin; simulation authority remains browser/headless. | Started foundation; native client/simulation hosting not implied |
 | Multi-ship | Per-ship state, AI ownership, command logs, deterministic fixed ticks, and P2P design work exist. | Planned roadmap direction |
-| Patrol Mode | Scenario systems, seeded world content, campaign projection, and future field/orbit foundations. | Post-banded future direction |
+| Patrol Mode | Scenario systems, seeded world content, campaign projection, and future field/orbit foundations. | Accepted Band F direction |
 | Ship customisation | Entity fragments/composition and accepted supply/demand design. | Accepted staged roadmap, not current player feature |
-| Crew assignments | Earlier Star Trek Online-inspired concept reported by the designer; no current canonical document recovered. | Permitted concept needing reconstruction |
+| Duty Teams and Away Missions | Fixed typed teams, named Duty Officers, Operations systems, Medical and off-screen assignments. | Accepted; planned but not scheduled |
 | Physical bridge | Web consoles, optional native delivery, stable commands/state. | Permitted extension, not current planned core requirement |
 | Lighting/smoke/show control | Alert and presentation events could supply cues. | Permitted future adapter; PASM currently does not commit show hardware |
 | GM tools | Debug/host surfaces, scenario effect vocabulary, snapshots, activity/balance events. | Planned staged roadmap |
@@ -65,6 +66,8 @@ Authors define grammars, constraints, actor types, system relationships, failure
 
 A hand-authored first patrol should teach exploration, database/library use, mission logging, wide/focused observation, and campaign handoff before procedural assignments open. Repetition controls should track recently used structures, actor conflicts, hazards, and resolution patterns, not only names.
 
+Patrol introduces the shared seeded generator and Director later reused by War and Sandbox. The Director selects assignments, actors and pacing from current world state. Patrol constrains it to the mode's assignment cadence and bounded campaign purpose; later modes alter those settings rather than forking the generator.
+
 ### Boundaries
 
 Patrol Mode does not generate a galaxy-scale continuous universe or simulate every system between missions. It produces bounded playable situations with persistent facts. Generated content must use the same world/entity/Rhai or successor authoring contracts and pass equivalent validation.
@@ -85,13 +88,19 @@ The accepted future power model makes every component draw energy, retains ship-
 
 The player holding a station in the lobby owns choices for that station’s loadout section; an unclaimed station uses the hull’s authored default. The composed loadout freezes at spawn into deterministic content. Mid-mission refit occurs only at an authored starbase path. Campaign scenarios may grant a reactor improvement; fixed skirmish balance remains sidegrade-only through authoring rather than a hidden mode switch.
 
-## Crew roster and assignments
+## Duty Teams, Duty Officers, and Away Missions
 
-The permitted concept is a named or abstract crew roster inspired by Star Trek Online duty officers. Crew entries have traits and may be assigned to ship systems, projects, or away missions. Their traits modify outcome, speed, risk, information, or recovery through explicit authored rules.
+The accepted unscheduled model generalises repair teams into fixed anonymous Duty Teams by type. Each team has a named Duty Officer leader whose compatible traits provide bonuses, but a leaderless team remains functional. Duty Officers can also occupy authored ship-system slots, gaining benefits and exposure to discrete damage-event casualties while assigned.
 
-This is not a persistent simulation of hundreds of individual lives. Crew do not need continuous location, hunger, sleep, conversation, or autonomous schedules. An assignment is a bounded decision with a result and availability cost. Named crew can become characters through authored events and consequences without turning Phoenix into an avatar-management game.
+Multiple Operations systems launch compatible off-screen missions through shuttles, transporters or carried craft. Required and optional slots may take teams, individual officers or both. The bridge supports missions through ordinary scans, Comms, deadlines and scenario effects; exact check probabilities reflect preparation, personnel, transport and current conditions. Medical treats persistent personnel consequences without introducing continuous crew simulation.
 
-Open decisions include roster size, trait vocabulary, injury/death, player ownership, away-mission resolution, relationship to repair teams/workforces, campaign persistence, duplication, and whether assignments occur only between missions or can be changed during a scenario.
+The complete contract is in [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md).
+
+## Generated modes after Patrol
+
+War Mode and Sandbox Mode are accepted but unscheduled successors to the Patrol MVP. War generates a route toward one decisive mission, letting the crew gather allies and supplies and weaken enemies across intervening systems. Sandbox removes the fixed destination and gives the shared Director wider latitude in a persistent actor-and-economy simulation suitable for player-chosen work and GM-led sessions.
+
+Both modes retain bridge-first play. Allied vessels are autonomous actors directed through Comms rather than directly controlled units. Warp is discrete system-to-system transit. The detailed dependency clusters are maintained in [Planned but Not Scheduled](./planned-not-scheduled.md).
 
 ## Native hosts and clients
 
@@ -154,7 +163,7 @@ Future scope should land as tracer bullets that prove the cross-cutting contract
 - Optional adapters fail without corrupting or pausing the authoritative simulation unless the host explicitly chooses that policy.
 - Multi-ship and Patrol preserve bounded situations, information provenance, and crew communication.
 - Customisation choices are legible sidegrades and are covered by deterministic balance evidence before catalogue breadth.
-- Crew assignments remain bounded trait-based decisions rather than continuous NPC-person simulation.
+- Duty Teams and Away Missions remain bounded assignments rather than continuous NPC-person simulation.
 - Hardware and show control use semantic commands/cues, browser fallback, accessibility equivalents, and venue safety boundaries.
 - GM actions are scoped, visible, auditable, and recoverable in proportion to impact.
 

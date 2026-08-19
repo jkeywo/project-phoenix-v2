@@ -10512,13 +10512,14 @@ fn torpedo_conservation_carves_out_a_sole_objective_ship() {
 /// and then the hull's own authored `[torpedoes.ai]` block asked the question
 /// the gate asks.
 ///
-/// The doctrine-entry count is asserted on purpose: it is the number that makes
-/// an entry-counting carve-out silently dead content in every shipped world, and
-/// the reason the lever counts named TARGETS instead. #960 moved it from 2 to 3
-/// — the world now appends a `close-on-starbase` Reach beside the assault, so
-/// a wave can fly the run-in from outside its acquisition band — and that is the
-/// point rather than an inconvenience: the entry count went up, the count of
-/// named engagements did not, and only the second one may move the gate.
+/// The doctrine-entry count grows when the world's brief appends to the
+/// template's standing orders — that growth is asserted relationally against
+/// the template's own (pre-merge) count, not against a literal, because it is
+/// exactly the count an entry-counting carve-out would key on, and the whole
+/// point of #960 (appending a `close-on-starbase` Reach beside the assault so
+/// a wave can fly the run-in from outside its acquisition band) is that the
+/// entry count moves while the count of NAMED engagements does not — only the
+/// second one may move the gate.
 #[test]
 fn combat_test_raid_cruisers_are_the_shipped_sole_objective_ship() {
     let template = crate::entities::config::EntityConfig::from_toml(
@@ -10563,19 +10564,25 @@ fn combat_test_raid_cruisers_are_the_shipped_sole_objective_ship() {
         &toml::to_string(&merged).expect("the merged document serialises"),
     )
     .expect("the merged raid cruiser must parse");
+    let template_doctrine_count = template
+        .behaviour
+        .as_ref()
+        .expect("the raid cruiser template carries a behaviour section")
+        .doctrine
+        .len();
     let behaviour = spawned
         .behaviour
         .expect("the merged raid cruiser carries a behaviour section");
 
-    assert_eq!(
-        behaviour.doctrine.len(),
-        3,
-        "the world's brief APPENDS to the template's standing orders, so the raid \
-         cruiser flies three doctrine entries: {:?}. If this ever drops to the 2 the \
-         override itself authors, the override has started replacing rather than \
-         appending and the entry-count reading of `sole objective` becomes available \
-         again — but until then, counting entries puts the one ship the issue \
-         describes on the constrained path.",
+    assert!(
+        behaviour.doctrine.len() > template_doctrine_count,
+        "the world's brief APPENDS to the template's standing orders, so the merged \
+         raid cruiser must fly MORE doctrine entries ({:?}) than the template's own \
+         {template_doctrine_count}. If this ever drops to the template's own count, \
+         the override has started replacing rather than appending and the \
+         entry-count reading of `sole objective` becomes available again — but \
+         until then, counting entries puts the one ship the issue describes on the \
+         constrained path.",
         behaviour.doctrine.iter().map(|d| &d.id).collect::<Vec<_>>()
     );
     assert_eq!(

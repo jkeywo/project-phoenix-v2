@@ -176,49 +176,83 @@ fn the_curated_public_manifest_really_does_restrict_what_the_native_host_publish
     let base = load_content(".", BASE_MANIFEST).expect("base content loads");
 
     // Issue #931's curation, asserted against the served document rather than
-    // against the TOML: one scenario, one hull.
-    assert_eq!(
-        demo.manifest.scenarios.len(),
-        1,
-        "the public demo manifest must publish exactly one scenario"
+    // against the TOML — and relationally against the dev catalogue rather
+    // than against pinned ids/counts, so a designer widening or narrowing the
+    // curated set does not have to also edit this test.
+    assert!(
+        !demo.manifest.scenarios.is_empty(),
+        "the public demo manifest must publish at least one scenario"
     );
     let scenario = &demo.manifest.scenarios[0];
-    assert_eq!(
-        scenario.get("id").and_then(PayloadValue::as_text),
-        Some("combat_test")
-    );
-    assert_eq!(
-        scenario.ships().len(),
-        1,
-        "the public demo manifest must publish exactly one hull"
-    );
-    assert_eq!(
-        scenario.ships()[0]
-            .get("template_path")
-            .and_then(PayloadValue::as_text),
-        Some("assets/entities/alliance_destroyer.toml")
+    let scenario_id = scenario
+        .get("id")
+        .and_then(PayloadValue::as_text)
+        .expect("a published scenario has an id");
+    assert!(
+        !scenario.ships().is_empty(),
+        "the public demo manifest must publish at least one hull"
     );
 
-    // And it really is a restriction of the dev catalogue, not a different one:
-    // the dev catalogue offers strictly more.
+    // And it really is a RESTRICTION of the dev catalogue, not a different
+    // one: every scenario id and hull the curated manifest publishes is also
+    // present in the dev catalogue, and the dev catalogue offers strictly more.
     assert!(
         base.manifest.scenarios.len() > demo.manifest.scenarios.len(),
         "the dev catalogue should offer more scenarios than the curated one"
     );
-    let base_combat = base
+    let base_scenario = base
         .manifest
         .scenarios
         .iter()
-        .find(|s| s.get("id").and_then(PayloadValue::as_text) == Some("combat_test"))
-        .expect("combat_test is in the dev catalogue");
+        .find(|s| s.get("id").and_then(PayloadValue::as_text) == Some(scenario_id))
+        .unwrap_or_else(|| panic!("{scenario_id} is in the dev catalogue"));
     assert!(
-        base_combat.ships().len() > scenario.ships().len(),
-        "combat_test authors more hulls than the curated manifest publishes"
+        base_scenario.ships().len() > scenario.ships().len(),
+        "{scenario_id} authors more hulls in the dev catalogue than the curated \
+         manifest publishes"
     );
+    let base_hull_paths: Vec<&str> = base_scenario
+        .ships()
+        .iter()
+        .filter_map(|s| s.get("template_path").and_then(PayloadValue::as_text))
+        .collect();
+    for ship in scenario.ships() {
+        let hull = ship
+            .get("template_path")
+            .and_then(PayloadValue::as_text)
+            .expect("a published hull has a template_path");
+        assert!(
+            base_hull_paths.contains(&hull),
+            "curated hull {hull} is not among the dev catalogue's hulls for {scenario_id}: \
+             {base_hull_paths:?}"
+        );
+    }
 
-    // Curation filters the catalogue; it never edits the world.
-    let world = std::fs::read_to_string("assets/worlds/combat_test.toml").expect("world reads");
-    assert!(world.contains("alliance_cruiser.toml"));
+    // Curation filters the catalogue; it never edits the world — some hull the
+    // dev catalogue authors for this scenario but the curated manifest does not
+    // publish must still be sitting in the world file.
+    let curated_hulls: std::collections::HashSet<&str> = scenario
+        .ships()
+        .iter()
+        .filter_map(|s| s.get("template_path").and_then(PayloadValue::as_text))
+        .collect();
+    let excluded_hull = base_hull_paths
+        .iter()
+        .find(|h| !curated_hulls.contains(*h))
+        .unwrap_or_else(|| {
+            panic!("expected {scenario_id} to author a hull the curated manifest excludes")
+        });
+    let world_path = format!("assets/worlds/{scenario_id}.toml");
+    let world =
+        std::fs::read_to_string(&world_path).unwrap_or_else(|e| panic!("{world_path} reads: {e}"));
+    let excluded_hull_name = excluded_hull
+        .rsplit('/')
+        .next()
+        .expect("template_path has a file name");
+    assert!(
+        world.contains(excluded_hull_name),
+        "{world_path} must still author the hull the curated manifest excludes ({excluded_hull_name})"
+    );
 }
 
 #[test]

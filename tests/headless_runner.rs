@@ -130,8 +130,12 @@ fn player_game_start_spawn_attaches_the_comms_and_repair_ai_components() {
     let mut app = build_headless_app(&args).expect("app should build");
     run(&mut app, args.max_ticks);
 
-    // `assets/entities/alliance_cruiser.toml` declares `power_rating = 90`.
-    let expected_rating = Some(90.0_f32);
+    let cruiser: project_phoenix::entity_config::EntityConfig =
+        project_phoenix::entity_includes::load_entity_config(
+            "assets/entities/alliance_cruiser.toml",
+        )
+        .expect("the cruiser template must compose and parse");
+    let expected_rating = cruiser.power_rating.map(|r| r as f32);
 
     let mut q = app.world_mut().query_filtered::<(
         &CommsTargetSelector,

@@ -94,7 +94,7 @@ The broadcaster implements `bevy::Plugin` with `is_unique() -> false`, so you ca
 
 ## Complete catalogue of registered producers
 
-All `ServerMessage` broadcasts are listed below. **Every** `OutboundMessage` write happens through a broadcaster-registered producer — either directly via the dispatch loop's `world.write_message(OutboundMessage { ... })` (`src/core/broadcast/sim.rs:189`, `src/core/broadcast/lobby.rs:188`) or inside a producer closure that is exclusively called by that dispatch.
+All `ServerMessage` broadcasts are listed below. **Every** `OutboundMessage` write happens through a broadcaster-registered producer — either directly via the shared dispatch loop's `world.write_message(OutboundMessage { ... })` (`src/core/broadcast/broadcaster.rs:249`) or inside a producer closure that is exclusively called by that dispatch.
 
 ### SimBroadcaster (game phase = `InProgress`)
 
@@ -154,7 +154,7 @@ The rule is:
 
 All outbound traffic flows through one of two paths:
 
-1. **Broadcaster dispatch loop** — `src/core/broadcast/sim.rs:189` and `src/core/broadcast/lobby.rs:188` write messages returned by registered producers. Each producer closure is called inside a pre-resolved audience context; the dispatch loop writes the `OutboundMessage` with `delivery: DeliveryClass::Reliable` (the producers themselves don't set delivery).
+1. **Broadcaster dispatch loop** — the shared loop at `src/core/broadcast/broadcaster.rs:249` writes messages returned by registered producers. Each producer closure is called inside a pre-resolved audience context; the dispatch loop applies the delivery class selected by the broadcaster type (the producers themselves don't set delivery).
 2. **Forwarding producer closures** — `src/server_app.rs:661` (`sim_outbox_broadcaster`) calls `delivery_class_for_msg()` (`src/server_app.rs:683`) to set per-message delivery, and `src/lobby/server.rs:696` (`drain_lobby_outbox`) hardcodes `DeliveryClass::Reliable` for all lobby messages.
 
 This means a codebase grep for `write_message.*OutboundMessage` should only hit files under `src/core/broadcast/`, `src/server_app.rs`, and `src/lobby/server.rs`.

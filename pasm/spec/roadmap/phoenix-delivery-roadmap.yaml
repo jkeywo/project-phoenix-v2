@@ -114,7 +114,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Post-Demo Release Bands A, A2, and B-I
-      summary: "Post-demo work proceeds through one campaign and continuing-mode ladder. A: Rhai scripting, Falling Skyway, delivery/content foundations and destroyer readiness. A2: Crew Control plus Native and Network foundations, with shared accessibility settings/profile, presentation and eligibility seams. B: Borrowed Sun, fields/epistemics, complexity, multi-ship and accessibility composition. C: Narrow Season, physical/relative space, docking, GM MVP and alternative interaction paths. D: Broken Tithe, resource networks, deep Engineering and mastery-task assistance. E: Silent Corridor, Tactical/Sensors/EWar depth and dense-information accessibility. F: an authored Patrol MVP, discrete warp, databases, refit/rewards and continuing-mode summaries. G: an authored War MVP, Pursuit, allies and the personnel/Operations vertical. H: shared Patrol/War PCG, Orbital Mode and accessibility-aware generation. I: Sandbox, coarse living economy, standing, sector/fleet state and alternative participation."
+      summary: "Post-demo work proceeds through one campaign and continuing-mode ladder. A: Rhai scripting, Falling Skyway, delivery/content foundations and destroyer readiness. A2: Crew Control plus Native and Network foundations, with shared accessibility settings/profile, presentation and eligibility seams. B: Borrowed Sun, fields/epistemics, complexity, multi-ship and accessibility composition. C: Narrow Season, physical/relative space, docking, GM MVP and alternative interaction paths. D: Broken Tithe, resource networks, deep Engineering, GM facilitation/safety and mastery-task assistance. E: Silent Corridor, Tactical/Sensors/EWar depth, the integrated GM Workshop/Live Inspector, GM information/presentation control and dense-information accessibility. F: an authored Patrol MVP, discrete warp, databases, refit/rewards, continuing-mode summaries and GM campaign/deep-pacing continuity. G: an authored War MVP, Pursuit, allies and the personnel/Operations vertical. H: shared Patrol/War PCG, Orbital Mode and accessibility-aware generation. I: Sandbox, coarse living economy, standing, sector/fleet state and alternative participation."
       rationale:
         - Each band is a shippable public build, not a paper milestone. Every band pairs playable content with supporting gameplay systems, technical investment, a visual/UX polish pass and an accessibility increment.
         - "The hull rollout is deliberately one at a time — destroyer, cruiser, courier, battleship — so tutorials, doctrine, and balance evidence land together per hull instead of as a single catalogue-wide push."
@@ -456,6 +456,7 @@ entities:
       summary: "Release E. Combine schedules, traffic, evidence, infrastructure, cascades, commitments and campaign consequences into the regional-crisis finale (#861); the scenario itself composes B-D foundations rather than adding another scenario framework. Ship Tactical detail with calibration, ammunition fabrication, arc/range trade-offs and authored torpedo payload sidegrades whose behavior freezes at launch. Add intrusive deep scan on top of B's knowledge ladder, gaining protected detail at detectable signature and authored diplomatic/tactical risk. Add the EWar MVP — Jam, Spoof and Harden — integrated with Sensors, Comms, power/heat and signature management; broader disruption waits unscheduled. Captain detail remains the commitments/objectives board, and signature management supplies emissions-based detection for player and NPC ships."
       rationale:
         - "Band E's accessibility increment covers uncertainty/signature/EWar semantics, configurable sensory intensity and alert priority, alternatives to rapidly changing radar-only presentation and an audit of every detailed station under the supported option set."
+        - "Band E also delivers GM M6 Integrated Workshop/Live Inspector, then M7 Information Control and M8 In-sim Presentation. The Workshop retires the HTML editor and model viewer only after feature parity; it does not add editor-specific simulation systems to Silent Corridor."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -472,6 +473,7 @@ entities:
       rationale:
         - "The authored MVP proves exploration, evidence, assignments, persistence, return-to-run flow and the B-D physical foundations before procedural composition multiplies them."
         - "PRD published as #1021 (2026-08-13, superseding the same-day PRD-when-E-nears deferral); its issue breakdown via /to-issues still waits for its band."
+        - "GM M9 Campaign Continuity and Deep Pacing moves from Band E to Band F so its campaign persistence, pressure history and authored-action suggestions grow alongside the continuing-run shell rather than preceding it."
         - "Band F accessibility covers map/list parity, station-database search, persistent mission summaries, warp-route comparison, session return and recap support."
     architecture:
       kind: roadmap-milestone
@@ -539,7 +541,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Planned but Not Scheduled — Accepted Dependency Clusters
-      summary: "Accepted future work still lacking a release promise after the A2-I plan. Human media remains one-to-one simulated Comms calls with consent, private/viewscreen routing, typed text, transient captions and the Discord adapter. Tactical/ship extensions still unscheduled are persistent mines, post-E cloaking, expanded EWar and multi-interlock self-destruct. Custom peripherals and external show systems also remain unscheduled. Personnel/Operations and surrender move to G; Pursuit and authored War move to G; Patrol/War PCG and Orbital Mode move to H; Sandbox, trade, standing, sector/fleet state and advanced spectator participation move to I; accessibility assistance is distributed from A2 through I."
+      summary: "Accepted future work still lacking a release promise after the A2-I plan. Human media remains one-to-one simulated Comms calls with consent, private/viewscreen routing, typed text, transient captions and the Discord adapter. Tactical/ship extensions still unscheduled are persistent mines, post-E cloaking, expanded EWar and multi-interlock self-destruct. Custom peripherals and external show systems also remain unscheduled. Source-level Rhai debugging beyond M6's diagnostics/traces/state breakpoints is accepted but unscheduled. Personnel/Operations and surrender move to G; Pursuit and authored War move to G; Patrol/War PCG and Orbital Mode move to H; Sandbox, trade, standing, sector/fleet state and advanced spectator participation move to I; accessibility assistance is distributed from A2 through I."
       rationale:
         - "Human media is a Comms capability, not an out-of-fiction voice room. Calls require a known reachable human ship, hail and acceptance; simulated loss interrupts both media tracks and retries for a short grace period. Calls are one-to-one in the first delivery."
         - "Each ship independently routes the accepted call through the device presenting private Comms or promotes audio and video together to the viewscreen endpoint. Existing viewscreen arbitration controls promotion; displacement hands the call back privately without ending it. Media is not recorded, while deliberate typed messages enter the Comms record."
@@ -548,6 +550,7 @@ entities:
         - "The station-database framework is shared with Band F: one evidence/reference model, Intelligence as primary cross-domain correlation, and focused station projections including Engineering procedures, Medical records and Operations history."
         - "G-I preserve the ratified generated-play contracts: exact/evidence-reported Pursuit, one decisive War destination, autonomous allies ordered through Comms, one shared generator/Director, discrete cargo lots, layered standing and discrete warp."
         - "Accessibility profiles remain private and describe effects rather than diagnoses. Their A2-I increments preserve the guarantee of one compatible station/rating on the base hull at full supported player count for a simple scenario, not solo completion of every complex scenario."
+        - "The unscheduled Rhai debugger adds source-expression stepping plus local-variable and stack-frame inspection to M6 Test. M6 already owns compile/runtime source diagnostics, deterministic simulation stepping, host-call/flag/callback traces and scenario-state breakpoints."
         - "Moving a cluster into a band requires a proving scenario or mode, bounded authoritative state, persistence classification, information/accessibility behavior and a vertical acceptance test; moving one cluster schedules none of the others."
     architecture:
       kind: roadmap-milestone
@@ -598,17 +601,19 @@ entities:
       status: accepted
       confidence: confirmed
       title: Game Master Console
-      summary: "Deliver #930's host-class GM peer across three bands, per the milestone ladder in gm-console-milestones.yaml. Release C: MVP — M1 peer tracer (GM lobby role, gm: command tier, headless GM page, omniscient map, activity feed, pause), M2 directing (trigger-action dispatch bridge, new action kinds, mission panel, dossier), M3 performing (comms studio, knowledge views, role presets). Release D: M4 facilitation assistance and M5 operations and safety, whose log/undo/checkpoint reuses the #862 capture and restore. Release E: M6 information control through the radar-projection seam, M7 in-sim presentation, M8 campaign persistence and pacing heuristics."
+      summary: "Deliver #930's host-class GM peer across four bands, per gm-console-milestones.yaml. Release C keeps the accepted MVP scope: M1 peer tracer, M2 directing and M3 performing. Release D keeps M4 facilitation assistance and M5 operations/safety. Release E inserts M6 Integrated Workshop and Live Inspector, which retires the HTML editor and model viewer after native/browser Authoring/Test parity while reusing constrained M1-M5 Live actions; M7 Information Control and M8 In-sim Presentation follow. Release F moves M9 Campaign Continuity and Deep Pacing alongside the authored Patrol continuing-run shell."
       rationale:
-        - "The GM is a host-class mesh peer running the full simulation with no ship, so it cannot start before the mesh exists: #854 in Band A2 is a hard gate."
+        - "The GM is a host-class mesh peer running the full simulation with no ship. Its hard transport gates now live under Band A2 PRD #1093: host admission #1114, deterministic multi-host play #1116 and portable-record transfer #1117, with divergence recovery #1118 for robust drop-in. #854's PeerJS plan is superseded."
         - "World and mission mutation goes through the trigger-action dispatch pipeline and station puppeting through a gm: admission tier, so the GM adds no authority path that authored content cannot also use."
-        - "M4-M5 and M6-M8 each get their own PRD when their band is due; only M1-M3 are broken into issues, and only once release B nears completion."
+        - "M1-M5 retain their settled feature scope but are written with M6 in mind: reusable inspectors, role-preset panels, validation descriptors and action adapters rather than disposable pages."
+        - "Live exists only in a connected GM session and never writes source; standalone Workshop owns Authoring/Test. Native may edit project roots or one mod workspace, while browser Workshop edits exactly one in-memory mod overlay and downloads a ZIP. Rhai source and model/rig data are fixed during Live runs."
+        - "M4-M9 each get their own PRD when their band is due; only M1-M3 are broken into issues once the A2 host-mesh gates near completion."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       reads: [world-snapshot-artifact, world-configuration-state, spawned-entity-state]
       coordinates: [roadmap-p2p-multiship-delivery, roadmap-authoritative-snapshots]
-      runs_in: [host-browser-runtime, headless-runtime]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime, node-tooling-runtime]
 
   - component: roadmap-release-polish
     core:

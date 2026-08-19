@@ -4,11 +4,12 @@ entities:
       status: accepted
       confidence: confirmed
       title: GM Console Milestones to Fully-Featured GM Interface
-      summary: "The GM console (PRD #930) arrives in three MVP milestones after the Band A2 Phoenix mesh delivery (#854) — GM peer tracer, directing, performing — then grows to a fully-featured facilitation interface through facilitation assistance, operations and safety, information control, in-sim presentation, and campaign continuity with deep pacing. External show hardware and AI-drafted NPC replies are explicitly not planned."
+      summary: "The GM console (PRD #930) arrives in three MVP milestones after the Band A2 Phoenix mesh delivery — GM peer tracer, directing, performing — then grows through facilitation assistance and operations/safety before M6 unifies Live inspection with a standalone Authoring/Test Workshop that retires the HTML editor and model viewer. Information control and in-sim presentation follow in Band E; campaign continuity with deep pacing moves to Band F. External show hardware and AI-drafted NPC replies are explicitly not planned, while source-level Rhai debugging is accepted but unscheduled."
       rationale:
         - "Milestone ladder and ordering settled 2026-08-02 in the session that published PRD #930: facilitation assistance is the first post-MVP milestone, then operations and safety before information control, presentation stays in-sim only, and campaign persistence plus pacing heuristics complete the endgame."
-        - "Nothing here un-parks #930: no GM work begins before #854 nears completion, and each post-MVP milestone becomes its own PRD only when it comes due."
-        - "The prerequisites are the existing delivery roadmap's determinism (#849) and P2P (#854) milestones; #900 (god mode becomes a logged command) and #862 (snapshot tracer) land en route and establish the logged-override and snapshot patterns GM work reuses."
+        - "The 2026-08-19 Workshop review inserted M6 after Operations and Safety, shifted Information Control, Presentation and Campaign/Pacing to M7-M9, and moved M9 to Band F. Each post-MVP milestone remains its own PRD only when due."
+        - "M1-M5 keep their settled player-facing scope. They must nevertheless use reusable inspector, capability, validation and action components so M6 extends the GM surface instead of replacing another disposable interface."
+        - "The transport prerequisites now live in Band A2 PRD #1093, especially #1114, #1116 and #1117; #1118 supplies robust divergence recovery. These supersede #854's PeerJS-specific plan. #900 and #862 still establish the logged-override and snapshot patterns GM work reuses."
     architecture:
       kind: roadmap-sequence
       authority: non-authoritative
@@ -20,6 +21,7 @@ entities:
         - gm-milestone-performing
         - gm-milestone-facilitation-assistance
         - gm-milestone-operations-safety
+        - gm-milestone-integrated-workshop
         - gm-milestone-information-control
         - gm-milestone-presentation
         - gm-milestone-campaign-and-pacing
@@ -29,7 +31,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: GM Peer Exists (Tracer)
-      summary: "Deliver PRD #930 modules 1, 2, and 6 plus a skeletal surface: GM session role and lobby policy (own ready state, force-start override, crew-visible presence, paused-snapshot drop-in), the gm: command-admission token tier, a headless-sim GM page that joins the #854 mesh as a full NPC-ownership roster member, a basic omniscient map component, a live activity feed over the balance-event stream, and pause/resume."
+      summary: "Deliver PRD #930 modules 1, 2, and 6 plus a skeletal surface: GM session role and lobby policy (own ready state, force-start override, crew-visible presence, paused-snapshot drop-in), the gm: command-admission token tier, a headless-sim GM page that joins the Band A2 Phoenix mesh as a full deterministic roster member, a basic omniscient map component, a live activity feed over the balance-event stream, and pause/resume. Build the map, selection and inspector shell as reusable components for the later Workshop without adding Workshop features to this milestone."
       rationale:
         - "A GM-only session running the world end-to-end is the tracer: it proves topology (host-class peer, local omniscient reads), the admission tier, and lobby role in one vertical slice before any directing tools exist."
         - "Exit criteria: a GM-only session runs the world; a GM can join a crewed game, watch everything live, and pause it."
@@ -44,7 +46,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: GM Directing
-      summary: "Deliver PRD #930 modules 3 and 4 and part of 8: the GM dispatch bridge into the trigger-action pipeline with idempotency and attribution; new action kinds (set doctrine, inject fault, restore, reveal/conceal, safe despawn, trigger fire/delay/skip) that are simultaneously TOML-authorable; the mission panel showing triggers with eligibility and fire/delay/skip controls; scenario-authored quick actions; and the entity dossier."
+      summary: "Deliver PRD #930 modules 3 and 4 and part of 8: the GM dispatch bridge into the trigger-action pipeline with idempotency and attribution; new action kinds (set doctrine, inject fault, restore, reveal/conceal, safe despawn, trigger fire/delay/skip) that are simultaneously TOML-authorable; the mission panel showing triggers with eligibility and fire/delay/skip controls; scenario-authored quick actions; and the entity dossier. Implement dossier fields and actions through shared inspector descriptors/adapters that M6 can reuse; this does not broaden Directing's accepted capability scope."
       rationale:
         - "Exit criteria: a GM can pace Combat Test end-to-end — delay a wave, spring one early, redirect an NPC, rescue a softlock."
         - "Every new action kind follows the trigger-action extension contract so scenario authors gain the same vocabulary the GM uses."
@@ -59,7 +61,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: GM Performing (PRD 930 MVP Complete)
-      summary: "Deliver PRD #930 modules 5 and 7 and the rest of 8: the comms studio (send-as-entity, scripted hail initiation, per-ship history), per-ship knowledge views (contact picture, objectives, comms inbox), and scenario-authored GM role presets in world TOML with the preset loader."
+      summary: "Deliver PRD #930 modules 5 and 7 and the rest of 8: the comms studio (send-as-entity, scripted hail initiation, per-ship history), per-ship knowledge views (contact picture, objectives, comms inbox), and scenario-authored GM role presets in world TOML with the preset loader. Role-preset and panel components must also render in M6 Authoring/Test, without adding those later workflows to the MVP."
       rationale:
         - "Exit criteria: run a real multi-crew event with one or more GMs; PRD #930's acceptance holds in full."
         - "Role presets differentiate GM interfaces (filters, quick-action panels, scripts), never permissions — all GMs remain mechanically equal, last-write-wins."
@@ -102,6 +104,28 @@ entities:
       reads: [world-snapshot-artifact]
       runs_in: [host-browser-runtime]
 
+  - component: gm-milestone-integrated-workshop
+    core:
+      status: proposed
+      confidence: confirmed
+      title: GM Integrated Workshop and Live Inspector
+      summary: "Band E M6, after Operations and Safety. Unify the GM console, HTML editor and model viewer around shared schema-backed inspectors while keeping two exclusive contexts. Live exists only while connected as a GM peer: it exposes M1-M5 actions plus separately tested safe reconciliation adapters as constrained, attributed, optimistic-concurrency transactions through Operations/Safety; Rhai source is fixed for the run and no arbitrary ECS escape hatch exists. Standalone Workshop switches between Authoring and Test with one chronological undo stack. Native Authoring edits an explicitly selected project root or one mod workspace; Browser Authoring edits exactly one in-memory new/imported/loaded mod pack over read-only base/other-pack dependencies and exports one ZIP. Test validates an unsaved draft, starts a fresh disposable deterministic simulation with every Station on Backfill, and switches between the omniscient GM view and the authentic Viewscreen of any simulated player ship. M6 reaches comment-preserving TOML/Rhai/entity/definition/mod-pack parity, integrates model/rig/marker/variant/LOD preview and native LOD/remesh capability, then deletes the old editor and standalone viewer interfaces while preserving redirecting developer shortcuts."
+      rationale:
+        - "Live and Workshop never coexist. Leaving Live uses ordinary GM disconnect/reconnect; Workshop is offline and needs no GM credentials or running session. There is no capture-live-state-to-source workflow and no shared undo/draft state across the boundary."
+        - "Authoring and Live reuse inspector presentation but not authority: Authoring patches a document-preserving syntax tree and writes only after runtime-equivalent parse/composition/Rhai/reference/mod-pack validation; Live submits named actions or schema-marked safe adapters at agreed ticks. Recreate-required and derived fields remain visible but disabled."
+        - "Structured forms are hybrid: runtime-owned descriptors supply types, defaults, validation, source locations and Live mutability, while human-authored panels own grouping and specialised workflows. Unknown fields remain available through a structured/raw fallback without losing comments, ordering or formatting."
+        - "Test never hot-patches a running draft. Editing marks the run stale; restart-from-draft creates a clean simulation. It provides deterministic restart, pause/step/accelerate, host-call/flag/callback traces, scenario-state breakpoints and role-preset preview. Source-level Rhai stepping/locals remain unscheduled."
+        - "Browser Workshop never receives project filesystem authority. A loaded pack is retained as its exact immutable source bundle and may be cloned after normal Live disconnect; runtime state and GM interventions are never reconstructed into files. Imported Rhai remains inside the ordinary deterministic budgeted sandbox with no DOM, network, filesystem or Workshop APIs."
+        - "Model and rig editing is Authoring/Test-only. Browser Workshop can import pack assets, edit rig/marker/variant/LOD metadata and preview/export them, but full external LOD/remesh generation is native-only. The old viewer's fast launch command becomes a deep link into Workshop Model authoring."
+        - "The Workshop uses the shared Accessibility profile from first delivery: keyboard/mouse parity, visible focus, non-colour validation/dirty/mode cues, structured alternatives to canvases and Test controls usable without animation/audio. Browser and native surfaces share one JS/HTML UI over explicit capability providers."
+        - "Exit criteria are one golden native/browser workflow covering comment-preserving scenario/entity/Rhai/model authoring, role presets, disposable Backfill Test with GM/ship viewscreens, validated save/mod export, constrained Live inspection, crash-draft recovery and deletion of the superseded interfaces."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      coordinates: [gm-milestone-operations-safety, roadmap-mod-content-packs, roadmap-scenario-scripting, native-delivery-host]
+      reads: [world-snapshot-artifact]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime, node-tooling-runtime]
+
   - component: gm-milestone-information-control
     core:
       status: proposed
@@ -114,7 +138,7 @@ entities:
     architecture:
       kind: roadmap-milestone
       authority: authoritative
-      coordinates: [gm-milestone-operations-safety]
+      coordinates: [gm-milestone-integrated-workshop]
       runs_in: [host-browser-runtime, headless-runtime]
 
   - component: gm-milestone-presentation
@@ -146,6 +170,20 @@ entities:
     architecture:
       kind: roadmap-milestone
       authority: authoritative
-      coordinates: [gm-milestone-facilitation-assistance, roadmap-authoritative-snapshots]
+      coordinates: [gm-milestone-presentation, gm-milestone-facilitation-assistance, roadmap-authoritative-snapshots]
       reads: [world-snapshot-artifact]
       runs_in: [host-browser-runtime]
+
+  - component: gm-unscheduled-rhai-source-debugger
+    core:
+      status: proposed
+      confidence: confirmed
+      title: Source-Level Rhai Debugger — Planned but Unscheduled
+      summary: "Extend M6 Test with source-level Rhai stepping, breakpoints inside expressions and inspection of local variables/stack frames. M6 itself stops at compile/runtime source diagnostics, host-call/flag/callback traces, scenario-state breakpoints and deterministic simulation stepping."
+      rationale:
+        - "Accepted during the 2026-08-19 Workshop design review, but deliberately excluded from M6 because instrumenting Rhai execution is a distinct debugging-runtime project rather than a requirement for replacing the existing editor."
+    architecture:
+      kind: roadmap-milestone
+      authority: non-authoritative
+      coordinates: [gm-milestone-integrated-workshop]
+      runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]

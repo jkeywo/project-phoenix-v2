@@ -131,6 +131,17 @@ jobs:
           PHOENIX_DEMO_BUILD: 'true'
         run: cargo test --lib -- build_flags command_admission::debug_route route_is_absent_from_a_demo_build
 
+      # `host` and `capture` each gate a binary CI never otherwise builds
+      # (native delivery host / offscreen billboard-atlas + LOD-tuning tools —
+      # neither ships in the default or wasm feature set, and neither test
+      # invocation above passes their feature flags). A debug build is enough
+      # to catch a compile break; nothing here needs to RUN, so this rides the
+      # same cache as the steps above rather than paying for a release profile.
+      - name: Build the host and capture-tooling binaries
+        run: |
+          cargo build --features host --bin phoenix-host
+          cargo build --features capture --bins
+
   # ── Viewer tests (`--features viewer`) ────────────────────────────────────────
   #
   # The standalone model/shader viewer's own tests, EXECUTED. Until this job

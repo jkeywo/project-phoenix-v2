@@ -6,21 +6,24 @@ The station system maps player count → ordered station definitions, drives the
 
 ## Module split
 
-The station code lives in two modules under `src/lobby/`:
+> **Staleness note:** this page predates the B3/B4 (#533/#534) station-layout
+> rewrite and the #601/#605 admission-gate changes below. `stations_policy.rs`
+> — the sibling module this page originally documented alongside
+> `stations_config` — was a tombstone alias with no live members by the time
+> it was deleted outright; the `reassign_on_join`/`reassign_on_leave`/
+> `advance_on_join` functions and the `complexity_presets` section further
+> down describe that pre-B3/B4 shape and may no longer be accurate. This page
+> needs a pass against current `src/lobby/stations_config.rs` and whatever
+> replaced the deleted policy functions before it can be trusted.
 
-| Module | Path | Responsibility |
-|--------|------|---------------|
-| `stations_config` | `src/lobby/stations_config.rs` | TOML deserialization, `ShipStations`, `StationDef`, `parse_and_validate`, `get_station`, `all_stations_filled` |
-| `stations_policy` | `src/lobby/stations_policy.rs` | Pure assignment policy: `reassign_on_join`, `reassign_on_leave`, `advance_on_join`, spectator FIFO interactions |
-
-Both are re-exported at crate root via `src/lib.rs`:
+The station config code lives in `src/lobby/stations_config.rs`, re-exported
+at crate root via `src/lib.rs`:
 
 ```rust
 pub use lobby::stations_config;
-pub use lobby::stations_policy;
 ```
 
-The old `src/stations.rs` shim has been deleted (issue #242). All call sites now import directly from `crate::stations_config` or `crate::stations_policy`.
+The old `src/stations.rs` shim has been deleted (issue #242). All call sites now import directly from `crate::stations_config`.
 
 ## Config (`stations_config`)
 
@@ -55,16 +58,6 @@ next = "Bridge"        # optional — implicit if same name exists at count+1
 ```
 
 Loaded from `assets/player_ship.toml` at runtime.
-
-## Policy (`stations_policy`)
-
-Pure functions with no Bevy dependencies, imported via `crate::stations_policy::`:
-
-- `reassign_on_join(stations: &ShipStations, current: &StationAssignments, new_player: &str) -> StationAssignments` — cascades the N+1 station layout when a player joins; the new player is placed at the station with no predecessor.
-- `reassign_on_leave(stations: &ShipStations, current: &StationAssignments, leaving_player: &str, spectators: &VecDeque<String>) -> (StationAssignments, VecDeque<String>)` — cascades the N-1 station layout when a player leaves; promotes a spectator if a slot stays empty.
-- `advance_on_join(stations: &ShipStations, current: &StationAssignments) -> StationAssignments` — lobby-safe variant: advances existing assigned players to the N+1 layout without assigning the new joiner (they must select a station explicitly).
-
-Call sites import directly from `crate::stations_policy` rather than via the legacy `crate::stations` shim.
 
 ## Config-derived admission gate (#601)
 

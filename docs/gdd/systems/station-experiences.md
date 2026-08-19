@@ -5,11 +5,11 @@
 | Document | GDD-STATION-EXPERIENCES |
 | Status | Working draft; combines implemented station behaviour with clearly marked accepted direction |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-08-19 |
 | Scope | Player experience for Captain, Helm, Tactical, Sensors, Navigation, Comms, Shields, Power, and Repair |
 | Authority | Player-facing design overview. Ship TOML, console code, PASM, and runtime validation remain canonical. |
 
-This document defines what each console family should feel like to operate, what information and authority it owns, and what conversation it should create. A ship may bundle several families into one station or expose each as a separate seat; the experience contract belongs to the fine-system family rather than to a particular hull layout.
+This document defines what each console family should feel like to operate, what information and authority it owns, and what conversation it should create. A ship may bundle several families into one station or expose each as a separate seat. A human-seeking station preserves its complete authored surface when it is hosted as a tab elsewhere rather than decomposing back into loose family panels.
 
 Related documents: [Game Design Overview](../foundation/overview.md), [Ships and Ship Systems](./ships-and-systems.md), [Alliance Ships](../content/ships/alliance-ships.md), [AI and Backfill](./ai-and-backfill.md), [Onboarding, Tutorials, and Accessibility](../foundation/onboarding-accessibility.md), and [World and Environmental Systems](./world-environmental-systems.md).
 
@@ -24,6 +24,8 @@ Detailed mechanics: [Movement and Helm](../mechanics/movement.md), [Targeting an
 - Automation operates the same fine systems through the same admitted command paths as a human. Taking control should not switch to a second simulation model.
 - System damage, power, interference, range, and scenario state should alter what a console can truthfully show or do rather than merely recolour it.
 - Shared information should come from one authoritative producer. Human-visible facts and AI facts must not be separately derived versions that happen to agree.
+
+Every console uses one shared Hero Bar. It pins the player's directly held station first and lists visiting stations in hull-authored order. The selected station contributes its name, rating and authoritative capacity-weighted health; every tab keeps a separate health indicator plus an off-screen importance indicator. Alerts do not replace health or reorder tabs. One-off events clear when seen, while continuing critical conditions remain marked until resolved. Switching tabs preserves local UI context.
 
 ## Current and accepted control-depth model
 
@@ -136,7 +138,7 @@ Captain supplies priority; Sensors supplies hazard/contact interpretation; Navig
 
 ### Failure and automation
 
-Unreachable or invalid destinations must be refused visibly. Navigation is human-seeking: it should move to an available human-held station according to the hull’s complete authored order before falling back to AI. A visiting Navigation panel must not change the host station’s rating or hide its primary work.
+Unreachable or invalid destinations must be refused visibly. Navigation belongs to a human-seeking station surface: the complete authored Navigation UI seeks only its finite compatible fallback list before reaching AI. On a fallback host it appears as a peer Hero Bar tab, keeps its own visiting rating and never changes the host station’s rating.
 
 ## Comms
 
@@ -154,7 +156,7 @@ Captain should approve consequential promises and political posture; Navigation 
 
 ### Failure and automation
 
-Range, jamming, stale dialogue state, and invalid responses are authoritative refusals with visible feedback. Physical contacts may become unavailable while old messages remain readable. Comms is human-seeking and defaults to simplified control when visiting a station in the accepted complexity design. Captions and persistent text are native to current authored dialogue; any later voice must preserve the transcript and speaker identity.
+Range, jamming, stale dialogue state, and invalid responses are authoritative refusals with visible feedback. Physical contacts may become unavailable while old messages remain readable. Comms is a complete human-seeking station, normally using its authored Simplified visiting rating unless a scenario requires more. Planned human ship calls preserve an explicit typed-text alternative and speaker identity without recording voice/video content.
 
 ## Shields
 
@@ -212,7 +214,7 @@ A team in transit reveals no new detail and cannot be reprioritised as if alread
 
 ## Future Command
 
-Band A2's human-seeking Command system is normally hosted by Captain through hull data. It lists AI-controlled stations and sets authored standard, alert-neutral or objective-specific stances at station scale. It does not operate individual systems. Its complete lifecycle is defined in [Command and Crew Control](../mechanics/command-and-crew-control.md).
+Band A2's auxiliary human-seeking Command station is normally hosted by Captain through hull data and need not create another lobby seat. It lists AI-controlled stations and sets authored standard, alert-neutral or objective-specific stances at station scale. It does not operate individual systems. Its complete lifecycle and shared Hero Bar presentation are defined in [Command and Crew Control](../mechanics/command-and-crew-control.md).
 
 ## Future Operations and Medical
 

@@ -2,7 +2,7 @@
 
 Use these names consistently. Runtime detail belongs in code/wiki; intended behavior belongs in PASM.
 
-- **Station**: a fixed player seat identified by `StationId` and authored by a ship.
+- **Station**: an authored operable surface identified by `StationId`, owning a coherent UI and set of Systems. A primary Station may be a fixed player seat; an auxiliary Station may exist only as a hosted tab. A human-seeking Station retains its identity while being presented by another directly player-held Station.
 - **System**: a fine-grained operable capability identified by `SystemId`.
 - **Station Rating**: an authored station mode that selects which owned systems are AI-operated. `Backfill` operates every owned system.
 - **Control Source**: `Human`, `Ai`, or `Offline` authority for a system on a tick.

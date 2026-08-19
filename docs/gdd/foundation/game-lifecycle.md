@@ -5,13 +5,13 @@
 | Document | GDD-LIFECYCLE |
 | Status | Working draft |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-08-19 |
 | Scope | Enter game, connection lifecycle, lobby, scenario entry, scenario end, replay, and exit |
 | Authority | Design overview. Code and assets are runtime truth; PASM is design and architecture truth. |
 
 This document defines the player-facing lifecycle around a Phoenix scenario. It covers how a group forms, how a player's identity survives connection changes, how the crew enters and leaves a scenario, and what the game must preserve or discard at each boundary. Detailed network protocols, station mechanics, and scenario rules belong in their own specifications.
 
-Related documents: [Game Design Overview](./overview.md), [Campaign Continuity and Persistence](./campaign-continuity.md), [Onboarding and Accessibility](./onboarding-accessibility.md), [Station Experiences](../systems/station-experiences.md), [AI and Backfill](../systems/ai-and-backfill.md), and [Future Modes](../future/future-modes.md).
+Related documents: [Game Design Overview](./overview.md), [Campaign Continuity and Persistence](./campaign-continuity.md), [Onboarding and Accessibility](./onboarding-accessibility.md), [Station Experiences](../systems/station-experiences.md), [AI and Backfill](../systems/ai-and-backfill.md), [Native and Network Foundation](../systems/native-network-foundation.md), and [Future Modes](../future/future-modes.md).
 
 ## Lifecycle goals
 
@@ -70,11 +70,21 @@ The host opens Phoenix on a shared display or native host. The host becomes the 
 
 Startup failures should name the failed stage and offer a useful recovery action. Catalogue failure, content incompatibility, renderer failure, signalling failure, and missing relay capability are different problems and should not collapse into a generic loading screen.
 
+### Human-readable join codes
+
+Band A2 replaces raw PeerJS routing identifiers with typed human-readable codes. Client and server joining use separate project GUIDs, a shared compatible-release version GUID and separate five-letter suffixes. Ordinary players enter only the suffix or scan a QR code; the full `PROJECT_GUID_VERSION_GUID_CODE` form supports copying and diagnostics. Each ship host issues a private client code which no other host or simulation state sees. One privileged server code admits and recovers hosts in a multi-ship session.
+
+The rendezvous layer distinguishes unknown, wrong-type and version-mismatched codes before transport setup. The eventual host handshake still refuses incompatible protocol/content stamps authoritatively. Codes survive reconnects and mission transitions. Rotation is explicit and restricted to periods when no mission is running.
+
 ### Player entry
 
 A player scans the QR code or opens the join link. The client creates or recovers a session token and a display name, connects to the host, and sends an identification handshake. The host replies with a complete `Welcome` projection containing the current phase, player roster, selected ship's stations, ratings, and any live scenario state needed to reconstruct the console.
 
 No external account is required for baseline play. The session token identifies the player to this host; the transient WebRTC peer ID only routes the current connection.
+
+### Multi-ship host entry and replacement
+
+Before mission start, an open server code admits new ship hosts. Mission start freezes player-ship slots and their loadouts. Closing host admission blocks new slots but the same server code remains a recovery capability: a replacement machine can claim any currently disconnected fixed slot, never a connected one. While a ship host is absent, the remaining hosts apply an agreed tick-stamped transition and operate that ship through ordinary Backfill. A successful replacement restores the shared snapshot/history and rebinds the ship's existing client code so its players reconnect without receiving a new route.
 
 ### Joining before scenario selection
 

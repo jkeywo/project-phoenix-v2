@@ -1,0 +1,39 @@
+entities:
+  - decision: accessibility-private-effect-profile
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Private Effect-Named Accessibility Profile
+      summary: "Band A2 establishes one shared Accessibility settings surface and a private per-player profile used by web and native panes. Settings name functional effects such as text scale, contrast, motion, timing or assistance; they never name or infer a diagnosis. OS preferences supply defaults where available and explicit player overrides win."
+      rationale:
+        - "The profile belongs to the player/pane, not the physical bridge layout, station claim or scenario save."
+        - "Other players never receive the settings or reasons. Only a derived functional result required for eligibility or an explicitly requested assistance state crosses the client boundary."
+        - "A2 owns the schema and cheap presentation controls while the settings shell, native panes and shared Hero Bar are already changing; later bands add deeper assistance without replacing the profile."
+    game_design:
+      must_not_be: [labelled by medical need, exposed to other players, stored as part of a bridge hardware profile, allowed to make the browser route secondary]
+
+  - decision: accessibility-station-eligibility-contract
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Anonymous Station and Rating Eligibility
+      summary: "A client evaluates whether the complete station surface at a required rating is compatible with its private profile and publishes only an eligible/ineligible functional result. Station selection explains incompatibility locally; the human-seeking resolver skips an ineligible destination without disclosing why."
+      rationale:
+        - "Eligibility covers the base hull at full supported player count. It does not account for missing players or guarantee that one person can operate every station required by a complex scenario."
+        - "Every base hull must validate at least one compatible station/rating under the complete supported option set for a simple scenario. Band B adds the scenario-floor composition and authoring validation on A2's transport/resolver seam."
+        - "Assistance is a per-function override layered separately from station rating even when both delegate work to the same limited-AI policy runtime."
+    game_design:
+      must_not_be: [a disclosure of enabled settings, a promise of solo complex-scenario completion, implemented as a second automation engine]
+
+  - decision: accessibility-incremental-delivery
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Accessibility Delivered Across Bands A2–I
+      summary: "Accessibility is one continuing programme with concrete increments in each release: A2 settings/profile/presentation/eligibility seams; B complexity composition and validation; C alternative motion/docking/multi-ship paths; D mastery-task assistance; E dense tactical information; F continuing-mode navigation and return; G strategy; H generation constraints; I alternative participation and completion audit."
+      rationale:
+        - "An increment lands when the owning UI, authority or authoring seam is already changing, avoiding a late retrofit. It need not be fictionally or mechanically tied to the band’s headline content."
+        - "Every band still has its own visual/UX polish pass. Accessibility is planned and tested alongside that pass but remains a distinct set of requirements."
+        - "Band I completes richer authorised spectator monitors and the whole-product audit; it is not the first point at which accessibility work occurs."
+    game_design:
+      must_not_be: [deferred as one final polish project, treated as identical to difficulty, required to map one-to-one onto scenario fiction]

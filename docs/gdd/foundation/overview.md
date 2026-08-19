@@ -124,7 +124,7 @@ Presentation should support the ensemble fantasy: the viewscreen supplies shared
 
 ## Setup and bridge scale
 
-Zero-setup browser play is the product baseline. Work has begun on native host delivery; later extensions may include native clients, P2P multi-ship sessions, custom peripherals, and event-output integrations for lighting, smoke, sound, or other venue systems. A group may therefore play with a television and phones, build one physical console, or construct a complete event bridge.
+Zero-setup browser play is the product baseline. Work has begun on native host delivery, and Band A2 now includes the Phoenix WebSocket/RTC transport plus a true Windows host with native viewscreen rendering and Ultralight local stations. Later extensions may add custom peripherals and event-output integrations for lighting, smoke, sound, or other venue systems. A group may therefore play with a television and phones, build one physical console, or construct a complete event bridge.
 
 All such integrations are optional adapters around the same authoritative game and station model. Scenario rules and ordinary controls must remain playable through the baseline browser route. PASM currently records external show hardware as not planned while requiring the cue path not to preclude future integration; this overview treats it as a permitted extension direction, not committed roadmap scope.
 
@@ -137,7 +137,7 @@ Phoenix deliberately does not pursue:
 - moment-to-moment simulation of every member of a large NPC crew as an autonomous person;
 - galaxy-scale traversal or billions of star systems;
 - valve-level or component-by-component hardware manipulation;
-- terrain-following atmospheric or character-scale planetary exploration; a coarse wrapping Orbital Mode is accepted but unscheduled;
+- terrain-following atmospheric or character-scale planetary exploration; Band H's coarse wrapping Orbital Mode remains deliberately below that scope;
 - astronomical formation simulation;
 - isolated station minigames whose state does not matter to the rest of the ship;
 - a setup flow that requires every player to install software or configure a local network.

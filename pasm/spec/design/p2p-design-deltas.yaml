@@ -88,12 +88,38 @@ entities:
       status: accepted
       confidence: confirmed
       title: The Delivered PeerJS Layer Is a Crew Star With a TURN Worker, Not a Mesh
-      summary: "#620 assumed the host-to-host mesh sits beside an unchanged crew star, and that is still the right shape — but nothing mesh-shaped exists yet. Delivered: one host tab running the WASM sim, crew clients connecting over PeerJS DataChannels (gui/connection-manager.js) with exponential backoff and connect-timeout schedules, PeerJS cloud signalling, a Cloudflare Worker minting short-lived ICE credentials from Metered and Cloudflare Realtime TURN behind an ALLOWED_ORIGIN CORS gate, an OpenRelay fallback, and a BroadcastChannel-backed peerjs-shim for multi-tab browser tests. #854 must add symmetric peer discovery by world/session code, a host-to-host message set separate from ClientMessage/ServerMessage, and mesh routing in the shim — and must treat the TURN worker's origin allowlist as a first-class deployment concern, since a stale deployed ALLOWED_ORIGIN has already silently stripped TURN once."
+      summary: "#620 assumed the host-to-host mesh sits beside a crew star, and that topology remains right while the transport changes. Delivered today: one host tab running the WASM sim, crew clients connecting over PeerJS DataChannels, PeerJS cloud signalling, TURN credential workers/fallback and a BroadcastChannel peerjs-shim. Band A2 replaces PeerJS with a Phoenix secure-WebSocket rendezvous/signalling service, direct or TURN-relayed WebRTC DataChannels and typed human-readable join namespaces. The host-to-host message set remains separate from ClientMessage/ServerMessage, and the browser crew star remains a complete route."
       rationale:
         - "The crew protocol stays JSON over the MessageCodec seam and stays unchanged, exactly as #620 required; the host-to-host set is free to choose its own encoding for large snapshot payloads without touching it."
-        - "The existing shim already simulates severed and offline pairs, so partition and rejoin cases are testable in-browser without new infrastructure once it routes host-to-host traffic."
+        - "The existing shim already simulates severed and offline pairs, so partition and rejoin cases remain reusable behavioral prior art even if the concrete PeerJS surface is retired."
+        - "Managed TURN, candidate diagnostics and relay-degraded warnings are product requirements because public Wi-Fi, mobile hotspots and separate mobile networks cannot rely on direct candidates."
     game_design:
       must_not_be: [layered onto ClientMessage/ServerMessage, dependent on a TURN allowlist that is not verified at deploy time]
+
+  - decision: p2p-human-readable-join-namespaces
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Typed Human-Readable Join Namespaces
+      summary: "Client and server joining use different stable project GUIDs, one shared compatible-release version GUID and independently issued five-letter suffixes. Normal entry supplies only the suffix from local project/version context; the full PROJECT_GUID_VERSION_GUID_CODE form is portable. Every ship host owns a client code invisible to simulation and other hosts, while the multi-ship session owns one privileged server code."
+      rationale:
+        - "Suffix input is case-insensitive, normalises 0 to O and 1 or L to I, retains J as distinct, collision-checks within its typed namespace and refuses offensive/misleading results."
+        - "Rendezvous reports unknown, wrong-type and version-mismatch failures precisely. The target host still performs the authoritative protocol/content stamp check."
+        - "Codes persist for the session and through host recovery. Client-code or server-code rotation is explicit and only allowed while no mission is running."
+    game_design:
+      must_not_be: [stored in authoritative simulation state, shared from one ship host to another, treated as a replacement for the host compatibility handshake]
+
+  - decision: p2p-fixed-host-slot-recovery
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Fixed Host-Slot Recovery
+      summary: "Before mission start an open server code may admit new ship hosts. Mission start freezes player-ship slots and loadouts. Afterwards the same server code may be entered on any replacement machine to claim a disconnected fixed slot, but cannot add a slot or displace a connected host. The first synchronised valid claim wins."
+      rationale:
+        - "A disconnected player ship transitions at one agreed tick to ordinary Backfill on the remaining hosts. Replacement restores the shared snapshot/history, resumes the same slot and causes rendezvous to rebind the existing private client code."
+        - "The server code is therefore a privileged fleet recovery capability. Closing new-host admission does not invalidate it for a known disconnected slot."
+    game_design:
+      must_not_be: [allowed to mutate ship/loadout topology after mission start, allowed to displace a connected host, implemented as a second simplified ship simulation]
 
   - decision: p2p-delta-backfill-replaces-auto-crew
     core:

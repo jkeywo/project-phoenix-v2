@@ -68,7 +68,7 @@ Orbital or strongly relative scenarios should build on the same identity, waypoi
 
 Band C adds docking as a relative-motion operation: approach, request clearance, enter the authored docking envelope, dock and undock. Band D adds docked repair, replenishment and resource transfer. Band F adds loadout refit and campaign reactor rewards at authored starbases.
 
-Band F's generated-world foundation uses discrete warp jumps between systems rather than continuous interstellar flight. Warp fuel is distinct from local propellant and normally abundant; aid, damage, sabotage, unusual route costs or hazards may make it consequential. Planetary Orbital Mode is accepted but unscheduled and described in [Planned but Not Scheduled](../future/planned-not-scheduled.md).
+Band F's authored continuing-run foundation uses discrete warp jumps between systems rather than continuous interstellar flight. Warp fuel is distinct from local propellant and normally abundant; aid, damage, sabotage, unusual route costs or hazards may make it consequential. Band H adds the coarse planetary Orbital Mode described in [Release Bands G–I](../future/release-bands-g-i.md).
 
 ## Authoring and tuning
 

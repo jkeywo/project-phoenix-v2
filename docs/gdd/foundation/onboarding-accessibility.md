@@ -13,7 +13,7 @@ Phoenix should let a group enter play without studying a rulebook, while still r
 
 Related documents: [Game and Session Lifecycle](./game-lifecycle.md), [Campaign Continuity and Persistence](./campaign-continuity.md), [Station Experiences](../systems/station-experiences.md), [Ships and Ship Systems](../systems/ships-and-systems.md), [AI and Backfill](../systems/ai-and-backfill.md), [Difficulty, Balance, and Playtesting](./difficulty-balance-playtesting.md), and [Future Modes](../future/future-modes.md).
 
-Future crew-control details: [Command and Crew Control](../mechanics/command-and-crew-control.md) and [Planned but Not Scheduled](../future/planned-not-scheduled.md).
+Future crew-control and delivery details: [Command and Crew Control](../mechanics/command-and-crew-control.md), [Release Bands G–I](../future/release-bands-g-i.md), and [Planned but Not Scheduled](../future/planned-not-scheduled.md).
 
 ## Onboarding goals
 
@@ -141,7 +141,11 @@ Local presentation/input preferences include text scale, contrast theme, reduced
 
 Planned accessibility assistance is personal but may affect authoritative control ownership. A profile names functional effects and requested assistance, never diagnoses; any player may enable any setting for any reason. The host combines the private profile with hull capabilities to show station suitability and delegate named subfunctions to the same limited-AI machinery used by the complexity ladder. Other players can see the assisted function or unsuitable station, but not the setting or reason behind it.
 
-A genuinely incompatible station is greyed out with an explanation, and human-seeking placement skips that player. Complete lockout should be rare. Every base playable hull at full supported player count must author at least one station/rating combination usable with the complete supported option set in a simple scenario. This guarantee does not cover understaffed play, scenario-added duties or solo completion of complex content.
+A genuinely incompatible station is greyed out with an explanation, and human-seeking placement skips that player when the complete visiting station cannot be used at its scenario-required rating. Complete lockout should be rare. Every base playable hull at full supported player count must author at least one station/rating combination usable with the complete supported option set in a simple scenario. This guarantee does not cover understaffed play, scenario-added duties or solo completion of complex content.
+
+## Roadmap integration
+
+Accessibility is delivered incrementally from Band A2 rather than held for a late retrofit. A2 establishes the shared settings/profile, presentation and anonymous eligibility seams while its settings shell, Hero Bar, station resolver and native panes are changing. B composes assistance with station ratings and scenario floors. C covers alternative relative-motion, docking and multi-ship interaction paths. D adds assistance for mastery-heavy Engineering work. E addresses dense tactical information and sensory load. F adds continuing-mode maps, summaries and return support. G adds strategic alternatives, H makes accessibility a generation constraint, and I completes richer spectator participation and a whole-product audit. The detailed allocation is maintained in [Release Bands G–I](../future/release-bands-g-i.md).
 
 ## Validation and playtesting
 

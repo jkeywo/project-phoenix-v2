@@ -4,7 +4,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: GM Console Milestones to Fully-Featured GM Interface
-      summary: "The GM console (PRD #930) arrives in three MVP milestones after P2P mesh delivery (#854) — GM peer tracer, directing, performing — then grows to a fully-featured facilitation interface through facilitation assistance, operations and safety, information control, in-sim presentation, and campaign continuity with deep pacing. External show hardware and AI-drafted NPC replies are explicitly not planned."
+      summary: "The GM console (PRD #930) arrives in three MVP milestones after the Band A2 Phoenix mesh delivery (#854) — GM peer tracer, directing, performing — then grows to a fully-featured facilitation interface through facilitation assistance, operations and safety, information control, in-sim presentation, and campaign continuity with deep pacing. External show hardware and AI-drafted NPC replies are explicitly not planned."
       rationale:
         - "Milestone ladder and ordering settled 2026-08-02 in the session that published PRD #930: facilitation assistance is the first post-MVP milestone, then operations and safety before information control, presentation stays in-sim only, and campaign persistence plus pacing heuristics complete the endgame."
         - "Nothing here un-parks #930: no GM work begins before #854 nears completion, and each post-MVP milestone becomes its own PRD only when it comes due."

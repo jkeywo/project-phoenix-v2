@@ -3,16 +3,26 @@
 | Field | Value |
 |---|---|
 | Status | Accepted direction without a release band |
-| Scope | Dependency-grouped features that do not currently fit Bands B–F |
+| Scope | Dependency-grouped features that do not currently fit Bands A2–I |
 | Audience | Design, roadmap, content and future planning |
 
 These features are accepted parts of Phoenix's long-term design but have no promised release band. Their order below expresses dependencies, not priority or delivery sequence. Work should enter a band only when its supporting systems, scenario proof and release capacity are clear.
 
-Related documents: [Future Modes](./future-modes.md), [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md), [Command and Crew Control](../mechanics/command-and-crew-control.md), [Campaign Continuity](../foundation/campaign-continuity.md), and [World and Environmental Systems](../systems/world-environmental-systems.md).
+Related documents: [Future Modes](./future-modes.md), [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md), [Command and Crew Control](../mechanics/command-and-crew-control.md), [Native and Network Foundation](../systems/native-network-foundation.md), [Campaign Continuity](../foundation/campaign-continuity.md), and [World and Environmental Systems](../systems/world-environmental-systems.md).
 
-## Duty Teams, Away Missions and Medical
+## Human ship-to-ship media
 
-The shared personnel foundation comprises typed anonymous Duty Teams, named Duty Officer leaders, system assignments, personnel consequences, multiple Operations systems, shuttle/transporter deployment, branching off-screen Away Missions, boarding, internal defence and Medical. It depends on campaign persistence, the station database framework and normal authoritative scenario effects.
+Human-controlled ships may establish one-to-one voice, video and typed-text calls through their ordinary simulated Comms relationship. A call requires a known reachable contact, an explicit hail and acceptance by the human currently controlling each ship's Comms station. Range, interference, damage and jamming govern availability. A short interrupted-link grace period retries silently with media muted; expiry requires another hail. The first version treats simulated reachability as connected or interrupted rather than deliberately degrading packets.
+
+Each ship controls its end independently. While private, the call sends from and receives through the device presenting that ship's Comms station, producing Comms-to-Comms, bridge-to-Comms or bridge-to-bridge combinations. Putting a call on screen moves audio and video together as one live endpoint handoff to the viewscreen device. It is not possible to promote only one medium. Comms retains call authority while the shared viewscreen follows the existing latest-valid-request-wins policy; when another valid request displaces Comms, the call returns to the private endpoint without ending. Switching away from the Comms station tab does not end or promote a private call, and the Hero Bar retains active-call, mute and attention state.
+
+The zero-setup source is the device presenting the endpoint. Native bridge profiles may instead assign separate cameras, microphones and outputs to the private Comms surface and viewscreen. Promotion shows a clear transition and transmission state. Hardware or permission failure leaves the established private call intact. Neither side transmits microphone or camera data before acceptance, and no media content is recorded. Phoenix may retain call participants, times, routing state and interruption reason. Live captions remain transient; deliberate typed messages enter the ordinary Comms record with ship and speaker identity.
+
+This feature ships with its Discord bot rather than treating Discord as a later add-on, because Discord is the first planned test environment. A host-configured bot acts as that ship's bridge endpoint, streams the viewscreen and bridge audio, and returns remote media while obeying the same reachability, consent, routing and mute rules. Browser-to-browser calls remain a complete supported path. Fleet conferences and open voice rooms are out of scope for the first delivery.
+
+## Duty Teams, Away Missions and Medical — scheduled for Band G
+
+The shared personnel foundation comprises typed anonymous Duty Teams, named Duty Officer leaders, system assignments, personnel consequences, multiple Operations systems, shuttle/transporter deployment, branching off-screen Away Missions, boarding, internal defence and Medical. Its minimum complete vertical is now scheduled for Band G and proven by the authored War run.
 
 This cluster is detailed in [Duty Teams, Officers and Operations](../mechanics/duty-teams-and-operations.md). It should ship as a vertical mission slice rather than as a roster screen without playable assignments.
 
@@ -30,45 +40,45 @@ Cloaking extends Band E signature management. A cloak suppresses detection rathe
 
 Band E supplies the Jam, Spoof and Harden MVP. Later EWar may add remote disruption and access operations, but every effect must remain authored, inspectable and integrated with Sensors, Comms, signatures and modifiers.
 
-### Surrender
+### Surrender — scheduled for Band G
 
 Comms may offer or demand surrender. The receiving actor evaluates authored conditions and may accept, refuse, counteroffer or feign compliance. Acceptance changes objectives, hostility and vessel orders without automatically despawning or transferring ownership. Player surrender is likewise a scenario-authored outcome.
 
 ### Self-destruct
 
-Self-destruct uses several dedicated human-seeking interlock systems distributed across stations. Every interlock must be activated. If station consolidation gives one player multiple interlocks, they remain separately labelled actions and all still require deliberate activation. A visible cancellable countdown precedes scenario-authored physical and campaign consequences.
+Self-destruct uses several dedicated interlocks distributed through human-seeking station surfaces. Every interlock must be activated. If station consolidation gives one player multiple interlocks, they remain separately labelled actions and all still require deliberate activation. A visible cancellable countdown precedes scenario-authored physical and campaign consequences.
 
-## Accessibility assistance and advanced spectators
+## Accessibility assistance and advanced spectators — distributed A2–I
 
-Personal accessibility profiles may delegate named subfunctions to the same limited-AI machinery used by the complexity ladder. Settings describe effects rather than diagnoses and remain private. Station selection shows suitability, explains genuine incompatibility and causes human-seeking systems to skip an incompatible player.
+Personal accessibility profiles may delegate named subfunctions to the same limited-AI machinery used by the complexity ladder. Settings describe effects rather than diagnoses and remain private. Station selection shows suitability, explains genuine incompatibility and causes a complete human-seeking station to skip an incompatible player at its required rating. This work now begins with A2's settings, Hero Bar and eligibility seams and advances through every later band.
 
-Every base hull at full supported player count must retain one accessible station/rating for a simple scenario, without guaranteeing solo operation of complex content. Rich spectator mode adds authorised system-monitor selection beyond Band A2's summary-screen MVP.
+Every base hull at full supported player count must retain one accessible station/rating for a simple scenario, without guaranteeing solo operation of complex content. Rich spectator mode adds authorised system-monitor selection in Band I beyond Band A2's summary-screen MVP. The complete distribution is in [Release Bands G–I](./release-bands-g-i.md).
 
-## Pursuit
+## Pursuit — scheduled for Band G
 
 Pursuit is an authoritative relationship between a pursued actor and a named pursuing force. Between systems the force is abstract and advances against a lead or interception clock; on contact it materialises as ordinary world entities. Warp choices, repairs, detours, signatures, misinformation and local actions change the lead.
 
 The simulation keeps exact state while the crew receives an Intelligence estimate: last confirmed position, likely route, evidence-derived countdown, uncertainty interval and graded interception risk. Stronger evidence narrows the interval. The same system may support a single scenario, Patrol arc or War run.
 
-## War Mode
+## War Mode — scheduled for Bands G–H
 
-War Mode follows the Patrol MVP and reuses its seeded generator and Director. Each run creates one decisive destination mission. The crew jumps through intervening systems, gathering allies and supplies, weakening opponents and changing the conditions of that final mission through ordinary bridge play.
+Band G ships one authored War run after the authored Patrol MVP. Each run creates one decisive destination mission. The crew jumps through intervening systems, gathering allies and supplies, weakening opponents and changing the conditions of that final mission through ordinary bridge play. Band H adds procedural generation for War and Patrol together.
 
 The player remains aboard one ship. Sector control, fronts and fleet disposition are coarse campaign state. Allied ships remain autonomous; the crew issues high-level assignments through Comms, and allies may accept, refuse, negotiate or fail to comply according to authority, standing and circumstances.
 
-## Sandbox Mode
+## Sandbox Mode — scheduled for Band I
 
 Sandbox follows War Mode and deepens the shared actor-and-economy layer. Routes, production, consumption, shortages, cargo and faction needs change through discrete events and player action rather than continuous galaxy simulation. Players choose their own assignments in a persistent world.
 
 The shared Director has greater freedom in Sandbox because there is no fixed Patrol assignment chain or War destination objective. It may offer missions from central command, generate crises and advance actors. The mode also provides the foundation for GM-controlled sessions, with the GM able to shape or override Director activity.
 
-## Shared generated-world foundation
+## Shared generated-world foundation — scheduled for Bands F–I
 
-Patrol, War and Sandbox use one generator and Director with different mode profiles. Bulk resources begin in Band D; later trade adds discrete cargo lots with type, quantity, owner, destination and scenario tags. Reputation remains layered by actor, faction and institution rather than collapsing into one score.
+Band F establishes the authored Patrol run shell and mode-profile seam. Band G adds authored War and strategic state. Band H supplies the shared generator and Director for Patrol and War. Band I consumes them for Sandbox under a wider profile. Bulk resources begin in Band D; Band I trade adds discrete cargo lots with type, quantity, owner, destination and scenario tags. Reputation remains layered by actor, faction and institution rather than collapsing into one score.
 
 Warp is discrete system-to-system transit. Warp fuel is distinct from local main-drive propellant but normally abundant; it becomes consequential through aid, loss, sabotage, unusual route costs or authored hazards. Transit may trigger events without simulating continuous interstellar flight.
 
-## Planetary Orbital Mode
+## Planetary Orbital Mode — scheduled for Band H
 
 A ship enters Orbital Mode by approaching a planet's transition envelope. Impulse is disabled and normal planar controls move the ship across a coarse wrapping global surface map. Authored or generated points of interest support scans, Comms, Away Missions and external operations.
 

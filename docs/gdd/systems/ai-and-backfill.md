@@ -5,7 +5,7 @@
 | Document | GDD-AI-BACKFILL |
 | Status | Working draft; current behaviour and transitional architecture are identified explicitly |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-08-19 |
 | Scope | Vacant-station operation, human/AI handoff, NPC doctrine, information parity, transparency, and difficulty boundaries |
 | Authority | Player-facing AI design. PASM, ship TOML, command admission, and runtime systems are authoritative. |
 
@@ -49,7 +49,7 @@ Current station ratings author which owned systems are automated. The station ho
 
 The accepted future star ladder adds simplified and detailed control rungs per system. Simplified control means a limited AI drives the full model from human-selected summary settings; it does not replace the system with a lower-fidelity simulation. Star 0 remains full Backfill. This ladder is accepted direction, not the current complete interface.
 
-Human-seeking systems such as Navigation and Comms walk a complete authored station order, owner first, and attach to the first human-held station. They fall back to AI only when no human is available. Visiting systems carry their own control depth and do not inflate the host station’s rating.
+Human-seeking is accepted at station rather than fine-system scale. A primary station prefers its active direct holder; otherwise it walks a finite authored fallback list containing only compatible host stations and then falls back to AI. An auxiliary station may have no dedicated seat. Only directly player-held stations can host a visitor, and the visiting station retains its complete UI, identity, rating, systems and state. Its authored visiting rating is independent of the host station and may be raised by a scenario floor.
 
 ## AI decision model
 
@@ -129,7 +129,7 @@ Backfill is primarily workload support, not a difficulty selector. Making a stat
 - Exactly one control source can command each fine system at a time.
 - Human and AI commands reach the same authoritative handler and produce identical rules-level effects.
 - Every authored AI world reading on a player-capable hull has a rendered human counterpart from the same producer, with documented exceptions only for derived policy state.
-- Disconnect, reconnect, station claim, rating change, and human-seeking movement preserve a coherent control source.
+- Disconnect, reconnect, station claim, rating change, and complete human-seeking-station movement preserve coherent ownership, hosting and fine-system control sources.
 - AI cannot bypass damage, range, power, faction, alert, ammunition, or scenario authority.
 - Seeded tests cover doctrine and outcome stability; human playtests cover helpfulness, legibility, workload, and perceived agency.
 

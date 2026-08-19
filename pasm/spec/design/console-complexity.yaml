@@ -35,15 +35,30 @@ entities:
     game_design:
       must_not_be: [the only home of a time-pressured action, locked out at red alert]
 
-  - decision: console-complexity-human-seeking-systems
+  - decision: console-complexity-human-seeking-stations
     core:
       status: accepted
       confidence: confirmed
-      title: Human-Seeking Systems
-      summary: "Comms and navigation always try to be under human control: each walks an authored station order until it finds a human-held station, where it appears as extra buttons beside the hero bar (the destroyer-tactical precedent). With no human anywhere in the order, the system falls back to AI control exactly as today. A floating system carries its own control tier — default simplified — independent of the host station's rung, so hosting a visiting system never changes the host's star."
+      title: Human-Seeking Stations
+      summary: "A human-seeking station retains its complete station identity, systems and UI while resolving onto a directly player-held host station, where the shared Hero Bar presents it as a peer tab. Primary stations remain separately claimable; auxiliary stations such as Command may have no dedicated seat. Resolution prefers a direct active holder, then walks only the station's finite authored fallback list, then assigns AI. A visiting station uses its own authored visiting rating, raised where necessary by the scenario detail floor, and never changes the host station's rating."
       rationale:
-        - "The seek order only ever chooses among human-held stations: the mechanism prefers any human over the AI, it never forces a human."
-        - "Scenarios can mark additional systems human-seeking through the scenario-floor vocabulary."
-        - "The order is derived by default — the system's own station, then the remaining stations as authored — and a hull may override it per system with an explicit seek_order. That list is a PERMUTATION of the hull's stations headed by the system's own: an order reorders, it does not filter, so authoring one can never strand a seated human behind an omitted station, and owner-first stays visible in the text rather than being silently prepended. The destroyer authors Tactical, Engineering, Captain, Helm for both systems — Engineering promoted ahead of the Captain, whose attention is meant to stay on the whole board."
+        - "Station-scale movement preserves authored UI, alerts, health and control depth instead of rebuilding fragments of a station on every possible host. Comms and Navigation migrate from the delivered fine-system seek onto this complete-station model."
+        - "Only directly player-held stations are eligible hosts. A visiting station cannot host another visiting station, preventing nested tabs, transitive authority and cycles."
+        - "Fallback lists are deliberately partial. Compatibility is an authored design choice, so an exhausted list reaches AI even if an unrelated human remains seated. Battleship content in Band D uses Power → Repair → AI and Shields → Sensors → AI."
+        - "A disconnected or AFK direct holder retains seat ownership but is temporarily ineligible; the station seeks a fallback host and returns intact when its holder becomes active. Accessibility eligibility applies to the complete visiting surface at its scenario-required rating, while the player's private settings remain undisclosed."
+        - "Placement is automatic. The host player is not asked to understand or manually decline the resolver."
     game_design:
-      must_not_be: [allowed to inflate the host station's star rating, used to force a station onto an unwilling holder, authored as a partial order that leaves a station unreachable]
+      must_not_be: [split into independently moving systems, allowed to inflate the host station's star rating, nested through another visiting station, exposed as a manual placement puzzle]
+
+  - decision: console-shared-hero-bar
+    core:
+      status: accepted
+      confidence: confirmed
+      title: Shared Station Hero Bar
+      summary: "Every console uses one shared Hero Bar shell. It pins the directly held station first, follows with visiting stations in hull-authored order, and shows the selected station's name, rating and authoritative capacity-weighted health. Every tab retains a separate health indicator and an importance indicator for off-screen events. Selecting a tab swaps the complete station surface without discarding local UI context."
+      rationale:
+        - "Alerts never replace health and never reorder tabs. One-off important events remain unread until their station is visited; continuing critical conditions remain indicated until resolved. Alert semantics come from authoritative or authored station events rather than client guesses."
+        - "The host publishes station health as current damageable-system capacity divided by maximum capacity. Clients do not infer it from their recipient-specific detail projection; a station with no damageable systems has a neutral no-damage-model state."
+        - "If a selected visiting station leaves, focus returns to the primary tab. A later return restores its session-local UI state but does not steal focus."
+    game_design:
+      must_not_be: [implemented independently by each console page, allowed to hide station health behind an alert, reordered in response to urgency]

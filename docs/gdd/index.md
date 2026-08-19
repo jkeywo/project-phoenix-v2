@@ -5,7 +5,7 @@
 | Document | GDD-INDEX |
 | Status | Working draft |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-08-19 |
 | Scope | Navigation, document authority, current coverage, and recommended next documents |
 | Authority | Orientation only. Linked code, assets, PASM, and project planning remain canonical for their domains. |
 
@@ -29,9 +29,11 @@ The Project Phoenix GDD is federated: short design documents explain player-faci
 | [Thin Margin Setting](./foundation/thin-margin-setting.md) | Synthesised tone, institutions, technology, dialogue, visual/audio language, and open canon decisions |
 | [Onboarding and Accessibility](./foundation/onboarding-accessibility.md) | First-session flow, tutorials, manuals, handover, facilitation, sensory/input alternatives, and testing |
 | [AI and Backfill](./systems/ai-and-backfill.md) | Control-source symmetry, station automation, NPC doctrine, information parity, transparency, and handoff |
+| [Native and Network Foundation](./systems/native-network-foundation.md) | Band A2 join codes, RTC transport, host recovery, Windows native bridge, Ultralight, displays, touch and media devices |
 | [Difficulty and Balance](./foundation/difficulty-balance-playtesting.md) | Balance dimensions, evidence ladder, crew workload, accessibility boundary, metrics, and tuning process |
 | [World and Environmental Systems](./systems/world-environmental-systems.md) | Space, terrain, asteroids, regions/fields, traffic, infrastructure, operations, observation, and evidence |
 | [Future Modes](./future/future-modes.md) | Multi-ship, Patrol Mode, customisation, crew assignments, native/physical bridges, show control, and GM tools |
+| [Release Bands G–I](./future/release-bands-g-i.md) | Authored War, Patrol/War PCG, Sandbox, supporting features, technical work, polish and distributed accessibility |
 | [Movement and Helm](./mechanics/movement.md) | Motion authority, axes, impulse, boost, coordination, damage and accepted 3D direction |
 | [Targeting and Weapons](./mechanics/targeting-weapons.md) | Combat lock, phasers, blasters, torpedoes, readiness and arc-bearing coordination |
 | [Damage, Diagnosis and Repair](./mechanics/damage-repair.md) | Damage routing, information boundaries, repair teams, priorities and defeat |
@@ -41,13 +43,13 @@ The Project Phoenix GDD is federated: short design documents explain player-faci
 | [Navigation and Relative Motion](./mechanics/navigation-relative-motion.md) | Chart, waypoints, Helm boundary, traffic orders, reference frames and 3D direction |
 | [Comms and Commitments](./mechanics/comms-commitments.md) | Dialogue, reachability, response authority, promises, settlement and continuity |
 | [External Operations](./mechanics/external-operations.md) | Stabilise, tow, escort, transfer and field-repair holds across ship systems |
-| [Command and Crew Control](./mechanics/command-and-crew-control.md) | Band A2 Command stances, AI direction, spectators, AFK and human-seeking placement |
+| [Command and Crew Control](./mechanics/command-and-crew-control.md) | Band A2 Command stances, spectators, AFK, human-seeking stations and shared Hero Bar |
 | [Duty Teams, Officers and Operations](./mechanics/duty-teams-and-operations.md) | Unscheduled workforce, personnel, Away Missions, boarding, Medical and Operations systems |
-| [Planned but Not Scheduled](./future/planned-not-scheduled.md) | Accepted future clusters outside Bands B–F and their dependency boundaries |
+| [Planned but Not Scheduled](./future/planned-not-scheduled.md) | Accepted future clusters outside Bands A2–I and their dependency boundaries |
 
 ## What these documents now cover
 
-Together, the set defines the game’s high-level identity, complete session and campaign journeys, principal authoring layers, station experiences, detailed interconnected mechanics, Band A2 crew control, B–F direction, accepted unscheduled dependency clusters, shared-setting relationship, onboarding/accessibility target, balance framework, world systems, current ship families and both current scenarios. Each page distinguishes shipped behavior from accepted direction and unscheduled extension; detailed schemas and tunables remain in their canonical sources.
+Together, the set defines the game’s high-level identity, complete session and campaign journeys, principal authoring layers, station experiences, detailed interconnected mechanics, both Band A2 Bridge Foundation tracks, B–I direction, accepted unscheduled dependency clusters, shared-setting relationship, onboarding/accessibility target, balance framework, world systems, current ship families and both current scenarios. Each page distinguishes shipped behavior from accepted direction and unscheduled extension; detailed schemas and tunables remain in their canonical sources.
 
 ## Remaining gaps
 
@@ -86,7 +88,7 @@ These should remain visibly deferred rather than filled with speculative recomme
 
 ## Recommended next sequence
 
-1. Break [Band A2](./mechanics/command-and-crew-control.md) into implementation work before Band B begins.
+1. Break the two Band A2 Bridge Foundations PRDs—[Crew Control](./mechanics/command-and-crew-control.md) and [Native and Network](./systems/native-network-foundation.md)—into implementation work before Band B begins.
 2. Review and ratify the Phoenix-era setting relationship, especially the Imperium name, House identities, chronology, and which facts are inherited versus local.
 3. Choose the first episode that consumes Falling Skyway’s projection and define its input bindings before expanding the full campaign shell.
 4. Run Combat Test and Falling Skyway playtests using the station, onboarding, AI, accessibility, balance, debrief, and continuity questions; ratify crew counts, pacing, workload, and measurable targets.

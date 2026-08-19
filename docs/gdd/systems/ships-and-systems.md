@@ -42,7 +42,7 @@ The possible player range is `0–Max Players per Ship`, where the maximum is no
 
 Each station authors an ordered set of ratings. A rating names the systems automated for that holder and may supply AI tuning. A fully manual rating automates little; simpler ratings automate more. An unclaimed or disconnected station keeps its holder relationship but its systems fall to Backfill control until the player reconnects or the station is reclaimed.
 
-Human-seeking systems such as comms or navigation may walk an authored station order to find any human-held console before accepting AI. The order must be a complete permutation with the owning station first. This preserves the principle that any available human is preferred without creating an invisible allow-list.
+Human-seeking stations such as Comms or Navigation preserve their full authored UI and walk a finite ordered list of compatible host stations before accepting AI. Their active direct holder is preferred; only directly player-held stations are eligible fallbacks, so visiting stations never nest. Partial lists are intentional compatibility rules rather than complete permutations.
 
 ## Fine-system catalogue
 

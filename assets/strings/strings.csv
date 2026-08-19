@@ -458,15 +458,6 @@ console.captain.shields_power,"captain console — ""Shields & Power"" panel hea
 console.captain.repair,"captain console — ""Repair"" panel heading",Repair
 console.captain.navigation,"captain console — ""Navigation"" panel heading",Navigation
 console.captain.comms,"captain console — ""Comms"" panel heading",Comms
-console.pilot.doc_title,Browser-tab title of the pilot console page,[Project Phoenix — Pilot Console]
-console.pilot.screen_label,Phone-frame screen label of the pilot console,Pilot Console
-console.pilot.title,pilot console — main hero heading,PILOT
-console.pilot.subtitle,pilot console — hero sub-heading under the title,COURIER
-console.pilot.radar,"pilot console — ""Radar"" panel heading",Radar
-console.pilot.flight_and_weapons,"pilot console — ""Flight & Weapons"" panel heading",[Flight & Weapons]
-console.pilot.navigation,"pilot console — ""Navigation"" panel heading",Navigation
-console.pilot.comms,"pilot console — ""Comms"" panel heading",Comms
-console.pilot.objectives,"pilot console — ""Objectives"" panel heading",Objectives
 console.courier_tactical.doc_title,Browser-tab title of the tactical console page,[Project Phoenix — Courier Tactical]
 console.courier_tactical.screen_label,Phone-frame screen label of the tactical console,Courier Tactical
 console.tactical.weapons,"tactical console — ""Weapons"" panel heading",Weapons
@@ -481,7 +472,6 @@ console.tactical.intel,"tactical console — ""Intel"" panel heading (issue #103
 console.common.no_waypoint,Console footer when no waypoint is set,NO WAYPOINT
 console.engineering.station_footer,engineering console — footer station name,ENGINEERING STATION
 console.science.station_footer,science console — footer station name,SCIENCE STATION
-console.pilot.station_footer,pilot console — footer station name,PILOT STATION
 console.common.active_hail,Comms footer while a hail with an unnamed sender is open,ACTIVE HAIL
 console.common.waypoint,Fallback name for an unnamed waypoint,WAYPOINT
 console.common.locked,Tactical footer when a target is locked but unnamed,LOCKED
@@ -495,8 +485,6 @@ console.common.navigation_panel,"Heading on the full-frame Navigation panel a co
 console.common.comms_panel,"Heading on the full-frame Comms panel a console opens when the seek parks Comms on it (issue #984)",Comms
 console.common.objectives_toggle,Button that toggles the objectives overlay,Objectives
 console.common.red_alert_badge,Badge shown while the ship is at red alert,Red Alert
-console.pilot.cam_cinematic,Courier pilot — cinematic camera button,Cinematic
-console.pilot.cam_fore,Courier pilot — fore camera button,Fore
 console.shields.threat_bearing,"Shields console — standing bearing of the nearest hostile in sensor range, the same fact the backfilled Shields focus AI reads",Threat Bearing
 console.common.no_data,Generic readout placeholder when no telemetry is available,NO DATA
 console.shield.shld,Abbreviated shield label on a single-fraction shield readout,SHLD

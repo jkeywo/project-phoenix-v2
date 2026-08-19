@@ -109,6 +109,9 @@ describe('host channel localisation boundary', () => {
     }));
     const p = payloadFor(d.seen, 'hud');
     expect(p.game_over_message).toBe(t('world.combat_test.trigger.action.18.message'));
+    // A missing id resolves to itself, which would let the assertion above
+    // pass vacuously — so also require actual resolution happened.
+    expect(p.game_over_message).not.toBe('world.combat_test.trigger.action.18.message');
   });
 
   it('resolves an id nested inside an array of station payloads', () => {

@@ -11,8 +11,8 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 
-echo === Building client (Trunk) ===
-call trunk build --release --config client-trunk.toml
+echo === Building client ===
+call node scripts/build-client.mjs
 if %errorlevel% neq 0 (
     echo [ERROR] Client build failed.
     exit /b %errorlevel%

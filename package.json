@@ -2,12 +2,8 @@
   "name": "project-phoenix",
   "private": true,
   "scripts": {
-    "test": "cargo check",
     "test:editor": "vitest run",
-    "typecheck": "cargo check",
-    "build:server": "trunk build",
     "build:client": "node scripts/build-client.mjs",
-    "build": "npm run build:server && npm run build:client",
     "dev:viewer": "node scripts/dev-viewer.mjs",
     "balance:demo": "cargo build --release --features headless --bin phoenix-headless && node scripts/balance-runs.mjs scripts/balance-runs.demo.toml --out .balance-out",
     "lods": "node scripts/generate-lods.mjs",

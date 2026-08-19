@@ -219,11 +219,6 @@ export function getEntityResolution(path) {
   return resolutionCache.get(path) || null;
 }
 
-/** Synchronous lookup of a resolved hull's provenance, or null. */
-export function getEntityProvenance(path) {
-  return resolutionCache.get(path)?.provenance || null;
-}
-
 /** Walk assets/entities/, load every *.toml into the cache.
  * No-ops (and returns []) if no project root is selected yet. */
 export async function preloadEntityCache() {

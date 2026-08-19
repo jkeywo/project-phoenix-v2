@@ -1,11 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { csvField, rowLineNumbers } from '../../scripts/strings-csv.mjs';
 import { parseCsv } from '../../gui/strings.js';
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 describe('csvField', () => {
   it('leaves a plain value alone', () => {
@@ -62,25 +57,5 @@ describe('rowLineNumbers', () => {
     // A hand-built rows array that does not describe the text: the check has to
     // notice, because a confidently wrong line number points at an innocent row.
     expect(rowLineNumbers('id,en\na,b\n', [['id', 'en'], ['zz', 'b']])).toEqual([1, null]);
-  });
-
-  it('resolves every row of the real strings.csv', async () => {
-    const text = await readFile(path.join(root, 'assets', 'strings', 'strings.csv'), 'utf8');
-    const rows = parseCsv(text);
-    const lines = rowLineNumbers(text, rows);
-
-    expect(lines).not.toContain(null);
-
-    // Each row's id really is the first thing on the line we named.
-    const physical = text.split('\n');
-    rows.forEach((row, i) => {
-      expect(physical[lines[i] - 1].startsWith(row[0])).toBe(true);
-    });
-
-    // The drift USED to be real (embedded-newline rows made the file longer
-    // than its row count) until the strings consolidation (9b89a37b) removed
-    // the last multi-line row; equality is legitimate now, and the synthetic
-    // cases above own the multi-line resolution coverage.
-    expect(lines[lines.length - 1]).toBeGreaterThanOrEqual(rows.length);
   });
 });

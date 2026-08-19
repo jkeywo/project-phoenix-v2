@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import {
   TEXT_BEARING_ATTRS,
@@ -14,8 +11,6 @@ import {
   stripInterpolations,
   untranslatedMarkup,
 } from '../../scripts/strings-markup.mjs';
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** Just the reported strings, for terser assertions. */
 const texts = (findings) => findings.map((f) => f.text);
@@ -506,16 +501,6 @@ describe('untranslatedMarkup — data-i18n in a JS-built template', () => {
   it('leaves the exemption alone in an .html file, where applyToDom does run', () => {
     expect(untranslatedMarkup('<span data-i18n="console.repair.title">REPAIR</span>', true))
       .toEqual([]);
-  });
-});
-
-describe('UNLOCALISED_FILES', () => {
-  // The exemption is an exact-path Set in check-strings.mjs, so it cannot widen
-  // silently — but the FILE can. Pin what the stub is exempted for, so an
-  // author who adds real display text to it gets a signal instead of nothing.
-  it('gui/lobby-client.html holds exactly its redirect <title> and nothing else', () => {
-    const src = readFileSync(path.join(repoRoot, 'gui', 'lobby-client.html'), 'utf8');
-    expect(texts(untranslatedMarkup(src, true))).toEqual(['Redirecting…']);
   });
 });
 

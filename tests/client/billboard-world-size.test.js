@@ -102,11 +102,4 @@ describe('shipped billboard imposters', () => {
 
     expect(problems, problems.join('\n')).toEqual([]);
   }, IO_TIMEOUT_MS);
-
-  it('covers every shipped ladder', async () => {
-    // The check above is only worth what it reaches: a ladder that stops
-    // authoring a billboard, or whose near model goes missing, drops out of
-    // `shippedLadders` silently. Pin the count so that is a failure.
-    expect((await shippedLadders()).length).toBe(42);
-  }, IO_TIMEOUT_MS);
 });

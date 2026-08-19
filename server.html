@@ -653,17 +653,6 @@
       0%, 100% { opacity: 0.55; }
       50%      { opacity: 1; }
     }
-    /* Bottom-centre status strip: HEADING / HULL / CONDITION. */
-    #hud-strip {
-      position: absolute; left: 50%; bottom: 0.6rem;
-      transform: translateX(-50%);
-      display: none; /* hidden until first __updateHud call */
-      flex-direction: row; gap: 2.4rem;
-      align-items: center; justify-content: center;
-      padding: 0.4rem 1.4rem;
-      font-family: "Chakra Petch", system-ui, sans-serif;
-    }
-    #hud-strip.shown { display: flex; }
     .hud-cell { display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
     .hud-label {
       font: 600 11px/1 "Chakra Petch", system-ui, sans-serif;
@@ -1338,13 +1327,6 @@
       <div id="hud-overlay">
         <div id="hud-vignette"></div>
 
-        <!-- Hidden backward-compat elements (smoke-test targets: #hud-heading etc.) -->
-        <div id="hud-strip" style="position:absolute;left:-9999px;visibility:hidden;display:flex;">
-          <span id="hud-heading">000</span>
-          <span id="hud-hull">100</span>
-          <span id="hud-condition" data-i18n="server.hud_nominal">NOMINAL</span>
-        </div>
-
         <!-- Viewscreen border frame (tiled edges) -->
         <div class="vs-edge top"></div>
         <div class="vs-edge bottom"></div>
@@ -1547,21 +1529,6 @@
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
     const overlay   = document.getElementById('hud-overlay');
-    const strip     = document.getElementById('hud-strip');
-    const heading   = document.getElementById('hud-heading');
-    const hull      = document.getElementById('hud-hull');
-    const condition = document.getElementById('hud-condition');
-    // Legacy compat (smoke-test targets — kept hidden, values still updated)
-    if (strip) strip.classList.add('shown');
-    if (heading && typeof s.heading === 'number') {
-      heading.textContent = String(s.heading).padStart(3, '0');
-    }
-    if (hull && typeof s.hull_pct === 'number') {
-      hull.textContent = String(s.hull_pct);
-    }
-    if (condition && typeof s.condition === 'string') {
-      condition.textContent = s.condition;
-    }
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
     // ── Red alert: siren one-shot on the edge, music loops underneath ───────
     if (s.red_alert && !_prevRedAlert && _els.siren) {

@@ -151,11 +151,14 @@ test('viewscreen HUD: __updateHud updates the status strip and red-alert class',
     ),
   );
 
-  await expect(serverPage.locator('#hud-heading')).toHaveText('007'); // zero-padded to 3
-  await expect(serverPage.locator('#hud-hull')).toHaveText('64');
-  await expect(serverPage.locator('#hud-condition')).toHaveText('ALERT');
+  // The real 4-slot viewscreen status strip — #v-nav/#v-tac/#v-eng/#v-sys —
+  // not the hidden legacy #hud-heading/#hud-hull/#hud-condition/#hud-strip
+  // compat elements, which __updateHud no longer writes.
+  await expect(serverPage.locator('#v-nav')).toContainText('007'); // zero-padded to 3
+  await expect(serverPage.locator('#v-eng')).toContainText('64');
+  await expect(serverPage.locator('#v-sys')).toHaveText('ALERT');
   await expect(serverPage.locator('#hud-overlay')).toHaveClass(/alert-on/);
-  await expect(serverPage.locator('#hud-strip')).toHaveClass(/shown/);
+  await expect(serverPage.locator('#v-tac')).toContainText('WEAPONS HOT');
 
   // Clearing red alert removes the class.
   await serverPage.evaluate(() =>
@@ -164,7 +167,8 @@ test('viewscreen HUD: __updateHud updates the status strip and red-alert class',
     ),
   );
   await expect(serverPage.locator('#hud-overlay')).not.toHaveClass(/alert-on/);
-  await expect(serverPage.locator('#hud-heading')).toHaveText('359');
+  await expect(serverPage.locator('#v-tac')).toContainText('CLEAR');
+  await expect(serverPage.locator('#v-nav')).toContainText('359');
 
   await serverPage.close();
 });

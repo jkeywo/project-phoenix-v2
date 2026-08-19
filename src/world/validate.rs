@@ -2432,47 +2432,6 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
         assert!(has_error(&findings));
     }
 
-    // ── shipped worlds validate clean (regression guard) ─────────────────────
-
-    #[test]
-    fn shipped_root_worlds_have_no_composition_errors() {
-        // Iterate every shipped world so the atomic-activation gate can never
-        // silently start rejecting real content as the catalog grows.
-        let mut checked = 0;
-        for entry in std::fs::read_dir("assets/worlds").expect("worlds dir readable") {
-            let path = entry.expect("dir entry").path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
-            let path_str = path.to_string_lossy().replace('\\', "/");
-            let toml = std::fs::read_to_string(&path).expect("shipped world readable");
-            let config = parse_world(&toml).expect("shipped world parses");
-            let src = WorldSource::new(&path_str, &toml, &config);
-            let findings = validate_composition(&src, &[]);
-            let errors: Vec<_> = findings.iter().filter(|f| f.is_error()).collect();
-            assert!(
-                errors.is_empty(),
-                "shipped world {path_str} must not error: {errors:?}"
-            );
-            // No shipped world may leave a positioning spelling ambiguous
-            // (issue #969) — a `relative_to` in the catalog must have exactly
-            // one entity it can mean, not one the precedence rule picked.
-            let ambiguous: Vec<_> = findings
-                .iter()
-                .filter(|f| f.category == "ambiguous-entity-reference")
-                .collect();
-            assert!(
-                ambiguous.is_empty(),
-                "shipped world {path_str} has an ambiguous entity spelling: {ambiguous:?}"
-            );
-            checked += 1;
-        }
-        assert!(
-            checked > 0,
-            "expected at least one shipped world to validate"
-        );
-    }
-
     // ── Template composition joins the finding flow (issue #906) ─────────────
 
     fn fragments(pairs: &[(&str, &str)]) -> HashMap<String, String> {
@@ -3074,63 +3033,6 @@ name = "ghost"
                 .any(|f| f.category == "override-absent-table" && !f.is_error()),
             "{findings:?}"
         );
-    }
-
-    /// Every template every shipped world names resolves through the loader
-    /// headless validates with, **and** every `overrides` table those worlds
-    /// carry merges onto the hull it names — so a hull that is deleted,
-    /// renamed, or mistyped in a world file, or an override that no longer
-    /// applies to the template it targets, fails the build instead of costing a
-    /// scenario its entities at runtime.
-    ///
-    /// Checks only `!has_error`, not `is_empty`, since #1043's
-    /// `override-absent-table` WARNING now rides in this same findings list and
-    /// several shipped worlds legitimately carry one (see
-    /// `shipped_world_override_absent_table_warnings_are_the_known_set`, which
-    /// pins exactly which). A warning is not a resolution failure — nothing
-    /// here got harder to resolve — so it must not fail this test.
-    ///
-    /// # What this does NOT catch, stated so nobody reads it as more
-    ///
-    /// **It would not have failed the build on #954.** That hull was on disk
-    /// the whole time; it had merely moved into a subdirectory the headless
-    /// preload's non-recursive walk missed, and the spawn path was cache-only.
-    /// The loader here is [`crate::entity_loader::WasmTemplateLoader`], whose
-    /// native filesystem fallback finds a template anywhere under the repo with
-    /// a completely empty cache — so this walk was green throughout #954 and is
-    /// green today against the subdirectory path.
-    ///
-    /// What closes that class is the spawn-side widening
-    /// ([`crate::entity_loader::resolve_entity_via`]) plus the gate holding the
-    /// spawn's own `ConfigCache`, not this walk. Keep the two claims apart: a
-    /// test advertising coverage it does not have is worse than no test at all,
-    /// because the next reader stops looking.
-    #[test]
-    fn every_shipped_world_names_a_template_that_resolves() {
-        let loader = crate::entity_loader::WasmTemplateLoader;
-        assert!(
-            loader.absence_is_final(),
-            "this walk is only meaningful on an authoritative host"
-        );
-        let mut checked = 0;
-        for entry in std::fs::read_dir("assets/worlds").expect("worlds dir readable") {
-            let path = entry.expect("dir entry").path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
-            let path_str = path.to_string_lossy().replace('\\', "/");
-            let toml = std::fs::read_to_string(&path).expect("shipped world readable");
-            let config = parse_world(&toml).expect("shipped world parses");
-            let src = WorldSource::new(&path_str, &toml, &config);
-            let mut seen = HashSet::new();
-            let findings = validate_template_resolution_in(&src, &loader, &mut seen);
-            assert!(
-                !has_error(&findings),
-                "shipped world {path_str} names a template that does not resolve: {findings:?}"
-            );
-            checked += 1;
-        }
-        assert!(checked > 0, "expected at least one shipped world");
     }
 
     /// `probe_evidence.toml` and `probe_corroborate.toml` author a

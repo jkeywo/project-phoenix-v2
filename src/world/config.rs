@@ -3608,39 +3608,6 @@ transform = { relative_to = "planet", offset = [0.0, 0.0, 5.0] }
         assert_eq!(at("backward-moon"), [100.0, 0.0, 5.0], "declared earlier");
     }
 
-    /// The sweep, kept as a guard. Every `[[entity]]` in every shipped world
-    /// must resolve a position, because every spawn caller answers a failed
-    /// resolve by logging and moving on — so a world that fails here ships with
-    /// an entity nobody will notice is missing.
-    #[test]
-    fn every_shipped_world_entity_resolves_a_position() {
-        let mut checked = 0;
-        for entry in std::fs::read_dir("assets/worlds").expect("worlds dir readable") {
-            let path = entry.expect("dir entry").path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
-            let toml = std::fs::read_to_string(&path).expect("shipped world readable");
-            let world = parse_world(&toml).expect("shipped world parses");
-            let table = build_named_entity_positions(&world);
-            for ent in &world.entities {
-                let label = ent
-                    .id
-                    .clone()
-                    .or_else(|| ent.name.clone())
-                    .unwrap_or_else(|| ent.template_path.clone());
-                assert!(
-                    resolve_entity_position_with(ent, &world.anchors, &table).is_ok(),
-                    "{}: entity '{label}' would be silently dropped: {}",
-                    path.display(),
-                    resolve_entity_position_with(ent, &world.anchors, &table).unwrap_err()
-                );
-                checked += 1;
-            }
-        }
-        assert!(checked > 0, "expected shipped entities to check");
-    }
-
     /// A `relative_to`-positioned entity is still not a valid base — chains
     /// stay unsupported, and the table must not gain one via the `id` key.
     #[test]

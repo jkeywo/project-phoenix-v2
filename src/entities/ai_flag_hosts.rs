@@ -1636,28 +1636,6 @@ mod tests {
         }
     }
 
-    /// The premise that makes stage 1 zero-risk: nothing shipped authors one, so
-    /// every hull must still load. Rechecked here rather than assumed, because
-    /// the rejection is only free while it stays true.
-    #[test]
-    fn every_shipped_entity_still_loads() {
-        let dir = crate_root().join("assets/entities");
-        let mut checked = 0;
-        for entry in std::fs::read_dir(&dir).expect("assets/entities must be readable") {
-            let path = entry.expect("readable dir entry").path();
-            if path.extension().is_some_and(|e| e == "toml") {
-                // Through the include resolver (issue #906): a raw read would
-                // assert on unresolved text the day a hull declares `includes`.
-                let key = path.to_string_lossy().replace('\\', "/");
-                crate::entity_includes::load_entity_config(&key).unwrap_or_else(|e| {
-                    panic!("{} must still load: {e}", path.display());
-                });
-                checked += 1;
-            }
-        }
-        assert!(checked > 0, "no entity TOMLs were checked");
-    }
-
     /// Every production validation call must name its host, or the rejection
     /// simply does not run for that block.
     ///

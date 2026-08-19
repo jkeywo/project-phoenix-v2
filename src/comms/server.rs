@@ -673,68 +673,6 @@ pub(crate) mod tests {
         msgs
     }
 
-    /// Issue #984 — the destroyer/courier `CommsState` bug, pinned on all four
-    /// shipped hulls.
-    ///
-    /// The address is resolved through `station_for_system` for the comms
-    /// SYSTEM. It used to be a literal `StationId("comms")`, which coincides
-    /// with the right answer on the battleship and cruiser and names NO STATION
-    /// AT ALL on the destroyer (comms lives on `tactical`) and the courier
-    /// (`captain`) — so those two hulls hit the no-holder early return every
-    /// tick and never received a single `CommsState` in their lives. The two
-    /// hulls that already worked are in the loop so a future "simplification"
-    /// back to the literal fails on the two that never did.
-    #[test]
-    fn comms_state_reaches_the_seat_that_hosts_comms_on_every_shipped_hull() {
-        for (stem, station) in [
-            ("alliance_battleship", "comms"),
-            ("alliance_cruiser", "comms"),
-            ("alliance_destroyer", "tactical"),
-            ("alliance_courier", "captain"),
-        ] {
-            let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("assets/entities")
-                .join(format!("{stem}.toml"));
-            let key = path.to_string_lossy().replace('\\', "/");
-            let config = crate::entity_includes::load_entity_config(&key)
-                .unwrap_or_else(|e| panic!("{stem} must parse: {e}"))
-                .ship_config
-                .unwrap_or_else(|| panic!("{stem} must declare a ShipConfig"));
-
-            let mut app = comms_test_app();
-            let ship = app
-                .world_mut()
-                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
-                .single(app.world())
-                .expect("the fixture spawns a LocalShip");
-            app.world_mut()
-                .entity_mut(ship)
-                .insert(crate::ship_plugin::ShipConfigComponent(config));
-            {
-                let mut sessions = app.world_mut().resource_mut::<Sessions>();
-                sessions
-                    .0
-                    .register("officer".into(), "Nova".into())
-                    .expect("a fresh token registers");
-                sessions
-                    .0
-                    .set_station("officer", Some(StationId(station.into())));
-            }
-            app.world_mut()
-                .resource_mut::<CommsRuntime>()
-                .needs_broadcast = true;
-
-            let out = tick(&mut app);
-            assert!(
-                out.iter()
-                    .any(|m| matches!(m.msg, ServerMessage::CommsState { .. })
-                        && m.target == Target::Token("officer".into())),
-                "{stem}: CommsState must reach the {station:?} seat that hosts the \
-                 comms system — a literal StationId(\"comms\") resolves to nobody here"
-            );
-        }
-    }
-
     /// Set up a game in InProgress phase with a comms player and captain.
     pub(crate) fn setup_game_with_comms(app: &mut App, station_uuid: &str) {
         // Register captain

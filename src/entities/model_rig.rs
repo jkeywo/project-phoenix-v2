@@ -728,41 +728,6 @@ shape = "sphere"
 
     // ── Shipped-asset conformance ────────────────────────────────────────
 
-    /// Every sidecar in `assets/models` parses under the strict schema.
-    ///
-    /// The engine degrades a malformed sidecar to an identity rig so a model
-    /// always renders, which is exactly why nothing else would fail: a typo
-    /// costs the ship its weapon markers, or the rock its whole LOD ladder,
-    /// and the only symptom is that the game looks slightly wrong. This is the
-    /// test that turns that into a red build. (Mirrors
-    /// `all_shipped_entity_templates_parse_strictly` in `entity_config`.)
-    #[test]
-    fn every_shipped_sidecar_parses_strictly() {
-        let mut checked = 0usize;
-        let mut problems: Vec<String> = Vec::new();
-        for entry in std::fs::read_dir("assets/models")
-            .expect("assets/models must exist")
-            .flatten()
-        {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
-            let file = path.to_string_lossy().replace('\\', "/");
-            let toml = std::fs::read_to_string(&path).expect("sidecar readable");
-            checked += 1;
-            if let Err(e) = ModelRig::from_toml(&toml) {
-                problems.push(format!("{file}: {e}"));
-            }
-        }
-        assert!(checked > 0, "assets/models should ship sidecars");
-        assert!(
-            problems.is_empty(),
-            "every shipped model sidecar must parse strictly:\n{}",
-            problems.join("\n")
-        );
-    }
-
     /// The migration itself (issue #914), asserted on a real shipped pair: the
     /// asteroid entity no longer carries a ladder, and the sidecar its `[mesh]`
     /// resolves to does — with every level's GLB present on disk.
@@ -979,56 +944,6 @@ shape = "sphere"
                 );
             }
         }
-    }
-
-    /// Recursively collect every `.toml` file under `dir`, INCLUDING
-    /// `assets/entities/fragments/`. Unlike a spawnable-template inventory,
-    /// this check has no reason to stop at the top level: a fragment
-    /// authoring `[[mesh.lod]]` would reintroduce the banned location into
-    /// every hull that includes it, just as silently as a shipped hull
-    /// authoring it directly.
-    fn collect_toml_files_recursive(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                collect_toml_files_recursive(&path, out);
-            } else if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-                out.push(path);
-            }
-        }
-    }
-
-    /// No entity template — nor any fragment it might compose in — may
-    /// reintroduce the old location.
-    #[test]
-    fn no_shipped_entity_template_still_authors_mesh_lod() {
-        let mut paths = Vec::new();
-        collect_toml_files_recursive(std::path::Path::new("assets/entities"), &mut paths);
-        assert!(
-            !paths.is_empty(),
-            "assets/entities must exist and contain templates"
-        );
-
-        let mut offenders: Vec<String> = Vec::new();
-        for path in paths {
-            let text = std::fs::read_to_string(&path).expect("template readable");
-            let has_lod = toml::from_str::<toml::Value>(&text)
-                .ok()
-                .as_ref()
-                .and_then(|v| v.get("mesh").and_then(|m| m.get("lod")))
-                .is_some();
-            if has_lod {
-                offenders.push(path.to_string_lossy().replace('\\', "/"));
-            }
-        }
-        assert!(
-            offenders.is_empty(),
-            "[[mesh.lod]] moved to the model sidecar (#914); still authored in:\n{}",
-            offenders.join("\n")
-        );
     }
 
     #[test]

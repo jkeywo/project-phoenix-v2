@@ -65,7 +65,6 @@ pub use core::balance;
 pub use core::messages;
 pub mod lobby;
 pub use lobby::stations_config;
-pub use lobby::stations_policy;
 pub mod modifiers;
 pub use core::codec;
 pub use lobby::handler as lobby_handler;

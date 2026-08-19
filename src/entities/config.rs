@@ -2556,9 +2556,6 @@ pub const SHIELD_FOCUS_HEALTH_RATIO_PARAM: &str = "health_ratio_threshold";
 /// payload — never an inline Rust number (AGENTS.md rule #11).
 pub const POWER_SET_ALLOCATION_VERB: &str = "set_power_group_allocation";
 
-/// Authored policy-parameter name: the forward-thrust level (0.0–1.0) above
-/// which the default helm-elevation rule considers the ship actively driving.
-pub const POWER_THRUST_THRESHOLD_PARAM: &str = "thrust_threshold";
 /// Authored policy-parameter name: the battery reserve (0–100) BELOW which the
 /// default helm channel gives its elevated point back (AC2). The shed floor: the
 /// hold rule reads it, and the channel falls to its baseline underneath it.
@@ -2579,11 +2576,6 @@ pub const POWER_WEAPONS_RESERVE_PARAM: &str = "min_reserve_weapons";
 /// weapons channel must be back OVER before it may elevate again (issue #1003).
 /// Sibling of [`POWER_HELM_RESTORE_PARAM`]; see there for what the gap buys.
 pub const POWER_WEAPONS_RESTORE_PARAM: &str = "min_restore_weapons";
-/// Authored policy-parameter name: the (zero) reserve the default LOWERING
-/// baseline rules reference so every rule declares a reserve (AC2) without ever
-/// gating a de-allocation, which can never cause a brownout.
-pub const POWER_BASELINE_RESERVE_PARAM: &str = "min_reserve_baseline";
-
 /// Host-seeded fact name: current battery charge as a percentage (0–100). The
 /// reserve guard `fact(battery_pct) >= param(min_reserve_*)` reads this; it is
 /// the stateless brownout-avoidance predicate (AC5).

@@ -325,7 +325,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "PhaserRenderConfig", "PowerAiCadence", "PowerAiPolicy", "PowerBrownoutState",
     "PowerConfigResource", "PowerMultiplierResource", "RadarAppearanceSection",
     "RegionEffectsSection", "RegionMembership", "RegionShapeSection", "RepairHumanAlerted",
-    "RepairRequestQueue", "RepairTargetSelector", "RunTelemetry", "ScenariosBeingUnloaded",
+    "RepairRequestQueue", "RepairTargetSelector", "RunTelemetry",
     "SelectedShipResource", "SensorsAiConfigResource", "SensorsFrequencyState",
     "SensorsTargetSelector", "SensorsThreatState", "Sessions", "ShakeState",
     "ShieldsAiConfigResource", "ShieldsCoordinationState", "ShieldsFocusAiPolicy", "Ship",

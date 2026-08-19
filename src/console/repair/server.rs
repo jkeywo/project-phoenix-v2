@@ -108,10 +108,6 @@ impl RepairRequestQueue {
         Some(self.entries.swap_remove(idx))
     }
 
-    pub fn remove_station(&mut self, station_id: &str) {
-        self.entries.retain(|e| e.station_id != station_id);
-    }
-
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

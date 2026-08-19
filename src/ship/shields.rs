@@ -38,10 +38,6 @@ impl ShipShields {
     pub fn frequency(&self) -> f32 {
         self.1
     }
-
-    pub fn set_frequency(&mut self, freq: f32) {
-        self.1 = freq.clamp(0.0, 1.0);
-    }
 }
 
 // ── Resources ──────────────────────────────────────────────────────────────────
@@ -992,50 +988,6 @@ mod tests {
         let msgs = app.world().resource::<CoordEnqueueBox>().0.clone();
         app.world_mut().resource_mut::<CoordEnqueueBox>().0.clear();
         msgs
-    }
-
-    // Superseded by `start_game_with_shields_and_helm` below for tests that
-    // also need a Helm session; retained as a documented no-op since no test
-    // in this module currently calls the captain-only variant directly.
-    #[allow(dead_code)]
-    fn start_game_with_shields(app: &mut App) {
-        push_msg(
-            app,
-            "captain",
-            ClientMessage::Identify {
-                token: "captain".into(),
-                name: "Alice".into(),
-            },
-        );
-        tick(app);
-        push_msg(
-            app,
-            "captain",
-            ClientMessage::SelectStation {
-                station: "Captain".into(),
-            },
-        );
-        tick(app);
-        push_msg(
-            app,
-            "shields",
-            ClientMessage::Identify {
-                token: "shields".into(),
-                name: "Scotty".into(),
-            },
-        );
-        tick(app);
-        push_msg(
-            app,
-            "shields",
-            ClientMessage::SelectStation {
-                station: "Shields".into(),
-            },
-        );
-        tick(app);
-        push_msg(app, "captain", ClientMessage::SetReady { ready: true });
-        push_msg(app, "shields", ClientMessage::SetReady { ready: true });
-        tick(app);
     }
 
     // ── Blackboard publish tests ─────────────────────────────────────────────

@@ -126,11 +126,6 @@ impl ScriptedWorld {
     pub fn actions(&self, fn_name: &str, flags: &FlagStore) -> Vec<TriggerAction> {
         buffered_actions(self.call(fn_name, flags).commands)
     }
-
-    /// [`Self::actions`], addressed by trigger index.
-    pub fn fired_actions(&self, index: usize, flags: &FlagStore) -> Vec<TriggerAction> {
-        self.actions(&self.triggers[index].handler, flags)
-    }
 }
 
 /// Keep only the unresolved [`TriggerAction`]s out of a drained effect buffer.

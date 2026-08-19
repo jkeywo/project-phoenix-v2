@@ -345,12 +345,6 @@ pub struct Provenance {
 }
 
 impl Provenance {
-    /// Every contributing template in the order it was merged: fragments first
-    /// (depth-first, declared order), the declaring template last.
-    pub fn merge_order(&self) -> &[MergeStep] {
-        &self.order
-    }
-
     /// Canonical paths of the contributing templates, in merge order.
     pub fn sources(&self) -> Vec<&str> {
         self.order.iter().map(|s| s.source.as_str()).collect()
@@ -365,11 +359,6 @@ impl Provenance {
     /// Every recorded field path with its origin, in sorted path order.
     pub fn fields(&self) -> impl Iterator<Item = (&String, &FieldOrigin)> {
         self.fields.iter()
-    }
-
-    /// How many distinct leaf fields the resolved document carries.
-    pub fn field_count(&self) -> usize {
-        self.fields.len()
     }
 
     /// Record everything `value` authored, attributing it to `step`.

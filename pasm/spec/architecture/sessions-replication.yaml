@@ -46,7 +46,7 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/lobby/session.rs, src/lobby/stations_policy.rs, src/core/messages.rs]
+      paths: [src/lobby/session.rs, src/lobby/stations_config.rs, src/core/messages.rs]
       symbols: [SessionManager, Player]
       tests: [cargo test, tests/smoke/stations.spec.js]
 
@@ -104,7 +104,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lobby/handler.rs, src/lobby/stations_policy.rs, src/lobby/server.rs]
+      paths: [src/lobby/handler.rs, src/lobby/stations_config.rs, src/lobby/server.rs]
       messages: [SelectStation, ReleaseStation, StationAssigned]
       tests: [cargo test, tests/smoke/stations.spec.js]
 

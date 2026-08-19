@@ -398,23 +398,6 @@ impl SystemHull {
         self.entries.get(sid).map(|e| e.current)
     }
 
-    /// Restore `amount` HP to the first system that is below its max HP.
-    /// Useful for repair systems that don't yet target a specific system.
-    /// Returns the `SystemId` that was restored, or `None` if all are at max.
-    pub fn restore_any_damaged(&mut self, amount: f32) -> Option<SystemId> {
-        for sid in &self.order {
-            let entry = self
-                .entries
-                .get_mut(sid)
-                .expect("SystemHull invariant: order and entries agree");
-            if entry.current < entry.max {
-                entry.current = (entry.current + amount).min(entry.max);
-                return Some(sid.clone());
-            }
-        }
-        None
-    }
-
     /// Return the active debuff magnitude for the given system.
     ///
     /// - `Operational` or `Destroyed` → `0.0` (fully operational or fully

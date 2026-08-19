@@ -183,11 +183,6 @@ impl ActiveBeam {
         self.per_bank.iter()
     }
 
-    /// The number of banks currently burning.
-    pub fn live_bank_count(&self) -> usize {
-        self.per_bank.len()
-    }
-
     /// How much longer this bank's beam burns, seconds. `0.0` when it is not
     /// firing — the same shape [`PhaserCooldown::bank_remaining_secs`] uses for
     /// its own per-bank map.

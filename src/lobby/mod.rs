@@ -2,7 +2,6 @@ pub mod handler;
 pub mod server;
 pub mod session;
 pub mod stations_config;
-pub mod stations_policy;
 
 pub use server::{
     lobby_outbox_broadcaster, CountdownTimer, GameStateCache, InboundMessage, LobbyOutbox,

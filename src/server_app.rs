@@ -2219,16 +2219,6 @@ fn separate_ship_from_collision(
     }
 }
 
-/// Tick shield regen for the player ship. **PR-7 (issue #597) moved this
-/// canonical registration into `ShipShieldsPlugin::tick_shields`, which
-/// iterates every ship with the `Ship` marker (player + NPCs). This local
-/// stub is retained temporarily as a documented no-op if any test still
-/// references it directly; production wiring goes through the plugin.**
-#[allow(dead_code)]
-fn tick_shields(_time: Res<Time>, _shields_q: Query<&mut ShipShields, With<Ship>>) {
-    // Moved: see `crate::ship::shields::tick_shields`.
-}
-
 /// Broadcast `ShieldStatus` at 10 Hz.
 /// Sends to all players only when shield state changed; always sends to the
 /// Shields console holder so their panel stays smooth during regeneration.
@@ -5664,18 +5654,6 @@ station = "pilot"
             .unwrap_or(crate::messages::ViewMode::Camera(
                 crate::messages::CameraView::default(),
             ))
-    }
-
-    // Test helper for directly setting view mode without round-tripping a
-    // client message; retained for tests that may need to seed view state.
-    #[allow(dead_code)]
-    fn set_ship_view_mode(app: &mut App, mode: crate::messages::ViewMode) {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<&mut crate::ship_state::ShipViewMode, With<LocalShip>>();
-        if let Ok(mut vm) = q.single_mut(app.world_mut()) {
-            vm.view_mode = mode;
-        }
     }
 
     /// Fast-forward the pre-game countdown so the game starts immediately.

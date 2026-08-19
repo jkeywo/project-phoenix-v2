@@ -762,7 +762,6 @@ struct TrailCrumb {
 struct EmitterTrail {
     crumbs: VecDeque<TrailCrumb>,
     mesh_handle: Handle<Mesh>,
-    #[allow(dead_code)]
     entity: Entity,
 }
 

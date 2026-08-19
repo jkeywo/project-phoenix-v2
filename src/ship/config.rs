@@ -372,24 +372,6 @@ impl ShipConfig {
             .is_some_and(|tbl| tbl.contains_key(rule))
     }
 
-    /// Get an f32 tuning parameter from a station rating's ai_tuning table.
-    pub fn ai_tuning_f32(
-        &self,
-        station_id: &StationId,
-        rating_name: &str,
-        rule: &str,
-        key: &str,
-        default: f32,
-    ) -> f32 {
-        self.rating_for_station(station_id, rating_name)
-            .and_then(|r| r.ai_tuning.as_ref())
-            .and_then(|t| t.get(rule))
-            .and_then(|r| r.get(key))
-            .and_then(|v| v.as_float())
-            .map(|v| v as f32)
-            .unwrap_or(default)
-    }
-
     pub fn systems_in_power_group<'a>(
         &'a self,
         id: &'a PowerGroupId,

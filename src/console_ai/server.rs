@@ -42,7 +42,6 @@ use crate::console_ai::shields_emit::emit_shields_ai_command;
 
 // AI rule keys — match the keys used in [[station.rating]].ai_tuning tables.
 pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
-pub const AI_RULE_FREQUENCY_MATCH: &str = "frequency_match";
 // `AI_RULE_AUTO_HINT` ("auto_hint") was deleted by issue #873. It gated the
 // Sensors frequency hint on whether a *human session* held the Sensors station
 // and, if so, on that holder's active rating — so a coordination fact derived
@@ -51,8 +50,6 @@ pub const AI_RULE_FREQUENCY_MATCH: &str = "frequency_match";
 // shipped hull authored the key anyway. Do not reintroduce it: a station rating
 // tunes what a console offers its own operator, never whether the ship's state
 // reaches the rest of the bridge.
-pub const AI_RULE_MOVEMENT_RULE: &str = "movement_rule";
-pub const AI_RULE_RED_ALERT_RULE: &str = "red_alert_rule";
 
 /// Per-ship persistent state for `tick_frequency_hint_high_fidelity`'s
 /// delayed-hint timer.

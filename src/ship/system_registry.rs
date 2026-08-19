@@ -354,6 +354,7 @@ impl SystemKindRegistry {
         registry.register(HELM_RADAR_KIND)?;
         registry.register(HELM_IMPULSE_KIND)?;
         registry.register(LATERAL_THRUST_KIND)?;
+        registry.register(VERTICAL_THRUST_KIND)?;
         // Per-axis Helm systems (issue #701)
         registry.register(HELM_THRUST_KIND)?;
         registry.register(HELM_STEERING_KIND)?;

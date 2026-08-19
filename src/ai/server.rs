@@ -113,11 +113,6 @@ impl AiTokenRegistry {
         self.by_entity.get(entity_uuid).map(|s| s.as_str())
     }
 
-    /// Look up the Bevy `Entity` for an entity UUID string.
-    pub fn bevy_entity_for_uuid(&self, entity_uuid: &str) -> Option<Entity> {
-        self.uuid_to_bevy.get(entity_uuid).copied()
-    }
-
     /// Returns `true` when the registry contains a record for this entity UUID.
     pub fn contains_entity(&self, entity_uuid: &str) -> bool {
         self.by_entity.contains_key(entity_uuid)
@@ -351,18 +346,6 @@ pub struct WarpOutMarker {
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
-
-/// Marker component added to an AI entity when its owning scenario is unloaded.
-///
-/// `tick_ai_controllers` reads this component to set `scenario_unloaded: true`
-/// in the `WorldView`. The component persists until `tick_ai_controllers`
-/// removes it (or until the entity despawns alongside its scenario cleanup).
-#[derive(Component)]
-pub struct ScenarioUnloadedMarker;
-
-/// Resource kept for backward-compatibility; no longer used for signalling.
-#[derive(Resource, Default)]
-pub struct ScenariosBeingUnloaded(pub std::collections::HashSet<String>);
 
 /// Emitted by the AI plugin when a ship's [`LastShipAttacker`] changes to name
 /// a new attacker.
@@ -920,7 +903,6 @@ pub struct AiPlugin;
 impl Plugin for AiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AiTokenRegistry>();
-        app.init_resource::<ScenariosBeingUnloaded>();
         app.add_message::<AiEntityAttacked>();
         app.add_message::<AiEntityDestroyed>();
         app.add_message::<AiWaypointReached>();

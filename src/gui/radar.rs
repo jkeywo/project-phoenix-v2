@@ -32,14 +32,6 @@ pub struct OnRadar(pub Vec<String>);
 #[derive(Component, Clone, Debug)]
 pub struct RadarFilter(pub std::collections::HashSet<String>);
 
-impl RadarFilter {
-    /// Build a `RadarFilter` from a slice of tag strings (e.g. one of the
-    /// `ShipClientConfig.*_shows` fields, or a TOML `shows = [...]` list).
-    pub fn from_shows<S: AsRef<str>>(shows: &[S]) -> Self {
-        RadarFilter(shows.iter().map(|s| s.as_ref().to_string()).collect())
-    }
-}
-
 // ── Appearance ────────────────────────────────────────────────────────────────
 
 /// How a region entity's shape is rendered on the 2D radar projection.

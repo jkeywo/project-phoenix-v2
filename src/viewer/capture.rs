@@ -325,25 +325,25 @@ pub(crate) fn publish_capture(mut state: ResMut<CaptureState>) {
 }
 
 /// True once a baked atlas is waiting to be read.
-#[allow(dead_code)] // dev-viewer capture API, consumed by the JS panel (WIP tooling)
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // dev-viewer capture API, called from viewer.html via wasm_bindgen
 pub fn capture_ready() -> bool {
     CAPTURE_META.with(|c| !c.borrow().is_empty())
 }
 
 /// The finished atlas metadata as JSON.
-#[allow(dead_code)] // dev-viewer capture API, consumed by the JS panel (WIP tooling)
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // dev-viewer capture API, called from viewer.html via wasm_bindgen
 pub fn capture_meta() -> String {
     CAPTURE_META.with(|c| c.borrow().clone())
 }
 
 /// Take the finished atlas RGBA bytes (row-major, `width`×`height`×4).
-#[allow(dead_code)] // dev-viewer capture API, consumed by the JS panel (WIP tooling)
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // dev-viewer capture API, called from viewer.html via wasm_bindgen
 pub fn capture_take_rgba() -> Vec<u8> {
     CAPTURE_RGBA.with(|c| c.borrow_mut().take().unwrap_or_default())
 }
 
 /// Clear the parked result after the panel has consumed it.
-#[allow(dead_code)] // dev-viewer capture API, consumed by the JS panel (WIP tooling)
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // dev-viewer capture API, called from viewer.html via wasm_bindgen
 pub fn capture_clear() {
     CAPTURE_RGBA.with(|c| *c.borrow_mut() = None);
     CAPTURE_META.with(|c| c.borrow_mut().clear());

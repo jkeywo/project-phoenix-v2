@@ -1,17 +1,6 @@
 // Pure Rust module implementing the ring-buffer window logic for grid-based
 // asteroid lifecycle. No Bevy imports, fully unit-testable.
 
-/// Ring-buffer window state tracking the player's current grid cell position
-/// and the window extents.
-#[derive(Debug, Clone, Copy)]
-pub struct WindowedGrid {
-    pub despawn_cells: u32,
-    pub spawn_cells: u32,
-    pub resolution: f32,
-    pub player_gx: i32,
-    pub player_gz: i32,
-}
-
 /// Result of evaluating a player move — which cells to despawn, which to
 /// evaluate for spawn, and whether a full rebuild is required instead.
 #[derive(Debug, Clone, PartialEq)]

@@ -275,6 +275,18 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     // of which is digest-folded; spawn-required on LocalShip so it never causes
     // a mid-run archetype move (the S7 digest-regression fix).
     ("HumanSeekingHosts", "derived"),
+    // Derived — the complete-Station half of the same resolver (issues #1097,
+    // #1098). `VisitingStationHosts` is the visiting-Station placement map PASM
+    // itself records as `classification: derived` (`visiting-station-placement-
+    // state` in station-system-authority.yaml), recomputed every tick alongside
+    // `HumanSeekingHosts` from the same digest-free inputs. `ScenarioDetailFloor`
+    // is that resolver's other derived input: the hull-resolved projection of
+    // the folded `WorldConfig.scenario_detail_floor` vocabulary, rewritten
+    // idempotently every tick by `write_scenario_detail_floor`, so folding it
+    // would fold WorldConfig's content a second time. Both arrive with
+    // LocalShip's spawn `#[require]`, never a mid-run archetype move.
+    ("ScenarioDetailFloor", "derived"),
+    ("VisitingStationHosts", "derived"),
 
     // Cleared-at-fold (the one new classification term this issue adds,
     // deterministic-simulation.yaml's `digest-exclusion-classes`):

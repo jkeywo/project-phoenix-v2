@@ -2653,8 +2653,15 @@ directive_kind = "Destroy"
             let stations: Vec<&str> = ship.stations.iter().map(|s| s.id.0.as_str()).collect();
             assert_eq!(
                 stations,
-                vec!["captain", "helm", "tactical", "navigation", "engineering"],
-                "five Stations, exactly as authored — no fragment adds or removes one"
+                vec![
+                    "captain",
+                    "helm",
+                    "tactical",
+                    "navigation",
+                    "comms",
+                    "engineering"
+                ],
+                "six Stations, exactly as authored — no fragment adds or removes one"
             );
             let arcs: Vec<&str> = config
                 .shield_arcs

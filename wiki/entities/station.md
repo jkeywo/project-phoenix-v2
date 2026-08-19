@@ -75,9 +75,13 @@ name Station ids (console families) or System kinds; `write_scenario_detail_floo
 resolves them against the selected hull into the live `ScenarioDetailFloor`
 component before placement, which publishes the resulting effective visiting
 rating in `VisitingStationHosts`; `SimSnapshot.station_hosts` projects those
-station-level placements generically to the client shell. The Alliance Destroyer's
-Navigation Station is the first shipped user; its Navigation System remains
-owned by Navigation wherever the complete surface is presented.
+station-level placements generically to the client shell. The Alliance Destroyer
+authors two: Navigation (the first shipped user) and Comms, added in #1098 —
+each System stays owned by its own complete Station wherever the surface is
+presented. Comms carries only one authored rating on every hull that declares
+it, so its `visiting_rating` is the same full interface a direct holder gets
+rather than a reduced one; Navigation's `Simplified` visiting tier is the
+exception, not the pattern.
 
 Parsed into `StationConfig` by `src/ship/config.rs`, validated and loaded into
 `ShipConfigResource` at startup by `load_ship_config_from_disk()`.

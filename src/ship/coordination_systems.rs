@@ -2265,7 +2265,7 @@ mod tests {
         // hull, comms system's station, navigation system's station
         ("alliance_battleship", "comms", "navigation"),
         ("alliance_cruiser", "comms", "comms"),
-        ("alliance_destroyer", "tactical", "navigation"),
+        ("alliance_destroyer", "comms", "navigation"),
         ("alliance_courier", "captain", "captain"),
     ];
 
@@ -2473,12 +2473,15 @@ station = "navigation"
                 let system = config
                     .system(&system_id)
                     .unwrap_or_else(|| panic!("{stem} must declare {:?}", system_id.0));
-                if stem == &"alliance_destroyer" && system_id.0 == "navigation" {
+                if stem == &"alliance_destroyer"
+                    && (system_id.0 == "navigation" || system_id.0 == "comms")
+                {
                     assert!(
                         config
-                            .station(&crate::messages::StationId("navigation".into()))
+                            .station(&crate::messages::StationId(system_id.0.clone()))
                             .is_some_and(|station| station.human_seeking),
-                        "Destroyer Navigation seeks as one complete Station"
+                        "Destroyer {:?} seeks as one complete Station",
+                        system_id.0
                     );
                     assert!(
                         !system.human_seeking,
@@ -2510,10 +2513,12 @@ station = "navigation"
         }
     }
 
-    /// The destroyer's authored `seek_order`, read off the resolved config
-    /// (issue #984). Not a restatement of the TOML: it also pins that the order
-    /// is a permutation of the hull's stations and that it DIFFERS from the
-    /// derived one, which is the only reason to author it at all.
+    /// The destroyer's authored `host_order` for its two complete human-seeking
+    /// Stations (issue #984, #1097, #1098). Not a restatement of the TOML: it
+    /// also pins that each order is a permutation of the hull's OTHER stations
+    /// and that it DIFFERS from the derived one, which is the only reason to
+    /// author it at all. Neither Comms nor Navigation carries a legacy
+    /// `[[system]] seek_order` any more — both are complete Stations now.
     #[test]
     fn the_destroyer_authors_engineering_second_in_its_seek_order() {
         let config = hull_ship_config("alliance_destroyer");
@@ -2521,33 +2526,41 @@ station = "navigation"
             config.stations.iter().map(|s| s.id.0.as_str()).collect();
         assert_eq!(
             authored_stations,
-            vec!["captain", "helm", "tactical", "navigation", "engineering"],
+            vec![
+                "captain",
+                "helm",
+                "tactical",
+                "navigation",
+                "comms",
+                "engineering"
+            ],
             "the [[station]] array is the lobby's row order and the broadcast \
              router's fan-out order — the seek order does not touch it"
         );
 
-        let system_id = crate::system_registry::comms_system_id();
-        let system = config
-            .system(&system_id)
-            .expect("the destroyer declares it");
-        let order: Vec<&str> = system.seek_order.iter().map(|s| s.0.as_str()).collect();
+        let comms = config
+            .station(&crate::messages::StationId("comms".into()))
+            .expect("the destroyer declares a comms Station");
+        let order: Vec<&str> = comms.host_order.iter().map(|s| s.0.as_str()).collect();
         assert_eq!(
             order,
             vec!["tactical", "engineering", "captain", "helm", "navigation"],
-            "{:?}: Tactical owns it, then Engineering — John's ruling",
-            system_id.0
+            "comms: Tactical owns it, then Engineering — John's ruling"
         );
         assert_eq!(
             order.len(),
-            authored_stations.len(),
-            "{:?}: the order is a permutation, so no seat is unreachable",
-            system_id.0
+            authored_stations.len() - 1,
+            "comms: the order covers every OTHER station, so no seat is unreachable"
         );
         assert_ne!(
-            order, authored_stations,
-            "{:?}: an order identical to the authored station list would be \
-             the derived walk written out, and worth nothing",
-            system_id.0
+            order,
+            authored_stations
+                .iter()
+                .filter(|s| **s != "comms")
+                .copied()
+                .collect::<Vec<_>>(),
+            "comms: an order identical to the authored station list would be \
+             the derived walk written out, and worth nothing"
         );
     }
 

@@ -74,9 +74,11 @@ impl HumanSeekingHosts {
     }
 }
 
-/// Live placements for complete human-seeking Stations (issue #1097).
-/// Kept separate from the legacy fine-system map while Comms is migrated by
-/// #1098, so the two authority models cannot accidentally reinterpret keys.
+/// Live placements for complete human-seeking Stations (issue #1097; Comms
+/// joined Navigation on this path in #1098). Kept separate from the legacy
+/// fine-system map — which several other shipped hulls (battleship, cruiser,
+/// courier) still use for their own per-system seeks — so the two authority
+/// models cannot accidentally reinterpret keys.
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct VisitingStationHosts(pub Vec<crate::ship::coordination::VisitingStationAssignment>);
 

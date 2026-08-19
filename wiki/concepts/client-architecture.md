@@ -58,10 +58,14 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 Each console UI is one HTML file per ship class (`gui/battleship/helm.html`, `gui/cruiser/science.html`, …) loaded as an iframe; the URL comes from the station's TOML `console` field via `gui/console-resolver.js`, and the section/iframe DOM ids from `gui/mount-plan.js`. See [Console UI Authoring Library](./console-ui-library.md) for the authoring pattern.
 
 `client.html` owns one shared Hero Bar above those iframes. It switches whole
-mounted Station surfaces, so visiting Navigation uses the same normal
-Navigation iframe as a direct holder. The bar states Direct/Visiting ownership
-in text as well as styling and exposes ARIA tabs with Arrow/Home/End focus
-movement; a departed visitor returns selection to the direct Station.
+mounted Station surfaces, so visiting Navigation or Comms uses the same normal
+Navigation/Comms iframe as a direct holder. The bar states Direct/Visiting
+ownership in text as well as styling and exposes ARIA tabs with Arrow/Home/End
+focus movement; a departed visitor returns selection to the direct Station.
+The destroyer's bespoke Nav/Comms overlay toggles (`gui/visiting-systems.js`)
+are retired — issues #1097 and #1098 moved both onto this shared path, and
+only Tactical's unrelated Intel toggle still uses the generic overlay pattern
+(`gui/console-overlays.js`).
 
 ## Build & test
 

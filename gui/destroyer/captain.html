@@ -28,22 +28,7 @@
     .console-footer .sep { color: var(--line-soft); }
     .console-footer .spacer { flex: 1; }
 
-    /* Visiting consoles (issue #984): Comms and Navigation follow the crew, so
-       this station carries the same toggle/panel pair the destroyer's Tactical
-       console has, shown only while the seek holds a system here. */
     .hero-controls { display: flex; align-items: center; gap: 8px; }
-    .overlay-toggle { background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 8px 16px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; white-space: nowrap; min-height: var(--control-hit-min); }
-    .overlay-toggle:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
-    .overlay-toggle.active { background: rgba(var(--rgb-cyan-dim), 0.9); border-color: var(--cyan); color: var(--cyan); }
-    .overlay-toggle .unread-badge { display: none; margin-left: 6px; background: var(--fire-bright); color: var(--surface-void); font-size: var(--text-xs); font-weight: 700; padding: 0 4px; border-radius: 2px; line-height: 1.4; }
-    .overlay-toggle .unread-badge.show { display: inline-block; }
-    .overlay-back { position: absolute; top: 6px; left: 6px; z-index: 6; background: rgba(var(--rgb-panel), 0.85); border: 1px solid var(--edge); color: var(--ink); font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.2em; padding: 6px 14px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; min-height: var(--control-hit-min); }
-    .overlay-back:hover { background: rgba(var(--rgb-panel-up), 0.9); border-color: var(--ink-dim); }
-    .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(var(--rgb-deep), 0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
-    .overlay-panel.open { display: flex; }
-    .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    .overlay-panel ph-navigation-map, .overlay-panel ph-comms-contact-list, .overlay-panel ph-comms-current-message { flex: 1; min-height: 0; }
-    .overlay-toggle[hidden] { display: none; }
 
     @media (orientation: portrait) {
       .panel-inner { padding: 10px 12px; gap: 8px; }
@@ -70,11 +55,6 @@
         <h1><span data-i18n="console.captain.title">CAPTAIN</span><span class="sub" data-i18n="console.destroyer_captain.subtitle">COMMAND &amp; SENSORS</span></h1>
         <div class="hero-controls">
           <span class="auto-badge" id="captain-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-          <!-- Human-seeking systems (issue #984): hidden until the seek parks
-               Navigation or Comms on this station, and hidden again the moment
-               it moves on. -->
-          <button class="overlay-toggle" id="nav-toggle" data-overlay="nav-overlay" data-active="false" hidden data-i18n="console.common.nav_toggle">Nav</button>
-          <button class="overlay-toggle" id="comms-toggle" data-overlay="comms-overlay" data-active="false" hidden><span data-i18n="console.common.comms_toggle">Comms</span><span class="unread-badge" id="comms-unread">!</span></button>
         </div>
       </div>
       <div class="console-body">
@@ -103,22 +83,6 @@
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
     </div>
-    <!-- Visiting consoles (issue #984). Present in the markup always, opened
-         only through toggles that appear while the seek holds the system here.
-         Same ids as the destroyer's Tactical console — gui/visiting-systems.js
-         renders all four seats through one code path. -->
-    <div class="overlay-panel" id="nav-overlay">
-      <button class="overlay-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
-      <h2 data-i18n="console.common.navigation_panel">Navigation</h2>
-      <ph-navigation-map id="navigation-map"></ph-navigation-map>
-      <ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>
-    </div>
-    <div class="overlay-panel" id="comms-overlay">
-      <button class="overlay-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
-      <h2 data-i18n="console.common.comms_panel">Comms</h2>
-      <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
-      <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
-    </div>
   </div>
   <script type="module">
     import '../components/ph-camera-select.js';
@@ -130,19 +94,9 @@
     import '../components/ph-sensor-radar.js';
     import '../components/ph-sensor-panel.js';
     import '../components/ph-station-damage.js';
-    import '../components/ph-comms-contact-list.js';
-    import '../components/ph-comms-current-message.js';
-    import '../components/ph-navigation-map.js';
-    import '../components/ph-civilian-traffic.js';
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
-    import { initConsoleOverlays } from '../console-overlays.js';
-    import { renderVisitingSystems } from '../visiting-systems.js';
-
-    // Delegated, because the toggles these panels hang off start `hidden` and
-    // only become controls when the seek hands this station the system.
-    initConsoleOverlays();
 
     // Generic system-id-keyed payload (issue #825): resolve each panel's view
     // from the fine system ids this station owns, falling back through the
@@ -152,11 +106,6 @@
       name: 'captain',
       // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
-        // Comms and Navigation follow the crew (issue #984). The Captain is
-        // THIRD in this hull's authored seek order, behind Engineering: the
-        // chair whose attention is meant to stay on the whole board is not the
-        // first place to put a second job.
-        renderVisitingSystems(s);
         var cameraEl = document.getElementById('camera-select');
         var redAlertEl = document.getElementById('red-alert');
         var objectiveEl = document.getElementById('objective-list');

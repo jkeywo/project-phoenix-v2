@@ -2479,6 +2479,36 @@ describe('auto fields', () => {
   it('comms_auto is false when stationRatings is absent', () => {
     expect(parse(buildCommsConsoleState(EMPTY)).comms_auto).toBe(false);
   });
+
+  it('comms_auto follows live system control ahead of the lobby rating', () => {
+    const visiting = parse(buildCommsConsoleState({
+      stationRatings: { comms: 'Backfill' },
+      controlSources: { comms: 'Human' },
+    }));
+    expect(visiting.comms_auto).toBe(false);
+
+    const delegated = parse(buildCommsConsoleState({
+      stationRatings: { comms: 'Std' },
+      controlSources: { comms: 'Ai' },
+    }));
+    expect(delegated.comms_auto).toBe(true);
+  });
+
+  it('a real SimState projection makes visiting Comms manual and AI Comms AUTO', () => {
+    const sim = new ClientSimState();
+    sim.stationRatings = { comms: 'Backfill' };
+    sim.apply({ type: 'SimState', data: { snapshot: {
+      station_hosts: [{ station: 'comms', host: 'tactical', rating: 'Std' }],
+      control_sources: { comms: 'Human' },
+    } } });
+    expect(parse(buildCommsConsoleState(sim)).comms_auto).toBe(false);
+
+    sim.apply({ type: 'SimState', data: { snapshot: {
+      station_hosts: [{ station: 'comms', host: null, rating: 'Std' }],
+      control_sources: { comms: 'Ai' },
+    } } });
+    expect(parse(buildCommsConsoleState(sim)).comms_auto).toBe(true);
+  });
 });
 
 // ── cruiser engineering station (generic payload, issue #825) ─────────────────
@@ -2917,8 +2947,12 @@ describe('buildSystemStationConsoleState', () => {
 // ── destroyer tactical station (generic payload, issue #825) ──────────────────
 
 describe('destroyer tactical station via buildSystemStationConsoleState', () => {
-  // Destroyer tactical station (weapons + navigation + comms) as declared in
-  // assets/entities/alliance_destroyer.toml (weapon ids abridged).
+  // A synthetic mixed-family fixture (weapon ids abridged) exercising the
+  // generic multi-family composition path. Navigation and Comms no longer
+  // live on the destroyer's real Tactical station — both are complete
+  // hero-bar Stations of their own (issues #1097, #1098) — but the builder
+  // itself stays generic, so this still proves the mixed-family shape works
+  // for any station that DOES own systems spanning several families.
   const TACTICAL_SYSTEMS = {
     tactical: ['tactical-radar', 'phaser-control', 'phaser-omni', 'blaster-port', 'blaster-starboard', 'navigation', 'comms'],
   };
@@ -2984,6 +3018,22 @@ describe('destroyer tactical station via buildSystemStationConsoleState', () => 
     const s = parse(buildSystemStationConsoleState('tactical', state));
     expect(s.systems['comms'].messages).toHaveLength(1);
     expect(s.systems['comms'].messages[0].id).toBe('msg-1');
+  });
+
+  // Issue #1098: on the real destroyer hull, Comms is its own hero-bar
+  // Station and Tactical no longer owns a comms-family system at all, so
+  // `s.systems['comms']` would not exist there. The destroyer's Intel panel
+  // reads dossiers independently of comms ownership, off a top-level field
+  // every system-composed station carries — proved here with a fixture that
+  // owns NO comms-family system, matching the real destroyer's Tactical.
+  it('carries dossiers at the top level even when the station owns no comms system', () => {
+    const subjects = [{ uuid: 'target-1', name: 'Harrow Raider' }];
+    const s = parse(buildSystemStationConsoleState('tactical', {
+      stationSystems: { tactical: ['tactical-radar', 'phaser-omni'] },
+      blackboards: { dossiers: { subjects } },
+    }));
+    expect(s.systems.comms).toBeUndefined();
+    expect(s.dossiers).toEqual(subjects);
   });
 
   it('passes navigation blackboard through the navigation view', () => {
@@ -3400,16 +3450,13 @@ describe('withTutorialOverlay (destroyer tactical station, issue #921)', () => {
     { id: 'tactical-torpedo', trigger: { kind: 'control_unused', control: 'fire_torpedo' },
       title: 'entity.alliance_destroyer.station.tactical.tutorial.torpedo.title',
       text: 'entity.alliance_destroyer.station.tactical.tutorial.torpedo.text', anchor: 'torpedo-controls' },
-    { id: 'tactical-comms', trigger: { kind: 'control_unused', control: 'hail' },
-      title: 'entity.alliance_destroyer.station.tactical.tutorial.comms.title',
-      text: 'entity.alliance_destroyer.station.tactical.tutorial.comms.text', anchor: 'comms-toggle' },
   ];
 
   it('parses and evaluates through buildSystemStationConsoleState: welcome first, then progresses as controls are used', () => {
     const fresh = { stationTutorials: { tactical: tacticalDefs }, tutorialProgress: { dismissed: {}, used: {} }, stationSystems: TACTICAL_SYSTEMS };
     const s1 = parse(withTutorialOverlay('tactical', fresh, buildSystemStationConsoleState('tactical', fresh)));
     expect(s1.tutorial.active.id).toBe('tactical-welcome');
-    expect(s1.tutorial.remaining).toBe(6);
+    expect(s1.tutorial.remaining).toBe(5);
     expect(getTable().has(s1.tutorial.active.title)).toBe(true);
     expect(getTable().has(s1.tutorial.active.text)).toBe(true);
     // The rest of the composed weapons/comms payload is untouched.
@@ -3427,7 +3474,7 @@ describe('withTutorialOverlay (destroyer tactical station, issue #921)', () => {
     };
     const s2 = parse(withTutorialOverlay('tactical', progressed, buildSystemStationConsoleState('tactical', progressed)));
     expect(s2.tutorial.active.id).toBe('tactical-blaster');
-    expect(s2.tutorial.remaining).toBe(3); // blaster, torpedo, comms
+    expect(s2.tutorial.remaining).toBe(2); // blaster, torpedo
   });
 });
 

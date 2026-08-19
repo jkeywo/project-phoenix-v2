@@ -1,13 +1,15 @@
 /**
- * gui/console-overlays.js — the hero-bar toggle / full-frame panel pair that a
- * console uses to show a surface it does not have room for inline.
+ * gui/console-overlays.js — the toggle / full-frame panel pair a console uses
+ * to show a surface it does not have room for inline.
  *
  * The pattern was written three times inline (destroyer Tactical, courier
- * Pilot, courier Captain) before issue #984 needed a fourth, fifth and sixth
- * copy: Comms and Navigation are human-seeking, so ANY station can be asked to
- * host them, and every destroyer console therefore grows the same two toggles.
- * Six copies of a mutual-exclusion rule is five too many, so the rule lives
- * here and the consoles carry only markup.
+ * Pilot, courier Captain) before issue #984 grew it onto every destroyer
+ * console for Comms and Navigation, which were human-seeking systems any
+ * station could be asked to host. Both have since become complete hero-bar
+ * Stations of their own (issues #1097, #1098) and no longer use this pattern;
+ * the destroyer Tactical console's Intel panel (issue #1030) is the surviving
+ * consumer. The mutual-exclusion rule stays here rather than back inline, so
+ * a future surface that needs the same shape does not have to write it again.
  *
  * THE CONVENTION, and it is the whole API:
  *
@@ -22,8 +24,11 @@
  * at once is not a layout, it is a bug you cannot see.
  *
  * The module reads the DOM and nothing else: no console payload, no simState,
- * no strings. Which toggles are VISIBLE is a separate question, answered by
- * `setSoughtToggle` in gui/console-ui.js from the console's own payload.
+ * no strings. Which toggles are VISIBLE was a separate question for the
+ * human-seeking Comms/Navigation toggles this pattern used to cover; now that
+ * both are complete hero-bar Stations (issues #1097, #1098), the surviving
+ * consumer (Tactical's Intel panel) is never conditionally hidden, so nothing
+ * in this module answers that question any more.
  */
 
 /**

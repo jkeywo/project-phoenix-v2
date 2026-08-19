@@ -48,6 +48,25 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.world).toEqual(world);
   });
 
+  it('clears authority and placement projections across a real new-round sequence', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      station_hosts: [{ station: 'navigation', host: 'tactical', rating: 'Std' }],
+      control_sources: { navigation: 'Human' },
+    } } });
+
+    s.apply({ type: 'ReturnedToLobby', data: {} });
+    expect(s.stationHosts).toEqual({});
+    expect(s.controlSources).toEqual({});
+
+    s.apply({ type: 'GameStarted', data: {} });
+    s.apply({ type: 'WorldSetup', data: { world: {
+      entities: [], scenario_title: 'Next round', scenario_description: '',
+    } } });
+    expect(s.stationHosts).toEqual({});
+    expect(s.controlSources).toEqual({});
+  });
+
   it('SimState updates entity position and hull IN PLACE without appending', () => {
     const s = new ClientSimState();
     s.world.entities = [asteroid('a', 0, 0), asteroid('b', 5, 5)];
@@ -62,6 +81,28 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.world.entities).toHaveLength(2);
     expect(s.world.entities[0].position).toEqual([1, 0, 2]);
     expect(s.world.entities[0].hull_fraction).toBe(0.5);
+  });
+
+  it('SimState stores generic complete-Station host projections by Station id', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      station_hosts: [
+        { station: 'power', host: 'repair', rating: 'Std' },
+        { station: 'shields', host: null, rating: 'Backfill' },
+      ],
+    } } });
+    expect(s.stationHosts).toEqual({
+      power: { station: 'power', host: 'repair', rating: 'Std' },
+      shields: { station: 'shields', host: null, rating: 'Backfill' },
+    });
+  });
+
+  it('SimState stores the authoritative fine-System control-source projection', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      control_sources: { navigation: 'Human', 'shields-system': 'Ai' },
+    } } });
+    expect(s.controlSources).toEqual({ navigation: 'Human', 'shields-system': 'Ai' });
   });
 
   it('SystemHullUpdate replaces consoleHull with SystemId-keyed entries', () => {
@@ -294,6 +335,24 @@ describe('apply Welcome', () => {
     s.apply(welcome(null, { repair_team_count: 3 }));
     expect(s.world.entities).toEqual([]);
     expect(s.repairTeams).toEqual([]); // no pre-seed during lobby
+  });
+
+  it('keeps authority and placement projections through an in-progress reconnect Welcome', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      station_hosts: [{ station: 'navigation', host: 'tactical', rating: 'Std' }],
+      control_sources: { navigation: 'Human' },
+    } } });
+
+    s.apply(welcome({ entities: [], scenario_title: '', scenario_description: '' }));
+    expect(s.stationHosts).toEqual({
+      navigation: { station: 'navigation', host: 'tactical', rating: 'Std' },
+    });
+    expect(s.controlSources).toEqual({ navigation: 'Human' });
+
+    s.apply(welcome(null));
+    expect(s.stationHosts).toEqual({});
+    expect(s.controlSources).toEqual({});
   });
 
   it('pre-seeds repair teams with Idle slots sized from ship_config when in-game', () => {

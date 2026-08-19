@@ -201,7 +201,7 @@ pub fn encode_delivery_refusal(refusal: &crate::delivery::DeliveryRefusal) -> St
 mod tests {
     use super::*;
     use crate::messages::*;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
     use strum::IntoEnumIterator;
 
     struct PrettyJsonCodec;
@@ -508,6 +508,15 @@ mod tests {
                             shield_freq: None,
                             warp_out_remaining_secs: None,
                         }],
+                        station_hosts: vec![StationHostSnapshot {
+                            station: StationId("navigation".into()),
+                            host: Some(StationId("tactical".into())),
+                            rating: "Std".into(),
+                        }],
+                        control_sources: BTreeMap::from([
+                            (SystemId("navigation".into()), "Human".into()),
+                            (SystemId("shields-system".into()), "Ai".into()),
+                        ]),
                     },
                 },
             ),
@@ -3271,6 +3280,10 @@ mod tests {
             assert!(
                 snapshot.entity_states[0].shields.is_none(),
                 "shields must default to None when absent"
+            );
+            assert!(
+                snapshot.control_sources.is_empty(),
+                "control_sources must default empty for an older compatible host"
             );
         } else {
             panic!("expected SimState");

@@ -269,6 +269,126 @@ pub fn seek_human_host_in<'a>(
         .find(|seat| is_human_and_connected(seat))
 }
 
+/// One complete human-seeking Station's resolved placement (issue #1097).
+/// `host = None` is the ordinary Backfill/AI outcome, not a special controller.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VisitingStationAssignment {
+    pub station: StationId,
+    pub host: Option<StationId>,
+    pub rating: String,
+}
+
+/// Resolve a complete human-seeking Station without Bevy state.
+///
+/// The station's own active direct holder always wins. Otherwise only its
+/// finite authored compatibility list is walked, and a candidate is eligible
+/// only when `is_directly_held` says a player actively holds that Station.
+/// This admits a human-seeking Station in its direct state without ever using
+/// a visiting Station as another visitor's host. `scenario_detailed_systems`
+/// is the hull-resolved scenario-floor input: the visiting rating is raised to
+/// the first authored rung at or above its baseline that leaves all those
+/// owned systems human-operated.
+pub fn resolve_visiting_station(
+    config: &crate::ship::config::ShipConfig,
+    station: &crate::ship::config::StationConfig,
+    is_directly_held: impl Fn(&StationId) -> bool,
+    scenario_detailed_systems: &std::collections::BTreeSet<SystemId>,
+) -> VisitingStationAssignment {
+    debug_assert!(station.human_seeking);
+    let direct = is_directly_held(&station.id).then(|| station.id.clone());
+    let host = direct.or_else(|| {
+        station.host_order.iter().find_map(|host| {
+            config.station(host)?;
+            is_directly_held(host).then(|| host.clone())
+        })
+    });
+
+    let (host, rating) = if host.is_none() {
+        (None, crate::ship::rating::BACKFILL_RATING.to_string())
+    } else if host.as_ref() == Some(&station.id) {
+        // The adapter replaces this with the active direct rating. Keeping the
+        // pure answer authored makes it useful without an ActiveStationRatings
+        // resource and gives hand-built fixtures a deterministic result.
+        let rating = station
+            .ratings
+            .first()
+            .map(|rating| rating.name.clone())
+            .unwrap_or_default();
+        (host, rating)
+    } else {
+        match effective_visiting_rating(config, station, scenario_detailed_systems) {
+            Some(rating) => (host, rating.to_string()),
+            None => (None, crate::ship::rating::BACKFILL_RATING.to_string()),
+        }
+    };
+
+    VisitingStationAssignment {
+        station: station.id.clone(),
+        host,
+        rating,
+    }
+}
+
+/// Resolve world-authored scenario detail-floor vocabulary onto one hull.
+///
+/// A scenario cannot name per-hull System ids because the crew chooses its hull
+/// in the lobby. Each selector therefore names either a console family (the
+/// authored Station id) or a System kind. Matching both namespaces and taking
+/// their union preserves that hull independence; the result is the concrete,
+/// deterministic System-id set consumed by the rating resolver.
+pub fn resolve_scenario_detail_floor(
+    config: &crate::ship::config::ShipConfig,
+    selectors: &[String],
+) -> std::collections::BTreeSet<SystemId> {
+    config
+        .systems
+        .iter()
+        .filter(|system| {
+            selectors.iter().any(|selector| {
+                system.kind == *selector
+                    || system
+                        .station
+                        .as_ref()
+                        .is_some_and(|station| station.0 == *selector)
+            })
+        })
+        .map(|system| system.id.clone())
+        .collect()
+}
+
+fn effective_visiting_rating<'a>(
+    config: &crate::ship::config::ShipConfig,
+    station: &'a crate::ship::config::StationConfig,
+    scenario_detailed_systems: &std::collections::BTreeSet<SystemId>,
+) -> Option<&'a str> {
+    let baseline = station.visiting_rating.as_ref().and_then(|name| {
+        station
+            .ratings
+            .iter()
+            .position(|rating| &rating.name == name)
+    })?;
+    let owned_floor: std::collections::BTreeSet<&SystemId> = config
+        .systems
+        .iter()
+        .filter(|system| system.station.as_ref() == Some(&station.id))
+        .map(|system| &system.id)
+        .filter(|id| scenario_detailed_systems.contains(*id))
+        .collect();
+    // Ratings are authored most-detailed first. Start at the visiting baseline
+    // and walk TOWARD earlier, more-detailed rungs, choosing the smallest raise
+    // that satisfies every scenario-required System.
+    station.ratings[..=baseline]
+        .iter()
+        .rev()
+        .find(|rating| {
+            !rating
+                .automated_systems
+                .iter()
+                .any(|system| owned_floor.contains(system))
+        })
+        .map(|rating| rating.name.as_str())
+}
+
 /// Build the seat list every [`seek_human_host`] call on one ship runs over
 /// (issue #984).
 ///
@@ -326,7 +446,21 @@ pub fn seeking_seats(
                 .map(|s| resolver.policy_for(&s.id))
                 .collect();
             let holder = holder_for(&station.id);
-            let control = if policies.is_empty() {
+            let control = if station.human_seeking {
+                // A complete visiting Station may host a legacy seeking System
+                // only while a connected player holds it DIRECTLY. `holder_for`
+                // is keyed by Session::station, so a Station merely presented
+                // as somebody else's visiting tab has no holder here and cannot
+                // create a visitor-on-visitor chain. Backfill is likewise not a
+                // human destination even if the direct owner remains connected.
+                let automated = ratings
+                    .get(&station.id)
+                    .is_some_and(|name| name == crate::ship::rating::BACKFILL_RATING);
+                match (automated, holder.is_some()) {
+                    (false, true) => ControlSource::Human,
+                    _ => ControlSource::Offline,
+                }
+            } else if policies.is_empty() {
                 let automated = ratings
                     .get(&station.id)
                     .is_some_and(|name| name == crate::ship::rating::BACKFILL_RATING);
@@ -966,6 +1100,65 @@ human_seeking = true
         );
     }
 
+    #[test]
+    fn a_directly_held_human_seeking_station_can_host_a_legacy_seek_without_nesting() {
+        let mut config = seeking_config();
+        let comms = config
+            .stations
+            .iter_mut()
+            .find(|station| station.id.0 == "comms")
+            .expect("fixture has a Comms Station");
+        comms.human_seeking = true;
+
+        let connected = seeking_seats(
+            &config,
+            &ControlSourceResolver::new(),
+            &ratings(&[("comms", "Standard")]),
+            |station| (station.0 == "comms").then(|| "bob".to_string()),
+        );
+        assert_eq!(
+            connected
+                .iter()
+                .find(|seat| seat.station.0 == "comms")
+                .unwrap()
+                .control,
+            ControlSource::Human,
+            "a connected direct holder is an eligible legacy-seek destination"
+        );
+
+        let visiting_only = seeking_seats(
+            &config,
+            &ControlSourceResolver::new(),
+            &ratings(&[("comms", "Standard")]),
+            |_| None,
+        );
+        assert_eq!(
+            visiting_only
+                .iter()
+                .find(|seat| seat.station.0 == "comms")
+                .unwrap()
+                .control,
+            ControlSource::Offline,
+            "presentation as a visiting tab supplies no direct Session holder and must not nest"
+        );
+
+        let delegated = seeking_seats(
+            &config,
+            &ControlSourceResolver::new(),
+            &ratings(&[("comms", crate::ship::rating::BACKFILL_RATING)]),
+            |station| (station.0 == "comms").then(|| "bob".to_string()),
+        );
+        assert_eq!(
+            delegated
+                .iter()
+                .find(|seat| seat.station.0 == "comms")
+                .unwrap()
+                .control,
+            ControlSource::Offline,
+            "an AI-operated human-seeking Station is not a human host"
+        );
+    }
+
     /// Seats come back in AUTHORED station order — the property `seek_human_host`
     /// and two lockstep peers both depend on.
     #[test]
@@ -1190,5 +1383,218 @@ human_seeking = true
                  half, got {id}"
             );
         }
+    }
+
+    fn visiting_config() -> crate::ship::config::ShipConfig {
+        crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "power"
+name = "Power"
+description = ""
+rank = ""
+human_seeking = true
+host_order = ["shields", "repair"]
+visiting_rating = "Visit"
+[[station.rating]]
+name = "Floor"
+automated_systems = []
+[[station.rating]]
+name = "Visit"
+automated_systems = ["power-system"]
+
+[[station]]
+id = "repair"
+name = "Repair"
+description = ""
+rank = ""
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "shields"
+name = "Shields"
+description = ""
+rank = ""
+human_seeking = true
+host_order = ["sensors"]
+visiting_rating = "Visit"
+[[station.rating]]
+name = "Visit"
+automated_systems = []
+
+[[station]]
+id = "sensors"
+name = "Sensors"
+description = ""
+rank = ""
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "power-system"
+kind = "test"
+station = "power"
+[[system]]
+id = "shields-system"
+kind = "test"
+station = "shields"
+"#,
+            &["test"],
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn complete_station_prefers_direct_then_ordered_fallback_then_ai() {
+        let config = visiting_config();
+        let power = config.station(&StationId("power".into())).unwrap();
+        let no_floor = std::collections::BTreeSet::new();
+        let direct = resolve_visiting_station(
+            &config,
+            power,
+            |id| id.0 == "power" || id.0 == "repair",
+            &no_floor,
+        );
+        assert_eq!(direct.host, Some(StationId("power".into())));
+
+        let visiting = resolve_visiting_station(
+            &config,
+            power,
+            |id| id.0 == "repair" || id.0 == "sensors",
+            &no_floor,
+        );
+        assert_eq!(visiting.host, Some(StationId("repair".into())));
+
+        let exhausted = resolve_visiting_station(&config, power, |id| id.0 == "sensors", &no_floor);
+        assert_eq!(
+            exhausted.host, None,
+            "an unrelated human is not an implicit fallback"
+        );
+        assert_eq!(exhausted.rating, crate::ship::rating::BACKFILL_RATING);
+    }
+
+    #[test]
+    fn generic_power_repair_and_shields_sensors_chains_need_no_band_d_hull() {
+        let config = visiting_config();
+        let none = std::collections::BTreeSet::new();
+        for (visitor, expected) in [("power", "repair"), ("shields", "sensors")] {
+            let station = config.station(&StationId(visitor.into())).unwrap();
+            let assignment =
+                resolve_visiting_station(&config, station, |id| id.0 == expected, &none);
+            assert_eq!(assignment.host, Some(StationId(expected.into())));
+        }
+    }
+
+    #[test]
+    fn scenario_floor_raises_the_authored_visiting_rating() {
+        let config = visiting_config();
+        let power = config.station(&StationId("power".into())).unwrap();
+        let floor = std::iter::once(SystemId("power-system".into())).collect();
+        let assignment = resolve_visiting_station(&config, power, |id| id.0 == "repair", &floor);
+        assert_eq!(assignment.rating, "Floor");
+    }
+
+    #[test]
+    fn scenario_floor_raises_simplified_toward_earlier_std_rung() {
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = ""
+rank = ""
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Simplified"
+[[station.rating]]
+name = "Std"
+automated_systems = []
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["navigation"]
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = ""
+rank = ""
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "navigation"
+"#,
+            &["navigation"],
+        )
+        .unwrap();
+        let navigation = config.station(&StationId("navigation".into())).unwrap();
+        let floor = std::iter::once(SystemId("navigation".into())).collect();
+        let assignment =
+            resolve_visiting_station(&config, navigation, |id| id.0 == "captain", &floor);
+        assert_eq!(assignment.host, Some(StationId("captain".into())));
+        assert_eq!(assignment.rating, "Std");
+    }
+
+    #[test]
+    fn impossible_scenario_floor_refuses_human_host_and_falls_back_to_ai() {
+        let mut config = visiting_config();
+        let power = config
+            .stations
+            .iter_mut()
+            .find(|station| station.id.0 == "power")
+            .unwrap();
+        for rating in &mut power.ratings {
+            rating.automated_systems = vec![SystemId("power-system".into())];
+        }
+        let power = config.station(&StationId("power".into())).unwrap();
+        let floor = std::iter::once(SystemId("power-system".into())).collect();
+        let assignment = resolve_visiting_station(&config, power, |id| id.0 == "repair", &floor);
+        assert_eq!(assignment.host, None);
+        assert_eq!(assignment.rating, crate::ship::rating::BACKFILL_RATING);
+    }
+
+    #[test]
+    fn scenario_floor_vocabulary_resolves_station_families_and_system_kinds_per_hull() {
+        let config = visiting_config();
+        let selectors = vec!["power".to_string(), "shields".to_string()];
+        let resolved = resolve_scenario_detail_floor(&config, &selectors);
+        assert!(resolved.contains(&SystemId("power-system".into())));
+        assert!(resolved.contains(&SystemId("shields-system".into())));
+        assert!(!resolved.contains(&SystemId("repair-system".into())));
+    }
+
+    #[test]
+    fn directly_held_human_seeking_station_may_host_without_enabling_nesting() {
+        let config = visiting_config();
+        let power = config.station(&StationId("power".into())).unwrap();
+        let directly_held = resolve_visiting_station(
+            &config,
+            power,
+            |id| id.0 == "shields",
+            &std::collections::BTreeSet::new(),
+        );
+        assert_eq!(
+            directly_held.host,
+            Some(StationId("shields".into())),
+            "Station type does not disqualify an active direct holder"
+        );
+
+        let shields_is_only_visiting = resolve_visiting_station(
+            &config,
+            power,
+            |id| id.0 == "repair",
+            &std::collections::BTreeSet::new(),
+        );
+        assert_eq!(
+            shields_is_only_visiting.host,
+            Some(StationId("repair".into())),
+            "a non-direct visiting candidate is skipped; resolution stays finite"
+        );
     }
 }

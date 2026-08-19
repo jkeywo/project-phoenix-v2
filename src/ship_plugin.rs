@@ -8,12 +8,13 @@ pub use crate::ship::components::{
     ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationEnqueue,
     CoordinationQueue, DockingMotionIntent, HelmWaypointClearance, HumanSeekingHosts,
     ImpulseConfigResource, LastHelmInput, LastSystemTiers, PendingArcBearingRequest,
-    PendingShipConfig, PendingTacticalFrequencyHint, RepairHumanAlerted, ShipConfigComponent,
-    ShipPhysicsConfigResource, ShipSystemControlSources, BANK_LERP_RATE,
+    PendingShipConfig, PendingTacticalFrequencyHint, RepairHumanAlerted, ScenarioDetailFloor,
+    ShipConfigComponent, ShipPhysicsConfigResource, ShipSystemControlSources, VisitingStationHosts,
+    BANK_LERP_RATE,
 };
 pub use crate::ship::coordination_systems::{
     handle_coordination_enqueue, handle_coordination_messages, process_coordination_lag,
-    resolve_human_seeking_hosts,
+    resolve_human_seeking_hosts, write_scenario_detail_floor,
 };
 pub use crate::ship::damage_sync::{detect_damage_tier_crossings, sync_console_damage_tiers};
 pub(crate) use crate::ship::helm_admission::{
@@ -256,7 +257,8 @@ impl Plugin for ShipPlugin {
         // is idempotent and runs every tick rather than on change.
         app.add_systems(
             FixedUpdate,
-            resolve_human_seeking_hosts
+            (write_scenario_detail_floor, resolve_human_seeking_hosts)
+                .chain()
                 .in_set(crate::sim_sets::SimSet::Input)
                 .after(crate::lobby::LobbySystemSet)
                 .after(handle_station_rating_change)

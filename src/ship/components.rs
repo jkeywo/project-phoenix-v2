@@ -38,9 +38,20 @@ pub struct ShipConfigComponent(pub ShipConfig);
 #[derive(Component, Clone, Debug, Default)]
 pub struct ActiveStationRatings(pub HashMap<StationId, String>);
 
-/// Where each `human_seeking` `[[system]]` on this ship is currently hosted
-/// (issue #984): the station whose holder is authoritative for it RIGHT NOW,
-/// which is not necessarily the station its `[[system]]` block authors.
+/// Scenario-authored minimum-detail requirements after they have been resolved
+/// to this hull's System ids. The scenario runtime owns this input; Station
+/// placement only reads it when choosing a complete visiting Station's
+/// effective authored rating.
+///
+/// A `BTreeSet` keeps the snapshot deterministic for saves and lockstep. An
+/// empty set is the ordinary pre-Band-B/simple-scenario value.
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ScenarioDetailFloor(pub std::collections::BTreeSet<SystemId>);
+
+/// Where each sought system on this ship is currently hosted: legacy
+/// `human_seeking` systems (#984) plus every system owned by a complete
+/// human-seeking Station (#1097). The station whose holder is authoritative
+/// RIGHT NOW need not be the station the system authors.
 ///
 /// Rewritten every tick by `ship::coordination_systems::resolve_human_seeking_hosts`
 /// from the pure [`crate::ship::coordination::seek_human_host`], and read by
@@ -60,6 +71,23 @@ impl HumanSeekingHosts {
     /// (in which case the system is AI-operated and has no human host).
     pub fn host_for(&self, system: &SystemId) -> Option<&StationId> {
         self.0.get(system)
+    }
+}
+
+/// Live placements for complete human-seeking Stations (issue #1097).
+/// Kept separate from the legacy fine-system map while Comms is migrated by
+/// #1098, so the two authority models cannot accidentally reinterpret keys.
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct VisitingStationHosts(pub Vec<crate::ship::coordination::VisitingStationAssignment>);
+
+impl VisitingStationHosts {
+    pub fn assignment_for(
+        &self,
+        station: &StationId,
+    ) -> Option<&crate::ship::coordination::VisitingStationAssignment> {
+        self.0
+            .iter()
+            .find(|assignment| &assignment.station == station)
     }
 }
 

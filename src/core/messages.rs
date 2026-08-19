@@ -1274,6 +1274,28 @@ pub struct SimSnapshot {
     /// Per-tick entity state snapshots (position, yaw, hull, flags).
     #[serde(default)]
     pub entity_states: Vec<EntityStateSnapshot>,
+    /// Authoritative complete human-seeking Station placement projection.
+    /// Station-level by design: clients must not infer a complete Station's
+    /// host or effective rating from one console family's blackboard.
+    #[serde(default)]
+    pub station_hosts: Vec<StationHostSnapshot>,
+    /// Effective per-system authority for the local ship at this tick.
+    ///
+    /// This is the wire projection of `ShipSystemControlSources`, not a
+    /// station-rating inference: complete Stations may visit differently
+    /// named hosts while their fine Systems remain human-operated. A sorted
+    /// map keeps the authoritative byte stream deterministic.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub control_sources: BTreeMap<SystemId, String>,
+}
+
+/// One complete human-seeking Station's current placement and effective rating.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationHostSnapshot {
+    pub station: StationId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<StationId>,
+    pub rating: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

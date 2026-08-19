@@ -167,6 +167,7 @@ impl SessionManager {
         ship_config
             .stations
             .iter()
+            .filter(|def| !def.auxiliary)
             .filter(|def| !held_stations.contains(&&def.id))
             .map(|def| def.id.clone())
             .collect()
@@ -237,90 +238,34 @@ mod tests {
     }
 
     fn test_stations() -> ShipStations {
+        let station = |id: &str, name: &str| StationDef {
+            id: StationId(id.into()),
+            name: name.into(),
+            description: "".into(),
+            rank: "".into(),
+            short_code: "".into(),
+            console: None,
+            ratings: vec![],
+            human_seeking: false,
+            host_order: vec![],
+            visiting_rating: None,
+            auxiliary: false,
+        };
         ShipStations {
-            stations: vec![
-                StationDef {
-                    id: StationId("captain".into()),
-                    name: "Captain".into(),
-                    description: "".into(),
-                    rank: "".into(),
-                    short_code: "".into(),
-                    console: None,
-                    ratings: vec![],
-                },
-                StationDef {
-                    id: StationId("helm".into()),
-                    name: "Helm".into(),
-                    description: "".into(),
-                    rank: "".into(),
-                    short_code: "".into(),
-                    console: None,
-                    ratings: vec![],
-                },
-                StationDef {
-                    id: StationId("tactical".into()),
-                    name: "Tactical".into(),
-                    description: "".into(),
-                    rank: "".into(),
-                    short_code: "".into(),
-                    console: None,
-                    ratings: vec![],
-                },
-                StationDef {
-                    id: StationId("repair".into()),
-                    name: "Repair".into(),
-                    description: "".into(),
-                    rank: "".into(),
-                    short_code: "".into(),
-                    console: None,
-                    ratings: vec![],
-                },
-                StationDef {
-                    id: StationId("sensors".into()),
-                    name: "Sensors".into(),
-                    description: "".into(),
-                    rank: "".into(),
-                    short_code: "".into(),
-                    console: None,
-                    ratings: vec![],
-                },
-                StationDef {
-                    id: StationId("shields".into()),
-                    name: "Shields".into(),
-                    description: "".into(),
-                    rank: "".into(),
-                    short_code: "".into(),
-                    console: None,
-                    ratings: vec![],
-                },
-                StationDef {
-                    id: StationId("navigation".into()),
-                    name: "Navigation".into(),
-                    description: "".into(),
-                    rank: "".into(),
-                    short_code: "".into(),
-                    console: None,
-                    ratings: vec![],
-                },
-                StationDef {
-                    id: StationId("power".into()),
-                    name: "Power".into(),
-                    description: "".into(),
-                    rank: "".into(),
-                    short_code: "".into(),
-                    console: None,
-                    ratings: vec![],
-                },
-                StationDef {
-                    id: StationId("comms".into()),
-                    name: "Comms".into(),
-                    description: "".into(),
-                    rank: "".into(),
-                    short_code: "".into(),
-                    console: None,
-                    ratings: vec![],
-                },
-            ],
+            stations: [
+                ("captain", "Captain"),
+                ("helm", "Helm"),
+                ("tactical", "Tactical"),
+                ("repair", "Repair"),
+                ("sensors", "Sensors"),
+                ("shields", "Shields"),
+                ("navigation", "Navigation"),
+                ("power", "Power"),
+                ("comms", "Comms"),
+            ]
+            .into_iter()
+            .map(|(id, name)| station(id, name))
+            .collect(),
         }
     }
 
@@ -339,6 +284,10 @@ mod tests {
                     console: None,
                     manual_overview: None,
                     tutorials: vec![],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 })
                 .collect(),
             systems: vec![SystemInstanceConfig {

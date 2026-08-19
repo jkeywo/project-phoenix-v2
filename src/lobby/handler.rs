@@ -293,6 +293,14 @@ pub(crate) fn handle_select_station(
             countdown_action: None,
         };
     };
+    if station_def.auxiliary {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
 
     // Check if sender already holds this station (own station → no-op)
     let sender_station = sessions.station_for_token(token).cloned();
@@ -1236,6 +1244,10 @@ max_level = 4
                     short_code: "CPT".into(),
                     console: None,
                     ratings: vec!["Std".into(), "Simplified".into()],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 },
                 StationDef {
                     id: StationId("helm".into()),
@@ -1245,6 +1257,10 @@ max_level = 4
                     short_code: "HLM".into(),
                     console: None,
                     ratings: vec![],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 },
                 StationDef {
                     id: StationId("tactical".into()),
@@ -1254,6 +1270,10 @@ max_level = 4
                     short_code: "TAC".into(),
                     console: None,
                     ratings: vec![],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 },
                 StationDef {
                     id: StationId("repair".into()),
@@ -1263,6 +1283,10 @@ max_level = 4
                     short_code: "ENG".into(),
                     console: None,
                     ratings: vec![],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 },
                 StationDef {
                     id: StationId("sensors".into()),
@@ -1272,6 +1296,10 @@ max_level = 4
                     short_code: "SCI".into(),
                     console: None,
                     ratings: vec![],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 },
                 StationDef {
                     id: StationId("shields".into()),
@@ -1281,6 +1309,10 @@ max_level = 4
                     short_code: "SHD".into(),
                     console: None,
                     ratings: vec![],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 },
                 StationDef {
                     id: StationId("navigation".into()),
@@ -1290,6 +1322,10 @@ max_level = 4
                     short_code: "NAV".into(),
                     console: None,
                     ratings: vec![],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 },
                 StationDef {
                     id: StationId("power".into()),
@@ -1299,6 +1335,10 @@ max_level = 4
                     short_code: "PWR".into(),
                     console: None,
                     ratings: vec![],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 },
                 StationDef {
                     id: StationId("comms".into()),
@@ -1308,6 +1348,10 @@ max_level = 4
                     short_code: "COM".into(),
                     console: None,
                     ratings: vec![],
+                    human_seeking: false,
+                    host_order: vec![],
+                    visiting_rating: None,
+                    auxiliary: false,
                 },
             ],
         }

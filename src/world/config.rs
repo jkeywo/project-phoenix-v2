@@ -774,6 +774,10 @@ pub struct PlayerSpawnEntry {
 pub struct RawWorld {
     #[serde(default)]
     pub global: GlobalConfig,
+    /// Hull-agnostic scenario detail-floor selectors (console-family/Station id
+    /// or System kind). Resolved against the lobby-selected hull at runtime.
+    #[serde(default)]
+    pub scenario_detail_floor: Vec<String>,
     #[serde(default)]
     pub anchors: HashMap<String, Vec<f32>>,
     #[serde(default, rename = "entity")]
@@ -1619,6 +1623,10 @@ pub(crate) fn scripted_trigger(condition: TriggerCondition) -> Trigger {
 #[derive(Clone, Debug, Default, bevy::prelude::Resource)]
 pub struct WorldConfig {
     pub global: GlobalConfig,
+    /// Hull-agnostic scenario detail-floor selectors from world TOML. A value
+    /// matches either an authored Station id (console family) or a System kind;
+    /// the LocalShip adapter resolves the union to concrete System ids.
+    pub scenario_detail_floor: Vec<String>,
     pub anchors: HashMap<String, [f32; 3]>,
     pub entities: Vec<WorldEntity>,
     /// Map of `name ? uuid` for entities spawned via `[[entity]] name = "..."`.
@@ -2030,6 +2038,7 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
 
     Ok(WorldConfig {
         global: raw.global,
+        scenario_detail_floor: raw.scenario_detail_floor,
         anchors,
         entities,
         name_to_uuid: HashMap::new(),
@@ -2597,6 +2606,22 @@ mod tests {
                      authoring, not a load error",
         );
         assert_eq!(negative.global.attacked_memory_secs, -1.0);
+    }
+
+    #[test]
+    fn parse_world_preserves_hull_agnostic_scenario_detail_floor_vocabulary() {
+        let parsed = parse_world(
+            r#"
+scenario_detail_floor = ["navigation", "sensors"]
+[global]
+title = "Floor fixture"
+"#,
+        )
+        .expect("scenario detail-floor vocabulary is valid world TOML");
+        assert_eq!(
+            parsed.scenario_detail_floor,
+            vec!["navigation".to_string(), "sensors".to_string()]
+        );
     }
 
     /// Every shipped world TOML authors the pre-#889 key. Promoting the field

@@ -1,12 +1,17 @@
 ---
 title: Station
 type: entity
-tags: [station, lobby, roster, rating, ai]
-sources: [src/ship/config.rs, src/lobby/stations_config.rs, src/ship/components.rs, src/ship/rating_systems.rs, assets/entities/alliance_battleship.toml, assets/entities/station_axiom.toml]
-updated: 2026-08-11
+tags: [station, lobby, roster, rating, ai, human-seeking]
+sources: [src/ship/config.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/lobby/stations_config.rs, src/ship/components.rs, src/ship/rating_systems.rs, assets/entities/alliance_destroyer.toml]
+updated: 2026-08-19
 ---
 
 # Station
+
+A Station is an authored operable surface with a stable identity, complete
+console, rating, and owned Systems. A primary Station is a lobby-claimable
+bridge seat; an auxiliary Station is mounted but not offered as a separate
+seat.
 
 A fixed bridge seat a player can claim in the lobby. Stations replaced the
 old per-player-count console bundles in B1–B3 (issue #518).
@@ -58,6 +63,21 @@ key = { ... }
 ```
 
 The optional `console = "..."` field selects the station's iframe page.
+
+A complete human-seeking Station adds `human_seeking = true`, a finite
+`host_order`, and an authored `visiting_rating`. Its own active direct holder
+wins; otherwise `resolve_visiting_station` walks only compatible directly held
+Stations and then selects Backfill AI. A human-seeking Station may itself host
+while it has an active direct holder; a Station that is currently visiting has
+no direct holder and is therefore ineligible, preventing nested tabs and
+transitive authority. A world's top-level `scenario_detail_floor` selectors
+name Station ids (console families) or System kinds; `write_scenario_detail_floor`
+resolves them against the selected hull into the live `ScenarioDetailFloor`
+component before placement, which publishes the resulting effective visiting
+rating in `VisitingStationHosts`; `SimSnapshot.station_hosts` projects those
+station-level placements generically to the client shell. The Alliance Destroyer's
+Navigation Station is the first shipped user; its Navigation System remains
+owned by Navigation wherever the complete surface is presented.
 
 Parsed into `StationConfig` by `src/ship/config.rs`, validated and loaded into
 `ShipConfigResource` at startup by `load_ship_config_from_disk()`.

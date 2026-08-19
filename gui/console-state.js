@@ -1696,7 +1696,13 @@ export function buildNavigationConsoleState(state) {
     // watching a contact move, because "it has not started turning yet" and
     // "it has decided not to" look identical on a chart.
     civilians:               (bb && bb.civilians) || [],
-    navigation_auto:         state.stationRatings?.['navigation'] === 'Backfill',
+    // The fine System's live source is authoritative even when its complete
+    // Navigation Station is visiting a differently named host. Older snapshots
+    // may not carry controlSources, so retain the lobby-rating fallback for
+    // compatibility rather than briefly presenting manual control as AUTO.
+    navigation_auto:         state.controlSources?.['navigation'] != null
+      ? state.controlSources['navigation'] === 'Ai'
+      : state.stationRatings?.['navigation'] === 'Backfill',
   });
 }
 

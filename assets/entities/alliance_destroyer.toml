@@ -900,6 +900,29 @@ anchor = "comms-toggle"
 trigger = { kind = "control_unused", control = "hail" }
 
 [[station]]
+id = "navigation"
+name = "Navigation"
+description = "entity.alliance_destroyer.station.navigation.description"
+rank = "Ltn."
+short_code = "NAV"
+console = "gui/battleship/navigation.html"
+human_seeking = true
+host_order = ["tactical", "engineering", "captain"]
+visiting_rating = "Simplified"
+# [ai] Navigation remains a complete, directly claimable Station. When it has
+# no active holder it visits only these compatible direct seats, in authored
+# order; an active Helm alone therefore leaves it on ordinary AI rather than
+# turning compatibility into an implicit all-crew fallback.
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["navigation"]
+
+[[station]]
 id = "engineering"
 name = "Engineering"
 description = "entity.alliance_destroyer.station.engineering.description"
@@ -1108,10 +1131,8 @@ power_group = "weapons"
 # authored station order (captain, helm, tactical, engineering) that the
 # derived walk would give them.
 #
-# Tactical first because Tactical owns them: a destroyer's own Tactical officer
-# keeps navigation and comms at their own console, which is what owner-first
-# has always meant and what the [[station]] list cannot express here (Tactical
-# is authored third).
+# This legacy fine-system order now applies only to Comms. Navigation above is
+# a complete human-seeking Station and is resolved by its own `host_order`.
 #
 # ENGINEERING SECOND is the ruling this list exists for. On a four-seat hull
 # the realistic under-crewed shapes are Captain+Helm and Captain+Engineering,
@@ -1129,16 +1150,14 @@ power_group = "weapons"
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "tactical"
-human_seeking = true
-seek_order = ["tactical", "engineering", "captain", "helm"]
+station = "navigation"
 
 [[system]]
 id = "comms"
 kind = "comms"
 station = "tactical"
 human_seeking = true
-seek_order = ["tactical", "engineering", "captain", "helm"]
+seek_order = ["tactical", "engineering", "captain", "helm", "navigation"]
 
 [[system]]
 id = "shields-system"

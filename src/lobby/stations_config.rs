@@ -28,6 +28,14 @@ pub struct StationDef {
     /// complexity toggle — never hardcode station ids for this.
     #[serde(default)]
     pub ratings: Vec<String>,
+    #[serde(default)]
+    pub human_seeking: bool,
+    #[serde(default)]
+    pub host_order: Vec<StationId>,
+    #[serde(default)]
+    pub visiting_rating: Option<String>,
+    #[serde(default)]
+    pub auxiliary: bool,
 }
 
 /// Fixed-roster station configuration. Populated from `ShipConfigResource`
@@ -53,6 +61,10 @@ pub fn stations_from_ship_config(config: &crate::ship::config::ShipConfig) -> Sh
             short_code: sc.short_code.clone(),
             console: sc.console.clone(),
             ratings: sc.ratings.iter().map(|r| r.name.clone()).collect(),
+            human_seeking: sc.human_seeking,
+            host_order: sc.host_order.clone(),
+            visiting_rating: sc.visiting_rating.clone(),
+            auxiliary: sc.auxiliary,
         })
         .collect();
     ShipStations { stations }

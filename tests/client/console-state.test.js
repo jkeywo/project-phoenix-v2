@@ -2437,6 +2437,36 @@ describe('auto fields', () => {
     expect(parse(buildNavigationConsoleState(EMPTY)).navigation_auto).toBe(false);
   });
 
+  it('navigation_auto follows live system control ahead of the lobby rating', () => {
+    const visiting = parse(buildNavigationConsoleState({
+      stationRatings: { navigation: 'Backfill' },
+      controlSources: { navigation: 'Human' },
+    }));
+    expect(visiting.navigation_auto).toBe(false);
+
+    const delegated = parse(buildNavigationConsoleState({
+      stationRatings: { navigation: 'Full' },
+      controlSources: { navigation: 'Ai' },
+    }));
+    expect(delegated.navigation_auto).toBe(true);
+  });
+
+  it('a real SimState projection makes visiting Navigation manual and AI Navigation AUTO', () => {
+    const sim = new ClientSimState();
+    sim.stationRatings = { navigation: 'Backfill' };
+    sim.apply({ type: 'SimState', data: { snapshot: {
+      station_hosts: [{ station: 'navigation', host: 'tactical', rating: 'Std' }],
+      control_sources: { navigation: 'Human' },
+    } } });
+    expect(parse(buildNavigationConsoleState(sim)).navigation_auto).toBe(false);
+
+    sim.apply({ type: 'SimState', data: { snapshot: {
+      station_hosts: [{ station: 'navigation', host: null, rating: 'Simplified' }],
+      control_sources: { navigation: 'Ai' },
+    } } });
+    expect(parse(buildNavigationConsoleState(sim)).navigation_auto).toBe(true);
+  });
+
   // comms_auto
   it('comms_auto is true when stationRatings.comms === Backfill', () => {
     expect(parse(buildCommsConsoleState({ stationRatings: { comms: 'Backfill' } })).comms_auto).toBe(true);

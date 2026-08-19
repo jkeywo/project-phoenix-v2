@@ -103,6 +103,14 @@ where
             warnings: vec![format!("failed to parse {path}: {e}")],
         },
         Ok(mut scenario_config) => {
+            if !scenario_config.scenario_detail_floor.is_empty() {
+                return LayerLoadResult {
+                    outcome: LayerLoadOutcome::ParseFailed,
+                    warnings: vec![format!(
+                        "failed to load {path}: scenario_detail_floor is root-world-only; supporting worlds cannot override the selected scenario's crew detail floor"
+                    )],
+                };
+            }
             // Assign UUIDs to named entities in this layer's config; the
             // registrations go both into the returned config (for spawning) and
             // to the applier (for the live runtime map).
@@ -201,6 +209,25 @@ condition = "on_world_loaded"
             "the refusal must name the retired block: {}",
             result.warnings[0]
         );
+    }
+
+    #[test]
+    fn a_supporting_world_cannot_author_a_scenario_detail_floor() {
+        const WITH_FLOOR: &str = r#"
+scenario_detail_floor = ["navigation"]
+[global]
+seed = 1
+"#;
+        let result = evaluate_layer_load(
+            "worlds/support.toml",
+            false,
+            Some(WITH_FLOOR),
+            counter_uuids(),
+        );
+        assert!(matches!(result.outcome, LayerLoadOutcome::ParseFailed));
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("root-world-only"));
+        assert!(result.warnings[0].contains("scenario_detail_floor"));
     }
 
     #[test]

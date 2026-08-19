@@ -36,6 +36,45 @@ entities:
       paths: [src/ship/config.rs]
       symbols: [ShipConfig]
 
+  - component: visiting-station-resolver
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Complete Human-Seeking Station Resolver
+      summary: Resolves a complete human-seeking Station to its active direct holder, then its finite authored compatible host order, then ordinary Backfill AI, while preserving the visiting Station's identity, rating, Systems, console and command authority.
+      rationale:
+        - "[ai] Resolution is pure and station-scale: host compatibility, active direct holders and hull-resolved scenario-floor detail are explicit inputs; the Bevy adapter supplies the two live inputs, applies the result to owned System control sources, and publishes the effective visiting rating."
+        - "[ai] Host eligibility is about live placement, not Station type: an actively directly held human-seeking Station may host, while a Station currently resolved as visiting has no direct holder and cannot host another visitor, so nesting cannot create transitive authority."
+        - "[ai] Scenario floors belong to the root world and supporting-world loads reject them, so an additive layer cannot silently replace or discard the selected scenario's crew-detail contract; Combat Test authors Navigation as its first shipped floor tracer."
+        - "[ai] The host projects complete Station placement and effective rating generically in SimSnapshot, rather than asking a family blackboard such as Navigation to carry shell ownership metadata. The same snapshot projects the local ship's sorted fine-System control sources from the live resolver, so a visiting Station's manual authority cannot be overwritten on the client by its stale lobby rating."
+    architecture:
+      kind: authority-policy
+      authority: authoritative
+      owns: [visiting-station-placement-state]
+      reads: [ship-station-system-topology-state, session-station-ownership-state, active-station-rating-state, world-configuration-state]
+      writes: [system-control-source-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs]
+      symbols: [resolve_visiting_station, resolve_scenario_detail_floor, write_scenario_detail_floor, VisitingStationAssignment, VisitingStationHosts, ScenarioDetailFloor]
+      tests: [cargo test]
+
+  - state: visiting-station-placement-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Visiting Station Placement State
+      summary: Derived per-ship placement and effective rating for every complete human-seeking Station, including the explicit AI outcome after compatible hosts are exhausted.
+    architecture:
+      classification: derived
+      owner: visiting-station-resolver
+      writers: [visiting-station-resolver]
+    implementation:
+      status: declared
+      paths: [src/ship/components.rs, src/server_app.rs, src/core/messages.rs, gui/sim-state.js, gui/hero-bar.js]
+      symbols: [VisitingStationHosts, StationHostSnapshot]
+
   - component: system-kind-registry
     core:
       status: implemented
@@ -89,8 +128,8 @@ entities:
       writers: [system-control-source-resolver]
     implementation:
       status: declared
-      paths: [src/ship/control_source.rs]
-      symbols: [ControlSourceResolver]
+      paths: [src/ship/control_source.rs, src/server_app.rs, src/core/messages.rs, gui/sim-state.js]
+      symbols: [ControlSourceResolver, SimSnapshot, build_control_source_snapshots]
 
   - component: station-rating-controller
     core:

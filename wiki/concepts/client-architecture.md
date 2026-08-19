@@ -2,8 +2,8 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, state, vitest]
-sources: [client.html, gui/mount-plan.js, gui/sim-state.js, gui/console-state.js, gui/action-map.js, gui/iframe-bridge.js, tests/client/]
-updated: 2026-08-12
+sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/sim-state.js, gui/console-state.js, gui/action-map.js, gui/iframe-bridge.js, tests/client/]
+updated: 2026-08-19
 ---
 
 ## Summary
@@ -37,6 +37,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | Module | Owns |
 |---|---|
 | `mount-plan.js` | **Single home** of the station-id → DOM-id naming scheme (`${id}-ui`/`${id}-iframe`, one tactical → weapons alias) and `planMounts(shipStations)` — the manifest is the server-supplied `ship_stations` |
+| `hero-bar.js` | Shared complete-Station tab model over `SimSnapshot.station_hosts`: direct Station pinned first, visiting Stations in hull order, selected identity/rating/ownership, and roving keyboard focus |
 | `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders |
 | `lobby-state.js` | Lobby view-model (stations, players, ready states) |
 | `comms-state.js` | Comms inbox/contact view-model |
@@ -55,6 +56,12 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `console-core.js`, `device-orientation.js`, `help-panel.js`, `manual-panel.js`, `settings-panel.js` | Iframe boot glue, orientation handling, and the phone Settings menu, including current-station help and the ship manual |
 
 Each console UI is one HTML file per ship class (`gui/battleship/helm.html`, `gui/cruiser/science.html`, …) loaded as an iframe; the URL comes from the station's TOML `console` field via `gui/console-resolver.js`, and the section/iframe DOM ids from `gui/mount-plan.js`. See [Console UI Authoring Library](./console-ui-library.md) for the authoring pattern.
+
+`client.html` owns one shared Hero Bar above those iframes. It switches whole
+mounted Station surfaces, so visiting Navigation uses the same normal
+Navigation iframe as a direct holder. The bar states Direct/Visiting ownership
+in text as well as styling and exposes ARIA tabs with Arrow/Home/End focus
+movement; a departed visitor returns selection to the direct Station.
 
 ## Build & test
 

@@ -63,6 +63,24 @@ pub struct StationConfig {
     /// hold `strings.csv` ids, enforced by `scripts/check-strings.mjs`.
     #[serde(default, rename = "tutorial", skip_serializing_if = "Vec::is_empty")]
     pub tutorials: Vec<TutorialOverlayWire>,
+    /// Complete-station human seeking (issue #1097). The station keeps its
+    /// identity, systems and console while this resolver chooses a directly
+    /// held station on which to present it.
+    #[serde(default)]
+    pub human_seeking: bool,
+    /// Compatible direct stations, in preference order, tried after this
+    /// station's own active holder. This is deliberately a finite allow-list:
+    /// exhaustion means ordinary AI even if another unrelated seat is held.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_order: Vec<StationId>,
+    /// Rating used while this station is visiting another direct station.
+    /// Scenario detail requirements may raise it, but never lower it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visiting_rating: Option<String>,
+    /// Auxiliary stations are mounted and resolved like any other station but
+    /// are not offered as a separately claimable lobby seat.
+    #[serde(default)]
+    pub auxiliary: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -270,6 +288,24 @@ pub enum ShipConfigError {
         owner: StationId,
         first: Option<StationId>,
     },
+    HostOrderWithoutHumanSeeking {
+        station: StationId,
+    },
+    HostOrderUnknownStation {
+        station: StationId,
+        host: StationId,
+    },
+    HostOrderDuplicateStation {
+        station: StationId,
+        host: StationId,
+    },
+    MissingVisitingRating {
+        station: StationId,
+    },
+    UnknownVisitingRating {
+        station: StationId,
+        rating: String,
+    },
 }
 
 impl std::fmt::Display for ShipConfigError {
@@ -440,6 +476,56 @@ pub fn validate(
                     rating: rating.name.clone(),
                 });
             }
+        }
+        if !station.human_seeking
+            && (!station.host_order.is_empty() || station.visiting_rating.is_some())
+        {
+            return Err(ShipConfigError::HostOrderWithoutHumanSeeking {
+                station: station.id.clone(),
+            });
+        }
+        if station.human_seeking {
+            let Some(visiting_rating) = station.visiting_rating.as_ref() else {
+                return Err(ShipConfigError::MissingVisitingRating {
+                    station: station.id.clone(),
+                });
+            };
+            if !station
+                .ratings
+                .iter()
+                .any(|rating| &rating.name == visiting_rating)
+            {
+                return Err(ShipConfigError::UnknownVisitingRating {
+                    station: station.id.clone(),
+                    rating: visiting_rating.clone(),
+                });
+            }
+        }
+    }
+
+    for station in &config.stations {
+        let mut seen = HashSet::new();
+        for host in &station.host_order {
+            let Some(_host_station) = config
+                .stations
+                .iter()
+                .find(|candidate| &candidate.id == host)
+            else {
+                return Err(ShipConfigError::HostOrderUnknownStation {
+                    station: station.id.clone(),
+                    host: host.clone(),
+                });
+            };
+            if !seen.insert(host) {
+                return Err(ShipConfigError::HostOrderDuplicateStation {
+                    station: station.id.clone(),
+                    host: host.clone(),
+                });
+            }
+            // A human-seeking Station is a valid compatible host while it is
+            // actively directly held. Runtime placement tests that state,
+            // rather than rejecting the Station's authored type here; a
+            // visiting Station is never recursively eligible.
         }
     }
 

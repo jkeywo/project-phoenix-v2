@@ -18,6 +18,9 @@ or loaded during play.
 ```toml
 seed = 42
 
+# Hull-agnostic selectors: Station ids (console families) or System kinds.
+scenario_detail_floor = ["navigation"]
+
 [global]
 seed = 42                                # optional global block; merged into WorldConfig
 
@@ -40,6 +43,13 @@ transform = { position = [0.0, 50.0, 0.0], rotation = [0.0, 0.0, 0.0], scale = [
 ```
 
 Scenario logic — event registrations, effects and comms dialogue — is authored in `[script]` and documented under [World Plugin](../concepts/world-plugin.md); the declarative `[[trigger]]` / `[[comms]]` blocks that preceded it were deleted in issue #985.
+
+`scenario_detail_floor` is root-world-only: additive/supporting world loads reject
+it rather than ambiguously overriding or discarding the selected scenario's
+crew-detail contract. It is resolved only after the lobby-selected hull exists.
+`write_scenario_detail_floor` matches each selector against that hull's Station
+ids and System kinds, writes the concrete System ids to the LocalShip's
+`ScenarioDetailFloor`, and clears stale values when the active world changes.
 
 ## Proposed Authoring Contract
 

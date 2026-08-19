@@ -26,7 +26,7 @@ use crate::impulse::ImpulseState;
 use crate::messages::ModifierSlot;
 use crate::modifiers::ShipModifiers;
 use crate::world::server::ObjectiveManagerRes;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 // â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 pub use crate::weapons_plugin::{
@@ -82,6 +82,8 @@ pub struct Ship;
 /// mid-run archetype move ever happens and the resolver needs no `Commands`.
 #[derive(Component)]
 #[require(crate::ship_plugin::HumanSeekingHosts)]
+#[require(crate::ship_plugin::VisitingStationHosts)]
+#[require(crate::ship_plugin::ScenarioDetailFloor)]
 pub struct LocalShip;
 
 /// Marker component on the scene-root child entity of the local ship's GLB
@@ -1046,6 +1048,8 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
 pub fn sim_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(Audience::All, Cadence::Hz(10.0), |world: &mut World| {
         let entity_states = build_sim_state_entity_states(world);
+        let station_hosts = build_station_host_snapshots(world);
+        let control_sources = build_control_source_snapshots(world);
 
         // ── Emit SystemHullUpdate per recipient, only when that recipient's
         // *visible* detail changed (issue #737).
@@ -1057,9 +1061,63 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         // `crate::console::repair::visibility`.
         crate::console::repair::visibility::push_hull_updates(world);
 
-        let snapshot = crate::messages::SimSnapshot { entity_states };
+        let snapshot = crate::messages::SimSnapshot {
+            entity_states,
+            station_hosts,
+            control_sources,
+        };
         vec![ServerMessage::SimState { snapshot }]
     })
+}
+
+fn build_control_source_snapshots(
+    world: &mut World,
+) -> BTreeMap<crate::messages::SystemId, String> {
+    let mut query =
+        world.query_filtered::<&crate::ship_plugin::ShipSystemControlSources, With<LocalShip>>();
+    query
+        .iter(world)
+        .next()
+        .map(|sources| {
+            sources
+                .0
+                .entries()
+                .map(|(system, source)| {
+                    let effective = if sources.0.is_offline(system) {
+                        crate::ship::control_source::ControlSource::Offline
+                    } else {
+                        *source
+                    };
+                    let label = match effective {
+                        crate::ship::control_source::ControlSource::Human => "Human",
+                        crate::ship::control_source::ControlSource::Ai => "Ai",
+                        crate::ship::control_source::ControlSource::Offline => "Offline",
+                    };
+                    (system.clone(), label.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn build_station_host_snapshots(world: &mut World) -> Vec<crate::messages::StationHostSnapshot> {
+    let mut query =
+        world.query_filtered::<&crate::ship_plugin::VisitingStationHosts, With<LocalShip>>();
+    query
+        .iter(world)
+        .next()
+        .map(|hosts| {
+            hosts
+                .0
+                .iter()
+                .map(|assignment| crate::messages::StationHostSnapshot {
+                    station: assignment.station.clone(),
+                    host: assignment.host.clone(),
+                    rating: assignment.rating.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Compute this tick's `EntityStateSnapshot` list for the `SimState` broadcast.
@@ -5051,6 +5109,88 @@ mod tests {
 
     #[derive(Resource)]
     struct ShipEntity(Entity);
+
+    #[test]
+    fn station_host_projection_is_generic_for_non_navigation_stations() {
+        let mut world = World::new();
+        world.spawn((
+            LocalShip,
+            crate::ship_plugin::VisitingStationHosts(vec![
+                crate::ship::coordination::VisitingStationAssignment {
+                    station: StationId("power".into()),
+                    host: Some(StationId("repair".into())),
+                    rating: "Std".into(),
+                },
+                crate::ship::coordination::VisitingStationAssignment {
+                    station: StationId("shields".into()),
+                    host: None,
+                    rating: crate::ship::rating::BACKFILL_RATING.into(),
+                },
+            ]),
+        ));
+
+        assert_eq!(
+            build_station_host_snapshots(&mut world),
+            vec![
+                StationHostSnapshot {
+                    station: StationId("power".into()),
+                    host: Some(StationId("repair".into())),
+                    rating: "Std".into(),
+                },
+                StationHostSnapshot {
+                    station: StationId("shields".into()),
+                    host: None,
+                    rating: crate::ship::rating::BACKFILL_RATING.into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn control_source_projection_tracks_visiting_and_ai_navigation_authority() {
+        use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+
+        let navigation = SystemId("navigation".into());
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(navigation.clone(), ControlSource::Human);
+
+        let mut world = World::new();
+        let ship = world
+            .spawn((
+                LocalShip,
+                crate::ship_plugin::VisitingStationHosts(vec![
+                    crate::ship::coordination::VisitingStationAssignment {
+                        station: StationId("navigation".into()),
+                        host: Some(StationId("tactical".into())),
+                        rating: "Std".into(),
+                    },
+                ]),
+                crate::ship_plugin::ShipSystemControlSources(resolver),
+            ))
+            .id();
+
+        assert_eq!(
+            build_station_host_snapshots(&mut world)[0].host,
+            Some(StationId("tactical".into()))
+        );
+        assert_eq!(
+            build_control_source_snapshots(&mut world).get(&navigation),
+            Some(&"Human".to_string()),
+            "a visiting Std Navigation Station must publish its live manual authority"
+        );
+
+        world
+            .entity_mut(ship)
+            .get_mut::<crate::ship_plugin::ShipSystemControlSources>()
+            .expect("control sources")
+            .0
+            .set(navigation.clone(), ControlSource::Ai);
+        assert_eq!(
+            build_control_source_snapshots(&mut world).get(&navigation),
+            Some(&"Ai".to_string()),
+            "a Simplified or exhausted Navigation Station must publish AUTO authority"
+        );
+    }
 
     // ── LOD tier retirement (PRD #1023, module 5) ────────────────────────
 

@@ -72,7 +72,12 @@ export class ClientSimState {
     this.reset();
   }
 
-  reset() {
+  reset({ preserveAuthorityProjection = false } = {}) {
+    // An InProgress Welcome is a reconnect handshake. Its targeted SimState
+    // resync follows shortly afterwards, so retain the last authoritative
+    // projection instead of briefly falling back to the lobby rating.
+    const controlSources = preserveAuthorityProjection ? this.controlSources : {};
+    const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
     /** Static world snapshot { entities: [EntitySnapshot], scenario_title, scenario_description } */
     this.world = defaultWorld();
     /** 'Auto' | 'Manual' */
@@ -125,8 +130,10 @@ export class ClientSimState {
     /** Station → system id list, populated from Welcome ship_config.station_systems.
      *  Used by aggregateStationHull to compute per-station damage from consoleHull. */
     this.stationSystems = {};
+    /** Authoritative complete human-seeking Station placements by Station id. */
+    this.stationHosts = stationHosts;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
-    this.controlSources = {};
+    this.controlSources = controlSources;
     /** Per-system blackboard mirror, keyed by SystemId string.
      *  Each value is the inner `data` object of the `SystemBlackboard` variant
      *  (e.g. `this.blackboards['helm']` is a `HelmBlackboard`). */
@@ -247,7 +254,13 @@ export class ClientSimState {
         break;
       case 'SimState': {
         const snap = d.snapshot || {};
+        this.stationHosts = Object.fromEntries(
+          (snap.station_hosts || []).filter(Boolean).map(entry => [entry.station, entry]),
+        );
         this.navigationWaypoint = snap.navigation_waypoint || null;
+        // The host publishes the LocalShip's effective fine-System authority.
+        // Missing on older protocol-compatible hosts, where the console
+        // builders retain their station-rating fallback.
         this.controlSources = snap.control_sources || {};
         // Update live positions/hull/shield of known entities IN PLACE — never append.
         for (const st of (snap.entity_states || [])) {
@@ -274,9 +287,18 @@ export class ClientSimState {
       case 'WorldSetup':
         this.world = d.world || defaultWorld();
         break;
+      case 'ReturnedToLobby':
+      case 'GameStarted':
+        // These are the real round boundaries. Welcome is instead the
+        // reconnect handshake for a peer already in the current round.
+        this.stationHosts = {};
+        this.controlSources = {};
+        break;
       case 'Welcome': {
         const world = (d.state && d.state.world) || null;
-        this.reset();
+        // The server only sends Welcome during an active game to reconnecting
+        // peers. Lobby/new-game resets still clear the previous projection.
+        this.reset({ preserveAuthorityProjection: d.state?.phase === 'InProgress' });
         // Store ship_config radar ranges (data-driven from TOML via server).
         // Used by console-state.js builders; fall back to server defaults.
         const sc = d.ship_config || {};

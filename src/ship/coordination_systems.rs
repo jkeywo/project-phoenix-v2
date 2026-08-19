@@ -8,7 +8,7 @@ use crate::server_app::LocalShip;
 use crate::ship::components::{
     ActiveStationRatings, CoordinationEnqueue, CoordinationQueue, HelmWaypointClearance,
     HumanSeekingHosts, PendingArcBearingRequest, PendingTacticalFrequencyHint, RepairHumanAlerted,
-    ShipConfigComponent, ShipSystemControlSources,
+    ScenarioDetailFloor, ShipConfigComponent, ShipSystemControlSources, VisitingStationHosts,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
@@ -170,6 +170,27 @@ fn ship_seats(
 
 // ── Human-seeking hosts (issue #984) ──────────────────────────────────────────
 
+/// Resolve the active world's hull-agnostic detail-floor vocabulary to the
+/// selected LocalShip's concrete System ids. This is the production writer of
+/// [`ScenarioDetailFloor`]; the Station resolver below remains a pure consumer.
+/// Re-running is deliberate: a scenario resource or selected hull may change
+/// between missions without leaving the prior world's floor latched.
+pub fn write_scenario_detail_floor(
+    world: Option<Res<crate::world::config::WorldConfig>>,
+    mut ships: Query<(&ShipConfigComponent, &mut ScenarioDetailFloor), With<LocalShip>>,
+) {
+    let selectors = world
+        .as_deref()
+        .map(|world| world.scenario_detail_floor.as_slice())
+        .unwrap_or_default();
+    for (config, mut floor) in ships.iter_mut() {
+        let resolved = coordination::resolve_scenario_detail_floor(&config.0, selectors);
+        if floor.0 != resolved {
+            floor.0 = resolved;
+        }
+    }
+}
+
 /// Re-resolve, EVERY tick, which station is hosting each `human_seeking`
 /// `[[system]]` on the player's ship, and put that system's `ControlSource`
 /// where the answer says it belongs.
@@ -192,6 +213,9 @@ fn ship_seats(
 /// * [`HumanSeekingHosts`], the system→station map
 ///   `command_admission::station_for_system` consults, so tenure is checked
 ///   against the seat the seek actually chose.
+/// * [`VisitingStationHosts`], including each complete visiting Station's
+///   observable effective rating after the live [`ScenarioDetailFloor`] has
+///   been composed with its authored visiting baseline.
 ///
 /// **Every tick, idempotently, never on-change.** `apply_rating` fires on lobby
 /// events (a claim, a disconnect, a `SetStationRating`) and rewrites every
@@ -240,16 +264,22 @@ pub fn resolve_human_seeking_hosts(
             &ShipConfigComponent,
             &mut ShipSystemControlSources,
             Option<&ActiveStationRatings>,
+            &ScenarioDetailFloor,
             &mut HumanSeekingHosts,
+            &mut VisitingStationHosts,
         ),
         With<LocalShip>,
     >,
     sessions: Res<Sessions>,
 ) {
     let no_ratings = std::collections::HashMap::new();
-    for (ship_config, mut control_sources, ratings, mut hosts) in ships.iter_mut() {
+    for (ship_config, mut control_sources, ratings, scenario_floor, mut hosts, mut station_hosts) in
+        ships.iter_mut()
+    {
         let config = &ship_config.0;
-        if !config.systems.iter().any(|s| s.human_seeking) {
+        if !config.systems.iter().any(|s| s.human_seeking)
+            && !config.stations.iter().any(|station| station.human_seeking)
+        {
             continue;
         }
         let seats = coordination::seeking_seats(
@@ -286,8 +316,55 @@ pub fn resolve_human_seeking_hosts(
                 control_sources.0.set(id.clone(), *source);
             }
         }
+        let mut resolved_stations = Vec::new();
+        for station in config
+            .stations
+            .iter()
+            .filter(|station| station.human_seeking)
+        {
+            let mut assignment = coordination::resolve_visiting_station(
+                config,
+                station,
+                |candidate| sessions.0.holder_for_station(candidate).is_some(),
+                &scenario_floor.0,
+            );
+            if assignment.host.as_ref() == Some(&station.id) {
+                assignment.rating = ratings
+                    .and_then(|active| active.0.get(&station.id))
+                    .cloned()
+                    .or_else(|| station.ratings.first().map(|rating| rating.name.clone()))
+                    .unwrap_or_default();
+            }
+
+            let automated = station
+                .ratings
+                .iter()
+                .find(|rating| rating.name == assignment.rating)
+                .map(|rating| &rating.automated_systems);
+            for system in config
+                .systems
+                .iter()
+                .filter(|system| system.station.as_ref() == Some(&station.id))
+            {
+                let source = if assignment.host.is_none()
+                    || automated.is_some_and(|ids| ids.contains(&system.id))
+                {
+                    ControlSource::Ai
+                } else {
+                    ControlSource::Human
+                };
+                control_sources.0.set(system.id.clone(), source);
+                if let Some(host) = assignment.host.as_ref() {
+                    resolved.insert(system.id.clone(), host.clone());
+                }
+            }
+            resolved_stations.push(assignment);
+        }
         if hosts.0 != resolved {
             hosts.0 = resolved;
+        }
+        if station_hosts.0 != resolved_stations {
+            station_hosts.0 = resolved_stations;
         }
     }
 }
@@ -2188,7 +2265,7 @@ mod tests {
         // hull, comms system's station, navigation system's station
         ("alliance_battleship", "comms", "navigation"),
         ("alliance_cruiser", "comms", "comms"),
-        ("alliance_destroyer", "tactical", "tactical"),
+        ("alliance_destroyer", "tactical", "navigation"),
         ("alliance_courier", "captain", "captain"),
     ];
 
@@ -2208,10 +2285,9 @@ mod tests {
     /// Backfill — and then crewed at `manned`: each named station gets a
     /// connected holder, a non-Backfill active rating, and its own systems set
     /// Human, which is what a seated officer looks like from here.
-    fn seeking_app(stem: &str, manned: &[&str]) -> App {
+    fn seeking_config_app(config: crate::ship::config::ShipConfig, manned: &[&str]) -> App {
         let mut app = test_app();
         let ship = find_ship_entity(&mut app);
-        let config = hull_ship_config(stem);
         let (mut resolver, mut active) = crate::ship::rating::seed_boot_ratings(&config, |_| {
             crate::ship::rating::BACKFILL_RATING.to_string()
         });
@@ -2237,6 +2313,10 @@ mod tests {
         app
     }
 
+    fn seeking_app(stem: &str, manned: &[&str]) -> App {
+        seeking_config_app(hull_ship_config(stem), manned)
+    }
+
     fn host_of(app: &mut App, system: &crate::messages::SystemId) -> Option<String> {
         let ship = find_ship_entity(app);
         app.world()
@@ -2256,6 +2336,128 @@ mod tests {
             .source_for(system)
     }
 
+    fn station_assignment(
+        app: &mut App,
+        station: &crate::messages::StationId,
+    ) -> crate::ship::coordination::VisitingStationAssignment {
+        let ship = find_ship_entity(app);
+        app.world()
+            .entity(ship)
+            .get::<VisitingStationHosts>()
+            .and_then(|hosts| hosts.assignment_for(station))
+            .cloned()
+            .expect("the complete visiting Station has a live assignment")
+    }
+
+    #[test]
+    fn live_scenario_floor_raises_effective_visiting_rating_and_control_depth() {
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = ""
+rank = ""
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Visit"
+[[station.rating]]
+name = "Floor"
+automated_systems = []
+[[station.rating]]
+name = "Visit"
+automated_systems = ["navigation"]
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = ""
+rank = ""
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "navigation"
+"#,
+            &["navigation"],
+        )
+        .expect("the adapter fixture is valid authored hull data");
+        let mut app = seeking_config_app(config, &["captain"]);
+        let navigation_station = crate::messages::StationId("navigation".into());
+        let navigation_system = crate::messages::SystemId("navigation".into());
+
+        tick(&mut app);
+        let baseline = station_assignment(&mut app, &navigation_station);
+        assert_eq!(
+            baseline.host,
+            Some(crate::messages::StationId("captain".into()))
+        );
+        assert_eq!(baseline.rating, "Visit");
+        assert_eq!(source_of(&mut app, &navigation_system), ControlSource::Ai);
+
+        app.world_mut()
+            .insert_resource(crate::world::config::WorldConfig {
+                scenario_detail_floor: vec!["navigation".into()],
+                ..Default::default()
+            });
+        tick(&mut app);
+
+        let ship = find_ship_entity(&mut app);
+        assert!(
+            app.world()
+                .entity(ship)
+                .get::<ScenarioDetailFloor>()
+                .expect("LocalShip requires the live scenario-floor input")
+                .0
+                .contains(&navigation_system),
+            "the production writer resolves the active world's kind selector onto this hull"
+        );
+
+        let raised = station_assignment(&mut app, &navigation_station);
+        assert_eq!(raised.rating, "Floor");
+        assert_eq!(raised.host, baseline.host);
+        assert_eq!(
+            source_of(&mut app, &navigation_system),
+            ControlSource::Human
+        );
+        assert_eq!(
+            host_of(&mut app, &navigation_system).as_deref(),
+            Some("captain")
+        );
+    }
+
+    #[test]
+    fn shipped_combat_test_floor_resolves_through_destroyer_hull_and_production_writer() {
+        let config = hull_ship_config("alliance_destroyer");
+        let mut app = seeking_config_app(config, &["tactical"]);
+        let world =
+            crate::world::config::parse_world(include_str!("../../assets/worlds/combat_test.toml"))
+                .expect("the shipped root world parses");
+        assert_eq!(world.scenario_detail_floor, vec!["navigation"]);
+        app.insert_resource(world);
+
+        tick(&mut app);
+
+        let navigation_station = crate::messages::StationId("navigation".into());
+        let navigation_system = crate::messages::SystemId("navigation".into());
+        let assignment = station_assignment(&mut app, &navigation_station);
+        assert_eq!(
+            assignment.host,
+            Some(crate::messages::StationId("tactical".into()))
+        );
+        assert_eq!(
+            assignment.rating, "Std",
+            "Combat Test raises the Destroyer's authored Simplified visiting baseline"
+        );
+        assert_eq!(
+            source_of(&mut app, &navigation_system),
+            ControlSource::Human
+        );
+    }
+
     /// The `SystemId`-vs-`StationId` regression, pinned on every shipped hull.
     /// Nothing here goes near the live seek: it asserts what the four hulls
     /// AUTHOR, and that the literal the addressing used to hardcode names no
@@ -2271,12 +2473,24 @@ mod tests {
                 let system = config
                     .system(&system_id)
                     .unwrap_or_else(|| panic!("{stem} must declare {:?}", system_id.0));
-                assert!(
-                    system.human_seeking,
-                    "{stem}: {:?} must be authored human_seeking — the flag and the \
-                     addressing that reads it ship together",
-                    system_id.0
-                );
+                if stem == &"alliance_destroyer" && system_id.0 == "navigation" {
+                    assert!(
+                        config
+                            .station(&crate::messages::StationId("navigation".into()))
+                            .is_some_and(|station| station.human_seeking),
+                        "Destroyer Navigation seeks as one complete Station"
+                    );
+                    assert!(
+                        !system.human_seeking,
+                        "the retired System overlay stays retired"
+                    );
+                } else {
+                    assert!(
+                        system.human_seeking,
+                        "{stem}: {:?} keeps legacy System seeking until migrated",
+                        system_id.0
+                    );
+                }
                 assert_eq!(
                     crate::command_admission::station_for_system(&config, None, &system_id),
                     Some(crate::messages::StationId((*expected).into())),
@@ -2307,43 +2521,41 @@ mod tests {
             config.stations.iter().map(|s| s.id.0.as_str()).collect();
         assert_eq!(
             authored_stations,
-            vec!["captain", "helm", "tactical", "engineering"],
+            vec!["captain", "helm", "tactical", "navigation", "engineering"],
             "the [[station]] array is the lobby's row order and the broadcast \
              router's fan-out order — the seek order does not touch it"
         );
 
-        for system_id in [
-            crate::system_registry::comms_system_id(),
-            crate::system_registry::navigation_system_id(),
-        ] {
-            let system = config
-                .system(&system_id)
-                .expect("the destroyer declares it");
-            let order: Vec<&str> = system.seek_order.iter().map(|s| s.0.as_str()).collect();
-            assert_eq!(
-                order,
-                vec!["tactical", "engineering", "captain", "helm"],
-                "{:?}: Tactical owns it, then Engineering — John's ruling",
-                system_id.0
-            );
-            assert_eq!(
-                order.len(),
-                authored_stations.len(),
-                "{:?}: the order is a permutation, so no seat is unreachable",
-                system_id.0
-            );
-            assert_ne!(
-                order, authored_stations,
-                "{:?}: an order identical to the authored station list would be \
-                 the derived walk written out, and worth nothing",
-                system_id.0
-            );
-        }
+        let system_id = crate::system_registry::comms_system_id();
+        let system = config
+            .system(&system_id)
+            .expect("the destroyer declares it");
+        let order: Vec<&str> = system.seek_order.iter().map(|s| s.0.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["tactical", "engineering", "captain", "helm", "navigation"],
+            "{:?}: Tactical owns it, then Engineering — John's ruling",
+            system_id.0
+        );
+        assert_eq!(
+            order.len(),
+            authored_stations.len(),
+            "{:?}: the order is a permutation, so no seat is unreachable",
+            system_id.0
+        );
+        assert_ne!(
+            order, authored_stations,
+            "{:?}: an order identical to the authored station list would be \
+             the derived walk written out, and worth nothing",
+            system_id.0
+        );
     }
 
     /// The authored order, live: Tactical empty and three other seats crewed.
     /// The DERIVED walk would hand both systems to the Captain (first authored
-    /// station); the authored one hands them to Engineering.
+    /// station); the authored one hands them to Engineering. Navigation still
+    /// remains AI-operated at its authored Simplified visiting rating until a
+    /// scenario raises its detail floor.
     #[test]
     fn the_destroyers_seek_order_prefers_engineering_over_the_captain() {
         let mut app = seeking_app("alliance_destroyer", &["captain", "helm", "engineering"]);
@@ -2360,13 +2572,17 @@ mod tests {
                  Captain, whose attention is meant to stay on the whole board",
                 system_id.0
             );
-            assert_eq!(
-                source_of(&mut app, &system_id),
-                ControlSource::Human,
-                "{:?}: the host is a human, so the system accepts human input",
-                system_id.0
-            );
         }
+        assert_eq!(
+            source_of(&mut app, &crate::system_registry::comms_system_id()),
+            ControlSource::Human,
+            "Comms remains fully human-operated for its visiting host"
+        );
+        assert_eq!(
+            source_of(&mut app, &crate::system_registry::navigation_system_id()),
+            ControlSource::Ai,
+            "Navigation stays AUTO at its authored Simplified visiting rating without a scenario floor"
+        );
     }
 
     /// Owner-first, on real hulls: with the seeking system's OWN station crewed,
@@ -2556,6 +2772,52 @@ mod tests {
             ),
             "and without the host map it must NOT be — otherwise this test would \
              pass on the authored station alone and prove nothing"
+        );
+    }
+
+    #[test]
+    fn only_the_live_resolved_host_can_command_complete_navigation() {
+        let mut app = seeking_app("alliance_destroyer", &["tactical", "captain"]);
+        app.world_mut()
+            .insert_resource(crate::world::config::WorldConfig {
+                scenario_detail_floor: vec!["navigation".into()],
+                ..Default::default()
+            });
+        tick(&mut app);
+        let navigation = crate::system_registry::navigation_system_id();
+        let payload = crate::messages::SystemControlPayload::ClearNavigationWaypoint;
+
+        let authorized = |app: &mut App, token: &str| {
+            let ship = find_ship_entity(app);
+            let world = app.world();
+            crate::command_admission::is_command_authorized(
+                token,
+                &navigation,
+                &payload,
+                world
+                    .entity(ship)
+                    .get::<ShipSystemControlSources>()
+                    .unwrap(),
+                world.resource::<Sessions>(),
+                &world.entity(ship).get::<ShipConfigComponent>().unwrap().0,
+                world.entity(ship).get::<HumanSeekingHosts>(),
+            )
+        };
+        assert!(authorized(&mut app, "officer-tactical"));
+        assert!(!authorized(&mut app, "officer-captain"));
+
+        app.world_mut()
+            .resource_mut::<Sessions>()
+            .0
+            .disconnect("officer-tactical");
+        tick(&mut app);
+        assert!(
+            !authorized(&mut app, "officer-tactical"),
+            "the stale host is refused"
+        );
+        assert!(
+            authorized(&mut app, "officer-captain"),
+            "the next authored host takes authority"
         );
     }
 }

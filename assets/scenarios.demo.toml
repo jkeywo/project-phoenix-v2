@@ -15,8 +15,8 @@
 # ship list down to just these, in the world's own authored order, and
 # `wasm_get_scenario_catalog` is what both the host UI and connected phones
 # read. A single curated ship also makes the lobby ship picker resolve
-# straight to it (gui/ship-picker.js / the pre-load arbiter auto-select),
-# without a hull-specific code branch anywhere.
+# straight to it (server.html's ship selection logic, issue #623 / the
+# pre-load arbiter auto-select), without a hull-specific code branch anywhere.
 #
 # `[content]` (issue #986) mirrors the base manifest's content identity: the
 # demo curates the same shipped assets, so a mod pack compatible with the base

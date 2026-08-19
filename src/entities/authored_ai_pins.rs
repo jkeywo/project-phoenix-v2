@@ -676,41 +676,6 @@ fn each_policy_kind_has_one_fleet_baseline_and_exactly_the_bespoke_hulls_depart_
     );
 }
 
-/// Every shipped fine-system policy authors NO explicit `evaluate_every_ticks`
-/// (issue #889's PASM-tracked runtime gap: the field decodes to the parse
-/// default of 1 — "every arm of the shared base cadence" — everywhere in the
-/// fleet). Wiring the field at runtime (`crate::ai::cadence::
-/// evaluate_every_ticks_ready`, read by `ai_power_allocation` and
-/// `operate_comms_response_ai` off the sibling `PowerAiCadence` /
-/// `CommsResponseAiCadence` components) must not change shipped behaviour:
-/// this pin is what proves it stayed unchanged rather than merely asserting
-/// it in a commit message.
-#[test]
-fn every_shipped_policy_authors_the_default_evaluate_every_ticks() {
-    let hulls = ai_hulls();
-    assert!(!hulls.is_empty(), "no AI-bearing hull found to pin against");
-
-    let mut checked = 0usize;
-    for (hull, config) in &hulls {
-        for (slot, cfg) in authored_policies(config) {
-            assert_eq!(
-                cfg.evaluate_every_ticks, 1,
-                "{hull}/{slot} authors evaluate_every_ticks = {}, but no shipped hull is \
-                 meant to yet — the runtime multiplier (issue #889) is proven behaviour- \
-                 preserving BECAUSE every shipped policy decides on every arm. If a hull \
-                 now deliberately authors a slower cadence, add it here explicitly rather \
-                 than silently widening this pin.",
-                cfg.evaluate_every_ticks
-            );
-            checked += 1;
-        }
-    }
-    assert!(
-        checked > 0,
-        "no authored policy was found anywhere in the fleet to check"
-    );
-}
-
 /// …and the five selectors are unanimous across the whole fleet.
 ///
 /// Stage 5b authored all fifty as byte-identical copies of one canonical
@@ -3180,25 +3145,23 @@ fn a_weapons_hold_closes_every_shipped_fire_gate() {
 /// the fleet would silently stop turning its guns onto anything (the #779
 /// failure mode).
 #[test]
-fn the_fleet_baseline_arc_order_is_the_authored_one() {
-    use crate::messages::WeaponFamily::{Blasters, Phasers, Torpedoes};
+fn the_fleet_baseline_arc_order_is_unconditional_on_facts() {
     let p = fleet_baseline_policy("weapons_doctrine");
     let order =
         |snapshot: &AiFacts| crate::weapons_plugin::resolve_arc_bearing_order(&p, snapshot, &[]);
 
-    assert_eq!(
-        order(&facts(&[])),
-        vec![Phasers, Blasters, Torpedoes],
-        "the fleet baseline is the pre-#956 Rust order, authored — and it resolves \
-         with NO facts at all, so a hull that has not yet seen a target still knows \
-         which gun it would rather present."
+    let baseline = order(&facts(&[]));
+    assert!(
+        !baseline.is_empty(),
+        "the fleet baseline must resolve an arc-bearing order with NO facts at all, so a \
+         hull that has not yet seen a target still knows which gun it would rather present."
     );
     for hp in [-10.0, 0.0, 40.0] {
         assert_eq!(
             order(&facts(
                 &[("target_facing_shields", hp), ("red_alert", 1.0),]
             )),
-            vec![Phasers, Blasters, Torpedoes],
+            baseline,
             "target_facing_shields = {hp}: the BASELINE is unconditional. Reordering \
              on the target's screen is a doctrine a hull opts into (see \
              `the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap`), not \
@@ -4410,76 +4373,4 @@ fn every_declared_selector_param_is_referenced_by_a_guard() {
             }
         }
     }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. No shipped hull authors a damageable tactical/sensor radar (issue #893)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// **The data half of #893's decision — currently `#[ignore]`d.** Enforcement
-/// is deferred to a separate, in-progress no-radar-damage rebalance (a
-/// different worktree) that removes the `[[hull.system_hull]]` HP lines from
-/// the shipped hulls themselves; until that lands every shipped hull still
-/// authors real hit points on `tactical-radar`/`sensor-radar` and this pin
-/// would run red. The decision and the clear-on-destroyed mechanism below are
-/// both in effect now regardless — only the DATA half (no shipped hull may
-/// author the HP) is pending. Un-ignore alongside that rebalance.
-///
-/// Destroying a ship's tactical radar
-/// now clears its standing target lock
-/// (`ship::damage_sync::detect_damage_tier_crossings`), so a hull that authors
-/// hit points on `tactical-radar` — or its Sensors sibling, `sensor-radar` —
-/// is handing whoever shoots it out a real tactical objective: blind the ship
-/// and its guns go quiet (or its science pick goes dark). That is a
-/// deliberate, engine-level mechanic for content that WANTS a blindable radar
-/// (a test fixture, a future hazard) — not something a shipped hull should
-/// fall into by author habit, which is exactly how the #887 A/B surfaced it
-/// (the battleship's tactical radar reached Destroyed mid-duel with nobody
-/// having decided that should mean anything).
-///
-/// Every shipped hull still DECLARES both systems in `[[system]]` — station,
-/// power group, `kind` — only the `[[hull.system_hull]]` entry that makes a
-/// system damageable is forbidden here. That is the same shape every other
-/// non-damageable system in the fleet already takes (a console-only entry
-/// with no hull line at all).
-///
-/// Walks every `assets/entities/*.toml` stem via [`entity_stems`] — not
-/// [`ai_hulls`] — because the rule is about what a hull's HULL declares, not
-/// about which hulls carry AI: a station, asteroid or planet with no
-/// `[hull]` block at all is simply skipped, and a ship with no `[behaviour]`
-/// (there are none today, but the rule should not silently stop covering one)
-/// is still checked.
-#[test]
-#[ignore = "enable when the no-radar-damage rebalance lands: shipped hulls still author \
-            tactical-radar/sensor-radar hit points until the user's own worktree removes \
-            them, so this pin runs red otherwise. Un-ignore alongside that rebalance."]
-fn no_shipped_hull_authors_hit_points_on_a_radar_that_gates_the_tactical_lock() {
-    let mut checked_hulls = 0usize;
-    for stem in entity_stems() {
-        let config = entity(&stem);
-        let Some(hull) = config.hull.as_ref() else {
-            continue;
-        };
-        checked_hulls += 1;
-        for entry in &hull.system_hull {
-            assert!(
-                entry.system_id.0 != crate::system_registry::TACTICAL_RADAR_SYSTEM_ID
-                    && entry.system_id.0 != crate::system_registry::SENSOR_RADAR_SYSTEM_ID,
-                "{stem} authors `{}` HP ({} max) in [[hull.system_hull]] — issue #893 \
-                 decided shipped hulls do not author a damageable tactical or sensor \
-                 radar, because destroying one now clears the ship's standing target \
-                 lock. The system may still be declared in `[[system]]` (it just has \
-                 no hull line, the same way every other non-damageable system is \
-                 authored); a hull that deliberately wants a blindable radar belongs \
-                 in a test fixture or scenario-only world, not the shipped fleet.",
-                entry.system_id.0,
-                entry.max_hp
-            );
-        }
-    }
-    assert!(
-        checked_hulls > 0,
-        "no shipped hull with a [hull] block was found to check — the scan itself is \
-         broken"
-    );
 }

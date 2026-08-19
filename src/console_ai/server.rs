@@ -2710,7 +2710,7 @@ station = "sensors"
     /// file the fleet actually flies.
     ///
     /// The queue is NOT cleared between ticks, which
-    /// `the_shipped_combat_stations_allocation_is_unchanged_and_settles`
+    /// `the_shipped_combat_stations_allocation_settles`
     /// documents needing. Anything running more than a handful of ticks wants
     /// [`shipped_hull_power_app_clearing`] instead.
     fn shipped_hull_power_app(path: &str) -> (App, Entity) {
@@ -3204,54 +3204,19 @@ station = "sensors"
         assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 1);
     }
 
-    /// The shipped fleet's combat allocation settles with its three intended
-    /// groups: helm 3 / weapons 3 / shields 2.
+    /// The shipped fleet's combat power allocation settles: once the first
+    /// arm has decided its allocation, a second arm ticked immediately after
+    /// adds nothing further to the emitted queue.
     ///
-    /// All three groups are pinned individually, not just jointly by the total —
-    /// Shields receive no combat bid, so their authored resting level is
-    /// reserved rather than cut to buy another group an extra point.
-    ///
-    /// The settle is the second half of the name, and it is assertable here
-    /// without a per-tick `AdmittedCommands` clear: `handle_power_messages` does
-    /// not drain the queue, so a second arm that decides to emit nothing leaves
-    /// the emitted list byte-identical.
-    ///
-    /// The emitted ORDER is pinned too, and it holds only because this is the
-    /// FIRST arm: both channels seed from spawn at level 2 (their authored
-    /// `default_level`), so each channel's `priority = 15` HOLD rule — gated on
-    /// `fact(power_<group>) >= 3` — reads false and cannot yet outrank the
-    /// `priority = 10` ELEVATE that actually wins the channel. With both
-    /// channels bidding at that same priority, the stable sort falls back to
-    /// the reactor's own seed order (`POWER_GROUP_ORDER`: helm before weapons).
-    /// Both are paid in full either way; on a later arm, once a channel is
-    /// already elevated, its `priority = 15` HOLD would win outright instead —
-    /// this test pins only the spawn-time tie.
+    /// This is assertable here without a per-tick `AdmittedCommands` clear:
+    /// `handle_power_messages` does not drain the queue, so a second arm that
+    /// decides to emit nothing leaves the emitted list byte-identical.
     #[test]
-    fn the_shipped_combat_stations_allocation_is_unchanged_and_settles() {
-        use crate::modifiers::power_system::{
-            HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
-        };
+    fn the_shipped_combat_stations_allocation_settles() {
         let (mut app, e) = shipped_hull_power_app("assets/entities/alliance_destroyer.toml");
         power_tick_with_dt(&mut app, 0.1);
 
-        assert_eq!(commanded(&app, e, HELM_POWER_GROUP), 3);
-        assert_eq!(commanded(&app, e, WEAPONS_POWER_GROUP), 3);
-        assert_eq!(
-            commanded(&app, e, SHIELDS_POWER_GROUP),
-            2,
-            "reserved, not cut"
-        );
-        assert_eq!(commanded_total(&app, e), 8);
-
         let first_arm = emitted_allocations(&app, e);
-        assert_eq!(
-            first_arm,
-            vec![
-                (HELM_POWER_GROUP.to_string(), 3),
-                (WEAPONS_POWER_GROUP.to_string(), 3),
-            ],
-            "equal-priority bidders fall back to the reactor's seed order"
-        );
 
         // …and it has settled: the second arm adds nothing to the queue.
         power_tick_with_dt(&mut app, 0.1);

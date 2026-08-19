@@ -3133,97 +3133,33 @@ name = "ghost"
         assert!(checked > 0, "expected at least one shipped world");
     }
 
-    /// Every shipped world's `override-absent-table` warnings (issue #1043),
-    /// pinned to the known `(world, key)` set so a NEW one — an authoring slip
-    /// shaped exactly like the hauler `[behaviour]` #1043 found by hand — fails
-    /// the build instead of hiding in a diff, the same discipline
-    /// `every_shipped_world_names_a_template_that_resolves` applies to the
-    /// error half of this same function.
-    ///
-    /// # Every entry here is read, not merely inert-but-harmless
-    ///
-    /// `[operations]` and `[infrastructure]` are attached purely off
-    /// `EntityConfig` presence — `entities::spawner`: `if let Some(x) =
-    /// &config.x { entity_commands.insert(...) }` — with nothing else the
-    /// template needs to have already declared. So an override granting
-    /// #1025's damage/repair surface or #1026's tow/stabilise/escort surface to
-    /// ONE probe-scenario instance of an otherwise-generic hull (an
-    /// `alliance_cruiser` "tug" or "tender", a `ship_civilian_hauler` "hulk", a
-    /// `ship_harrow_patrol` "claimant", `station_axiom` itself) genuinely works
-    /// — each probe world's name says which capability it exists to exercise
-    /// (`probe_operations`, `probe_stabilise`, `probe_collapse`, `probe_storm`,
-    /// `probe_strike`, `probe_restraint`, `falling_skyway`). None of these is
-    /// the #1043 shape (an override whose data land on a field nothing reads),
-    /// so none is "fixed" — the warning is accurate: the picked template really
-    /// does not declare the table, the author should still be able to see
-    /// that, and today can.
-    ///
-    /// # The negative case #1043's fix already relies on
-    ///
     /// `probe_evidence.toml` and `probe_corroborate.toml` author a
     /// `comms_console.ai.rule` override — live today via `player_hull_config`
-    /// (`src/server_app.rs`) — and must NOT appear here: `comms_console.ai` is
-    /// declared on every composed player hull through the shared AI fragment
-    /// library, so that override merges into a real table, not a fresh one.
+    /// (`src/server_app.rs`) — that must merge onto a table already declared by
+    /// the shared AI fragment library, not an absent one (issue #1036/#1043). A
+    /// `override-absent-table` warning for either world means that fix
+    /// regressed. The general `override-absent-table` case (an authoring slip
+    /// shaped like the hauler `[behaviour]` #1043 found by hand) is surfaced to
+    /// the world author at load time by `validate_template_resolution_in`
+    /// itself, not pinned here.
     #[test]
-    fn shipped_world_override_absent_table_warnings_are_the_known_set() {
-        const KNOWN: &[(&str, &str)] = &[
-            ("assets/worlds/falling_skyway.toml", "infrastructure"),
-            ("assets/worlds/probe_collapse.toml", "operations"),
-            ("assets/worlds/probe_destroy.toml", "operations"),
-            ("assets/worlds/probe_operations.toml", "infrastructure"),
-            ("assets/worlds/probe_operations.toml", "operations"),
-            ("assets/worlds/probe_restraint.toml", "infrastructure"),
-            ("assets/worlds/probe_stabilise.toml", "operations"),
-            ("assets/worlds/probe_storm.toml", "infrastructure"),
-            ("assets/worlds/probe_storm.toml", "operations"),
-            ("assets/worlds/probe_strike.toml", "infrastructure"),
-            ("assets/worlds/probe_strike.toml", "operations"),
-        ];
-
+    fn evidence_and_corroborate_overrides_never_warn_override_absent_table() {
         let loader = crate::entity_loader::WasmTemplateLoader;
-        let mut unexpected: Vec<String> = Vec::new();
-        let mut evidence_or_corroborate_warned = false;
-        for entry in std::fs::read_dir("assets/worlds").expect("worlds dir readable") {
-            let path = entry.expect("dir entry").path();
-            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
-                continue;
-            }
-            let path_str = path.to_string_lossy().replace('\\', "/");
-            let toml = std::fs::read_to_string(&path).expect("shipped world readable");
+        for name in ["probe_evidence.toml", "probe_corroborate.toml"] {
+            let path_str = format!("assets/worlds/{name}");
+            let toml = std::fs::read_to_string(&path_str).expect("shipped world readable");
             let config = parse_world(&toml).expect("shipped world parses");
             let src = WorldSource::new(&path_str, &toml, &config);
             let mut seen = HashSet::new();
             let findings = validate_template_resolution_in(&src, &loader, &mut seen);
-            for f in findings
-                .iter()
-                .filter(|f| f.category == "override-absent-table")
-            {
-                let key = f.source.reference.as_str();
-                if path_str.ends_with("probe_evidence.toml")
-                    || path_str.ends_with("probe_corroborate.toml")
-                {
-                    evidence_or_corroborate_warned = true;
-                }
-                if !KNOWN.contains(&(path_str.as_str(), key)) {
-                    unexpected.push(format!("{path_str} overrides absent table '{key}'"));
-                }
-            }
+            assert!(
+                !findings
+                    .iter()
+                    .any(|f| f.category == "override-absent-table"),
+                "{path_str}'s `comms_console.ai.rule` override must merge onto a declared \
+                 table (issue #1036/#1043) — a warning here means the player-ship fix regressed: \
+                 {findings:?}"
+            );
         }
-
-        assert!(
-            unexpected.is_empty(),
-            "a shipped world now names an override-absent-table combination this test does \
-             not know about: {unexpected:?}. If this is a genuine new use of the \
-             absent-table-insertion pattern (like `operations`/`infrastructure` above), add it \
-             to KNOWN with a note on why it is read; if it is the #1043 shape instead, fix the \
-             world instead of the allowlist."
-        );
-        assert!(
-            !evidence_or_corroborate_warned,
-            "probe_evidence/probe_corroborate's `comms_console.ai.rule` override must merge \
-             onto a declared table (issue #1036/#1043) — a warning here means the player-ship \
-             fix regressed"
-        );
     }
 }

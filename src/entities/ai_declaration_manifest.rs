@@ -35,13 +35,11 @@
 //!    whether the hull declared it. A slot is per-(hull, system) — per weapon
 //!    where the system is per-weapon — so the output is the worklist #885b
 //!    needs rather than a total.
-//! 2. [`EXPECTED_UNDECLARED`] is that worklist, committed, with
-//!    `tests::the_committed_worklist_matches_the_shipped_hulls` failing on any
-//!    difference in either direction. Authoring a declaration drops an entry and
-//!    forces the table to be edited — that is the burn-down. Adding a hull, a
-//!    weapon, or a fine-system kind without authoring fails loudly instead of
-//!    quietly widening the gap. [`UNDECLARED_HIGH_WATER_MARK`] is the ratchet:
-//!    it may be lowered, never raised.
+//! 2. That worklist was tracked as a committed table through the #885b
+//!    burn-down; it reached zero once stage 5c authored the last policy block,
+//!    and the tracking scaffolding was retired at that point in favour of (3)
+//!    below, which enforces the same "nothing undeclared" invariant at load —
+//!    on every caller, not just the shipped fleet a worklist test could walk.
 //! 3. [`AiDeclarationMode::Strict`] turns a missing declaration into a load
 //!    error, and since #885b stage 5d it is the DEFAULT: every caller of
 //!    [`EntityConfig::from_toml`] gets it. Stage 5d also deleted the nineteen
@@ -711,86 +709,17 @@ pub fn strict_error(c: &EntityConfig) -> Option<String> {
 // ─────────────────────────────────────────────────────────────────────────────
 // The committed worklist
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Every undeclared AI-capable fine system across the shipped hulls, per
-/// (hull, system).
-///
-/// This is #885b's worklist and its burn-down ledger. `tests::the_committed_worklist_matches_the_shipped_hulls`
-/// asserts EXACT equality with what [`undeclared_keys`] computes off
-/// `assets/entities/`, in both directions:
-///
-/// * Author a declaration ⇒ an entry must be removed here. That is the burn-down.
-/// * Add a hull, a weapon bank, a torpedo tube, or a fine-system kind without
-///   authoring ⇒ an entry appears and the test fails, instead of the gap quietly
-///   widening.
-///
-/// Keys are the [`Slot::key`] form. Hulls are the `assets/entities/` file stems.
-/// Entities absent from this table must have no undeclared slots at all — which,
-/// for everything that is not a hull, means no AI-capable fine system at all.
-///
-/// # The table is EMPTY, and that is the point
-///
-/// Nine hulls, 181 AI-capable fine-system slots, **zero of them undeclared**.
-/// (172 until issue #956 added the ship-level `weapons_doctrine` kind, authored
-/// on all nine in the same change — a new kind is only allowed to arrive with
-/// its content, which is what the exact-equality assertion below enforces.)
-/// Every slot on every shipped hull now carries an authored block, transcribed
-/// verbatim from the synthesiser that used to invent it and pinned equal to it
-/// by `default_ai_policy_pins::spawn_path`.
-///
-/// It was ten hulls and 191 slots until #954 moved the three-weapon RNG-coverage
-/// escort out of the fleet to `assets/entities/test/rng_coverage_lancer.toml`.
-/// The 19 slots that left with it are not a burn-down step: nothing was
-/// authored, and the fixture still declares all 19 for itself. What moved is the
-/// scope of the word "shipped" — `tests::hull_files` reads
-/// `assets/entities/*.toml` at the top level only, the same convention that
-/// keeps `fragments/` out.
-///
-/// The burn-down was 206 → 174 → 124 → **0**, and the steps are not the same
-/// kind of progress:
-///
-/// | step | mark | how |
-/// |---|---|---|
-/// | #885a counted the gap | 206 | — |
-/// | #892 retired two raider hulls | 174 | **deletion** |
-/// | #885b stage 5b authored all 50 selector blocks | 124 | **authoring** |
-/// | #885b stage 5c authored all 124 remaining policy blocks | **0** | **authoring** |
-///
-/// Deletion moved the number without a single declaration being written;
-/// authoring is the only half that is progress on US7, and it accounts for 174
-/// of the 206.
-///
-/// An empty table is not a dead one. It is now the **ratchet at its stop**:
-/// `tests::the_committed_worklist_matches_the_shipped_hulls` asserts exact
-/// equality, so adding a hull, a weapon bank, a torpedo tube or a twenty-first
-/// fine-system kind without authoring its declaration puts an entry back and
-/// fails, naming the hull and the system. That is the regression it exists to
-/// catch, and it can only be caught while the expected state is "nothing".
-///
-/// The synthesisers still exist and still fire for anything that omits a block
-/// — a test fixture, a hand-written world entity, a hull mid-edit. Deleting
-/// them, and flipping [`AiDeclarationMode::DEFAULT`] to
-/// [`AiDeclarationMode::Strict`] so that omission becomes a load error, is
-/// stage 5d. `tests::strict_mode_would_accept_every_shipped_hull_today` is the
-/// evidence that nothing blocks it.
-///
-/// The exact per-kind roll-up is pinned by
-/// `tests::the_per_kind_rollup_is_what_the_module_doc_says`, so these claims
-/// cannot rot into prose that used to be true.
-pub const EXPECTED_UNDECLARED: &[(&str, &[&str])] = &[];
-
-/// The ratchet: the total number of undeclared AI-capable fine systems across
-/// `assets/entities/`.
-///
-/// **It is at zero and must stay there.** It may never be raised — a change that
-/// needs it raised is a change that widened the gap PRD #774 US7 exists to
-/// close, and should author the declaration instead.
-///
-/// 206 → 174 → 124 → **0**. The first step was #892 deleting two hulls; the
-/// second and third are #885b stages 5b and 5c authoring the fifty selector
-/// blocks and then the 124 policy blocks. Only the authoring steps are progress
-/// on US7 — see the note on [`EXPECTED_UNDECLARED`].
-pub const UNDECLARED_HIGH_WATER_MARK: usize = 0;
+//
+// #885b's worklist and burn-down ledger (206 → 174 → 124 → 0 undeclared
+// AI-capable fine-system slots) tracked here as a committed table through
+// every stage. It reached zero once stage 5c authored the last policy block:
+// every slot on every shipped hull carries an authored block, transcribed
+// verbatim from the synthesiser that used to invent it. The tracking table and
+// its exact-equality test were retired at that point — stage 5d then deleted
+// the synthesisers outright and made [`AiDeclarationMode::Strict`] the
+// default, so a hull that ships an undeclared slot fails to load on every
+// path, not just under a test that walks the shipped fleet. See
+// `tests::strict_mode_is_on_by_default_and_every_shipped_hull_still_loads`.
 
 #[cfg(test)]
 pub(crate) mod source_scan {
@@ -1175,125 +1104,6 @@ base_priority = 40.0
             ],
             "these four can declare a policy but cannot declare idle. Strict mode must \
              not demand something the schema has no field for."
-        );
-    }
-
-    // ── The committed worklist ───────────────────────────────────────────────
-
-    fn computed_worklist() -> Vec<(String, Vec<String>)> {
-        let mut out: Vec<(String, Vec<String>)> = Vec::new();
-        for stem in hull_files() {
-            let c = parse(&format!("assets/entities/{stem}.toml"));
-            let keys = undeclared_keys(&c);
-            if !keys.is_empty() {
-                out.push((stem, keys));
-            }
-        }
-        out
-    }
-
-    /// AC: the count is CI-checkable and can only go down.
-    #[test]
-    fn the_committed_worklist_matches_the_shipped_hulls() {
-        let computed = computed_worklist();
-        let expected: Vec<(String, Vec<String>)> = EXPECTED_UNDECLARED
-            .iter()
-            .map(|(hull, keys)| {
-                let mut k: Vec<String> = keys.iter().map(|s| s.to_string()).collect();
-                k.sort();
-                (hull.to_string(), k)
-            })
-            .collect();
-        assert_eq!(
-            computed,
-            expected,
-            "the AI-declaration worklist changed.\n\
-             • FEWER entries: a declaration was authored — remove it here and lower \
-             UNDECLARED_HIGH_WATER_MARK. That is the #885b burn-down.\n\
-             • MORE entries: a hull, weapon, tube or fine-system kind was added \
-             without authoring its declaration, so automation is being supplied \
-             silently. Author it rather than widening this table.\n\
-             Computed worklist:\n{}",
-            computed
-                .iter()
-                .map(|(h, k)| format!("    (\"{h}\", &{k:?}),"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        );
-    }
-
-    /// The per-KIND roll-up, so the module doc's claims about which fine
-    /// systems nobody authors are checked rather than asserted in prose.
-    ///
-    /// Read as "of the N hulls that have this system at all, M declare it".
-    #[test]
-    fn the_per_kind_rollup_is_what_the_module_doc_says() {
-        let mut total = 0usize;
-        let mut rollup: Vec<(&str, usize, usize)> = Vec::new();
-        for kind in FINE_SYSTEM_KINDS {
-            let (mut slots, mut declared) = (0usize, 0usize);
-            for stem in hull_files() {
-                let c = parse(&format!("assets/entities/{stem}.toml"));
-                for slot in slots_of_kind(kind, &c) {
-                    slots += 1;
-                    if slot.declared != Declared::Nothing {
-                        declared += 1;
-                    }
-                }
-            }
-            total += slots;
-            rollup.push((kind.key.as_str(), declared, slots));
-        }
-        assert_eq!(
-            total, 200,
-            "the shipped hulls carry 200 AI-capable fine-system slots in total"
-        );
-        assert_eq!(
-            rollup,
-            vec![
-                ("captain", 10, 10),
-                ("engines", 10, 10),
-                ("steering", 10, 10),
-                ("lateral", 10, 10),
-                ("vertical", 10, 10),
-                ("impulse", 10, 10),
-                ("boost", 10, 10),
-                ("phaser_bank", 12, 12),
-                ("blaster_bank", 7, 7),
-                ("torpedo_tube", 14, 14),
-                ("weapons_doctrine", 11, 11),
-                ("torpedo_magazine", 5, 5),
-                ("shields_focus", 10, 10),
-                ("power", 10, 10),
-                ("comms_response", 10, 10),
-                ("sensors_selector", 10, 10),
-                ("tactical_selector", 11, 11),
-                ("navigation_selector", 10, 10),
-                ("repair_selector", 10, 10),
-                ("comms_selector", 10, 10),
-            ],
-            "the per-kind roll-up moved. Every one of the twenty kinds is now \
-             DECLARED on every hull that has it — declared == slots on every row — \
-             after #885b stage 5b authored the five selectors and stage 5c the \
-             fourteen policies, and #956 added the fifteenth policy kind \
-             (`weapons_doctrine`) already authored on all nine. The tenth hull is \
-             `ship_civilian_hauler` (issue #1028): it composes the fifteen \
-             ship-level declarations from `fragments/ai/fleet_baseline.toml` and \
-             authors its own stand-down Captain policy inline, so it arrives fully \
-             declared like the nine before it. A row where the two \
-             numbers differ is a fine system being handed automation nobody wrote, \
-             which is exactly what PRD #774 US7 forbids: author the block rather than \
-             editing this expectation."
-        );
-    }
-
-    #[test]
-    fn the_high_water_mark_is_the_real_total() {
-        let total: usize = computed_worklist().iter().map(|(_, k)| k.len()).sum();
-        assert_eq!(
-            total, UNDECLARED_HIGH_WATER_MARK,
-            "UNDECLARED_HIGH_WATER_MARK is the ratchet on how much automation ships \
-             undeclared. Lower it when #885b authors declarations; never raise it."
         );
     }
 

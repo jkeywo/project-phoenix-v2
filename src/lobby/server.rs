@@ -1812,9 +1812,15 @@ mod tests {
 
     /// Parse a real hull TOML into an `EntityConfig`, run the full manual
     /// pipeline (`build_manual_system_extras` + `build_ship_manual`), and return
-    /// the resulting manual. This is the integration path the pure `ship::manual`
-    /// module can't cover on its own (it never sees `EntityConfig`).
-    fn manual_from_hull(path: &str) -> crate::ship::manual::ShipManualWire {
+    /// the resulting manual alongside the config it was built from. This is the
+    /// integration path the pure `ship::manual` module can't cover on its own
+    /// (it never sees `EntityConfig`).
+    fn manual_from_hull(
+        path: &str,
+    ) -> (
+        crate::entities::config::EntityConfig,
+        crate::ship::manual::ShipManualWire,
+    ) {
         // Through the include resolver (issue #906) — the same document the
         // runtime hull load produces, composed or not.
         let config = crate::entity_includes::load_entity_config(path)
@@ -1825,7 +1831,8 @@ mod tests {
             .expect("hull declares a ship_config");
         let extras = build_manual_system_extras(&config);
         let registry = crate::ship::manual::ManualProviderRegistry::with_shipped_providers();
-        crate::ship::manual::build_ship_manual(&topology, &registry, &extras)
+        let manual = crate::ship::manual::build_ship_manual(&topology, &registry, &extras);
+        (config, manual)
     }
 
     fn find_metric(
@@ -1844,10 +1851,10 @@ mod tests {
 
     #[test]
     fn real_hulls_produce_different_manual_values() {
-        let cruiser = manual_from_hull("assets/entities/alliance_cruiser.toml");
-        let courier = manual_from_hull("assets/entities/alliance_courier.toml");
+        let (cruiser_cfg, cruiser) = manual_from_hull("assets/entities/alliance_cruiser.toml");
+        let (courier_cfg, courier) = manual_from_hull("assets/entities/alliance_courier.toml");
 
-        // Reactor capacity: cruiser [power] capacity = 90, courier = 35.
+        // Reactor capacity reflects each hull's own authored [power] capacity.
         let cruiser_cap = find_metric(
             &cruiser,
             crate::system_registry::POWER_REACTOR_KIND,
@@ -1858,45 +1865,64 @@ mod tests {
             crate::system_registry::POWER_REACTOR_KIND,
             "capacity",
         );
-        assert_eq!(cruiser_cap, Some(90.0));
-        assert_eq!(courier_cap, Some(35.0));
+        assert_eq!(
+            cruiser_cap,
+            cruiser_cfg.power.as_ref().map(|p| p.capacity as f64)
+        );
+        assert_eq!(
+            courier_cap,
+            courier_cfg.power.as_ref().map(|p| p.capacity as f64)
+        );
         assert_ne!(
             cruiser_cap, courier_cap,
             "manual content must change with ship configuration (AC2)"
         );
 
-        // Comms range: cruiser [comms] range = 1200, courier = 1000.
+        // Comms range likewise reflects each hull's own authored [comms] range.
+        let cruiser_comms = find_metric(&cruiser, crate::system_registry::COMMS_KIND, "range");
+        let courier_comms = find_metric(&courier, crate::system_registry::COMMS_KIND, "range");
         assert_eq!(
-            find_metric(&cruiser, crate::system_registry::COMMS_KIND, "range"),
-            Some(1200.0)
+            cruiser_comms,
+            cruiser_cfg.comms.as_ref().map(|c| c.range as f64)
         );
         assert_eq!(
-            find_metric(&courier, crate::system_registry::COMMS_KIND, "range"),
-            Some(1000.0)
+            courier_comms,
+            courier_cfg.comms.as_ref().map(|c| c.range as f64)
+        );
+        assert_ne!(
+            cruiser_comms, courier_comms,
+            "manual content must change with ship configuration (AC2)"
         );
     }
 
     #[test]
     fn cruiser_manual_covers_weapons_helm_and_sensors_from_authored_config() {
-        let cruiser = manual_from_hull("assets/entities/alliance_cruiser.toml");
+        let (cfg, cruiser) = manual_from_hull("assets/entities/alliance_cruiser.toml");
 
-        // Phaser bank beam range = 40 (authored on both banks).
+        // Phaser bank beam range reflects the authored config, not a pinned number.
+        let authored_beam_range = cfg
+            .weapons_console
+            .as_ref()
+            .and_then(|w| w.phaser_banks.first())
+            .map(|b| b.beam_range as f64);
+        assert!(authored_beam_range.is_some(), "hull authors a phaser bank");
         assert_eq!(
             find_metric(
                 &cruiser,
                 crate::system_registry::PHASER_BANK_KIND,
                 "beam_range"
             ),
-            Some(40.0)
+            authored_beam_range
         );
-        // Torpedo magazine capacity = 6, and three tubes declared.
+        // Torpedo magazine capacity and tube count reflect the authored [torpedoes] block.
+        let torpedoes = cfg.torpedoes.as_ref().expect("hull authors torpedoes");
         assert_eq!(
             find_metric(
                 &cruiser,
                 crate::system_registry::TORPEDO_MAGAZINE_KIND,
                 "capacity"
             ),
-            Some(6.0)
+            Some(torpedoes.count as f64)
         );
         assert_eq!(
             find_metric(
@@ -1904,12 +1930,14 @@ mod tests {
                 crate::system_registry::TORPEDO_MAGAZINE_KIND,
                 "tubes"
             ),
-            Some(3.0)
+            Some(torpedoes.tubes.len() as f64)
         );
-        // Sensors long-range radar range = 300.
+        // Sensors long-range radar range reflects the authored [sensors_console].
         assert_eq!(
             find_metric(&cruiser, crate::system_registry::SENSORS_KIND, "range"),
-            Some(300.0)
+            cfg.sensors_console
+                .as_ref()
+                .map(|s| s.long_range_radar.range as f64)
         );
 
         // Helm movement mode: no `[helm_capability]` authored ⇒ effective planar.
@@ -1926,24 +1954,30 @@ mod tests {
                 .map(|c| c.value_code.as_str()),
             Some("planar")
         );
-        // And the authored helm max speed (14) is reflected.
+        // And the authored [helm_console] max speed is reflected, not a pinned number.
         assert_eq!(
             helm.metrics
                 .iter()
                 .find(|m| m.code == "max_speed")
                 .map(|m| m.value),
-            Some(14.0)
+            cfg.helm_console.as_ref().map(|h| h.max_speed as f64)
         );
     }
 
     #[test]
     fn courier_manual_covers_its_blaster_bank() {
-        // The courier carries a blaster (range 35), not torpedoes — proving the
-        // blaster provider is fed from real authored config.
-        let courier = manual_from_hull("assets/entities/alliance_courier.toml");
+        // The courier carries a blaster, not torpedoes — proving the blaster
+        // provider is fed from real authored config.
+        let (cfg, courier) = manual_from_hull("assets/entities/alliance_courier.toml");
+        let authored_range = cfg
+            .weapons_console
+            .as_ref()
+            .and_then(|w| w.blaster_banks.first())
+            .map(|b| b.range as f64);
+        assert!(authored_range.is_some(), "hull authors a blaster bank");
         assert_eq!(
             find_metric(&courier, crate::system_registry::BLASTER_BANK_KIND, "range"),
-            Some(35.0)
+            authored_range
         );
     }
 }

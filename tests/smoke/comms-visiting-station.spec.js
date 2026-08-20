@@ -1,17 +1,22 @@
-// Issue #1098 — Smoke test: Comms as a complete visiting Station on the
+// Issue #1098 — Smoke test: Comms as a hosted-tab-only visiting Station on the
 // Alliance Destroyer.
 //
 // `comms.spec.js` already covers the direct-hosting message flow (hail →
 // respond → objective) against the cruiser's older Comms wiring. This spec
-// is scoped to what #1098 actually changed: the destroyer's Comms is now a
-// complete `human_seeking` Station resolved by `host_order` (see
+// is scoped to the destroyer's Comms, which is now an AUXILIARY
+// `human_seeking` Station resolved by `host_order` (see
 // `assets/entities/alliance_destroyer.toml`'s `[[station]] id = "comms"`),
-// same as Navigation (#1097). It demonstrates all three host outcomes the
-// acceptance criteria name — direct, visiting and AI-hosted — via
+// same as Navigation. Auxiliary means Comms has NO dedicated claimable lobby
+// seat — it is never a direct holder; it is only ever reached as a Hero Bar
+// tab hosted by a resolved seat, or AI-operated. This spec demonstrates both
+// remaining host outcomes the acceptance criteria name — visiting and
+// AI-hosted — plus the hosted-tab resolution onto a non-owning seat, via
 // `SimState.snapshot.station_hosts` (the wire projection of
 // `resolve_visiting_station`, `src/ship/coordination.rs`) plus a live
 // `CommsState`/`Hail` round trip to prove a visiting host can actually act,
-// not just get named as host.
+// not just get named as host. The prior "direct: a player seated on Comms is
+// its own host" case is gone: Comms is no longer a claimable seat, so its
+// first case now pins hosted-tab resolution onto a seated Captain instead.
 //
 // Navigation's equivalent migration (#1097, same host_order machinery) has
 // no smoke coverage of its own visiting/AI-hosted behavior either — nothing
@@ -127,34 +132,34 @@ async function lastCommsHost(client, stationId, timeout = 8_000) {
   }, stationId);
 }
 
-test('comms — direct: a player seated on Comms is its own host', async ({ context }) => {
+test('comms — hosted tab: an unclaimable Comms resolves onto a seated Captain host', async ({ context }) => {
   const serverPage = await bootDestroyerServer(context);
   const hostId = await readHostPeerId(serverPage);
 
-  const comms = await createTestClient(context, hostId, { name: 'Comms' });
-  const tactical = await createTestClient(context, hostId, { name: 'Tactical' });
+  // Comms is auxiliary now: no dedicated seat, so a player claims a real seat
+  // (Captain) and Comms is reached as a Hero Bar tab. With only Captain held,
+  // Comms resolves through its host_order (`["tactical", "engineering",
+  // "captain", "helm"]`) past the two unheld seats to Captain — the first
+  // held candidate. `SetReady`/solo start work exactly as before.
+  const captain = await createTestClient(context, hostId, { name: 'Captain' });
 
-  await comms.send('SelectStation', { station: 'Comms' });
-  await waitForStation(comms);
-  await tactical.send('SelectStation', { station: 'Tactical' });
-  await waitForStation(tactical);
+  await captain.send('SelectStation', { station: 'Captain' });
+  await waitForStation(captain);
+  await captain.send('SetReady', { ready: true });
+  await captain.waitForMessage('GameStarted', 10_000);
 
-  await comms.send('SetReady', { ready: true });
-  await tactical.send('SetReady', { ready: true });
-  await comms.waitForMessage('GameStarted', 10_000);
-
-  const host = await lastCommsHost(comms, 'comms');
+  const host = await lastCommsHost(captain, 'comms');
   expect(host, 'station_hosts must carry a comms entry').not.toBeNull();
-  expect(host.host).toBe('comms');
+  expect(host.host).toBe('captain');
+  // Comms authors only one rating everywhere it appears (no automated tier),
+  // so a visiting host gets the same full "Std" surface.
   expect(host.rating).toBe('Std');
 
-  // The seated holder is also admitted to act: CommsState arrives on the
-  // first InProgress tick regardless of hosting mode, but confirm it lands
-  // on the direct holder specifically.
-  await comms.waitForMessage('CommsState', 8_000);
+  // The resolved host is admitted to act: CommsState arrives on the first
+  // InProgress tick and lands on the Captain-seated token hosting Comms.
+  await captain.waitForMessage('CommsState', 8_000);
 
-  await comms.close();
-  await tactical.close();
+  await captain.close();
 });
 
 test('comms — visiting: a Tactical-seated player is admitted as the resolved Comms host and can act', async ({ context }) => {
@@ -162,9 +167,9 @@ test('comms — visiting: a Tactical-seated player is admitted as the resolved C
   const hostId = await readHostPeerId(serverPage);
 
   // Solo crew: only Tactical is claimed, so Comms (unheld) resolves through
-  // its host_order (`["tactical", "engineering", "captain", "helm",
-  // "navigation"]`) straight to Tactical — the first compatible seat that is
-  // actually held. `sessions.all_ready()` only requires every CONNECTED
+  // its host_order (`["tactical", "engineering", "captain", "helm"]`)
+  // straight to Tactical — the first compatible seat that is actually held.
+  // `sessions.all_ready()` only requires every CONNECTED
   // player ready, not every station filled, so a solo Tactical officer can
   // start the game alone.
   const tactical = await createTestClient(context, hostId, { name: 'Tactical' });
@@ -218,9 +223,9 @@ test('comms — AI-hosted: falls back to AI once every host_order seat is unheld
   expect(visitingHost?.host).toBe('tactical');
 
   // ...then releases Tactical mid-game. host_order = ["tactical",
-  // "engineering", "captain", "helm", "navigation"] is every OTHER station on
-  // the hull, so with Tactical released and nobody else ever having claimed a
-  // seat, every candidate in the chain is unheld and resolve_visiting_station
+  // "engineering", "captain", "helm"] is every crewable seat other than Comms,
+  // so with Tactical released and nobody else ever having claimed a seat,
+  // every candidate in the chain is unheld and resolve_visiting_station
   // (src/ship/coordination.rs) falls all the way through to `host: None`,
   // `rating: BACKFILL_RATING` ("Backfill") — the pure AI-operated verdict.
   await tactical.page.evaluate(() => {

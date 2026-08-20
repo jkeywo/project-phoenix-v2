@@ -2549,13 +2549,15 @@ station = "navigation"
         let order: Vec<&str> = comms.host_order.iter().map(|s| s.0.as_str()).collect();
         assert_eq!(
             order,
-            vec!["tactical", "engineering", "captain", "helm", "navigation"],
-            "comms: Tactical owns it, then Engineering — John's ruling"
+            vec!["tactical", "engineering", "captain", "helm"],
+            "comms: Tactical owns it, then Engineering — John's ruling. Navigation \
+             was dropped now that it too is an auxiliary visiting station: a \
+             visiting station cannot host another visiting station."
         );
-        // Every OTHER station a visiting Comms could land on is covered — but
-        // the auxiliary Command station (issue #1107) is not a candidate host: a
-        // visiting station never lands on an auxiliary surface, so it is
-        // correctly absent from the order and excluded from the count.
+        // Every OTHER station a visiting Comms could land on is covered — but the
+        // auxiliary stations (Navigation, Comms itself, and Command, issue #1107)
+        // are not candidate hosts: a visiting station never lands on an auxiliary
+        // surface, so they are correctly absent from the order and the count.
         let host_candidates = config
             .stations
             .iter()
@@ -2571,7 +2573,7 @@ station = "navigation"
             order,
             authored_stations
                 .iter()
-                .filter(|s| **s != "comms" && **s != "command")
+                .filter(|s| **s != "comms" && **s != "command" && **s != "navigation")
                 .copied()
                 .collect::<Vec<_>>(),
             "comms: an order identical to the authored station list would be \

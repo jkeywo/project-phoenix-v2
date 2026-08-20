@@ -939,13 +939,15 @@ description = "entity.alliance_destroyer.station.navigation.description"
 rank = "Ltn."
 short_code = "NAV"
 console = "gui/battleship/navigation.html"
+auxiliary = true
 human_seeking = true
 host_order = ["tactical", "engineering", "captain"]
 visiting_rating = "Simplified"
-# [ai] Navigation remains a complete, directly claimable Station. When it has
-# no active holder it visits only these compatible direct seats, in authored
-# order; an active Helm alone therefore leaves it on ordinary AI rather than
-# turning compatibility into an implicit all-crew fallback.
+# [ai] Navigation is now a hosted-tab-only auxiliary station: it has no dedicated
+# claimable lobby seat (`auxiliary = true`), but stays `human_seeking` and
+# appears as a Hero Bar tab, resolving a host from these compatible direct seats
+# in authored order. An active Helm alone therefore leaves it on ordinary AI
+# rather than turning compatibility into an implicit all-crew fallback.
 
 [[station.rating]]
 name = "Std"
@@ -963,13 +965,20 @@ rank = "Ens."
 short_code = "COM"
 console = "gui/battleship/comms.html"
 manual_overview = "You handle communications. Hail contacts, read and answer incoming traffic, and keep the captain and crew informed of mission developments. Stay on top of the message queue and flag anything urgent."
+auxiliary = true
 human_seeking = true
-host_order = ["tactical", "engineering", "captain", "helm", "navigation"]
+host_order = ["tactical", "engineering", "captain", "helm"]
 visiting_rating = "Std"
-# [ai] Comms carries only one authored rating everywhere it is declared on any
-# hull — there is no Simplified/automated tier for it — so its visiting
-# rating is the same full interface a direct holder gets. Unlike Navigation,
-# a visiting host is never handed a reduced Comms surface.
+# [ai] Comms is now a hosted-tab-only auxiliary station: no dedicated claimable
+# lobby seat (`auxiliary = true`), but still `human_seeking` and shown as a Hero
+# Bar tab, resolving a host from these directly-held seats in authored order.
+# `navigation` was dropped from this chain: it is itself an auxiliary
+# human_seeking (visiting) station now, never directly held, so a visiting
+# station cannot host another visiting station and the resolver skips it anyway.
+# Comms carries only one authored rating everywhere it is declared on any hull —
+# there is no Simplified/automated tier for it — so its visiting rating is the
+# same full interface a direct holder gets. Unlike Navigation, a visiting host
+# is never handed a reduced Comms surface.
 
 [[station.rating]]
 name = "Std"

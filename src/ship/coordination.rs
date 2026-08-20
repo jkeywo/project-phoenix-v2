@@ -1100,6 +1100,44 @@ human_seeking = true
         );
     }
 
+    /// Issue #1104 AC3: when a directly-held seat's holder steps AFK, their
+    /// Station is Backfilled — every owned System delegated to AI. `seeking_seats`
+    /// must then read that seat as `Ai`, not `Human`, so a human-seeking System's
+    /// seek walks past it exactly as it walks past a disconnected seat. No AFK
+    /// parameter is needed here: the Backfill the AFK entry applies is precisely
+    /// what excludes the seat, and this pins that it does even while the AFK
+    /// player stays connected and keeps the seat.
+    #[test]
+    fn an_afk_backfilled_seat_is_not_offered_as_a_human_host() {
+        let config = seeking_config();
+        let mut resolver = ControlSourceResolver::new();
+        // AFK entry Backfilled the captain seat: its owned `captain` system is Ai.
+        resolver.set(SystemId("captain".into()), ControlSource::Ai);
+
+        let seats = seeking_seats(
+            &config,
+            &resolver,
+            &ratings(&[("captain", crate::ship::rating::BACKFILL_RATING)]),
+            // The AFK player is still CONNECTED and still holds the seat.
+            |station| (station.0 == "captain").then(|| "afk-captain".to_string()),
+        );
+
+        let captain = seats
+            .iter()
+            .find(|s| s.station == StationId("captain".into()))
+            .unwrap();
+        assert_eq!(
+            captain.control,
+            ControlSource::Ai,
+            "a Backfilled (AFK) seat reads Ai — a human-seeking seek skips it"
+        );
+        assert_eq!(
+            captain.holder.as_deref(),
+            Some("afk-captain"),
+            "AFK retains the seat even though it now hosts nobody"
+        );
+    }
+
     #[test]
     fn a_directly_held_human_seeking_station_can_host_a_legacy_seek_without_nesting() {
         let mut config = seeking_config();

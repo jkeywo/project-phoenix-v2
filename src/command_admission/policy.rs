@@ -768,4 +768,102 @@ station = "command"
             Some(&command_hosted_on_captain()),
         ));
     }
+
+    // ── AFK stale-command refusal (issue #1104, AC5) ─────────────────────────
+    //
+    // AFK adds NO new admission branch. Entering AFK delegates the holder's own
+    // Station to AI (Backfill → every owned system `ControlSource::Ai`), and it
+    // relocates human-seeking Stations off the AFK holder via the live
+    // `HumanSeekingHosts` seam. Both stale-command refusals fall out of the two
+    // gates `is_command_authorized` already applies: `!accept_human_input` and
+    // station tenure. These pin that they do.
+
+    /// AC5, refusal 1: the AFK player's OWN direct-station command is refused
+    /// because entering AFK delegated that station to AI, so `accept_human_input`
+    /// is false — the very first human gate `is_command_authorized` checks.
+    #[test]
+    fn an_afk_delegated_holders_own_command_is_refused_via_accept_human_input() {
+        let sessions = {
+            let mut sm = crate::lobby::session::SessionManager::new();
+            sm.register("t1".into(), "Engineer".into()).unwrap();
+            sm.set_station("t1", Some(StationId("repair".into())));
+            sm.set_afk("t1", true); // AFK delegated the seat to AI…
+            crate::lobby::Sessions(sm)
+        };
+        assert!(
+            !is_command_authorized(
+                "t1",
+                &SystemId("repair".into()),
+                &dispatch(),
+                &sources(ControlSource::Ai, false), // …so its system runs on AI.
+                &sessions,
+                &config(),
+                None,
+            ),
+            "an AFK holder's own command is refused because the seat is AI"
+        );
+        // The companion that proves the deny is the delegation, not the token:
+        // the SAME holder, seat still Human (not AFK-delegated), is admitted.
+        assert!(is_command_authorized(
+            "t1",
+            &SystemId("repair".into()),
+            &dispatch(),
+            &sources(ControlSource::Human, false),
+            &sessions,
+            &config(),
+            None,
+        ));
+    }
+
+    /// AC5, refusal 2: after an AFK holder's visiting Station re-resolves to a
+    /// new host, the STALE prior host — no longer holding the station the live
+    /// `HumanSeekingHosts` seam puts the system on — is refused by the ordinary
+    /// tenure check. Here `command` has relocated off the now-AFK Captain onto
+    /// Tactical; the Captain's stale order is refused because the live host is
+    /// Tactical, held by someone else.
+    #[test]
+    fn a_stale_prior_visiting_host_is_refused_via_tenure_after_afk_relocation() {
+        let hosts = {
+            let mut map = std::collections::BTreeMap::new();
+            map.insert(
+                crate::system_registry::command_system_id(),
+                StationId("tactical".into()),
+            );
+            crate::ship_plugin::HumanSeekingHosts(map)
+        };
+        let sessions = {
+            let mut sm = crate::lobby::session::SessionManager::new();
+            // The relocated (present) Tactical officer is the live Command host.
+            sm.register("tac".into(), "Sulu".into()).unwrap();
+            sm.set_station("tac", Some(StationId("tactical".into())));
+            // The prior host stepped AFK but still holds Captain — its order is
+            // stale now that the seek has moved Command to Tactical.
+            sm.register("cap".into(), "Kirk".into()).unwrap();
+            sm.set_station("cap", Some(StationId("captain".into())));
+            sm.set_afk("cap", true);
+            crate::lobby::Sessions(sm)
+        };
+        assert!(
+            !is_command_authorized(
+                "cap",
+                &crate::system_registry::command_system_id(),
+                &set_stance(),
+                &command_sources(ControlSource::Human),
+                &sessions,
+                &command_config(),
+                Some(&hosts),
+            ),
+            "the stale prior host is refused — the live host is Tactical"
+        );
+        // And the relocated host IS admitted, proving the seek moved authority.
+        assert!(is_command_authorized(
+            "tac",
+            &crate::system_registry::command_system_id(),
+            &set_stance(),
+            &command_sources(ControlSource::Human),
+            &sessions,
+            &command_config(),
+            Some(&hosts),
+        ));
+    }
 }

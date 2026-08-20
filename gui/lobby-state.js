@@ -37,7 +37,7 @@ export function playerStationId(player) {
 }
 
 function normalisePlayer(p) {
-  return { ready: false, spectator: false, ...p, station: playerStationId(p) };
+  return { ready: false, spectator: false, afk: false, ...p, station: playerStationId(p) };
 }
 
 function defaultShipStations() {
@@ -184,6 +184,14 @@ export class LobbyState {
         // this only tracks the role flag on the player record.
         const p = this.players.find(p => p.token === d.token);
         if (p) p.spectator = d.spectator;
+        break;
+      }
+      case 'AfkChanged': {
+        // AFK presence delta (issue #1104). The delegation/restore arrive as
+        // their own RatingChanged messages and the seat is never vacated, so
+        // this only tracks the presence flag on the player record.
+        const p = this.players.find(p => p.token === d.token);
+        if (p) p.afk = d.afk;
         break;
       }
       case 'StationAssigned': {

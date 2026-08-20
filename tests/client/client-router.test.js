@@ -354,6 +354,16 @@ describe('routeMessage — player list bookkeeping', () => {
     expect(s.players[0].spectator).toBe(false);
   });
 
+  it('AfkChanged sets the presence flag and rebuilds (issue #1104)', () => {
+    const s = baseUiState({ players: [{ token: MY, afk: false }] });
+    const r = routeMessage({ type: 'AfkChanged', data: { token: MY, afk: true } }, ctx(s));
+    expect(s.players[0].afk).toBe(true);
+    expect(r.rebuildStations).toBe(true);
+    // And the inverse toggle clears it — the presence delta only tracks the flag.
+    routeMessage({ type: 'AfkChanged', data: { token: MY, afk: false } }, ctx(s));
+    expect(s.players[0].afk).toBe(false);
+  });
+
   it('NameChanged for my token surfaces the new name', () => {
     const s = baseUiState({ players: [{ token: MY, name: 'Old' }] });
     const r = routeMessage({ type: 'NameChanged', data: { token: MY, name: 'New' } }, ctx(s));

@@ -63,6 +63,18 @@ pub struct SessionManager {
     /// never locked out of a seat. Cleared on `ReturnToLobby` alongside
     /// `pending_ratings`.
     eligibility: std::collections::HashMap<String, std::collections::HashSet<StationId>>,
+    /// The station rating a player held on their directly-owned Station at the
+    /// instant they entered AFK (issue #1104), token → rating name. Captured
+    /// BEFORE the AFK Backfill is applied and consumed (and cleared) when the
+    /// player leaves AFK, restoring the prior coherent control configuration.
+    ///
+    /// Kept INDEPENDENT of `Player.last_rating` on purpose: `last_rating` is the
+    /// disconnect/reconnect snapshot, and a disconnect that lands while a player
+    /// is AFK writes Backfill into `last_rating` — reusing it would clobber the
+    /// true pre-AFK rating. A private side-map (like `pending_ratings` /
+    /// `eligibility`) is the seam that survives that interaction. An absent entry
+    /// means "no AFK snapshot to restore".
+    afk_prev_rating: std::collections::HashMap<String, String>,
 }
 
 impl Default for SessionManager {
@@ -77,6 +89,7 @@ impl SessionManager {
             players: Vec::new(),
             pending_ratings: std::collections::HashMap::new(),
             eligibility: std::collections::HashMap::new(),
+            afk_prev_rating: std::collections::HashMap::new(),
         }
     }
 
@@ -96,6 +109,7 @@ impl SessionManager {
             station: None,
             last_rating: None,
             spectator: false,
+            afk: false,
         });
         Ok(self.players.last().unwrap())
     }
@@ -110,6 +124,12 @@ impl SessionManager {
         if let Some(idx) = self.idx(token) {
             self.players[idx].connected = false;
             self.players[idx].ready = false;
+            // `afk` is DELIBERATELY preserved across a disconnect (issue #1104
+            // AC5): an AFK holder that drops is already delegated (visiting
+            // Stations re-resolved) and keeps the seat, so the presence flag —
+            // and the `afk_prev_rating` snapshot that restores their prior
+            // configuration — must survive the drop and the reconnect. Only the
+            // transient `ready` flag is cleared here (unlike `afk`).
         }
     }
 
@@ -159,6 +179,24 @@ impl SessionManager {
     pub fn is_spectator(&self, token: &str) -> bool {
         self.idx(token)
             .map(|idx| self.players[idx].spectator)
+            .unwrap_or(false)
+    }
+
+    /// Enter or leave the AFK presence state for a player (issue #1104). No-op
+    /// if the token is not found. Unlike `set_spectator`, this RETAINS any held
+    /// Station — AFK delegates the seat's Systems without relinquishing it — so
+    /// only the flag moves.
+    pub fn set_afk(&mut self, token: &str, afk: bool) {
+        if let Some(idx) = self.idx(token) {
+            self.players[idx].afk = afk;
+        }
+    }
+
+    /// True when the player with `token` is currently AFK (issue #1104). False
+    /// for an unknown token.
+    pub fn is_afk(&self, token: &str) -> bool {
+        self.idx(token)
+            .map(|idx| self.players[idx].afk)
             .unwrap_or(false)
     }
 
@@ -221,6 +259,24 @@ impl SessionManager {
     /// fresh round), alongside `clear_all_pending_ratings`.
     pub fn clear_all_eligibility(&mut self) {
         self.eligibility.clear();
+    }
+
+    /// Snapshot the rating a player held on their directly-owned Station just
+    /// before entering AFK (issue #1104), so leaving AFK can restore the exact
+    /// prior configuration. Replaces any earlier snapshot for the token.
+    pub fn set_afk_prev_rating(&mut self, token: &str, rating: String) {
+        self.afk_prev_rating.insert(token.to_string(), rating);
+    }
+
+    /// The rating snapshotted at AFK-entry for `token`, if any (issue #1104).
+    pub fn afk_prev_rating_for(&self, token: &str) -> Option<&String> {
+        self.afk_prev_rating.get(token)
+    }
+
+    /// Drop a token's AFK rating snapshot (issue #1104), once it has been
+    /// restored on AFK-exit.
+    pub fn clear_afk_prev_rating(&mut self, token: &str) {
+        self.afk_prev_rating.remove(token);
     }
 
     /// Station IDs not held by any connected player, in ship-config declaration
@@ -773,6 +829,93 @@ mod tests {
             !sm.all_ready(),
             "reconnected spectator stays out of readiness"
         );
+    }
+
+    // ── AFK presence (issue #1104) ───────────────────────────────────────────
+
+    #[test]
+    fn set_and_is_afk_roundtrip() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(!sm.is_afk("t1"), "a fresh player is not AFK");
+        sm.set_afk("t1", true);
+        assert!(sm.is_afk("t1"));
+        sm.set_afk("t1", false);
+        assert!(!sm.is_afk("t1"));
+        assert!(!sm.is_afk("ghost"), "unknown token is not AFK");
+    }
+
+    #[test]
+    fn register_defaults_afk_false() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(
+            !sm.players()[0].afk,
+            "a freshly registered player is not AFK"
+        );
+    }
+
+    #[test]
+    fn set_afk_retains_the_held_station() {
+        // Contrast `set_spectator`, which vacates the seat: AFK delegates the
+        // Station's Systems WITHOUT relinquishing ownership (issue #1104 AC1).
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.set_station("t1", Some(StationId("captain".into())));
+        sm.set_afk("t1", true);
+        assert_eq!(
+            sm.station_for_token("t1"),
+            Some(&StationId("captain".into())),
+            "entering AFK must keep the seat"
+        );
+        assert!(sm.is_afk("t1"));
+    }
+
+    #[test]
+    fn afk_flag_and_snapshot_survive_disconnect() {
+        // AC5: an AFK holder that drops keeps both the presence flag and the
+        // pre-AFK rating snapshot — disconnect must touch neither.
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.set_station("t1", Some(StationId("captain".into())));
+        sm.set_afk("t1", true);
+        sm.set_afk_prev_rating("t1", "Std".into());
+        sm.disconnect("t1");
+        assert!(sm.is_afk("t1"), "AFK flag persists across disconnect");
+        assert_eq!(
+            sm.afk_prev_rating_for("t1"),
+            Some(&"Std".to_string()),
+            "the pre-AFK snapshot survives the drop, un-clobbered by last_rating"
+        );
+        // The seat stays on the record for reconnect restore (occupancy is
+        // gated on `connected` via `holder_for_station`, but the record keeps
+        // the station).
+        assert_eq!(
+            sm.station_for_token("t1"),
+            Some(&StationId("captain".into())),
+            "the seat is retained on the record across the drop"
+        );
+        assert_eq!(
+            sm.holder_for_station(&StationId("captain".into())),
+            None,
+            "but a disconnected holder does not occupy the seat"
+        );
+        sm.reconnect("t1");
+        assert!(sm.is_afk("t1"), "AFK flag persists across reconnect");
+    }
+
+    #[test]
+    fn afk_prev_rating_set_restore_and_clear() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert_eq!(sm.afk_prev_rating_for("t1"), None, "no snapshot by default");
+        sm.set_afk_prev_rating("t1", "Manual".into());
+        assert_eq!(sm.afk_prev_rating_for("t1"), Some(&"Manual".to_string()));
+        // A second entry replaces the first.
+        sm.set_afk_prev_rating("t1", "Std".into());
+        assert_eq!(sm.afk_prev_rating_for("t1"), Some(&"Std".to_string()));
+        sm.clear_afk_prev_rating("t1");
+        assert_eq!(sm.afk_prev_rating_for("t1"), None, "cleared after restore");
     }
 
     #[test]

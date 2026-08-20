@@ -141,6 +141,30 @@ describe('apply player lifecycle', () => {
     s.apply({ type: 'SpectatorChanged', data: { token: 'a', spectator: false } });
     expect(s.players[0].spectator).toBe(false);
   });
+
+  it('AfkChanged toggles the presence flag without touching the seat (issue #1104)', () => {
+    const s = new LobbyState();
+    s.players = [ps('a', 'Alice', 'helm'), ps('b', 'Bob', null)];
+    s.apply({ type: 'AfkChanged', data: { token: 'a', afk: true } });
+    expect(s.players[0].afk).toBe(true);
+    expect(s.players[0].station).toBe('helm'); // AFK retains the seat
+    expect(s.players[1].afk).toBeFalsy();
+    s.apply({ type: 'AfkChanged', data: { token: 'a', afk: false } });
+    expect(s.players[0].afk).toBe(false);
+    expect(s.players[0].station).toBe('helm');
+  });
+
+  it('returning from AFK does not steal console focus (issue #1104 AC4)', () => {
+    // AFK never changes Player.station, so no StationAssigned is re-sent and the
+    // reconciler keeps the current console across the enter/leave round-trip.
+    const s = new LobbyState();
+    s.players = [ps('a', 'Alice', 'helm')];
+    const held = () => s.players.filter((p) => p.station).map((p) => p.station);
+    expect(reconcileActiveConsole('helm', held())).toBe('helm');
+    s.apply({ type: 'AfkChanged', data: { token: 'a', afk: true } });
+    s.apply({ type: 'AfkChanged', data: { token: 'a', afk: false } });
+    expect(reconcileActiveConsole('helm', held())).toBe('helm');
+  });
 });
 
 describe('apply StationAssigned', () => {

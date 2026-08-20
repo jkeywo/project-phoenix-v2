@@ -305,6 +305,19 @@ export function routeMessage(msg, ctx) {
       }
       rebuildStations = true;
       break;
+    case 'AfkChanged':
+      // AFK presence delta (issue #1104). The delegation/restore ride on their
+      // own RatingChanged messages and the seat is never vacated (no
+      // StationAssigned), so this only tracks the presence flag on the roster
+      // for presence rendering — mirroring ReadyChanged/SpectatorChanged.
+      if (lobbyState) {
+        uiState.players = lobbyState.players;
+      } else {
+        const p = uiState.players.find(p => p.token === msg.data.token);
+        if (p) p.afk = msg.data.afk;
+      }
+      rebuildStations = true;
+      break;
     case 'ObjectiveSummary':
       break; // fall through to the render guard
     default:

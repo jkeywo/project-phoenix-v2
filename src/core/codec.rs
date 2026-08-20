@@ -249,6 +249,7 @@ mod tests {
             station: None,
             last_rating: None,
             spectator: false,
+            afk: false,
         }
     }
 
@@ -379,6 +380,10 @@ mod tests {
                 ClientMessage::SetSpectator { spectator: true },
             ),
             (
+                ClientMessageDiscriminants::SetAfk,
+                ClientMessage::SetAfk { afk: true },
+            ),
+            (
                 ClientMessageDiscriminants::ControlSystem,
                 ClientMessage::ControlSystem {
                     target: crate::system_registry::helm_thrust_system_id(),
@@ -496,6 +501,13 @@ mod tests {
                 ServerMessage::SpectatorChanged {
                     token: "tok".into(),
                     spectator: true,
+                },
+            ),
+            (
+                ServerMessageDiscriminants::AfkChanged,
+                ServerMessage::AfkChanged {
+                    token: "tok".into(),
+                    afk: true,
                 },
             ),
             (

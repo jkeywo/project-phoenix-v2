@@ -193,6 +193,12 @@ export function buildSettingsState(opts = {}) {
   const stations = state.stations || [];
   const myStation = stations.find((st) => st.holder_token === myToken) || null;
   const stationId = myStation ? myStation.id : null;
+  // AFK presence (issue #1104) is a PUBLIC per-player flag on the roster, so the
+  // tab paints the toggle from server truth (the local player's own record),
+  // never from what was last clicked. A silent/legacy roster defaults to false.
+  const players = state.players || [];
+  const mePlayer = players.find((p) => p.token === myToken) || null;
+  const afk = !!(mePlayer && mePlayer.afk);
   const names = (myStation && myStation.ratings) || [];
   const stationRatings = state.stationRatings || {};
   const activeRating = (stationId && stationRatings[stationId]) || names[0] || '';
@@ -217,6 +223,7 @@ export function buildSettingsState(opts = {}) {
     tabs: visibleClientTabs(demo).map((tab) => ({ id: tab.id, labelId: tab.labelId })),
     activeTab: resolveClientActiveTab(opts.activeTab || null, demo),
     stationId,
+    afk,
     ratings,
     // The private Accessibility profile (issue #1102), reflected as the
     // player's EXPLICIT choices so the tab paints which option is selected.
@@ -685,6 +692,27 @@ export function mountSettings({
       action(t('settings.toggle_qr'), null, () => emit('ToggleQrCode', {})),
     );
     body.appendChild(qrSection);
+
+    // AFK (issue #1104): step away from a HELD station, delegating its systems
+    // to AI without giving up the seat. Only meaningful while holding a station,
+    // so it rides alongside Leave Station (which is likewise station-gated). The
+    // toggle is painted from server truth (`view.afk`) and emits the flipped
+    // flag; unlike Leave it does NOT close the panel, so a player can return the
+    // same way they left.
+    if (view.stationId) {
+      const afkSection = section('settings.afk');
+      const afkRow = row('settings-rating-row');
+      afkRow.appendChild(
+        toggle(
+          'afk-toggle',
+          t(view.afk ? 'settings.afk_active' : 'settings.afk_enter'),
+          view.afk,
+          () => emit('SetAfk', { afk: !view.afk }),
+        ),
+      );
+      afkSection.appendChild(afkRow);
+      body.appendChild(afkSection);
+    }
 
     if (view.stationId) {
       const leaveSection = section('settings.station');

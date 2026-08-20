@@ -655,6 +655,108 @@ pub(crate) fn handle_set_spectator(
     }
 }
 
+/// Handle `SetAfk` (issue #1104): enter or leave the AFK presence state. AFK
+/// delegates every System on the player's DIRECTLY-held Station through ordinary
+/// AI control while retaining the seat and reconnect identity, and (via the
+/// per-tick resolver's AFK gate) makes the player an ineligible host for visiting
+/// Stations. Leaving AFK restores the prior coherent control configuration.
+///
+/// On `afk == true`: snapshot the seat's current rating into the
+/// `afk_prev_rating` side-map (AC4's restore target), then move that Station to
+/// `BACKFILL_RATING` — the EXACT move `process_disconnect_with_stations` makes,
+/// reusing `rating::apply_rating` (through `apply_result`) unchanged, so AFK adds
+/// no new control mechanism (AC2). The seat is RETAINED, so no `StationAssigned`
+/// is emitted and the client keeps its console focus (AC4). Broadcasts
+/// `RatingChanged { station, Backfill }` for the delegated seat, then
+/// `AfkChanged { true }`.
+///
+/// On `afk == false`: re-apply the snapshotted prior rating and consume the
+/// snapshot (AC4). Visiting Stations need nothing stored — the pure per-tick
+/// resolver re-includes the no-longer-AFK holder on the next tick (AC4).
+/// Broadcasts `RatingChanged { station, prev }`, then `AfkChanged { false }`.
+///
+/// `AfkChanged` carries ONLY the boolean — no accessibility detail (AC5).
+///
+/// Takes `station_ratings` (the live `ActiveStationRatings` map) purely to READ
+/// the pre-AFK rating for the snapshot; the delegation/restore themselves ride
+/// on `station_rating_update`, applied by `apply_result` like every other lobby
+/// rating change.
+pub(crate) fn handle_set_afk(
+    token: &str,
+    afk: bool,
+    sessions: &mut SessionManager,
+    station_ratings: &HashMap<StationId, String>,
+) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+    let mut station_rating_update: Option<(StationId, String)> = None;
+
+    // AFK never vacates the seat, so the held Station is the same before and
+    // after the flag flips — capture it once.
+    let held_station = sessions.station_for_token(token).cloned();
+
+    if afk {
+        // Guard against a redundant re-entry (already AFK): re-snapshotting would
+        // capture the Backfill we ourselves applied and clobber the true prior
+        // rating. Only the first entry snapshots + delegates.
+        if !sessions.is_afk(token) {
+            if let Some(ref sid) = held_station {
+                // Snapshot the CURRENT rating before Backfill overwrites it. A
+                // seat with no recorded rating restores to Backfill, a harmless
+                // already-automated target.
+                let prev = station_ratings
+                    .get(sid)
+                    .cloned()
+                    .unwrap_or_else(|| rating::BACKFILL_RATING.to_string());
+                sessions.set_afk_prev_rating(token, prev);
+
+                let backfill = rating::BACKFILL_RATING.to_string();
+                outbound.push((
+                    Target::All,
+                    ServerMessage::RatingChanged {
+                        station_id: sid.clone(),
+                        rating_name: backfill.clone(),
+                    },
+                ));
+                station_rating_update = Some((sid.clone(), backfill));
+            }
+        }
+        sessions.set_afk(token, true);
+    } else {
+        sessions.set_afk(token, false);
+        // Restore the directly-held Station's prior configuration; visiting
+        // Stations re-resolve on the next tick (nothing to store). Consume the
+        // snapshot so a later disconnect cannot re-apply it.
+        if let Some(prev) = sessions.afk_prev_rating_for(token).cloned() {
+            sessions.clear_afk_prev_rating(token);
+            if let Some(ref sid) = held_station {
+                outbound.push((
+                    Target::All,
+                    ServerMessage::RatingChanged {
+                        station_id: sid.clone(),
+                        rating_name: prev.clone(),
+                    },
+                ));
+                station_rating_update = Some((sid.clone(), prev));
+            }
+        }
+    }
+
+    outbound.push((
+        Target::All,
+        ServerMessage::AfkChanged {
+            token: token.to_string(),
+            afk,
+        },
+    ));
+
+    LobbyHandlerResult {
+        new_phase: None,
+        outbound,
+        station_rating_update,
+        countdown_action: None,
+    }
+}
+
 /// Who asked to return to the lobby, which decides which phases honour it.
 ///
 /// The `ReturnToLobby` wire variant itself is deliberately un-gated — any
@@ -983,6 +1085,7 @@ mod tests {
             ClientMessage::SetSpectator { spectator } => {
                 handle_set_spectator(token, *spectator, sessions, phase, ship_stations)
             }
+            ClientMessage::SetAfk { afk } => handle_set_afk(token, *afk, sessions, station_ratings),
             ClientMessage::ReturnToLobby => {
                 handle_return_to_lobby(sessions, phase, return_to_lobby_authority(token))
             }
@@ -2088,6 +2191,182 @@ max_level = 4
         assert!(
             !sessions.all_ready(),
             "and remains out of readiness after reconnect"
+        );
+    }
+
+    // ── AFK presence (issue #1104) ────────────────────────────────────────
+
+    /// A station_ratings map with one seat rated, for the AFK snapshot path.
+    fn ratings_map(station: &str, rating: &str) -> HashMap<StationId, String> {
+        HashMap::from([(StationId(station.into()), rating.to_string())])
+    }
+
+    #[test]
+    fn entering_afk_delegates_the_held_station_to_backfill_and_broadcasts() {
+        // AC2: entering AFK moves the player's directly-held Station to Backfill
+        // (which delegates every owned System to AI) exactly like a disconnect,
+        // WITHOUT vacating the seat, and broadcasts AfkChanged.
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        let ratings = ratings_map("captain", "Manual");
+
+        let result = handle_set_afk("t1", true, &mut sessions, &ratings);
+
+        assert!(sessions.is_afk("t1"), "the player is now AFK");
+        assert_eq!(
+            sessions.station_for_token("t1"),
+            Some(&StationId("captain".into())),
+            "AFK retains the seat — reconnect identity is preserved"
+        );
+        assert_eq!(
+            result.station_rating_update,
+            Some((
+                StationId("captain".into()),
+                rating::BACKFILL_RATING.to_string()
+            )),
+            "the held station is delegated to Backfill"
+        );
+        assert!(
+            result.outbound.iter().any(|(_, m)| matches!(
+                m,
+                ServerMessage::RatingChanged { station_id, rating_name }
+                    if station_id.0 == "captain" && rating_name == rating::BACKFILL_RATING
+            )),
+            "broadcasts RatingChanged {{ Backfill }} for the delegated seat"
+        );
+        assert!(
+            result.outbound.iter().any(|(t, m)| matches!(t, Target::All)
+                && matches!(m, ServerMessage::AfkChanged { token, afk: true } if token == "t1")),
+            "broadcasts AfkChanged {{ true }}"
+        );
+        // The seat is retained, so no StationAssigned rides along (no focus steal).
+        assert!(
+            !result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::StationAssigned { .. })),
+            "AFK never vacates the seat, so no StationAssigned is emitted"
+        );
+    }
+
+    #[test]
+    fn afk_broadcast_carries_only_the_boolean_no_accessibility_detail() {
+        // AC5 / AC7 privacy guard: the AfkChanged delta carries exactly the
+        // token and the boolean. If a reason/profile ever leaked onto the wire
+        // it would have to be a new field on this variant — this pins that the
+        // variant stays a bare presence flag.
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        let ratings = ratings_map("captain", "Manual");
+        let result = handle_set_afk("t1", true, &mut sessions, &ratings);
+        let afk_changed = result
+            .outbound
+            .iter()
+            .find_map(|(_, m)| match m {
+                ServerMessage::AfkChanged { token, afk } => Some((token.clone(), *afk)),
+                _ => None,
+            })
+            .expect("an AfkChanged is broadcast");
+        assert_eq!(afk_changed, ("t1".to_string(), true));
+    }
+
+    #[test]
+    fn leaving_afk_restores_the_exact_prior_rating() {
+        // AC4: leaving AFK re-applies the SNAPSHOTTED prior rating (not a
+        // hardcoded default), returning the seat to its prior coherent config.
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+
+        // Enter AFK with the seat on "Manual"; the seat is now Backfilled and
+        // "Manual" is snapshotted.
+        handle_set_afk("t1", true, &mut sessions, &ratings_map("captain", "Manual"));
+        assert_eq!(
+            sessions.afk_prev_rating_for("t1"),
+            Some(&"Manual".to_string())
+        );
+
+        // Leave AFK: the live station_ratings now read Backfill (what we set),
+        // but the restore must use the SNAPSHOT, not the live value.
+        let result = handle_set_afk(
+            "t1",
+            false,
+            &mut sessions,
+            &ratings_map("captain", rating::BACKFILL_RATING),
+        );
+
+        assert!(!sessions.is_afk("t1"), "the player is no longer AFK");
+        assert_eq!(
+            result.station_rating_update,
+            Some((StationId("captain".into()), "Manual".to_string())),
+            "the exact pre-AFK rating is restored, not Backfill"
+        );
+        assert!(
+            result.outbound.iter().any(|(_, m)| matches!(
+                m,
+                ServerMessage::RatingChanged { station_id, rating_name }
+                    if station_id.0 == "captain" && rating_name == "Manual"
+            )),
+            "broadcasts RatingChanged {{ Manual }} on return"
+        );
+        assert!(
+            result.outbound.iter().any(|(_, m)| matches!(
+                m,
+                ServerMessage::AfkChanged { token, afk: false } if token == "t1"
+            )),
+            "broadcasts AfkChanged {{ false }}"
+        );
+        assert!(
+            !result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::StationAssigned { .. })),
+            "return never re-sends StationAssigned — the console keeps focus"
+        );
+        assert_eq!(
+            sessions.afk_prev_rating_for("t1"),
+            None,
+            "the snapshot is consumed on return"
+        );
+    }
+
+    #[test]
+    fn afk_then_disconnect_then_reconnect_then_leave_restores_prior_rating() {
+        // AC5 composition: a player enters AFK, then drops, then reconnects, then
+        // leaves AFK. The disconnect writes Backfill into last_rating, but the
+        // INDEPENDENT afk_prev_rating snapshot preserves the true prior rating,
+        // so leaving AFK still restores "Manual" rather than the Backfill the
+        // disconnect captured.
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+
+        handle_set_afk("t1", true, &mut sessions, &ratings_map("captain", "Manual"));
+
+        // A disconnect while AFK: last_rating captures the CURRENT (Backfill)
+        // rating, and afk must survive the drop.
+        sessions.set_last_rating("t1", Some(rating::BACKFILL_RATING.to_string()));
+        sessions.disconnect("t1");
+        assert!(sessions.is_afk("t1"), "AFK survives the disconnect");
+        assert_eq!(
+            sessions.players()[0].last_rating,
+            Some(rating::BACKFILL_RATING.to_string()),
+            "last_rating captured Backfill — it must NOT be the restore source"
+        );
+
+        // Reconnect the same token.
+        sessions.reconnect("t1");
+        assert!(sessions.is_afk("t1"), "still AFK after reconnect");
+
+        // Leave AFK: the snapshot, not last_rating, drives the restore.
+        let result = handle_set_afk(
+            "t1",
+            false,
+            &mut sessions,
+            &ratings_map("captain", rating::BACKFILL_RATING),
+        );
+        assert_eq!(
+            result.station_rating_update,
+            Some((StationId("captain".into()), "Manual".to_string())),
+            "the true pre-AFK rating survives the disconnect and is restored"
         );
     }
 

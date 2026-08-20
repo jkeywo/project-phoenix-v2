@@ -791,6 +791,26 @@ describe('buildSettingsState', () => {
     expect(view.ratings).toEqual([]);
   });
 
+  it('exposes the local player afk flag from the roster (issue #1104)', () => {
+    // Painted from server truth on the roster, never from what was clicked.
+    const away = buildSettingsState({
+      state: state({ players: [{ token: 'tok1', afk: true }] }),
+      myToken: 'tok1',
+      demo: false,
+    });
+    expect(away.afk).toBe(true);
+
+    const present = buildSettingsState({
+      state: state({ players: [{ token: 'tok1', afk: false }] }),
+      myToken: 'tok1',
+      demo: false,
+    });
+    expect(present.afk).toBe(false);
+
+    // A silent/legacy roster (no players, or no matching token) defaults false.
+    expect(buildSettingsState({ state: state(), myToken: 'tok1', demo: false }).afk).toBe(false);
+  });
+
   it('folds a DebugState message through SimState into the shape it consumes', () => {
     // The two halves of the read-back path meet here: sim-state.js folds the
     // wire message, buildSettingsState reads what it produced.
@@ -911,6 +931,37 @@ describe('gameplay tab — rating, QR and leave station', () => {
   it('hides Leave Station when the player holds no station', () => {
     openGameplay({ stations: [], stationRatings: {} });
     expect(bodyButtons(doc).some((b) => b.className.includes('settings-leave-btn'))).toBe(false);
+  });
+
+  // ── AFK toggle (issue #1104) ───────────────────────────────────────────────
+
+  const withStationAfk = (afk) => ({
+    ...withStation,
+    players: [{ token: 'tok1', afk }],
+  });
+
+  it('sends SetAfk with the flipped flag when the AFK toggle is used', () => {
+    openGameplay(withStationAfk(false));
+    const afkBtn = bodyButtons(doc).find((b) => b.getAttribute('data-control') === 'afk-toggle');
+    expect(afkBtn).toBeDefined();
+    afkBtn.click();
+    expect(sent).toEqual([{ type: 'SetAfk', data: { afk: true } }]);
+  });
+
+  it('paints the AFK toggle pressed from the roster afk flag and leaves on tap', () => {
+    openGameplay(withStationAfk(true));
+    const afkBtn = bodyButtons(doc).find((b) => b.getAttribute('data-control') === 'afk-toggle');
+    expect(afkBtn.getAttribute('aria-pressed')).toBe('true');
+    expect(afkBtn.textContent).toBe(t('settings.afk_active'));
+    afkBtn.click();
+    expect(sent).toEqual([{ type: 'SetAfk', data: { afk: false } }]);
+    // The panel stays open so the player can return the same way they left.
+    expect(findOverlay(doc).hidden).toBe(false);
+  });
+
+  it('hides the AFK toggle when the player holds no station', () => {
+    openGameplay({ stations: [], stationRatings: {}, players: [{ token: 'tok1', afk: false }] });
+    expect(bodyButtons(doc).some((b) => b.getAttribute('data-control') === 'afk-toggle')).toBe(false);
   });
 
   it('offers no exit-to-lobby — that authority stays host-side', () => {

@@ -184,6 +184,7 @@ impl Plugin for LobbyPlugin {
                     handle_release_station_system,
                     handle_set_ready_system,
                     handle_set_spectator_system,
+                    handle_set_afk_system,
                     handle_set_station_rating_system,
                     handle_report_station_eligibility_system,
                 )
@@ -1246,6 +1247,69 @@ pub fn handle_set_spectator_system(
                 None,
                 None,
                 &mut fallback_ratings,
+                countdown.as_deref_mut(),
+            );
+        }
+    }
+}
+
+/// Per-variant system for `ClientMessage::SetAfk` (issue #1104). Reads its
+/// variant off the inbound bus with its own cursor, calls the pure
+/// `lobby_handler::handle_set_afk`, and applies the delegate/restore
+/// `RatingChanged` + `AfkChanged` broadcasts through the same dual-path
+/// `apply_result` the other lobby message systems use. Threads
+/// `ActiveStationRatings` through so the pure handler can SNAPSHOT the player's
+/// current directly-held Station rating before Backfill overwrites it (AFK-exit
+/// restores from that snapshot). Runs on the same Lobby/Loading/InProgress gate
+/// as the other station systems.
+pub fn handle_set_afk_system(
+    mut inbound: MessageReader<InboundMessage>,
+    mut sessions: ResMut<Sessions>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut countdown: Option<ResMut<CountdownTimer>>,
+) {
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::SetAfk { afk } = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
+            let result =
+                lobby_handler::handle_set_afk(&ev.token, *afk, &mut sessions.0, &active_ratings.0);
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+                countdown.as_deref_mut(),
+            );
+        } else {
+            let fallback_ratings = ActiveStationRatings::default();
+            let result = lobby_handler::handle_set_afk(
+                &ev.token,
+                *afk,
+                &mut sessions.0,
+                &fallback_ratings.0,
+            );
+            let mut apply_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut apply_ratings,
                 countdown.as_deref_mut(),
             );
         }

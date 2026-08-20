@@ -936,6 +936,22 @@ pub struct Player {
     /// disconnect/reconnect (records are never pruned).
     #[serde(default)]
     pub spectator: bool,
+    /// True when this player has stepped Away From Keyboard (issue #1104): a
+    /// temporary presence flag that delegates every System on the player's
+    /// directly-held Station to ordinary AI control and makes the player an
+    /// ineligible host for visiting Stations — all WITHOUT relinquishing the
+    /// seat or the reconnect identity. Leaving AFK restores the prior coherent
+    /// control configuration.
+    ///
+    /// Unlike the private accessibility eligibility side-map (#1103), AFK is a
+    /// PUBLIC presence effect, so — like `ready` and `spectator` — it rides on
+    /// the serialized `Player` record and travels for free in
+    /// `GameState`/`Welcome`/`PlayerJoined`. Only this boolean is public: no
+    /// accessibility detail is ever exposed (issue #1104 AC5). AFK RETAINS the
+    /// seat, so `afk == true` does NOT imply `station == None` (contrast
+    /// `spectator`), and it survives a disconnect/reconnect untouched.
+    #[serde(default)]
+    pub afk: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -2016,6 +2032,18 @@ pub enum ClientMessage {
     SetSpectator {
         spectator: bool,
     },
+    /// Enter, or leave, the AFK (Away From Keyboard) presence state (issue
+    /// #1104). Symmetric so a player can toggle it either way from settings. On
+    /// `afk == true` the server delegates every System on the player's directly
+    /// held Station through ordinary AI control (Backfill) and makes the player
+    /// an ineligible host for visiting Stations — WITHOUT vacating the seat. On
+    /// `afk == false` the prior coherent control configuration is restored and
+    /// eligible visiting Stations return. Not a simulation command — dispatched
+    /// through the lobby's per-variant system like `SetReady`/`SetSpectator`,
+    /// never through command admission.
+    SetAfk {
+        afk: bool,
+    },
     /// Primary station/system architecture control envelope. Targets one
     /// ship-local system instance by stable `SystemId` and carries a typed
     /// payload for that system kind. Runtime handlers across every console
@@ -2412,6 +2440,19 @@ pub enum ServerMessage {
     SpectatorChanged {
         token: String,
         spectator: bool,
+    },
+    /// Broadcast when a participant enters or leaves the AFK presence state
+    /// (issue #1104). Mirrors `ReadyChanged`/`SpectatorChanged`: the flag rides
+    /// on `Player` (and so is already carried by any full
+    /// `GameState`/`Welcome`/`PlayerJoined`), but a live toggle needs its own
+    /// delta so connected clients update presence rendering without a fresh
+    /// roster. Carries ONLY the boolean — no accessibility detail, no reason —
+    /// so peers receive the presence effect alone (issue #1104 AC5). The
+    /// delegation and its restore ride on their own `RatingChanged` broadcasts;
+    /// the seat is never vacated, so no `StationAssigned` accompanies this.
+    AfkChanged {
+        token: String,
+        afk: bool,
     },
     NameChanged {
         token: String,

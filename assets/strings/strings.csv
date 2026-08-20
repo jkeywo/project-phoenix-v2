@@ -640,6 +640,9 @@ settings.qr_code,Settings — QR code section heading,QR Code
 settings.toggle_qr,Settings — button that shows/hides the join QR code on the viewscreen,[Toggle QR on Screen]
 settings.station,Settings — station section heading,Station
 settings.leave_station,Settings — button that releases the player's claimed station,Leave Station
+settings.afk,Settings — Away From Keyboard section heading (issue #1104),Away
+settings.afk_enter,"Settings — button to step away; delegates the player's station systems to AI while keeping the seat",Go AFK
+settings.afk_active,"Settings — button state while AFK; tap to return and restore control",Away — Tap to Return
 settings.tab.debug,Server settings menu — name of the Debug/Cheat tab (hidden in a release build),[Debug / Cheat]
 settings.tab.audio,Server settings menu — name of the Audio tab,Audio
 settings.tab.gameplay,Server settings menu — name of the Gameplay tab,Gameplay

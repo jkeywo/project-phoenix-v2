@@ -334,15 +334,18 @@ pub fn resolve_human_seeking_hosts(
                 config,
                 station,
                 // A candidate direct seat is a valid host for THIS visiting
-                // station only when its holder is ALSO eligible for it (issue
-                // #1103 AC2). An ineligible holder is skipped and the walk falls
-                // through to the next `host_order` entry or AI — the resolver
-                // never sees the settings or the reason, only the boolean.
+                // station only when its holder is present (not AFK, issue #1104)
+                // AND eligible for it (issue #1103 AC2). An AFK or ineligible
+                // holder is skipped and the walk falls through to the next
+                // `host_order` entry or AI — the resolver never sees the AFK
+                // state's cause, the settings or the reason, only the booleans.
+                // Pure per-tick recompute, so an AFK holder is dropped as a host
+                // deterministically the moment they step away and re-included the
+                // tick after they return (AC3/AC4).
                 |candidate| {
-                    sessions
-                        .0
-                        .holder_for_station(candidate)
-                        .is_some_and(|tok| sessions.0.is_eligible(tok, &station.id))
+                    sessions.0.holder_for_station(candidate).is_some_and(|tok| {
+                        !sessions.0.is_afk(tok) && sessions.0.is_eligible(tok, &station.id)
+                    })
                 },
                 &scenario_floor.0,
             );
@@ -2606,6 +2609,93 @@ station = "navigation"
             "an ineligible holder is skipped; the visiting station falls to AI"
         );
         assert_eq!(source_of(&mut app, &navigation_system), ControlSource::Ai);
+    }
+
+    #[test]
+    fn an_afk_direct_holder_is_skipped_as_a_visiting_host_and_returns_on_leave() {
+        // AC3/AC4 (issue #1104) at the Bevy adapter. The Captain is crewed and
+        // hosts the visiting navigation station; when that holder steps AFK the
+        // resolver must skip them and fall the station to AI — deterministically,
+        // per tick — and re-include them the tick after they return.
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = ""
+rank = ""
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Visit"
+[[station.rating]]
+name = "Floor"
+automated_systems = []
+[[station.rating]]
+name = "Visit"
+automated_systems = []
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = ""
+rank = ""
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "navigation"
+"#,
+            &["navigation"],
+        )
+        .expect("valid authored hull data");
+        let mut app = seeking_config_app(config, &["captain"]);
+        let navigation_station = crate::messages::StationId("navigation".into());
+        let navigation_system = crate::messages::SystemId("navigation".into());
+
+        // Baseline: the present captain hosts navigation and operates it.
+        tick(&mut app);
+        assert_eq!(
+            station_assignment(&mut app, &navigation_station).host,
+            Some(crate::messages::StationId("captain".into())),
+            "baseline: the present captain hosts the visiting navigation station"
+        );
+        assert_eq!(
+            source_of(&mut app, &navigation_system),
+            ControlSource::Human
+        );
+
+        // The captain steps AFK.
+        {
+            let mut sessions = app.world_mut().resource_mut::<Sessions>();
+            sessions.0.set_afk("officer-captain", true);
+        }
+        tick(&mut app);
+        assert_eq!(
+            station_assignment(&mut app, &navigation_station).host,
+            None,
+            "an AFK holder is skipped; the visiting station falls to AI"
+        );
+        assert_eq!(source_of(&mut app, &navigation_system), ControlSource::Ai);
+
+        // The captain returns — the pure per-tick recompute re-includes them
+        // with no stored state (AC4).
+        {
+            let mut sessions = app.world_mut().resource_mut::<Sessions>();
+            sessions.0.set_afk("officer-captain", false);
+        }
+        tick(&mut app);
+        assert_eq!(
+            station_assignment(&mut app, &navigation_station).host,
+            Some(crate::messages::StationId("captain".into())),
+            "leaving AFK re-includes the eligible visiting host on the next tick"
+        );
+        assert_eq!(
+            source_of(&mut app, &navigation_system),
+            ControlSource::Human
+        );
     }
 
     #[test]

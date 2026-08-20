@@ -3671,6 +3671,103 @@ fn a_save_written_before_the_weapons_hold_is_refused_on_format() {
     );
 }
 
+// ── Issues #1107–#1109: a Command stance survives the save ───────────────────
+
+/// The saved Command stance selections in a payload, flattened to
+/// `(uuid, station id, stance id)` and sorted.
+fn directed_ships(payload: &PhoenixSnapshot) -> Vec<(String, String, String)> {
+    let mut rows: Vec<(String, String, String)> = payload
+        .entities
+        .iter()
+        .flat_map(|e| {
+            e.station_stances
+                .iter()
+                .map(move |(station, stance)| (e.uuid.clone(), station.clone(), stance.clone()))
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// **Issues #1107–#1109.** A ship's in-force Command stance comes back exactly
+/// as it stood.
+///
+/// The restraint world's destroyer runs its Command seat through ordinary AI,
+/// which at red alert directs the weapons Station onto the authored `ai_engaged`
+/// stance — an entry in `ShipStationStances`, which `world_digest` folds. The
+/// capture is taken with that stance in force; the fresh app boots the same file
+/// and reaches its restore point long before the destroyer raises red alert, so
+/// it holds NO stance at the moment `restore` is called. A resume that dropped
+/// the map would fold a different number on the tick the digest counts it — the
+/// bug this issue fixes.
+#[test]
+fn a_command_stance_survives_a_resume() {
+    let mut live = boot(&restraint_args());
+    step(&mut live, RESTRAINT_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let captured_digest = world_digest(live.world());
+
+    let directed = directed_ships(&payload);
+    assert!(
+        !directed.is_empty(),
+        "precondition: the capture is taken with a Command stance in force — the \
+         destroyer's AI Command seat picks its engaged stance at red alert — so a \
+         resume that dropped the map would fold a different number below"
+    );
+
+    let mut resumed = boot_to_restore_point(&restraint_args(), &payload);
+    assert!(
+        directed_ships(&capture(resumed.world())).is_empty(),
+        "precondition: the freshly booted world holds no stance — it reaches the \
+         restore point before the destroyer raises red alert, so nothing below can be \
+         satisfied by a bootstrap coincidence"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    assert_eq!(
+        directed_ships(&capture(resumed.world())),
+        directed,
+        "every ship's Command stance comes back exactly as it was directed"
+    );
+    assert_eq!(
+        world_digest(resumed.world()),
+        captured_digest,
+        "the resumed world stands exactly where the capture did, station-stances \
+         namespace included — a resume that dropped the map would fold a different \
+         number here, because a directed ship IS in that namespace"
+    );
+}
+
+/// A save written before Command stances were recorded is refused on **format**.
+///
+/// The field carries `#[serde(default)]`, so an older payload still parses —
+/// which is exactly why the constant had to move. Nothing in a format-10 payload
+/// distinguishes a run whose crew had directed a Station from one that had not,
+/// and the two fold to different digests.
+#[test]
+fn a_save_written_before_the_station_stances_is_refused_on_format() {
+    let mut live = boot(&restraint_args());
+    step(&mut live, RESTRAINT_CAPTURE_AT);
+
+    let payload = capture(live.world());
+    let digest = world_digest(live.world());
+    let current = current_versions(RESTRAINT);
+
+    let previous = Versions::new(SNAPSHOT_FORMAT - 1, SIMULATION_RULES, current.content);
+    let run = run_for(payload, digest, SEED, RESTRAINT, previous);
+    let store = FileStore::new(scratch("station-stances-format"));
+    save_to(&store, "autosave", &run).expect("the save is written");
+
+    let refusal = load_from(&store, "autosave", &current).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Format { .. })),
+        "the refusal names the dimension that moved: {refusal}"
+    );
+}
+
 // ── Dynamic combat consequences across a resume (issue #863) ─────────────────
 
 /// The reinforcement probe: an authored escort, and two Harrow raiders a script

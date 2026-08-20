@@ -38,17 +38,18 @@ pub struct ShipStationStances(pub HashMap<StationId, String>);
 /// state (a fresh spawn) records the current state as its FIRST observation and
 /// fires no edge — the deliberate first-observation no-op below.
 ///
-/// The exclusion is safe because the digest is only ever compared in full
-/// replay from tick 0 (headless, within one process), never across a snapshot
-/// boundary: `snapshot.rs` persists NEITHER this scratch NOR
-/// [`ShipStationStances`] today, so every host reconstructs both by replaying
-/// the same ticks over the same control sources. WARNING: if a future change
-/// starts persisting [`ShipStationStances`] in a snapshot (so a restored host
-/// keeps stored stances), it MUST also persist or reseed this scratch —
-/// otherwise a Human→AI transition on the first post-restore tick would fire on
-/// a continuous host (`was_ai == Some(false)`) but be swallowed as a first
-/// observation (`was_ai == None`) on the restored host, diverging the resolved
-/// stance.
+/// The exclusion stays safe across a snapshot boundary because
+/// [`ShipStationStances`] — the AUTHORITATIVE half that IS folded — now travels
+/// in the payload (`snapshot.rs`, SNAPSHOT_FORMAT 11), and `restore` RESEEDS
+/// this scratch from the restored world's own control sources: for the directed
+/// Station it records the current `station_is_ai_controlled` reading, so the
+/// first post-restore tick is a continuation of the state the resume landed in
+/// rather than a first observation (`was_ai == None`) that would swallow a
+/// Human→AI edge a continuous host (`was_ai == Some(false)`) fires that tick.
+/// The scratch itself is deliberately NOT persisted: the captured session-level
+/// human/AI split on the target is not recoverable (control sources are derived
+/// from who is at a console, which the snapshot excludes), so the honest reseed
+/// is the restored world's current reading, not a stored one.
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct LastDirectedControl(pub HashMap<StationId, bool>);
 

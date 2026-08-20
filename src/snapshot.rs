@@ -367,7 +367,21 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// cannot be left at 9. Nothing in the payload distinguishes that save from one
 /// whose run had a whole raid on the board, so both are refused by
 /// `Versions::check`, which names the dimension.
-pub const SNAPSHOT_FORMAT: u32 = 10;
+///
+/// `11` — issues #1107–#1109 added [`EntityState::station_stances`], and it is
+/// #1041's argument on a fresh lever. The per-ship Command stance map
+/// (`ShipStationStances`) IS folded into the sim digest by
+/// `sim_digest::fold_station_stances_namespace`, but nothing in the payload
+/// carried it, so a resume dropped every stance an AI, human or objective order
+/// had put in force and folded a different number than the capture: a destroyer
+/// that had chosen its `ai_engaged` stance at red alert comes back undirected,
+/// on the very tick the fold counts it. The field carries `#[serde(default)]`,
+/// so a format-10 save still parses — and a format-10 save of a run in which no
+/// stance was ever selected would even restore correctly, which is exactly why
+/// the constant cannot be left at 10. Nothing in the payload distinguishes that
+/// save from one whose crew had directed a Station, so both are refused by
+/// `Versions::check`, which names the dimension.
+pub const SNAPSHOT_FORMAT: u32 = 11;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -453,6 +467,22 @@ pub struct EntityState {
     /// resume a ship that had been ordered to hold fire with its guns live.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weapons_hold: Option<bool>,
+    /// The ship's Command stance selections (issues #1107–#1109) as
+    /// `(station id, stance id)`, sorted by station id.
+    ///
+    /// The per-ship `ShipStationStances` map, which is folded into the sim
+    /// digest by `sim_digest::fold_station_stances_namespace` but — before this
+    /// field — did not travel, so a resume dropped every stance an AI, human or
+    /// objective order had put in force and folded a different number than the
+    /// capture. Stored as sorted scalar pairs for `fold`'s own reason: the map's
+    /// `HashMap` iteration order is not stable across instances, and the capture
+    /// has to be byte-identical whatever order the entries were inserted in.
+    ///
+    /// EMPTY is the load-bearing default — a hull nobody commands carries an
+    /// empty map — so an absent or empty vec restores to an empty map, which is
+    /// byte-identical to a never-commanded ship and folds to the same number.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub station_stances: Vec<(String, String)>,
     /// The helm axes as they stood at the capture — see [`ControlState`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<ControlState>,
@@ -2638,12 +2668,13 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
         Option<&EntitySystemHull>,
         Option<&ShipRedAlert>,
         Option<&ShipWeaponsHold>,
+        Option<&crate::command_plugin::ShipStationStances>,
     )>() else {
         return Vec::new();
     };
     let mut rows: Vec<EntityState> = query
         .iter(world)
-        .map(|(uuid, physics, hull, alert, hold)| EntityState {
+        .map(|(uuid, physics, hull, alert, hold, stances)| EntityState {
             control: controls
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
@@ -2725,6 +2756,20 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
             hull: hull.map(|h| hull_rows(&h.0)),
             red_alert: alert.map(|a| a.0),
             weapons_hold: hold.map(|h| h.0),
+            // Sorted by station id, the same walk `fold_station_stances_namespace`
+            // takes, so the capture is byte-identical whatever order the map's
+            // entries were inserted in. An empty map yields an empty vec, which
+            // `skip_serializing_if` drops — a never-commanded hull carries no row.
+            station_stances: stances
+                .map(|s| {
+                    let mut pairs: Vec<(String, String)> =
+                        s.0.iter()
+                            .map(|(station, stance)| (station.0.clone(), stance.clone()))
+                            .collect();
+                    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                    pairs
+                })
+                .unwrap_or_default(),
         })
         .collect();
     rows.sort_by(|a, b| a.uuid.cmp(&b.uuid));
@@ -3779,6 +3824,61 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(held) = row.weapons_hold {
             if let Some(mut hold) = entity_mut.get_mut::<ShipWeaponsHold>() {
                 hold.0 = held;
+            }
+        }
+        // Issues #1107–#1109. The per-ship Command stance map IS folded into the
+        // sim digest, so a resume that dropped it stood at a different digest
+        // than the capture the instant any stance was in force. Overwrite the
+        // authoritative map from the row — an empty row clears it, byte-identical
+        // to a never-commanded hull. Re-wrapped into `StationId` from the sorted
+        // scalar pairs the capture stored.
+        if let Some(mut stances) = entity_mut.get_mut::<crate::command_plugin::ShipStationStances>()
+        {
+            stances.0 = row
+                .station_stances
+                .iter()
+                .map(|(station, stance)| {
+                    (crate::messages::StationId(station.clone()), stance.clone())
+                })
+                .collect();
+        }
+        // Reseed the #1108 edge scratch (`LastDirectedControl`) from the restored
+        // control sources. It is NOT folded into the digest (it is a pure
+        // function of already-authoritative control state, classified `derived`),
+        // so this does not move the digest-at-restore assertion — but the scratch
+        // is what makes the Human→AI stance-resume trigger fire on an EDGE rather
+        // than every tick, and a restored map is empty. An empty scratch treats
+        // the first post-restore tick as a first OBSERVATION and fires nothing;
+        // a continuous host would have carried `Some(prev)` and could fire the
+        // edge that tick. Recording the directed Station's CURRENT
+        // `station_is_ai_controlled` result makes the first tick a continuation
+        // of the state the resumed world actually restored into, not a spurious
+        // first-observation no-op. The captured session-level human/AI split on
+        // the target is deliberately NOT recoverable — control sources are
+        // derived from who is at a console, which the snapshot excludes — so the
+        // honest reseed is the restored world's own current reading. See the
+        // WARNING on `command_plugin::LastDirectedControl`.
+        let reseed = {
+            let config = entity_mut.get::<crate::ship_plugin::ShipConfigComponent>();
+            let sources = entity_mut.get::<crate::ship_plugin::ShipSystemControlSources>();
+            match (config, sources) {
+                (Some(config), Some(sources)) => crate::command_plugin::command_station(&config.0)
+                    .and_then(|command| command.command_target.clone())
+                    .map(|target| {
+                        let now_ai = crate::command_plugin::station_is_ai_controlled(
+                            &config.0, &sources.0, &target,
+                        );
+                        (target, now_ai)
+                    }),
+                _ => None,
+            }
+        };
+        if let Some((target, now_ai)) = reseed {
+            if let Some(mut last) =
+                entity_mut.get_mut::<crate::command_plugin::LastDirectedControl>()
+            {
+                last.0.clear();
+                last.0.insert(target, now_ai);
             }
         }
         if let Some(control) = &row.control {

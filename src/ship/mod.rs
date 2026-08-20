@@ -8,6 +8,7 @@ pub mod coordination;
 pub mod coordination_systems;
 pub mod damage;
 pub mod damage_sync;
+pub mod eligibility;
 pub mod helm;
 pub mod helm_admission;
 pub mod helm_ai;

@@ -394,6 +394,12 @@ mod tests {
                 },
             ),
             (
+                ClientMessageDiscriminants::ReportStationEligibility,
+                ClientMessage::ReportStationEligibility {
+                    ineligible: vec![crate::messages::StationId("science".into())],
+                },
+            ),
+            (
                 ClientMessageDiscriminants::SendCoordination,
                 ClientMessage::SendCoordination {
                     // Coordination targets are station-id keys (issue #801) —

@@ -1477,6 +1477,39 @@ station = "shields"
     }
 
     #[test]
+    fn an_ineligible_host_is_skipped_to_the_next_eligible_one() {
+        // AC2 (issue #1103): the Bevy adapter passes `held && eligible` as
+        // `is_directly_held`. Model shields as held-but-INELIGIBLE for the
+        // visiting power station (composed predicate false) while repair is held
+        // AND eligible: the walk skips shields — first in power's host_order —
+        // and lands on repair, exactly as if shields were unheld.
+        let config = visiting_config();
+        let power = config.station(&StationId("power".into())).unwrap();
+        let no_floor = std::collections::BTreeSet::new();
+
+        let held = |id: &StationId| id.0 == "shields" || id.0 == "repair";
+        let eligible_for_power = |id: &StationId| id.0 != "shields";
+        let assignment = resolve_visiting_station(
+            &config,
+            power,
+            |id| held(id) && eligible_for_power(id),
+            &no_floor,
+        );
+        assert_eq!(
+            assignment.host,
+            Some(StationId("repair".into())),
+            "an ineligible first host is skipped; the walk continues to the next eligible one"
+        );
+
+        // With every held candidate ineligible the composed predicate is false
+        // everywhere, so the walk falls through to AI exactly as it would with no
+        // human host at all — reason/settings never enter the resolver.
+        let none_eligible = resolve_visiting_station(&config, power, |_id| false, &no_floor);
+        assert_eq!(none_eligible.host, None);
+        assert_eq!(none_eligible.rating, crate::ship::rating::BACKFILL_RATING);
+    }
+
+    #[test]
     fn generic_power_repair_and_shields_sensors_chains_need_no_band_d_hull() {
         let config = visiting_config();
         let none = std::collections::BTreeSet::new();

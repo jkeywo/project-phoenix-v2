@@ -1123,6 +1123,19 @@ pub struct ShipClientConfig {
     /// compatibility with older server builds that don't send this field.
     #[serde(default)]
     pub station_systems: HashMap<String, Vec<String>>,
+    /// Anonymous accessibility eligibility projection (issue #1103).
+    ///
+    /// Per station id → per rating name → the A2 assist-function ids the station
+    /// would force its holder to operate MANUALLY at that rating (the "gaps").
+    /// This is projected CONFIG derived from the hull topology + rating
+    /// automation (`crate::ship::eligibility::projected_assist_gaps`) — never the
+    /// player's profile — so the client can run the SAME eligibility rule locally
+    /// without any private setting leaving the device. Only ratings with a
+    /// non-empty gap set appear; a missing station/rating means "no gaps ⇒
+    /// eligible" (the permissive default). `#[serde(default)]` keeps older
+    /// servers that omit it decoding.
+    #[serde(default)]
+    pub station_assist_gaps: HashMap<String, HashMap<String, Vec<String>>>,
     /// Minimum relative bearing change (radians) for Sensors to re-emit a
     /// `ThreatBearing` coordination message to Shields. Sourced from
     /// `[sensors_console] threat_bearing_epsilon_rad` in the ship TOML.
@@ -1257,6 +1270,7 @@ impl Default for ShipClientConfig {
             power_rating: None,
             ship_css: None,
             station_systems: HashMap::new(),
+            station_assist_gaps: HashMap::new(),
             threat_bearing_epsilon_rad: default_threat_bearing_epsilon_rad(),
             helm_systems: Vec::new(),
             vertical_movement_mode: default_vertical_movement_mode(),
@@ -1995,6 +2009,19 @@ pub enum ClientMessage {
     /// Validated server-side: sender must hold a station with that rating.
     SetStationRating {
         rating_name: String,
+    },
+    /// Anonymous accessibility eligibility result (issue #1103).
+    ///
+    /// The client evaluates the complete Station surface at its required rating
+    /// against its PRIVATE accessibility profile locally (design:
+    /// `accessibility-station-eligibility-contract`) and reports only the
+    /// derived minimum: the set of Station ids it is INELIGIBLE for. The profile
+    /// and the functional reasons NEVER cross this boundary — the local player
+    /// alone sees them. Re-sent whenever the profile or a published required
+    /// rating changes. The host stores it in a token-keyed side-map off `Player`
+    /// (never broadcast); an absent/legacy sender defaults to eligible.
+    ReportStationEligibility {
+        ineligible: Vec<StationId>,
     },
     /// Channel-3 coordination envelope. Carries a typed coordination payload
     /// to be queued with lag and routed at delivery time (issue #494).

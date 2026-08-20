@@ -641,6 +641,14 @@
       border-color: var(--signal); }
     .station-row .action .taken-btn { background: var(--surface-panel); color: var(--ink-faint);
       border-color: var(--edge); cursor: default; }
+    /* A free seat blocked by this player's private accessibility profile
+       (issue #1103 AC1). Muted like 'taken'; the functional reason sits inline
+       under the station name and is local-only. */
+    .station-row .action .ineligible-btn { background: var(--surface-panel); color: var(--ink-faint);
+      border-color: var(--edge); cursor: not-allowed; }
+    .station-row.ineligible { opacity: 0.75; }
+    .station-row .info .ineligible-reason { font-size: var(--text-sm); color: var(--ink-dim);
+      margin-top: 2px; line-height: 1.4; font-style: italic; }
     /* Detail panel */
     #detail-panel { flex-shrink: 0; border-top: 1px solid var(--edge);
       padding: 8px 0 4px; margin-top: 4px; transition: opacity .3s ease; }
@@ -1143,7 +1151,7 @@
     // -- Click sound --------------------------------------------------------
     // Message types that should NOT trigger a click (continuous / connection
     // setup messages that are not the result of a deliberate button press).
-    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName']);
+    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName', 'ReportStationEligibility']);
 
     const CLICK_PITCH_VARIANCE = 0.08; // +/- 8% playback-rate jitter so repeated clicks don't sound identical
 
@@ -1794,6 +1802,75 @@
       }
     }
 
+    // ── Anonymous accessibility eligibility (issue #1103) ─────────────────
+    // The client evaluates the complete station surface at its required rating
+    // against its PRIVATE profile (gui/accessibility-profile.js), blocks and
+    // privately explains an ineligible direct claim (AC1), and reports ONLY the
+    // anonymous ineligible station-id set to the host (AC2). The profile and the
+    // functional reasons never leave the device.
+
+    /** The required rating for a station: the in-game visiting rating when the
+     *  human-seeking resolver has placed it, else the direct-claim rating, else
+     *  the station's authored base rating. */
+    function requiredRatingForStation(id, ratings) {
+      const sim = window.simState;
+      const host = sim && sim.stationHosts && sim.stationHosts[id];
+      if (host && host.rating) return host.rating;
+      const direct = sim && sim.stationRatings && sim.stationRatings[id];
+      if (direct) return direct;
+      return (ratings && ratings[0]) || '';
+    }
+
+    /** Eligibility for one lobby roster station — { eligible, reason }. The
+     *  `reason` is the PRIVATE functional explanation, shown only to this
+     *  player; it is never sent anywhere. */
+    function stationEligibility(st) {
+      const sim = window.simState;
+      if (!sim || typeof window.deriveStationEligibility !== 'function') {
+        return { eligible: true, reason: null };
+      }
+      const rating = requiredRatingForStation(st.id, st.ratings);
+      const gaps = (sim.stationAssistGaps || {})[st.id];
+      return window.deriveStationEligibility(sim.accessibilityProfile, gaps, rating);
+    }
+
+    /** Recompute the anonymous ineligible-station set and report it to the host.
+     *  Only station ids cross the wire — no reason, no setting. */
+    function computeAndSendEligibility() {
+      const sim = window.simState;
+      if (!sim || typeof window.deriveStationEligibility !== 'function') return;
+      const gaps = sim.stationAssistGaps || {};
+      const profile = sim.accessibilityProfile;
+      const ineligible = [];
+      const seen = new Set();
+      const evalStation = (id, ratings) => {
+        if (seen.has(id)) return;
+        seen.add(id);
+        const rating = requiredRatingForStation(id, ratings);
+        const r = window.deriveStationEligibility(profile, gaps[id], rating);
+        if (!r.eligible) ineligible.push(id);
+      };
+      // Claimable seats carry their authored ratings in the roster; any other
+      // station the projection knows (auxiliary / human-seeking) is evaluated at
+      // its in-game visiting rating when present, permissively otherwise.
+      for (const st of (uiState.stations || [])) evalStation(st.id, st.ratings);
+      for (const id of Object.keys(gaps)) evalStation(id, null);
+      ineligible.sort();
+      send('ReportStationEligibility', { ineligible });
+    }
+
+    // Re-report whenever the private assistance profile changes (the hook is
+    // fired by gui/accessibility-profile.js after it persists the change).
+    window.onAccessibilityAssistanceChanged = computeAndSendEligibility;
+
+    /** Re-report on the messages that change a published required rating or the
+     *  projection: Welcome (projection + ratings arrive) and RatingChanged. */
+    function maybeReportEligibility(msg) {
+      if (msg && (msg.type === 'Welcome' || msg.type === 'RatingChanged')) {
+        computeAndSendEligibility();
+      }
+    }
+
     function renderLobby(s) {
       renderActiveMods();
       const list = document.getElementById('station-list');
@@ -1806,6 +1883,8 @@
         labelFor: stationLabel,
         describeFor: stationDescription,
         stationRatings: window.simState ? window.simState.stationRatings : null,
+        // Anonymous accessibility eligibility per row (issue #1103 AC1).
+        eligibilityFor: stationEligibility,
       });
       // Detail-panel console auto-select (and clear on release) is part of
       // the view model.
@@ -1881,6 +1960,19 @@
         }
         rowEl.appendChild(info);
 
+        // A free seat this player is INELIGIBLE for (issue #1103 AC1): explain
+        // privately, in functional terms, right on the row. The reason is
+        // local-only — it is never sent to the host or another player.
+        if (row.button === 'ineligible' && row.ineligibleReason) {
+          const why = document.createElement('div');
+          why.className = 'ineligible-reason';
+          const fns = (row.ineligibleReason.functions || [])
+            .map(f => t('client.assist_function.' + f))
+            .join(', ');
+          why.textContent = t('client.station_ineligible_reason', { functions: fns });
+          info.appendChild(why);
+        }
+
         const action = document.createElement('div');
         action.className = 'action';
         const btn = document.createElement('button');
@@ -1891,6 +1983,11 @@
         } else if (row.button === 'taken') {
           btn.className = 'taken-btn';
           btn.textContent = t('client.taken');
+          btn.disabled = true;
+        } else if (row.button === 'ineligible') {
+          // Blocked direct claim: the disabled control never sends SelectStation.
+          btn.className = 'ineligible-btn';
+          btn.textContent = t('client.station_ineligible');
           btn.disabled = true;
         } else {
           btn.className = 'claim-btn';
@@ -2358,6 +2455,10 @@
       if (result.myName !== undefined) myName = result.myName;
       for (const fx of result.sideEffects) applySideEffect(fx);
       if (result.rebuildStations) rebuildStations();
+      // Re-derive and report anonymous eligibility AFTER the roster/projection/
+      // ratings have folded in (issue #1103): only the ineligible station-id set
+      // — no reason, no setting — goes back to the host.
+      maybeReportEligibility(msg);
       if (result.shouldRender) scheduleRender();
     }
 

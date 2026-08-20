@@ -132,6 +132,10 @@ export class ClientSimState {
     /** Station → system id list, populated from Welcome ship_config.station_systems.
      *  Used by aggregateStationHull to compute per-station damage from consoleHull. */
     this.stationSystems = {};
+    /** Anonymous eligibility projection (issue #1103): station → rating →
+     *  assist-function ids that station forces manual. From Welcome
+     *  ship_config.station_assist_gaps. Hull-derived config, never a profile. */
+    this.stationAssistGaps = {};
     /** Authoritative complete human-seeking Station placements by Station id. */
     this.stationHosts = stationHosts;
     /**
@@ -368,6 +372,11 @@ export class ClientSimState {
         this.stationTutorials  = sc.station_tutorials   || {};
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
+        // Anonymous eligibility projection (issue #1103): per station → per
+        // rating → the assist-functions that station forces manual. Hull-derived
+        // config, never anyone's profile; the lobby glue runs the SAME rule as
+        // the host from it. Absent on a legacy server → {} → everyone eligible.
+        this.stationAssistGaps = sc.station_assist_gaps || {};
         if (world) {
           // Reset to defaults but preserve the world snapshot from Welcome.
           this.world = world;

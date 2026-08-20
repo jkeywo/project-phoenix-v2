@@ -774,6 +774,12 @@ client.ship_destroyed,Game-over overlay headline when the hull reaches zero,Ship
 client.release,Station card button — release your own claimed station,RELEASE
 client.taken,Station card button — station is held by another player,TAKEN
 client.claim,Station card button — claim a free station,CLAIM
+client.station_ineligible,Station card button — a free station incompatible with this player's private accessibility assistance profile (issue #1103),[UNAVAILABLE]
+client.station_ineligible_reason,"Station card — private functional explanation shown only to this player when a seat is incompatible with their requested assistance (issue #1103); {functions} is a comma-joined list of functional labels","[This seat runs these manually here, and you asked for help with them: {functions}.]"
+client.assist_function.helm.course-keeping,Functional label for the helm course-keeping assist-function (issue #1103),[keeping course]
+client.assist_function.tactical.target-selection,Functional label for the tactical target-selection assist-function (issue #1103),[selecting targets]
+client.assist_function.sensors.contact-triage,Functional label for the sensors contact-triage assist-function (issue #1103),[triaging contacts]
+client.assist_function.comms.dialogue-timing,Functional label for the comms dialogue-timing assist-function (issue #1103),[timing dialogue]
 client.leave,Station detail button — leave the current station,LEAVE
 client.take_station,Lobby readiness button relabelled during an active round — takes the claimed station from Backfill AI,TAKE STATION
 client.release_confirm,Station release button after arming — asks the player to confirm returning the station to Backfill AI mid-round,CONFIRM RELEASE?

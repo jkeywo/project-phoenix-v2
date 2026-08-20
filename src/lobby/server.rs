@@ -184,6 +184,7 @@ impl Plugin for LobbyPlugin {
                     handle_release_station_system,
                     handle_set_ready_system,
                     handle_set_station_rating_system,
+                    handle_report_station_eligibility_system,
                 )
                     .in_set(LobbySystemSet)
                     .after(handle_disconnect)
@@ -428,6 +429,24 @@ fn update_session_with_config(
                         .collect();
                     (station.id.0.clone(), system_ids)
                 })
+                .collect();
+            // Anonymous accessibility eligibility projection (issue #1103):
+            // per station → per rating → the A2 assist-functions the station
+            // would force its holder to operate manually at that rating. Derived
+            // purely from hull topology + rating automation
+            // (`eligibility::projected_assist_gaps`) so the client runs the SAME
+            // rule locally without any private profile leaving the device. Only
+            // stations with a non-empty gap map are carried.
+            next.station_assist_gaps = sc
+                .stations
+                .iter()
+                .map(|station| {
+                    (
+                        station.id.0.clone(),
+                        crate::ship::eligibility::projected_assist_gaps(station, sc),
+                    )
+                })
+                .filter(|(_, gaps)| !gaps.is_empty())
                 .collect();
             // Contextual tutorial overlays (issue #916): carry every station's
             // authored `[[station.tutorial]]` blocks to the client verbatim.
@@ -1227,6 +1246,32 @@ pub fn handle_set_station_rating_system(
                 countdown.as_deref_mut(),
             );
         }
+    }
+}
+
+/// Per-variant system for `ClientMessage::ReportStationEligibility` (issue #1103).
+///
+/// Stores the sender's ANONYMOUS ineligible-Station set in the SessionManager
+/// side-map (off `Player`, never broadcast). There is no `apply_result` /
+/// `LobbyOutbox` path on purpose: the report produces no outbound message — it is
+/// private host state that only the human-seeking resolver
+/// (`resolve_human_seeking_hosts`) and the direct-claim guard
+/// (`handle_select_station`) consult, and only as a boolean. The profile and the
+/// functional reasons never reach the host. Registered alongside the other
+/// station-management systems on the Lobby/Loading/InProgress gate so a client
+/// can (re)report as it tweaks its profile before or during a mission.
+pub fn handle_report_station_eligibility_system(
+    mut inbound: MessageReader<InboundMessage>,
+    mut sessions: ResMut<Sessions>,
+) {
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::ReportStationEligibility { ineligible } = &ev.msg else {
+            continue;
+        };
+        let set: std::collections::HashSet<crate::messages::StationId> =
+            ineligible.iter().cloned().collect();
+        sessions.0.set_eligibility(&ev.token, set);
     }
 }
 

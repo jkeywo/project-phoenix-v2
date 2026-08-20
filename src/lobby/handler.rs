@@ -327,6 +327,21 @@ pub(crate) fn handle_select_station(
         };
     }
 
+    // Defense-in-depth accessibility guard (issue #1103 AC1). The client already
+    // blocks and privately explains an ineligible claim; this silently no-ops a
+    // claim the sender has reported itself ineligible for, taking the SAME
+    // neutral path as an occupied/invalid seat. No reason is ever computed or put
+    // on the wire — the host holds only the anonymous boolean. DEFAULT TRUE keeps
+    // a silent/legacy client (never reported) claimable as today.
+    if !sessions.is_eligible(token, &station_def.id) {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
+
     let mid_game_claim = phase == GamePhase::InProgress;
     if mid_game_claim {
         sessions.set_ready(token, false);
@@ -595,6 +610,11 @@ pub(crate) fn handle_return_to_lobby(
         sessions.reset_ready();
         sessions.clear_all_stations();
         sessions.clear_all_pending_ratings();
+        // Anonymous accessibility eligibility (issue #1103) is per-round lobby
+        // state like the pending ratings above: drop every token's report so the
+        // next round starts from the DEFAULT-TRUE baseline and each client
+        // re-reports against the freshly selected hull.
+        sessions.clear_all_eligibility();
 
         for (token, had_station) in &roster {
             if *had_station {
@@ -867,10 +887,15 @@ mod tests {
             // is drained frame-driven in `server_app::drain_station_visited`,
             // which mutates the host importance state, so the lobby has nothing
             // to add.
+            // `ReportStationEligibility` (issue #1103) is stored directly into
+            // the SessionManager side-map by `handle_report_station_eligibility_system`,
+            // not through a pure result-producing handler — so like the other
+            // runtime variants it is a no-op on this dispatch path.
             ClientMessage::ControlSystem { .. }
             | ClientMessage::SendCoordination { .. }
             | ClientMessage::SelectScenario { .. }
             | ClientMessage::SelectPlayerShip { .. }
+            | ClientMessage::ReportStationEligibility { .. }
             | ClientMessage::StationVisited { .. } => LobbyHandlerResult {
                 new_phase: None,
                 outbound: Vec::new(),
@@ -1459,6 +1484,51 @@ max_level = 4
             station_id,
             Some(&StationId("captain".into())),
             "Player.station must be set to the StationId after SelectStation"
+        );
+    }
+
+    // ── Accessibility eligibility on the direct claim (issue #1103) ───────
+
+    #[test]
+    fn select_station_allows_claim_for_eligible_sender() {
+        let mut sessions = sessions_with("t1", "Alice");
+        // No eligibility reported → DEFAULT TRUE → the claim proceeds as today.
+        handle_select_station(
+            "t1",
+            "captain",
+            &mut sessions,
+            GamePhase::Lobby,
+            &ship_stations(),
+        );
+        assert_eq!(
+            sessions.station_for_token("t1"),
+            Some(&StationId("captain".into())),
+            "an eligible (unreported) sender claims the seat normally"
+        );
+    }
+
+    #[test]
+    fn select_station_silently_no_ops_an_ineligible_claim() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_eligibility(
+            "t1",
+            std::collections::HashSet::from([StationId("captain".into())]),
+        );
+        let result = handle_select_station(
+            "t1",
+            "captain",
+            &mut sessions,
+            GamePhase::Lobby,
+            &ship_stations(),
+        );
+        assert_eq!(
+            sessions.station_for_token("t1"),
+            None,
+            "an ineligible claim must not seat the player"
+        );
+        assert!(
+            result.outbound.is_empty(),
+            "an ineligible claim takes the neutral no-op path: no broadcast, no reason on the wire"
         );
     }
 

@@ -62,6 +62,11 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
   const labelFor = opts.labelFor || (st => (st && (st.name || st.id)) || '');
   const describeFor = opts.describeFor || (st => (st && st.description) || '');
   const stationRatings = opts.stationRatings || null;
+  // Anonymous accessibility eligibility per row (issue #1103 AC1). Injected so
+  // this module stays pure: `eligibilityFor(station)` → { eligible, reason },
+  // where `reason` is the PRIVATE functional explanation shown only to this
+  // player. Default: everything eligible (no profile / no projection).
+  const eligibilityFor = opts.eligibilityFor || (() => ({ eligible: true, reason: null }));
 
   const myPlayer = (s.players || []).find(p => p.token === myToken) || null;
   const myStation = myPlayer
@@ -72,13 +77,21 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
 
   const rows = (s.stations || []).map(st => {
     const isMine = !!st.holder_token && st.holder_token === myToken;
+    const elig = eligibilityFor(st) || { eligible: true, reason: null };
+    const eligible = elig.eligible !== false;
+    // A free seat the local player is ineligible for becomes an 'ineligible'
+    // button (blocked + privately explained), not a 'claim'. A held/mine seat
+    // keeps its button — eligibility only gates NEW direct claims.
+    const baseButton = isMine ? 'release' : (st.holder_name ? 'taken' : 'claim');
+    const button = baseButton === 'claim' && !eligible ? 'ineligible' : baseButton;
     return {
       id: st.id,
       name: st.name,
       isMine,
       rowClass: 'station-row'
         + (isMine ? ' mine' : '')
-        + (st.holder_name && !isMine ? ' taken' : ''),
+        + (st.holder_name && !isMine ? ' taken' : '')
+        + (button === 'ineligible' ? ' ineligible' : ''),
       glyph: st.short_code ? st.short_code.substring(0, 2).toUpperCase() : '--',
       label: labelFor(st),
       // What the seat does. Present on EVERY row regardless of button kind —
@@ -88,8 +101,12 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
       rank: st.rank || null,
       chipId: st.id || null,
       occupant: (st.holder_name && !isMine) ? st.holder_name : null,
-      // 'release' (mine) | 'taken' (someone else's) | 'claim' (free)
-      button: isMine ? 'release' : (st.holder_name ? 'taken' : 'claim'),
+      // 'release' (mine) | 'taken' (someone else's) | 'claim' (free) |
+      // 'ineligible' (free but incompatible with this player's assist profile)
+      button,
+      // Anonymous eligibility + the PRIVATE functional reason (local-only).
+      eligible,
+      ineligibleReason: eligible ? null : (elig.reason || null),
     };
   });
 

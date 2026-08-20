@@ -325,7 +325,17 @@ pub fn resolve_human_seeking_hosts(
             let mut assignment = coordination::resolve_visiting_station(
                 config,
                 station,
-                |candidate| sessions.0.holder_for_station(candidate).is_some(),
+                // A candidate direct seat is a valid host for THIS visiting
+                // station only when its holder is ALSO eligible for it (issue
+                // #1103 AC2). An ineligible holder is skipped and the walk falls
+                // through to the next `host_order` entry or AI — the resolver
+                // never sees the settings or the reason, only the boolean.
+                |candidate| {
+                    sessions
+                        .0
+                        .holder_for_station(candidate)
+                        .is_some_and(|tok| sessions.0.is_eligible(tok, &station.id))
+                },
                 &scenario_floor.0,
             );
             if assignment.host.as_ref() == Some(&station.id) {
@@ -2427,6 +2437,81 @@ station = "navigation"
             host_of(&mut app, &navigation_system).as_deref(),
             Some("captain")
         );
+    }
+
+    #[test]
+    fn an_ineligible_direct_holder_is_skipped_as_a_visiting_host() {
+        // AC2 (issue #1103) at the Bevy adapter. Captain is crewed and would host
+        // the visiting navigation station, but that holder reports itself
+        // INELIGIBLE for navigation. The resolver must skip it and fall the
+        // station to AI — never touching the settings or the reason.
+        let config = crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = ""
+rank = ""
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Visit"
+[[station.rating]]
+name = "Floor"
+automated_systems = []
+[[station.rating]]
+name = "Visit"
+automated_systems = []
+
+[[station]]
+id = "captain"
+name = "Captain"
+description = ""
+rank = ""
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "navigation"
+kind = "navigation"
+station = "navigation"
+"#,
+            &["navigation"],
+        )
+        .expect("valid authored hull data");
+        let mut app = seeking_config_app(config, &["captain"]);
+        let navigation_station = crate::messages::StationId("navigation".into());
+        let navigation_system = crate::messages::SystemId("navigation".into());
+
+        // Baseline: the eligible captain (default TRUE) hosts navigation and
+        // operates it as a human.
+        tick(&mut app);
+        assert_eq!(
+            station_assignment(&mut app, &navigation_station).host,
+            Some(crate::messages::StationId("captain".into())),
+            "baseline: the eligible captain hosts the visiting navigation station"
+        );
+        assert_eq!(
+            source_of(&mut app, &navigation_system),
+            ControlSource::Human
+        );
+
+        // The captain's holder now reports itself ineligible for navigation.
+        {
+            let mut sessions = app.world_mut().resource_mut::<Sessions>();
+            sessions.0.set_eligibility(
+                "officer-captain",
+                std::collections::HashSet::from([navigation_station.clone()]),
+            );
+        }
+        tick(&mut app);
+
+        assert_eq!(
+            station_assignment(&mut app, &navigation_station).host,
+            None,
+            "an ineligible holder is skipped; the visiting station falls to AI"
+        );
+        assert_eq!(source_of(&mut app, &navigation_system), ControlSource::Ai);
     }
 
     #[test]

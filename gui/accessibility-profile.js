@@ -191,6 +191,76 @@ export function profileWithAssistance(profile, funcId, value) {
   return current;
 }
 
+// ── Anonymous station/rating eligibility (issue #1103) ───────────────────────
+//
+// The client mirrors the RUST rule (`src/ship/eligibility.rs`) from a PROJECTED
+// table the host sends on Welcome (`ShipClientConfig.station_assist_gaps`): per
+// station → per rating → the assist-function ids that station would force its
+// holder to operate MANUALLY at that rating. The player's PRIVATE profile is
+// applied here, locally, and only the derived result ever leaves the device —
+// the anonymous ineligible station-id list. The functional reason stays local,
+// for the AC1 explanation shown to this player alone.
+
+/** The assist-functions this profile requests help with (ASSIST_REQUEST). */
+export function requestedAssistFunctions(profile) {
+  const p = normalizeAccessibilityProfile(profile);
+  return ASSISTANCE_FUNCTIONS.filter((id) => p.assistance[id] === ASSIST_REQUEST);
+}
+
+/**
+ * Evaluate ONE complete station surface at `requiredRating` against the private
+ * profile. Returns BOTH shapes:
+ *   - `eligible`: the anonymous boolean the host is allowed to know.
+ *   - `reason`: the PRIVATE functional explanation (the requested assist-function
+ *     ids this station cannot cover) — `null` when eligible. NEVER sent to the
+ *     host or another player; it drives only the local AC1 explanation.
+ *
+ * `stationGaps` is the projection entry for this station (`{ [rating]: [funcId] }`);
+ * a missing station or rating means "no gaps ⇒ eligible" — the permissive default
+ * that mirrors the host side-map's DEFAULT TRUE.
+ *
+ * @param {object} profile  the private accessibility profile
+ * @param {Object<string,string[]>|null|undefined} stationGaps
+ * @param {string} requiredRating
+ * @returns {{ eligible: boolean, reason: { functions: string[] } | null }}
+ */
+export function deriveStationEligibility(profile, stationGaps, requiredRating) {
+  const requested = requestedAssistFunctions(profile);
+  if (requested.length === 0) {
+    return { eligible: true, reason: null };
+  }
+  const gaps = (stationGaps && stationGaps[requiredRating]) || [];
+  const blocked = requested.filter((id) => gaps.includes(id));
+  if (blocked.length === 0) {
+    return { eligible: true, reason: null };
+  }
+  return { eligible: false, reason: { functions: blocked } };
+}
+
+/**
+ * The ANONYMOUS ineligible-station set to report to the host (issue #1103 §4):
+ * the sorted list of station ids the profile is ineligible for, and NOTHING
+ * else — no settings, no rating, no reason. Mirrors what the host stores.
+ *
+ * @param {object} profile
+ * @param {Object<string,Object<string,string[]>>} allStationGaps
+ *        the full `station_assist_gaps` projection (per station → per rating).
+ * @param {(stationId: string) => string} ratingFor
+ *        the required rating for each station (direct-claim rating for a
+ *        claimable seat, visiting rating for a human-seeking station).
+ * @param {string[]} stationIds  the stations to evaluate.
+ * @returns {string[]} sorted ineligible station ids.
+ */
+export function computeIneligibleStations(profile, allStationGaps, ratingFor, stationIds) {
+  const gaps = allStationGaps || {};
+  const out = [];
+  for (const id of stationIds || []) {
+    const result = deriveStationEligibility(profile, gaps[id], ratingFor(id));
+    if (!result.eligible) out.push(id);
+  }
+  return out.sort();
+}
+
 // ── OS-default resolver (matchMedia) ─────────────────────────────────────────
 
 /**
@@ -405,7 +475,12 @@ if (typeof window !== 'undefined') {
     return window.applyAccessibilityProfile();
   };
 
-  /** Update one per-function assistance override, persisted privately (inert). */
+  /**
+   * Update one per-function assistance override, persisted privately. In A2 the
+   * assistance itself is inert (no AI), but the CHANGE re-derives eligibility:
+   * after persisting, fire the optional `onAccessibilityAssistanceChanged` hook
+   * so the client re-reports its anonymous ineligible set (issue #1103 §4).
+   */
   window.setAccessibilityAssistance = function setAssistance(funcId, value) {
     const sim = window.simState;
     if (!sim) return;
@@ -415,5 +490,12 @@ if (typeof window !== 'undefined') {
     let storage = null;
     try { storage = window.localStorage; } catch (_) { /* privacy mode */ }
     saveAccessibilityProfile(storage, sim.accessibilityProfile);
+    if (typeof window.onAccessibilityAssistanceChanged === 'function') {
+      try { window.onAccessibilityAssistanceChanged(); } catch (_) { /* best-effort */ }
+    }
   };
+
+  // Pure eligibility derivation for the inline lobby glue (issue #1103).
+  window.deriveStationEligibility = deriveStationEligibility;
+  window.computeIneligibleStations = computeIneligibleStations;
 }

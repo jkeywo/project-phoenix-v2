@@ -51,6 +51,18 @@ pub struct SessionManager {
     /// mid-game (`InProgress`) disconnect/reconnect — the two never overlap
     /// in lifetime.
     pending_ratings: std::collections::HashMap<StationId, String>,
+    /// Anonymous accessibility eligibility (issue #1103), token → the set of
+    /// Station ids that token has reported itself INELIGIBLE for.
+    ///
+    /// A private side-map, DELIBERATELY OFF `Player`: `Player` is serialized and
+    /// broadcast, so an eligibility field there would leak a derived accessibility
+    /// fact to every peer. Only the anonymous ineligible SET ever reaches here
+    /// (via `ClientMessage::ReportStationEligibility`); the profile and the
+    /// functional reasons never leave the reporting client. An unknown token
+    /// defaults to eligible ([`is_eligible`]) so a silent or legacy client is
+    /// never locked out of a seat. Cleared on `ReturnToLobby` alongside
+    /// `pending_ratings`.
+    eligibility: std::collections::HashMap<String, std::collections::HashSet<StationId>>,
 }
 
 impl Default for SessionManager {
@@ -64,6 +76,7 @@ impl SessionManager {
         Self {
             players: Vec::new(),
             pending_ratings: std::collections::HashMap::new(),
+            eligibility: std::collections::HashMap::new(),
         }
     }
 
@@ -151,6 +164,34 @@ impl SessionManager {
     /// Clear every pending rating (e.g. on `ReturnToLobby` for a fresh round).
     pub fn clear_all_pending_ratings(&mut self) {
         self.pending_ratings.clear();
+    }
+
+    /// Record the anonymous set of Station ids a token is INELIGIBLE for
+    /// (issue #1103). Replaces any prior report for that token, since the client
+    /// re-sends the complete set whenever its profile or a required rating
+    /// changes. An empty set means "eligible everywhere".
+    pub fn set_eligibility(
+        &mut self,
+        token: &str,
+        ineligible: std::collections::HashSet<StationId>,
+    ) {
+        self.eligibility.insert(token.to_string(), ineligible);
+    }
+
+    /// Is `token` eligible for `station`? DEFAULT TRUE for an unknown token or an
+    /// unreported station, so a silent / legacy client is never locked out of a
+    /// seat. Only a token that has explicitly reported `station` as ineligible
+    /// returns `false`.
+    pub fn is_eligible(&self, token: &str, station: &StationId) -> bool {
+        self.eligibility
+            .get(token)
+            .is_none_or(|ineligible| !ineligible.contains(station))
+    }
+
+    /// Clear every token's eligibility report (e.g. on `ReturnToLobby` for a
+    /// fresh round), alongside `clear_all_pending_ratings`.
+    pub fn clear_all_eligibility(&mut self) {
+        self.eligibility.clear();
     }
 
     /// Station IDs not held by any connected player, in ship-config declaration
@@ -643,6 +684,90 @@ mod tests {
         assert!(
             !sm.players()[0].ready,
             "newly registered player must have ready=false"
+        );
+    }
+
+    // ── Accessibility eligibility side-map (issue #1103) ─────────────────
+
+    #[test]
+    fn eligibility_defaults_true_for_unknown_token() {
+        let sm = sm();
+        assert!(
+            sm.is_eligible("nobody", &StationId("helm".into())),
+            "an unreported token must default to eligible"
+        );
+    }
+
+    #[test]
+    fn set_and_query_ineligible_station() {
+        let mut sm = sm();
+        let helm = StationId("helm".into());
+        let tactical = StationId("tactical".into());
+        sm.set_eligibility("t1", std::collections::HashSet::from([helm.clone()]));
+        assert!(
+            !sm.is_eligible("t1", &helm),
+            "reported station is ineligible"
+        );
+        assert!(
+            sm.is_eligible("t1", &tactical),
+            "an unreported station stays eligible even for a reporting token"
+        );
+    }
+
+    #[test]
+    fn set_eligibility_replaces_prior_report() {
+        let mut sm = sm();
+        let helm = StationId("helm".into());
+        let tactical = StationId("tactical".into());
+        sm.set_eligibility("t1", std::collections::HashSet::from([helm.clone()]));
+        // Re-send with a different set (profile changed): the old one is replaced.
+        sm.set_eligibility("t1", std::collections::HashSet::from([tactical.clone()]));
+        assert!(sm.is_eligible("t1", &helm), "old report cleared");
+        assert!(!sm.is_eligible("t1", &tactical), "new report applied");
+    }
+
+    #[test]
+    fn clear_all_eligibility_resets_to_default_true() {
+        let mut sm = sm();
+        let helm = StationId("helm".into());
+        sm.set_eligibility("t1", std::collections::HashSet::from([helm.clone()]));
+        assert!(!sm.is_eligible("t1", &helm));
+        sm.clear_all_eligibility();
+        assert!(
+            sm.is_eligible("t1", &helm),
+            "after ReturnToLobby every token is eligible again"
+        );
+    }
+
+    /// Eligibility lives OFF `Player`: it must never appear in a serialized,
+    /// broadcast Player. Set an ineligible station for a token that holds a
+    /// seat, then encode the `PlayerJoined` broadcast and assert the ineligible
+    /// station id is nowhere in the wire form.
+    #[test]
+    fn eligibility_is_absent_from_the_serialized_player() {
+        use crate::codec::{JsonCodec, MessageCodec};
+        use crate::messages::ServerMessage;
+
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.set_station("t1", Some(StationId("captain".into())));
+        // t1 is ineligible for "science" — a station it does NOT hold.
+        sm.set_eligibility(
+            "t1",
+            std::collections::HashSet::from([StationId("science".into())]),
+        );
+
+        let player = sm.players()[0].clone();
+        let wire = JsonCodec
+            .encode_server(&ServerMessage::PlayerJoined { player })
+            .expect("encode");
+        assert!(
+            !wire.contains("science"),
+            "the ineligible station leaked into the broadcast Player: {wire}"
+        );
+        assert!(
+            !wire.contains("eligib"),
+            "no eligibility field may appear on the broadcast Player: {wire}"
         );
     }
 }

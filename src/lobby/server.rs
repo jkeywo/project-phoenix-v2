@@ -183,6 +183,7 @@ impl Plugin for LobbyPlugin {
                     handle_select_station_system,
                     handle_release_station_system,
                     handle_set_ready_system,
+                    handle_set_spectator_system,
                     handle_set_station_rating_system,
                     handle_report_station_eligibility_system,
                 )
@@ -1160,6 +1161,81 @@ pub fn handle_set_ready_system(
                 &mut sessions.0,
                 phase.clone(),
                 preload_complete,
+                stations,
+            );
+            let mut fallback_ratings = ActiveStationRatings::default();
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                None,
+                None,
+                &mut fallback_ratings,
+                countdown.as_deref_mut(),
+            );
+        }
+    }
+}
+
+/// Per-variant system for `ClientMessage::SetSpectator` (issue #1105). Reads
+/// its variant off the inbound bus with its own cursor, calls the pure
+/// `lobby_handler::handle_set_spectator`, and applies the seat-vacate / unready
+/// / rating-reset / `SpectatorChanged` broadcasts through the same dual-path
+/// `apply_result` the other lobby message systems use. Threads the phase and
+/// `ShipStations` through like `handle_release_station_system` does: when a
+/// spectator gives up a seat, that seat's rating is reset (Backfill mid-game,
+/// base rating pre-game) exactly as a ReleaseStation would.
+pub fn handle_set_spectator_system(
+    mut inbound: MessageReader<InboundMessage>,
+    mut sessions: ResMut<Sessions>,
+    state: Res<State<GamePhase>>,
+    mut next_state: ResMut<NextState<GamePhase>>,
+    mut outbox: ResMut<LobbyOutbox>,
+    ship_stations: Option<Res<ShipStations>>,
+    mut ship_query: Query<
+        (
+            &ShipConfigComponent,
+            &mut ShipSystemControlSources,
+            &mut ActiveStationRatings,
+        ),
+        With<crate::server_app::LocalShip>,
+    >,
+    mut countdown: Option<ResMut<CountdownTimer>>,
+) {
+    let default_stations = ShipStations::default();
+    let stations = ship_stations
+        .as_ref()
+        .map(|s| s.as_ref())
+        .unwrap_or(&default_stations);
+    let phase = state.get().clone();
+    let events: Vec<_> = inbound.read().cloned().collect();
+    for ev in events {
+        let ClientMessage::SetSpectator { spectator } = &ev.msg else {
+            continue;
+        };
+        if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
+            let result = lobby_handler::handle_set_spectator(
+                &ev.token,
+                *spectator,
+                &mut sessions.0,
+                phase.clone(),
+                stations,
+            );
+            apply_result(
+                result,
+                &mut outbox,
+                &mut next_state,
+                Some(cfg),
+                Some(&mut cs),
+                &mut active_ratings,
+                countdown.as_deref_mut(),
+            );
+        } else {
+            let result = lobby_handler::handle_set_spectator(
+                &ev.token,
+                *spectator,
+                &mut sessions.0,
+                phase.clone(),
                 stations,
             );
             let mut fallback_ratings = ActiveStationRatings::default();

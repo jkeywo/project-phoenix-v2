@@ -49,6 +49,9 @@
   <script type="module" src="gui/station-roster.js"></script>
   <script type="module" src="gui/client-router.js"></script>
   <script type="module" src="gui/lobby-view.js"></script>
+  <!-- Crew-public Spectator summary surface (issue #1105). Depends on
+       gui/hero-bar.js for the shared health/importance classifiers. -->
+  <script type="module" src="gui/spectator-view.js"></script>
   <!-- Onboarding/session-flow state (PRD #1023 module 4): the in-flight
        scenario/ship pick, the game-over frame, and whether a console's link is
        live, still loading or dead. All three are pure rules the inline script
@@ -575,6 +578,30 @@
       -webkit-user-select: none; user-select: none;
       pointer-events: auto;
     }
+    /* -- Spectator summary surface (issue #1105) ------------------------- */
+    #spectator-ui { display: none; }
+    #spectator-ui.active {
+      display: flex; flex-direction: column; gap: 12px;
+      position: fixed; inset: 0; z-index: 6; overflow: auto;
+      padding: 44px 12px 12px;
+      background: var(--surface-abyss); color: var(--ink);
+      font-family: 'Chakra Petch', system-ui, sans-serif;
+    }
+    #spectator-header { font-size: var(--text-lg); font-weight: 600; letter-spacing: .06em; }
+    #spectator-alert { font-size: var(--text-md); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); }
+    #spectator-alert[data-alert="red"] { color: var(--tactical-bright); font-weight: 700; }
+    #spectator-hull { font-size: var(--text-sm); color: var(--ink-dim); font-family: 'JetBrains Mono', monospace; }
+    .spectator-section { display: flex; flex-direction: column; gap: 4px; }
+    .spectator-heading { font-size: var(--text-xs); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); }
+    .spectator-station-row { display: flex; justify-content: space-between; font-size: var(--text-sm); }
+    .spectator-station-health { color: var(--ink-dim); font-family: 'JetBrains Mono', monospace; }
+    .spectator-objective-row { font-size: var(--text-sm); }
+    .spectator-objective-row.done { text-decoration: line-through; color: var(--ink-dim); }
+    .spectator-objectives-empty { font-size: var(--text-xs); color: var(--ink-dim); }
+    #spectate-btn { padding: 6px 14px; border-radius: 4px; background: var(--surface-panel-up);
+      color: var(--ink); border: 1px solid var(--edge-strong); font-family: 'Chakra Petch', sans-serif;
+      letter-spacing: .06em; }
+
     /* Ship header */
     #lobby-header { display: flex; align-items: center; justify-content: space-between;
       padding: 4px 0 8px; border-bottom: 1px solid var(--edge); flex-shrink: 0; }
@@ -1022,7 +1049,30 @@
       <!-- Footer -->
       <div id="lobby-footer">
         <span id="status-line" data-i18n="client.connecting_host">Connecting to host…</span>
+        <!-- Spectate toggle (issue #1105): opt out of a station into the
+             explicit Spectator role, or (when spectating) opt back into the
+             crew. Label + handler are set by renderLobby from the view model. -->
+        <button id="spectate-btn" data-i18n="client.spectator.spectate" style="display:none">Spectate</button>
         <button id="ready-btn" data-i18n="client.ready">READY</button>
+      </div>
+    </section>
+
+    <!-- Spectator summary surface (issue #1105): the one crew-public read-only
+         view a Spectator sees during an in-progress mission, instead of the
+         station-select lobby. It shows only Audience::All crew-public data —
+         objectives, red-alert, ship-wide hull, per-Station health — never any
+         per-station private feed (a seatless client never receives one). -->
+    <section id="spectator-ui" aria-hidden="true">
+      <div id="spectator-header" data-i18n="client.spectator.title">Spectating</div>
+      <div id="spectator-alert" role="status" aria-live="polite"></div>
+      <div id="spectator-hull" role="status" aria-live="polite"></div>
+      <div class="spectator-section">
+        <div class="spectator-heading" data-i18n="client.spectator.stations_heading">Crew stations</div>
+        <div id="spectator-stations"></div>
+      </div>
+      <div class="spectator-section">
+        <div class="spectator-heading" data-i18n="client.spectator.objectives_heading">Objectives</div>
+        <div id="spectator-objectives"></div>
       </div>
     </section>
 
@@ -1398,7 +1448,16 @@
     function showingLobbyDuringGame(s) {
       if (s.phase !== 'InProgress') return false;
       const player = me(s);
+      // An explicit Spectator (issue #1105) renders the crew-public summary
+      // surface, never the station-select lobby — and its read-only surface
+      // must re-paint live on each SimState, so it is excluded from this
+      // "skip the lobby rebuild" guard.
+      if (player && player.spectator) return false;
       return pendingMidGameClaim || !playerStation(s) || !!(player && !player.ready);
+    }
+    // Explicit Spectator role during an in-progress mission (issue #1105).
+    function spectatingInGame(s) {
+      return s.phase === 'InProgress' && !!(me(s) && me(s).spectator);
     }
     function isCaptain(s)     { return playerStation(s) === 'captain'; }
     function isHelm(s)        { return playerStation(s) === 'helm'; }
@@ -1647,10 +1706,21 @@
             game: s.phase === 'InProgress' || s.phase === 'GameOver',
             bezel: s.phase === 'InProgress' || s.phase === 'GameOver' };
       const mine = myConsoles(s);
-      // Spectators and pending mid-game claimants stay in the lobby. Ready is
-      // the point where the server actually hands the station over from AI.
-      if (showingLobbyDuringGame(s)) {
+      // An explicit Spectator (issue #1105) gets the crew-public summary surface
+      // instead of the station-select lobby OR the game shell. Checked first so
+      // it wins over the mid-game-claimant lobby override below.
+      const spectating = spectatingInGame(s);
+      // Pending mid-game claimants (and stationless non-spectators) stay in the
+      // lobby. Ready is the point where the server hands the station over from AI.
+      if (spectating) {
+        vis.lobby = false; vis.game = false; vis.bezel = false;
+      } else if (showingLobbyDuringGame(s)) {
         vis.lobby = true; vis.game = false; vis.bezel = false;
+      }
+      const specSection = $('spectator-ui');
+      if (specSection) {
+        specSection.className = spectating ? 'active' : '';
+        specSection.setAttribute('aria-hidden', spectating ? 'false' : 'true');
       }
       const inGame = vis.game;
       $('lobby-ui').className = vis.lobby ? 'active' : '';
@@ -1760,8 +1830,40 @@
         waitingEl.style.display = (window.lobbyState && window.lobbyState.waitingForScenario) ? 'flex' : 'none';
       }
 
-      if (inGame) renderGame(s);
+      if (spectating) renderSpectator(s);
+      else if (inGame) renderGame(s);
       else if (!(window.lobbyState && window.lobbyState.waitingForScenario)) renderLobby(s);
+    }
+
+    // Render the crew-public Spectator summary surface (issue #1105) from the
+    // already-held simState. A Spectator receives only Audience::All broadcasts,
+    // so this shows exactly the crew-public set — objectives, red-alert,
+    // ship-wide hull, per-Station health — and no per-station private feed.
+    function renderSpectator(s) {
+      if (typeof window.spectatorSummaryModel !== 'function'
+          || typeof window.renderSpectatorDom !== 'function') return;
+      const sim = window.simState || {};
+      const model = window.spectatorSummaryModel({
+        redAlert: sim.redAlert,
+        hullAggregate: sim.hullAggregate,
+        hullDestroyed: sim.hullDestroyed,
+        stations: (s.shipStations && s.shipStations.stations) || [],
+        stationHealth: sim.stationHealth,
+        stationImportance: sim.stationImportance,
+        objectives: sim.objectives,
+      });
+      window.renderSpectatorDom({
+        alertEl: $('spectator-alert'),
+        hullEl: $('spectator-hull'),
+        stationsEl: $('spectator-stations'),
+        objectivesEl: $('spectator-objectives'),
+        model,
+        translate: (id, params) => t(id, params),
+        // Objective text is a wire string id (may carry text_params); resolve it
+        // the same way the rest of the shell resolves wire copy.
+        objectiveText: (o) => (window.phStrings && window.phStrings.has(o.text))
+          ? t(o.text, o.textParams || {}) : (o.text || ''),
+      });
     }
 
     // "Mods active" lobby list (issue #990): render the packs the host applied
@@ -2101,6 +2203,21 @@
           readyBtn.onclick = () => send('SetReady', { ready: vm.readyBtn.sendReady });
         } else {
           readyBtn.style.display = 'none';
+        }
+      }
+
+      // Spectate toggle (issue #1105): opt into / out of the explicit Spectator
+      // role. 'spectate' sends SetSpectator{true} (vacate seat + unready on the
+      // server); 'join' sends SetSpectator{false} to rejoin the crew.
+      const spectateBtn = document.getElementById('spectate-btn');
+      if (spectateBtn) {
+        if (vm.spectateBtn && vm.spectateBtn.visible) {
+          spectateBtn.style.display = 'block';
+          const joining = vm.spectateBtn.mode === 'join';
+          spectateBtn.textContent = joining ? t('client.spectator.join') : t('client.spectator.spectate');
+          spectateBtn.onclick = () => send('SetSpectator', { spectator: !joining });
+        } else {
+          spectateBtn.style.display = 'none';
         }
       }
 

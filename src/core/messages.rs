@@ -923,6 +923,19 @@ pub struct Player {
     /// Last rating active for this player's station (persists across disconnect for backfill).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_rating: Option<String>,
+    /// True when this participant has joined the session as a Spectator (issue
+    /// #1105): an explicit, non-ambiguous "no Station" role. A Spectator is
+    /// excluded from collective readiness, is refused every simulation command,
+    /// and receives only the crew-public (`Audience::All`) broadcast set.
+    ///
+    /// INVARIANT: `spectator == true` implies `station == None` — the two are
+    /// mutually exclusive (a Spectator holds no seat). Enforced wherever either
+    /// is set (`SessionManager::set_spectator` / `set_station`). Like `ready`
+    /// and `last_rating` this rides on the `Player` record, so it travels for
+    /// free in `GameState`/`Welcome`/`PlayerJoined` and survives a
+    /// disconnect/reconnect (records are never pruned).
+    #[serde(default)]
+    pub spectator: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1993,6 +2006,16 @@ pub enum ClientMessage {
     SetReady {
         ready: bool,
     },
+    /// Join, or leave, the explicit Spectator role (issue #1105). Symmetric so a
+    /// participant can become OR stop being a spectator. On `spectator == true`
+    /// the server vacates any held Station and clears the ready flag (the
+    /// spectator invariant); on `false` it simply clears the flag, leaving the
+    /// participant a seatless, un-ready lobby member again. Not a simulation
+    /// command — dispatched through the lobby's per-variant system like
+    /// `SetReady`, never through command admission.
+    SetSpectator {
+        spectator: bool,
+    },
     /// Primary station/system architecture control envelope. Targets one
     /// ship-local system instance by stable `SystemId` and carries a typed
     /// payload for that system kind. Runtime handlers across every console
@@ -2378,6 +2401,17 @@ pub enum ServerMessage {
     ReadyChanged {
         token: String,
         ready: bool,
+    },
+    /// Broadcast when a participant joins or leaves the Spectator role (issue
+    /// #1105). Mirrors `ReadyChanged`: the flag rides on `Player` (and so is
+    /// already carried by any full `GameState`/`Welcome`/`PlayerJoined`), but a
+    /// live toggle needs its own delta so connected clients update without a
+    /// fresh roster. A `spectator == true` toggle is always accompanied by the
+    /// separate `StationAssigned { station: None }` / `ReadyChanged { false }`
+    /// broadcasts the seat-vacate and unready produce.
+    SpectatorChanged {
+        token: String,
+        spectator: bool,
     },
     NameChanged {
         token: String,

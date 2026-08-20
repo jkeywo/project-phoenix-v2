@@ -248,6 +248,7 @@ mod tests {
             ready: false,
             station: None,
             last_rating: None,
+            spectator: false,
         }
     }
 
@@ -374,6 +375,10 @@ mod tests {
                 ClientMessage::SetReady { ready: true },
             ),
             (
+                ClientMessageDiscriminants::SetSpectator,
+                ClientMessage::SetSpectator { spectator: true },
+            ),
+            (
                 ClientMessageDiscriminants::ControlSystem,
                 ClientMessage::ControlSystem {
                     target: crate::system_registry::helm_thrust_system_id(),
@@ -484,6 +489,13 @@ mod tests {
                 ServerMessage::ReadyChanged {
                     token: "tok".into(),
                     ready: true,
+                },
+            ),
+            (
+                ServerMessageDiscriminants::SpectatorChanged,
+                ServerMessage::SpectatorChanged {
+                    token: "tok".into(),
+                    spectator: true,
                 },
             ),
             (

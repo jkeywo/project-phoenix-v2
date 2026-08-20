@@ -37,7 +37,7 @@ export function playerStationId(player) {
 }
 
 function normalisePlayer(p) {
-  return { ready: false, ...p, station: playerStationId(p) };
+  return { ready: false, spectator: false, ...p, station: playerStationId(p) };
 }
 
 function defaultShipStations() {
@@ -176,6 +176,14 @@ export class LobbyState {
       case 'ReadyChanged': {
         const p = this.players.find(p => p.token === d.token);
         if (p) p.ready = d.ready;
+        break;
+      }
+      case 'SpectatorChanged': {
+        // Explicit Spectator role delta (issue #1105). The seat-vacate and
+        // unready arrive as their own StationAssigned/ReadyChanged messages, so
+        // this only tracks the role flag on the player record.
+        const p = this.players.find(p => p.token === d.token);
+        if (p) p.spectator = d.spectator;
         break;
       }
       case 'StationAssigned': {

@@ -125,6 +125,22 @@ describe('apply player lifecycle', () => {
     expect(s.players[0].name).toBe('Alicia');
     expect(s.players[1].name).toBe('Bob');
   });
+
+  it('normalises a new player with spectator=false by default (issue #1105)', () => {
+    const s = new LobbyState();
+    s.apply({ type: 'PlayerJoined', data: { player: ps('a', 'Alice', null) } });
+    expect(s.players[0].spectator).toBe(false);
+  });
+
+  it('SpectatorChanged toggles the role flag on the named player (issue #1105)', () => {
+    const s = new LobbyState();
+    s.players = [ps('a', 'Alice', null), ps('b', 'Bob', null)];
+    s.apply({ type: 'SpectatorChanged', data: { token: 'a', spectator: true } });
+    expect(s.players[0].spectator).toBe(true);
+    expect(s.players[1].spectator).toBeFalsy();
+    s.apply({ type: 'SpectatorChanged', data: { token: 'a', spectator: false } });
+    expect(s.players[0].spectator).toBe(false);
+  });
 });
 
 describe('apply StationAssigned', () => {

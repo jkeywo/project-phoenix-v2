@@ -95,6 +95,7 @@ impl SessionManager {
             ready: false,
             station: None,
             last_rating: None,
+            spectator: false,
         });
         Ok(self.players.last().unwrap())
     }
@@ -127,10 +128,38 @@ impl SessionManager {
     }
 
     /// C1: Set (or clear) the stable station ID for a player.
+    ///
+    /// Seating a player (`Some(..)`) also clears the spectator flag: a seat and
+    /// the Spectator role are mutually exclusive (issue #1105 invariant, and the
+    /// #1106 seam — a token that becomes seated is no longer a spectator).
     pub fn set_station(&mut self, token: &str, station: Option<StationId>) {
         if let Some(idx) = self.idx(token) {
+            if station.is_some() {
+                self.players[idx].spectator = false;
+            }
             self.players[idx].station = station;
         }
+    }
+
+    /// Set (or clear) the explicit Spectator role for a player (issue #1105).
+    /// No-op if the token is not found. Setting `true` also vacates any held
+    /// Station to preserve the invariant `spectator ⇒ station == None` — the
+    /// two roles are mutually exclusive.
+    pub fn set_spectator(&mut self, token: &str, spectator: bool) {
+        if let Some(idx) = self.idx(token) {
+            self.players[idx].spectator = spectator;
+            if spectator {
+                self.players[idx].station = None;
+            }
+        }
+    }
+
+    /// True when the player with `token` is currently a Spectator (issue #1105).
+    /// False for an unknown token.
+    pub fn is_spectator(&self, token: &str) -> bool {
+        self.idx(token)
+            .map(|idx| self.players[idx].spectator)
+            .unwrap_or(false)
     }
 
     /// C3: Record the rating the player held at a station just before disconnect.
@@ -238,15 +267,28 @@ impl SessionManager {
         }
     }
 
-    /// True when every connected player is ready.
-    /// Returns false when zero connected players exist to prevent
-    /// auto-starting the game after the last client disconnects.
+    /// True when every connected, non-spectator player is ready.
+    ///
+    /// Spectators (issue #1105) are excluded from BOTH the readiness tally and
+    /// the "any humans present" guard: a spectator-only lobby must never
+    /// auto-start (returns false when no connected non-spectator exists), and a
+    /// sitting spectator can never hold up — or trip — mission start. This is
+    /// the single source of truth for start-readiness; every caller
+    /// (`handle_set_ready`, the disconnect re-checks, `tick_countdown`, the
+    /// host lobby HUD) reads it.
+    ///
+    /// Returns false when zero connected non-spectator players exist to prevent
+    /// auto-starting the game after the last crew client disconnects.
     pub fn all_ready(&self) -> bool {
-        let connected: Vec<&Player> = self.players.iter().filter(|p| p.connected).collect();
-        if connected.is_empty() {
-            return false; // never auto-start with zero humans
+        let crew: Vec<&Player> = self
+            .players
+            .iter()
+            .filter(|p| p.connected && !p.spectator)
+            .collect();
+        if crew.is_empty() {
+            return false; // never auto-start with zero non-spectator humans
         }
-        connected.iter().all(|p| p.ready)
+        crew.iter().all(|p| p.ready)
     }
 
     /// Reset all players' ready flags to false (e.g. when a new scenario loads).
@@ -644,6 +686,92 @@ mod tests {
         assert!(
             sm.all_ready(),
             "disconnected player should not block all_ready"
+        );
+    }
+
+    // ── Spectator role (issue #1105) ─────────────────────────────────────────
+
+    #[test]
+    fn set_and_is_spectator_roundtrip() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        assert!(!sm.is_spectator("t1"), "fresh player is not a spectator");
+        sm.set_spectator("t1", true);
+        assert!(sm.is_spectator("t1"));
+        sm.set_spectator("t1", false);
+        assert!(!sm.is_spectator("t1"));
+        assert!(
+            !sm.is_spectator("ghost"),
+            "unknown token is not a spectator"
+        );
+    }
+
+    #[test]
+    fn set_spectator_vacates_held_station() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.set_station("t1", Some(StationId("captain".into())));
+        sm.set_spectator("t1", true);
+        assert_eq!(
+            sm.station_for_token("t1"),
+            None,
+            "becoming a spectator must vacate the seat (invariant)"
+        );
+        assert!(sm.is_spectator("t1"));
+    }
+
+    #[test]
+    fn set_station_clears_spectator_flag() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.set_spectator("t1", true);
+        sm.set_station("t1", Some(StationId("helm".into())));
+        assert!(
+            !sm.is_spectator("t1"),
+            "seating a spectator must clear the spectator role (invariant / #1106 seam)"
+        );
+        assert_eq!(sm.station_for_token("t1"), Some(&StationId("helm".into())));
+    }
+
+    #[test]
+    fn all_ready_ignores_spectators() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Alice".into()).unwrap();
+        sm.register("t2".into(), "Watcher".into()).unwrap();
+        sm.set_ready("t1", true);
+        sm.set_spectator("t2", true);
+        // t2 is a spectator and never readies; the lone crew member is ready.
+        assert!(
+            sm.all_ready(),
+            "a spectator must not be counted in readiness or delay start"
+        );
+    }
+
+    #[test]
+    fn all_ready_false_when_only_spectators() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Watcher".into()).unwrap();
+        sm.set_spectator("t1", true);
+        assert!(
+            !sm.all_ready(),
+            "a spectator-only lobby must never auto-start"
+        );
+    }
+
+    #[test]
+    fn spectator_flag_survives_disconnect_reconnect() {
+        let mut sm = sm();
+        sm.register("t1".into(), "Watcher".into()).unwrap();
+        sm.set_spectator("t1", true);
+        sm.disconnect("t1");
+        // Record is never pruned; the flag rides on the Player record.
+        assert!(sm.is_spectator("t1"), "flag persists across disconnect");
+        sm.reconnect("t1");
+        assert!(sm.is_spectator("t1"), "flag persists across reconnect");
+        // And a reconnected spectator still cannot delay start.
+        assert!(
+            !sm.all_ready(),
+            "reconnected spectator stays out of readiness"
         );
     }
 

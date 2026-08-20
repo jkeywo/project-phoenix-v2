@@ -494,6 +494,20 @@ pub(crate) fn handle_set_ready(
     let mut station_rating_update: Option<(StationId, String)> = None;
     let mut countdown_action = None;
 
+    // A Spectator (issue #1105) has opted out of both a Station and readiness.
+    // A stray `SetReady` from one must neither flip a flag it does not own nor
+    // trip the start countdown — no-op it before anything mutates. (Readiness
+    // already excludes spectators in `all_ready`; this stops a spectator's own
+    // flag from ever being set true in the first place.)
+    if sessions.is_spectator(token) {
+        return LobbyHandlerResult {
+            new_phase: None,
+            outbound,
+            station_rating_update: None,
+            countdown_action: None,
+        };
+    }
+
     sessions.set_ready(token, ready);
     outbound.push((
         Target::All,
@@ -538,6 +552,106 @@ pub(crate) fn handle_set_ready(
         outbound,
         station_rating_update,
         countdown_action,
+    }
+}
+
+/// Handle `SetSpectator` (issue #1105): join or leave the explicit Spectator
+/// role. Mirrors `handle_release_station`'s seat-vacate + unready, but keyed on
+/// an explicit role rather than a seat.
+///
+/// On `spectator == true`: set the flag (which vacates any held Station via
+/// `SessionManager::set_spectator`), broadcast the seat clear if one was held,
+/// clear the ready flag and broadcast `ReadyChanged { false }`, then broadcast
+/// `SpectatorChanged { true }`.
+///
+/// On `spectator == false`: clear the flag and broadcast `SpectatorChanged
+/// { false }`, leaving the participant a seatless, un-ready lobby member again.
+///
+/// When a seat is vacated on the way in, the vacated Station's rating is reset
+/// exactly as `handle_release_station` does it (Backfill mid-game; pending
+/// cleared + base rating pre-game): giving up a seat via Spectate must leave
+/// that station in the same state as giving it up via ReleaseStation, rather
+/// than stranding a stale `pending_ratings` entry for the next claimant (or a
+/// dark, non-Backfill seat in-progress).
+pub(crate) fn handle_set_spectator(
+    token: &str,
+    spectator: bool,
+    sessions: &mut SessionManager,
+    phase: GamePhase,
+    ship_stations: &ShipStations,
+) -> LobbyHandlerResult {
+    let mut outbound = Vec::new();
+    let mut station_rating_update: Option<(StationId, String)> = None;
+
+    if spectator {
+        // Capture the seat BEFORE `set_spectator` vacates it, so we only emit a
+        // `StationAssigned { None }` (and reset the seat's rating) when a seat
+        // was actually released.
+        let vacated_station = sessions.station_for_token(token).cloned();
+        sessions.set_spectator(token, true); // sets flag + clears station (invariant)
+        if vacated_station.is_some() {
+            outbound.push((
+                Target::All,
+                ServerMessage::StationAssigned {
+                    token: token.to_string(),
+                    station: None,
+                    station_id: None,
+                },
+            ));
+        }
+        sessions.set_ready(token, false);
+        outbound.push((
+            Target::All,
+            ServerMessage::ReadyChanged {
+                token: token.to_string(),
+                ready: false,
+            },
+        ));
+        // Reset the vacated seat's rating, mirroring `handle_release_station`.
+        if let Some(station_id) = vacated_station {
+            if phase == GamePhase::InProgress {
+                let backfill = rating::BACKFILL_RATING.to_string();
+                outbound.push((
+                    Target::All,
+                    ServerMessage::RatingChanged {
+                        station_id: station_id.clone(),
+                        rating_name: backfill.clone(),
+                    },
+                ));
+                station_rating_update = Some((station_id, backfill));
+            } else {
+                // Pre-InProgress: don't let a new claimant inherit a
+                // stranger's lobby-chosen complexity toggle.
+                sessions.clear_pending_rating(&station_id);
+                let base_rating = get_station(ship_stations, &station_id.0)
+                    .and_then(|def| def.ratings.first().cloned())
+                    .unwrap_or_else(|| "Std".to_string());
+                outbound.push((
+                    Target::All,
+                    ServerMessage::RatingChanged {
+                        station_id,
+                        rating_name: base_rating,
+                    },
+                ));
+            }
+        }
+    } else {
+        sessions.set_spectator(token, false);
+    }
+
+    outbound.push((
+        Target::All,
+        ServerMessage::SpectatorChanged {
+            token: token.to_string(),
+            spectator,
+        },
+    ));
+
+    LobbyHandlerResult {
+        new_phase: None,
+        outbound,
+        station_rating_update,
+        countdown_action: None,
     }
 }
 
@@ -866,6 +980,9 @@ mod tests {
                 preload_complete,
                 ship_stations,
             ),
+            ClientMessage::SetSpectator { spectator } => {
+                handle_set_spectator(token, *spectator, sessions, phase, ship_stations)
+            }
             ClientMessage::ReturnToLobby => {
                 handle_return_to_lobby(sessions, phase, return_to_lobby_authority(token))
             }
@@ -1575,6 +1692,211 @@ max_level = 4
             station_id,
             Some(&StationId("helm".into())),
             "StationAssigned must carry station_id after SelectStation"
+        );
+    }
+
+    // ── SetSpectator (issue #1105) ────────────────────────────────────────
+
+    #[test]
+    fn set_spectator_true_vacates_station_unreadies_and_broadcasts() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        sessions.set_ready("t1", true);
+        let result = pm_stations(
+            "t1",
+            &ClientMessage::SetSpectator { spectator: true },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        assert!(sessions.is_spectator("t1"), "flag is set");
+        assert_eq!(sessions.station_for_token("t1"), None, "seat vacated");
+        assert!(!sessions.players()[0].ready, "ready cleared");
+        assert!(
+            result.outbound.iter().any(|(t, m)| matches!(m,
+                ServerMessage::StationAssigned { token, station_id, .. }
+                    if token == "t1" && station_id.is_none())
+                && *t == Target::All),
+            "must broadcast StationAssigned {{ None }} for the vacated seat"
+        );
+        assert!(
+            result.outbound.iter().any(|(_, m)| matches!(m,
+                ServerMessage::ReadyChanged { token, ready: false } if token == "t1")),
+            "must broadcast ReadyChanged {{ false }}"
+        );
+        assert!(
+            result.outbound.iter().any(|(_, m)| matches!(m,
+                ServerMessage::SpectatorChanged { token, spectator: true } if token == "t1")),
+            "must broadcast SpectatorChanged {{ true }}"
+        );
+    }
+
+    #[test]
+    fn set_spectator_true_in_lobby_clears_pending_rating_and_resets_broadcast() {
+        // Mirror of `release_station_in_lobby_clears_pending_rating_and_resets_broadcast`:
+        // a seated player picks a non-base rating, then Spectates. Entering
+        // Spectator from a seat must leave that station in exactly the state a
+        // `ReleaseStation` would — pending cleared, base `RatingChanged` broadcast
+        // — so the next claimant does not inherit a stale complexity toggle.
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        sessions.set_pending_rating(&StationId("captain".into()), "Simplified".into());
+
+        let result = pm_stations(
+            "t1",
+            &ClientMessage::SetSpectator { spectator: true },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+
+        assert!(
+            sessions
+                .pending_rating_for(&StationId("captain".into()))
+                .is_none(),
+            "vacated seat's pending rating must be cleared"
+        );
+        assert!(
+            result.outbound.iter().any(|(t, m)| {
+                matches!(t, Target::All)
+                    && matches!(
+                        m,
+                        ServerMessage::RatingChanged { station_id, rating_name }
+                            if *station_id == StationId("captain".into()) && rating_name == "Std"
+                    )
+            }),
+            "must broadcast a base RatingChanged for the vacated seat"
+        );
+    }
+
+    #[test]
+    fn set_spectator_true_during_inprogress_restores_backfill_rating() {
+        // In-progress analog of
+        // `release_station_during_inprogress_restores_backfill_rating`: a seated
+        // player who Spectates mid-mission must hand the seat back to Backfill,
+        // exactly like a `ReleaseStation`, not leave it dark at a stale rating.
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_station("t1", Some(StationId("captain".into())));
+        sessions.set_ready("t1", true);
+        let result = pm_stations(
+            "t1",
+            &ClientMessage::SetSpectator { spectator: true },
+            &mut sessions,
+            GamePhase::InProgress,
+            None,
+        );
+        assert!(result.outbound.iter().any(|(_, m)| matches!(
+            m,
+            ServerMessage::RatingChanged { station_id, rating_name }
+            if station_id.0 == "captain" && rating_name == rating::BACKFILL_RATING
+        )));
+        assert_eq!(
+            result.station_rating_update,
+            Some((
+                StationId("captain".into()),
+                rating::BACKFILL_RATING.to_string()
+            ))
+        );
+        assert_eq!(sessions.station_for_token("t1"), None);
+        assert!(!sessions.players()[0].ready);
+        assert!(sessions.is_spectator("t1"));
+    }
+
+    #[test]
+    fn set_spectator_false_clears_flag_without_vacating() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_spectator("t1", true);
+        let result = pm_stations(
+            "t1",
+            &ClientMessage::SetSpectator { spectator: false },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        assert!(!sessions.is_spectator("t1"), "flag cleared");
+        assert!(
+            result.outbound.iter().any(|(_, m)| matches!(m,
+                ServerMessage::SpectatorChanged { token, spectator: false } if token == "t1")),
+            "must broadcast SpectatorChanged {{ false }}"
+        );
+        assert!(
+            !result
+                .outbound
+                .iter()
+                .any(|(_, m)| matches!(m, ServerMessage::StationAssigned { .. })),
+            "no seat to vacate → no StationAssigned"
+        );
+    }
+
+    #[test]
+    fn spectator_set_ready_is_noop_and_does_not_start_countdown() {
+        let mut sessions = sessions_with("t1", "Watcher");
+        sessions.set_spectator("t1", true);
+        let result = pm_stations(
+            "t1",
+            &ClientMessage::SetReady { ready: true },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        assert!(
+            !sessions.players()[0].ready,
+            "a spectator's ready flag must stay false"
+        );
+        assert!(
+            result.countdown_action.is_none(),
+            "a spectator's SetReady must not start the countdown"
+        );
+        assert!(
+            result.outbound.is_empty(),
+            "a spectator's SetReady is a silent no-op (no ReadyChanged)"
+        );
+    }
+
+    #[test]
+    fn seated_player_readies_while_spectator_present_starts_countdown() {
+        // AC2: a sitting spectator neither counts toward readiness nor delays
+        // start — the lone crew member readying is enough to start the game.
+        let mut sessions = sessions_with("t1", "Crew");
+        sessions.register("t2".into(), "Watcher".into()).unwrap();
+        sessions.set_spectator("t2", true);
+        let result = pm_stations(
+            "t1",
+            &ClientMessage::SetReady { ready: true },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        assert!(
+            matches!(result.countdown_action, Some(CountdownAction::Start { .. })),
+            "the game must start with only crew ready and a spectator sitting"
+        );
+    }
+
+    #[test]
+    fn spectator_stays_spectator_across_reconnect_dispatch() {
+        let mut sessions = sessions_with("t1", "Watcher");
+        sessions.set_spectator("t1", true);
+        sessions.disconnect("t1");
+        // Reconnect via Identify with the same token (record never pruned).
+        pm_stations(
+            "t1",
+            &ClientMessage::Identify {
+                token: "t1".into(),
+                name: "Watcher".into(),
+            },
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+        );
+        assert!(
+            sessions.is_spectator("t1"),
+            "a reconnected participant stays a spectator"
+        );
+        assert!(sessions.players()[0].connected, "and is reconnected");
+        assert!(
+            !sessions.all_ready(),
+            "and remains out of readiness after reconnect"
         );
     }
 

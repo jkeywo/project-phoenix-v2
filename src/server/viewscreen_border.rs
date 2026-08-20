@@ -189,7 +189,6 @@ pub(crate) fn push_lobby_state(
     };
 
     let players = sessions.0.players();
-    let connected_count = players.iter().filter(|p| p.connected).count() as u32;
     let roster_size = stations.stations.len() as u32;
 
     let mut station_payloads: Vec<StationPayload> = Vec::new();
@@ -209,14 +208,12 @@ pub(crate) fn push_lobby_state(
         });
     }
 
-    // Players with no station who are connected are spectators.
-    if roster_size > 0 && connected_count > roster_size {
-        for p in players
-            .iter()
-            .filter(|p| p.connected && p.station.is_none())
-        {
-            spectators.push(p.name.clone());
-        }
+    // Spectators (issue #1105) are the participants who hold the explicit
+    // Spectator role — a real session role now, not the connected-and-stationless
+    // overflow heuristic this used to infer. The invariant (spectator ⇒ no
+    // station) keeps this list free of anyone still holding a seat.
+    for p in players.iter().filter(|p| p.connected && p.spectator) {
+        spectators.push(p.name.clone());
     }
 
     let all_filled =

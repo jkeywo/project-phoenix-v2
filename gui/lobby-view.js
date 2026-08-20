@@ -69,6 +69,9 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
   const eligibilityFor = opts.eligibilityFor || (() => ({ eligible: true, reason: null }));
 
   const myPlayer = (s.players || []).find(p => p.token === myToken) || null;
+  // Explicit Spectator role (issue #1105) — a real flag on the player, not the
+  // "no station" heuristic. Drives the Spectate/Join toggle and the status line.
+  const isSpectator = !!(myPlayer && myPlayer.spectator);
   const myStation = myPlayer
     ? ((s.stations || []).find(st => st.holder_token === myToken) || null)
     : null;
@@ -145,8 +148,19 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
     readyBtn = { visible: false };
   }
 
+  // Spectate toggle (issue #1105): a participant may join or leave the
+  // Spectator role from the lobby. Visible whenever we have a player record;
+  // 'join' when already spectating (sends SetSpectator{false}), else 'spectate'
+  // (sends SetSpectator{true}). A spectator can't ready, so readyBtn stays
+  // hidden for them (hasStation is false → the branch above already hides it).
+  const spectateBtn = myPlayer
+    ? { visible: true, mode: isSpectator ? 'join' : 'spectate' }
+    : { visible: false };
+
   let statusLine;
-  if (!myPlayer || !hasStation) {
+  if (isSpectator) {
+    statusLine = { id: 'client.spectator.lobby_status', params: {} };
+  } else if (!myPlayer || !hasStation) {
     statusLine = { id: 'client.status_select_station', params: {} };
   } else if (!selectedConsole) {
     statusLine = { id: 'client.status_select_console', params: { station: labelFor(myStation) } };
@@ -162,11 +176,13 @@ export function lobbyViewModel(s, myToken, lobbyConsole, opts = {}) {
 
   return {
     hasStation,
+    isSpectator,
     myStation,
     selectedConsole,
     rows,
     detail,
     readyBtn,
+    spectateBtn,
     statusLine,
     crew: {
       filled: (s.stations || []).filter(st => st.holder_name).length,

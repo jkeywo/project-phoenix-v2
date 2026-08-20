@@ -195,6 +195,34 @@ describe('lobbyViewModel — ready button', () => {
   });
 });
 
+describe('lobbyViewModel — spectate toggle (issue #1105)', () => {
+  it('offers Spectate for a joined crew member', () => {
+    const s = uiState({ players: [{ token: MY, name: 'Ada' }], stations: [helmRow()] });
+    const vm = lobbyViewModel(s, MY, null);
+    expect(vm.isSpectator).toBe(false);
+    expect(vm.spectateBtn).toEqual({ visible: true, mode: 'spectate' });
+  });
+
+  it('offers Join for an explicit spectator, and hides the ready button', () => {
+    const s = uiState({ players: [{ token: MY, name: 'Ada', spectator: true }], stations: [helmRow()] });
+    const vm = lobbyViewModel(s, MY, null);
+    expect(vm.isSpectator).toBe(true);
+    expect(vm.spectateBtn).toEqual({ visible: true, mode: 'join' });
+    expect(vm.readyBtn.visible).toBe(false);
+  });
+
+  it('hidden when there is no local player record', () => {
+    const vm = lobbyViewModel(uiState(), MY, null);
+    expect(vm.spectateBtn).toEqual({ visible: false });
+  });
+
+  it('a spectator gets the spectator status line', () => {
+    const s = uiState({ players: [{ token: MY, name: 'Ada', spectator: true }] });
+    const vm = lobbyViewModel(s, MY, null);
+    expect(vm.statusLine).toEqual({ id: 'client.spectator.lobby_status', params: {} });
+  });
+});
+
 describe('releaseConfirmStep — mid-round release arm→confirm (#771 AC3/AC4)', () => {
   it('lobby release is immediate — sends without arming', () => {
     expect(releaseConfirmStep('Lobby', false)).toEqual({ send: true, armed: false });

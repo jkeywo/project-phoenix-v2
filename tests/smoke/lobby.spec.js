@@ -85,7 +85,11 @@ test('SetReady starts game even with unfilled stations', async ({ context }) => 
   const hostId = await readHostPeerId(serverPage);
 
   const clientA = await createTestClient(context, hostId, { name: 'Helm' });
-  const clientB = await createTestClient(context, hostId, { name: 'Spectator' });
+  // A stationless CREW member (NOT the explicit Spectator role of issue #1105):
+  // it never claims a station but still readies, so it IS counted in readiness.
+  // Renamed from 'Spectator' to avoid implying the seatless-and-excluded role;
+  // tests/smoke/spectator.spec.js covers the real Spectator, which is excluded.
+  const clientB = await createTestClient(context, hostId, { name: 'Beta' });
 
   // Only A claims Helm — Tactical station is unfilled
   await clientA.send('SelectStation', { station: 'Helm' });

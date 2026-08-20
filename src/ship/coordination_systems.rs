@@ -74,6 +74,14 @@ pub fn handle_coordination_enqueue(
             Some(p) => p,
             None => continue,
         };
+        // A Spectator (issue #1105) issues no simulation-influencing traffic.
+        // Channel-3 coordination shapes crew/AI behaviour, so it is a
+        // simulation command in the AC3 sense — drop a spectator's here rather
+        // than enqueue it. (A spectator holds no station, but the explicit role
+        // check is the robust gate, mirroring command admission.)
+        if player.spectator {
+            continue;
+        }
         let sender_origin = if player.station.is_none() {
             ControlSource::Ai
         } else {
@@ -1471,6 +1479,92 @@ mod tests {
             coordination_popups(&app),
             0,
             "an advisory consumed by an AI station must not also raise a popup"
+        );
+    }
+
+    /// AC3 (issue #1105): a Spectator's `SendCoordination` is dropped, while a
+    /// registered non-spectator's is enqueued. A large coordination lag keeps
+    /// the enqueued item pending so the queue length is observable before
+    /// delivery. Nothing is stubbed — the real `handle_coordination_enqueue`
+    /// runs under `ShipPlugin`, reading the live `Sessions` role that
+    /// `SetSpectator` set.
+    #[test]
+    fn spectator_send_coordination_is_dropped_but_crew_is_queued() {
+        fn gate_app() -> App {
+            let mut app = test_app();
+            let mut q = app
+                .world_mut()
+                .query_filtered::<&mut ShipConfigComponent, With<Ship>>();
+            for mut cfg in q.iter_mut(app.world_mut()) {
+                cfg.0.coordination_lag_secs = 100.0;
+            }
+            app
+        }
+        fn queue_len(app: &mut App) -> usize {
+            let ship = find_ship_entity(app);
+            app.world()
+                .entity(ship)
+                .get::<CoordinationQueue>()
+                .expect("LocalShip carries a CoordinationQueue")
+                .0
+                .len()
+        }
+        let target = crate::system_registry::tactical_station_key();
+        let payload = CoordinationPayload::FrequencyHint { frequency: 0.5 };
+
+        // Registered non-spectator: enqueued.
+        let mut app = gate_app();
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::Identify {
+                token: "crew".into(),
+                name: "Officer".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "crew",
+            ClientMessage::SendCoordination {
+                target: target.clone(),
+                payload: payload.clone(),
+            },
+        );
+        tick(&mut app);
+        assert_eq!(
+            queue_len(&mut app),
+            1,
+            "a registered non-spectator's coordination is queued"
+        );
+
+        // Spectator: dropped.
+        let mut app = gate_app();
+        push(
+            &mut app,
+            "spec",
+            ClientMessage::Identify {
+                token: "spec".into(),
+                name: "Watcher".into(),
+            },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "spec",
+            ClientMessage::SetSpectator { spectator: true },
+        );
+        tick(&mut app);
+        push(
+            &mut app,
+            "spec",
+            ClientMessage::SendCoordination { target, payload },
+        );
+        tick(&mut app);
+        assert_eq!(
+            queue_len(&mut app),
+            0,
+            "a spectator's coordination is dropped"
         );
     }
 

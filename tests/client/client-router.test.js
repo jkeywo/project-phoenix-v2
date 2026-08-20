@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   routeMessage,
   showingLobbyDuringGame,
+  isSpectator,
   playerStation,
 } from '../../gui/client-router.js';
 
@@ -70,6 +71,24 @@ describe('showingLobbyDuringGame', () => {
       players: [{ token: MY, station: 'helm', ready: true }],
     });
     expect(showingLobbyDuringGame(s, MY, false)).toBe(false);
+  });
+
+  it('is false for an explicit Spectator (issue #1105) — they get the summary surface', () => {
+    const s = baseUiState({
+      phase: 'InProgress',
+      players: [{ token: MY, station: null, ready: false, spectator: true }],
+    });
+    expect(showingLobbyDuringGame(s, MY, false)).toBe(false);
+  });
+});
+
+describe('isSpectator', () => {
+  it('is true only for an explicit spectator flag', () => {
+    const spec = baseUiState({ players: [{ token: MY, spectator: true }] });
+    const stationless = baseUiState({ players: [{ token: MY, station: null }] });
+    expect(isSpectator(spec, MY)).toBe(true);
+    expect(isSpectator(stationless, MY)).toBe(false);
+    expect(isSpectator(baseUiState(), MY)).toBe(false); // unknown token
   });
 });
 
@@ -323,6 +342,16 @@ describe('routeMessage — player list bookkeeping', () => {
     expect(r.pendingMidGameClaim).toBe(false);
     expect(s.players[0].ready).toBe(true);
     expect(r.rebuildStations).toBe(true);
+  });
+
+  it('SpectatorChanged sets the role flag and rebuilds (issue #1105)', () => {
+    const s = baseUiState({ players: [{ token: MY, spectator: false }] });
+    const r = routeMessage({ type: 'SpectatorChanged', data: { token: MY, spectator: true } }, ctx(s));
+    expect(s.players[0].spectator).toBe(true);
+    expect(r.rebuildStations).toBe(true);
+    // And the inverse toggle clears it.
+    routeMessage({ type: 'SpectatorChanged', data: { token: MY, spectator: false } }, ctx(s));
+    expect(s.players[0].spectator).toBe(false);
   });
 
   it('NameChanged for my token surfaces the new name', () => {

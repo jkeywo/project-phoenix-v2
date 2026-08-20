@@ -103,6 +103,21 @@ pub fn is_command_authorized(
     if token == crate::console_bridge::LOCAL_CONSOLE_TOKEN {
         return policy.accept_human_input;
     }
+
+    // A Spectator (issue #1105) is a registered, connected player with no
+    // Station and no simulation authority. Reject every simulation command from
+    // one explicitly and up front — this is the robust single gate rather than
+    // relying on the *absence* of a seat. A station-owned command is already
+    // denied by the `holder_for_station` tenure check below, but the ownerless
+    // Debug/God-Mode route further down admits ANY registered player, and a
+    // spectator IS a registered player — so without this, a spectator could
+    // still fire the God-Mode/debug cheats. Placed after the `ai:` and
+    // LOCAL_CONSOLE_TOKEN branches (those tokens are never spectators) and
+    // before the debug route it closes.
+    if sessions.0.is_spectator(token) {
+        return false;
+    }
+
     if !policy.accept_human_input {
         return false;
     }
@@ -524,6 +539,75 @@ station = "shields"
             &config(),
             None,
         ));
+    }
+
+    // ── Spectator admission (issue #1105, AC3) ───────────────────────────────
+
+    /// A registered spectator holds a repair session but no station. Sessions
+    /// helper: register the token, mark it a spectator (which vacates any seat).
+    fn sessions_with_spectator(token: &str) -> crate::lobby::Sessions {
+        let mut sm = crate::lobby::session::SessionManager::new();
+        sm.register(token.into(), "Watcher".into()).unwrap();
+        sm.set_spectator(token, true);
+        crate::lobby::Sessions(sm)
+    }
+
+    /// AC3: a spectator is refused an ordinary station-owned command. (It would
+    /// be denied by station tenure anyway — a spectator holds no seat — but the
+    /// explicit early rejection is what makes it robust and un-bypassable.)
+    #[test]
+    fn spectator_is_refused_a_station_command() {
+        assert!(!is_command_authorized(
+            "spec",
+            &SystemId("repair".into()),
+            &dispatch(),
+            &sources(ControlSource::Human, false),
+            &sessions_with_spectator("spec"),
+            &config(),
+            None,
+        ));
+    }
+
+    /// AC3, the load-bearing case: a spectator is refused the ownerless
+    /// Debug/God-Mode route. That route admits ANY registered player, and a
+    /// spectator IS registered — so only the explicit spectator rejection closes
+    /// it. In a demo build the route is compiled out and refusal is trivially
+    /// true; in a dev build the refusal is entirely down to the spectator gate.
+    #[test]
+    fn spectator_is_refused_the_debug_god_mode_route() {
+        assert!(!is_command_authorized(
+            "spec",
+            &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            &toggle_god_mode(),
+            &sources(ControlSource::Human, false),
+            &sessions_with_spectator("spec"),
+            &config(),
+            None,
+        ));
+    }
+
+    /// The companion that proves the previous test is about the spectator gate,
+    /// not a closed route: the SAME token, registered but NOT a spectator, IS
+    /// admitted by the debug route in a dev build.
+    #[test]
+    fn a_non_spectator_registered_token_still_reaches_the_debug_route() {
+        let sessions = {
+            let mut sm = crate::lobby::session::SessionManager::new();
+            sm.register("player".into(), "Player".into()).unwrap();
+            crate::lobby::Sessions(sm)
+        };
+        assert_eq!(
+            is_command_authorized(
+                "player",
+                &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+                &toggle_god_mode(),
+                &sources(ControlSource::Human, false),
+                &sessions,
+                &config(),
+                None,
+            ),
+            !crate::build_flags::is_demo_cfg(),
+        );
     }
 
     // ── Command station SetStationStance admission (issue #1107, AC6/AC3) ─────

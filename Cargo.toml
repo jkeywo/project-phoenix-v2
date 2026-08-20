@@ -249,7 +249,7 @@ libm = "0.2"
 # vellum crate — pinned to the rev pyproject.toml already pins for pasm, so the
 # repo carries one vellum rev rather than two. The `json` feature is on because
 # CI stores the capture artifact; `Baseline` round-trips RON without it.
-vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a17b96c4b930aab9564a371e20", features = ["json"] }
+vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["json"] }
 # The seeded simulation generator behind `crate::sim_rng` (issue #897). Same
 # vellum rev as `vellum-perf` above, for the same reason — one vellum rev in
 # the repo, not two. Taken for a property `rand`'s `SmallRng` does not have:
@@ -258,7 +258,7 @@ vellum-perf = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a
 # wasm build. `rand` stays regardless: it still backs the *cosmetic* unseeded
 # generators in the renderer, pfx and asteroid modules, which are deliberately
 # not part of the seeded simulation.
-vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a17b96c4b930aab9564a371e20" }
+vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
 # The replay-as-save contract behind `crate::command_admission::log` (issue
 # #898). Same vellum rev as the two above, for the same reason. Zero
 # dependencies of its own, so it is a non-event for the wasm build.
@@ -271,7 +271,7 @@ vellum-rng = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a1
 # tick: `LoggedCommand { tick, command }` is phoenix's, because the tick a
 # command applies on is phoenix's contract with its lockstep peers (#854), not
 # vellum's.
-vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a17b96c4b930aab9564a371e20" }
+vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
 # The digest primitives behind `crate::headless::digest` (issue #901): `fnv1a`,
 # `fold_digest`/`FOLD_SEED` and `digest_postcard`. Same vellum rev as the three
 # above — one vellum rev in the repo, not two.
@@ -289,7 +289,7 @@ vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a344
 # `vellum-replay` were. Default features only — `ron-digest` stays off, because
 # phoenix's fold is defined over postcard bytes and the two never produce the
 # same number for the same value.
-vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a17b96c4b930aab9564a371e20" }
+vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
 # The fleet's persistence contract behind `crate::snapshot` (issue #862). Same
 # vellum rev as the four above — one vellum rev in the repo, not two.
 #
@@ -307,7 +307,7 @@ vellum-digest = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a344
 # a filesystem the browser does not have, and `backend-web` is `localStorage`,
 # which the crate cfg's to `wasm32` anyway. Cargo unifies the stanzas into one
 # `vellum-save` per target.
-vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a17b96c4b930aab9564a371e20", features = ["run"] }
+vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["run"] }
 # The fleet's deterministic Rhai scenario-scripting host behind
 # `crate::world::script` (issue #979, Rhai milestone M1). Same vellum rev as the
 # crates above — one vellum rev in the repo, not two. Phoenix takes the sandbox
@@ -315,7 +315,7 @@ vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a
 # (host functions, the per-call effect buffer draining into `world::dispatch`'s
 # ActionCmd boundary, the sugared `flags` type, the loader, and cross-reference
 # validation) stays here (`world/script/`), per vellum's charter.
-vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a17b96c4b930aab9564a371e20" }
+vellum-script = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6" }
 # The Rhai engine itself, named directly because `world::script` constructs the
 # host-fn vocabulary on the engines vellum-script hands back and must fix the
 # global hashing seed before any engine is built (M0 spike:
@@ -331,7 +331,7 @@ rhai = { version = "1.25", features = ["sync", "no_float"] }
 # The contract checks (`vellum_replay::contract`), which the crate gates behind
 # `testkit` precisely so no shipped binary pulls them in. Cargo unifies this
 # with the dependency above for test builds only.
-vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a17b96c4b930aab9564a371e20", features = ["testkit"] }
+vellum-replay = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["testkit"] }
 
 # `bevy/debug` (issue #894): without it, `ComponentInfo::name()` (used by
 # `tests/authoritative_state_enumeration.rs` to enumerate the sim app's
@@ -367,7 +367,7 @@ ron = "0.12"
 # `FileStore` — `<root>/<slot>.ron` (issue #862). Native only, because a
 # filesystem is: the browser gets `backend-web` in the wasm stanza below. Both
 # unify into the single `vellum-save` declared in `[dependencies]`.
-vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a17b96c4b930aab9564a371e20", features = ["backend-fs"] }
+vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["backend-fs"] }
 
 # WASM: no parallel, uses single-threaded runtime
 # getrandom 0.3+ needs wasm_js feature + cfg(getrandom_backend="js")
@@ -376,7 +376,7 @@ bevy_rapier3d = { version = "0.33", features = ["dim3"] }
 getrandom = { version = "0.3", features = ["wasm_js"] }
 # `LocalStorage` — `localStorage["phoenix:<slot>"]` (issue #862). The browser
 # half of the pair whose native half is `backend-fs` above.
-vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "2eae13194a3449a17b96c4b930aab9564a371e20", features = ["backend-web"] }
+vellum-save = { git = "https://github.com/jkeywo/vellum", rev = "a08dca9ca49033307bb6d5e85cb068205c1164b6", features = ["backend-web"] }
 
 [target.wasm32-unknown-unknown.dependencies]
 js-sys = "0.3"

@@ -863,10 +863,15 @@ mod tests {
             // phone message after the world is already loading), the selection
             // is already settled — so it is a deliberate no-op here.
             //
+            // `StationVisited` (issue #1101) is likewise not a lobby concern: it
+            // is drained frame-driven in `server_app::drain_station_visited`,
+            // which mutates the host importance state, so the lobby has nothing
+            // to add.
             ClientMessage::ControlSystem { .. }
             | ClientMessage::SendCoordination { .. }
             | ClientMessage::SelectScenario { .. }
-            | ClientMessage::SelectPlayerShip { .. } => LobbyHandlerResult {
+            | ClientMessage::SelectPlayerShip { .. }
+            | ClientMessage::StationVisited { .. } => LobbyHandlerResult {
                 new_phase: None,
                 outbound: Vec::new(),
                 station_rating_update: None,

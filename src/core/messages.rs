@@ -1286,6 +1286,19 @@ pub struct SimSnapshot {
     /// entitled to another Station's rows to sum in the first place.
     #[serde(default)]
     pub station_health: Vec<StationHealthSnapshot>,
+    /// Authoritative per-Station importance for the local ship (issue #1101).
+    ///
+    /// A host-derived attention stream that is deliberately kept SEPARATE from
+    /// `station_health`: importance answers "does an off-screen event on this
+    /// Station want the crew's eyes", not "how damaged is it". Station-level and
+    /// recipient-independent for exactly `station_hosts`' reason — the same
+    /// privacy argument that lets everyone hold the ship-wide aggregate.
+    ///
+    /// Only Stations that currently carry importance appear; a Station whose
+    /// importance has fully resolved simply drops out, so a client rebuilding its
+    /// map from this list each tick clears it authoritatively.
+    #[serde(default)]
+    pub station_importance: Vec<StationImportanceSnapshot>,
     /// Effective per-system authority for the local ship at this tick.
     ///
     /// This is the wire projection of `ShipSystemControlSources`, not a
@@ -1318,6 +1331,30 @@ pub struct StationHealthSnapshot {
     pub station: StationId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<f32>,
+}
+
+/// One Station's authoritative importance, host-derived (issue #1101).
+///
+/// Recipient-independent and station-level, mirroring [`StationHostSnapshot`]
+/// and [`StationHealthSnapshot`], but carrying an attention signal that is held
+/// strictly apart from health. The two flags have DISTINCT lifecycles and are
+/// two independent fields precisely so neither can interfere with the other:
+///
+/// - `unread` — a **one-off** off-screen event (e.g. an objective completing or
+///   failing while its Station was not the selected tab). It stays marked until
+///   the Station is VISITED (its tab selected), then clears through the
+///   authoritative lifecycle: the host drops the flag and the next broadcast
+///   omits it. A client never clears it optimistically.
+/// - `critical` — a **continuing** condition (e.g. a raised Red Alert attributed
+///   to a Station). It is immune to the visit-clear and only lowers when the
+///   underlying condition itself resolves.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StationImportanceSnapshot {
+    pub station: StationId,
+    /// A one-off unread event, cleared when the Station is visited.
+    pub unread: bool,
+    /// A continuing critical condition, cleared only when it resolves.
+    pub critical: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1989,6 +2026,23 @@ pub enum ClientMessage {
     /// `SelectScenario`, accepted from any participant token.
     SelectPlayerShip {
         template_path: String,
+    },
+    /// A held Station's tab became the active console in-game (issue #1101).
+    ///
+    /// The authoritative "visit" signal, and NOT the lobby's [`SelectStation`]
+    /// (which claims a Station before the game): this carries no claim and no
+    /// authority change. Its sole effect is to clear the one-off `unread`
+    /// importance flag for the named Station in host state, so the clear flows
+    /// through the next `SimState` broadcast rather than being applied
+    /// optimistically on the client (issue #1101 AC2). A continuing `critical`
+    /// condition is deliberately immune to it.
+    ///
+    /// Drained frame-driven (`server_app::drain_station_visited`), not through
+    /// command admission — like `ToggleDebugFlag`/`TogglePause`, it changes no
+    /// simulation outcome a replay must re-derive, only a presentation-attention
+    /// flag, so it stays out of the command log.
+    StationVisited {
+        station: StationId,
     },
     /// Flip one host-page debug overlay from a connected phone's Debug/Cheat
     /// tab (issue #940).

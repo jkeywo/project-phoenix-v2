@@ -16,7 +16,7 @@ function legacyPlacement(station, stationSystems, blackboards) {
  * allowing the shell to state the outcome without encoding it as colour.
  */
 export function heroBarModel({ directStation, stations, stationSystems,
-  blackboards, stationHosts, stationHealth, stationRatings, activeStation }) {
+  blackboards, stationHosts, stationHealth, stationImportance, stationRatings, activeStation }) {
   const defs = stations || [];
   const byId = Object.fromEntries(defs.filter(Boolean).map(st => [st.id, st]));
   const placements = Object.fromEntries(defs.filter(st => st?.human_seeking).map(st => [
@@ -49,8 +49,14 @@ export function heroBarModel({ directStation, stations, stationSystems,
       // Station's health from the recipient-scoped damage rows a client holds.
       const rawHealth = stationHealth ? stationHealth[id] : undefined;
       const health = typeof rawHealth === 'number' ? rawHealth : null;
+      // Authoritative host importance figure (issue #1101), kept SEPARATE from
+      // health: a one-off `unread` event and a continuing `critical` condition,
+      // each with its own lifecycle. Absent (Station resolved / never marked) is
+      // the neutral state. Never derived from health or blackboards.
+      const importance = (stationImportance && stationImportance[id]) || null;
       return { id, name: st.name || id, mode, rating, health,
-        healthState: heroBarHealthState(health), selected: id === selected };
+        healthState: heroBarHealthState(health), importance,
+        importanceState: heroBarImportanceState(importance), selected: id === selected };
     }),
     ownership,
     aiStations: defs
@@ -72,6 +78,30 @@ export function heroBarModel({ directStation, stations, stationSystems,
 export function heroBarHealthState(health) {
   if (typeof health !== 'number') return 'none';
   return health >= 1 ? 'healthy' : 'damaged';
+}
+
+/**
+ * Classify a Station's authoritative importance into a discrete state for a
+ * persistent non-colour cue per tab (issue #1101). Mirrors
+ * `heroBarHealthState`, but for the SEPARATE importance stream so the two never
+ * share a data attribute or a glyph.
+ *
+ * Four states, none needing a tunable threshold — the flags are already
+ * booleans decided authoritatively on the host:
+ *   - `none`     — no importance (neutral/resolved).
+ *   - `unread`   — a one-off off-screen event, awaiting a visit.
+ *   - `critical` — a continuing condition.
+ *   - `both`     — a one-off event AND a continuing condition at once.
+ * The two lifecycles are independent, so `both` is a real, distinct state, not
+ * a precedence collapse.
+ */
+export function heroBarImportanceState(importance) {
+  const unread = !!(importance && importance.unread);
+  const critical = !!(importance && importance.critical);
+  if (unread && critical) return 'both';
+  if (critical) return 'critical';
+  if (unread) return 'unread';
+  return 'none';
 }
 
 /** Roving-tab keyboard rule used by the DOM shell and unit tests. */
@@ -116,12 +146,17 @@ export function renderHeroBarDom({ tabsEl, titleEl, metaEl, aiEl, healthEl, mode
         tabsEl.ownerDocument.createElement('span'),
         tabsEl.ownerDocument.createElement('span'),
         tabsEl.ownerDocument.createElement('span'),
+        tabsEl.ownerDocument.createElement('span'),
       );
       button.children[1].className = 'station-tab-owner';
       // A dedicated span for the persistent non-colour health cue (issue #1100).
       // Being its own element is what lets it coexist with an importance alert
       // painted elsewhere on the tab, and stay a text/shape token, not colour.
       button.children[2].className = 'station-tab-health';
+      // A SEPARATE span for the importance cue (issue #1101), with its own
+      // `data-importance` attribute — never sharing health's element or
+      // attribute, so the two streams coexist on one tab (AC4).
+      button.children[3].className = 'station-tab-importance';
     }
     existing.delete(tab.id);
     button.setAttribute('aria-selected', tab.id === model.selected ? 'true' : 'false');
@@ -132,6 +167,12 @@ export function renderHeroBarDom({ tabsEl, titleEl, metaEl, aiEl, healthEl, mode
     // never colour, and set unconditionally so an alert cannot suppress it.
     button.children[2].textContent = translate('client.hero.health.cue.' + tab.healthState);
     button.dataset.health = tab.healthState;
+    // Persistent per-tab importance cue on EVERY tab (AC4): its own glyph token
+    // and its own `data-importance`, set UNCONDITIONALLY (even 'none') so health
+    // and importance always coexist and neither can suppress the other. Never a
+    // sort key — the tab order above is untouched by importance.
+    button.children[3].textContent = translate('client.hero.importance.cue.' + tab.importanceState);
+    button.dataset.importance = tab.importanceState;
     button.onclick = () => onActivate(tab.id);
     button.onkeydown = event => {
       const target = heroBarKeyTarget(ids, tab.id, event.key);

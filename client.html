@@ -236,6 +236,11 @@
        colour, so it reads regardless of theme or colour vision and survives
        beside any importance alert on the tab. */
     .station-tab-health { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.06em; }
+    /* Persistent per-tab importance cue (issue #1101): its OWN element and glyph
+       token, held apart from the health cue above, so an off-screen event or a
+       continuing condition reads on every tab without colour and alongside
+       health. Never a sort key — importance never reorders tabs. */
+    .station-tab-importance { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.06em; }
     #station-hero-title, #station-hero-meta, #station-hero-ai, #station-hero-health { grid-column: 2; }
     #station-hero-title { font-size: var(--text-md); font-weight: 700; }
     #station-hero-meta, #station-hero-ai, #station-hero-health { font-size: var(--text-xs); color: var(--ink-dim); }
@@ -1651,6 +1656,7 @@
               blackboards: window.simState && window.simState.blackboards,
               stationHosts: window.simState && window.simState.stationHosts,
               stationHealth: window.simState && window.simState.stationHealth,
+              stationImportance: window.simState && window.simState.stationImportance,
               stationRatings: window.simState && window.simState.stationRatings,
               activeStation: activeConsole,
             }) : { tabs: mine.map(id => ({ id })), selected: mine[0] || null };
@@ -2129,6 +2135,7 @@
         blackboards: window.simState && window.simState.blackboards,
         stationHosts: window.simState && window.simState.stationHosts,
         stationHealth: window.simState && window.simState.stationHealth,
+        stationImportance: window.simState && window.simState.stationImportance,
         stationRatings: window.simState && window.simState.stationRatings,
         activeStation: activeConsole,
       });
@@ -2144,6 +2151,13 @@
         translate: t,
         onActivate: stationId => {
           setActiveConsole(stationId);
+          // Tell the host this Station's tab was visited (issue #1101), so it
+          // clears the one-off `unread` importance flag authoritatively through
+          // the next SimState — NOT an optimistic local clear. In-game only:
+          // renderStationHero returns early outside a live game, so onActivate
+          // never fires in the lobby. A continuing `critical` condition is
+          // immune host-side, so this cannot lower an alert.
+          send('StationVisited', { station: stationId });
           scheduleRender();
         },
       });

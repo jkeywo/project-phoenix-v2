@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
-import { heroBarHealthState, heroBarKeyTarget, heroBarModel, renderHeroBarDom } from '../../gui/hero-bar.js';
+import { heroBarHealthState, heroBarImportanceState, heroBarKeyTarget, heroBarModel, renderHeroBarDom } from '../../gui/hero-bar.js';
 
 const stations = [
   { id: 'helm', name: 'Helm' },
@@ -87,6 +87,40 @@ it('classifies health states without a tunable threshold', () => {
   expect(heroBarHealthState(1)).toBe('healthy');
   expect(heroBarHealthState(0.999)).toBe('damaged');
   expect(heroBarHealthState(0)).toBe('damaged');
+});
+
+it('classifies importance into four independent-lifecycle states', () => {
+  expect(heroBarImportanceState(null)).toBe('none');
+  expect(heroBarImportanceState(undefined)).toBe('none');
+  expect(heroBarImportanceState({ unread: false, critical: false })).toBe('none');
+  expect(heroBarImportanceState({ unread: true, critical: false })).toBe('unread');
+  expect(heroBarImportanceState({ unread: false, critical: true })).toBe('critical');
+  // A one-off event AND a continuing condition at once is its own state, not a
+  // precedence collapse — the two lifecycles are independent.
+  expect(heroBarImportanceState({ unread: true, critical: true })).toBe('both');
+});
+
+it('sources per-tab importance from the host map, held apart from health', () => {
+  const model = heroBarModel({
+    directStation: 'helm', stations,
+    stationHosts: {
+      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    },
+    // helm is damaged AND has a critical condition; navigation is healthy with a
+    // one-off unread event; comms has neither health damage nor importance.
+    stationHealth: { helm: 0.4, navigation: 1, comms: null },
+    stationImportance: {
+      helm: { unread: false, critical: true },
+      navigation: { unread: true, critical: false },
+    },
+    stationRatings: {}, activeStation: 'helm',
+  });
+  const byId = Object.fromEntries(model.tabs.map(tab => [tab.id, tab]));
+  // Health and importance are carried as separate fields with separate states.
+  expect(byId.helm).toMatchObject({ healthState: 'damaged', importanceState: 'critical' });
+  expect(byId.navigation).toMatchObject({ healthState: 'healthy', importanceState: 'unread' });
+  expect(byId.comms).toMatchObject({ healthState: 'none', importanceState: 'none' });
 });
 
 function heroDom() {
@@ -189,6 +223,89 @@ it('shows a persistent per-tab health cue that survives an importance alert', ()
   expect(helmTab.dataset.alert).toBe('true');
   expect(helmTab.querySelector('.tab-alert')).not.toBeNull();
   expect(cueOf('helm').textContent).toBe('damaged');
+});
+
+it('renders a persistent per-tab importance cue on every tab, coexisting with health', () => {
+  const { elements } = heroDom();
+  const model = heroBarModel({
+    directStation: 'helm', stations,
+    stationHosts: {
+      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    },
+    stationHealth: { helm: 0.4, navigation: 1, comms: null },
+    stationImportance: {
+      helm: { unread: true, critical: true },
+      navigation: { unread: false, critical: true },
+    },
+    stationRatings: {}, activeStation: 'helm',
+  });
+  renderHeroBarDom({ ...elements, model, translate, onActivate: vi.fn() });
+
+  const healthCue = id => elements.tabsEl.querySelector(`[data-station="${id}"] .station-tab-health`);
+  const importanceCue = id => elements.tabsEl.querySelector(`[data-station="${id}"] .station-tab-importance`);
+
+  // Health and importance are SEPARATE spans with SEPARATE data attributes, both
+  // present on every tab — neither suppresses the other (AC4).
+  for (const id of ['helm', 'navigation', 'comms']) {
+    const tab = elements.tabsEl.querySelector(`[data-station="${id}"]`);
+    expect(healthCue(id)).not.toBeNull();
+    expect(importanceCue(id)).not.toBeNull();
+    expect(tab.dataset.health).toBeTruthy();
+    expect(tab.dataset.importance).toBeTruthy();
+  }
+  // The importance cue reflects each tab's own state, unconditionally (even 'none').
+  expect(elements.tabsEl.querySelector('[data-station="helm"]').dataset.importance).toBe('both');
+  expect(elements.tabsEl.querySelector('[data-station="navigation"]').dataset.importance).toBe('critical');
+  expect(elements.tabsEl.querySelector('[data-station="comms"]').dataset.importance).toBe('none');
+  // Health cue is unchanged and legible beside it.
+  expect(elements.tabsEl.querySelector('[data-station="helm"]').dataset.health).toBe('damaged');
+  expect(importanceCue('comms').textContent).toBe('none');
+});
+
+it('never lets importance reorder the tabs', () => {
+  const { elements } = heroDom();
+  const build = importance => heroBarModel({
+    directStation: 'helm', stations,
+    stationHosts: {
+      navigation: { station: 'navigation', host: 'helm', rating: 'Std' },
+      comms: { station: 'comms', host: 'helm', rating: 'Simple' },
+    },
+    stationImportance: importance,
+    stationRatings: {}, activeStation: 'helm',
+  });
+  const order = () => [...elements.tabsEl.querySelectorAll('button[data-station]')]
+    .map(b => b.dataset.station);
+
+  renderHeroBarDom({ ...elements, model: build({}), translate, onActivate: vi.fn() });
+  const before = order();
+  expect(before).toEqual(['helm', 'navigation', 'comms']);
+
+  // Marking a later tab critical must NOT hoist it — order is authored, never
+  // an importance sort key (AC4).
+  renderHeroBarDom({
+    ...elements,
+    model: build({ comms: { unread: true, critical: true } }),
+    translate,
+    onActivate: vi.fn(),
+  });
+  expect(order()).toEqual(before);
+});
+
+it('reports the visited Station id to onActivate (the StationVisited contract)', () => {
+  const { elements } = heroDom();
+  const onActivate = vi.fn();
+  const model = heroBarModel({
+    directStation: 'helm', stations,
+    stationHosts: { navigation: { station: 'navigation', host: 'helm', rating: 'Std' } },
+    stationImportance: { navigation: { unread: true, critical: false } },
+    stationRatings: {}, activeStation: 'helm',
+  });
+  renderHeroBarDom({ ...elements, model, translate, onActivate });
+  // client.html's onActivate forwards this exact id verbatim into
+  // send('StationVisited', { station }); pinning the argument pins that contract.
+  elements.tabsEl.querySelector('[data-station="navigation"]').click();
+  expect(onActivate).toHaveBeenCalledWith('navigation');
 });
 
 it('renders the neutral no-damage-model readout for a Station with no damage', () => {

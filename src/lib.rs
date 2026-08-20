@@ -155,6 +155,10 @@ pub mod simmath_vectors;
 /// stored inside `vellum-save`'s envelope. Compiles on both targets — a browser
 /// host is the thing that saves.
 pub mod snapshot;
+/// Host-derived per-Station importance projection (issue #1101): a pure,
+/// Bevy-free attention stream (one-off unread events vs continuing critical
+/// conditions), held strictly apart from health.
+pub mod station_importance;
 pub mod world;
 /// Deterministic tick-scoped world-id minting (issue #907) — the single
 /// chokepoint every simulation entity, message and projectile id comes from.

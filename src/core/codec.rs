@@ -418,6 +418,12 @@ mod tests {
                     template_path: "assets/entities/alliance_cruiser.toml".into(),
                 },
             ),
+            (
+                ClientMessageDiscriminants::StationVisited,
+                ClientMessage::StationVisited {
+                    station: crate::messages::StationId("comms".into()),
+                },
+            ),
             // The two client settings-menu routes (issue #940). Both rows carry
             // the same `#[cfg]` the variants do, so in a demo build the table
             // shrinks with the enum and the exhaustiveness test below still
@@ -516,6 +522,11 @@ mod tests {
                         station_health: vec![StationHealthSnapshot {
                             station: StationId("navigation".into()),
                             health: Some(0.5),
+                        }],
+                        station_importance: vec![StationImportanceSnapshot {
+                            station: StationId("navigation".into()),
+                            unread: true,
+                            critical: false,
                         }],
                         control_sources: BTreeMap::from([
                             (SystemId("navigation".into()), "Human".into()),

@@ -79,6 +79,7 @@ export class ClientSimState {
     const controlSources = preserveAuthorityProjection ? this.controlSources : {};
     const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
     const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
+    const stationImportance = preserveAuthorityProjection ? this.stationImportance : {};
     /** Static world snapshot { entities: [EntitySnapshot], scenario_title, scenario_description } */
     this.world = defaultWorld();
     /** 'Auto' | 'Manual' */
@@ -141,6 +142,15 @@ export class ClientSimState {
      * this map rather than summing recipient-scoped damage rows.
      */
     this.stationHealth = stationHealth;
+    /**
+     * Authoritative per-Station importance by Station id (issue #1101).
+     * Each value is `{ unread, critical }` — a one-off unread event (cleared
+     * when the Station is visited) and a continuing critical condition (cleared
+     * only when it resolves), held apart from health. Host-derived and rebuilt
+     * from `snap.station_importance` every SimState, so a Station whose
+     * importance has resolved simply drops out of the map.
+     */
+    this.stationImportance = stationImportance;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = controlSources;
     /** Per-system blackboard mirror, keyed by SystemId string.
@@ -273,6 +283,13 @@ export class ClientSimState {
           (snap.station_health || []).filter(Boolean)
             .map(entry => [entry.station, typeof entry.health === 'number' ? entry.health : null]),
         );
+        // Authoritative per-Station importance (issue #1101), rebuilt wholesale
+        // each tick: a Station absent from the list carries no importance, so a
+        // resolved unread/critical clears authoritatively (never optimistically).
+        this.stationImportance = Object.fromEntries(
+          (snap.station_importance || []).filter(Boolean)
+            .map(entry => [entry.station, { unread: !!entry.unread, critical: !!entry.critical }]),
+        );
         this.navigationWaypoint = snap.navigation_waypoint || null;
         // The host publishes the LocalShip's effective fine-System authority.
         // Missing on older protocol-compatible hosts, where the console
@@ -309,6 +326,7 @@ export class ClientSimState {
         // reconnect handshake for a peer already in the current round.
         this.stationHosts = {};
         this.stationHealth = {};
+        this.stationImportance = {};
         this.controlSources = {};
         break;
       case 'Welcome': {

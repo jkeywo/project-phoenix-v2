@@ -281,10 +281,7 @@ impl HullVisibility {
         let mut order: Vec<StationId> = Vec::new();
         let mut sums: HashMap<StationId, (f32, f32)> = HashMap::new();
         for e in &self.entries {
-            let station = match self.owner_of.get(&e.system_id) {
-                Some(Some(owner)) => owner.clone(),
-                _ => StationId(CORE_BUCKET_ID.to_string()),
-            };
+            let station = self.station_bucket(&e.system_id);
             let slot = sums.entry(station.clone()).or_insert_with(|| {
                 order.push(station.clone());
                 (0.0, 0.0)
@@ -304,6 +301,33 @@ impl HullVisibility {
                 (station, fraction)
             })
             .collect()
+    }
+
+    /// The Station bucket a system falls into: its owning Station, or the
+    /// [`CORE_BUCKET_ID`] bucket when it is ownerless or unknown.
+    ///
+    /// The single source of the station-bucketing [`Self::station_fractions`]
+    /// reduces health over — reused by the host importance projection (issue
+    /// #1101) so an objective's owning Station is attributed exactly the way its
+    /// health is bucketed, never by a second, divergent rule.
+    pub fn station_bucket(&self, system_id: &SystemId) -> StationId {
+        match self.owner_of.get(system_id) {
+            Some(Some(owner)) => owner.clone(),
+            _ => StationId(CORE_BUCKET_ID.to_string()),
+        }
+    }
+
+    /// The owning Station of a system, or `None` when the system is ownerless
+    /// or unknown (i.e. it would fall to the Core bucket).
+    ///
+    /// Unlike [`Self::station_bucket`] this does not substitute the Core bucket,
+    /// so importance attribution (issue #1101) can tell "owned by Station X"
+    /// from "attribute to the ship-wide core bucket".
+    pub fn owned_station(&self, system_id: &SystemId) -> Option<StationId> {
+        match self.owner_of.get(system_id) {
+            Some(Some(owner)) => Some(owner.clone()),
+            _ => None,
+        }
     }
 
     /// True when a hull entry has no owning station — the Core bucket.

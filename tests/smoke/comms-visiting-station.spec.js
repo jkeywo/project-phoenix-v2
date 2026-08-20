@@ -149,6 +149,23 @@ async function lastStationHealth(client, timeout = 8_000) {
   });
 }
 
+/** The latest non-empty `SimState.snapshot.station_importance` array (#1101). */
+async function lastStationImportance(client, timeout = 8_000) {
+  await client.page.waitForFunction(
+    () => (window.__messages || []).some(
+      (m) => m.type === 'SimState' && (m.data.snapshot.station_importance || []).length > 0,
+    ),
+    null,
+    { timeout },
+  );
+  return client.page.evaluate(() => {
+    const msgs = (window.__messages || []).filter(
+      (m) => m.type === 'SimState' && (m.data.snapshot.station_importance || []).length > 0,
+    );
+    return msgs[msgs.length - 1].data.snapshot.station_importance;
+  });
+}
+
 // Issue #1100: the host publishes authoritative per-Station health station-level
 // in `SimState.snapshot.station_health`, exactly like `station_hosts`, so every
 // client shows a Station's health from the host's own sum rather than inferring
@@ -189,6 +206,54 @@ test('station health — the host publishes authoritative per-Station health sta
   expect(typeof byStation.navigation).not.toBe('number');
 
   await tactical.close();
+});
+
+// Issue #1101: the host publishes an authoritative per-Station importance stream
+// in `SimState.snapshot.station_importance`, held apart from health, with two
+// independent-lifecycle flags — one-off `unread` (cleared on visit) and
+// continuing `critical` (cleared only on resolve). This asserts the wire
+// projection reaches a client for the state a solo captain can trigger cheaply
+// off-screen: a raised Red Alert is a continuing `critical` condition attributed
+// to the ship-wide `core` bucket. It also pins AC3's immunity — a `StationVisited`
+// clears only one-off unread events, so the critical mark survives a visit. The
+// unread lifecycle and the simultaneous-health-and-importance case are pinned by
+// the Rust projection tests (`server_app`, `station_importance`) and the vitest
+// client tests (hero-bar / sim-state), which can drive an objective transition
+// the smoke harness has no cheap lever for.
+test('station importance — a Red Alert reaches a client as a continuing critical mark that survives a visit', async ({ context }) => {
+  const serverPage = await bootDestroyerServer(context);
+  const hostId = await readHostPeerId(serverPage);
+
+  const captain = await createTestClient(context, hostId, { name: 'Captain' });
+  await captain.send('SelectStation', { station: 'Captain' });
+  await waitForStation(captain);
+  await captain.send('SetReady', { ready: true });
+  await captain.waitForMessage('GameStarted', 10_000);
+
+  // Raise Red Alert from the captain — a continuing critical condition, derived
+  // host-side and attributed to the ship-wide core bucket.
+  await captain.send('ControlSystem', {
+    target: 'red-alert',
+    payload: { type: 'SetRedAlert', data: { active: true } },
+  });
+
+  const importance = await lastStationImportance(captain);
+  const core = importance.find((e) => e.station === 'core');
+  expect(core, 'a raised Red Alert must publish a critical importance mark on core').toBeDefined();
+  expect(core.critical).toBe(true);
+  // Kept apart from a one-off unread event on the SAME wire entry (AC1).
+  expect(core.unread).toBe(false);
+
+  // AC3: visiting a Station clears ONLY one-off unread events; a continuing
+  // critical condition is immune. Send StationVisited and confirm the critical
+  // mark still arrives on a later broadcast.
+  await captain.page.evaluate(() => { window.__messages = []; });
+  await captain.send('StationVisited', { station: 'core' });
+  const afterVisit = await lastStationImportance(captain);
+  const coreAfter = afterVisit.find((e) => e.station === 'core');
+  expect(coreAfter?.critical, 'a visit must not clear a continuing Red Alert').toBe(true);
+
+  await captain.close();
 });
 
 test('comms — hosted tab: an unclaimable Comms resolves onto a seated Captain host', async ({ context }) => {

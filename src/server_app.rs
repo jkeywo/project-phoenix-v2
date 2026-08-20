@@ -883,6 +883,16 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     // what the host's own cog did. Two `add_systems` calls rather than one
     // `#[cfg]`-riddled tuple, so the demo build's schedule is a strictly
     // smaller thing rather than a differently-shaped one.
+    // Host-side Station importance (issue #1101). Registered unconditionally so
+    // the broadcaster's ingest/read always has a resource; the visit drain is
+    // gated on `Sessions` existing (a headless run has no phone to serve and no
+    // inbound stream to read).
+    app.init_resource::<StationImportanceRes>();
+    app.add_systems(
+        PreUpdate,
+        drain_station_visited.run_if(resource_exists::<crate::lobby::Sessions>),
+    );
+
     app.init_resource::<crate::debug_overlay::LastReportedDebugState>();
     #[cfg(not(phoenix_demo_build))]
     app.add_systems(
@@ -1053,6 +1063,13 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         let entity_states = build_sim_state_entity_states(world);
         let station_hosts = build_station_host_snapshots(world);
         let station_health = build_station_health_snapshots(world);
+        // Fold this tick's host state (objectives + Red Alert) into the
+        // authoritative importance projection before reading it, so the snapshot
+        // reflects the same tick's events (issue #1101). The drain of visits runs
+        // frame-driven elsewhere; this ingest only ever raises flags on their
+        // edge, so it can never resurrect a visit-cleared unread.
+        ingest_station_importance(world);
+        let station_importance = build_station_importance_snapshots(world);
         let control_sources = build_control_source_snapshots(world);
 
         // ── Emit SystemHullUpdate per recipient, only when that recipient's
@@ -1069,6 +1086,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
             entity_states,
             station_hosts,
             station_health,
+            station_importance,
             control_sources,
         };
         vec![ServerMessage::SimState { snapshot }]
@@ -1124,6 +1142,127 @@ fn build_station_health_snapshots(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Authoritative host-side per-Station importance (issue #1101).
+///
+/// The SAME structure the visit-clear ([`drain_station_visited`]) mutates and
+/// the snapshot builder ([`build_station_importance_snapshots`]) reads. Held as
+/// a persistent resource because `unread` is sticky across ticks until a visit
+/// clears it — unlike health, which is recomputed wholesale every tick.
+#[derive(Resource, Default)]
+pub struct StationImportanceRes(pub crate::station_importance::StationImportance);
+
+/// Fold this tick's authoritative host state into [`StationImportanceRes`]
+/// (issue #1101).
+///
+/// Host-derived, tracer-bullet sourcing from state that already exists:
+///
+/// - Each mission objective's terminal edge (Completed/Failed) is a one-off
+///   `unread` event for the Station it is attributed to. Attribution reuses the
+///   repair `owner_of` bucketing (`HullVisibility::owned_station`): an objective
+///   whose target names a Station-owned System is attributed to that Station,
+///   otherwise it falls to the ship-wide core bucket — the same bucket ownerless
+///   hull sums into.
+/// - A raised Red Alert on the local ship is a continuing `critical` condition,
+///   attributed to that ship-wide core bucket.
+///
+/// Authored-TOML importance is a deliberate future seam and is NOT built here.
+fn ingest_station_importance(world: &mut World) {
+    use crate::console::repair::visibility::CORE_BUCKET_ID;
+    use crate::messages::{StationId, SystemId};
+
+    // Objectives as (id, targets, status) — empty on an `App` with no manager.
+    let objectives: Vec<(String, Vec<String>, crate::messages::ObjectiveStatus)> = world
+        .get_resource::<crate::world::server::ObjectiveManagerRes>()
+        .map(|m| {
+            m.0.sorted_snapshots()
+                .into_iter()
+                .map(|o| (o.id, o.targets, o.status))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Red Alert on the local ship, if it has spawned.
+    let red_alert = {
+        let mut q = world.query_filtered::<&crate::ship_state::ShipRedAlert, With<LocalShip>>();
+        q.iter(world).next().map(|r| r.0).unwrap_or(false)
+    };
+
+    // Owned as a value (not borrowing the world), so the resource can be
+    // borrowed mutably below.
+    let vis = crate::console::repair::visibility::hull_visibility(world);
+    let core = StationId(CORE_BUCKET_ID.to_string());
+
+    let attributed: Vec<(String, StationId, crate::messages::ObjectiveStatus)> = objectives
+        .into_iter()
+        .map(|(id, targets, status)| {
+            let station = vis
+                .as_ref()
+                .and_then(|v| {
+                    targets
+                        .iter()
+                        .find_map(|t| v.owned_station(&SystemId(t.clone())))
+                })
+                .unwrap_or_else(|| core.clone());
+            (id, station, status)
+        })
+        .collect();
+
+    let critical_stations: Vec<StationId> = if red_alert {
+        vec![core.clone()]
+    } else {
+        Vec::new()
+    };
+
+    if let Some(mut res) = world.get_resource_mut::<StationImportanceRes>() {
+        res.0.ingest(attributed, critical_stations);
+    }
+}
+
+/// Read this tick's authoritative per-Station importance for the `SimState`
+/// broadcast (issue #1101).
+///
+/// A pure read of [`StationImportanceRes`] — [`ingest_station_importance`] has
+/// already folded the tick's events in. Station-level and recipient-independent,
+/// exactly like [`build_station_health_snapshots`], and safe for `Target::All`.
+/// Empty before the resource is registered.
+fn build_station_importance_snapshots(
+    world: &mut World,
+) -> Vec<crate::messages::StationImportanceSnapshot> {
+    world
+        .get_resource::<StationImportanceRes>()
+        .map(|res| res.0.snapshots())
+        .unwrap_or_default()
+}
+
+/// Drain `ClientMessage::StationVisited` from connected phones and clear the
+/// visited Station's one-off `unread` importance flag (issue #1101 AC2).
+///
+/// Reads raw `InboundMessage` rather than `AdmittedCommands` — like the debug
+/// drains, a visit changes no simulation outcome, only a presentation-attention
+/// flag, so it never crosses command admission. The clear mutates host state
+/// only; it reaches clients solely through the next `SimState` broadcast, which
+/// is the authoritative lifecycle AC2 requires (never an optimistic client
+/// clear). A continuing `critical` condition is untouched — [`StationImportance::visit`](crate::station_importance::StationImportance::visit)
+/// clears only `unread` (AC3).
+fn drain_station_visited(
+    mut reader: MessageReader<crate::lobby::InboundMessage>,
+    sessions: Res<crate::lobby::Sessions>,
+    importance: Option<ResMut<StationImportanceRes>>,
+) {
+    let Some(mut importance) = importance else {
+        return;
+    };
+    for ev in reader.read() {
+        if let crate::messages::ClientMessage::StationVisited { station } = &ev.msg {
+            // Only a connected player's visit counts — same authority gate the
+            // debug drains apply.
+            if sessions.0.players().iter().any(|p| p.token == ev.token) {
+                importance.0.visit(station);
+            }
+        }
+    }
 }
 
 fn build_station_host_snapshots(world: &mut World) -> Vec<crate::messages::StationHostSnapshot> {
@@ -5135,6 +5274,192 @@ mod tests {
 
     #[derive(Resource)]
     struct ShipEntity(Entity);
+
+    // ── Issue #1101: authoritative per-Station importance projection ──────────
+    //
+    // Host-derived from objectives + Red Alert, held apart from health, with two
+    // independent-lifecycle flags: one-off `unread` (cleared on visit) and
+    // continuing `critical` (cleared only on resolve).
+
+    fn core_station() -> StationId {
+        StationId("core".into())
+    }
+
+    fn importance_of<'a>(
+        snaps: &'a [StationImportanceSnapshot],
+        station: &str,
+    ) -> Option<&'a StationImportanceSnapshot> {
+        snaps.iter().find(|s| s.station.0 == station)
+    }
+
+    #[test]
+    fn importance_marks_a_completed_objective_unread_then_clears_only_on_visit() {
+        let mut world = World::new();
+        world.init_resource::<StationImportanceRes>();
+        let mut objectives = crate::world::server::ObjectiveManagerRes::default();
+        objectives.0.add("rescue", "objective.rescue", true, vec![]);
+        objectives.0.complete("rescue");
+        world.insert_resource(objectives);
+
+        // An objective that completed off-screen marks its Station unread. With no
+        // Station-owned target System it buckets to the ship-wide core bucket.
+        ingest_station_importance(&mut world);
+        let snaps = build_station_importance_snapshots(&mut world);
+        assert_eq!(
+            importance_of(&snaps, "core"),
+            Some(&StationImportanceSnapshot {
+                station: core_station(),
+                unread: true,
+                critical: false,
+            })
+        );
+
+        // Visiting clears the one-off unread through host state (AC2)…
+        world
+            .resource_mut::<StationImportanceRes>()
+            .0
+            .visit(&core_station());
+        // …and a later tick re-seeing the still-Completed objective must NOT
+        // resurrect it — the clear is authoritative, not optimistic.
+        ingest_station_importance(&mut world);
+        assert!(
+            build_station_importance_snapshots(&mut world).is_empty(),
+            "a visited one-off event must stay cleared across later broadcasts"
+        );
+    }
+
+    #[test]
+    fn importance_marks_red_alert_critical_that_survives_visit_and_clears_on_resolve() {
+        let mut world = World::new();
+        world.init_resource::<StationImportanceRes>();
+        let ship = world
+            .spawn((LocalShip, crate::ship_state::ShipRedAlert(true)))
+            .id();
+
+        // A raised Red Alert is a continuing critical condition on the core bucket.
+        ingest_station_importance(&mut world);
+        assert_eq!(
+            importance_of(&build_station_importance_snapshots(&mut world), "core"),
+            Some(&StationImportanceSnapshot {
+                station: core_station(),
+                unread: false,
+                critical: true,
+            })
+        );
+
+        // Visiting must NOT clear a continuing condition (AC3).
+        world
+            .resource_mut::<StationImportanceRes>()
+            .0
+            .visit(&core_station());
+        ingest_station_importance(&mut world);
+        assert_eq!(
+            importance_of(&build_station_importance_snapshots(&mut world), "core")
+                .map(|s| s.critical),
+            Some(true),
+            "a visit must not clear a continuing Red Alert"
+        );
+
+        // It clears only when Red Alert is lowered.
+        world
+            .entity_mut(ship)
+            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .unwrap()
+            .0 = false;
+        ingest_station_importance(&mut world);
+        assert!(
+            build_station_importance_snapshots(&mut world).is_empty(),
+            "a resolved Red Alert must drop the critical mark from the broadcast"
+        );
+    }
+
+    #[test]
+    fn importance_carries_simultaneous_unread_and_critical_independently() {
+        // A completed off-screen objective (one-off unread) AND a raised Red
+        // Alert (continuing critical) land on the same core bucket at once. The
+        // two flags are separate fields with separate lifecycles, so they coexist
+        // and a visit clears only the one-off — proving no crosstalk (AC1). Health
+        // is a wholly separate wire field/builder, so it cannot interfere.
+        let mut world = World::new();
+        world.init_resource::<StationImportanceRes>();
+        world.spawn((LocalShip, crate::ship_state::ShipRedAlert(true)));
+        let mut objectives = crate::world::server::ObjectiveManagerRes::default();
+        objectives.0.add("rescue", "objective.rescue", true, vec![]);
+        objectives.0.complete("rescue");
+        world.insert_resource(objectives);
+
+        ingest_station_importance(&mut world);
+        assert_eq!(
+            importance_of(&build_station_importance_snapshots(&mut world), "core"),
+            Some(&StationImportanceSnapshot {
+                station: core_station(),
+                unread: true,
+                critical: true,
+            }),
+            "an unread event and a critical condition must coexist on one Station"
+        );
+
+        // Visiting clears ONLY the one-off unread; the continuing critical stays.
+        world
+            .resource_mut::<StationImportanceRes>()
+            .0
+            .visit(&core_station());
+        ingest_station_importance(&mut world);
+        assert_eq!(
+            importance_of(&build_station_importance_snapshots(&mut world), "core"),
+            Some(&StationImportanceSnapshot {
+                station: core_station(),
+                unread: false,
+                critical: true,
+            }),
+            "a visit clears the one-off unread without disturbing the critical flag"
+        );
+    }
+
+    #[test]
+    fn station_visited_drain_clears_unread_for_a_connected_player() {
+        let mut app = App::new();
+        app.init_resource::<Messages<InboundMessage>>();
+        app.init_resource::<StationImportanceRes>();
+        let mut sessions = crate::lobby::Sessions(crate::session::SessionManager::new());
+        sessions.0.register("tok".into(), "Ada".into()).unwrap();
+        app.insert_resource(sessions);
+        app.add_systems(Update, drain_station_visited);
+
+        // Seed a one-off unread event on the core bucket.
+        app.world_mut()
+            .resource_mut::<StationImportanceRes>()
+            .0
+            .ingest(
+                vec![("rescue".into(), core_station(), ObjectiveStatus::Completed)],
+                Vec::new(),
+            );
+        assert!(
+            app.world()
+                .resource::<StationImportanceRes>()
+                .0
+                .flags_of(&core_station())
+                .unread
+        );
+
+        // A connected player's StationVisited clears it via the wired drain.
+        app.world_mut()
+            .resource_mut::<Messages<InboundMessage>>()
+            .write(InboundMessage {
+                token: "tok".into(),
+                msg: ClientMessage::StationVisited {
+                    station: core_station(),
+                },
+            });
+        app.update();
+        assert!(
+            !app.world()
+                .resource::<StationImportanceRes>()
+                .0
+                .flags_of(&core_station())
+                .unread
+        );
+    }
 
     #[test]
     fn station_host_projection_is_generic_for_non_navigation_stations() {

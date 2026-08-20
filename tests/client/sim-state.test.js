@@ -119,6 +119,43 @@ describe('apply WorldSetup / SimState', () => {
     expect(s.stationHealth).toEqual({});
   });
 
+  it('SimState stores authoritative per-Station importance by Station id', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      station_importance: [
+        { station: 'comms', unread: true, critical: false },
+        { station: 'core', unread: false, critical: true },
+        { station: 'helm', unread: true, critical: true },
+      ],
+    } } });
+    expect(s.stationImportance).toEqual({
+      comms: { unread: true, critical: false },
+      core: { unread: false, critical: true },
+      helm: { unread: true, critical: true },
+    });
+  });
+
+  it('SimState rebuilds per-Station importance each tick so a resolved Station clears', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      station_importance: [{ station: 'comms', unread: true, critical: false }],
+    } } });
+    expect(s.stationImportance).toEqual({ comms: { unread: true, critical: false } });
+    // comms drops out of the next broadcast — the map is rebuilt, clearing it
+    // authoritatively (never an optimistic client clear).
+    s.apply({ type: 'SimState', data: { snapshot: { station_importance: [] } } });
+    expect(s.stationImportance).toEqual({});
+  });
+
+  it('SimState clears per-Station importance at a round boundary', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      station_importance: [{ station: 'comms', unread: true, critical: false }],
+    } } });
+    s.apply({ type: 'ReturnedToLobby', data: {} });
+    expect(s.stationImportance).toEqual({});
+  });
+
   it('SimState stores the authoritative fine-System control-source projection', () => {
     const s = new ClientSimState();
     s.apply({ type: 'SimState', data: { snapshot: {

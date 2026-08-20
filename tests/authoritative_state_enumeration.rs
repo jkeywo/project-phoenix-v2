@@ -247,6 +247,15 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     ("DebugDamageEnabled", "presentation"),
     ("DebugEntitiesEnabled", "presentation"),
     ("DebugEntityInspectorEnabled", "presentation"),
+    // Presentation — the per-Station importance stream (issue #1101) is a
+    // host-derived attention surface: one-off `unread` events (edge-triggered
+    // on an objective's terminal transition, cleared when the Station is
+    // visited) and continuing `critical` conditions (level-triggered from Red
+    // Alert), projected to the Hero Bar. Nothing in the sim reads it to decide
+    // anything the fixed tick computes — it only drives which tab asks for
+    // attention — so by the "does it change what the sim computes" line above
+    // it is presentation, not authoritative.
+    ("StationImportanceRes", "presentation"),
 
     // Broadcast caches — one-directional delta-suppression mirrors of
     // already-authoritative state, not a second copy of simulation truth.
@@ -300,6 +309,13 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     // LocalShip's spawn `#[require]`, never a mid-run archetype move.
     ("ScenarioDetailFloor", "derived"),
     ("VisitingStationHosts", "derived"),
+    // Derived — the persist-behind-human edge scratch (issue #1108). Records
+    // each Command directed Station's last-observed AI/human control state so
+    // the Human->AI handoff fires once, on the edge. It is a pure function of
+    // the ship's control sources (themselves digest-free) and the AUTHORITATIVE
+    // outcome of every edge — resume or reset — lands in `ShipStationStances`,
+    // which IS folded; this map only remembers when the last transition was.
+    ("LastDirectedControl", "derived"),
 
     // Cleared-at-fold (the one new classification term this issue adds,
     // deterministic-simulation.yaml's `digest-exclusion-classes`):

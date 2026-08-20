@@ -44,6 +44,7 @@
        payload normaliser. -->
   <script type="module" src="gui/mount-plan.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
+  <script type="module" src="gui/console-mount.js"></script>
   <script type="module" src="gui/hero-bar.js"></script>
   <script type="module" src="gui/station-roster.js"></script>
   <script type="module" src="gui/client-router.js"></script>
@@ -1677,17 +1678,22 @@
       // returns null and is silently skipped.
       const stationIds = ((s.shipStations && s.shipStations.stations) || [])
         .map(st => st.id).filter(Boolean);
-      const sections = (typeof window.consoleSections === 'function')
-        ? window.consoleSections(activeConsole, inGame, stationIds)
-        : Object.fromEntries(stationIds.map(id => {
-            // Boot-race fallback: canonical `${id}-ui` scheme + the one
-            // tactical → weapons alias (single home: gui/mount-plan.js).
-            const base = id === 'tactical' ? 'weapons' : id;
-            return [base + '-ui', inGame && activeConsole === id];
-          }));
-      for (const [sectionId, visible] of Object.entries(sections)) {
-        const el = $(sectionId);
-        if (el) el.className = visible ? 'console-section active' : 'console-section';
+      if (typeof window.applyConsoleVisibility === 'function') {
+        // The tab-switch seam (gui/console-mount.js): a pure `.active` toggle
+        // over the mounted sections. It never touches iframe nodes, so session-
+        // local console state survives a switch away and back (issue #1099 AC1).
+        window.applyConsoleVisibility(document, activeConsole, inGame, stationIds);
+      } else {
+        // Boot-race fallback: canonical `${id}-ui` scheme + the one tactical →
+        // weapons alias (single home: gui/mount-plan.js).
+        const sections = Object.fromEntries(stationIds.map(id => {
+          const base = id === 'tactical' ? 'weapons' : id;
+          return [base + '-ui', inGame && activeConsole === id];
+        }));
+        for (const [sectionId, visible] of Object.entries(sections)) {
+          const el = $(sectionId);
+          if (el) el.className = visible ? 'console-section active' : 'console-section';
+        }
       }
 
       // Orientation drives console CSS via the container's data attribute.
@@ -2203,30 +2209,14 @@
     function mountConsoles(shipStations) {
       const container = $('console-container');
       if (!container) return;
-
-      // Remove all previously-mounted console sections (identified by class),
-      // but leave the lobby-ui sibling untouched.
-      const existing = container.querySelectorAll('.console-section');
-      for (const el of existing) el.remove();
-
-      const plan = (typeof window.planMounts === 'function')
-        ? window.planMounts(shipStations) : [];
-      for (const mount of plan) {
-        const section = document.createElement('section');
-        section.id = mount.sectionId;
-        section.className = 'console-section';
-
-        const iframe = document.createElement('iframe');
-        iframe.id = mount.iframeId;
-        iframe.src = mount.url;
-        iframe.title = mount.title;
-        iframe.allowFullscreen = true;
-
-        section.appendChild(iframe);
-        container.appendChild(section);
-
-        // Attach load listener so the iframe re-pushes state after load/reload.
-        _attachIframeLoadListener(iframe, mount.stationId);
+      // The mount seam lives in gui/console-mount.js (issues #827, #1099): it
+      // owns node creation (via gui/mount-plan.js planMounts) so the iframe
+      // nodes it creates are the persistent ones a tab switch must preserve.
+      // We attach the per-iframe load listener here so the iframe re-pushes
+      // state after load/reload.
+      if (typeof window.mountConsolesDom === 'function') {
+        window.mountConsolesDom(document, container, shipStations,
+          (iframe, mount) => _attachIframeLoadListener(iframe, mount.stationId));
       }
     }
 

@@ -1,6 +1,7 @@
 import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
 import { heroBarHealthState, heroBarImportanceState, heroBarKeyTarget, heroBarModel, renderHeroBarDom } from '../../gui/hero-bar.js';
+import { reconcileActiveConsole } from '../../gui/lobby-state.js';
 
 const stations = [
   { id: 'helm', name: 'Helm' },
@@ -345,6 +346,40 @@ it('falls back to the direct tab when a selected visitor leaves', () => {
   });
   expect(model.selected).toBe('helm');
   expect(model.tabs.map(tab => tab.id)).toEqual(['helm']);
+});
+
+// Issue #1099 AC4: when the selected visiting Station leaves, focus returns to
+// the primary tab; a later return restores the visitor's context WITHOUT
+// stealing focus. This exercises the exact heroBarModel → reconcileActiveConsole
+// chain client.html runs on every reconcile (client.html:1651-1667).
+it('returns a visitor without stealing focus from the primary tab', () => {
+  const host = h => ({
+    navigation: h ? { station: 'navigation', host: 'helm', rating: 'Std' } : null,
+  });
+  const build = (activeStation, present) => heroBarModel({
+    directStation: 'helm', stations, stationHosts: host(present),
+    stationRatings: {}, activeStation,
+  });
+
+  // Player is looking at the visiting Navigation tab.
+  let active = 'navigation';
+  expect(build(active, true).selected).toBe('navigation');
+
+  // Navigation leaves: it drops from the tabs, so the model falls back to the
+  // primary, and the reconciler moves the active console there too.
+  const gone = build(active, false);
+  expect(gone.tabs.map(t => t.id)).toEqual(['helm']);
+  expect(gone.selected).toBe('helm');
+  active = reconcileActiveConsole(active, gone.tabs.map(t => t.id));
+  expect(active).toBe('helm');
+
+  // Navigation returns. The active console is now the primary and still present,
+  // so focus must STAY on the primary — the returning visitor does not grab it —
+  // while its tab (and thus its persistent context) is back and available.
+  const back = build(active, true);
+  expect(reconcileActiveConsole(active, back.tabs.map(t => t.id))).toBe('helm');
+  expect(back.selected).toBe('helm');
+  expect(back.tabs.map(t => t.id)).toEqual(['helm', 'navigation']);
 });
 
 describe('keyboard roving focus', () => {

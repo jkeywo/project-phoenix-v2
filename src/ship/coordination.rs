@@ -1597,4 +1597,38 @@ station = "navigation"
             "a non-direct visiting candidate is skipped; resolution stays finite"
         );
     }
+
+    /// Issue #1099 AC3: a disconnect relocates a human-seeking Station. The
+    /// resolver is a pure per-tick recompute keyed on which seats are directly
+    /// held; a holder dropping off (its seat no longer `is_directly_held`) moves
+    /// the visiting Station on to the next authored host without any state of
+    /// its own being reset. `holder_for_station` returning `None` for a
+    /// disconnected holder (see `lobby::session`) is what flips the input here.
+    #[test]
+    fn a_disconnect_relocates_a_human_seeking_station_to_the_next_host() {
+        let config = visiting_config();
+        let power = config.station(&StationId("power".into())).unwrap();
+        let none = std::collections::BTreeSet::new();
+
+        // Shields officer seated: power visits shields' authored host order
+        // — host_order = ["shields", "repair"], shields first and held.
+        let before = resolve_visiting_station(
+            &config,
+            power,
+            |id| id.0 == "shields" || id.0 == "repair",
+            &none,
+        );
+        assert_eq!(before.host, Some(StationId("shields".into())));
+
+        // The shields holder disconnects: its seat is no longer directly held,
+        // so the very same recompute relocates power on to `repair`, the next
+        // authored host that is still held. Nothing about power's own state is
+        // touched — the resolver reads the seat map and nothing else.
+        let after = resolve_visiting_station(&config, power, |id| id.0 == "repair", &none);
+        assert_eq!(
+            after.host,
+            Some(StationId("repair".into())),
+            "losing the current host relocates the visiting Station to the next authored one",
+        );
+    }
 }

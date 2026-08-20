@@ -374,3 +374,75 @@ test('comms — AI-hosted: falls back to AI once every host_order seat is unheld
 
   await tactical.close();
 });
+
+/** Wait until `comms`'s resolved host equals `expected` (a seat id, or null). */
+async function waitForCommsHost(client, expected, timeout = 8_000) {
+  await client.page.waitForFunction(
+    (exp) => (window.__messages || []).some(
+      (m) => m.type === 'SimState'
+        && (m.data.snapshot.station_hosts || []).some(
+          (h) => h.station === 'comms' && (h.host ?? null) === exp,
+        ),
+    ),
+    expected,
+    { timeout },
+  );
+}
+
+// Issue #1099 AC3: a disconnect relocates a human-seeking Station to the next
+// held seat while the vacated seat stays RECOVERABLE, and a reconnect returns
+// the same Station state to its holder — all observed through station_hosts and
+// live admission, never internal state. Comms is the destroyer's auxiliary
+// human-seeking Station (host_order = ["tactical", "engineering", "captain",
+// "helm"]), so a Tactical holder dropping off must move Comms down that order to
+// the still-seated Captain, and a same-token reconnect must bring it back to
+// Tactical.
+test('comms — a disconnect relocates the visiting host, and a reconnect restores it', async ({ context }) => {
+  const serverPage = await bootDestroyerServer(context);
+  const hostId = await readHostPeerId(serverPage);
+
+  const TAC_TOKEN = 'visiting-station-tactical';
+  const tactical = await createTestClient(context, hostId, { token: TAC_TOKEN, name: 'Tactical' });
+  await tactical.send('SelectStation', { station: 'Tactical' });
+  await waitForStation(tactical);
+
+  const captain = await createTestClient(context, hostId, { name: 'Captain' });
+  await captain.send('SelectStation', { station: 'Captain' });
+  await waitForStation(captain);
+
+  await tactical.send('SetReady', { ready: true });
+  await captain.send('SetReady', { ready: true });
+  await tactical.waitForMessage('GameStarted', 10_000);
+
+  // Comms visits Tactical — the first held seat in host_order.
+  let host = await lastCommsHost(tactical, 'comms');
+  expect(host.host).toBe('tactical');
+
+  // Tactical disconnects. Its seat is no longer directly held, so Comms
+  // relocates down host_order past the unheld Engineering to the seated
+  // Captain. Watched on Captain's own SimState stream so the assertion is
+  // through an independent observer.
+  await captain.page.evaluate(() => {
+    window.__messages = window.__messages.filter((m) => m.type !== 'SimState');
+  });
+  await tactical.close();
+  await waitForCommsHost(captain, 'captain');
+  host = await lastCommsHost(captain, 'comms');
+  expect(host.host, 'a disconnect relocates Comms to the next held seat').toBe('captain');
+
+  // Tactical reconnects with the SAME token. Nobody claimed the seat in the
+  // meantime, so it is restored and Comms returns to Tactical — the same
+  // Station state back on its holder.
+  const tacticalBack = await createTestClient(context, hostId, { token: TAC_TOKEN, name: 'Tactical' });
+  await tacticalBack.waitForMessage('Welcome', 10_000);
+  await waitForCommsHost(tacticalBack, 'tactical');
+  host = await lastCommsHost(tacticalBack, 'comms');
+  expect(host.host, 'a reconnect returns the visiting Station to its holder').toBe('tactical');
+
+  // Admission follows the restored host: the reconnected Tactical token is
+  // admitted as the live Comms surface, exactly as before the drop.
+  await tacticalBack.waitForMessage('CommsState', 8_000);
+
+  await captain.close();
+  await tacticalBack.close();
+});

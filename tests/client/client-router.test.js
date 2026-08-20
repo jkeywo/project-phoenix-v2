@@ -178,6 +178,42 @@ describe('routeMessage — SimState render guard', () => {
   });
 });
 
+// Issue #1099 AC1: console iframes are (re)mounted ONLY on the Welcome
+// `mount-consoles` side effect. A hosting change (SimState.station_hosts) or a
+// station reassignment must NOT re-mount, or a visiting Station's persistent
+// iframe — and its session-local interface context — would be torn down under
+// the player. The iframe-node persistence itself is pinned in
+// console-persistence.test.js; this pins the router seam that must never ask
+// for a remount outside Welcome.
+describe('routeMessage — consoles re-mount only on Welcome (issue #1099 AC1)', () => {
+  const seated = () => baseUiState({
+    phase: 'InProgress',
+    players: [{ token: MY, name: 'Ada', station: 'helm', ready: true }],
+  });
+
+  it('a SimState hosting update emits no mount-consoles side effect', () => {
+    const msg = {
+      type: 'SimState',
+      data: { snapshot: { station_hosts: [{ station: 'comms', host: 'helm', rating: 'Std' }] } },
+    };
+    const r = routeMessage(msg, ctx(seated()));
+    expect(effects(r)).not.toContain('mount-consoles');
+    expect(effects(r)).toEqual([]);
+  });
+
+  it('non-Welcome lifecycle messages never re-mount consoles', () => {
+    for (const msg of [
+      { type: 'StationAssigned', data: { token: MY, station_id: 'comms' } },
+      { type: 'RatingChanged', data: { station_id: 'comms', rating_name: 'Std' } },
+      { type: 'BlackboardUpdate', data: { updates: [['comms', {}]] } },
+      { type: 'PlayerJoined', data: { player: { token: 'x', name: 'X' } } },
+    ]) {
+      const r = routeMessage(msg, ctx(seated()));
+      expect(effects(r)).not.toContain('mount-consoles');
+    }
+  });
+});
+
 describe('routeMessage — BlackboardUpdate', () => {
   const bbMsg = (systems) => ({
     type: 'BlackboardUpdate',

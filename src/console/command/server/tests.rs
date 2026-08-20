@@ -368,3 +368,68 @@ fn the_blackboard_marks_the_station_off_the_board_when_human_held() {
         "a human at the directed Station takes it off the Command board"
     );
 }
+
+/// Issue #1099 AC2: a direct claim relocates who OPERATES a Station's surface,
+/// but must never reset the authoritative Station state stored off to the side
+/// of hosting. A stored Command stance lives on the ship entity keyed by
+/// `StationId`; the lobby claim path only mutates Sessions and control sources.
+/// Prove the stance — and the canonical authoritative-state digest that folds
+/// it (`sim_digest::world_digest` → `fold_station_stances_namespace`) — is
+/// byte-unchanged when the directed Station is claimed by a human (its fine
+/// System flips AI → Human, the whole observable authoritative effect of a
+/// mid-game direct claim).
+#[test]
+fn a_direct_claim_of_the_directed_station_preserves_the_stored_stance_and_digest() {
+    let mut app = App::new();
+    // tactical AI (Command may direct it), Command human-operated.
+    let ship = spawn_ship(&mut app, true, false);
+    // A minted world id so the stance namespace folds this ship (the fold keys
+    // on `EntityUuid`; an unminted hull would fold nothing here).
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::entity_spawner::EntityUuid(
+            crate::world_id::WorldId::new(crate::world_id::IdNamespace::Entity, 1, 1).render(),
+        ));
+
+    // A human Command operator lands a standing order while tactical is AI.
+    set_admitted(&mut app, ship, "tactical", "weapons-free");
+    app.world_mut()
+        .run_system_cached(handle_set_station_stance)
+        .unwrap();
+    assert_eq!(
+        stances(&app, ship).0.get(&tactical()).map(String::as_str),
+        Some("weapons-free"),
+    );
+
+    let digest_before = crate::sim_digest::world_digest(app.world());
+
+    // Direct claim: a player takes the Tactical seat, so its fine System flips
+    // AI → Human. Nothing here touches ShipStationStances.
+    {
+        let mut ship_mut = app.world_mut().entity_mut(ship);
+        let mut sources = ship_mut.get_mut::<ShipSystemControlSources>().unwrap();
+        sources
+            .0
+            .set(SystemId("phaser-fore".into()), ControlSource::Human);
+    }
+    // Re-run the Command input systems exactly as a post-claim tick would: with
+    // no new order admitted and Command still human, none of them may rewrite
+    // the stored stance.
+    app.world_mut()
+        .run_system_cached(handle_set_station_stance)
+        .unwrap();
+    app.world_mut()
+        .run_system_cached(operate_command_ai)
+        .unwrap();
+
+    assert_eq!(
+        stances(&app, ship).0.get(&tactical()).map(String::as_str),
+        Some("weapons-free"),
+        "a direct claim must not reset the stored Command stance",
+    );
+    assert_eq!(
+        crate::sim_digest::world_digest(app.world()),
+        digest_before,
+        "a direct claim must not move the authoritative-state digest",
+    );
+}

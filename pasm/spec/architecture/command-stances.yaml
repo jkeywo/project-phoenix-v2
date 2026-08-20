@@ -1,0 +1,92 @@
+entities:
+  - component: command-station-authority
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Command Station and Stance Authority
+      summary: An auxiliary, data-authored Command station that directs one AI-controlled proving Station by selecting a stance from that Station's authored catalogue, seeding a posture fact into the target Station's existing AI policy hosts without operating, buffing, or bypassing any fine System.
+      rationale:
+        - "[ai] Command is authored on the hull (auxiliary=true, human_seeking=true, host_order names its host — [\"captain\"] on the Alliance Destroyer), never a hard-coded Captain rule. It resolves and mounts like any human-seeking station (the shared visiting-station-resolver places it as a Hero Bar tab on its host), but is not offered as a claimable lobby seat. When its host seat is directly held, that holder operates Command; otherwise it falls to ship AI, which keeps the directed Station in its alert-neutral stance."
+        - "[ai] Command owns a `command` System (kind=command, the admitted target for SetStationStance) and lists exactly ONE authored `command_target` Station, and only while that target is AI-controlled. On the Destroyer the target is Tactical — the hull's one existing AI branch that read Red Alert directly (the weapons `min_alert_to_fire` fire gate), so migrating it onto the stance path realises the issue faithfully rather than inventing a new behaviour."
+        - "[ai] A selected stance seeds the target Station's ordinary AI hosts a posture fact 'in the same broad manner that Red Alert currently informs behaviour' — it never applies a hidden statistical bonus, never operates a fine System, and never bypasses admission, cooldown, range or arc. `red_alert` remains an AI fact; a hull nobody directs is byte-identical to the prior direct Red-Alert fire gates because the effective posture then tracks the ship's own red alert exactly as before."
+        - "[ai] Admission is the existing per-station rule, not a new gate: command_admission::policy::is_command_authorized resolves the Command host (via the live human-seeking host map) and admits SetStationStance for the token holding that resolved host, exactly as any other human-seeking station's systems are admitted for their seek host."
+    architecture:
+      kind: authority-policy
+      authority: authoritative
+      owns: [command-stance-selection-state]
+      reads: [ship-station-system-topology-state, session-station-ownership-state, system-control-source-state]
+      writes: [system-control-source-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/console/command/mod.rs, src/console/command/server.rs, src/command_admission/policy.rs, src/ship/config.rs]
+      symbols: [CommandPlugin, ShipStationStances, CommandBlackboard, StationStanceConfig, command_target, is_command_authorized]
+      messages: [SetStationStance]
+      tests: [cargo test, tests/smoke/command-console.spec.js]
+    evidence:
+      - kind: test
+        reference: command-console.spec.js
+        summary: >-
+          End-to-end smoke: a human hosting Command selects an authored stance
+          for the AI-controlled Tactical station and the target's weapons AI
+          posture follows the selection, while an uncommanded hull keeps the
+          prior Red-Alert-driven fire behaviour.
+
+  - component: command-stance-resolver
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Command Stance Resolver
+      summary: Pure, Bevy-free logic that decides which stances a human Command operator may select, which alert-neutral stance is the current default, how a selection follows an alert-level change, and which posture fact the selection seeds for the directed Station's AI hosts.
+      rationale:
+        - "[ai] The authored catalogue IS the entire selectable vocabulary: standard stances plus exactly one normal-alert-neutral and one high-alert-neutral fallback (both mandatory, enforced at load). A human operator may select only an authored stance; Command 'does not invent orders outside the authored vocabulary'."
+        - "[ai] An alert-level change switches neutral-to-neutral ONLY when the Station is already in a neutral stance; it never overwrites a deliberately selected standard stance. A standard stance may author persist_behind_human so a durable order (e.g. weapons-free) survives a human handoff rather than resetting to neutral."
+        - "[ai] With no explicit selection the seeded posture TRACKS the ship's own red alert, which is precisely the pre-#1107 behaviour — the property that keeps an uncommanded hull byte-identical."
+    architecture:
+      kind: authority-policy
+      authority: authoritative
+      reads: [command-stance-selection-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/ship/command_stance.rs, src/ship/config.rs]
+      symbols: [neutral_stance_for_alert, is_selectable, effective_high_alert, selection_after_alert_change, stance_by_id, StanceKind, StationStanceConfig]
+      tests: [cargo test]
+
+  - state: command-stance-selection-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Command Stance Selection State
+      summary: Authoritative per-target selected stance for each AI-controlled Station a Command station directs, defaulting to the alert-neutral stance for the current alert level.
+    architecture:
+      classification: authoritative
+      owner: command-station-authority
+      writers: [command-station-authority]
+    implementation:
+      status: declared
+      paths: [src/console/command/server.rs, src/ship/command_stance.rs]
+      symbols: [ShipStationStances]
+
+  - message: set-station-stance-command
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Set Station Stance Command
+      summary: Untrusted client-to-host command carrying a target station id and a stance id, admitted only for the token holding the resolved Command host and only naming a stance in the target's authored catalogue.
+    architecture:
+      authority: request
+      producer: [command-station-authority]
+      consumer: [command-station-authority]
+      validator: [system-command-admission-policy]
+      trust_boundary: client-to-host
+      payload: SetStationStance
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/core/codec.rs, gui/action-map.js, gui/console-state.js]
+      symbols: [SetStationStance]
+      tests: [cargo test, tests/client/action-map.test.js, tests/client/console-state.test.js]

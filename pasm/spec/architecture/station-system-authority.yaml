@@ -47,6 +47,7 @@ entities:
         - "[ai] Host eligibility is about live placement, not Station type: an actively directly held human-seeking Station may host, while a Station currently resolved as visiting has no direct holder and cannot host another visitor, so nesting cannot create transitive authority."
         - "[ai] Scenario floors belong to the root world and supporting-world loads reject them, so an additive layer cannot silently replace or discard the selected scenario's crew-detail contract; Combat Test authors Navigation as its first shipped floor tracer."
         - "[ai] The host projects complete Station placement and effective rating generically in SimSnapshot, rather than asking a family blackboard such as Navigation to carry shell ownership metadata. The same snapshot projects the local ship's sorted fine-System control sources from the live resolver, so a visiting Station's manual authority cannot be overwritten on the client by its stale lobby rating."
+        - "[ai] Auxiliary vs visiting is an orthogonal, authored per-Station distinction, enforced generically rather than per-station. An `auxiliary` Station is not offered as a claimable lobby seat (the available_stations filter in lobby/session.rs drops auxiliary defs; a claim on one is a no-op in lobby/handler.rs) yet stays `human_seeking`, so it still resolves a host through this resolver and presents on the Hero Bar. An auxiliary Station is also never a candidate HOST: a visiting Station never lands on an auxiliary surface. On the Alliance Destroyer, Navigation, Comms and Command are all auxiliary human-seeking (hosted-tab-only); Command additionally names a `command_target` — see command-station-authority."
     architecture:
       kind: authority-policy
       authority: authoritative
@@ -56,7 +57,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs]
+      paths: [src/ship/coordination.rs, src/ship/coordination_systems.rs, src/ship/components.rs, src/lobby/session.rs, src/lobby/handler.rs]
       symbols: [resolve_visiting_station, resolve_scenario_detail_floor, write_scenario_detail_floor, VisitingStationAssignment, VisitingStationHosts, ScenarioDetailFloor]
       tests: [cargo test]
 

@@ -40,9 +40,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: Human-Seeking Stations
-      summary: "A human-seeking station retains its complete station identity, systems and UI while resolving onto a directly player-held host station, where the shared Hero Bar presents it as a peer tab. Primary stations remain separately claimable; auxiliary stations such as Command may have no dedicated seat. Resolution prefers a direct active holder, then walks only the station's finite authored fallback list, then assigns AI. A visiting station uses its own authored visiting rating, raised where necessary by the scenario detail floor, and never changes the host station's rating."
+      summary: "A human-seeking station retains its complete station identity, systems and UI while resolving onto a directly player-held host station, where the shared Hero Bar presents it as a peer tab. Primary stations remain separately claimable; auxiliary stations such as Command, and now the Destroyer's Navigation and Comms, have no dedicated claimable lobby seat. Resolution prefers a direct active holder, then walks only the station's finite authored fallback list, then assigns AI. A visiting station uses its own authored visiting rating, raised where necessary by the scenario detail floor, and never changes the host station's rating."
       rationale:
         - "Station-scale movement preserves authored UI, alerts, health and control depth instead of rebuilding fragments of a station on every possible host. Comms and Navigation migrate from the delivered fine-system seek onto this complete-station model."
+        - "[ai] Auxiliary vs visiting is an orthogonal, per-station authored distinction. On the Alliance Destroyer, Navigation and Comms now author auxiliary=true while staying human_seeking with their host_order fallback: they lose their claimable lobby seat but still resolve a host and present on the Hero Bar — the same shape as the Command station (#1107). The hull therefore offers four crewable seats (captain, helm, tactical, engineering); navigation, comms and command are auxiliary. Comms drops navigation from its host_order because a human-seeking station is never directly held and so can never host another."
         - "Only directly player-held stations are eligible hosts. A visiting station cannot host another visiting station, preventing nested tabs, transitive authority and cycles."
         - "Fallback lists are deliberately partial. Compatibility is an authored design choice, so an exhausted list reaches AI even if an unrelated human remains seated. Battleship content in Band D uses Power → Repair → AI and Shields → Sensors → AI."
         - "A disconnected or AFK direct holder retains seat ownership but is temporarily ineligible; the station seeks a fallback host and returns intact when its holder becomes active. Accessibility eligibility applies to the complete visiting surface at its scenario-required rating, while the player's private settings remain undisclosed."
@@ -62,3 +63,17 @@ entities:
         - "If a selected visiting station leaves, focus returns to the primary tab. A later return restores its session-local UI state but does not steal focus."
     game_design:
       must_not_be: [implemented independently by each console page, allowed to hide station health behind an alert, reordered in response to urgency]
+
+  - decision: console-complexity-command-station-stances
+    core:
+      status: accepted
+      confidence: confirmed
+      origin: ai
+      title: Command Station and Stances
+      summary: "Command is an auxiliary, data-authored human-seeking station (issue #1107) that directs one AI-controlled proving station by selecting a stance from that station's authored catalogue. The stance seeds a posture into the target station's existing AI policy hosts — in the same broad manner Red Alert informs behaviour — and never operates, buffs, or bypasses any fine system. On the Alliance Destroyer, Command is hosted by Captain through hull data and directs Tactical while Tactical is AI-controlled."
+      rationale:
+        - "[ai] Command works at station scale: it tells an AI-controlled station what posture to adopt, then that station's existing authored policies decide how its individual systems act. A human Command operator may select only an authored stance, never invent one; the operator gains no second set of fine-system controls."
+        - "[ai] Every directed station authors standard stances plus two mandatory alert-neutral fallbacks (normal-alert-neutral, high-alert-neutral). The prior direct Red-Alert AI fire branches migrate onto this stance path: high-alert-neutral behaves as 'at red alert', normal-alert-neutral as 'stood down'. red_alert remains an AI fact, and an uncommanded hull is byte-identical to prior behaviour because the effective posture then tracks the ship's own red alert."
+        - "[ai] Changing alert level switches neutral-to-neutral only when the station is already in a neutral stance; it never overwrites a deliberately selected standard stance. A standard stance may author persist_behind_human so a durable order survives a human handoff. Human and AI Command use the same catalogue, lifecycle and authoritative application path."
+    game_design:
+      must_not_be: [offered as a claimable lobby seat, granted a second set of fine-system controls, allowed to buff or directly operate a target system, allowed to bypass admission or cooldown or range or arc, allowed to overwrite an explicit standard stance on an alert-level change, allowed to select a stance outside the target's authored catalogue]

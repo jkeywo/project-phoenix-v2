@@ -45,6 +45,7 @@ describe('ACTION_MAP', () => {
       'set_repair_target_priority',
       'set_sensors_target',
       'set_shield_focus',
+      'set_station_stance',
       'set_target',
       'set_torpedo_volley_target',
       'set_view',
@@ -276,6 +277,28 @@ describe('set_red_alert', () => {
       target: 'red-alert',
       payload: { type: 'SetRedAlert', data: { active: false } },
     });
+  });
+});
+
+describe('set_station_stance (issue #1107)', () => {
+  it('sends ControlSystem targeting the command system with the station + stance', () => {
+    const send = mkSend();
+    ACTION_MAP.set_station_stance(
+      { action: 'set_station_stance', station: 'tactical', stance: 'tactical-hold' },
+      send,
+    );
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'command',
+      payload: { type: 'SetStationStance', data: { station: 'tactical', stance: 'tactical-hold' } },
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a no-op when the station or stance is missing (never invents an order)', () => {
+    const send = mkSend();
+    ACTION_MAP.set_station_stance({ action: 'set_station_stance', station: 'tactical' }, send);
+    ACTION_MAP.set_station_stance({ action: 'set_station_stance', stance: 'tactical-hold' }, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });
 

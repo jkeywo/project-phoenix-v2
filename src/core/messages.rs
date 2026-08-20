@@ -1631,6 +1631,18 @@ pub enum SystemControlPayload {
     SetWeaponsHold {
         held: bool,
     },
+    /// Select a stance for one AI-controlled Station through a Command station
+    /// (issue #1107). Targets the Command coarse system (`command`); `station`
+    /// names the directed proving Station and `stance` its authored stance id.
+    ///
+    /// Explicit like the alert commands above — the handler assigns the
+    /// selection, so a retried, duplicated or stale-UI order is idempotent. An
+    /// unauthored stance id, or a station this Command does not direct, is
+    /// rejected by the handler (it never invents an order).
+    SetStationStance {
+        station: StationId,
+        stance: String,
+    },
     /// Set the throttle axis. Targets `helm-thrust` (issue #801).
     SetThrust {
         value: f32,
@@ -2971,6 +2983,76 @@ impl Default for CaptainBlackboard {
     }
 }
 
+/// The Command console's readout (issue #1107): the directed proving Station,
+/// whether Command may act on it right now (it lists a Station only while that
+/// Station is AI-controlled), the selectable stances and the current selection.
+///
+/// Published under the `command` system key. The persistent non-colour
+/// automation cue the console renders is derived from `directed_station_ai` and
+/// `selected_stance` — the client never guesses posture from a colour change.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CommandBlackboard {
+    /// Stable system id for the Command coarse system (the admitted target for
+    /// `SetStationStance`).
+    #[serde(default = "default_command_system_id")]
+    pub command_system_id: SystemId,
+    /// The proving Station this Command station directs.
+    pub directed_station: StationId,
+    /// Its display name (authored `[[station]] name`), for the console heading.
+    #[serde(default)]
+    pub directed_station_name: String,
+    /// True only while the directed Station is AI-controlled. Command lists and
+    /// applies stances only in this state; a human at that Station takes it off
+    /// the board.
+    #[serde(default)]
+    pub directed_station_ai: bool,
+    /// True when Command itself is currently operated by the ship's AI (no human
+    /// host). Drives the console's own automation cue.
+    #[serde(default)]
+    pub command_auto: bool,
+    /// The stance currently in force for the directed Station.
+    #[serde(default)]
+    pub selected_stance: String,
+    /// The stances a human operator may select, in authored order.
+    #[serde(default)]
+    pub stances: Vec<CommandStanceOption>,
+}
+
+/// One selectable stance on the Command console (issue #1107).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct CommandStanceOption {
+    pub id: String,
+    /// `strings.csv` id for the display label, resolved client-side.
+    #[serde(default)]
+    pub label: String,
+    /// One of `standard`, `normal_alert_neutral`, `high_alert_neutral` — carried
+    /// so the console can group the two neutral fallbacks and mark the automation
+    /// cue without re-deriving the kind.
+    pub kind: String,
+    /// The posture this stance seeds (`true` == high alert), so the console can
+    /// render a non-colour posture glyph per option.
+    #[serde(default)]
+    pub high_alert: bool,
+}
+
+fn default_command_system_id() -> SystemId {
+    crate::system_registry::command_system_id()
+}
+
+impl Default for CommandBlackboard {
+    fn default() -> Self {
+        Self {
+            command_system_id: default_command_system_id(),
+            directed_station: StationId::default(),
+            directed_station_name: String::new(),
+            directed_station_ai: false,
+            command_auto: false,
+            selected_stance: String::new(),
+            stances: Vec::new(),
+        }
+    }
+}
+
 /// Raw sim truth for the Helm system, published each tick into the ship
 /// blackboard (issue #557). GUI derivation (heading strings, radar blips)
 /// happens client-side in `gui/console-state.js`.
@@ -3297,6 +3379,9 @@ pub enum SystemBlackboard {
     Power(PowerBlackboard),
     Shields(ShieldsBlackboard),
     Captain(CaptainBlackboard),
+    /// Command console readout (issue #1107). One per ship carrying a Command
+    /// station, keyed by `command_system_id`.
+    Command(CommandBlackboard),
     Repair(RepairBlackboard),
     Comms(CommsBlackboard),
     Sensors(SensorsBlackboard),

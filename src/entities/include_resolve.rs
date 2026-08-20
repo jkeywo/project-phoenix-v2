@@ -2659,9 +2659,10 @@ directive_kind = "Destroy"
                     "tactical",
                     "navigation",
                     "comms",
-                    "engineering"
+                    "engineering",
+                    "command"
                 ],
-                "six Stations, exactly as authored — no fragment adds or removes one"
+                "seven Stations, exactly as authored — no fragment adds or removes one"
             );
             let arcs: Vec<&str> = config
                 .shield_arcs

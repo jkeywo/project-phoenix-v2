@@ -532,7 +532,7 @@ pub enum RegistrationOrder {
 /// `.add_plugins` calls) precisely so [`register_sim_set_plugins`] has
 /// something it can reorder; the systems and edges each plugin registers are
 /// unchanged either way.
-const SIM_SET_PLUGIN_REGISTRARS: [fn(&mut App); 13] = [
+const SIM_SET_PLUGIN_REGISTRARS: [fn(&mut App); 14] = [
     |app| {
         app.add_plugins(crate::region_plugin::RegionPlugin);
     },
@@ -544,6 +544,9 @@ const SIM_SET_PLUGIN_REGISTRARS: [fn(&mut App); 13] = [
     },
     |app| {
         app.add_plugins(crate::captain_plugin::CaptainPlugin);
+    },
+    |app| {
+        app.add_plugins(crate::command_plugin::CommandPlugin);
     },
     |app| {
         app.add_plugins(crate::helm_plugin::HelmPlugin);

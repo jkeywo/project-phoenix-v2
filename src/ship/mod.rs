@@ -1,5 +1,6 @@
 pub mod boost;
 pub mod combat_activity;
+pub mod command_stance;
 pub mod components;
 pub mod config;
 pub mod control_source;

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title data-i18n="console.command.doc_title">Project Phoenix — Command Console</title>
+  <link rel="stylesheet" href="console.css">
+  <style>
+    body { font-size: var(--text-lg); margin: 0; background: var(--surface-void); overflow: hidden; }
+    .frame { height: 100%; position: relative; }
+    .panel-inner { padding: 22px 52px 20px; display: flex; flex-direction: column; gap: 14px; height: 100%; box-sizing: border-box; }
+    .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; }
+    .hero h1 { font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); margin: 0; }
+    .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .directed { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; flex-shrink: 0; }
+    .directed .label { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.18em; color: var(--ink-faint); }
+    .directed .name { font-size: var(--text-xl); letter-spacing: 0.12em; color: var(--ink); }
+    /* The automation cue is a persistent NON-COLOUR badge: a glyph plus text,
+       readable without relying on any colour change (issue #1107, accessibility
+       direction — non-colour states in the shared Hero Bar). */
+    .cue { display: inline-flex; align-items: center; gap: 7px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.14em; padding: 3px 10px; border: 1px solid var(--line-soft); border-radius: 3px; color: var(--ink-faint); }
+    .cue .glyph { font-size: var(--text-sm); }
+    .stance-heading { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-faint); flex-shrink: 0; margin-top: 4px; }
+    .stances { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; }
+    .stance-btn { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 16px; background: var(--surface-raised); border: 1px solid var(--line-soft); border-radius: 4px; color: var(--ink); font-size: var(--text-md); letter-spacing: 0.04em; cursor: pointer; }
+    .stance-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+    .stance-btn .posture { font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); color: var(--ink-faint); width: 2.4em; flex-shrink: 0; }
+    .stance-btn .name { flex: 1; min-width: 0; }
+    .stance-btn .neutral-tag { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.12em; color: var(--ink-faint); }
+    /* Selected: a persistent glyph, not a colour — the mark survives greyscale. */
+    .stance-btn[aria-pressed="true"] { border-color: var(--ink-faint); }
+    .stance-btn .mark { font-family: "JetBrains Mono", monospace; width: 1.4em; flex-shrink: 0; color: var(--ink); }
+    .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
+    .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
+    .console-footer .spacer { flex: 1; }
+    @media (orientation: portrait) {
+      .panel-inner { padding: 10px 12px; gap: 10px; }
+      .hero h1 { font-size: var(--text-xl); }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame" data-screen-label="Command Console" data-i18n-attr="data-screen-label:console.command.screen_label">
+    <div class="panel"></div>
+    <div class="panel-inner">
+      <div class="hero">
+        <h1><span data-i18n="console.command.title">COMMAND</span><span class="sub" data-i18n="console.command.subtitle">STATION DIRECTION</span></h1>
+      </div>
+      <div class="directed">
+        <span class="label" data-i18n="console.command.directing">Directing</span>
+        <span class="name" id="directed-name">—</span>
+        <span class="cue" id="command-cue" hidden><span class="glyph" id="command-cue-glyph"></span><span id="command-cue-text"></span></span>
+        <span class="cue" id="station-cue"><span class="glyph" id="station-cue-glyph"></span><span id="station-cue-text"></span></span>
+      </div>
+      <div class="stance-heading" data-i18n="console.command.stance_heading">Stance</div>
+      <div class="stances" id="stance-list"></div>
+      <footer class="console-footer footer-bar">
+        <span class="dot"></span>
+        <span id="footer-status" data-i18n="console.command.station_footer">COMMAND STATION</span>
+        <span class="spacer"></span>
+        <span id="footer-current" style="color:var(--ink-faint)">—</span>
+      </footer>
+    </div>
+  </div>
+  <script type="module">
+    import { initConsole } from './console-core.js';
+    import { t } from './strings.js';
+
+    // A high-alert posture reads as "▲ armed"; a stood-down one as "▬ cold". A
+    // glyph, not a colour, so the posture survives greyscale (issue #1107).
+    function postureGlyph(high) { return high ? '▲' : '▬'; }
+
+    let api;
+    function render(s) {
+      const list = document.getElementById('stance-list');
+      // A directed Station's name is localised from `station.<id>.name` (the
+      // project convention — station ids stay English in TOML). With no station
+      // directed, the blackboard's authored name is shown, or an em-dash when
+      // even that is absent.
+      const directedName = s.directed_station
+        ? t('station.' + s.directed_station + '.name')
+        : (s.directed_station_name || '—');
+      document.getElementById('directed-name').textContent = directedName;
+
+      // Command's own automation cue (it may itself be run by the ship AI).
+      const cmdCue = document.getElementById('command-cue');
+      if (s.command_auto) {
+        cmdCue.hidden = false;
+        document.getElementById('command-cue-glyph').textContent = '◇'; // ◇
+        document.getElementById('command-cue-text').textContent = t('console.command.command_auto');
+      } else {
+        cmdCue.hidden = true;
+      }
+
+      // The directed Station's persistent NON-COLOUR cue: directable only while
+      // it is AI-controlled (criterion 2).
+      const glyph = document.getElementById('station-cue-glyph');
+      const text = document.getElementById('station-cue-text');
+      if (s.directed_station_ai) {
+        glyph.textContent = '◆'; // ◆ filled — under automation, directable
+        text.textContent = t('console.command.ai_directed');
+      } else {
+        glyph.textContent = '◇'; // ◇ hollow — crewed, off the board
+        text.textContent = t('console.command.human_held');
+      }
+
+      // Rebuild the stance buttons.
+      list.textContent = '';
+      const stances = s.stances || [];
+      for (const stance of stances) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'stance-btn';
+        const selected = stance.id === s.selected_stance;
+        btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        btn.disabled = !s.directed_station_ai;
+
+        const mark = document.createElement('span');
+        mark.className = 'mark';
+        mark.textContent = selected ? '●' : ''; // ● in force
+        btn.appendChild(mark);
+
+        const posture = document.createElement('span');
+        posture.className = 'posture';
+        posture.textContent = postureGlyph(stance.high_alert);
+        btn.appendChild(posture);
+
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = stance.label ? t(stance.label) : stance.id;
+        btn.appendChild(name);
+
+        if (stance.kind === 'normal_alert_neutral' || stance.kind === 'high_alert_neutral') {
+          const tag = document.createElement('span');
+          tag.className = 'neutral-tag';
+          tag.textContent = '○'; // ○ marks the alert-neutral fallbacks
+          btn.appendChild(tag);
+        }
+
+        btn.addEventListener('click', function() {
+          if (btn.disabled) return;
+          const send = (api && api.sendAction) || (typeof window !== 'undefined' && window.sendAction);
+          if (send) send('set_station_stance', { station: s.directed_station, stance: stance.id });
+        });
+        list.appendChild(btn);
+      }
+
+      // Footer: the stance in force, resolved to its label.
+      const current = stances.find(function(x) { return x.id === s.selected_stance; });
+      const currentLabel = current ? (current.label ? t(current.label) : current.id) : (s.selected_stance || '—');
+      document.getElementById('footer-current').textContent = t('console.command.current_stance') + ' ' + currentLabel;
+    }
+
+    api = initConsole({ name: 'command', render: render });
+  </script>
+</body>
+</html>

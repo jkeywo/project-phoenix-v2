@@ -180,6 +180,19 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /** Select a stance for an AI-controlled Station through Command (issue
+   *  #1107). Targets the `command` capability system; the host authorises the
+   *  order against the Command station's live host (Captain, normally) and
+   *  rejects any stance the target station did not author. Explicit like the
+   *  alert levers above, so a stale or retried pick is idempotent. */
+  set_station_stance: (a, send) => {
+    if (!a.station || !a.stance) return;
+    send('ControlSystem', {
+      target: 'command',
+      payload: { type: 'SetStationStance', data: { station: a.station, stance: a.stance } },
+    });
+  },
+
   /** Toggle Captain priority boost on an objective (issue #675). */
   set_objective_priority: (a, send) => {
     if (!a.id) return;

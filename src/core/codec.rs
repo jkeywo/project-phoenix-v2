@@ -1206,6 +1206,27 @@ mod tests {
         );
     }
 
+    /// Command stance selection as a ControlSystem payload (issue #1107).
+    #[test]
+    fn set_station_stance_control_system_round_trips() {
+        let msg = ClientMessage::ControlSystem {
+            target: SystemId("command".into()),
+            payload: SystemControlPayload::SetStationStance {
+                station: StationId("tactical".into()),
+                stance: "tactical-weapons-free".into(),
+            },
+        };
+        assert_client_roundtrip(&JsonCodec, msg.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, msg.clone());
+
+        let encoded = JsonCodec.encode_client(&msg).unwrap();
+        assert_eq!(
+            encoded,
+            r#"{"type":"ControlSystem","data":{"target":"command","payload":{"type":"SetStationStance","data":{"station":"tactical","stance":"tactical-weapons-free"}}}}"#,
+            "SetStationStance wire shape must match what action-map.js sends"
+        );
+    }
+
     /// Torpedo fire as a ControlSystem payload (issue #846).
     #[test]
     fn fire_torpedo_control_system_round_trips() {

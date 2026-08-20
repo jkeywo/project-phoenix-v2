@@ -411,7 +411,14 @@ pub fn spawn_entity(
         // engaging/disengaging helm power by ±1 on sustained high/low
         // thrust rather than pinning to an absolute level. Inserted
         // separately because Bevy's tuple Bundle max is 15 elements.
-        entity_commands.insert(crate::ship_plugin::LastHelmInput::default());
+        // `ShipStationStances` rides the same command as `LastHelmInput` (a
+        // tuple is one Bundle, one archetype move) so a hull nobody commands
+        // pays no extra insert and stays byte-identical. Empty by default: only
+        // a human Command operator's explicit stance pick ever fills it.
+        entity_commands.insert((
+            crate::ship_plugin::LastHelmInput::default(),
+            crate::command_plugin::ShipStationStances::default(),
+        ));
         // Per-objective route cursors: where this ship is on each objective's
         // route. Read by the low-LOD `simulate_low_lod_ships` path, the high-LOD
         // `helm_patrol`, and `operate_navigation_ai`; written only by

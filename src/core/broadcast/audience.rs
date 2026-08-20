@@ -82,6 +82,8 @@ mod tests {
                     host_order: vec![],
                     visiting_rating: None,
                     auxiliary: false,
+                    command_target: None,
+                    stances: vec![],
                 },
                 StationConfig {
                     id: StationId("helm".into()),
@@ -97,6 +99,8 @@ mod tests {
                     host_order: vec![],
                     visiting_rating: None,
                     auxiliary: false,
+                    command_target: None,
+                    stances: vec![],
                 },
             ],
             systems: vec![
@@ -252,6 +256,8 @@ mod tests {
             host_order: vec![],
             visiting_rating: None,
             auxiliary: false,
+            command_target: None,
+            stances: vec![],
         });
         config.systems.push(SystemInstanceConfig {
             id: SystemId("blaster-fore".into()),

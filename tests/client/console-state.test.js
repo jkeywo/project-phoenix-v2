@@ -21,6 +21,7 @@ import {
   buildSensorsConsoleState,
   buildCommsConsoleState,
   buildNavigationConsoleState,
+  buildCommandConsoleState,
   buildSystemStationConsoleState,
   withTutorialOverlay,
   withVisitingSystems,
@@ -678,6 +679,49 @@ describe('buildWeaponsConsoleState', () => {
     const s = parse(buildWeaponsConsoleState({ blasterBanks: [bank] }));
     // charge_progress not present → passes through as undefined; treat as falsy
     expect(s.blasters[0].charge_progress == null || s.blasters[0].charge_progress === 0).toBe(true);
+  });
+});
+
+describe('buildCommandConsoleState (issue #1107)', () => {
+  const withBlackboard = (bb) => ({ blackboards: { command: bb } });
+
+  it('returns valid JSON with safe defaults when no blackboard has arrived', () => {
+    const s = parse(buildCommandConsoleState(EMPTY));
+    expect(s.command_system_id).toBe('command');
+    expect(s.directed_station).toBe('');
+    expect(s.directed_station_ai).toBe(false);
+    expect(s.stances).toEqual([]);
+  });
+
+  it('projects the directed station, its AI state and the stance list', () => {
+    const bb = {
+      command_system_id: 'command',
+      directed_station: 'tactical',
+      directed_station_name: 'Tactical',
+      directed_station_ai: true,
+      command_auto: false,
+      selected_stance: 'tactical-normal',
+      stances: [
+        { id: 'tactical-weapons-free', label: 'lbl.wf', kind: 'standard', high_alert: true },
+        { id: 'tactical-normal', label: 'lbl.n', kind: 'normal_alert_neutral', high_alert: false },
+        { id: 'tactical-high', label: 'lbl.h', kind: 'high_alert_neutral', high_alert: true },
+      ],
+    };
+    const s = parse(buildCommandConsoleState(withBlackboard(bb)));
+    expect(s.directed_station).toBe('tactical');
+    expect(s.directed_station_name).toBe('Tactical');
+    expect(s.directed_station_ai).toBe(true);
+    expect(s.selected_stance).toBe('tactical-normal');
+    expect(s.stances).toHaveLength(3);
+    expect(s.stances[0].kind).toBe('standard');
+  });
+
+  it('carries the human-held (off the board) state through', () => {
+    const s = parse(buildCommandConsoleState(withBlackboard({
+      directed_station: 'tactical', directed_station_name: 'Tactical',
+      directed_station_ai: false, selected_stance: '', stances: [],
+    })));
+    expect(s.directed_station_ai).toBe(false);
   });
 });
 

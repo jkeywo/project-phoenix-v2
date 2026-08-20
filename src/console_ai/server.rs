@@ -912,6 +912,10 @@ pub(crate) fn ai_torpedo_auto_fire(
             // above into the one `red_alert` fact the tube's authored LAUNCH
             // predicate already reads.
             Option<&crate::ship_state::ShipWeaponsHold>,
+            // Issue #1107: the ship's Command stance selections, so a directed
+            // AI weapons Station's stance decides the launch posture in place of
+            // the ship's own Red Alert. Absent reads as no direction.
+            Option<&crate::console::command::server::ShipStationStances>,
         ),
         (
             With<crate::ai_plugin::AiHighFidelity>,
@@ -947,15 +951,24 @@ pub(crate) fn ai_torpedo_auto_fire(
         mut admitted,
         red_alert_opt,
         weapons_hold_opt,
+        stances_opt,
     ) in ships.iter_mut()
     {
         // Read once per ship; seeded into every tube's launch snapshot. No Rust
         // rule consults it — the gate is the tube's authored predicate (#872),
         // and the weapons hold folded in beside it rides that same predicate
-        // (#1041).
-        let posture = crate::weapons_plugin::WeaponsAlertPosture::from_components(
+        // (#1041). The Command stance override (#1107) rides the same fact;
+        // absent a direction it is `None` and the seeded value is unchanged.
+        let stance_override = crate::console::command::server::weapons_station_stance_high_alert(
+            stances_opt,
+            &ship_config.0,
+            &control_sources.0,
+            red_alert_opt.is_some_and(|r| r.0),
+        );
+        let posture = crate::weapons_plugin::WeaponsAlertPosture::from_parts(
             red_alert_opt,
             weapons_hold_opt,
+            stance_override,
         );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).

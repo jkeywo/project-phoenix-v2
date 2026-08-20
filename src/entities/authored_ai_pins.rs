@@ -3039,6 +3039,7 @@ fn a_weapons_hold_closes_every_shipped_fire_gate() {
     let held = WeaponsAlertPosture {
         red_alert: true,
         weapons_hold: true,
+        stance_high_alert: None,
     };
     assert_eq!(
         held.alert_fact_value(),

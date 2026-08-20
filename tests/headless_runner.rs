@@ -3782,15 +3782,29 @@ fn the_composed_player_destroyer_boots_backfilled_and_flies() {
     run(&mut app, args.max_ticks);
 
     {
-        let mut q = app
-            .world_mut()
-            .query_filtered::<(&ShipSystemControlSources, &ActiveStationRatings), With<LocalShip>>(
-            );
-        let (sources, ratings) = q.single(app.world()).expect("exactly one LocalShip");
+        let mut q = app.world_mut().query_filtered::<(
+            &ShipSystemControlSources,
+            &ActiveStationRatings,
+            &ShipConfigComponent,
+        ), With<LocalShip>>();
+        let (sources, ratings, config) = q.single(app.world()).expect("exactly one LocalShip");
+        // `seed_boot_ratings` inserts one entry per authored station with no
+        // auxiliary filter, so the raw total counts the auxiliary Command
+        // station (issue #1107) too. The real invariant is the number of
+        // *crewable* (non-auxiliary) seats — auxiliary stations are data-authored
+        // directors, not seats a human can take — so a future auxiliary addition
+        // must not be silently accepted here as a new seat.
+        let crewable = config.0.stations.iter().filter(|s| !s.auxiliary).count();
+        assert_eq!(
+            crewable, 6,
+            "the destroyer's six crewable seats must survive composition: {:?}",
+            ratings.0
+        );
         assert_eq!(
             ratings.0.len(),
-            6,
-            "the destroyer's six authored seats must survive composition: {:?}",
+            7,
+            "six crewable seats + one auxiliary Command station (issue #1107) \
+             each boot a rating: {:?}",
             ratings.0
         );
         for (station, rating) in &ratings.0 {

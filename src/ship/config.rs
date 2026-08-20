@@ -81,6 +81,67 @@ pub struct StationConfig {
     /// are not offered as a separately claimable lobby seat.
     #[serde(default)]
     pub auxiliary: bool,
+    /// The proving Station this (Command) station directs (issue #1107).
+    ///
+    /// Authored on an auxiliary Command station, never hard-coded: it names the
+    /// AI-controlled Station whose authored stance catalogue this Command
+    /// surface lists and applies. `None` on every ordinary station.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_target: Option<StationId>,
+    /// This station's authored stance catalogue (issue #1107).
+    ///
+    /// Standard stances plus the two mandatory alert-neutral fallbacks
+    /// (`normal_alert_neutral`, `high_alert_neutral`). A Command station reads
+    /// its `command_target`'s catalogue; the target station authors it here.
+    /// Empty on stations that are never directed.
+    #[serde(default, rename = "stance", skip_serializing_if = "Vec::is_empty")]
+    pub stances: Vec<StationStanceConfig>,
+}
+
+/// One authored stance in a station's catalogue (issue #1107).
+///
+/// A stance supplies a posture FACT and policy choices to the station's ordinary
+/// AI hosts "in the same broad manner that Red Alert currently informs
+/// behavior" — it never applies a hidden statistical bonus and never operates a
+/// fine System directly. See `docs/gdd/mechanics/command-and-crew-control.md`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StationStanceConfig {
+    /// Stable stance id, referenced by `SetStationStance` on the wire.
+    pub id: String,
+    /// `strings.csv` id for the stance's display label. Carried to the Command
+    /// console, which resolves it through `gui/strings.js`; never emitted
+    /// English. Empty falls back to the raw id on the console.
+    #[serde(default)]
+    pub label: String,
+    /// Which of the three authored kinds this stance is.
+    pub kind: StanceKind,
+    /// The alert posture this stance seeds for the station's AI hosts: `true`
+    /// behaves as "at high alert" (the migrated Red Alert branch fires), `false`
+    /// as "stood down". Validated to agree with `kind` for the two neutral
+    /// fallbacks; a `standard` stance authors it freely.
+    #[serde(default)]
+    pub high_alert: bool,
+    /// Stance lifecycle: when `true` the stance persists behind a human handoff
+    /// on the directed station; when `false` (the default) it resets to the
+    /// appropriate alert-neutral stance. Neutral stances are their own reset
+    /// target, so the flag is meaningful only on `standard` stances.
+    #[serde(default)]
+    pub persist_behind_human: bool,
+}
+
+/// The three authored stance kinds (issue #1107). Every station catalogue that
+/// exists at all authors exactly one `normal_alert_neutral` and one
+/// `high_alert_neutral`; `standard` stances are the authored postures a Command
+/// operator can additionally select.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StanceKind {
+    /// An authored non-neutral posture (e.g. "weapons free", "escort").
+    Standard,
+    /// The fallback stance for the normal (not-red) alert level.
+    NormalAlertNeutral,
+    /// The fallback stance for the high (red) alert level.
+    HighAlertNeutral,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -306,6 +367,38 @@ pub enum ShipConfigError {
         station: StationId,
         rating: String,
     },
+    /// A `command_target` naming a station this hull does not have (issue #1107).
+    CommandTargetUnknownStation {
+        station: StationId,
+        target: StationId,
+    },
+    /// A `command_target` whose named station authors no stance catalogue at all
+    /// (issue #1107). Command has nothing to list, so it is a content error.
+    CommandTargetHasNoStances {
+        station: StationId,
+        target: StationId,
+    },
+    /// Two stances share an `id` within one station's catalogue (issue #1107).
+    DuplicateStanceId {
+        station: StationId,
+        stance: String,
+    },
+    /// A stance catalogue is missing one of the two mandatory alert-neutral
+    /// fallbacks, or authors it more than once (issue #1107). Every catalogue
+    /// authors exactly one `normal_alert_neutral` and one `high_alert_neutral`.
+    StanceCatalogueNeutralCount {
+        station: StationId,
+        kind: StanceKind,
+        found: usize,
+    },
+    /// A neutral stance whose authored `high_alert` posture disagrees with its
+    /// kind (issue #1107): `normal_alert_neutral` must be `false`,
+    /// `high_alert_neutral` must be `true`.
+    NeutralStancePostureMismatch {
+        station: StationId,
+        stance: String,
+        kind: StanceKind,
+    },
 }
 
 impl std::fmt::Display for ShipConfigError {
@@ -526,6 +619,71 @@ pub fn validate(
             // actively directly held. Runtime placement tests that state,
             // rather than rejecting the Station's authored type here; a
             // visiting Station is never recursively eligible.
+        }
+    }
+
+    // Stance catalogues and Command targets (issue #1107).
+    for station in &config.stations {
+        // A station's own stance catalogue: unique ids, exactly one of each
+        // neutral fallback (or none at all — an undirected station authors no
+        // catalogue), and neutral postures that agree with their kind.
+        if !station.stances.is_empty() {
+            let mut stance_ids = HashSet::new();
+            for stance in &station.stances {
+                if !stance_ids.insert(stance.id.clone()) {
+                    return Err(ShipConfigError::DuplicateStanceId {
+                        station: station.id.clone(),
+                        stance: stance.id.clone(),
+                    });
+                }
+                match stance.kind {
+                    StanceKind::NormalAlertNeutral if stance.high_alert => {
+                        return Err(ShipConfigError::NeutralStancePostureMismatch {
+                            station: station.id.clone(),
+                            stance: stance.id.clone(),
+                            kind: stance.kind,
+                        });
+                    }
+                    StanceKind::HighAlertNeutral if !stance.high_alert => {
+                        return Err(ShipConfigError::NeutralStancePostureMismatch {
+                            station: station.id.clone(),
+                            stance: stance.id.clone(),
+                            kind: stance.kind,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            for kind in [StanceKind::NormalAlertNeutral, StanceKind::HighAlertNeutral] {
+                let found = station
+                    .stances
+                    .iter()
+                    .filter(|stance| stance.kind == kind)
+                    .count();
+                if found != 1 {
+                    return Err(ShipConfigError::StanceCatalogueNeutralCount {
+                        station: station.id.clone(),
+                        kind,
+                        found,
+                    });
+                }
+            }
+        }
+
+        // A Command target must name a real station that authors a catalogue.
+        if let Some(target) = &station.command_target {
+            let Some(target_station) = config.station(target) else {
+                return Err(ShipConfigError::CommandTargetUnknownStation {
+                    station: station.id.clone(),
+                    target: target.clone(),
+                });
+            };
+            if target_station.stances.is_empty() {
+                return Err(ShipConfigError::CommandTargetHasNoStances {
+                    station: station.id.clone(),
+                    target: target.clone(),
+                });
+            }
         }
     }
 
@@ -1579,5 +1737,204 @@ ai_only = true
 "#;
         let config = ShipConfig::from_toml(toml, KINDS).unwrap();
         assert_eq!(config.sensors_station(), None);
+    }
+
+    // ── Command stances (issue #1107) ─────────────────────────────────────────
+
+    const STANCE_KINDS: &[&str] = &["red_alert", "sensors", "command"];
+
+    /// A captain, a proving station (sensors) authoring a full stance catalogue,
+    /// and an auxiliary Command station directing it, hosted by the captain.
+    fn command_toml(catalogue: &str, command_extra: &str) -> String {
+        format!(
+            r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command the bridge."
+rank = "Cpt."
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "proving"
+name = "Proving"
+description = "The AI-controlled proving station."
+rank = "Ltn."
+{catalogue}
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station]]
+id = "command"
+name = "Command"
+description = "Direct an AI station."
+rank = "Cpt."
+console = "gui/command-console.html"
+auxiliary = true
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Std"
+command_target = "proving"
+{command_extra}
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "red-alert"
+kind = "red_alert"
+station = "captain"
+
+[[system]]
+id = "sensors"
+kind = "sensors"
+station = "proving"
+
+[[system]]
+id = "command"
+kind = "command"
+station = "command"
+"#
+        )
+    }
+
+    const FULL_CATALOGUE: &str = r#"
+[[station.stance]]
+id = "proving-standard"
+kind = "standard"
+high_alert = true
+
+[[station.stance]]
+id = "proving-normal"
+kind = "normal_alert_neutral"
+
+[[station.stance]]
+id = "proving-high"
+kind = "high_alert_neutral"
+high_alert = true
+"#;
+
+    fn parse_command(catalogue: &str, extra: &str) -> Result<ShipConfig, ShipConfigError> {
+        ShipConfig::from_toml(&command_toml(catalogue, extra), STANCE_KINDS)
+    }
+
+    #[test]
+    fn command_station_and_stance_catalogue_parse_and_round_trip() {
+        let config = parse_command(FULL_CATALOGUE, "").expect("command hull parses");
+        let command = config.station(&StationId("command".into())).unwrap();
+        assert!(command.auxiliary);
+        assert!(command.human_seeking);
+        assert_eq!(command.host_order, vec![StationId("captain".into())]);
+        assert_eq!(command.command_target, Some(StationId("proving".into())));
+
+        let proving = config.station(&StationId("proving".into())).unwrap();
+        assert_eq!(proving.stances.len(), 3);
+        assert_eq!(proving.stances[0].id, "proving-standard");
+        assert_eq!(proving.stances[0].kind, StanceKind::Standard);
+        assert!(proving.stances[0].high_alert);
+        assert_eq!(proving.stances[1].kind, StanceKind::NormalAlertNeutral);
+        assert!(!proving.stances[1].high_alert);
+        assert_eq!(proving.stances[2].kind, StanceKind::HighAlertNeutral);
+
+        // A hull that authors no catalogue keeps an empty list and serialises
+        // without the key, so untouched hulls round-trip byte-for-byte.
+        let encoded = toml::to_string(&config).expect("serialise");
+        let decoded = ShipConfig::from_toml(&encoded, STANCE_KINDS).unwrap();
+        assert_eq!(decoded, config);
+        let captain_encoded =
+            toml::to_string(config.station(&StationId("captain".into())).unwrap()).unwrap();
+        assert!(!captain_encoded.contains("stance"));
+        assert!(!captain_encoded.contains("command_target"));
+    }
+
+    #[test]
+    fn command_target_must_name_a_real_station() {
+        let toml = command_toml(FULL_CATALOGUE, "")
+            .replace("command_target = \"proving\"", "command_target = \"ghost\"");
+        assert!(matches!(
+            ShipConfig::from_toml(&toml, STANCE_KINDS),
+            Err(ShipConfigError::CommandTargetUnknownStation { ref target, .. })
+                if target.0 == "ghost"
+        ));
+    }
+
+    #[test]
+    fn command_target_must_author_a_catalogue() {
+        // Point Command at the captain, which has no stances.
+        let toml = command_toml(FULL_CATALOGUE, "").replace(
+            "command_target = \"proving\"",
+            "command_target = \"captain\"",
+        );
+        assert!(matches!(
+            ShipConfig::from_toml(&toml, STANCE_KINDS),
+            Err(ShipConfigError::CommandTargetHasNoStances { ref target, .. })
+                if target.0 == "captain"
+        ));
+    }
+
+    #[test]
+    fn catalogue_must_have_exactly_one_of_each_neutral() {
+        // Drop the high-alert neutral.
+        let missing = r#"
+[[station.stance]]
+id = "proving-normal"
+kind = "normal_alert_neutral"
+"#;
+        assert!(matches!(
+            parse_command(missing, ""),
+            Err(ShipConfigError::StanceCatalogueNeutralCount {
+                kind: StanceKind::HighAlertNeutral,
+                found: 0,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn neutral_stance_posture_must_agree_with_kind() {
+        // normal_alert_neutral authored as high_alert = true.
+        let bad = r#"
+[[station.stance]]
+id = "proving-normal"
+kind = "normal_alert_neutral"
+high_alert = true
+
+[[station.stance]]
+id = "proving-high"
+kind = "high_alert_neutral"
+high_alert = true
+"#;
+        assert!(matches!(
+            parse_command(bad, ""),
+            Err(ShipConfigError::NeutralStancePostureMismatch {
+                kind: StanceKind::NormalAlertNeutral,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn catalogue_rejects_duplicate_stance_ids() {
+        let dupe = r#"
+[[station.stance]]
+id = "proving-normal"
+kind = "normal_alert_neutral"
+
+[[station.stance]]
+id = "proving-normal"
+kind = "high_alert_neutral"
+high_alert = true
+"#;
+        assert!(matches!(
+            parse_command(dupe, ""),
+            Err(ShipConfigError::DuplicateStanceId { ref stance, .. })
+                if stance == "proving-normal"
+        ));
     }
 }

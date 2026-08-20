@@ -126,6 +126,16 @@ pub const CAPTAIN_KIND: &str = "captain";
 pub const REPAIR_SYSTEM_ID: &str = "repair";
 pub const REPAIR_KIND: &str = "repair";
 
+/// Wire `SystemId` for the Command coarse system (issue #1107).
+///
+/// The admitted-command target for an auxiliary Command station's stance
+/// selection (`SystemControlPayload::SetStationStance`). Like the other
+/// capability systems it owns no fine actuator — it is the seat a
+/// `human_seeking` + `auxiliary` Command station carries so its stance orders
+/// have a station to be authorised against (the seek host, normally Captain).
+pub const COMMAND_SYSTEM_ID: &str = "command";
+pub const COMMAND_KIND: &str = "command";
+
 // ── Fine-grained Helm systems (issue #511) ────────────────────────────────────
 
 /// Wire `SystemId` for the Helm Joystick fine system.
@@ -348,6 +358,8 @@ impl SystemKindRegistry {
         registry.register(CAPTAIN_KIND)?;
         registry.register(VIEWSCREEN_KIND)?;
         registry.register(REPAIR_KIND)?;
+        // Command capability system (issue #1107).
+        registry.register(COMMAND_KIND)?;
         // Fine-grained Helm systems (issue #511)
         registry.register(HELM_JOYSTICK_KIND)?;
         registry.register(HELM_ENGINE_KIND)?;
@@ -462,6 +474,10 @@ pub fn viewscreen_system_id() -> SystemId {
 
 pub fn repair_system_id() -> SystemId {
     SystemId(REPAIR_SYSTEM_ID.to_string())
+}
+
+pub fn command_system_id() -> SystemId {
+    SystemId(COMMAND_SYSTEM_ID.to_string())
 }
 
 // ── Fine Helm system id helpers (issue #511) ──────────────────────────────────
@@ -632,6 +648,7 @@ mod tests {
             CAPTAIN_SYSTEM_ID,
             VIEWSCREEN_SYSTEM_ID,
             REPAIR_SYSTEM_ID,
+            COMMAND_SYSTEM_ID,
         ];
         for id in ids {
             assert_eq!(
@@ -658,6 +675,7 @@ mod tests {
         assert_eq!(CAPTAIN_SYSTEM_ID, "captain");
         assert_eq!(VIEWSCREEN_SYSTEM_ID, "viewscreen");
         assert_eq!(REPAIR_SYSTEM_ID, "repair");
+        assert_eq!(COMMAND_SYSTEM_ID, "command");
     }
 
     #[test]

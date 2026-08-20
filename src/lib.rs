@@ -168,6 +168,7 @@ pub mod console;
 
 // Backwards-compat aliases so old paths still resolve.
 pub use console::captain::server as captain_plugin;
+pub use console::command::server as command_plugin;
 pub use console::comms::inbox as comms_inbox;
 pub use console::comms::server as comms_plugin;
 pub use console::helm::server as helm_plugin;

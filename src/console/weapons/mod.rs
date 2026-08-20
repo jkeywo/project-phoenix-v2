@@ -466,6 +466,11 @@ pub struct WeaponsAlertPosture {
     pub red_alert: bool,
     /// This ship's own [`crate::ship_state::ShipWeaponsHold`].
     pub weapons_hold: bool,
+    /// A Command stance directing this weapons Station's alert posture (issue
+    /// #1107), overriding the ship's own Red Alert for the fire gate. `None`
+    /// means no Command stance is in force → the posture tracks `red_alert`
+    /// exactly as before this issue, so an undirected hull stays byte-identical.
+    pub stance_high_alert: Option<bool>,
 }
 
 /// The `red_alert` fact value seeded at a weapons host while the ship is under a
@@ -487,9 +492,21 @@ impl WeaponsAlertPosture {
         red_alert: Option<&crate::ship_state::ShipRedAlert>,
         weapons_hold: Option<&crate::ship_state::ShipWeaponsHold>,
     ) -> Self {
+        Self::from_parts(red_alert, weapons_hold, None)
+    }
+
+    /// As [`from_components`](Self::from_components) but with a Command stance
+    /// override (issue #1107). `stance_high_alert: None` is exactly
+    /// `from_components`, so every pre-#1107 call site keeps its behaviour.
+    pub fn from_parts(
+        red_alert: Option<&crate::ship_state::ShipRedAlert>,
+        weapons_hold: Option<&crate::ship_state::ShipWeaponsHold>,
+        stance_high_alert: Option<bool>,
+    ) -> Self {
         Self {
             red_alert: red_alert.is_some_and(|r| r.0),
             weapons_hold: weapons_hold.is_some_and(|h| h.0),
+            stance_high_alert,
         }
     }
 
@@ -499,14 +516,27 @@ impl WeaponsAlertPosture {
         Self {
             red_alert,
             weapons_hold: false,
+            stance_high_alert: None,
         }
     }
 
     /// The value seeded for the `red_alert` fact. See the type docs for the
     /// ladder this implements.
+    ///
+    /// A weapons hold still wins over everything (the captain's restraint lever
+    /// is absolute). Otherwise a Command stance override, when present, decides
+    /// the posture in place of the ship's own Red Alert — this is the seam the
+    /// migrated Red Alert fire branch travels through (issue #1107). With no
+    /// override the reading is the pre-#1107 `red_alert` value, bit for bit.
     pub fn alert_fact_value(self) -> f64 {
         if self.weapons_hold {
             WEAPONS_HOLD_ALERT_FACT
+        } else if let Some(high) = self.stance_high_alert {
+            if high {
+                1.0
+            } else {
+                0.0
+            }
         } else if self.red_alert {
             1.0
         } else {

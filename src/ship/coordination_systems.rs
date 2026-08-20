@@ -2532,7 +2532,12 @@ station = "navigation"
                 "tactical",
                 "navigation",
                 "comms",
-                "engineering"
+                "engineering",
+                // The auxiliary Command station (issue #1107): mounted and
+                // resolved like any other, so it takes its authored place in the
+                // roster, but `auxiliary = true` keeps it off the lobby's seat
+                // list.
+                "command"
             ],
             "the [[station]] array is the lobby's row order and the broadcast \
              router's fan-out order — the seek order does not touch it"
@@ -2547,16 +2552,26 @@ station = "navigation"
             vec!["tactical", "engineering", "captain", "helm", "navigation"],
             "comms: Tactical owns it, then Engineering — John's ruling"
         );
+        // Every OTHER station a visiting Comms could land on is covered — but
+        // the auxiliary Command station (issue #1107) is not a candidate host: a
+        // visiting station never lands on an auxiliary surface, so it is
+        // correctly absent from the order and excluded from the count.
+        let host_candidates = config
+            .stations
+            .iter()
+            .filter(|s| !s.auxiliary && s.id.0 != "comms")
+            .count();
         assert_eq!(
             order.len(),
-            authored_stations.len() - 1,
-            "comms: the order covers every OTHER station, so no seat is unreachable"
+            host_candidates,
+            "comms: the order covers every OTHER non-auxiliary seat, so no \
+             reachable seat is unreachable"
         );
         assert_ne!(
             order,
             authored_stations
                 .iter()
-                .filter(|s| **s != "comms")
+                .filter(|s| **s != "comms" && **s != "command")
                 .copied()
                 .collect::<Vec<_>>(),
             "comms: an order identical to the authored station list would be \

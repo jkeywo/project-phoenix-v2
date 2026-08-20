@@ -525,4 +525,163 @@ station = "shields"
             None,
         ));
     }
+
+    // ── Command station SetStationStance admission (issue #1107, AC6/AC3) ─────
+    //
+    // The Command station (`auxiliary = true`, `human_seeking = true`) owns the
+    // `command` system but is authored on no fixed seat — it is hosted, this
+    // tick, wherever `resolve_human_seeking_hosts` put it (its `host_order`
+    // starts with the Captain). So a `SetStationStance` order must be admitted
+    // for whichever token holds THAT host station and refused for everyone else,
+    // resolved through the same `HumanSeekingHosts` seam #984 built and the same
+    // `is_command_authorized` public path every other console command takes —
+    // never by pushing an `AdmittedCommand` past the gate. `command`'s
+    // ownership resolves through step 0 (the live seek), so this exercises the
+    // real authorization boundary AC3 depends on.
+
+    /// A hull with a Captain seat and the auxiliary, human-seeking Command
+    /// station that owns the `command` system. `command_target` is deliberately
+    /// omitted so no stance catalogue is required — admission turns on station
+    /// tenure, not on the stance content this fixture is not about.
+    fn command_config() -> crate::ship::config::ShipConfig {
+        crate::ship::config::ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "captain"
+name = "Captain"
+description = "Command the bridge."
+rank = "Cpt."
+
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons."
+rank = "Ltn."
+
+[[station]]
+id = "command"
+name = "Command"
+description = "Direct an AI station."
+rank = "Cpt."
+auxiliary = true
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Std"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "command"
+kind = "command"
+station = "command"
+"#,
+            &["command"],
+        )
+        .unwrap()
+    }
+
+    /// The live seek result production writes every tick: the auxiliary Command
+    /// station is hosted on the Captain seat, so its `command` system's
+    /// authoritative station is `captain`, NOT the `command` station it authors.
+    fn command_hosted_on_captain() -> crate::ship_plugin::HumanSeekingHosts {
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(
+            crate::system_registry::command_system_id(),
+            StationId("captain".into()),
+        );
+        crate::ship_plugin::HumanSeekingHosts(map)
+    }
+
+    /// `command` under the given control source. Human is the shape a Captain
+    /// actively directing the board produces; Ai is the backfilled shape.
+    fn command_sources(source: ControlSource) -> ShipSystemControlSources {
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(crate::system_registry::command_system_id(), source);
+        ShipSystemControlSources(resolver)
+    }
+
+    fn set_stance() -> SystemControlPayload {
+        SystemControlPayload::SetStationStance {
+            station: StationId("tactical".into()),
+            stance: "hold".into(),
+        }
+    }
+
+    fn sessions_with_captain(token: &str) -> crate::lobby::Sessions {
+        let mut sm = crate::lobby::session::SessionManager::new();
+        sm.register(token.into(), "Kirk".into()).unwrap();
+        sm.set_station(token, Some(StationId("captain".into())));
+        crate::lobby::Sessions(sm)
+    }
+
+    /// AC3/AC6 happy path: the token holding the resolved Command host station
+    /// (the Captain) is admitted to direct the board.
+    #[test]
+    fn set_station_stance_is_admitted_for_the_resolved_command_host() {
+        assert!(is_command_authorized(
+            "captain-token",
+            &crate::system_registry::command_system_id(),
+            &set_stance(),
+            &command_sources(ControlSource::Human),
+            &sessions_with_captain("captain-token"),
+            &command_config(),
+            Some(&command_hosted_on_captain()),
+        ));
+    }
+
+    /// AC6 rejection: a registered player who holds no station that hosts
+    /// Command cannot issue the order, even though the target and payload are
+    /// well-formed. The deny is station tenure — the seek put Command on the
+    /// Captain, and this token is not the Captain.
+    #[test]
+    fn set_station_stance_is_refused_for_a_token_without_the_command_host() {
+        let sessions = {
+            let mut sm = crate::lobby::session::SessionManager::new();
+            sm.register("captain-token".into(), "Kirk".into()).unwrap();
+            sm.set_station("captain-token", Some(StationId("captain".into())));
+            // A connected player seated on Tactical — a real session, so the
+            // deny below is tenure of the Command host, not an unknown token.
+            sm.register("intruder".into(), "Nosy".into()).unwrap();
+            sm.set_station("intruder", Some(StationId("tactical".into())));
+            crate::lobby::Sessions(sm)
+        };
+        assert!(!is_command_authorized(
+            "intruder",
+            &crate::system_registry::command_system_id(),
+            &set_stance(),
+            &command_sources(ControlSource::Human),
+            &sessions,
+            &command_config(),
+            Some(&command_hosted_on_captain()),
+        ));
+    }
+
+    /// AGENTS.md rule 6 — identity is stripped past admission and humans/AI are
+    /// symmetric: when the Command system is backfilled to AI, the `ai:` token
+    /// is admitted on the same terms the human host was, with no origin-specific
+    /// branch. This mirrors `dispatch_to_an_ai_controlled_system_rejects_humans_and_admits_ai`.
+    #[test]
+    fn set_station_stance_admits_ai_and_refuses_humans_while_command_is_ai() {
+        let sources = command_sources(ControlSource::Ai);
+        assert!(!is_command_authorized(
+            "captain-token",
+            &crate::system_registry::command_system_id(),
+            &set_stance(),
+            &sources,
+            &sessions_with_captain("captain-token"),
+            &command_config(),
+            Some(&command_hosted_on_captain()),
+        ));
+        assert!(is_command_authorized(
+            "ai:command",
+            &crate::system_registry::command_system_id(),
+            &set_stance(),
+            &sources,
+            &sessions_with_captain("captain-token"),
+            &command_config(),
+            Some(&command_hosted_on_captain()),
+        ));
+    }
 }

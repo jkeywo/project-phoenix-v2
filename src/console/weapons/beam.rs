@@ -835,16 +835,22 @@ pub(crate) fn ai_phaser_auto_fire(
             Option<&PhaserCombatConfigResource>,
             Option<&PhaserBankAiPolicies>,
             Option<&crate::ship_state::ShipPhaserFrequency>,
-            // Issue #872: this ship's own red-alert state, seeded as a typed
-            // fact for the bank's authored fire predicate. `Option<&_>` because
-            // bare-`App` weapons fixtures spawn ships without it; a missing
-            // component reads `false`, exactly as `ShipRedAlert::default()`.
-            Option<&crate::ship_state::ShipRedAlert>,
-            // Issue #1041: the captain's weapons hold, folded together with the
-            // alert above into the ONE `red_alert` fact the bank's authored
-            // gate already reads. Same `Option<&_>` reasoning; absent reads
-            // "not holding".
-            Option<&crate::ship_state::ShipWeaponsHold>,
+            // The three posture inputs are grouped into ONE Bundle query item so
+            // the tuple stays within Bevy's 15-element ceiling now the Command
+            // stance rides here too (issue #1107):
+            //   - the ship's own red-alert state (issue #872), seeded as a typed
+            //     fact for the bank's authored fire predicate;
+            //   - the captain's weapons hold (issue #1041), folded into the same
+            //     `red_alert` fact the bank's gate reads;
+            //   - the ship's Command stance selections (issue #1107), the seam
+            //     that carries the migrated Red Alert branch onto the
+            //     neutral-stance path. Every one is `Option<&_>` so a bare-`App`
+            //     fixture that spawns none behaves exactly as before.
+            (
+                Option<&crate::ship_state::ShipRedAlert>,
+                Option<&crate::ship_state::ShipWeaponsHold>,
+                Option<&crate::console::command::server::ShipStationStances>,
+            ),
         ),
         With<crate::server_app::Ship>,
     >,
@@ -867,8 +873,7 @@ pub(crate) fn ai_phaser_auto_fire(
         combat_config_opt,
         bank_policies_opt,
         phaser_freq_opt,
-        red_alert_opt,
-        weapons_hold_opt,
+        (red_alert_opt, weapons_hold_opt, stances_opt),
     ) in ship_q.iter_mut()
     {
         // Read once per ship, seeded into every bank's fact snapshot below.
@@ -876,7 +881,25 @@ pub(crate) fn ai_phaser_auto_fire(
         // predicate's business (issue #872), and so is whether a weapons hold
         // does (issue #1041) — the hold rides the same fact and the same
         // authored predicate, which is exactly why no Rust branch appears here.
-        let posture = super::WeaponsAlertPosture::from_components(red_alert_opt, weapons_hold_opt);
+        //
+        // The Command stance override (issue #1107) is computed the same way and
+        // rides the same fact: when an AI-controlled weapons Station is directed
+        // by a human Command operator, its selected stance decides the posture in
+        // place of the ship's own Red Alert; absent a direction it is `None` and
+        // the seeded value is bit-for-bit the pre-#1107 reading.
+        let stance_override = ship_config_opt.and_then(|cfg| {
+            crate::console::command::server::weapons_station_stance_high_alert(
+                stances_opt,
+                &cfg.0,
+                &control_sources.0,
+                red_alert_opt.is_some_and(|r| r.0),
+            )
+        });
+        let posture = super::WeaponsAlertPosture::from_parts(
+            red_alert_opt,
+            weapons_hold_opt,
+            stance_override,
+        );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = crate::world::server::entity_flag_chain(

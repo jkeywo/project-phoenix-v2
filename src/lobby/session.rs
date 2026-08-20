@@ -288,6 +288,8 @@ mod tests {
                     host_order: vec![],
                     visiting_rating: None,
                     auxiliary: false,
+                    command_target: None,
+                    stances: vec![],
                 })
                 .collect(),
             systems: vec![SystemInstanceConfig {

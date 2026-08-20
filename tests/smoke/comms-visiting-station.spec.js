@@ -132,6 +132,65 @@ async function lastCommsHost(client, stationId, timeout = 8_000) {
   }, stationId);
 }
 
+/** The latest `SimState.snapshot.station_health` array, once one arrives. */
+async function lastStationHealth(client, timeout = 8_000) {
+  await client.page.waitForFunction(
+    () => (window.__messages || []).some(
+      (m) => m.type === 'SimState' && (m.data.snapshot.station_health || []).length > 0,
+    ),
+    null,
+    { timeout },
+  );
+  return client.page.evaluate(() => {
+    const msgs = (window.__messages || []).filter(
+      (m) => m.type === 'SimState' && (m.data.snapshot.station_health || []).length > 0,
+    );
+    return msgs[msgs.length - 1].data.snapshot.station_health;
+  });
+}
+
+// Issue #1100: the host publishes authoritative per-Station health station-level
+// in `SimState.snapshot.station_health`, exactly like `station_hosts`, so every
+// client shows a Station's health from the host's own sum rather than inferring
+// it from recipient-scoped damage rows. This asserts the wire projection reaches
+// a client, covering the two states a freshly-spawned, undamaged destroyer can
+// demonstrate cheaply: HEALTHY stations (summed hull at full) and NO-DAMAGE-MODEL
+// stations (owning no damageable Systems, so they never appear — the neutral
+// state the Hero Bar renders as a definite cue). The DAMAGED state and the
+// explicit `None` wire encoding are pinned by the Rust projection tests
+// (`repair::visibility`) and the vitest client tests (hero-bar / sim-state),
+// since the smoke harness has no cheap lever to damage a player System.
+test('station health — the host publishes authoritative per-Station health station-level', async ({ context }) => {
+  const serverPage = await bootDestroyerServer(context);
+  const hostId = await readHostPeerId(serverPage);
+
+  const tactical = await createTestClient(context, hostId, { name: 'Tactical' });
+  await tactical.send('SelectStation', { station: 'Tactical' });
+  await waitForStation(tactical);
+  await tactical.send('SetReady', { ready: true });
+  await tactical.waitForMessage('GameStarted', 10_000);
+
+  const health = await lastStationHealth(tactical);
+  const byStation = Object.fromEntries(health.map((e) => [e.station, e.health]));
+
+  // HEALTHY: on a fresh, undamaged hull every damageable Station sums to full.
+  // These three own the destroyer's hull Systems (helm engines, weapons, power),
+  // and `core` is the ownerless bucket — all report exactly 1.
+  expect(byStation.helm).toBe(1);
+  expect(byStation.tactical).toBe(1);
+  expect(byStation.engineering).toBe(1);
+  expect(byStation.core).toBe(1);
+
+  // NO-DAMAGE-MODEL: Comms and Navigation own no damageable Systems on this
+  // hull, so the host emits no health figure for them — the neutral state. A
+  // client must therefore render their Hero Bar tab from this absence, never
+  // from summed damage rows it is not entitled to hold (AC #2/#3).
+  expect(typeof byStation.comms).not.toBe('number');
+  expect(typeof byStation.navigation).not.toBe('number');
+
+  await tactical.close();
+});
+
 test('comms — hosted tab: an unclaimable Comms resolves onto a seated Captain host', async ({ context }) => {
   const serverPage = await bootDestroyerServer(context);
   const hostId = await readHostPeerId(serverPage);

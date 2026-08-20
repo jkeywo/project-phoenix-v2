@@ -1279,6 +1279,13 @@ pub struct SimSnapshot {
     /// host or effective rating from one console family's blackboard.
     #[serde(default)]
     pub station_hosts: Vec<StationHostSnapshot>,
+    /// Authoritative per-Station hull health for the local ship, summed by the
+    /// host (issue #1100). Station-level by design, exactly like `station_hosts`:
+    /// a client must show a Station's health from this figure, never by summing
+    /// the recipient-scoped damage rows it happens to hold — no client is
+    /// entitled to another Station's rows to sum in the first place.
+    #[serde(default)]
+    pub station_health: Vec<StationHealthSnapshot>,
     /// Effective per-system authority for the local ship at this tick.
     ///
     /// This is the wire projection of `ShipSystemControlSources`, not a
@@ -1296,6 +1303,21 @@ pub struct StationHostSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host: Option<StationId>,
     pub rating: String,
+}
+
+/// One Station's authoritative hull health, summed by the host (issue #1100).
+///
+/// Station-level and recipient-independent, mirroring [`StationHostSnapshot`]:
+/// the host sums the Station's own damageable capacity, so every client renders
+/// the same figure rather than inferring it from the per-recipient rows a
+/// client holds — the whole point of #737 is that no client holds another
+/// Station's rows to sum. `health` is `None` for the neutral "no-damage-model"
+/// state: a Station that owns no damageable capacity.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct StationHealthSnapshot {
+    pub station: StationId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<f32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

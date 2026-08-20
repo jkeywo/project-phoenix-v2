@@ -258,6 +258,54 @@ impl HullVisibility {
         Some((destroyed / max).clamp(0.0, 1.0))
     }
 
+    /// Per-station hull fraction (0.0–1.0), one scalar per owning station.
+    ///
+    /// The station-level companion to [`Self::aggregate_fraction`], and the
+    /// authoritative figure the Hero Bar publishes so no client has to sum
+    /// another station's damage rows it is not entitled to hold (issue #1100).
+    /// Each entry is summed-current over summed-max across exactly that
+    /// station's damageable systems; ownerless systems accumulate under the
+    /// [`CORE_BUCKET_ID`] bucket, matching [`Self::can_see_station`].
+    ///
+    /// A station whose damageable capacity sums to zero — it owns only systems
+    /// the ship declares at zero max, or (as bucketed here) none at all —
+    /// yields an explicit `None`: the neutral "no-damage-model" state, exactly
+    /// as `aggregate_fraction` returns `None` for a ship with no damageable
+    /// systems. Each value is a single scalar reduction naming no system, so it
+    /// is safe to publish station-level to every recipient — the same privacy
+    /// argument that lets everyone have the ship-wide aggregate.
+    ///
+    /// Stations appear in first-seen `entries` order so the wire byte stream is
+    /// deterministic.
+    pub fn station_fractions(&self) -> Vec<(StationId, Option<f32>)> {
+        let mut order: Vec<StationId> = Vec::new();
+        let mut sums: HashMap<StationId, (f32, f32)> = HashMap::new();
+        for e in &self.entries {
+            let station = match self.owner_of.get(&e.system_id) {
+                Some(Some(owner)) => owner.clone(),
+                _ => StationId(CORE_BUCKET_ID.to_string()),
+            };
+            let slot = sums.entry(station.clone()).or_insert_with(|| {
+                order.push(station.clone());
+                (0.0, 0.0)
+            });
+            slot.0 += e.current;
+            slot.1 += e.max_hp;
+        }
+        order
+            .into_iter()
+            .map(|station| {
+                let (current, max) = sums[&station];
+                let fraction = if max > 0.0 {
+                    Some((current / max).clamp(0.0, 1.0))
+                } else {
+                    None
+                };
+                (station, fraction)
+            })
+            .collect()
+    }
+
     /// True when a hull entry has no owning station — the Core bucket.
     fn is_core(&self, system_id: &SystemId) -> bool {
         matches!(self.owner_of.get(system_id), Some(None) | None)
@@ -757,6 +805,88 @@ mod tests {
             let p = v.projection_for(viewer.as_ref());
             assert!((p.aggregate_fraction.unwrap() - expected).abs() < 1e-6);
         }
+    }
+
+    // ── Issue #1100: per-station health, published station-level ──────────────
+    //
+    // The Hero Bar shows every station's health from the host's own sum, not
+    // from the recipient-scoped rows a client happens to hold. `station_fractions`
+    // is that sum: one scalar per owning station, an explicit `None` for a
+    // station that owns no damageable capacity.
+
+    /// The `station_fractions` entry for `station`, or `None` if absent.
+    /// Outer `Option` is presence; inner is the published health.
+    fn health_of(v: &HullVisibility, station: &str) -> Option<Option<f32>> {
+        v.station_fractions()
+            .into_iter()
+            .find(|(s, _)| s.0 == station)
+            .map(|(_, f)| f)
+    }
+
+    #[test]
+    fn station_fractions_report_a_damaged_station_from_its_own_capacity() {
+        // helm owns only helm-radar, at 60/100.
+        let v = vis(vec![]);
+        let f = health_of(&v, "helm")
+            .expect("helm present")
+            .expect("helm has damageable capacity");
+        assert!((f - 0.6).abs() < 1e-6, "expected ~0.6, got {f}");
+    }
+
+    #[test]
+    fn station_fractions_report_a_fully_healthy_station_as_one() {
+        // science owns only sensors, at 100/100.
+        let v = vis(vec![]);
+        let f = health_of(&v, "science")
+            .expect("science present")
+            .expect("science has damageable capacity");
+        assert!((f - 1.0).abs() < 1e-6, "expected ~1.0, got {f}");
+    }
+
+    #[test]
+    fn station_fractions_bucket_ownerless_systems_under_core() {
+        // core (ownerless) is at 40/100.
+        let v = vis(vec![]);
+        let f = health_of(&v, CORE_BUCKET_ID)
+            .expect("core present")
+            .expect("core has damageable capacity");
+        assert!((f - 0.4).abs() < 1e-6, "expected ~0.4, got {f}");
+    }
+
+    #[test]
+    fn a_station_with_no_damageable_capacity_is_the_neutral_none_state() {
+        // `comms` owns one system the ship declares at zero max — no damage
+        // model at all — while `helm` owns a normal damageable system.
+        let entries = vec![
+            status("helm-radar", 60.0),
+            SystemHullStatus {
+                max_hp: 0.0,
+                ..status("comms-array", 0.0)
+            },
+        ];
+        let owner_of = [
+            (
+                SystemId("helm-radar".into()),
+                Some(StationId("helm".into())),
+            ),
+            (
+                SystemId("comms-array".into()),
+                Some(StationId("comms".into())),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let v = HullVisibility::new(
+            entries,
+            owner_of,
+            Some(StationId("engineering".into())),
+            vec![],
+        );
+        // Present, but explicitly neutral — the no-damage-model state.
+        assert_eq!(health_of(&v, "comms"), Some(None));
+        // The healthy path still reports its own capacity beside it.
+        let f = health_of(&v, "helm").flatten().expect("helm has capacity");
+        assert!((f - 0.6).abs() < 1e-6, "expected ~0.6, got {f}");
     }
 
     // ── Issue #1014: destroyed capability is a whole-ship scalar ──────────────

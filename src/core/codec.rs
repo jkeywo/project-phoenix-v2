@@ -513,6 +513,10 @@ mod tests {
                             host: Some(StationId("tactical".into())),
                             rating: "Std".into(),
                         }],
+                        station_health: vec![StationHealthSnapshot {
+                            station: StationId("navigation".into()),
+                            health: Some(0.5),
+                        }],
                         control_sources: BTreeMap::from([
                             (SystemId("navigation".into()), "Human".into()),
                             (SystemId("shields-system".into()), "Ai".into()),

@@ -222,7 +222,7 @@
       background: var(--surface-panel); border-bottom: 1px solid var(--edge-strong);
       font-family: 'Chakra Petch', monospace;
     }
-    #station-hero-tabs { display: flex; gap: 4px; overflow-x: auto; grid-row: 1 / span 3; }
+    #station-hero-tabs { display: flex; gap: 4px; overflow-x: auto; grid-row: 1 / span 4; }
     #station-hero-tabs button {
       width: auto; margin: 0; padding: 3px 9px; min-height: var(--control-hit-min);
       display: flex; flex-direction: column; gap: 1px; white-space: nowrap;
@@ -232,9 +232,13 @@
       border-color: var(--signal); min-height: var(--control-hit-min);
     }
     .station-tab-owner { font-size: var(--text-xs); color: var(--ink-dim); }
-    #station-hero-title, #station-hero-meta, #station-hero-ai { grid-column: 2; }
+    /* Persistent per-tab health cue (issue #1100): a text/shape token, not
+       colour, so it reads regardless of theme or colour vision and survives
+       beside any importance alert on the tab. */
+    .station-tab-health { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.06em; }
+    #station-hero-title, #station-hero-meta, #station-hero-ai, #station-hero-health { grid-column: 2; }
     #station-hero-title { font-size: var(--text-md); font-weight: 700; }
-    #station-hero-meta, #station-hero-ai { font-size: var(--text-xs); color: var(--ink-dim); }
+    #station-hero-meta, #station-hero-ai, #station-hero-health { font-size: var(--text-xs); color: var(--ink-dim); }
     /* --- Phone-bezel red alert glow animation -----------------------------
        Pure CSS no PNGs. A thin 2px inset border holds the base frame color;
        when .alert-on is toggled we swap `--bezel-frame` to red and kick off
@@ -1007,6 +1011,7 @@
       <div id="station-hero-title"></div>
       <div id="station-hero-meta"></div>
       <div id="station-hero-ai" role="status" aria-live="polite"></div>
+      <div id="station-hero-health" role="status" aria-live="polite"></div>
     </nav>
 
     <!-- Console sections are mounted dynamically by mountConsoles() when a
@@ -1645,6 +1650,7 @@
               stationSystems: window.simState && window.simState.stationSystems,
               blackboards: window.simState && window.simState.blackboards,
               stationHosts: window.simState && window.simState.stationHosts,
+              stationHealth: window.simState && window.simState.stationHealth,
               stationRatings: window.simState && window.simState.stationRatings,
               activeStation: activeConsole,
             }) : { tabs: mine.map(id => ({ id })), selected: mine[0] || null };
@@ -2122,6 +2128,7 @@
         stationSystems: window.simState && window.simState.stationSystems,
         blackboards: window.simState && window.simState.blackboards,
         stationHosts: window.simState && window.simState.stationHosts,
+        stationHealth: window.simState && window.simState.stationHealth,
         stationRatings: window.simState && window.simState.stationRatings,
         activeStation: activeConsole,
       });
@@ -2132,6 +2139,7 @@
         titleEl: $('station-hero-title'),
         metaEl: $('station-hero-meta'),
         aiEl: $('station-hero-ai'),
+        healthEl: $('station-hero-health'),
         model,
         translate: t,
         onActivate: stationId => {

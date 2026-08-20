@@ -78,6 +78,7 @@ export class ClientSimState {
     // projection instead of briefly falling back to the lobby rating.
     const controlSources = preserveAuthorityProjection ? this.controlSources : {};
     const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
+    const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
     /** Static world snapshot { entities: [EntitySnapshot], scenario_title, scenario_description } */
     this.world = defaultWorld();
     /** 'Auto' | 'Manual' */
@@ -132,6 +133,14 @@ export class ClientSimState {
     this.stationSystems = {};
     /** Authoritative complete human-seeking Station placements by Station id. */
     this.stationHosts = stationHosts;
+    /**
+     * Authoritative per-Station hull health by Station id (issue #1100).
+     * Value is a fraction in [0,1], or `null` for the neutral "no-damage-model"
+     * state — a Station that owns no damageable capacity. Published
+     * station-level by the host, so the Hero Bar shows a Station's health from
+     * this map rather than summing recipient-scoped damage rows.
+     */
+    this.stationHealth = stationHealth;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = controlSources;
     /** Per-system blackboard mirror, keyed by SystemId string.
@@ -257,6 +266,13 @@ export class ClientSimState {
         this.stationHosts = Object.fromEntries(
           (snap.station_hosts || []).filter(Boolean).map(entry => [entry.station, entry]),
         );
+        // Authoritative per-Station health (issue #1100). `health` is omitted on
+        // the wire for the neutral no-damage-model state, so a missing value
+        // becomes an explicit `null` the Hero Bar renders as that neutral cue.
+        this.stationHealth = Object.fromEntries(
+          (snap.station_health || []).filter(Boolean)
+            .map(entry => [entry.station, typeof entry.health === 'number' ? entry.health : null]),
+        );
         this.navigationWaypoint = snap.navigation_waypoint || null;
         // The host publishes the LocalShip's effective fine-System authority.
         // Missing on older protocol-compatible hosts, where the console
@@ -292,6 +308,7 @@ export class ClientSimState {
         // These are the real round boundaries. Welcome is instead the
         // reconnect handshake for a peer already in the current round.
         this.stationHosts = {};
+        this.stationHealth = {};
         this.controlSources = {};
         break;
       case 'Welcome': {

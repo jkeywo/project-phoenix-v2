@@ -1052,6 +1052,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
     SimBroadcaster::new().register(Audience::All, Cadence::Hz(10.0), |world: &mut World| {
         let entity_states = build_sim_state_entity_states(world);
         let station_hosts = build_station_host_snapshots(world);
+        let station_health = build_station_health_snapshots(world);
         let control_sources = build_control_source_snapshots(world);
 
         // ── Emit SystemHullUpdate per recipient, only when that recipient's
@@ -1067,6 +1068,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         let snapshot = crate::messages::SimSnapshot {
             entity_states,
             station_hosts,
+            station_health,
             control_sources,
         };
         vec![ServerMessage::SimState { snapshot }]
@@ -1098,6 +1100,27 @@ fn build_control_source_snapshots(
                     };
                     (system.clone(), label.to_string())
                 })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Compute this tick's authoritative per-Station health for the `SimState`
+/// broadcast (issue #1100).
+///
+/// Reads the `LocalShip`'s [`HullVisibility`] and reduces it to one scalar per
+/// owning Station via `station_fractions`. Mirrors [`build_station_host_snapshots`]:
+/// a station-level figure that names no system, so it is safe for `Target::All`
+/// — the same privacy argument as the ship-wide aggregate. Empty before the
+/// ship spawns.
+fn build_station_health_snapshots(
+    world: &mut World,
+) -> Vec<crate::messages::StationHealthSnapshot> {
+    crate::console::repair::visibility::hull_visibility(world)
+        .map(|vis| {
+            vis.station_fractions()
+                .into_iter()
+                .map(|(station, health)| crate::messages::StationHealthSnapshot { station, health })
                 .collect()
         })
         .unwrap_or_default()

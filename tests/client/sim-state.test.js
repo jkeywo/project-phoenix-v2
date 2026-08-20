@@ -97,6 +97,28 @@ describe('apply WorldSetup / SimState', () => {
     });
   });
 
+  it('SimState stores authoritative per-Station health by Station id', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      station_health: [
+        { station: 'helm', health: 0.4 },
+        { station: 'navigation', health: 1 },
+        // No-damage-model: the host omits `health` entirely on the wire.
+        { station: 'comms' },
+      ],
+    } } });
+    expect(s.stationHealth).toEqual({ helm: 0.4, navigation: 1, comms: null });
+  });
+
+  it('SimState clears per-Station health at a round boundary', () => {
+    const s = new ClientSimState();
+    s.apply({ type: 'SimState', data: { snapshot: {
+      station_health: [{ station: 'helm', health: 0.4 }],
+    } } });
+    s.apply({ type: 'ReturnedToLobby', data: {} });
+    expect(s.stationHealth).toEqual({});
+  });
+
   it('SimState stores the authoritative fine-System control-source projection', () => {
     const s = new ClientSimState();
     s.apply({ type: 'SimState', data: { snapshot: {

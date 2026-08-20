@@ -23,6 +23,18 @@ This repo carries a **small LLM-maintained wiki** under `wiki/`. It indexes curr
 
 The wiki is not a replacement for code, `README.md`, `CONTEXT.md`, this file, PASM, or GitHub issues. Code is runtime truth; PASM is in-repository design truth; GitHub is planning truth.
 
+**Scenario design work starts with the digest, not the world file.** Before
+reasoning about or changing a scenario's design (pacing, deadlines, causality,
+consequences, the window arithmetic), run `uv run pasm design digest` and treat
+its output as the design source of truth — it merges the declared intent in
+`pasm/spec/design/` with the live authored values and answers questions like
+"what happens if the crew miss `lyra_clear`?" without opening the 5,000-line
+TOML. Tuning edits flow through `pasm design writeback` where possible (it is
+hash-guarded, preserves the world file's commentary byte-for-byte, and refuses
+values outside declared design bounds); structural script work is still a
+direct edit, after which `uv run pasm validate` must stay green — a new
+deadline the design model does not claim is an error by design.
+
 ---
 
 ## Common Commands

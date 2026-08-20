@@ -91,8 +91,6 @@ entity.alliance_destroyer.station.tactical.tutorial.blaster.title,assets/entitie
 entity.alliance_destroyer.station.tactical.tutorial.blaster.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — forward-blasters tip body,"[Port and starboard blasters cover a narrow forward arc. Hold Fire to charge a volley, release to launch it.]"
 entity.alliance_destroyer.station.tactical.tutorial.torpedo.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — torpedo-tubes tip heading,TORPEDO TUBES
 entity.alliance_destroyer.station.tactical.tutorial.torpedo.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — torpedo-tubes tip body,"[Fore and aft tubes load automatically. Use +/- to set how many rounds to hold loaded, then press Fire to launch them at your locked target.]"
-entity.alliance_destroyer.station.tactical.tutorial.comms.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — comms-overlay tip heading,COMMS
-entity.alliance_destroyer.station.tactical.tutorial.comms.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — comms-overlay tip body,[Open Comms to hail contacts and read incoming messages — the badge lights up when something new comes in.]
 entity.alliance_destroyer.station.engineering.tutorial.welcome.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — first-visit engineering tip heading,ENGINEERING STATION
 entity.alliance_destroyer.station.engineering.tutorial.welcome.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — first-visit engineering tip body,"[You keep the destroyer alive. Balance reactor power between Helm, Weapons and Sensors, focus shields toward incoming fire, and send repair teams to anything that's hurting.]"
 entity.alliance_destroyer.station.engineering.tutorial.power.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — power-allocation tip heading,POWER ALLOCATION
@@ -466,8 +464,6 @@ console.tactical.helm,"tactical console — ""Helm"" panel heading",Helm
 console.destroyer_captain.subtitle,captain console — hero sub-heading under the title,[COMMAND & SENSORS]
 console.destroyer_engineering.subtitle,engineering console — hero sub-heading under the title,[SHIELDS · POWER · REPAIR]
 console.engineering.shields,"engineering console — ""Shields"" panel heading",Shields
-console.tactical.navigation,"tactical console — ""Navigation"" panel heading",Navigation
-console.tactical.comms,"tactical console — ""Comms"" panel heading",Comms
 console.tactical.intel,"tactical console — ""Intel"" panel heading (issue #1030)",Intel
 console.common.no_waypoint,Console footer when no waypoint is set,NO WAYPOINT
 console.engineering.station_footer,engineering console — footer station name,ENGINEERING STATION
@@ -481,8 +477,6 @@ console.navigation.none,Navigation console — selected-entity readout when noth
 console.common.nav_toggle,Button that toggles the navigation chart overlay,Nav
 console.common.comms_toggle,Button that toggles the comms overlay,Comms
 console.common.intel_toggle,Button that toggles the intelligence-files overlay (issue #1030),Intel
-console.common.navigation_panel,"Heading on the full-frame Navigation panel a console opens when the seek parks Navigation on it (issue #984)",Navigation
-console.common.comms_panel,"Heading on the full-frame Comms panel a console opens when the seek parks Comms on it (issue #984)",Comms
 console.common.objectives_toggle,Button that toggles the objectives overlay,Objectives
 console.common.red_alert_badge,Badge shown while the ship is at red alert,Red Alert
 console.shields.threat_bearing,"Shields console — standing bearing of the nearest hostile in sensor range, the same fact the backfilled Shields focus AI reads",Threat Bearing
@@ -1341,3 +1335,11 @@ client.link_connecting,Console banner before the first state arrives from the ho
 client.link_dead,Console banner headline while the link to the host is down. The console behind it is dimmed and stops accepting commands,[LINK LOST]
 server.qr_caption,Host viewscreen join panel — caption above the QR code telling guests what scanning it does,[Scan to join the crew]
 server.qr_url_label,Host viewscreen join panel — label above the join URL in text for anyone whose camera will not scan the code,[or type this in]
+client.hero.label,Accessible label for the shared Station Hero Bar tab list,[Station selector]
+client.hero.owner.direct,Hero Bar ownership label for the Station this player directly holds,[Direct]
+client.hero.owner.visiting,Hero Bar ownership label for a complete Station visiting this player's directly held Station,[Visiting]
+client.hero.owner.ai,Hero Bar ownership label for a human-seeking Station whose compatible host order is exhausted,[AI]
+client.hero.meta,"Hero Bar selected Station metadata. {owner} is Direct/Visiting/AI and {rating} is its authored active rating",[{owner} · {rating}]
+client.hero.ai_status,"Hero Bar non-commandable status naming human-seeking Stations currently operated by AI. {stations} is a comma-separated list of Station names",[AI: {stations}]
+entity.alliance_destroyer.station.navigation.description,Alliance Destroyer lobby description for its complete human-seeking Navigation Station,[Plot waypoints and manage the system chart.]
+entity.alliance_destroyer.station.comms.description,Alliance Destroyer lobby description for its complete human-seeking Comms Station,[Hail contacts and manage incoming traffic.]

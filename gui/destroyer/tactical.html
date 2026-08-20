@@ -30,7 +30,7 @@
     .overlay-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; background: rgba(var(--rgb-deep), 0.97); border: 1px solid var(--edge); display: none; flex-direction: column; padding: 16px; }
     .overlay-panel.open { display: flex; }
     .overlay-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
-    .overlay-panel ph-navigation-map, .overlay-panel ph-comms-contact-list, .overlay-panel ph-comms-current-message, .overlay-panel ph-dossier-panel { flex: 1; min-height: 0; }
+    .overlay-panel ph-dossier-panel { flex: 1; min-height: 0; }
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); flex-shrink: 0; padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .sep { color: var(--line-soft); }
@@ -46,12 +46,10 @@
         <h1><span data-i18n="console.tactical.title">TACTICAL</span><span class="sub" data-i18n="console.cruiser_tactical.subtitle">WEAPONS</span></h1>
         <div class="hero-controls">
           <span class="auto-badge" id="tactical-auto-badge" hidden data-i18n="console.common.auto">AUTO</span>
-          <!-- Nav and Comms are human-seeking (issue #984). Tactical AUTHORS
-               them, so it hosts them whenever its own officer is at this
-               console — but not otherwise, and both hide when the seek parks
-               them on another station. Intel is not a system and never moves. -->
-          <button class="overlay-toggle" id="nav-toggle" data-overlay="nav-overlay" data-active="false" hidden data-i18n="console.common.nav_toggle">Nav</button>
-          <button class="overlay-toggle" id="comms-toggle" data-overlay="comms-overlay" data-active="false" hidden><span data-i18n="console.common.comms_toggle">Comms</span><span class="unread-badge" id="comms-unread">!</span></button>
+          <!-- Navigation and Comms are both complete hero-bar Stations now
+               (issues #1097, #1098) and no longer visit Tactical as overlays.
+               Intel is not a system and never moves — it stays here regardless
+               of which station is currently hosting Comms. -->
           <button class="overlay-toggle" id="intel-toggle" data-overlay="intel-overlay" data-active="false" data-i18n="console.common.intel_toggle">Intel</button>
         </div>
       </div>
@@ -74,21 +72,8 @@
         <span id="footer-right" style="color:var(--ink-faint)">—</span>
       </footer>
     </div>
-    <div class="overlay-panel" id="nav-overlay">
-      <button class="overlay-back" id="nav-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
-      <h2 data-i18n="console.tactical.navigation">Navigation</h2>
-      <ph-navigation-map id="navigation-map"></ph-navigation-map>
-      <ph-civilian-traffic id="civilian-traffic"></ph-civilian-traffic>
-    </div>
-    <div class="overlay-panel" id="comms-overlay">
-      <button class="overlay-back" id="comms-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
-      <h2 data-i18n="console.tactical.comms">Comms</h2>
-      <ph-comms-contact-list id="comms-contact-list"></ph-comms-contact-list>
-      <ph-comms-current-message id="comms-current-message"></ph-comms-current-message>
-    </div>
-    <!-- Intelligence files (issue #1030). A sibling overlay to Comms, not a
-         panel inside it: the destroyer has no comms console, comms is a toggle
-         here, and this is a toggle beside it. -->
+    <!-- Intelligence files (issue #1030). Independent of Comms, which is now
+         its own hero-bar console (issue #1098) rather than a toggle here. -->
     <div class="overlay-panel" id="intel-overlay">
       <button class="overlay-back" id="intel-back" data-overlay-back data-i18n="console.common.back">&#8592; Back</button>
       <h2 data-i18n="console.tactical.intel">Intel</h2>
@@ -100,23 +85,17 @@
     import '../components/ph-phasers-controls.js';
     import '../components/ph-blasters-controls.js';
     import '../components/ph-torpedo-controls.js';
-    import '../components/ph-comms-contact-list.js';
-    import '../components/ph-comms-current-message.js';
-    import '../components/ph-navigation-map.js';
-    import '../components/ph-civilian-traffic.js';
     import '../components/ph-dossier-panel.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     import { initConsoleOverlays } from '../console-overlays.js';
-    import { renderVisitingSystems } from '../visiting-systems.js';
 
     // One delegated listener drives every `data-overlay` toggle and every
-    // `data-overlay-back` button on the page (gui/console-overlays.js). It has
-    // to be delegation rather than per-button binding: the Nav and Comms
-    // toggles start `hidden` and only exist as controls while the seek has
-    // parked their systems here.
+    // `data-overlay-back` button on the page (gui/console-overlays.js). Only
+    // the Intel toggle uses this pattern now — Navigation and Comms are both
+    // complete hero-bar Stations (issues #1097, #1098).
     initConsoleOverlays();
 
     // Generic system-id-keyed payload (issue #825): resolve each panel's view
@@ -133,21 +112,15 @@
         var torpedoEl = document.getElementById('torpedo-controls');
         var dossierEl = document.getElementById('dossier-panel');
         var w = system(s, 'tactical-radar', 'phaser-control', 'phaser-omni', 'blaster-port', 'blaster-starboard');
-        var n = system(s, 'navigation');
-        var c = system(s, 'comms');
-        // Nav and Comms are visitors here, even though this hull AUTHORS them
-        // on Tactical (issue #984): their views arrive under `s.systems` only
-        // while the seek holds them here, and the shared renderer shows, hides
-        // and feeds the two panels from exactly that.
-        renderVisitingSystems(s);
-        radarEl.state = { blips: w.blips || [], x: n.ship_x || 0, z: n.ship_z || 0, speed: n.ship_speed || 0, ship_heading: n.ship_heading || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
+        radarEl.state = { blips: w.blips || [], x: w.ship_x || 0, z: w.ship_z || 0, speed: w.ship_speed || 0, ship_heading: w.ship_heading || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
         phasersEl.state = { banks: w.banks || [], target_valid: !!w.target_uuid, mode: w.phaser_mode || 'Auto' };
         blastersEl.state = { banks: w.blasters || [] };
         torpedoEl.state = { tubes: w.tubes || [], magazine: { current: w.torpedo_count || 0, max: w.torpedo_max || w.torpedo_count || 0 }, target_uuid: w.target_uuid || null };
         // Intelligence files (issue #1030). Server-projected: which facts the
         // crew may see is decided by src/dossier/projection.rs, which has no
-        // field for hidden truth — there is nothing to filter here.
-        dossierEl.state = { dossiers: c.dossiers || [] };
+        // field for hidden truth — there is nothing to filter here. `s.dossiers`
+        // is independent of who currently hosts Comms (issue #1098).
+        dossierEl.state = { dossiers: s.dossiers || [] };
         var targetName = w.target_name || w.target_uuid || null;
         document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : t('console.common.no_target');
         document.getElementById('footer-target').style.color = targetName ? 'var(--fire-bright)' : 'var(--ink-faint)';

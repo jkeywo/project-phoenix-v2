@@ -854,9 +854,10 @@ automated_systems = ["phaser-omni"]
 # Contextual tutorial overlays (issue #921, on the #916 framework). Tactical
 # is system-composed (weapons + navigation + comms families — issue #825),
 # so `state` triggers read `systems.<system-id>.<field>`; anchors are DOM
-# ids in gui/destroyer/tactical.html (the `comms-toggle` button, not the
-# hidden comms overlay panel it opens, so the tip is visible before the
-# player has ever opened Comms).
+# ids in gui/destroyer/tactical.html. Navigation and Comms are both complete
+# hero-bar Stations now (issues #1097, #1098) and no longer visit Tactical as
+# overlays, so there is no in-station anchor left for either — this station's
+# tutorial entries below cover only weapons (Tactical's own systems).
 [[station.tutorial]]
 id = "tactical-welcome"
 title = "entity.alliance_destroyer.station.tactical.tutorial.welcome.title"
@@ -892,12 +893,48 @@ text = "entity.alliance_destroyer.station.tactical.tutorial.torpedo.text"
 anchor = "torpedo-controls"
 trigger = { kind = "control_unused", control = "fire_torpedo" }
 
-[[station.tutorial]]
-id = "tactical-comms"
-title = "entity.alliance_destroyer.station.tactical.tutorial.comms.title"
-text = "entity.alliance_destroyer.station.tactical.tutorial.comms.text"
-anchor = "comms-toggle"
-trigger = { kind = "control_unused", control = "hail" }
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = "entity.alliance_destroyer.station.navigation.description"
+rank = "Ltn."
+short_code = "NAV"
+console = "gui/battleship/navigation.html"
+human_seeking = true
+host_order = ["tactical", "engineering", "captain"]
+visiting_rating = "Simplified"
+# [ai] Navigation remains a complete, directly claimable Station. When it has
+# no active holder it visits only these compatible direct seats, in authored
+# order; an active Helm alone therefore leaves it on ordinary AI rather than
+# turning compatibility into an implicit all-crew fallback.
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[station.rating]]
+name = "Simplified"
+automated_systems = ["navigation"]
+
+[[station]]
+id = "comms"
+name = "Comms"
+description = "entity.alliance_destroyer.station.comms.description"
+rank = "Ens."
+short_code = "COM"
+console = "gui/battleship/comms.html"
+manual_overview = "You handle communications. Hail contacts, read and answer incoming traffic, and keep the captain and crew informed of mission developments. Stay on top of the message queue and flag anything urgent."
+human_seeking = true
+host_order = ["tactical", "engineering", "captain", "helm", "navigation"]
+visiting_rating = "Std"
+# [ai] Comms carries only one authored rating everywhere it is declared on any
+# hull — there is no Simplified/automated tier for it — so its visiting
+# rating is the same full interface a direct holder gets. Unlike Navigation,
+# a visiting host is never handed a reduced Comms surface.
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
 
 [[station]]
 id = "engineering"
@@ -1104,41 +1141,35 @@ kind = "blaster_bank"
 station = "tactical"
 power_group = "weapons"
 
-# Both floating systems walk the same authored order, and it is NOT the
-# authored station order (captain, helm, tactical, engineering) that the
-# derived walk would give them.
+# Navigation and Comms are both complete human-seeking Stations (issue #984,
+# #1097, #1098) and are each resolved by their own `[[station]] host_order`,
+# authored above. Neither system block below carries `human_seeking` or
+# `seek_order` any more — that legacy fine-system overlay is fully retired on
+# this hull.
 #
-# Tactical first because Tactical owns them: a destroyer's own Tactical officer
-# keeps navigation and comms at their own console, which is what owner-first
-# has always meant and what the [[station]] list cannot express here (Tactical
-# is authored third).
-#
-# ENGINEERING SECOND is the ruling this list exists for. On a four-seat hull
-# the realistic under-crewed shapes are Captain+Helm and Captain+Engineering,
-# and Engineering is the seat with slack: its own systems are damage-control
-# and power, which are bursty, while Helm is continuously loaded and the
-# Captain is the one person whose attention is meant to be free to look at the
-# whole board. Handing an empty Tactical's comms to Engineering puts it on the
-# officer most able to answer a hail; the derived order would have handed it to
-# the Captain, whose console is the least appropriate place for a second job.
+# ENGINEERING SECOND is the ruling both stations' `host_order` exists to
+# express. On a four-seat hull the realistic under-crewed shapes are
+# Captain+Helm and Captain+Engineering, and Engineering is the seat with
+# slack: its own systems are damage-control and power, which are bursty,
+# while Helm is continuously loaded and the Captain is the one person whose
+# attention is meant to be free to look at the whole board. Handing an empty
+# Tactical's comms to Engineering puts it on the officer most able to answer a
+# hail; the derived order would have handed it to the Captain, whose console
+# is the least appropriate place for a second job.
 #
 # Captain then Helm keeps the fallback honest for the emptier crews — a lone
 # Captain still gets the systems, and a Helm-only bridge still gets them last
-# rather than never. The order is a permutation of the hull's stations, so no
-# seat is unreachable; see `SystemInstanceConfig::seek_order`.
+# rather than never. Each `host_order` is a permutation of the hull's other
+# stations, so no seat is unreachable.
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "tactical"
-human_seeking = true
-seek_order = ["tactical", "engineering", "captain", "helm"]
+station = "navigation"
 
 [[system]]
 id = "comms"
 kind = "comms"
-station = "tactical"
-human_seeking = true
-seek_order = ["tactical", "engineering", "captain", "helm"]
+station = "comms"
 
 [[system]]
 id = "shields-system"

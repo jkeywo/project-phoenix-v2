@@ -1544,10 +1544,12 @@ export function buildSensorsConsoleState(state) {
  * Its own blackboard under its own channel key, read from there rather than off
  * the comms one, for the reason {@link operationsPayload} reads from `operations`:
  * a dossier is something the crew knows, not something a system aboard the ship
- * publishes. It rides the comms payload because comms is the family that owns
- * *who is out there* — on the destroyer that family is on the tactical station,
- * which is where the panel is mounted, and on a hull with a real comms console it
- * arrives there without another builder.
+ * publishes. On the destroyer the Intel panel is mounted on Tactical, which is
+ * independent of wherever Comms is currently hosted (issue #1098 made Comms a
+ * complete visiting Station in its own right) — so `buildSystemStationConsoleState`
+ * merges this onto every system-composed station's top-level `dossiers` field
+ * rather than nesting it under a comms-family view, and the flat `comms.html`
+ * console still gets its own copy directly from {@link buildCommsConsoleState}.
  *
  * A world with no subjects publishes an empty list rather than nothing, so the
  * panel renders its own empty state instead of the console guessing.
@@ -1578,7 +1580,13 @@ export function buildCommsConsoleState(state) {
       // their own key on BOTH arms: a comms blackboard that has not arrived says
       // nothing about whether a dossier one has.
       dossiers:   dossiersPayload(state),
-      comms_auto: state.stationRatings?.['comms'] === 'Backfill',
+      // The fine System's live source is authoritative even when its complete
+      // Comms Station is visiting a differently named host (issue #1098,
+      // mirroring navigation_auto below). Older snapshots may not carry
+      // controlSources, so retain the lobby-rating fallback for compatibility.
+      comms_auto: state.controlSources?.['comms'] != null
+        ? state.controlSources['comms'] === 'Ai'
+        : state.stationRatings?.['comms'] === 'Backfill',
       rejection,
     });
   }
@@ -1589,7 +1597,9 @@ export function buildCommsConsoleState(state) {
     on_screen: state.currentView === 'Comms',
     own_hull:  aggregateStationHull('comms', state.consoleHull, state.stationSystems),
     dossiers:  dossiersPayload(state),
-    comms_auto: state.stationRatings?.['comms'] === 'Backfill',
+    comms_auto: state.controlSources?.['comms'] != null
+      ? state.controlSources['comms'] === 'Ai'
+      : state.stationRatings?.['comms'] === 'Backfill',
     rejection,
   });
 }
@@ -1696,7 +1706,13 @@ export function buildNavigationConsoleState(state) {
     // watching a contact move, because "it has not started turning yet" and
     // "it has decided not to" look identical on a chart.
     civilians:               (bb && bb.civilians) || [],
-    navigation_auto:         state.stationRatings?.['navigation'] === 'Backfill',
+    // The fine System's live source is authoritative even when its complete
+    // Navigation Station is visiting a differently named host. Older snapshots
+    // may not carry controlSources, so retain the lobby-rating fallback for
+    // compatibility rather than briefly presenting manual control as AUTO.
+    navigation_auto:         state.controlSources?.['navigation'] != null
+      ? state.controlSources['navigation'] === 'Ai'
+      : state.stationRatings?.['navigation'] === 'Backfill',
   });
 }
 
@@ -1757,7 +1773,8 @@ const FAMILY_BUILDERS = {
  * gui/courier/{captain,pilot,tactical}.html.
  *
  * @typedef {{ station_id: string, system_ids: string[],
- *             systems: Object<string, object> }} SystemStationConsolePayload
+ *             systems: Object<string, object>,
+ *             dossiers: Array }} SystemStationConsolePayload
  */
 
 /**
@@ -1812,7 +1829,20 @@ export function buildSystemStationConsoleState(stationId, state) {
   add('repair', buildRepairConsoleState,
     (view) => { view.repair_auto = controlSources['repair'] === 'Ai'; });
 
-  return JSON.stringify({ station_id: stationId, system_ids: ids, systems });
+  // Dossiers (issue #1030) ride this top-level key rather than under
+  // `systems['comms']`. That used to be enough because the destroyer's Intel
+  // panel and its Comms system lived on the same station, but Comms is now
+  // its own complete Station (issue #1098) and can visit anywhere, so a
+  // system-composed station that never owns a comms-family system (Tactical,
+  // once Comms left it) would otherwise lose the feed. Cross-cutting like
+  // `own_hull` below, for the same reason: every system-composed station gets
+  // it, whether or not it renders it.
+  return JSON.stringify({
+    station_id: stationId,
+    system_ids: ids,
+    systems,
+    dossiers: dossiersPayload(state),
+  });
 }
 
 // ── Window dispatch (for non-module inline scripts in client.html) ──────────

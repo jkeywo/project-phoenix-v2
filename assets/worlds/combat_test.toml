@@ -223,6 +223,11 @@
 # ever reaches the rule whose text changed. The two worlds that DO — `duel` and
 # `rng_coverage` — carry their own baselines and both moved.
 
+# [ai] Combat Test's timed waves require a human-hosted Navigation surface to
+# retain direct waypoint control. The selector names the hull-agnostic System
+# kind; the selected hull resolves it after the lobby locks the ship.
+scenario_detail_floor = ["navigation"]
+
 [global]
 seed = 475
 title = "world.combat_test.global.title"

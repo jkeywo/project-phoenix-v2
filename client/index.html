@@ -44,6 +44,7 @@
        payload normaliser. -->
   <script type="module" src="gui/mount-plan.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
+  <script type="module" src="gui/hero-bar.js"></script>
   <script type="module" src="gui/station-roster.js"></script>
   <script type="module" src="gui/client-router.js"></script>
   <script type="module" src="gui/lobby-view.js"></script>
@@ -213,6 +214,27 @@
       border: none;
       display: block;
     }
+    #station-hero[aria-hidden="true"] { display: none; }
+    #station-hero {
+      display: grid; grid-template-columns: 1fr auto; gap: 2px 10px;
+      align-items: center; flex: 0 0 auto; padding: 4px 10px;
+      min-height: var(--control-hit-min); z-index: 16;
+      background: var(--surface-panel); border-bottom: 1px solid var(--edge-strong);
+      font-family: 'Chakra Petch', monospace;
+    }
+    #station-hero-tabs { display: flex; gap: 4px; overflow-x: auto; grid-row: 1 / span 3; }
+    #station-hero-tabs button {
+      width: auto; margin: 0; padding: 3px 9px; min-height: var(--control-hit-min);
+      display: flex; flex-direction: column; gap: 1px; white-space: nowrap;
+      font-size: var(--text-sm); text-align: center;
+    }
+    #station-hero-tabs button[aria-selected="true"] {
+      border-color: var(--signal); min-height: var(--control-hit-min);
+    }
+    .station-tab-owner { font-size: var(--text-xs); color: var(--ink-dim); }
+    #station-hero-title, #station-hero-meta, #station-hero-ai { grid-column: 2; }
+    #station-hero-title { font-size: var(--text-md); font-weight: 700; }
+    #station-hero-meta, #station-hero-ai { font-size: var(--text-xs); color: var(--ink-dim); }
     /* --- Phone-bezel red alert glow animation -----------------------------
        Pure CSS no PNGs. A thin 2px inset border holds the base frame color;
        when .alert-on is toggled we swap `--bezel-frame` to red and kick off
@@ -980,6 +1002,13 @@
       </div>
     </section>
 
+    <nav id="station-hero" aria-hidden="true" aria-label="" data-i18n-attr="aria-label:client.hero.label">
+      <div id="station-hero-tabs" role="tablist"></div>
+      <div id="station-hero-title"></div>
+      <div id="station-hero-meta"></div>
+      <div id="station-hero-ai" role="status" aria-live="polite"></div>
+    </nav>
+
     <!-- Console sections are mounted dynamically by mountConsoles() when a
          Welcome message arrives with ship_stations. Each section is created
          with the same id/iframe-id conventions as the static originals
@@ -1609,13 +1638,25 @@
       // Reconcile activeConsole with current consoles list (port of the
       // deleted Bevy reconcile_active_console — see gui/lobby-state.js).
       if (inGame) {
+        const hero = (typeof window.heroBarModel === 'function')
+          ? window.heroBarModel({
+              directStation: playerStation(s),
+              stations: (s.shipStations && s.shipStations.stations) || [],
+              stationSystems: window.simState && window.simState.stationSystems,
+              blackboards: window.simState && window.simState.blackboards,
+              stationHosts: window.simState && window.simState.stationHosts,
+              stationRatings: window.simState && window.simState.stationRatings,
+              activeStation: activeConsole,
+            }) : { tabs: mine.map(id => ({ id })), selected: mine[0] || null };
+        const available = hero.tabs.map(tab => tab.id);
         const next = (typeof window.reconcileActiveConsole === 'function')
-          ? window.reconcileActiveConsole(activeConsole, mine)
-          : ((activeConsole && mine.includes(activeConsole)) ? activeConsole : (mine[0] || null));
+          ? window.reconcileActiveConsole(activeConsole, available)
+          : ((activeConsole && available.includes(activeConsole)) ? activeConsole : (available[0] || null));
         if (next !== activeConsole) setActiveConsole(next);
       } else {
         setActiveConsole(null);
       }
+      renderStationHero(s, inGame);
 
       // Console sections: map activeConsole → HTML section id via
       // gui/content-switcher.js, over the sections this ship actually mounts
@@ -2068,6 +2109,36 @@
       // science, …) as well as the standalone ones — all resolve to their
       // iframe via the registry.
       pushActiveConsoleState();
+    }
+
+    function renderStationHero(s, inGame) {
+      const root = $('station-hero');
+      const tabsEl = $('station-hero-tabs');
+      if (!root || !tabsEl || typeof window.heroBarModel !== 'function'
+          || typeof window.renderHeroBarDom !== 'function') return;
+      const model = window.heroBarModel({
+        directStation: playerStation(s),
+        stations: (s.shipStations && s.shipStations.stations) || [],
+        stationSystems: window.simState && window.simState.stationSystems,
+        blackboards: window.simState && window.simState.blackboards,
+        stationHosts: window.simState && window.simState.stationHosts,
+        stationRatings: window.simState && window.simState.stationRatings,
+        activeStation: activeConsole,
+      });
+      root.setAttribute('aria-hidden', inGame && model.tabs.length ? 'false' : 'true');
+      if (!inGame || !model.tabs.length) return;
+      window.renderHeroBarDom({
+        tabsEl,
+        titleEl: $('station-hero-title'),
+        metaEl: $('station-hero-meta'),
+        aiEl: $('station-hero-ai'),
+        model,
+        translate: t,
+        onActivate: stationId => {
+          setActiveConsole(stationId);
+          scheduleRender();
+        },
+      });
     }
 
     // -- Coordination popup (issue #494) ---------------------------------------

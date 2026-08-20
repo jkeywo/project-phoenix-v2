@@ -19,7 +19,7 @@
  *             maxPlayers: number, allFilled: boolean, allReady: boolean }}
  */
 export function buildStationRoster(players, stationDefs) {
-  const defs = stationDefs || [];
+  const defs = (stationDefs || []).filter(def => !def.auxiliary);
   const list = players || [];
   const stations = defs.map(def => {
     // Post issue #619 a player holds a lowercase station id directly.

@@ -147,6 +147,19 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     // `authoritative-weapons-hold-state` entity in
     // pasm/spec/architecture/red-alert.yaml.
     "ShipWeaponsHold",
+    // Issue #1107's Command stance selection. `ShipStationStances` is the
+    // per-ship map of the stance a human Command operator has selected for each
+    // AI-controlled Station the hull's Command station directs. Authoritative
+    // and FOLDED, in its own `fold_station_stances_namespace` — a stored stance
+    // persists tick to tick and changes the directed Station's weapons AI
+    // posture, and (unlike `HumanSeekingHosts`/`VisitingStationHosts` below) it
+    // is NOT re-derived each tick from digest-free inputs, so a divergent
+    // selection must be caught on the tick it happens, exactly as
+    // `ShipWeaponsHold` above. The namespace folds nothing while every hull's
+    // map is empty, so an uncommanded world stays byte-identical. Transcribed
+    // from the `command-stance-selection-state` entity in
+    // pasm/spec/architecture/command-stances.yaml.
+    "ShipStationStances",
     // Issue #863's spawn provenance. `EntitySpawnOrigin` is a new Bevy
     // COMPONENT — what a mid-run scripted spawn was made from, so a resume can
     // rebuild the ship no fresh boot re-derives — and `SpawnOrigin` is the

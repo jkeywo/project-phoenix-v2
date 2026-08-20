@@ -174,6 +174,7 @@ use vellum_digest::{digest_postcard, fnv1a, fold_digest, FOLD_SEED};
 
 use crate::balance::BalanceEvent;
 use crate::civilian::{CivilianState, CivilianTraffic};
+use crate::command_plugin::ShipStationStances;
 use crate::core::telemetry::RunTelemetry;
 use crate::damage::SystemHull;
 use crate::entity_spawner::{EntitySystemHull, EntityUuid};
@@ -321,6 +322,7 @@ pub fn world_digest(world: &World) -> u64 {
     acc = fold_operations_namespace(world, acc);
     acc = fold_civilian_namespace(world, acc);
     acc = fold_weapons_hold_namespace(world, acc);
+    acc = fold_station_stances_namespace(world, acc);
     acc = fold_asteroid_namespace(world, acc);
     fold_collisions(world, acc)
 }
@@ -611,6 +613,82 @@ fn fold_weapons_hold_namespace(world: &World, mut acc: u64) -> u64 {
     acc = fold_u64(acc, rows.len() as u64);
     for (key, _) in rows {
         acc = fold_str(acc, &key.id);
+    }
+    acc
+}
+
+/// Every ship carrying a stored Command stance selection (issue #1107), in
+/// [`FoldKey`] order, in its own namespace.
+///
+/// Authoritative and folded: a stored stance is a human Command operator's
+/// standing order, it persists tick to tick, and it changes what the directed
+/// Station's weapons AI does — two hosts that disagreed about which stance a
+/// hull is under would disagree about whether that hull's guns open up. It is
+/// NOT re-derived each tick from digest-free inputs the way `HumanSeekingHosts`
+/// and `VisitingStationHosts` are (those recompute from `ShipConfig` +
+/// sessions + control sources every tick and so are excluded as `derived`); a
+/// selection lands here only when a `SetStationStance` command is admitted and
+/// stays until a later order or the AI operator clears it. So a divergent
+/// selection has to be caught on the tick it happens — the same rationale
+/// [`fold_weapons_hold_namespace`] folds.
+///
+/// # Only the ships that carry a selection, and per-station in id order
+///
+/// The empty-namespace rule of [`fold_weapons_hold_namespace`]. EMPTY is the
+/// load-bearing default: a hull nobody commands carries an empty
+/// `ShipStationStances` and folds nothing at all here, so a run in which no
+/// stance is ever selected and a run recorded before the lever existed *are the
+/// same authoritative state* and fold to the same number — which is the
+/// byte-identical property the whole slice is built to. Every ship is
+/// spawn-inserted with an empty map (`entities::spawner`), so folding a row for
+/// all of them would move every committed world digest over a lever none of
+/// those runs pull.
+///
+/// Each selecting ship folds its per-station selections in `StationId` order —
+/// the map's own iteration order is `HashMap` order, never stable across
+/// instances — so two hosts fold the same selections to the same number
+/// whatever order the entries were inserted in.
+fn fold_station_stances_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &ShipStationStances)>() else {
+        // A world that never registered the component carries no selection — the
+        // empty case above, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(
+        FoldKey,
+        bevy::ecs::entity::EntityIndex,
+        Vec<(String, String)>,
+    )> = query
+        .iter(world)
+        .filter(|(_, _, stances)| !stances.0.is_empty())
+        .map(|(entity, uuid, stances)| {
+            let mut selections: Vec<(String, String)> = stances
+                .0
+                .iter()
+                .map(|(station, stance)| (station.0.clone(), stance.clone()))
+                .collect();
+            selections.sort_by(|a, b| a.0.cmp(&b.0));
+            (
+                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                entity.index(),
+                selections,
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "station-stances-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, selections) in rows {
+        acc = fold_str(acc, &key.id);
+        acc = fold_u64(acc, selections.len() as u64);
+        for (station, stance) in selections {
+            acc = fold_str(acc, &station);
+            acc = fold_str(acc, &stance);
+        }
     }
     acc
 }

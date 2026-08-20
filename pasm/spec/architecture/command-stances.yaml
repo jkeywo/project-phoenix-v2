@@ -62,13 +62,17 @@ entities:
       origin: ai
       title: Command Stance Selection State
       summary: Authoritative per-target selected stance for each AI-controlled Station a Command station directs, defaulting to the alert-neutral stance for the current alert level.
+      rationale:
+        - "FOLDED, like the weapons-hold lever it sits beside. A stored stance is a human Command operator's standing order: it persists tick to tick and it changes the VALUE of the posture fact the directed Station's weapons AI reads, so two hosts that disagreed about which stance a hull is under would disagree about whether its guns open up. It is folded in its own `fold_station_stances_namespace` (src/sim_digest.rs) so a divergent selection is caught on the tick it happens, the identical argument `authoritative-weapons-hold-state` makes."
+        - "NOT derived, which is why it is folded rather than excluded. `HumanSeekingHosts` and `VisitingStationHosts` recompute every tick as pure functions of ShipConfig, sessions and control sources — all digest-free — and are classified `derived`; a stance selection is not: it lands only when a `SetStationStance` command is admitted and stays until a later order or the AI operator clears it, so no fold of already-folded state recovers it."
+        - "The namespace folds NOTHING while every hull's map is empty. Every ship is spawn-inserted with an empty `ShipStationStances` (empty is the load-bearing default of a hull nobody commands), so a run in which no stance is ever selected and a run recorded before #1107 existed are the same authoritative state and fold to the same number — the byte-identical property the whole slice is built to. Each selecting ship folds its per-station selections in `StationId` order, never `HashMap` iteration order, so the fold is independent of insertion order across instances."
     architecture:
       classification: authoritative
       owner: command-station-authority
       writers: [command-station-authority]
     implementation:
       status: declared
-      paths: [src/console/command/server.rs, src/ship/command_stance.rs]
+      paths: [src/console/command/server.rs, src/ship/command_stance.rs, src/sim_digest.rs]
       symbols: [ShipStationStances]
 
   - message: set-station-stance-command

@@ -37,6 +37,16 @@ export const TABS = [
   { id: 'debug', labelId: 'settings.tab.debug', gated: true },
 ];
 
+/**
+ * The phone client's Accessibility tab (issue #1102). PHONE-SCOPED on purpose:
+ * the Accessibility profile belongs to the player / this pane, so it appears on
+ * the phone client's cog and NOT on the shared host TABS above. Never gated —
+ * it must survive the public demo build like the documentation tabs do.
+ */
+export const CLIENT_ACCESSIBILITY_TABS = [
+  { id: 'accessibility', labelId: 'settings.tab.accessibility', gated: false },
+];
+
 /** Client-only documentation tabs, always available including in demo builds. */
 export const CLIENT_DOCUMENTATION_TABS = [
   { id: 'station-help', labelId: 'settings.tab.station_help', gated: false },
@@ -53,9 +63,16 @@ export function visibleTabs(demo) {
   return TABS.filter((tab) => !(tab.gated && demo));
 }
 
-/** The phone client's operational and documentation tabs in display order. */
+/**
+ * The phone client's tabs in display order: the shared operational tabs, then
+ * the phone-only Accessibility tab, then the documentation tabs. Accessibility
+ * sits with the operational settings (before the reference docs) because it is
+ * a live control surface, not reference material.
+ */
 export function visibleClientTabs(demo) {
-  return visibleTabs(demo).concat(CLIENT_DOCUMENTATION_TABS);
+  return visibleTabs(demo)
+    .concat(CLIENT_ACCESSIBILITY_TABS)
+    .concat(CLIENT_DOCUMENTATION_TABS);
 }
 
 /**

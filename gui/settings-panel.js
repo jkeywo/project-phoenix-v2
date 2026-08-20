@@ -49,6 +49,7 @@ import { visibleClientTabs, resolveClientActiveTab } from './settings-tabs.js';
 import { controlSystemEnvelope } from './command-gateway.js';
 import { renderStationHelp } from './help-panel.js';
 import { renderManual } from './manual-panel.js';
+import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP } from './accessibility-profile.js';
 
 /** localStorage key for the master volume. Unchanged from the pre-#940 slider. */
 const STORAGE_KEY = 'phoenix-settings-volume';
@@ -217,6 +218,12 @@ export function buildSettingsState(opts = {}) {
     activeTab: resolveClientActiveTab(opts.activeTab || null, demo),
     stationId,
     ratings,
+    // The private Accessibility profile (issue #1102), reflected as the
+    // player's EXPLICIT choices so the tab paints which option is selected.
+    // Pure: this reads the stored tri-states only — the OS default and the
+    // resolved effect are an apply()-time concern (gui/accessibility-profile.js),
+    // never computed here.
+    accessibility: accessibilityView(state.accessibilityProfile),
     debugFlags: CLIENT_DEBUG_FLAGS.map((entry) => ({
       ...entry,
       on: !!flags[entry.flag],
@@ -229,6 +236,28 @@ export function buildSettingsState(opts = {}) {
     // decode the frame, so offering the button would be offering a dead one.
     showPause: !demo,
     reported,
+  };
+}
+
+/** The three tri-states an OS-defaultable accessibility effect can carry. */
+const A11Y_TRI_STATES = new Set(['default', 'on', 'off']);
+
+/**
+ * Fold the stored accessibility profile into what the tab paints. Pure: it
+ * reflects the player's explicit choices only. `textScaleValue` is the slider's
+ * position — the numeric scale, or the identity (1) when the effect is unset.
+ *
+ * @param {object|null} profile
+ */
+export function accessibilityView(profile) {
+  const pres = (profile && profile.presentation) || {};
+  const textScale = pres.textScale;
+  const tri = (v) => (A11Y_TRI_STATES.has(v) ? v : 'default');
+  return {
+    textScale: typeof textScale === 'number' ? textScale : 'default',
+    textScaleValue: typeof textScale === 'number' ? textScale : 1,
+    contrast: tri(pres.contrast),
+    reducedMotion: tri(pres.reducedMotion),
   };
 }
 
@@ -325,6 +354,7 @@ export function mountSettings({
   audioEls,
   getManual,
   myToken,
+  onAccessibility: _onAccessibility,
   doc: _doc,
   isDemo: _isDemo,
 } = {}) {
@@ -365,6 +395,15 @@ export function mountSettings({
 
   const emit = (type, data) => {
     if (typeof send === 'function') send(type, data);
+  };
+
+  // The Accessibility tab's write path (issue #1102). DELIBERATELY separate
+  // from `emit`/`send`: a presentation choice is client-local and must never
+  // become a ClientMessage (AC5). client.html wires this to
+  // window.setAccessibilityPresentation (update simState, persist privately,
+  // re-apply to the shell + console iframes); absent, it is a harmless no-op.
+  const setAccessibility = (effect, value) => {
+    if (typeof _onAccessibility === 'function') _onAccessibility(effect, value);
   };
 
   // ── Gear button ──────────────────────────────────────────────────────────
@@ -512,6 +551,97 @@ export function mountSettings({
     body.appendChild(el);
   }
 
+  // A row of tri-state option buttons for one OS-defaultable effect. Exactly
+  // one is active (the player's explicit choice); each writes its value on the
+  // client-local path — never a ClientMessage.
+  function accessibilityChoiceRow(effect, current, options) {
+    const rowEl = row('settings-rating-row');
+    for (const [value, labelId] of options) {
+      rowEl.appendChild(
+        toggle('a11y-' + effect + '-' + value, t(labelId), current === value, () => {
+          setAccessibility(effect, value);
+          // Repaint so the active option moves. Safe here (unlike the sliders):
+          // no drag is in flight on a button press.
+          buildContent();
+        }),
+      );
+    }
+    return rowEl;
+  }
+
+  function buildAccessibilityTab(body, view) {
+    const a = view.accessibility;
+
+    // Explanatory copy: names effects, states the profile is private/local, and
+    // never asks for or infers a diagnosis or a reason (AC1).
+    const intro = section('settings.accessibility.presentation');
+    intro.appendChild(hint('settings.accessibility.intro_hint'));
+    intro.appendChild(hint('settings.accessibility.local_hint'));
+    body.appendChild(intro);
+
+    // Text size — the observable effect proven end to end (AC3). Drives
+    // --a11y-text-scale on every console :root via the client-local path.
+    const textSec = section('settings.accessibility.text_scale');
+    const scaleRow = row('settings-vol-row');
+
+    const slider = doc.createElement('input');
+    slider.type = 'range';
+    slider.min = String(TEXT_SCALE_MIN);
+    slider.max = String(TEXT_SCALE_MAX);
+    slider.step = String(TEXT_SCALE_STEP);
+    slider.value = String(a.textScaleValue);
+    slider.setAttribute('data-control', 'a11y-text-scale');
+
+    const label = doc.createElement('span');
+    label.className = 'settings-vol-label';
+    const paint = () => {
+      label.textContent = t('settings.accessibility.text_scale_value', {
+        value: String(Math.round(Number(slider.value) * 100)),
+      });
+    };
+    // `input`, not `change`: the console text must resize under the finger, and
+    // we do NOT rebuild the panel (that would drop the drag) — the readout is
+    // updated locally, exactly as the master-volume slider does.
+    slider.addEventListener('input', function () {
+      setAccessibility('textScale', Number(this.value));
+      paint();
+    });
+    paint();
+
+    scaleRow.appendChild(slider);
+    scaleRow.appendChild(label);
+    textSec.appendChild(scaleRow);
+    textSec.appendChild(hint('settings.accessibility.text_scale_hint'));
+    textSec.appendChild(
+      action(t('settings.accessibility.text_scale_reset'), null, () => {
+        setAccessibility('textScale', 'default');
+        buildContent();
+      }),
+    );
+    body.appendChild(textSec);
+
+    // Contrast — tri-state: follow the OS, force more, or force standard.
+    const contrastSec = section('settings.accessibility.contrast');
+    contrastSec.appendChild(accessibilityChoiceRow('contrast', a.contrast, [
+      ['default', 'settings.accessibility.follow_system'],
+      ['on', 'settings.accessibility.contrast_more'],
+      ['off', 'settings.accessibility.contrast_standard'],
+    ]));
+    contrastSec.appendChild(hint('settings.accessibility.contrast_hint'));
+    body.appendChild(contrastSec);
+
+    // Motion — tri-state: follow the OS, reduce, or allow full motion even when
+    // the OS asks to reduce (the explicit override wins both ways).
+    const motionSec = section('settings.accessibility.reduced_motion');
+    motionSec.appendChild(accessibilityChoiceRow('reducedMotion', a.reducedMotion, [
+      ['default', 'settings.accessibility.follow_system'],
+      ['on', 'settings.accessibility.motion_reduce'],
+      ['off', 'settings.accessibility.motion_allow'],
+    ]));
+    motionSec.appendChild(hint('settings.accessibility.reduced_motion_hint'));
+    body.appendChild(motionSec);
+  }
+
   function buildGameplayTab(body, view) {
     // Dev builds only — see the module doc. The whole section goes, not just
     // the button: a "Simulation" heading over nothing reads as a bug.
@@ -632,6 +762,7 @@ export function mountSettings({
 
     if (activeTab === 'debug') buildDebugTab(body, view);
     else if (activeTab === 'audio') buildAudioTab(body);
+    else if (activeTab === 'accessibility') buildAccessibilityTab(body, view);
     else if (activeTab === 'gameplay') buildGameplayTab(body, view);
     else if (activeTab === 'station-help') buildStationHelpTab(body, view);
     else if (activeTab === 'ship-manual') buildShipManualTab(body);

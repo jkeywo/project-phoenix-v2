@@ -27,7 +27,7 @@ import {
   GOD_MODE_SYSTEM_ID,
 } from '../../gui/settings-panel.js';
 import { setBuildFlags, isDemoBuild } from '../../gui/build-flags.js';
-import { TABS, CLIENT_DOCUMENTATION_TABS } from '../../gui/settings-tabs.js';
+import { TABS, CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS } from '../../gui/settings-tabs.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 
 const repoFile = (rel) =>
@@ -189,7 +189,7 @@ describe('mountSettings — cog and overlay', () => {
     const inst = mount(doc);
     inst.open();
     const labels = tabBarOf(doc).children.map((c) => c.getAttribute('data-tab'));
-    expect(labels).toEqual(['audio', 'gameplay', 'debug', 'station-help', 'ship-manual']);
+    expect(labels).toEqual(['audio', 'gameplay', 'debug', 'accessibility', 'station-help', 'ship-manual']);
     expect(tabBarOf(doc).children[0].classList.contains('active')).toBe(true);
   });
 
@@ -419,13 +419,19 @@ describe('the demo build gate', () => {
   it('hides exactly the Debug/Cheat tab in a demo build and nothing in a dev build', () => {
     const dev = buildSettingsState({ demo: false }).tabs.map((tb) => tb.id);
     const demo = buildSettingsState({ demo: true }).tabs.map((tb) => tb.id);
-    expect(dev).toEqual(TABS.concat(CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id));
-    expect(demo).toEqual(TABS.filter((tb) => !tb.gated).concat(CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id));
+    expect(dev).toEqual(TABS.concat(CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id));
+    expect(demo).toEqual(
+      TABS.filter((tb) => !tb.gated).concat(CLIENT_ACCESSIBILITY_TABS, CLIENT_DOCUMENTATION_TABS).map((tb) => tb.id),
+    );
     expect(dev).toContain('debug');
     expect(demo).not.toContain('debug');
     // Audio and Gameplay are not build-gated — the demo needs both.
     expect(demo).toContain('audio');
     expect(demo).toContain('gameplay');
+    // The Accessibility tab is phone-only and never gated — it must survive the
+    // demo build (issue #1102 AC1).
+    expect(dev).toContain('accessibility');
+    expect(demo).toContain('accessibility');
     expect(demo).toContain('station-help');
     expect(demo).toContain('ship-manual');
   });
@@ -454,7 +460,7 @@ describe('the demo build gate', () => {
     const inst = mount(doc, { isDemo: () => true });
     inst.open();
     expect(tabBarOf(doc).children.map((c) => c.getAttribute('data-tab')))
-      .toEqual(['audio', 'gameplay', 'station-help', 'ship-manual']);
+      .toEqual(['audio', 'gameplay', 'accessibility', 'station-help', 'ship-manual']);
     // …and nothing in the body offers a debug control.
     for (const entry of CLIENT_DEBUG_FLAGS) {
       expect(bodyButtons(doc).some((b) => b.getAttribute('data-control') === entry.id))
@@ -926,6 +932,90 @@ describe('gameplay tab — rating, QR and leave station', () => {
       .find((b) => b.getAttribute('data-control') === PAUSE_CONTROL_ID);
     expect(paused.textContent).toBe(t('settings.gameplay.resume'));
     expect(paused.getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+// ── The Accessibility tab (issue #1102) ──────────────────────────────────────
+//
+// The tab is phone-only and its whole point is that NOTHING it does reaches the
+// host: a presentation choice is client-local (AC5). Every control writes on
+// the dedicated `onAccessibility` path, never `send`, and this pins that so a
+// later refactor cannot quietly route a setting onto the wire.
+
+describe('accessibility tab', () => {
+  const profileState = (accessibilityProfile) => ({
+    stations: [{ id: 'helm', holder_token: 'tok1', ratings: ['Std'] }],
+    stationRatings: {},
+    accessibilityProfile,
+  });
+
+  function openAccessibility(accessibilityProfile) {
+    const doc = makeDoc();
+    const sent = [];
+    const writes = [];
+    const inst = mount(doc, {
+      send: (type, data) => sent.push({ type, data }),
+      onAccessibility: (effect, value) => writes.push({ effect, value }),
+      getState: () => profileState(accessibilityProfile),
+    });
+    inst.open();
+    inst.selectTab('accessibility');
+    return { doc, sent, writes, inst };
+  }
+
+  const accSlider = (doc) =>
+    bodyOf(doc).children
+      .flatMap((s) => s.children)
+      .flatMap((c) => (c.children && c.children.length ? c.children : [c]))
+      .find((c) => c.type === 'range');
+
+  it('appears in the phone tab list and opens a body with effect-named controls', () => {
+    const { doc } = openAccessibility();
+    expect(tabBarOf(doc).children.map((c) => c.getAttribute('data-tab'))).toContain('accessibility');
+    // The load-bearing text-scale slider is present…
+    expect(accSlider(doc)).toBeDefined();
+    // …alongside the tri-state contrast + motion choice buttons.
+    const controls = bodyButtons(doc).map((b) => b.getAttribute('data-control'));
+    expect(controls).toContain('a11y-contrast-default');
+    expect(controls).toContain('a11y-reducedMotion-on');
+  });
+
+  it('sends NOTHING on the wire — every control writes on the client-local path only', () => {
+    const { doc, sent, writes } = openAccessibility();
+    // Click every button on the tab…
+    for (const btn of bodyButtons(doc)) btn.click();
+    // …and drag the text-size slider.
+    const slider = accSlider(doc);
+    slider.value = '1.3';
+    slider.dispatch('input');
+
+    // Not one ClientMessage left the panel.
+    expect(sent).toEqual([]);
+    // But the client-local writes DID happen (persist + apply is client.html's job).
+    expect(writes.some((w) => w.effect === 'textScale' && w.value === 1.3)).toBe(true);
+    expect(writes.some((w) => w.effect === 'contrast')).toBe(true);
+    expect(writes.some((w) => w.effect === 'reducedMotion')).toBe(true);
+  });
+
+  it('paints the active tri-state from the stored profile, not from a click', () => {
+    const { doc } = openAccessibility({
+      presentation: { textScale: 'default', contrast: 'on', reducedMotion: 'off' },
+      assistance: {},
+    });
+    const active = bodyButtons(doc)
+      .filter((b) => b.classList.contains('active'))
+      .map((b) => b.getAttribute('data-control'));
+    expect(active).toContain('a11y-contrast-on');
+    expect(active).toContain('a11y-reducedMotion-off');
+    expect(active).not.toContain('a11y-contrast-default');
+  });
+
+  it('positions the text-size slider from the stored explicit scale', () => {
+    const { doc } = openAccessibility({
+      presentation: { textScale: 1.4, contrast: 'default', reducedMotion: 'default' },
+      assistance: {},
+    });
+    expect(Number(accSlider(doc).value)).toBeCloseTo(1.4);
   });
 });
 

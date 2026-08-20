@@ -92,6 +92,12 @@
   <script type="module" src="gui/connection-manager.js"></script>
   <!-- Settings panel: client controls plus Station Help and Ship Manual. -->
   <script type="module" src="gui/settings-panel.js"></script>
+  <!-- Private per-player Accessibility profile (issue #1102): presentation
+       effects + inert assistance schema. Hydrates simState.accessibilityProfile
+       from localStorage in the module graph and defines
+       window.applyAccessibilityProfile / setAccessibilityPresentation for the
+       inline script below. Never sent to the host — client-local. -->
+  <script type="module" src="gui/accessibility-profile.js"></script>
   <style>
     /* The lobby's vocabulary is gui/tokens.css, linked above — it used to keep
        a parallel `:root` here whose `--edge` was a different colour from the
@@ -2118,6 +2124,12 @@
         // covers every station id the ship mounts (including engineering /
         // science aggregates the old per-name switch never handled).
         pushConsoleStateFor(consoleName);
+        // Re-apply the private Accessibility profile to this same-origin console
+        // now that its document has (re)loaded — a reload otherwise resets the
+        // iframe :root, losing the text-scale var until the next apply (#1102).
+        if (typeof window.applyAccessibilityProfile === 'function') {
+          window.applyAccessibilityProfile({ iframes: [iframeEl] });
+        }
       });
     }
 
@@ -2449,7 +2461,19 @@
               ...uiState,
               stationRatings: window.simState ? window.simState.stationRatings : {},
               debugFlags: window.simState ? window.simState.debugFlags : null,
+              // Private Accessibility profile (issue #1102); the tab paints the
+              // player's explicit choices from it. Client-local, never on the wire.
+              accessibilityProfile: window.simState ? window.simState.accessibilityProfile : null,
             }),
+            // The Accessibility tab's write path (issue #1102): update the
+            // client-local profile, persist it privately, and re-apply to the
+            // shell + every mounted console iframe. Deliberately NOT `send` —
+            // no accessibility setting ever becomes a ClientMessage (AC5).
+            onAccessibility: (effect, value) => {
+              if (typeof window.setAccessibilityPresentation === 'function') {
+                window.setAccessibilityPresentation(effect, value);
+              }
+            },
             // Every audio channel this page owns. Master volume scales each
             // element's own authored level rather than replacing it, so adding
             // a channel here needs no other change (issue #940).
@@ -2457,6 +2481,13 @@
             getManual: () => (window.simState ? window.simState.shipManual : null),
             myToken: myToken,
           });
+        }
+
+        // Apply the private Accessibility profile to the shell at boot (issue
+        // #1102). Console iframes are (re)covered as they mount and on every
+        // iframe load — see mountConsoles / _attachIframeLoadListener.
+        if (typeof window.applyAccessibilityProfile === 'function') {
+          window.applyAccessibilityProfile();
         }
 
         console.log('[PeerJS] fetching ICE servers');

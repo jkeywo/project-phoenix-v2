@@ -670,6 +670,23 @@ settings.gameplay.pause,Server settings menu — button that pauses the simulati
 settings.gameplay.resume,Server settings menu — button that resumes a paused simulation clock,Resume
 settings.gameplay.session,"Server settings menu — Gameplay tab, heading over the exit control",Session
 settings.gameplay.exit_to_lobby,Server settings menu — ends the current mission and returns everyone to the lobby,[Exit to Lobby]
+settings.tab.accessibility,Phone client settings menu — name of the Accessibility tab,Accessibility
+settings.accessibility.presentation,Phone client Accessibility tab — heading over the presentation (display) settings,Presentation
+settings.accessibility.intro_hint,Phone client Accessibility tab — explains the settings change how YOUR console presents information; effect-named and never asks for or infers a reason or condition,[Adjust how your console looks and moves. Turn on whatever helps you play.]
+settings.accessibility.local_hint,Phone client Accessibility tab — states the profile is private to this player and stored on this device only,[Private to you and saved on this device.]
+settings.accessibility.text_scale,Phone client Accessibility tab — heading over the text size control,Text Size
+settings.accessibility.text_scale_value,Phone client Accessibility tab — text size readout as a percentage. {value} is the whole-number percentage.,{value}%
+settings.accessibility.text_scale_hint,Phone client Accessibility tab — explains larger text size scales every label and readout on your consoles,[Scales the text on all of your console screens.]
+settings.accessibility.text_scale_reset,Phone client Accessibility tab — button that returns text size to the default,[Reset Text Size]
+settings.accessibility.contrast,Phone client Accessibility tab — heading over the contrast control,Contrast
+settings.accessibility.contrast_hint,Phone client Accessibility tab — explains higher contrast strengthens the difference between text and background,[Strengthen the difference between text and background.]
+settings.accessibility.reduced_motion,Phone client Accessibility tab — heading over the motion control,Motion
+settings.accessibility.reduced_motion_hint,Phone client Accessibility tab — explains reducing motion stills non-essential animation such as pulses and flashes,[Still non-essential animation such as pulses and flashes.]
+settings.accessibility.follow_system,Phone client Accessibility tab — tri-state option that follows the device system preference,System
+settings.accessibility.contrast_more,Phone client Accessibility tab — contrast option that forces higher contrast on,More
+settings.accessibility.contrast_standard,Phone client Accessibility tab — contrast option that forces standard contrast,Standard
+settings.accessibility.motion_reduce,Phone client Accessibility tab — motion option that forces reduced motion on,Reduce
+settings.accessibility.motion_allow,Phone client Accessibility tab — motion option that allows full motion even when the device asks to reduce it,Allow
 station.rating.std.name,Display name of the Std station rating (identifier in TOML),STANDARD
 station.rating.simplified.name,Display name of the Simplified station rating,SIMPLIFIED
 station.rating.backfill.name,"Display name of the implicit Backfill rating (station unmanned, AI operates all its systems)",BACKFILL (AI)

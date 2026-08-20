@@ -50,11 +50,17 @@ html, body {
 
 .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
 
+/* The root font-size every `rem` is relative to, multiplied by the private
+   Accessibility profile's text-scale effect (issue #1102). Setting
+   --a11y-text-scale on this document's :root (the shell pushes it onto each
+   same-origin console iframe) therefore scales EVERY string on the console at
+   once. The fallback `1` is the identity, so a console with no profile applied
+   renders exactly as before. */
 @media (orientation: portrait) {
-  :root { font-size: var(--root-size-portrait); }
+  :root { font-size: calc(var(--root-size-portrait) * var(--a11y-text-scale, 1)); }
 }
 @media (orientation: landscape) {
-  :root { font-size: var(--root-size-landscape); }
+  :root { font-size: calc(var(--root-size-landscape) * var(--a11y-text-scale, 1)); }
 }
 
 /* ── Frame ──────────────────────────────────────────────────── */

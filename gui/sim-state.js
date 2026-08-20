@@ -242,6 +242,21 @@ export class ClientSimState {
      * other, for a different reason of its own.
      */
     this.tutorialProgress = this.tutorialProgress || { dismissed: {}, used: {} };
+    /**
+     * Client-LOCAL, PRIVATE accessibility profile (issue #1102): the player's
+     * explicit presentation effects (text scale, contrast, motion) plus a
+     * declared-but-inert per-function assistance schema. Not server state and
+     * never sent to any peer — hydrated from localStorage by
+     * gui/accessibility-profile.js and PRESERVED across Welcome resets, so an
+     * explicit choice survives a reconnect. Kept OUT of every server-projected
+     * field for the same privacy reason (AC5). The default shape is spelled out
+     * here (rather than imported) to avoid a sim-state ↔ accessibility-profile
+     * import cycle — the canonical builder is emptyAccessibilityProfile().
+     */
+    this.accessibilityProfile = this.accessibilityProfile || {
+      presentation: { textScale: 'default', contrast: 'default', reducedMotion: 'default' },
+      assistance: {},
+    };
   }
 
   /**

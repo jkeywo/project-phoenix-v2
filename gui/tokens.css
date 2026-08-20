@@ -201,6 +201,17 @@
   --root-size-portrait:   clamp(11px, 3vw, 15px);
   --root-size-landscape:  clamp(13px, 1.65vw, 16px);
 
+  /* ── Accessibility (issue #1102) ────────────────────────────────
+     The private per-player Accessibility profile (gui/accessibility-profile.js)
+     drives these at runtime. `--a11y-text-scale` multiplies the console root
+     font-size (see gui/console.css), so a larger text size scales EVERY
+     rem-based string on every console at once. `1` is the identity — no
+     scaling — and is the value when no explicit profile has been applied. The
+     profile sets it on the shell `:root` and each same-origin console iframe
+     `:root`; it is named here so the reference in console.css resolves to a
+     defined token rather than only to its inline fallback. */
+  --a11y-text-scale:   1;
+
   /* SVG user-space type. A radar overlay draws into `viewBox="0 0 100 100"`,
      where a font-size is in VIEWBOX UNITS and scales with the element — so it
      is not on the CSS ramp and the px floor above does not apply to it. Its

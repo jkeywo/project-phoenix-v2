@@ -186,6 +186,13 @@ pub enum ActionCmd {
         directive: AiDirective,
         utility: UtilityConfig,
         source: ObjectiveSource,
+        /// An objective-specific Command stance contributed to a named target
+        /// Station while this objective is active (issue #1110). `None` for
+        /// objectives that contribute no stance.
+        command_stance: Option<(
+            crate::messages::StationId,
+            crate::ship::config::StationStanceConfig,
+        )>,
         /// Sub-world layer that authored the trigger adding this objective, or
         /// `None` for base-world triggers (issue #751). The applier records
         /// layer-owned objective ids so `UnloadWorld` removes them.
@@ -579,6 +586,7 @@ fn dispatch_state_action(action: &TriggerAction, context: &DispatchContext) -> D
             directive,
             utility,
             source,
+            command_stance,
         } => {
             // Explicit targets win; otherwise fall back to the trigger
             // condition's entity (legacy behaviour).
@@ -596,6 +604,7 @@ fn dispatch_state_action(action: &TriggerAction, context: &DispatchContext) -> D
                 directive: directive.clone(),
                 utility: utility.clone(),
                 source: source.clone(),
+                command_stance: command_stance.clone(),
                 origin_layer: context.origin_layer.clone(),
             });
         }
@@ -1381,6 +1390,7 @@ mod tests {
             directive: AiDirective::default(),
             utility: UtilityConfig::default(),
             source: ObjectiveSource::default(),
+            command_stance: None,
         }
     }
 
@@ -1416,6 +1426,7 @@ mod tests {
                 directive: AiDirective::default(),
                 utility: UtilityConfig::default(),
                 source: ObjectiveSource::default(),
+                command_stance: None,
                 origin_layer: None,
             }]
         );
@@ -2664,6 +2675,7 @@ mod tests {
                 directive: AiDirective::default(),
                 utility: UtilityConfig::default(),
                 source: ObjectiveSource::default(),
+                command_stance: None,
                 origin_layer: None,
             }]
         );

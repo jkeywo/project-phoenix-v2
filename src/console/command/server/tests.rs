@@ -169,6 +169,59 @@ fn insert_stance(app: &mut App, ship: Entity, station: &str, stance: &str) {
         .insert(StationId(station.into()), stance.into());
 }
 
+/// Build an objective-contributed stance config (issue #1110).
+fn objective_stance(
+    id: &str,
+    kind: StanceKind,
+    high_alert: bool,
+    persist: bool,
+) -> StationStanceConfig {
+    StationStanceConfig {
+        id: id.into(),
+        label: String::new(),
+        kind,
+        high_alert,
+        persist_behind_human: persist,
+        ai_engaged: false,
+    }
+}
+
+/// Insert the `ActiveObjectiveStances` projection lending `stance` to `station`
+/// (as `project_active_objective_stances` would while its objective is active).
+fn contribute_objective_stance(app: &mut App, station: &str, stance: StationStanceConfig) {
+    app.world_mut()
+        .insert_resource(ActiveObjectiveStances(vec![(
+            StationId(station.into()),
+            stance,
+        )]));
+}
+
+/// Clear every objective contribution — what completion, failure or
+/// invalidation of the objective produces on the next projection refresh.
+fn clear_objective_stances(app: &mut App) {
+    app.world_mut()
+        .insert_resource(ActiveObjectiveStances::default());
+}
+
+/// The full published Command blackboard for `ship`.
+fn command_bb(app: &App, ship: Entity) -> crate::messages::CommandBlackboard {
+    let bbs = app
+        .world()
+        .entity(ship)
+        .get::<crate::server_app::ShipSystemBlackboards>()
+        .unwrap();
+    let SystemBlackboard::Command(bb) = bbs
+        .0
+        .get(&SystemId(
+            crate::system_registry::COMMAND_SYSTEM_ID.to_string(),
+        ))
+        .expect("a command blackboard is published")
+    else {
+        panic!("expected a Command blackboard");
+    };
+    bb.clone()
+}
+
 /// Run the target-transition trigger once (issue #1108).
 fn run_target_reconcile(app: &mut App) {
     app.world_mut()
@@ -584,14 +637,14 @@ fn the_stance_override_feeds_the_weapons_posture_only_when_directed_and_ai() {
 
     // No selection → None → tracks red alert (byte-identical default).
     assert_eq!(
-        weapons_station_stance_high_alert(Some(&selections), &config, &sources, false),
+        weapons_station_stance_high_alert(Some(&selections), None, &config, &sources, false),
         None
     );
 
     // A human's "hold" stance forces stood-down even at red alert.
     selections.0.insert(tactical(), "hold".into());
     assert_eq!(
-        weapons_station_stance_high_alert(Some(&selections), &config, &sources, true),
+        weapons_station_stance_high_alert(Some(&selections), None, &config, &sources, true),
         Some(false),
         "a hold stance overrides the ship's own red alert for the fire gate"
     );
@@ -600,9 +653,32 @@ fn the_stance_override_feeds_the_weapons_posture_only_when_directed_and_ai() {
     let mut human_sources = ControlSourceResolver::default();
     human_sources.set(SystemId("phaser-fore".into()), ControlSource::Human);
     assert_eq!(
-        weapons_station_stance_high_alert(Some(&selections), &config, &human_sources, true),
+        weapons_station_stance_high_alert(Some(&selections), None, &config, &human_sources, true),
         None,
         "Command does not direct a human-held weapons Station"
+    );
+
+    // Issue #1110: a SELECTED objective-contributed stance seeds its authored
+    // posture for the fire gate exactly as a permanent one does — resolved
+    // through the effective catalogue, not the permanent slice.
+    let active = ActiveObjectiveStances(vec![(
+        tactical(),
+        objective_stance("objective-escort", StanceKind::Standard, true, false),
+    )]);
+    let mut objective_selection = ShipStationStances::default();
+    objective_selection
+        .0
+        .insert(tactical(), "objective-escort".into());
+    assert_eq!(
+        weapons_station_stance_high_alert(
+            Some(&objective_selection),
+            Some(&active),
+            &config,
+            &sources,
+            false,
+        ),
+        Some(true),
+        "a selected objective stance forces its authored high-alert posture",
     );
 }
 
@@ -724,5 +800,357 @@ fn a_direct_claim_of_the_directed_station_preserves_the_stored_stance_and_digest
         crate::sim_digest::world_digest(app.world()),
         digest_before,
         "a direct claim must not move the authoritative-state digest",
+    );
+}
+
+// ── Objective-contributed stances (issue #1110) ────────────────────────────────
+
+#[test]
+fn an_active_objective_stance_is_exposed_to_human_and_the_shared_applier() {
+    // AC2/AC3: while the objective is active its stance joins the console's
+    // vocabulary WITHOUT mutating the permanent catalogue, and the shared order
+    // applier — the seam BOTH a human order and the AI operator's emitted order
+    // flow through — now admits it. Without the contribution it is an invented
+    // order the applier rejects.
+    let mut app = App::new();
+    let ship = spawn_ship(&mut app, true, false); // tactical AI
+    contribute_objective_stance(
+        &mut app,
+        "tactical",
+        objective_stance("objective-escort", StanceKind::Standard, true, true),
+    );
+
+    // Human console lists the four permanent stances plus the one contribution.
+    app.world_mut()
+        .run_system_cached(publish_command_blackboard)
+        .unwrap();
+    let bb = command_bb(&app, ship);
+    assert_eq!(bb.stances.len(), 5, "permanent four plus the contribution");
+    assert!(
+        bb.stances.iter().any(|s| s.id == "objective-escort"),
+        "the objective stance is exposed while active",
+    );
+    // AC1: the permanent catalogue is untouched — it still authors only four.
+    assert_eq!(
+        command_config().station(&tactical()).unwrap().stances.len(),
+        4,
+        "the permanent catalogue is never mutated by a contribution",
+    );
+
+    // The shared applier admits an order for the contributed stance.
+    set_admitted(&mut app, ship, "tactical", "objective-escort");
+    app.world_mut()
+        .run_system_cached(handle_set_station_stance)
+        .unwrap();
+    assert_eq!(
+        stances(&app, ship).0.get(&tactical()).map(String::as_str),
+        Some("objective-escort"),
+        "an objective stance is selectable through the shared applier while active",
+    );
+}
+
+#[test]
+fn without_the_contribution_the_objective_stance_is_an_invented_order() {
+    // The boundary of the test above: with no active contribution the same order
+    // is refused, so exposure is gated on the objective (AC2), not standing.
+    let mut app = App::new();
+    let ship = spawn_ship(&mut app, true, false);
+    set_admitted(&mut app, ship, "tactical", "objective-escort");
+    app.world_mut()
+        .run_system_cached(handle_set_station_stance)
+        .unwrap();
+    assert!(
+        stances(&app, ship).0.is_empty(),
+        "an objective stance is not selectable without its active contribution",
+    );
+}
+
+#[test]
+fn the_ai_operator_reads_the_effective_catalogue_and_stays_in_vocabulary() {
+    // AC2/AC3 AI parity: the uncrewed Command seat decides against the SAME
+    // effective catalogue the human sees. With a contribution present its pick is
+    // still an authored member of that catalogue — never invented — proving the
+    // AI reads the projection like every other consumer.
+    let mut app = ai_app();
+    let ship = spawn_ship(&mut app, true, true); // tactical AI, Command AI
+    set_red_alert(&mut app, ship, true);
+    contribute_objective_stance(
+        &mut app,
+        "tactical",
+        objective_stance("objective-escort", StanceKind::Standard, true, false),
+    );
+    run_command_ai_tick(&mut app);
+    let stored = stances(&app, ship).0.get(&tactical()).cloned();
+    if let Some(id) = stored {
+        let config = command_config();
+        let permanent = &config.station(&tactical()).unwrap().stances;
+        let effective = crate::ship::command_stance::effective_catalogue(
+            permanent,
+            &[objective_stance(
+                "objective-escort",
+                StanceKind::Standard,
+                true,
+                false,
+            )],
+        );
+        assert!(
+            crate::ship::command_stance::is_selectable(&effective, &id),
+            "the AI operator only ever stores an effective-catalogue member; stored {id:?}",
+        );
+    }
+}
+
+#[test]
+fn ending_the_objective_drops_a_selected_objective_stance_to_the_neutral() {
+    // AC3/AC4: a selected objective stance whose objective completes, fails or is
+    // invalidated (all three converge on "no longer contributed") is reconciled
+    // away, and the directed Station falls back to the current alert's neutral —
+    // visibly, on the published readout — at BOTH alert levels.
+    for (red_alert, expected) in [(false, "normal"), (true, "high")] {
+        let mut app = App::new();
+        let ship = spawn_ship(&mut app, true, false);
+        set_red_alert(&mut app, ship, red_alert);
+        contribute_objective_stance(
+            &mut app,
+            "tactical",
+            objective_stance("objective-escort", StanceKind::Standard, true, true),
+        );
+        // The operator selects the objective stance while it is offered.
+        set_admitted(&mut app, ship, "tactical", "objective-escort");
+        app.world_mut()
+            .run_system_cached(handle_set_station_stance)
+            .unwrap();
+        assert_eq!(
+            stances(&app, ship).0.get(&tactical()).map(String::as_str),
+            Some("objective-escort"),
+        );
+
+        // The objective ends → the contribution is withdrawn → reconcile drops
+        // the now-unauthored selection.
+        clear_objective_stances(&mut app);
+        app.world_mut()
+            .run_system_cached(reconcile_station_stances)
+            .unwrap();
+        assert!(
+            !stances(&app, ship).0.contains_key(&tactical()),
+            "a selected objective stance is removed when its objective ends",
+        );
+        assert_eq!(
+            published_selected_stance(&mut app, ship),
+            expected,
+            "the Station visibly falls back to the current alert's neutral",
+        );
+    }
+}
+
+#[test]
+fn a_persistent_objective_stance_held_behind_a_human_resolves_to_neutral_when_it_ends() {
+    // AC5 persist-behind-human interaction (issue #1110 §6): a persist=true
+    // objective stance is dormant while a human holds the target. If the
+    // objective ends WHILE the human still holds it, the contribution is gone
+    // from the effective catalogue, so on the Human→AI handoff the persist branch
+    // finds no such stance and the target resolves to the alert-neutral instead
+    // of resuming a stance that no longer exists.
+    let mut app = App::new();
+    let ship = spawn_ship(&mut app, false, false); // tactical human-held
+    contribute_objective_stance(
+        &mut app,
+        "tactical",
+        objective_stance("objective-escort", StanceKind::Standard, false, true),
+    );
+    insert_stance(&mut app, ship, "tactical", "objective-escort");
+
+    // First observation while human-held records state, fires no edge.
+    run_target_reconcile(&mut app);
+    // The objective ends while the human still holds the target.
+    clear_objective_stances(&mut app);
+    // Human hands the target back to AI → Human→AI edge.
+    set_tactical_ai(&mut app, ship, true);
+    run_target_reconcile(&mut app);
+    // The vanished objective stance does not resume; also swept by the removal
+    // reconcile so the readout shows the neutral.
+    app.world_mut()
+        .run_system_cached(reconcile_station_stances)
+        .unwrap();
+    assert!(
+        !stances(&app, ship).0.contains_key(&tactical()),
+        "a persistent objective stance whose objective ended does not resume",
+    );
+    assert_eq!(
+        published_selected_stance(&mut app, ship),
+        "normal",
+        "the target falls back to the alert-neutral when the objective is gone",
+    );
+}
+
+#[test]
+fn a_persistent_objective_stance_survives_a_handoff_while_its_objective_is_active() {
+    // The counterpart: while the objective is STILL active its persist=true stance
+    // is carried across the human's control exactly as a permanent one is, so it
+    // resumes intact on the Human→AI edge (issue #1110 reuses #1108's persist path
+    // through the effective catalogue).
+    let mut app = App::new();
+    let ship = spawn_ship(&mut app, false, false); // tactical human-held
+    contribute_objective_stance(
+        &mut app,
+        "tactical",
+        objective_stance("objective-escort", StanceKind::Standard, true, true),
+    );
+    insert_stance(&mut app, ship, "tactical", "objective-escort");
+
+    run_target_reconcile(&mut app); // record human-held
+    set_tactical_ai(&mut app, ship, true);
+    run_target_reconcile(&mut app); // Human→AI edge with the objective still active
+    assert_eq!(
+        stances(&app, ship).0.get(&tactical()).map(String::as_str),
+        Some("objective-escort"),
+        "a persistent objective stance resumes while its objective is still active",
+    );
+}
+
+/// A full-schedule app that wires the real [`CommandPlugin`] into `FixedUpdate`,
+/// so `app.update()` drives the actual projection → reconcile → publish pipeline
+/// (issue #1110).
+///
+/// Every fixture above injects [`ActiveObjectiveStances`] by hand and so never
+/// runs [`project_active_objective_stances`]. This one instead seeds the
+/// authoritative [`ObjectiveManagerRes`](crate::world::server::ObjectiveManagerRes)
+/// and lets the SCHEDULED projection build the resource from it, closing the
+/// projection seam the hand-injected tests skip. Mirrors the production SimSet
+/// chain (`server_app`) so cross-set ordering — Input's projection/reconcile/
+/// applier before Publish's blackboard — holds under `app.update()`.
+fn projection_schedule_app() -> App {
+    let mut app = App::new();
+    app.add_plugins(bevy::time::TimePlugin)
+        // `operate_command_ai` takes `Res<Sessions>` as a param even for a
+        // human-held Command seat that never emits; the resource must exist.
+        .insert_resource(crate::lobby::Sessions(
+            crate::lobby::session::SessionManager::new(),
+        ))
+        // The authoritative objective state the scheduled projection reads.
+        .init_resource::<crate::world::server::ObjectiveManagerRes>()
+        .configure_sets(
+            FixedUpdate,
+            (
+                crate::sim_sets::SimSet::Input,
+                crate::sim_sets::SimSet::Physics,
+                crate::sim_sets::SimSet::Damage,
+                crate::sim_sets::SimSet::Modifiers,
+                crate::sim_sets::SimSet::Publish,
+                crate::sim_sets::SimSet::PublishAggregate,
+                crate::sim_sets::SimSet::Broadcast,
+            )
+                .chain(),
+        )
+        .add_plugins(CommandPlugin);
+    // One fixed step per `app.update()` (issue #895), so each update is exactly
+    // one simulation tick of the pipeline under test.
+    crate::ship::test_support::drive_one_fixed_step_per_update(
+        &mut app,
+        crate::ship::test_support::TEST_TICK,
+    );
+    app
+}
+
+/// Author an `Active` objective that lends `stance` to `station` through the
+/// same [`ObjectiveManagerRes`](crate::world::server::ObjectiveManagerRes) door
+/// the world dispatch pass writes — so the SCHEDULED projection, not the test,
+/// publishes the contribution (issue #1110).
+fn author_objective_stance(app: &mut App, id: &str, station: &str, stance: StationStanceConfig) {
+    app.world_mut()
+        .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+        .0
+        .add_full_with_params(
+            id,
+            "objective text",
+            std::collections::BTreeMap::new(),
+            false,
+            Vec::new(),
+            crate::messages::AiDirective::default(),
+            crate::objectives::UtilityConfig::default(),
+            crate::messages::ObjectiveSource::default(),
+            Some((StationId(station.into()), stance)),
+        );
+}
+
+#[test]
+fn the_scheduled_projection_exposes_then_drops_an_objective_stance_end_to_end() {
+    // The projection seam every other #1110 test bypasses: drive the REAL
+    // `project_active_objective_stances` through the schedule and prove
+    // authoring an objective (a) exposes and makes selectable its stance, and
+    // (b) once the objective ends, projection-empties → reconcile-drops the
+    // selection back to the alert-neutral — end to end, over `app.update()`.
+    let mut app = projection_schedule_app();
+    let ship = spawn_ship(&mut app, true, false); // tactical AI, Command human-held
+
+    // Author an objective contributing a persistent standard stance to Tactical
+    // — into the manager, NOT the projection resource.
+    author_objective_stance(
+        &mut app,
+        "escort-run",
+        "tactical",
+        objective_stance("objective-escort", StanceKind::Standard, true, true),
+    );
+
+    // Drive the schedule. Two ticks cover the documented one-tick projection lag
+    // (projection reads objective state in SimSet::Input; a production
+    // transition lands later, in SimSet::Physics) and let the state settle.
+    app.update();
+    app.update();
+
+    // The projection ran: the contributed stance is in the published console
+    // options WITHOUT the permanent catalogue being mutated.
+    let bb = command_bb(&app, ship);
+    assert!(
+        bb.stances.iter().any(|s| s.id == "objective-escort"),
+        "the scheduled projection exposes the objective stance in the console options",
+    );
+    assert_eq!(
+        command_config().station(&tactical()).unwrap().stances.len(),
+        4,
+        "the permanent catalogue is never mutated by the projection",
+    );
+
+    // …and it is selectable through the shared applier, which reads the same
+    // projection this tick.
+    set_admitted(&mut app, ship, "tactical", "objective-escort");
+    app.update();
+    // The real admission pipeline consumes AdmittedCommands each tick; clear it
+    // so a stale re-apply cannot resurrect the selection after the objective
+    // ends (the assertion below would still hold, but this keeps the fixture
+    // honest to production).
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<AdmittedCommands>()
+        .unwrap()
+        .0
+        .clear();
+    assert_eq!(
+        stances(&app, ship).0.get(&tactical()).map(String::as_str),
+        Some("objective-escort"),
+        "the projected objective stance is selectable through the scheduled applier",
+    );
+
+    // Complete the objective: its contribution leaves `active_station_stances`,
+    // so the next scheduled projection empties the resource and the removal
+    // reconcile drops the now-unauthored selection.
+    assert!(
+        app.world_mut()
+            .resource_mut::<crate::world::server::ObjectiveManagerRes>()
+            .0
+            .complete("escort-run"),
+        "the authored objective is Active and completes",
+    );
+    app.update();
+    app.update();
+
+    assert!(
+        !stances(&app, ship).0.contains_key(&tactical()),
+        "projection-empties → reconcile-drops removes the selection end to end",
+    );
+    assert_eq!(
+        command_bb(&app, ship).selected_stance,
+        "normal",
+        "the directed Station settles on the alert-neutral once the objective ends",
     );
 }

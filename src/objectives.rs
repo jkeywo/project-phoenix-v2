@@ -19,9 +19,10 @@
 //     so callers can push `ObjectiveSummary` only on change
 
 use crate::messages::{
-    AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
+    AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective, StationId,
     SystemAffinity,
 };
+use crate::ship::config::StationStanceConfig;
 use std::collections::BTreeMap;
 
 // ── Utility scoring types ──────────────────────────────────────────────────
@@ -254,6 +255,17 @@ struct ObjectiveRecord {
     utility: UtilityConfig,
     /// Whether this originated from a mission trigger or standing doctrine.
     source: ObjectiveSource,
+    /// An objective-specific Command stance this objective contributes to a
+    /// named target Station while it is `Active` (issue #1110).
+    ///
+    /// `Some((station, stance))` lends the Station a temporary authored stance —
+    /// exposed only through [`ObjectiveManager::active_station_stances`], which
+    /// filters on `status == Active`, so completing, failing or removing the
+    /// objective withdraws it immediately. Never mutates the target Station's
+    /// permanent catalogue; the Command consumers merge it in at read time. Most
+    /// objectives author none and carry `None`, keeping their record and wire
+    /// snapshot unchanged.
+    command_stance: Option<(StationId, StationStanceConfig)>,
 }
 
 // ── Manager ────────────────────────────────────────────────────────────────
@@ -317,6 +329,7 @@ impl ObjectiveManager {
             directive,
             utility,
             source,
+            None,
         )
     }
 
@@ -345,6 +358,7 @@ impl ObjectiveManager {
         directive: AiDirective,
         utility: UtilityConfig,
         source: ObjectiveSource,
+        command_stance: Option<(StationId, StationStanceConfig)>,
     ) -> bool {
         let id = id.into();
         if self.objectives.iter().any(|o| o.id == id) {
@@ -360,9 +374,28 @@ impl ObjectiveManager {
             directive,
             utility,
             source,
+            command_stance,
         });
         self.dirty = true;
         true
+    }
+
+    /// The Command stances currently contributed by `Active` objectives
+    /// (issue #1110), each paired with the target Station it is lent to.
+    ///
+    /// Filtering on `status == Active` is the whole removal mechanism: the same
+    /// gate the AI-facing `scored_pool` uses. Completing or failing an objective
+    /// moves it out of `Active`, and [`remove`](Self::remove) deletes the record
+    /// outright, so any of the three drops the contribution here on the very next
+    /// read — the Command consumers stop exposing the stance and reconcile any
+    /// selection of it away. An objective that authored no stance contributes
+    /// nothing.
+    pub fn active_station_stances(&self) -> Vec<(StationId, StationStanceConfig)> {
+        self.objectives
+            .iter()
+            .filter(|o| o.status == ObjectiveStatus::Active)
+            .filter_map(|o| o.command_stance.clone())
+            .collect()
     }
 
     /// Transition an `Active` objective to `Completed`.
@@ -1056,6 +1089,87 @@ mod tests {
         let snaps = mgr.sorted_snapshots();
         assert_eq!(snaps.len(), 1);
         assert_eq!(snaps[0].text, "Second");
+    }
+
+    // ── objective-contributed Command stances (issue #1110) ────────────────
+
+    fn objective_stance() -> (StationId, StationStanceConfig) {
+        (
+            StationId("tactical".into()),
+            StationStanceConfig {
+                id: "objective-escort".into(),
+                label: String::new(),
+                kind: crate::ship::config::StanceKind::Standard,
+                high_alert: true,
+                persist_behind_human: true,
+                ai_engaged: false,
+            },
+        )
+    }
+
+    fn add_with_stance(
+        mgr: &mut ObjectiveManager,
+        id: &str,
+        stance: Option<(StationId, StationStanceConfig)>,
+    ) {
+        mgr.add_full_with_params(
+            id,
+            "text",
+            BTreeMap::new(),
+            false,
+            vec![],
+            AiDirective::None,
+            UtilityConfig::default(),
+            ObjectiveSource::Mission,
+            stance,
+        );
+    }
+
+    #[test]
+    fn a_contributed_stance_is_exposed_only_while_active() {
+        let mut mgr = ObjectiveManager::new();
+        add_with_stance(&mut mgr, "escort", Some(objective_stance()));
+        // Active → the contribution is exposed against its target Station.
+        assert_eq!(mgr.active_station_stances(), vec![objective_stance()]);
+    }
+
+    #[test]
+    fn an_objective_without_a_stance_contributes_nothing() {
+        let mut mgr = ObjectiveManager::new();
+        add_with_stance(&mut mgr, "plain", None);
+        assert!(mgr.active_station_stances().is_empty());
+    }
+
+    #[test]
+    fn completing_the_objective_withdraws_its_contribution() {
+        let mut mgr = ObjectiveManager::new();
+        add_with_stance(&mut mgr, "escort", Some(objective_stance()));
+        assert!(mgr.complete("escort"));
+        assert!(
+            mgr.active_station_stances().is_empty(),
+            "a completed objective no longer contributes its stance",
+        );
+    }
+
+    #[test]
+    fn failing_the_objective_withdraws_its_contribution() {
+        let mut mgr = ObjectiveManager::new();
+        add_with_stance(&mut mgr, "escort", Some(objective_stance()));
+        assert!(mgr.fail("escort"));
+        assert!(
+            mgr.active_station_stances().is_empty(),
+            "a failed objective no longer contributes its stance",
+        );
+    }
+
+    #[test]
+    fn removing_the_objective_withdraws_its_contribution() {
+        // Invalidation (`remove`) deletes the record outright, so its
+        // contribution disappears the same way completion/failure withdraw it.
+        let mut mgr = ObjectiveManager::new();
+        add_with_stance(&mut mgr, "escort", Some(objective_stance()));
+        assert!(mgr.remove("escort"));
+        assert!(mgr.active_station_stances().is_empty());
     }
 
     // ── is_visible_objective (objective-visibility-policy, #752) ────────────

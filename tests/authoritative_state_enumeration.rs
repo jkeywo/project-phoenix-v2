@@ -316,6 +316,11 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     // outcome of every edge — resume or reset — lands in `ShipStationStances`,
     // which IS folded; this map only remembers when the last transition was.
     ("LastDirectedControl", "derived"),
+    // Derived — the per-tick projection of the active Command-stance
+    // contributions (issue #1110), rebuilt every tick by
+    // `project_active_objective_stances` from `ObjectiveManagerRes` (which the
+    // objective-namespace fold already covers), never folded itself.
+    ("ActiveObjectiveStances", "derived"),
 
     // Cleared-at-fold (the one new classification term this issue adds,
     // deterministic-simulation.yaml's `digest-exclusion-classes`):

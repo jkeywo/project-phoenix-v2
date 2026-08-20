@@ -53,6 +53,48 @@ pub struct ShipStationStances(pub HashMap<StationId, String>);
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct LastDirectedControl(pub HashMap<StationId, bool>);
 
+/// The Command stances currently contributed by `Active` scenario objectives
+/// (issue #1110), each paired with the target Station it is lent to.
+///
+/// A thin, tick-refreshed PROJECTION of the authoritative
+/// [`ObjectiveManagerRes`](crate::world::server::ObjectiveManagerRes): every
+/// Command consumer merges these into a directed Station's EFFECTIVE catalogue at
+/// read time via [`command_stance::effective_catalogue`], so an objective's
+/// stance is exposed and selectable while the objective is `Active` WITHOUT ever
+/// mutating the Station's permanent catalogue (AC1). Empty — the default, and
+/// what a bare-`App` fixture or an objective-free world carries — leaves every
+/// catalogue byte-identical to its permanent form.
+///
+/// Rebuilt each tick from the objective manager by
+/// [`project_active_objective_stances`] in `SimSet::Input`, BEFORE
+/// [`reconcile_station_stances`], so an objective that ended last tick has its
+/// contribution gone before the removal reconcile runs (AC3/AC4). Not folded into
+/// the sim digest: it is a pure function of the already-authoritative objective
+/// state.
+#[derive(Resource, Clone, Debug, Default, PartialEq)]
+pub struct ActiveObjectiveStances(pub Vec<(StationId, StationStanceConfig)>);
+
+/// The objective-contributed stances lent to one target Station this tick.
+///
+/// The per-consumer helper behind the EFFECTIVE catalogue: it filters the
+/// [`ActiveObjectiveStances`] projection down to the entries whose target is
+/// `station` (AC2's "the contribution's station equals the directed target"
+/// gate). Absent projection or no match → empty, so the effective catalogue
+/// collapses to the permanent one.
+fn contributed_for(
+    active: Option<&ActiveObjectiveStances>,
+    station: &StationId,
+) -> Vec<StationStanceConfig> {
+    active
+        .map(|a| {
+            a.0.iter()
+                .filter(|(target, _)| target == station)
+                .map(|(_, stance)| stance.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
@@ -66,12 +108,21 @@ impl Plugin for CommandPlugin {
         // (issue #1109). Idempotent — every plugin registering a gated system
         // calls it.
         crate::ai::cadence::register_ai_cadence(app);
+        app.init_resource::<ActiveObjectiveStances>();
         app.add_systems(
             FixedUpdate,
             (
-                // A stored id no longer in the authored catalogue is dropped
-                // FIRST, so the input handlers below never act on a stale
-                // selection (issue #1108 criterion 4).
+                // Refresh the objective-contribution projection FIRST, from the
+                // objective manager the world dispatch pass updated last tick, so
+                // every consumer below (and the removal reconcile in particular)
+                // reads this tick's active contributions (issue #1110).
+                project_active_objective_stances
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .before(reconcile_station_stances),
+                // A stored id no longer in the effective catalogue — a hull
+                // change, or an objective-contributed stance whose objective just
+                // ended (#1110) — is dropped FIRST, so the input handlers below
+                // never act on a stale selection (issue #1108 criterion 4).
                 reconcile_station_stances.in_set(crate::sim_sets::SimSet::Input),
                 // An uncrewed Command seat chooses a stance through ordinary AI
                 // (issue #1109). It runs AFTER the catalogue reconcile (so it
@@ -106,6 +157,30 @@ impl Plugin for CommandPlugin {
                 publish_command_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
+    }
+}
+
+// ── Objective-contribution projection (issue #1110) ────────────────────────────
+
+/// Refresh the [`ActiveObjectiveStances`] projection from the authoritative
+/// objective manager each tick (issue #1110).
+///
+/// Runs in `SimSet::Input` before every Command consumer, so activation,
+/// completion, failure and invalidation of an objective all reach the effective
+/// catalogue on the tick after the world dispatch pass records them — the same
+/// one-tick, frozen-snapshot cadence the rest of the sim reads cross-system state
+/// through. `Option<Res>` so a bare-`App` fixture with no world plugin simply
+/// projects nothing (the empty default). Guarded on change so an unchanged
+/// objective set marks the resource clean and triggers no downstream churn.
+fn project_active_objective_stances(
+    manager: Option<Res<crate::world::server::ObjectiveManagerRes>>,
+    mut projection: ResMut<ActiveObjectiveStances>,
+) {
+    let next = manager
+        .map(|m| m.0.active_station_stances())
+        .unwrap_or_default();
+    if projection.0 != next {
+        projection.0 = next;
     }
 }
 
@@ -149,6 +224,7 @@ pub fn station_is_ai_controlled(
 /// weapons Station is AI-controlled AND carries an explicit stored selection.
 pub fn weapons_station_stance_high_alert(
     stances: Option<&ShipStationStances>,
+    active: Option<&ActiveObjectiveStances>,
     config: &ShipConfig,
     control_sources: &ControlSourceResolver,
     red_alert: bool,
@@ -159,9 +235,14 @@ pub fn weapons_station_stance_high_alert(
         return None;
     }
     let selected = stances.0.get(&weapons_station)?;
-    let catalogue = &config.station(&weapons_station)?.stances;
+    // Resolve the selection through the EFFECTIVE catalogue (issue #1110): a
+    // selected objective-contributed stance seeds its authored `high_alert`
+    // posture just as a permanent one does, and vanishes with its objective.
+    let permanent = &config.station(&weapons_station)?.stances;
+    let contributed = contributed_for(active, &weapons_station);
+    let catalogue = command_stance::effective_catalogue(permanent, &contributed);
     Some(command_stance::effective_high_alert(
-        catalogue,
+        &catalogue,
         Some(selected.as_str()),
         red_alert,
     ))
@@ -178,6 +259,7 @@ pub fn weapons_station_stance_high_alert(
 /// be one the target authored (Command "does not invent orders outside the
 /// authored vocabulary"). A rejected order is a silent no-op.
 fn handle_set_station_stance(
+    active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
             &AdmittedCommands,
@@ -188,6 +270,7 @@ fn handle_set_station_stance(
         With<crate::server_app::Ship>,
     >,
 ) {
+    let active = active.as_deref();
     for (admitted, ship_config, control_sources, mut stances) in ships.iter_mut() {
         let config = &ship_config.0;
         let Some(command) = command_station(config) else {
@@ -206,11 +289,16 @@ fn handle_set_station_stance(
             if !station_is_ai_controlled(config, &control_sources.0, station) {
                 continue;
             }
-            // Only an authored stance.
+            // Only a stance the EFFECTIVE catalogue authors — the permanent
+            // catalogue plus any active objective contribution to this target
+            // (issue #1110), the same vocabulary the console lists.
             let Some(target_station) = config.station(station) else {
                 continue;
             };
-            if !command_stance::is_selectable(&target_station.stances, stance) {
+            let contributed = contributed_for(active, station);
+            let catalogue =
+                command_stance::effective_catalogue(&target_station.stances, &contributed);
+            if !command_stance::is_selectable(&catalogue, stance) {
                 continue;
             }
             stances.0.insert(station.clone(), stance.clone());
@@ -226,6 +314,7 @@ fn handle_set_station_stance(
 /// touched: an undirected Station has none, and it keeps tracking the alert
 /// through the absent-selection default rather than through a stored value.
 fn apply_alert_change_to_stances(
+    active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
             &ShipConfigComponent,
@@ -238,6 +327,7 @@ fn apply_alert_change_to_stances(
         ),
     >,
 ) {
+    let active = active.as_deref();
     for (ship_config, red_alert, mut stances) in ships.iter_mut() {
         let config = &ship_config.0;
         if stances.0.is_empty() {
@@ -248,8 +338,10 @@ fn apply_alert_change_to_stances(
             let Some(target) = config.station(station) else {
                 continue;
             };
+            let contributed = contributed_for(active, station);
+            let catalogue = command_stance::effective_catalogue(&target.stances, &contributed);
             if let Some(next) = command_stance::selection_after_alert_change(
-                &target.stances,
+                &catalogue,
                 Some(current.as_str()),
                 red_alert.0,
             ) {
@@ -274,11 +366,13 @@ fn apply_alert_change_to_stances(
 /// `command_stance` catalogue seam, never an ad-hoc check. A station id that no
 /// longer names any station at all is dropped too.
 fn reconcile_station_stances(
+    active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (&ShipConfigComponent, &mut ShipStationStances),
         With<crate::server_app::Ship>,
     >,
 ) {
+    let active = active.as_deref();
     for (ship_config, mut stances) in ships.iter_mut() {
         // Read-only probe first: taking `&mut` does not mark the component
         // changed until it is deref-mutated, so an already-clean map (the
@@ -291,8 +385,17 @@ fn reconcile_station_stances(
             .0
             .iter()
             .filter(|(station, stance)| match config.station(station) {
+                // Membership is judged against the EFFECTIVE catalogue (issue
+                // #1110): while an objective contributes a stance to this target
+                // the id is a member and survives; once the objective ends the
+                // contribution is gone from the projection, so a selected
+                // objective stance drops here and the Station falls back to the
+                // alert-neutral tracking default (AC3/AC4).
                 Some(target) => {
-                    command_stance::reconcile_selection(&target.stances, stance).is_none()
+                    let contributed = contributed_for(active, station);
+                    let catalogue =
+                        command_stance::effective_catalogue(&target.stances, &contributed);
+                    command_stance::reconcile_selection(&catalogue, stance).is_none()
                 }
                 None => true,
             })
@@ -321,6 +424,7 @@ fn reconcile_station_stances(
 /// human or the ship's AI currently holds Command. Edge detection uses
 /// [`LastDirectedControl`]; a first observation records state and fires nothing.
 fn reconcile_directed_target_control(
+    active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
             &ShipConfigComponent,
@@ -332,6 +436,7 @@ fn reconcile_directed_target_control(
         With<crate::server_app::Ship>,
     >,
 ) {
+    let active = active.as_deref();
     for (ship_config, control_sources, red_alert, mut stances, mut last) in ships.iter_mut() {
         let config = &ship_config.0;
         let Some(command) = command_station(config) else {
@@ -347,13 +452,21 @@ fn reconcile_directed_target_control(
         // transition just records state below.
         if was_ai == Some(false) && now_ai {
             if let Some(target_station) = config.station(&target) {
+                // Resolve the handoff against the EFFECTIVE catalogue (issue
+                // #1110) so a persist-behind-human OBJECTIVE stance is carried
+                // across the human hold exactly as a permanent one is — and, once
+                // its objective ends, is already gone from the catalogue so the
+                // handoff resolves to the alert-neutral instead.
+                let contributed = contributed_for(active, &target);
+                let catalogue =
+                    command_stance::effective_catalogue(&target_station.stances, &contributed);
                 let current = stances.0.get(&target).cloned();
                 let resolved = command_stance::selection_after_human_lost(
-                    &target_station.stances,
+                    &catalogue,
                     current.as_deref(),
                     red_alert.0,
                 );
-                store_resolved_selection(&mut stances, &target, &target_station.stances, resolved);
+                store_resolved_selection(&mut stances, &target, &catalogue, resolved);
             }
         }
 
@@ -418,6 +531,7 @@ fn store_resolved_selection(
 /// correctness does not depend on the guard.
 fn operate_command_ai(
     sessions: Res<crate::lobby::Sessions>,
+    active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
             &ShipConfigComponent,
@@ -430,6 +544,7 @@ fn operate_command_ai(
         With<crate::server_app::Ship>,
     >,
 ) {
+    let active = active.as_deref();
     for (ship_config, control_sources, red_alert, stances, mut admitted, entity_uuid) in
         ships.iter_mut()
     {
@@ -458,8 +573,13 @@ fn operate_command_ai(
         let Some(target_station) = config.station(&target) else {
             continue;
         };
+        // The AI chooses from the SAME effective catalogue a human sees (issue
+        // #1110): permanent stances plus any active objective contribution to
+        // this target, so both consoles expose one vocabulary (AC2/AC3 parity).
+        let contributed = contributed_for(active, &target);
+        let catalogue = command_stance::effective_catalogue(&target_station.stances, &contributed);
         let Some(chosen) = command_stance::select_stance(
-            &target_station.stances,
+            &catalogue,
             command_stance::CommandKnowledge {
                 red_alert: red_alert.0,
             },
@@ -469,8 +589,7 @@ fn operate_command_ai(
         // The stance currently in force: an explicit stored selection, else the
         // alert level's neutral (the same tracking default the console shows).
         let in_force = stances.0.get(&target).cloned().or_else(|| {
-            command_stance::neutral_stance_for_alert(&target_station.stances, red_alert.0)
-                .map(str::to_string)
+            command_stance::neutral_stance_for_alert(&catalogue, red_alert.0).map(str::to_string)
         });
         if in_force.as_deref() == Some(chosen.as_str()) {
             continue;
@@ -516,6 +635,7 @@ fn emit_command_ai_command(
 /// Publish the Command console readout for every ship carrying a Command station
 /// (issue #1107).
 fn publish_command_blackboard(
+    active: Option<Res<ActiveObjectiveStances>>,
     mut ships: Query<
         (
             &ShipConfigComponent,
@@ -527,6 +647,7 @@ fn publish_command_blackboard(
         With<crate::server_app::Ship>,
     >,
 ) {
+    let active = active.as_deref();
     for (ship_config, control_sources, red_alert, stances, mut bbs) in ships.iter_mut() {
         let config = &ship_config.0;
         let Some(command) = command_station(config) else {
@@ -545,18 +666,25 @@ fn publish_command_blackboard(
             .source_for(&crate::system_registry::command_system_id())
             == ControlSource::Ai;
 
+        // The EFFECTIVE catalogue this tick: permanent stances plus any active
+        // objective contribution to this target (issue #1110). The console lists
+        // exactly this, so an objective stance appears while its objective is
+        // active and vanishes when it ends — the same vocabulary the AI and the
+        // order applier read.
+        let contributed = contributed_for(active, &target);
+        let catalogue = command_stance::effective_catalogue(&target_station.stances, &contributed);
+
         // The stance in force: an explicit stored selection, else the alert
         // level's neutral (the tracking default the AI hosts see).
         let selected_stance = stances
             .and_then(|s| s.0.get(&target).cloned())
             .or_else(|| {
-                command_stance::neutral_stance_for_alert(&target_station.stances, red_alert.0)
+                command_stance::neutral_stance_for_alert(&catalogue, red_alert.0)
                     .map(str::to_string)
             })
             .unwrap_or_default();
 
-        let options: Vec<CommandStanceOption> = target_station
-            .stances
+        let options: Vec<CommandStanceOption> = catalogue
             .iter()
             .map(|stance| CommandStanceOption {
                 id: stance.id.clone(),

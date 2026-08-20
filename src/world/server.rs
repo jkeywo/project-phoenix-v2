@@ -2441,6 +2441,7 @@ pub(crate) fn apply_dispatch_result(
                 directive,
                 utility,
                 source,
+                command_stance,
                 origin_layer,
             } => {
                 let added = objectives.0.add_full_with_params(
@@ -2452,6 +2453,7 @@ pub(crate) fn apply_dispatch_result(
                     directive,
                     utility,
                     source,
+                    command_stance,
                 );
                 // Record layer ownership (issue #751) so UnloadWorld removes
                 // exactly the objectives this layer's triggers added. Only on
@@ -8646,6 +8648,7 @@ position = [1.0, 0.0, 0.0]
                     directive: crate::messages::AiDirective::None,
                     utility: crate::objectives::UtilityConfig::default(),
                     source: crate::messages::ObjectiveSource::default(),
+                    command_stance: None,
                 },
                 TriggerAction::CompleteObjective {
                     id: "obj-alpha".into(),
@@ -8659,6 +8662,7 @@ position = [1.0, 0.0, 0.0]
                     directive: crate::messages::AiDirective::None,
                     utility: crate::objectives::UtilityConfig::default(),
                     source: crate::messages::ObjectiveSource::default(),
+                    command_stance: None,
                 },
                 TriggerAction::FailObjective {
                     id: "obj-beta".into(),

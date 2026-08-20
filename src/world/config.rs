@@ -631,6 +631,32 @@ pub(crate) struct RawZeroGate {
     pub(crate) threshold: Option<f32>,
 }
 
+/// An objective-contributed Command stance inside an `add_objective` action
+/// (issue #1110).
+///
+/// The authored shape names the target Station and then the ordinary stance
+/// fields the target's permanent catalogue authors, e.g.:
+///
+/// ```toml
+/// command_stance = { station = "tactical", id = "objective-escort", \
+///                    kind = "standard", high_alert = true, \
+///                    persist_behind_human = true, label = "stance.escort" }
+/// ```
+///
+/// `station` is the target Station id; the remaining fields flatten into a
+/// [`StationStanceConfig`](crate::ship::config::StationStanceConfig) — the exact
+/// type a station's permanent catalogue is authored as — so the contributed
+/// stance is validated, exposed and selected through the same seams a permanent
+/// one is. `pub(crate)` (with `pub(crate)` fields) for the same reason as
+/// [`RawModifier`]: declarative deserialization AND scripted construction from a
+/// `#{ … }` Rhai map.
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawCommandStance {
+    pub(crate) station: String,
+    #[serde(flatten)]
+    pub(crate) stance: crate::ship::config::StationStanceConfig,
+}
+
 /// One flat, all-optional `[[trigger.action]]` row as authored in TOML.
 ///
 /// `pub(crate)` (with `pub(crate)` fields and a `Default` derive) so the Rhai
@@ -742,6 +768,10 @@ pub(crate) struct RawActionEntry {
     /// Zero-gate veto conditions.
     #[serde(default)]
     pub(crate) zero_gates: Option<Vec<RawZeroGate>>,
+    /// An objective-specific Command stance this `add_objective` contributes to a
+    /// named target Station while the objective is active (issue #1110).
+    #[serde(default)]
+    pub(crate) command_stance: Option<RawCommandStance>,
     /// Named groups for `spawn_entity` action. The entity is tracked as a
     /// member of each group and removed from all groups on destruction.
     #[serde(default)]
@@ -925,6 +955,14 @@ pub enum TriggerAction {
         utility: UtilityConfig,
         /// Whether this is a mission objective or standing doctrine (issue #571).
         source: ObjectiveSource,
+        /// An objective-specific Command stance contributed to a named target
+        /// Station while this objective is active (issue #1110). `None` for the
+        /// vast majority of objectives, which contribute no stance. The tuple is
+        /// (target Station id, authored stance).
+        command_stance: Option<(
+            crate::messages::StationId,
+            crate::ship::config::StationStanceConfig,
+        )>,
     },
     CompleteObjective {
         id: String,
@@ -1285,6 +1323,44 @@ fn parse_utility_config(raw: &RawActionEntry) -> UtilityConfig {
     }
 }
 
+/// Convert an `add_objective` action's optional `command_stance` (issue #1110)
+/// into the (target Station id, authored stance) pair the objective carries.
+///
+/// The declarative and scripted front-ends share this, so a malformed
+/// contribution is refused identically from both — the whole `add_objective`
+/// call is discarded (settled decision 10), never a half-registered objective.
+/// `kind` and `id` are already required by [`StationStanceConfig`]'s
+/// deserialization; here the two fields serde cannot check for emptiness are
+/// rejected: a blank target `station` (there would be nothing to lend the stance
+/// to) and a blank stance `id` (Command keys selections by id).
+fn parse_command_stance(
+    raw: &RawActionEntry,
+) -> Result<
+    Option<(
+        crate::messages::StationId,
+        crate::ship::config::StationStanceConfig,
+    )>,
+    String,
+> {
+    let Some(raw_stance) = &raw.command_stance else {
+        return Ok(None);
+    };
+    if raw_stance.station.trim().is_empty() {
+        return Err(
+            "Action 'add_objective' command_stance requires a non-empty 'station'".to_string(),
+        );
+    }
+    if raw_stance.stance.id.trim().is_empty() {
+        return Err(
+            "Action 'add_objective' command_stance requires a non-empty stance 'id'".to_string(),
+        );
+    }
+    Ok(Some((
+        crate::messages::StationId(raw_stance.station.clone()),
+        raw_stance.stance.clone(),
+    )))
+}
+
 fn parse_modifier_slot(s: &str) -> Result<crate::messages::ModifierSlot, String> {
     use crate::messages::ModifierSlot;
     match s {
@@ -1343,6 +1419,7 @@ pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerA
                     Some("doctrine") => ObjectiveSource::Doctrine,
                     _ => ObjectiveSource::Mission,
                 };
+                let command_stance = parse_command_stance(raw_action)?;
                 TriggerAction::AddObjective {
                     id: raw_action.id.clone().ok_or_else(|| {
                         "Action 'add_objective' requires an 'id' field".to_string()
@@ -1356,6 +1433,7 @@ pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerA
                     directive,
                     utility,
                     source,
+                    command_stance,
                 }
             }
             "complete_objective" => TriggerAction::CompleteObjective {
@@ -3863,6 +3941,66 @@ directive_loop   = false
             }
             other => panic!("expected AddObjective, got {other:?}"),
         }
+    }
+
+    // -- Objective command-stance contribution (issue #1110) ----------------
+
+    #[test]
+    fn add_objective_parses_a_command_stance_contribution() {
+        let parsed = actions(
+            r#"
+[[action]]
+type = "add_objective"
+id   = "obj-escort"
+text = "world.obj.text"
+command_stance = { station = "tactical", id = "objective-escort", kind = "standard", high_alert = true, persist_behind_human = true, label = "stance.escort" }
+"#,
+        )
+        .expect("must parse");
+        match &parsed[0] {
+            TriggerAction::AddObjective { command_stance, .. } => {
+                let (station, stance) = command_stance
+                    .as_ref()
+                    .expect("the contribution is present");
+                assert_eq!(station.0, "tactical");
+                assert_eq!(stance.id, "objective-escort");
+                assert_eq!(stance.kind, crate::ship::config::StanceKind::Standard);
+                assert!(stance.high_alert);
+                assert!(stance.persist_behind_human);
+                assert_eq!(stance.label, "stance.escort");
+            }
+            other => panic!("expected AddObjective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_objective_without_a_command_stance_carries_none() {
+        let parsed = actions(
+            "[[action]]\n\
+             type = \"add_objective\"\n\
+             id = \"obj-plain\"\n\
+             text = \"world.obj.text\"\n",
+        )
+        .expect("must parse");
+        match &parsed[0] {
+            TriggerAction::AddObjective { command_stance, .. } => {
+                assert!(command_stance.is_none(), "no contribution is authored");
+            }
+            other => panic!("expected AddObjective, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_objective_rejects_a_command_stance_with_a_blank_station() {
+        let err = actions(
+            "[[action]]\n\
+             type = \"add_objective\"\n\
+             id = \"obj-escort\"\n\
+             text = \"world.obj.text\"\n\
+             command_stance = { station = \"\", id = \"objective-escort\", kind = \"standard\" }\n",
+        )
+        .expect_err("a blank target station must be refused");
+        assert!(err.contains("station"), "{err}");
     }
 
     // -- Flag-system triggers (issue #412) ---------------------------------

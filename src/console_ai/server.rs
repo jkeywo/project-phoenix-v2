@@ -889,6 +889,9 @@ pub(crate) fn ai_torpedo_auto_fire(
     // bare-`App` fixtures still pass parameter validation.
     runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // Objective-contributed Command stances (issue #1110). `Option<Res<_>>` so a
+    // bare-`App` weapons fixture with no world plugin reads no contributions.
+    active_objective_stances: Option<Res<crate::console::command::server::ActiveObjectiveStances>>,
     // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
     // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
     origin_q: Query<&crate::world::server::EntityOriginLayer>,
@@ -961,6 +964,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         // absent a direction it is `None` and the seeded value is unchanged.
         let stance_override = crate::console::command::server::weapons_station_stance_high_alert(
             stances_opt,
+            active_objective_stances.as_deref(),
             &ship_config.0,
             &control_sources.0,
             red_alert_opt.is_some_and(|r| r.0),

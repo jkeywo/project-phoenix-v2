@@ -316,10 +316,12 @@ impl TickBudget {
 /// current tick to schedule against it.
 enum Deferred {
     /// A delayed effect: `in_seconds(delay).<verb>(…)`, as the same
-    /// `TriggerAction` the TOML front-end builds.
+    /// `TriggerAction` the TOML front-end builds. Boxed so this variant does not
+    /// dwarf `Callback` (`clippy::large_enum_variant`): `TriggerAction` grew once
+    /// objective contributions rode along on `AddObjective` (issue #1110).
     Effect {
         delay_secs: i64,
-        action: TriggerAction,
+        action: Box<TriggerAction>,
     },
     /// A deferred callback: `after(delay, |ctx| …)`, by its (generated) name.
     Callback { delay_secs: i64, fn_name: String },
@@ -374,7 +376,7 @@ impl ScheduleSink {
             match item {
                 Deferred::Effect { delay_secs, action } => {
                     delayed.push(DelayedAction {
-                        action,
+                        action: *action,
                         // Script-scheduled work is authored at base scope in M3
                         // (no sub-world layer origin to thread yet), mirroring the
                         // effect sink's `loader_path: None` note.
@@ -414,7 +416,7 @@ impl Schedule {
     fn defer(&self, action: TriggerAction) {
         self.sink.push(Deferred::Effect {
             delay_secs: self.delay_secs,
-            action,
+            action: Box::new(action),
         });
     }
 }
@@ -582,9 +584,9 @@ mod tests {
         let sink = ScheduleSink::new();
         sink.push(Deferred::Effect {
             delay_secs: 10,
-            action: TriggerAction::CompleteObjective {
+            action: Box::new(TriggerAction::CompleteObjective {
                 id: "later".to_string(),
-            },
+            }),
         });
         sink.push(Deferred::Callback {
             delay_secs: 5,

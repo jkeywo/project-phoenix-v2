@@ -41,6 +41,36 @@ pub fn stance_by_id<'a>(
     catalogue.iter().find(|stance| stance.id == stance_id)
 }
 
+/// The EFFECTIVE stance catalogue a directed Station exposes right now: its
+/// PERMANENT authored catalogue with any currently-active objective
+/// contributions (issue #1110) merged in at READ time.
+///
+/// An active scenario objective may lend a Station a temporary authored stance
+/// WITHOUT ever mutating the Station's permanent `Vec` (AC1): every Command
+/// consumer — human console options, AI selection, order validation, the removal
+/// reconcile — reads through this merge instead of the permanent slice, so the
+/// contributed stance appears and disappears with its objective and the
+/// permanent catalogue is never touched.
+///
+/// The permanent catalogue is the membership authority on a collision: a
+/// contributed id that a permanent stance already authors is dropped, so an
+/// objective can never shadow or redefine an authored stance. With no
+/// contributions the result is a plain clone of `permanent` — byte-identical to
+/// reading the permanent slice directly, which is what keeps an undirected or
+/// objective-free hull unchanged.
+pub fn effective_catalogue(
+    permanent: &[StationStanceConfig],
+    contributed: &[StationStanceConfig],
+) -> Vec<StationStanceConfig> {
+    let mut effective = permanent.to_vec();
+    for stance in contributed {
+        if !effective.iter().any(|existing| existing.id == stance.id) {
+            effective.push(stance.clone());
+        }
+    }
+    effective
+}
+
 /// Whether a human Command operator may select `stance_id` for this station.
 ///
 /// The authored catalogue IS the whole selectable vocabulary (criterion 3):
@@ -294,6 +324,76 @@ mod tests {
             selection_after_alert_change(&c, None, true).as_deref(),
             Some("high"),
         );
+    }
+
+    /// One objective-contributed stance for the merge tests (issue #1110).
+    fn objective_stance() -> StationStanceConfig {
+        StationStanceConfig {
+            id: "objective-escort".into(),
+            label: String::new(),
+            kind: StanceKind::Standard,
+            high_alert: true,
+            persist_behind_human: true,
+            ai_engaged: false,
+        }
+    }
+
+    #[test]
+    fn effective_catalogue_without_contributions_is_byte_identical() {
+        // AC1: contributed absent → the merge is a plain clone of the permanent
+        // catalogue, so an undirected/objective-free hull is unchanged.
+        let c = catalogue();
+        assert_eq!(effective_catalogue(&c, &[]), c);
+    }
+
+    #[test]
+    fn effective_catalogue_appends_an_active_contribution() {
+        // AC2: an active objective's stance joins the exposed vocabulary…
+        let c = catalogue();
+        let contributed = vec![objective_stance()];
+        let effective = effective_catalogue(&c, &contributed);
+        assert_eq!(effective.len(), c.len() + 1);
+        assert!(is_selectable(&effective, "objective-escort"));
+        // …WITHOUT mutating the permanent catalogue (AC1): it still lacks the id.
+        assert!(!is_selectable(&c, "objective-escort"));
+    }
+
+    #[test]
+    fn effective_catalogue_dedupes_by_id_permanent_wins() {
+        // A contributed id colliding with a permanent one never shadows or
+        // redefines the authored stance: the permanent copy is kept.
+        let c = catalogue();
+        let collide = StationStanceConfig {
+            id: "weapons-free".into(),
+            label: "SHADOW".into(),
+            kind: StanceKind::Standard,
+            high_alert: false,
+            persist_behind_human: false,
+            ai_engaged: false,
+        };
+        let effective = effective_catalogue(&c, &[collide]);
+        assert_eq!(effective.len(), c.len(), "no duplicate id is appended");
+        let kept = stance_by_id(&effective, "weapons-free").unwrap();
+        assert!(kept.high_alert, "the permanent stance is the one kept");
+        assert_eq!(
+            kept.label, "",
+            "the contributed stance did not overwrite it"
+        );
+    }
+
+    #[test]
+    fn reconcile_selection_against_the_merged_slice_keeps_an_active_objective_stance() {
+        // #1110: while the objective is active its stance is a member of the
+        // effective catalogue, so a selection of it survives reconcile…
+        let c = catalogue();
+        let effective = effective_catalogue(&c, &[objective_stance()]);
+        assert_eq!(
+            reconcile_selection(&effective, "objective-escort").as_deref(),
+            Some("objective-escort"),
+        );
+        // …but once the objective ends the contribution is gone, so the same
+        // selection reconciled against the PERMANENT catalogue is dropped.
+        assert_eq!(reconcile_selection(&c, "objective-escort"), None);
     }
 
     #[test]

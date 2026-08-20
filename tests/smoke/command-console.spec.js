@@ -157,3 +157,60 @@ test('command console: clicking a stance emits set_station_stance for that stati
     stance: 'tactical-weapons-free',
   });
 });
+
+// Issue #1110: an active scenario objective contributes an extra authored stance
+// to the directed Station. The console is a pure projection of the `command`
+// blackboard, so activation shows up as an added, selectable option, and when
+// the objective ends the server drops it from `stances` and moves
+// `selected_stance` back to the alert-neutral — the option vanishes and the
+// readout falls back. The server-side contribution and removal are pinned in
+// Rust (`ship::command_stance::effective_catalogue`, the command server systems,
+// the objective manager); this pins the console-boundary contract.
+test('command console: an objective stance appears and is selectable, then vanishes to the neutral when the objective ends', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__sendAction = (json) => window.__sent.push(json);
+  });
+
+  // Objective active: the contributed stance joins the list as a fifth option
+  // and is the stance in force. (Its label reuses an existing string id — the
+  // console renders whatever label the blackboard carries.)
+  const active = aiDirectedState();
+  active.stances.push({
+    id: 'tactical-objective-escort',
+    label: 'entity.alliance_destroyer.station.tactical.stance.weapons_free',
+    kind: 'standard',
+    high_alert: true,
+  });
+  active.selected_stance = 'tactical-objective-escort';
+  await page.evaluate((s) => window.__updateConsole('command', JSON.stringify(s)), active);
+
+  await expect(page.locator('#stance-list .stance-btn')).toHaveCount(5);
+  await expect(page.locator('.stance-btn[aria-pressed="true"]')).toHaveCount(1);
+
+  // It is selectable: clicking it emits set_station_stance for the objective id.
+  await page.locator('#stance-list .stance-btn').nth(4).click();
+  const sent = await page.evaluate(() => window.__sent);
+  expect(sent).toHaveLength(1);
+  expect(JSON.parse(sent[0])).toEqual({
+    action: 'set_station_stance',
+    console: 'command',
+    station: 'tactical',
+    stance: 'tactical-objective-escort',
+  });
+
+  // Objective ends: the server withdraws the option and moves selected_stance
+  // back to the alert-neutral. The extra button disappears and the neutral is
+  // the marked stance in force.
+  const ended = aiDirectedState(); // the four permanent stances only
+  ended.selected_stance = 'tactical-normal';
+  await page.evaluate((s) => window.__updateConsole('command', JSON.stringify(s)), ended);
+
+  await expect(page.locator('#stance-list .stance-btn')).toHaveCount(4);
+  const fellBack = page.locator('.stance-btn[aria-pressed="true"]');
+  await expect(fellBack).toHaveCount(1);
+  await expect(fellBack.locator('.name')).toHaveText(
+    ts('entity.alliance_destroyer.station.tactical.stance.normal'),
+  );
+});

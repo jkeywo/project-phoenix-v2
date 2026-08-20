@@ -61,7 +61,7 @@ use rhai::{Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position
 
 use crate::comms::content::OpenCommsRequest;
 use crate::world::config::{
-    parse_action_entry, RawActionEntry, RawModifier, RawZeroGate, TriggerAction,
+    parse_action_entry, RawActionEntry, RawCommandStance, RawModifier, RawZeroGate, TriggerAction,
 };
 use crate::world::dispatch::{ActionCmd, FlagMutation};
 
@@ -912,9 +912,62 @@ fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
         source: map_str(spec, "source"),
         modifiers: map_modifiers(spec)?,
         zero_gates: map_zero_gates(spec)?,
+        command_stance: map_command_stance(spec)?,
         ..Default::default()
     };
     parse_action_entry(&raw)
+}
+
+/// Read an optional `command_stance` `#{ … }` map (issue #1110) into a
+/// [`RawCommandStance`], so a scripted `add_objective` contributes an
+/// objective-specific stance through the SAME `parse_command_stance` seam the
+/// declarative TOML twin uses — one validator, not two.
+///
+/// `station`, `id` and `kind` are required (a stance with no id cannot be
+/// selected, no kind cannot be resolved, and no station has nothing to lend to);
+/// the remaining posture flags default exactly as `#[serde(default)]` does on the
+/// declarative side. `Ok(None)` when absent; `Err` — discarding the whole call
+/// (settled decision 10) — when present but malformed.
+fn map_command_stance(spec: &Map) -> Result<Option<RawCommandStance>, String> {
+    let Some(d) = spec.get("command_stance") else {
+        return Ok(None);
+    };
+    let map = d
+        .clone()
+        .try_cast::<Map>()
+        .ok_or_else(|| "`command_stance` must be a #{ … } map".to_string())?;
+    let station = map_str(&map, "station")
+        .ok_or_else(|| "`command_stance` requires a string `station`".to_string())?;
+    let id =
+        map_str(&map, "id").ok_or_else(|| "`command_stance` requires a string `id`".to_string())?;
+    let kind_str = map_str(&map, "kind")
+        .ok_or_else(|| "`command_stance` requires a string `kind`".to_string())?;
+    let kind = parse_stance_kind(&kind_str)?;
+    let stance = crate::ship::config::StationStanceConfig {
+        id,
+        label: map_str(&map, "label").unwrap_or_default(),
+        kind,
+        high_alert: map_bool(&map, "high_alert").unwrap_or(false),
+        persist_behind_human: map_bool(&map, "persist_behind_human").unwrap_or(false),
+        ai_engaged: map_bool(&map, "ai_engaged").unwrap_or(false),
+    };
+    Ok(Some(RawCommandStance { station, stance }))
+}
+
+/// Map a `command_stance` `kind` string to the [`StanceKind`] the declarative
+/// serde path resolves the same token to. The three snake_case spellings match
+/// `#[serde(rename_all = "snake_case")]` on the enum; an unknown one raises.
+fn parse_stance_kind(s: &str) -> Result<crate::ship::config::StanceKind, String> {
+    use crate::ship::config::StanceKind;
+    match s {
+        "standard" => Ok(StanceKind::Standard),
+        "normal_alert_neutral" => Ok(StanceKind::NormalAlertNeutral),
+        "high_alert_neutral" => Ok(StanceKind::HighAlertNeutral),
+        other => Err(format!(
+            "`command_stance.kind` must be one of standard, normal_alert_neutral, \
+             high_alert_neutral; got '{other}'"
+        )),
+    }
 }
 
 /// Build a `TriggerAction::SpawnEntity` from a script `#{ … }` map, reusing the
@@ -1400,6 +1453,55 @@ mod tests {
         )
         .expect_err("a weightless modifier must raise");
         assert!(err.to_string().contains("weight"), "{err}");
+    }
+
+    /// Issue #1110: a scripted `command_stance` map and the declarative
+    /// `command_stance` table build the BYTE-IDENTICAL `TriggerAction::AddObjective`
+    /// — same target Station id, same `StationStanceConfig` — because both run
+    /// through the one `parse_command_stance` seam. Two front-ends, one parser.
+    #[test]
+    fn add_objective_command_stance_matches_toml() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.add_objective(#{
+                    id: "obj-escort",
+                    text: "world.obj.text",
+                    command_stance: #{
+                        station: "tactical",
+                        id: "objective-escort",
+                        kind: "standard",
+                        high_alert: true,
+                        persist_behind_human: true,
+                    },
+                });
+            }"#,
+            "f",
+        );
+        let toml = toml_action(
+            "type = \"add_objective\"\n\
+             id = \"obj-escort\"\n\
+             text = \"world.obj.text\"\n\
+             command_stance = { station = \"tactical\", id = \"objective-escort\", kind = \"standard\", high_alert = true, persist_behind_human = true }",
+        );
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+    }
+
+    /// A `command_stance` with no `station` RAISES (discarding the call, settled
+    /// decision 10): there is no target Station to lend the stance to. The same
+    /// loud failure the declarative `parse_command_stance` gives a blank station.
+    #[test]
+    fn add_objective_rejects_a_command_stance_without_a_station() {
+        let err = run_result(
+            r#"fn f(ctx) {
+                ctx.effects.add_objective(#{
+                    id: "o", text: "t",
+                    command_stance: #{ id: "x", kind: "standard" },
+                });
+            }"#,
+            "f",
+        )
+        .expect_err("a stationless command_stance must raise");
+        assert!(err.to_string().contains("station"), "{err}");
     }
 
     // ── Feature A: the `flt("…")` fractional-data marker (no_float-safe) ───────

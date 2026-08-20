@@ -1402,5 +1402,8 @@ client.spectator.hull.none,Spectator summary hull readout when the ship reports 
 client.spectator.hull.readout,Spectator summary ship-wide hull readout. {pct} is the whole-number percentage of hull remaining,[Ship hull {pct}%]
 client.spectator.objectives_heading,Spectator summary heading over the mission objective list,[Objectives]
 client.spectator.stations_heading,Spectator summary heading over the per-station health list,[Crew stations]
+client.spectator.claim_heading,Spectator surface heading over the list of open stations a spectator may claim to enter play (issue #1106),[Open stations — tap to take a seat]
+client.spectator.claim_none,Shown on the Spectator surface when no open station is currently available to claim (issue #1106),[No open stations right now]
+client.spectator.claim_taken,"Neutral notice on the Spectator surface after a spectator's claim lost the race and the seat is now held by someone else (issue #1106); leaks no other-player identity",[That seat was just taken — still spectating]
 entity.alliance_destroyer.station.navigation.description,Alliance Destroyer lobby description for its complete human-seeking Navigation Station,[Plot waypoints and manage the system chart.]
 entity.alliance_destroyer.station.comms.description,Alliance Destroyer lobby description for its complete human-seeking Comms Station,[Hail contacts and manage incoming traffic.]

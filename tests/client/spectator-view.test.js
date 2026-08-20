@@ -1,6 +1,9 @@
 import { JSDOM } from 'jsdom';
 import { describe, expect, it } from 'vitest';
-import { spectatorSummaryModel, renderSpectatorDom } from '../../gui/spectator-view.js';
+import {
+  spectatorSummaryModel, renderSpectatorDom,
+  spectatorClaimModel, spectatorClaimStale,
+} from '../../gui/spectator-view.js';
 
 const stations = [
   { id: 'helm', name: 'Helm', human_seeking: true },
@@ -118,5 +121,80 @@ describe('renderSpectatorDom', () => {
     renderSpectatorDom({ ...els, model, translate });
     expect(els.objectivesEl.querySelector('.spectator-objectives-empty').textContent)
       .toBe('component.objectives.empty');
+  });
+});
+
+// ── #1106: claim an open Station from the Spectator surface ───────────────
+
+// A live lobby roster row (gui/station-roster.js shape). `holder_token` is
+// null for an OPEN seat and a token for a TAKEN one.
+function seat(id, name, holderToken) {
+  return { id, name, short_code: id.slice(0, 3), rank: '', description: '',
+    holder_token: holderToken || null, ratings: ['Std'] };
+}
+
+describe('spectatorClaimModel', () => {
+  const roster = [
+    seat('helm', 'Helm', null),           // open + eligible
+    seat('tactical', 'Tactical', null),   // open + ineligible
+    seat('captain', 'Captain', 'other'),  // TAKEN — must be excluded
+  ];
+  // Ineligible only for tactical; the private reason is local-only.
+  const eligibilityFn = st => st.id === 'tactical'
+    ? { eligible: false, reason: { functions: ['fine_motor'] } }
+    : { eligible: true, reason: null };
+
+  it('lists only OPEN stations — a taken seat is excluded entirely', () => {
+    const rows = spectatorClaimModel(roster, eligibilityFn);
+    expect(rows.map(r => r.id)).toEqual(['helm', 'tactical']);
+    expect(rows.map(r => r.id)).not.toContain('captain');
+  });
+
+  it('marks an open+eligible seat claimable and an open+ineligible seat disabled', () => {
+    const rows = spectatorClaimModel(roster, eligibilityFn);
+    const helm = rows.find(r => r.id === 'helm');
+    const tactical = rows.find(r => r.id === 'tactical');
+    expect(helm).toMatchObject({ button: 'claim', eligible: true, ineligibleReason: null });
+    // `name` is what the caller sends as SelectStation.station — the SAME
+    // authoritative message the lobby roster uses.
+    expect(helm.name).toBe('Helm');
+    expect(tactical).toMatchObject({ button: 'ineligible', eligible: false });
+    expect(tactical.ineligibleReason).toEqual({ functions: ['fine_motor'] });
+  });
+
+  it('defaults to all-eligible when no eligibility function is supplied', () => {
+    const rows = spectatorClaimModel(roster);
+    expect(rows.every(r => r.button === 'claim' && r.eligible)).toBe(true);
+  });
+
+  it('is empty when every station is taken, and safe on empty/undefined input', () => {
+    const allTaken = [seat('helm', 'Helm', 'x'), seat('tactical', 'Tactical', 'y')];
+    expect(spectatorClaimModel(allTaken, eligibilityFn)).toEqual([]);
+    expect(spectatorClaimModel([])).toEqual([]);
+    expect(spectatorClaimModel(undefined)).toEqual([]);
+  });
+});
+
+describe('spectatorClaimStale', () => {
+  it('is false while the attempted seat is still open (claim in flight)', () => {
+    const roster = [seat('helm', 'Helm', null)];
+    expect(spectatorClaimStale(roster, 'helm', 'me')).toBe(false);
+  });
+
+  it('is true once the attempted seat is held by someone else (lost race)', () => {
+    // The winner's StationAssigned landed: the seat repaints as taken. The
+    // participant is still a Spectator, so the caller shows a neutral notice.
+    const roster = [seat('helm', 'Helm', 'winner')];
+    expect(spectatorClaimStale(roster, 'helm', 'me')).toBe(true);
+  });
+
+  it('is false when I am the holder (I won the race — no stale notice)', () => {
+    const roster = [seat('helm', 'Helm', 'me')];
+    expect(spectatorClaimStale(roster, 'helm', 'me')).toBe(false);
+  });
+
+  it('is false when there is no pending claim', () => {
+    const roster = [seat('helm', 'Helm', 'winner')];
+    expect(spectatorClaimStale(roster, null, 'me')).toBe(false);
   });
 });

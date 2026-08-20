@@ -1649,6 +1649,197 @@ max_level = 4
         );
     }
 
+    // ── #1106: a Spectator claims an eligible open Station ─────────────────
+    // The claim runs through the SAME authoritative path as an ordinary lobby
+    // claim (handle_select_station); a success seats the player AND clears the
+    // Spectator role server-side (the set_station invariant). There is NO
+    // spectator-specific host code — these tests assert the existing path
+    // already admits an ex-Spectator race-safely.
+
+    #[test]
+    fn spectator_claiming_open_station_is_seated_and_role_cleared() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_spectator("t1", true);
+        assert!(sessions.is_spectator("t1"));
+        // A mid-mission claim of an open, eligible seat.
+        handle_select_station(
+            "t1",
+            "captain",
+            &mut sessions,
+            GamePhase::InProgress,
+            &ship_stations(),
+        );
+        assert_eq!(
+            sessions.station_for_token("t1"),
+            Some(&StationId("captain".into())),
+            "a Spectator's claim seats them through the normal admission path"
+        );
+        assert!(
+            !sessions.is_spectator("t1"),
+            "a successful claim clears the Spectator role (set_station invariant)"
+        );
+    }
+
+    #[test]
+    fn simultaneous_spectator_claims_first_wins_second_stays_spectator() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.register("t2".into(), "Bob".into()).unwrap();
+        sessions.set_spectator("t1", true);
+        sessions.set_spectator("t2", true);
+        // t1 wins the race for the open seat.
+        handle_select_station(
+            "t1",
+            "helm",
+            &mut sessions,
+            GamePhase::InProgress,
+            &ship_stations(),
+        );
+        assert_eq!(
+            sessions.station_for_token("t1"),
+            Some(&StationId("helm".into())),
+            "the first claim is seated"
+        );
+        assert!(
+            !sessions.is_spectator("t1"),
+            "the winner is no longer a Spectator"
+        );
+        // t2's simultaneous claim of the now-occupied seat is a silent no-op.
+        let result = handle_select_station(
+            "t2",
+            "helm",
+            &mut sessions,
+            GamePhase::InProgress,
+            &ship_stations(),
+        );
+        assert!(
+            result.outbound.is_empty(),
+            "the losing claim takes the neutral no-op path: no self-addressed message"
+        );
+        assert_eq!(
+            sessions.station_for_token("t2"),
+            None,
+            "the loser is not seated"
+        );
+        assert!(
+            sessions.is_spectator("t2"),
+            "the loser stays a Spectator — its role flag is untouched"
+        );
+    }
+
+    #[test]
+    fn ineligible_spectator_claim_is_noop_and_stays_spectator() {
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.set_spectator("t1", true);
+        sessions.set_eligibility(
+            "t1",
+            std::collections::HashSet::from([StationId("captain".into())]),
+        );
+        let result = handle_select_station(
+            "t1",
+            "captain",
+            &mut sessions,
+            GamePhase::InProgress,
+            &ship_stations(),
+        );
+        assert!(
+            result.outbound.is_empty(),
+            "an ineligible claim takes the neutral no-op path"
+        );
+        assert_eq!(
+            sessions.station_for_token("t1"),
+            None,
+            "an ineligible claim must not seat the player"
+        );
+        assert!(
+            sessions.is_spectator("t1"),
+            "an ineligible claim leaves the participant a Spectator"
+        );
+    }
+
+    #[test]
+    fn spectator_claim_of_stale_taken_seat_is_noop() {
+        // A crew member already holds the seat; the Spectator's roster was stale
+        // (the seat looked open). Claiming an occupied seat no-ops.
+        let mut sessions = sessions_with("t1", "Alice");
+        sessions.register("t2".into(), "Watcher".into()).unwrap();
+        sessions.set_station("t1", Some(StationId("helm".into())));
+        sessions.set_spectator("t2", true);
+        let result = handle_select_station(
+            "t2",
+            "helm",
+            &mut sessions,
+            GamePhase::InProgress,
+            &ship_stations(),
+        );
+        assert!(
+            result.outbound.is_empty(),
+            "a stale claim of an already-taken seat no-ops"
+        );
+        assert_eq!(
+            sessions.station_for_token("t2"),
+            None,
+            "the Spectator is not seated"
+        );
+        assert!(
+            sessions.is_spectator("t2"),
+            "the Spectator stays a Spectator"
+        );
+    }
+
+    #[test]
+    fn reconnect_after_spectator_claim_restores_seat_and_role() {
+        let stations = ship_stations();
+        let config = backfill_ship_config();
+        let mut sessions = SessionManager::new();
+        sessions.register("t1".into(), "Alice".into()).unwrap();
+        sessions.set_spectator("t1", true);
+        // The Spectator claims an open, eligible seat through the normal path.
+        handle_select_station("t1", "captain", &mut sessions, GamePhase::Lobby, &stations);
+        let captain_id = sessions.station_for_token("t1").cloned();
+        assert!(captain_id.is_some(), "the claim seats the ex-Spectator");
+        assert!(
+            !sessions.is_spectator("t1"),
+            "the claim clears the Spectator role"
+        );
+        // Drop the connection, then reconnect via Identify (mirrors
+        // reconnect_restores_station_when_unclaimed).
+        let mut resolver = ControlSourceResolver::new();
+        let _ = process_disconnect_with_stations(
+            "t1",
+            &mut sessions,
+            &stations,
+            &config,
+            &mut resolver,
+            &HashMap::new(),
+            GamePhase::Lobby,
+            true,
+        );
+        let msg = ClientMessage::Identify {
+            token: "t1".into(),
+            name: "Alice".into(),
+        };
+        let _ = dispatch(
+            "t1",
+            &msg,
+            &mut sessions,
+            GamePhase::Lobby,
+            None,
+            &stations,
+            &default_ship_config(),
+            true,
+            &HashMap::new(),
+        );
+        assert_eq!(
+            sessions.station_for_token("t1"),
+            captain_id.as_ref(),
+            "reconnect restores the seat claimed from the spectator surface"
+        );
+        assert!(
+            !sessions.is_spectator("t1"),
+            "the reconnected participant is crew, not a Spectator"
+        );
+    }
+
     #[test]
     fn release_station_clears_player_station_field() {
         let mut sessions = sessions_with("t1", "Alice");

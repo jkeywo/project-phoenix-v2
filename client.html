@@ -598,6 +598,14 @@
     .spectator-objective-row { font-size: var(--text-sm); }
     .spectator-objective-row.done { text-decoration: line-through; color: var(--ink-dim); }
     .spectator-objectives-empty { font-size: var(--text-xs); color: var(--ink-dim); }
+    /* Claim-an-open-Station list (issue #1106). Rows reuse the lobby
+       .station-row visuals (claim/ineligible buttons, inline reason); only the
+       list container and the neutral stale-claim notice are scoped here. */
+    #spectator-claims { display: flex; flex-direction: column; gap: 6px; }
+    #spectator-claim-status:empty { display: none; }
+    #spectator-claim-status { font-size: var(--text-sm); color: var(--ink-dim); }
+    #spectator-claim-status[data-state="taken"] { color: var(--reloading); }
+    .spectator-claims-empty { font-size: var(--text-xs); color: var(--ink-dim); }
     #spectate-btn { padding: 6px 14px; border-radius: 4px; background: var(--surface-panel-up);
       color: var(--ink); border: 1px solid var(--edge-strong); font-family: 'Chakra Petch', sans-serif;
       letter-spacing: .06em; }
@@ -1074,6 +1082,17 @@
         <div class="spectator-heading" data-i18n="client.spectator.objectives_heading">Objectives</div>
         <div id="spectator-objectives"></div>
       </div>
+      <!-- Claim an open Station (issue #1106): a Spectator may enter play by
+           taking any currently-open seat it is eligible for, through the SAME
+           authoritative SelectStation path an ordinary lobby claim uses. Only
+           OPEN∩ELIGIBLE seats offer a live button; an ineligible open seat is
+           shown disabled with a private reason; a lost race / stale seat leaves
+           the participant here with a neutral notice. -->
+      <div class="spectator-section">
+        <div class="spectator-heading" data-i18n="client.spectator.claim_heading">Open stations</div>
+        <div id="spectator-claim-status" role="status" aria-live="polite"></div>
+        <div id="spectator-claims"></div>
+      </div>
     </section>
 
     <nav id="station-hero" aria-hidden="true" aria-label="" data-i18n-attr="aria-label:client.hero.label">
@@ -1404,6 +1423,12 @@
     // confirm string; second click sends ReleaseStation. In-progress only —
     // lobby release stays immediate. Reset whenever we leave InProgress.
     let releaseArmed = false;
+    // #1106: the station id a Spectator last tapped "claim" on. A lost race /
+    // stale seat is a silent server no-op (no self-addressed message), so the
+    // client watches this seat: when it reappears as taken, we show a neutral
+    // "that seat was taken" line and keep the participant on the spectator
+    // surface. Cleared whenever we are no longer spectating.
+    let pendingSpectatorClaim = null;
 
     // Single source of truth for changing the active console. Called only by
     // the render() reconciler now that the tab bar and swipe gesture are gone
@@ -1830,9 +1855,16 @@
         waitingEl.style.display = (window.lobbyState && window.lobbyState.waitingForScenario) ? 'flex' : 'none';
       }
 
-      if (spectating) renderSpectator(s);
-      else if (inGame) renderGame(s);
-      else if (!(window.lobbyState && window.lobbyState.waitingForScenario)) renderLobby(s);
+      if (spectating) {
+        renderSpectator(s);
+      } else {
+        // A successful claim (issue #1106) seats the ex-Spectator and clears the
+        // role, so we drop off the spectator surface; forget any pending claim
+        // so a later re-spectate never shows a stale "seat taken" notice.
+        pendingSpectatorClaim = null;
+        if (inGame) renderGame(s);
+        else if (!(window.lobbyState && window.lobbyState.waitingForScenario)) renderLobby(s);
+      }
     }
 
     // Render the crew-public Spectator summary surface (issue #1105) from the
@@ -1864,6 +1896,105 @@
         objectiveText: (o) => (window.phStrings && window.phStrings.has(o.text))
           ? t(o.text, o.textParams || {}) : (o.text || ''),
       });
+      renderSpectatorClaims(s);
+    }
+
+    // Render the "claim an open Station" list on the Spectator surface (issue
+    // #1106). A Spectator may enter play by taking any currently-open, eligible
+    // seat — through the SAME authoritative SelectStation message an ordinary
+    // lobby claim sends (AC2). Open∩eligible seats get a live claim button;
+    // ineligible open seats are shown disabled with the private #1103 reason
+    // (AC1); a lost race / stale seat leaves a neutral notice and keeps the
+    // participant here (AC3). The roster is live because StationAssigned is
+    // broadcast to all, so a race lost to another player repaints as taken.
+    function renderSpectatorClaims(s) {
+      const listEl = $('spectator-claims');
+      const statusEl = $('spectator-claim-status');
+      if (!listEl || typeof window.spectatorClaimModel !== 'function') return;
+      const roster = s.stations || [];
+
+      // Neutral stale/lost-race notice (AC3): the seat we tapped came back
+      // taken. Keep the Spectator on the surface; leak no other-player identity.
+      if (statusEl) {
+        const stale = typeof window.spectatorClaimStale === 'function'
+          && window.spectatorClaimStale(roster, pendingSpectatorClaim, myToken);
+        if (stale) {
+          statusEl.textContent = t('client.spectator.claim_taken');
+          statusEl.dataset.state = 'taken';
+          pendingSpectatorClaim = null;
+        } else if (!pendingSpectatorClaim) {
+          statusEl.textContent = '';
+          statusEl.removeAttribute('data-state');
+        }
+      }
+
+      const rows = window.spectatorClaimModel(roster, stationEligibility);
+      listEl.innerHTML = '';
+      if (rows.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'spectator-claims-empty';
+        empty.textContent = t('client.spectator.claim_none');
+        listEl.appendChild(empty);
+        return;
+      }
+      for (const row of rows) {
+        const rowEl = document.createElement('div');
+        // Reuse the lobby row visuals (issue #1106): the claim/ineligible
+        // buttons and inline reason are styled under `.station-row`.
+        rowEl.className = 'station-row spectator-claim-row'
+          + (row.button === 'ineligible' ? ' ineligible' : '');
+        rowEl.dataset.station = row.id;
+
+        const info = document.createElement('div');
+        info.className = 'info';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'name';
+        nameEl.textContent = stationLabel(row);
+        info.appendChild(nameEl);
+        if (row.rank) {
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          const rankEl = document.createElement('span');
+          rankEl.textContent = row.rank;
+          meta.appendChild(rankEl);
+          info.appendChild(meta);
+        }
+        // A free seat this player is INELIGIBLE for (issue #1103 AC1): the
+        // private functional reason, local-only, mirroring the lobby roster.
+        if (row.button === 'ineligible' && row.ineligibleReason) {
+          const why = document.createElement('div');
+          why.className = 'ineligible-reason';
+          const fns = (row.ineligibleReason.functions || [])
+            .map(f => t('client.assist_function.' + f))
+            .join(', ');
+          why.textContent = t('client.station_ineligible_reason', { functions: fns });
+          info.appendChild(why);
+        }
+        rowEl.appendChild(info);
+
+        const action = document.createElement('div');
+        action.className = 'action';
+        const btn = document.createElement('button');
+        if (row.button === 'ineligible') {
+          // Blocked claim: the disabled control never sends SelectStation.
+          btn.className = 'ineligible-btn';
+          btn.textContent = t('client.station_ineligible');
+          btn.disabled = true;
+        } else {
+          btn.className = 'claim-btn';
+          btn.textContent = t('client.claim');
+          btn.addEventListener('click', () => {
+            // Remember the seat so a lost race can render its neutral notice,
+            // then send the SAME authoritative message the lobby roster uses.
+            pendingSpectatorClaim = row.id;
+            send('SelectStation', { station: row.name });
+            scheduleRender();
+          });
+        }
+        action.appendChild(btn);
+        rowEl.appendChild(action);
+        listEl.appendChild(rowEl);
+      }
     }
 
     // "Mods active" lobby list (issue #990): render the packs the host applied

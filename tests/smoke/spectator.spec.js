@@ -164,3 +164,65 @@ test('AC5 — a spectator that reconnects stays a spectator and out of readiness
 
   await spec2.close();
 });
+
+// ── Issue #1106 — a Spectator claims an eligible open Station ──────────────
+// A Spectator enters play by claiming an open seat through the SAME
+// authoritative SelectStation message an ordinary lobby claim uses. The
+// transition preserves session identity and reconnect continuity.
+
+/** Wait until this token has received a StationAssigned SEATING it at `stationId`. */
+async function waitForSeatedAt(client, stationId) {
+  await client.page.waitForFunction(
+    ([t, id]) => window.__messages?.some(
+      (m) => m.type === 'StationAssigned' && m.data.token === t && m.data.station_id === id,
+    ),
+    [client.token, stationId],
+    { timeout: 5_000 },
+  );
+}
+
+test('#1106 AC2 — a spectator claims an open station and is seated (enters play)', async ({ context }) => {
+  const hostId = await bootServer(context);
+
+  const spec = await createTestClient(context, hostId, { name: 'Watcher' });
+  await becomeSpectator(spec);
+
+  // The SAME message the lobby roster sends. The host runs it through the
+  // authoritative admission path: race-check, eligibility-check, then seat.
+  await spec.send('SelectStation', { station: 'Helm' });
+  await waitForSeatedAt(spec, 'helm');
+
+  // The claim was granted for THIS token — the ex-spectator now owns the seat.
+  const seated = await spec.page.evaluate(
+    (t) => (window.__messages || []).some(
+      (m) => m.type === 'StationAssigned' && m.data.token === t && m.data.station_id === 'helm',
+    ),
+    spec.token,
+  );
+  expect(seated).toBe(true);
+
+  await spec.close();
+});
+
+test('#1106 AC4 — reconnect after a claim restores the same player and station', async ({ context }) => {
+  const hostId = await bootServer(context);
+  const TOKEN = 'claim-reconnect';
+
+  const spec = await createTestClient(context, hostId, { token: TOKEN, name: 'Watcher' });
+  await becomeSpectator(spec);
+  await spec.send('SelectStation', { station: 'Helm' });
+  await waitForSeatedAt(spec, 'helm');
+
+  // Simulate a browser refresh: drop and reconnect with the same token.
+  await spec.close();
+  const spec2 = await createTestClient(context, hostId, { token: TOKEN, name: 'Watcher' });
+
+  const welcome = await spec2.waitForMessage('Welcome');
+  const me = (welcome?.data?.state?.players ?? []).find((p) => p.token === TOKEN);
+  // Same player, same station, no longer a spectator — the claim survived.
+  const stationId = typeof me?.station === 'string' ? me.station : (me?.station && me.station.id);
+  expect(stationId).toBe('helm');
+  expect(me?.spectator).toBe(false);
+
+  await spec2.close();
+});

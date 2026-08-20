@@ -166,6 +166,30 @@ describe('apply StationAssigned', () => {
     s.apply({ type: 'StationAssigned', data: { token: 'a', station: null, station_id: null } });
     expect(s.players[0].station).toBeNull();
   });
+
+  it('seating a spectator clears the local spectator flag (issue #1106 fix A)', () => {
+    // Mirrors the Rust set_station invariant: on a claim the host emits
+    // StationAssigned (+ RatingChanged) but NO SpectatorChanged, so the client
+    // roster must drop the spectator role itself or the claimant stays stuck on
+    // the read-only spectator surface.
+    const s = new LobbyState();
+    s.players = [{ ...ps('a', 'Alice', null), spectator: true }];
+    s.apply({ type: 'StationAssigned', data: { token: 'a', station: 'Helm', station_id: 'helm' } });
+    expect(s.players[0].station).toBe('helm');
+    expect(s.players[0].spectator).toBe(false);
+  });
+
+  it('a station-vacate (null station_id) does not touch the spectator flag', () => {
+    // Only seating clears the role; releasing a seat must not silently flip a
+    // player into (or out of) the Spectator role — that arrives via SpectatorChanged.
+    // Start from spectator:true so this also guards against a clear-on-vacate
+    // regression (the fix-A clear must be gated on a non-null station_id only).
+    const s = new LobbyState();
+    s.players = [{ ...ps('a', 'Alice', 'captain'), spectator: true }];
+    s.apply({ type: 'StationAssigned', data: { token: 'a', station: null, station_id: null } });
+    expect(s.players[0].station).toBeNull();
+    expect(s.players[0].spectator).toBe(true);
+  });
 });
 
 describe('apply phase transitions', () => {

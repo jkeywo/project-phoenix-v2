@@ -58,7 +58,7 @@ Campaign continuity preserves the declared promise and settlement, not the whole
 
 ## Intelligence database
 
-Band F's database/library work gives Comms the primary Intelligence search and correlation surface. It organises known entities, registry codes, dossiers, reports, pursuit estimates and mission history over the shared evidence model. Other station databases remain focused projections and do not obsolete Intelligence.
+Band C6's database/library work gives Comms the primary Intelligence search and correlation surface. It organises known entities, registry codes, dossiers, reports, pursuit estimates and mission history over the shared evidence model. Other station databases remain focused projections and do not obsolete Intelligence.
 
 Comms-specialist Away Missions may acquire sources, records or other durable entries for the Intelligence database. Those missions follow the unscheduled Operations and Duty Team framework rather than adding an espionage mode to ordinary dialogue.
 

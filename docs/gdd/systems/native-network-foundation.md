@@ -2,11 +2,11 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted for Band A2 — Bridge Foundations |
+| Status | Accepted for T1 — Bridge Foundations (formerly Band A2) |
 | Scope | Join codes, rendezvous, WebSocket/RTC transport, host recovery, native Windows hosting, Ultralight consoles, multi-monitor/touch and local media-device setup |
 | Audience | Product, networking, native client, UI, simulation, operations and test |
 
-Band A2 front-loads the technical foundation needed for reliable multi-ship play and optional physical bridges. The zero-setup browser host and phone-console route remains complete. The native route uses the same authoritative simulation, commands, station ownership, projections and content rather than becoming a separate edition of the game.
+T1 front-loads the technical foundation needed for reliable multi-ship play and optional physical bridges. The zero-setup browser host and phone-console route remains complete. The native route uses the same authoritative simulation, commands, station ownership, projections and content rather than becoming a separate edition of the game.
 
 Related documents: [Game and Session Lifecycle](../foundation/game-lifecycle.md), [Future Modes and Optional Bridge Extensions](../future/future-modes.md), [Command and Crew Control](../mechanics/command-and-crew-control.md), [Onboarding and Accessibility](../foundation/onboarding-accessibility.md), [AI and Backfill](./ai-and-backfill.md), and [Planned but Not Scheduled](../future/planned-not-scheduled.md).
 
@@ -58,11 +58,11 @@ Accessibility preferences belong to each pane's private player profile, not to t
 
 ## Local media devices
 
-Band A2 establishes multi-device routing without shipping inter-ship calls. Every viewscreen or station surface can author or select its own camera, microphone and audio output. Shared devices require explicit configuration rather than automatic reuse. The setup screen warns about conflicting or unsupported claims, persists assignments and provides camera preview, microphone level/loopback and output tests. A missing device disables only that media path, never the station or simulation.
+T1 establishes multi-device routing without shipping inter-ship calls. Every viewscreen or station surface can author or select its own camera, microphone and audio output. Shared devices require explicit configuration rather than automatic reuse. The setup screen warns about conflicting or unsupported claims, persists assignments and provides camera preview, microphone level/loopback and output tests. A missing device disables only that media path, never the station or simulation.
 
 This boundary permits a private Comms endpoint and a separate bridge-wide viewscreen endpoint inside one native process. The planned ship-to-ship media feature can later hand an established call between them without redesigning native device ownership.
 
-## Band A2 acceptance criteria
+## T1 acceptance criteria
 
 - Typed client/server codes resolve within separate project namespaces, give specific wrong-type/version errors and survive supported reconnect/recovery paths.
 - Mission start freezes ship slots and loadouts; the server code restores only disconnected fixed slots after start.

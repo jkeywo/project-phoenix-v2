@@ -4,17 +4,18 @@ entities:
       status: accepted
       confidence: confirmed
       title: GM Console Milestones to Fully-Featured GM Interface
-      summary: "The GM console (PRD #930) arrives in three MVP milestones after the Band A2 Phoenix mesh delivery — GM peer tracer, directing, performing — then grows through facilitation assistance and operations/safety before M6 unifies Live inspection with a standalone Authoring/Test Workshop that retires the HTML editor and model viewer. Information control and in-sim presentation follow in Band E; campaign continuity with deep pacing moves to Band F. External show hardware and AI-drafted NPC replies are explicitly not planned, while source-level Rhai debugging is accepted but unscheduled."
+      summary: "The GM console (PRD #930) arrives in three MVP milestones in technical band T2, once the T1 #1093 transport gates land — GM peer tracer, directing, performing — then grows through facilitation assistance and operations/safety (T3) before M6 unifies Live inspection with a standalone Authoring/Test Workshop that retires the HTML editor and model viewer. Information control and in-sim presentation follow M6 in T4; campaign continuity with deep pacing closes in T6, after the T5 host mesh. External show hardware and AI-drafted NPC replies are explicitly not planned, while source-level Rhai debugging is accepted but unscheduled."
       rationale:
         - "Milestone ladder and ordering settled 2026-08-02 in the session that published PRD #930: facilitation assistance is the first post-MVP milestone, then operations and safety before information control, presentation stays in-sim only, and campaign persistence plus pacing heuristics complete the endgame."
-        - "The 2026-08-19 Workshop review inserted M6 after Operations and Safety, shifted Information Control, Presentation and Campaign/Pacing to M7-M9, and moved M9 to Band F. Each post-MVP milestone remains its own PRD only when due."
+        - "The 2026-08-19 Workshop review inserted M6 after Operations and Safety, shifted Information Control, Presentation and Campaign/Pacing to M7-M9, and moved M9 last. The 2026-08-20 track split re-homes the ladder on the technical track — M1-M3 in T2, M4-M5 in T3, M6-M8 in T4, M9 in T6 — deliberately ahead of the T5 multi-ship host mesh; any milestone behaviour needing true multi-ship observation waits on T5. Each post-MVP milestone remains its own PRD only when due."
         - "M1-M5 keep their settled player-facing scope. They must nevertheless use reusable inspector, capability, validation and action components so M6 extends the GM surface instead of replacing another disposable interface."
-        - "The transport prerequisites now live in Band A2 PRD #1093, especially #1114, #1116 and #1117; #1118 supplies robust divergence recovery. These supersede #854's PeerJS-specific plan. #900 and #862 still establish the logged-override and snapshot patterns GM work reuses."
+        - "The transport prerequisites live in T1 PRD #1093, especially #1114, #1116 and #1117; #1118 supplies robust divergence recovery. These supersede #854's PeerJS-specific plan; the T5 host mesh is no longer a gate on the console's start. #900 and #862 still establish the logged-override and snapshot patterns GM work reuses. Live inspection builds on T1's roadmap-debug-observability payload substrate."
     architecture:
       kind: roadmap-sequence
       authority: non-authoritative
       coordinates:
         - roadmap-deterministic-simulation-foundation
+        - roadmap-band-a2-native-network-foundation
         - roadmap-p2p-multiship-delivery
         - gm-milestone-peer-tracer
         - gm-milestone-directing
@@ -31,14 +32,14 @@ entities:
       status: accepted
       confidence: confirmed
       title: GM Peer Exists (Tracer)
-      summary: "Deliver PRD #930 modules 1, 2, and 6 plus a skeletal surface: GM session role and lobby policy (own ready state, force-start override, crew-visible presence, paused-snapshot drop-in), the gm: command-admission token tier, a headless-sim GM page that joins the Band A2 Phoenix mesh as a full deterministic roster member, a basic omniscient map component, a live activity feed over the balance-event stream, and pause/resume. Build the map, selection and inspector shell as reusable components for the later Workshop without adding Workshop features to this milestone."
+      summary: "Deliver PRD #930 modules 1, 2, and 6 plus a skeletal surface: GM session role and lobby policy (own ready state, force-start override, crew-visible presence, paused-snapshot drop-in), the gm: command-admission token tier, a headless-sim GM page that joins over the T1 #1093 Phoenix transport as a full deterministic roster member, a basic omniscient map component, a live activity feed over the balance-event stream, and pause/resume. Build the map, selection and inspector shell as reusable components for the later Workshop without adding Workshop features to this milestone."
       rationale:
         - "A GM-only session running the world end-to-end is the tracer: it proves topology (host-class peer, local omniscient reads), the admission tier, and lobby role in one vertical slice before any directing tools exist."
         - "Exit criteria: a GM-only session runs the world; a GM can join a crewed game, watch everything live, and pause it."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
-      coordinates: [roadmap-p2p-multiship-delivery]
+      coordinates: [roadmap-band-a2-native-network-foundation]
       runs_in: [host-browser-runtime]
 
   - component: gm-milestone-directing
@@ -109,7 +110,7 @@ entities:
       status: proposed
       confidence: confirmed
       title: GM Integrated Workshop and Live Inspector
-      summary: "Band E M6, after Operations and Safety. Unify the GM console, HTML editor and model viewer around shared schema-backed inspectors while keeping two exclusive contexts. Live exists only while connected as a GM peer: it exposes M1-M5 actions plus separately tested safe reconciliation adapters as constrained, attributed, optimistic-concurrency transactions through Operations/Safety; Rhai source is fixed for the run and no arbitrary ECS escape hatch exists. Standalone Workshop switches between Authoring and Test with one chronological undo stack. Native Authoring edits an explicitly selected project root or one mod workspace; Browser Authoring edits exactly one in-memory new/imported/loaded mod pack over read-only base/other-pack dependencies and exports one ZIP. Test validates an unsaved draft, starts a fresh disposable deterministic simulation with every Station on Backfill, and switches between the omniscient GM view and the authentic Viewscreen of any simulated player ship. M6 reaches comment-preserving TOML/Rhai/entity/definition/mod-pack parity, integrates model/rig/marker/variant/LOD preview and native LOD/remesh capability, then deletes the old editor and standalone viewer interfaces while preserving redirecting developer shortcuts."
+      summary: "T4 M6, after Operations and Safety. Unify the GM console, HTML editor and model viewer around shared schema-backed inspectors while keeping two exclusive contexts. Live exists only while connected as a GM peer: it exposes M1-M5 actions plus separately tested safe reconciliation adapters as constrained, attributed, optimistic-concurrency transactions through Operations/Safety; Rhai source is fixed for the run and no arbitrary ECS escape hatch exists. Standalone Workshop switches between Authoring and Test with one chronological undo stack. Native Authoring edits an explicitly selected project root or one mod workspace; Browser Authoring edits exactly one in-memory new/imported/loaded mod pack over read-only base/other-pack dependencies and exports one ZIP. Test validates an unsaved draft, starts a fresh disposable deterministic simulation with every Station on Backfill, and switches between the omniscient GM view and the authentic Viewscreen of any simulated player ship. M6 reaches comment-preserving TOML/Rhai/entity/definition/mod-pack parity, integrates model/rig/marker/variant/LOD preview and native LOD/remesh capability, then deletes the old editor and standalone viewer interfaces while preserving redirecting developer shortcuts."
       rationale:
         - "Live and Workshop never coexist. Leaving Live uses ordinary GM disconnect/reconnect; Workshop is offline and needs no GM credentials or running session. There is no capture-live-state-to-source workflow and no shared undo/draft state across the boundary."
         - "Authoring and Live reuse inspector presentation but not authority: Authoring patches a document-preserving syntax tree and writes only after runtime-equivalent parse/composition/Rhai/reference/mod-pack validation; Live submits named actions or schema-marked safe adapters at agreed ticks. Recreate-required and derived fields remain visible but disabled."

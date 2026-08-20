@@ -24,7 +24,7 @@ Detailed mechanics: [Sensors and Epistemics](../mechanics/sensors-epistemics.md)
 5. Physical properties may occasionally permit an unexpected but legitimate solution.
 6. Procedural generation creates coherent situations, not variety for its own sake.
 
-Depth is earned when it gives another bridge officer a consequential decision within a mission. Phoenix does not simulate astronomical formation histories, walkable interiors or a galaxy merely to claim scale. Band H's coarse wrapping planetary Orbital Mode uses normal planar controls and points of interest rather than terrain-following or atmospheric physics.
+Depth is earned when it gives another bridge officer a consequential decision within a mission. Phoenix does not simulate astronomical formation histories, walkable interiors or a galaxy merely to claim scale. Band C8's coarse wrapping planetary Orbital Mode uses normal planar controls and points of interest rather than terrain-following or atmospheric physics.
 
 ## Spatial model
 

@@ -11,7 +11,7 @@
 
 Phoenix may scale from a browser, television, and phones to multi-ship sessions and purpose-built bridge venues. Every extension must preserve the complete zero-setup route and the same authoritative station/system model. Optional depth should add ways to participate, author, and present the game without splitting it into incompatible “real” and “casual” versions.
 
-Related documents: [Game Design Overview](../foundation/overview.md), [Game and Session Lifecycle](../foundation/game-lifecycle.md), [Campaign Continuity and Persistence](../foundation/campaign-continuity.md), [Station Experiences](../systems/station-experiences.md), [Onboarding, Tutorials, and Accessibility](../foundation/onboarding-accessibility.md), [AI and Backfill](../systems/ai-and-backfill.md), [Scenario Authoring](../systems/scenario-authoring.md), [Release Bands G–I](./release-bands-g-i.md), [Planned but Not Scheduled](./planned-not-scheduled.md), and [Difficulty, Balance, and Playtesting](../foundation/difficulty-balance-playtesting.md).
+Related documents: [Game Design Overview](../foundation/overview.md), [Game and Session Lifecycle](../foundation/game-lifecycle.md), [Campaign Continuity and Persistence](../foundation/campaign-continuity.md), [Station Experiences](../systems/station-experiences.md), [Onboarding, Tutorials, and Accessibility](../foundation/onboarding-accessibility.md), [AI and Backfill](../systems/ai-and-backfill.md), [Scenario Authoring](../systems/scenario-authoring.md), [Release Bands C7–C9](./release-bands-g-i.md), [Planned but Not Scheduled](./planned-not-scheduled.md), and [Difficulty, Balance, and Playtesting](../foundation/difficulty-balance-playtesting.md).
 
 ## Non-negotiable baseline
 
@@ -25,15 +25,15 @@ Related documents: [Game Design Overview](../foundation/overview.md), [Game and 
 
 | Direction | Current foundation | Status in this GDD |
 |---|---|---|
-| Band A2 Bridge Foundations | Crew control plus front-loaded networking and native Windows bridge work. | Accepted immediate band before B; split across two PRDs |
-| Native delivery | Native `phoenix-host` can serve a built bundle/catalogue/version pin; Band A2 adds native simulation/viewscreen and Ultralight station hosting. | Started foundation with accepted A2 expansion |
-| Multi-ship | Per-ship state, AI ownership, command logs and deterministic fixed ticks exist; A2 supplies transport/recovery before B gameplay. | Planned roadmap direction with front-loaded foundation |
-| Patrol Mode | Scenario systems, seeded world content and campaign projection. | Authored MVP in Band F; procedural generation in H |
-| War Mode | Multi-system run state, Pursuit, allies and coarse strategic consequences. | Authored MVP in Band G; procedural generation in H |
-| Sandbox Mode | Shared generator/Director plus persistent actor, economy and sector state. | Accepted Band I direction |
+| T1 Bridge Foundations (formerly Band A2) | Crew control plus front-loaded networking and native Windows bridge work. | Accepted first technical band after release A; split across two PRDs |
+| Native delivery | Native `phoenix-host` can serve a built bundle/catalogue/version pin; T1 adds native simulation/viewscreen and Ultralight station hosting. | Started foundation with accepted T1 expansion |
+| Multi-ship | Per-ship state, AI ownership, command logs and deterministic fixed ticks exist; T1 supplies transport/recovery, and the multi-ship host mesh follows in T5. | Planned roadmap direction with front-loaded foundation |
+| Patrol Mode | Scenario systems, seeded world content and campaign projection. | Authored MVP in Band C6; procedural generation in C8 |
+| War Mode | Multi-system run state, Pursuit, allies and coarse strategic consequences. | Authored MVP in Band C7; procedural generation in C8 |
+| Sandbox Mode | Shared generator/Director plus persistent actor, economy and sector state. | Accepted Band C9 direction |
 | Ship customisation | Entity fragments/composition and accepted supply/demand design. | Accepted staged roadmap, not current player feature |
 | Duty Teams and Away Missions | Fixed typed teams, named Duty Officers, Operations systems, Medical and off-screen assignments. | Accepted; planned but not scheduled |
-| Physical bridge | Web consoles, optional native delivery, stable commands/state. | Native Windows bridge foundation accepted for Band A2 |
+| Physical bridge | Web consoles, optional native delivery, stable commands/state. | Native Windows bridge foundation accepted for T1 |
 | Lighting/smoke/show control | Alert and presentation events could supply cues. | Permitted future adapter; PASM currently does not commit show hardware |
 | GM tools | Debug/host surfaces, scenario effect vocabulary, snapshots, activity/balance events. | Planned staged roadmap |
 
@@ -60,15 +60,15 @@ Escort and protected transit, split investigation, pincer or screen tactics, mut
 
 ### Experience
 
-Patrol Mode is a continuing series of assignments. Band F ships a complete hand-authored Patrol run and the persistent multi-system shell. Band H later adds a seeded system and situation generator producing physical context, actors, needs, infrastructure, evidence, commitments and cascades. The goal is coherent episodes, not a catalogue of random planets.
+Patrol Mode is a continuing series of assignments. Band C6 ships a complete hand-authored Patrol run and the persistent multi-system shell. Band C8 later adds a seeded system and situation generator producing physical context, actors, needs, infrastructure, evidence, commitments and cascades. The goal is coherent episodes, not a catalogue of random planets.
 
 ### Authored and generated responsibility
 
 Authors define grammars, constraints, actor types, system relationships, failure patterns, tone, pacing bands, and outcome projections. Generation selects and binds compatible pieces from one seed, then validates that objectives, knowledge paths, operations, and terminal states remain coherent. Hand-authored scenarios remain the quality reference.
 
-A hand-authored first patrol teaches exploration, database/library use, mission logging, wide/focused observation and campaign handoff in Band F. Procedural assignments open in Band H. Repetition controls track recently used structures, actor conflicts, hazards and resolution patterns, not only names.
+A hand-authored first patrol teaches exploration, database/library use, mission logging, wide/focused observation and campaign handoff in Band C6. Procedural assignments open in Band C8. Repetition controls track recently used structures, actor conflicts, hazards and resolution patterns, not only names.
 
-Band F introduces the mode-profile and run-orchestration seams. Band H introduces the shared seeded generator and Director for both Patrol and War. Sandbox consumes the same generator and Director under a less constrained profile rather than forking them.
+Band C6 introduces the mode-profile and run-orchestration seams. Band C8 introduces the shared seeded generator and Director for both Patrol and War. Sandbox consumes the same generator and Director under a less constrained profile rather than forking them.
 
 ### Boundaries
 
@@ -100,13 +100,13 @@ The complete contract is in [Duty Teams, Officers and Operations](../mechanics/d
 
 ## War, procedural generation and Sandbox
 
-Band G ships an authored War Mode run toward one decisive mission, letting the crew gather allies and supplies and weaken enemies across intervening systems. Band H procedurally generates Patrol assignments and War runs. Band I removes the fixed assignment chain or destination for Sandbox and gives the shared Director wider latitude in a persistent actor-and-economy simulation suitable for player-chosen work and GM-led sessions.
+Band C7 ships an authored War Mode run toward one decisive mission, letting the crew gather allies and supplies and weaken enemies across intervening systems. Band C8 procedurally generates Patrol assignments and War runs. Band C9 removes the fixed assignment chain or destination for Sandbox and gives the shared Director wider latitude in a persistent actor-and-economy simulation suitable for player-chosen work and GM-led sessions.
 
-All modes retain bridge-first play. Allied vessels are autonomous actors directed through Comms rather than directly controlled units. Warp is discrete system-to-system transit. The complete G–I scope and distributed accessibility programme are defined in [Release Bands G–I](./release-bands-g-i.md).
+All modes retain bridge-first play. Allied vessels are autonomous actors directed through Comms rather than directly controlled units. Warp is discrete system-to-system transit. The complete C7–C9 scope and distributed accessibility programme are defined in [Release Bands C7–C9](./release-bands-g-i.md).
 
 ## Native hosts and clients
 
-The current native host is a delivery server: it serves a built client bundle, manifest, catalogue, and version stamp. Band A2 extends this into an optional Windows host that runs the authoritative simulation, renders the viewscreen natively and presents isolated Ultralight station panes across full-screen monitors. It replaces PeerJS with Phoenix WebSocket rendezvous/signalling and direct or TURN-relayed WebRTC while preserving the browser route.
+The current native host is a delivery server: it serves a built client bundle, manifest, catalogue, and version stamp. T1 extends this into an optional Windows host that runs the authoritative simulation, renders the viewscreen natively and presents isolated Ultralight station panes across full-screen monitors. It replaces PeerJS with Phoenix WebSocket rendezvous/signalling and direct or TURN-relayed WebRTC while preserving the browser route.
 
 A native client is an optional shell around the same console actions and state. Each local pane has its own player identity and projection; it must not gain exclusive controls, higher simulation authority, or content incompatible with a browser participant. Bridge profiles author one or two station panes per station monitor, a native viewscreen, independent touchscreen routing and per-surface cameras, microphones and audio outputs. See [Native and Network Foundation](../systems/native-network-foundation.md).
 

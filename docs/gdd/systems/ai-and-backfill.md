@@ -13,7 +13,7 @@ Phoenix uses AI to keep every authored ship functional at any crew size and to o
 
 Related documents: [Station Experiences](./station-experiences.md), [Ships and Ship Systems](./ships-and-systems.md), [Difficulty, Balance, and Playtesting](../foundation/difficulty-balance-playtesting.md), [Alliance Ships](../content/ships/alliance-ships.md), [Harrow Ships](../content/ships/harrow-ships.md), and [Onboarding, Tutorials, and Accessibility](../foundation/onboarding-accessibility.md).
 
-Band A2 crew direction is specified in [Command and Crew Control](../mechanics/command-and-crew-control.md).
+T1 crew direction is specified in [Command and Crew Control](../mechanics/command-and-crew-control.md).
 
 ## Design goals
 

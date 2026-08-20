@@ -4,7 +4,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Phoenix Demo and Post-Demo Delivery
-      summary: "The demo critical path front-loads deterministic simulation (#849), completed composable entity templates (#869), and Backfill combat symmetry (#870) before Combat Test doctrine closure (#774), measured readiness (#868 and #850), the snapshot tracer (#848/#862), and the deliberately narrow limited release (#853/#931): Combat Test only, Alliance Destroyer only. Post-demo delivery runs through A, inserted Bridge Foundations Band A2, campaign bands B-E and continuing-mode bands F-I. A ships Falling Skyway and delivery/content foundations; A2 adds crew control, station hosting, Phoenix networking, native Windows and accessibility seams; B-E deliver the Thin Margin campaign and progressively deeper simulation; F adds an authored Patrol MVP; G adds an authored War MVP and personnel operations; H procedurally generates Patrol and War and adds Orbital Mode; I adds Sandbox and persistent sector/economy state. Accessibility and polish advance in every band."
+      summary: "The demo critical path front-loads deterministic simulation (#849), completed composable entity templates (#869), and Backfill combat symmetry (#870) before Combat Test doctrine closure (#774), measured readiness (#868 and #850), the snapshot tracer (#848/#862), and the deliberately narrow limited release (#853/#931): Combat Test only, Alliance Destroyer only. Post-demo delivery runs through release A and then two parallel tracks (2026-08-20 restructure of the former A2/B-I ladder): a CONTENT track C1-C9 of scenarios, ships and the features they need, and a TECHNICAL track T1-T6 of networking, GM console, Workshop/modding, architecture and debug work. A ships Falling Skyway and delivery/content foundations. C1 pairs the cruiser with the Falling Skyway AI-backfill completion; C2-C5 deliver the Thin Margin campaign and progressively deeper simulation; C6 adds an authored Patrol MVP; C7 adds an authored War MVP and personnel operations; C8 procedurally generates Patrol and War and adds Orbital Mode; C9 adds Sandbox and persistent sector/economy state. T1 carries the Bridge Foundations pair (crew control, Phoenix networking/native Windows), debug observability and the defect backlog; T2-T4 pull the GM console and Workshop/modding investment ahead of the multi-ship host mesh (T5), with GM campaign continuity closing in T6. Accessibility and polish advance with every content release."
       rationale:
         - Completed work already supplies the balance harness (#835), baseline player Backfill doctrine (#842), scenario catalogue and QR flow (#754-#756), legacy save/load tracer bullets (#431-#435), native scenario hosting (#420), and mod-pack export/overlay plumbing (#759-#760).
         - Determinism, authored composition, and player/NPC Backfill symmetry are foundational game contracts; settling them before Combat Test balance avoids tuning a model that will immediately change.
@@ -25,6 +25,8 @@ entities:
         - post-demo-release-bands
         - roadmap-band-a2-crew-control
         - roadmap-band-a2-native-network-foundation
+        - roadmap-band-a2-falling-skyway-ai-backfill
+        - roadmap-debug-observability
         - roadmap-scenario-scripting
         - roadmap-falling-skyway-foundation
         - roadmap-falling-skyway-content
@@ -98,7 +100,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Snapshot Contract and Demo Tracer Bullet
-      summary: "Pre-demo. Define the versioned authoritative snapshot boundary and deliver the bounded Combat Test capture/restore tracer (#848/#862) while the demo is still one scenario. The consequence, scenario, slot, export, and campaign adapters follow in release bands A-C, before any of them carries campaign content."
+      summary: "Pre-demo. Define the versioned authoritative snapshot boundary and deliver the bounded Combat Test capture/restore tracer (#848/#862) while the demo is still one scenario. The consequence, scenario, slot, export, and campaign adapters follow post-demo (see roadmap-authoritative-snapshots; all but save-slot UX #865 are now delivered), before any of them carries campaign content."
       rationale:
         - The snapshot contract now builds on #849's logical tick and command log, informing scenario data and later P2P without making save UX a first-demo release gate.
         - Stable content IDs and an authoritative-only boundary prevent browser, renderer, and session state leaking into future persistence.
@@ -113,14 +115,15 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: Post-Demo Release Bands A, A2, and B-I
-      summary: "Post-demo work proceeds through one campaign and continuing-mode ladder. A: Rhai scripting, Falling Skyway, delivery/content foundations and destroyer readiness. A2: Crew Control plus Native and Network foundations, with shared accessibility settings/profile, presentation and eligibility seams. B: Borrowed Sun, fields/epistemics, complexity, multi-ship and accessibility composition. C: Narrow Season, physical/relative space, docking, GM MVP and alternative interaction paths. D: Broken Tithe, resource networks, deep Engineering, GM facilitation/safety and mastery-task assistance. E: Silent Corridor, Tactical/Sensors/EWar depth, the integrated GM Workshop/Live Inspector, GM information/presentation control and dense-information accessibility. F: an authored Patrol MVP, discrete warp, databases, refit/rewards, continuing-mode summaries and GM campaign/deep-pacing continuity. G: an authored War MVP, Pursuit, allies and the personnel/Operations vertical. H: shared Patrol/War PCG, Orbital Mode and accessibility-aware generation. I: Sandbox, coarse living economy, standing, sector/fleet state and alternative participation."
+      title: Post-Demo Content Track C1-C9 and Technical Track T1-T6
+      summary: "Post-demo work proceeds through two parallel tracks (2026-08-20 restructure of the former A2/B-I ladder). CONTENT — C1: cruiser readiness (#1080-#1083) and the Falling Skyway AI-backfill completion (#1129: scenario re-author + AI Scan/Operate/Order verbs). C2: Borrowed Sun, fields/epistemics, complexity ladder (#1016/#1017/#858). C3: Narrow Season, physical/relative space, docking, courier readiness (#1018/#859/#877). C4: Broken Tithe, resource networks, deep Engineering, battleship readiness (#1019/#860). C5: Silent Corridor, Tactical/Sensors/EWar depth, ship-customisation MVP (#1020/#861/#1091). C6: an authored Patrol MVP, discrete warp, databases, refit/rewards (#1021). C7: an authored War MVP, Pursuit, allies and the personnel/Operations vertical (#1094). C8: shared Patrol/War PCG, Orbital Mode and accessibility-aware generation (#1095). C9: Sandbox, coarse living economy, standing, sector/fleet state and alternative participation (#1096). TECHNICAL — T1: Bridge Foundations Crew Control (#1092) and Native/Network (#1093), Distributed Ship Operations (#1143), debug observability for scenario/AI state and station activity, and the current defect backlog (#1045-#1049, #929). T2: GM console M1-M3 (#930), mod content packs (#856/#910) and save-slot lifecycle UX (#865). T3: GM console M4-M5. T4: GM console M6-M8 including the integrated Workshop/Live Inspector. T5: the multi-ship host mesh scale-up (#1086 scenario-state digest widening, #1090 many-instance protocol proof, #1153 multi-ship scenario authoring), deliberately resequenced after the GM/Workshop investment; the two-host protocol itself ships with T1's #1093 (#1116-#1120). T6: GM console M9 campaign continuity and deep pacing."
       rationale:
-        - Each band is a shippable public build, not a paper milestone. Every band pairs playable content with supporting gameplay systems, technical investment, a visual/UX polish pass and an accessibility increment.
-        - "The hull rollout is deliberately one at a time — destroyer, cruiser, courier, battleship — so tutorials, doctrine, and balance evidence land together per hull instead of as a single catalogue-wide push."
-        - "The #848 adapters split across A, B, and C by what needs them: Falling Skyway needs consequence and scripted-progression resume, P2P join and recovery ride on the portable record, and campaign continuity only becomes real once three missions exist."
-        - Defects are fixed as they arise outside these bands and are deliberately not scheduled into them.
-        - "2026-08-13 decision (Starship Simulator Genesis review): missions 2-4 each gain a paired foundation PRD mirroring the #851/#852 pattern, threading a physical-world simulation layer through B-D rather than deferring it past the campaign. Platform capabilities stay in their bands; the bands get longer. Foundation PRDs are written just-in-time as each band starts. Scope guard: pasm/spec/design/simulation-differentiation.yaml."
+        - Each CONTENT band is a shippable public build, not a paper milestone, pairing playable content with the features it needs, a visual/UX polish pass and an accessibility increment. TECHNICAL bands are not releases; their work merges into whichever content release is next.
+        - "The hull rollout is deliberately one at a time — destroyer (A), cruiser (C1), courier (C3), battleship (C4) — so tutorials, doctrine, and balance evidence land together per hull instead of as a single catalogue-wide push."
+        - "The #848 adapters are consumed where needed: Falling Skyway's consequence and scripted-progression resume (#863/#864) landed in A, portable import/export (#866) and campaign-continuity projection (#867) are delivered, and only save-slot lifecycle UX (#865) remains, scheduled in T2."
+        - "Defects are normally fixed as they arise outside these bands. One-time exception recorded 2026-08-20: the accumulated backlog (#1045-#1049 script/composition defects, #929 torpedo tick defect) is scheduled into T1 as a cleanup batch; new defects continue to be fixed as they arise."
+        - "2026-08-13 decision (Starship Simulator Genesis review): missions 2-4 each gain a paired foundation PRD mirroring the #851/#852 pattern, threading a physical-world simulation layer through C2-C4 rather than deferring it past the campaign. Platform capabilities stay in their bands; the bands get longer. Foundation PRDs are written just-in-time as each band starts. Scope guard: pasm/spec/design/simulation-differentiation.yaml."
+        - "2026-08-20 track split: content and technical work no longer gate each other band-by-band. GM console and Workshop/modding (T2-T4) deliberately precede the multi-ship host mesh (T5) — the GM transport gates (#1114, #1116-#1118) live under T1's #1093, not the mesh. Consequence: C2 Borrowed Sun ships what is achievable without the mesh (single-host multi-crew); its multi-ship variant waits on T5."
     architecture:
       kind: roadmap-release-bands
       authority: non-authoritative
@@ -131,16 +134,16 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: "Band A2 — Crew Control Foundation"
-      summary: "The first of two Bridge Foundations PRDs, scheduled immediately after release A and before Band B. Add an auxiliary human-seeking Command station, normally hosted by Captain through hull data, that lists AI-controlled stations and selects an authored stance for each at station rather than fine-system scale. Generalise human seeking from individual systems to complete station surfaces with finite compatible fallback lists, authored visiting ratings and a shared Hero Bar presenting stable station tabs, selected-station identity/rating/health, per-tab health and separate off-screen importance alerts. Migrate Comms and Navigation. Also add an explicit Spectator role with one crew-public summary screen, readiness exclusion and manual claiming of eligible open stations, plus an AFK setting that delegates all systems on a retained player station and relocates human-seeking stations until the player returns."
+      title: "T1 — Crew Control Foundation"
+      summary: "The first of two Bridge Foundations PRDs, scheduled in technical band T1 immediately after release A. Add an auxiliary human-seeking Command station, normally hosted by Captain through hull data, that lists AI-controlled stations and selects an authored stance for each at station rather than fine-system scale. Generalise human seeking from individual systems to complete station surfaces with finite compatible fallback lists, authored visiting ratings and a shared Hero Bar presenting stable station tabs, selected-station identity/rating/health, per-tab health and separate off-screen importance alerts. Migrate Comms and Navigation. Also add an explicit Spectator role with one crew-public summary screen, readiness exclusion and manual claiming of eligible open stations, plus an AFK setting that delegates all systems on a retained player station and relocates human-seeking stations until the player returns."
       rationale:
-        - "PRD published as #1092; it is the Crew Control sibling of #1093 in the renamed Band A2 — Bridge Foundations."
-        - "Command must land before the more elaborate B-E missions because a small crew needs to direct aggregate AI station behavior without operating every fine system. It is an auxiliary data-authored human-seeking station, not hard-coded to Captain or required to create another claimable seat."
+        - "PRD published as #1092; it is the Crew Control sibling of #1093 in T1 — Bridge Foundations (the band formerly named A2). PRD #1143 (Distributed Ship Operations — Crew-Driven Systems) is registered alongside them in T1."
+        - "Command must land before the more elaborate C2-C5 missions because a small crew needs to direct aggregate AI station behavior without operating every fine system. It is an auxiliary data-authored human-seeking station, not hard-coded to Captain or required to create another claimable seat."
         - "Every stance declares whether it persists behind human control or resets to the alert-appropriate neutral stance. An objective stance disappears and falls back immediately when its objective becomes invalid. Alert changes switch neutral-to-neutral only and never overwrite an explicit stance."
         - "When no human controls Command, its AI operator selects from the same stance catalogue using current knowledge and authored policy. Human-held stations see intent but are not constrained by it."
         - "AFK changes control source without relinquishing ownership. An AFK or disconnected direct holder is temporarily ineligible for station hosting; their human-seeking station relocates as a complete surface and returns intact when the holder becomes active."
         - "The spectator MVP is deliberately one summary surface. Selectable authorised system monitors remain accepted but unscheduled."
-        - "A2 starts the accessibility programme while these seams are already changing: a shared Accessibility settings tab, private effect-named profile, anonymous station/rating eligibility result, per-function assistance schema, keyboard/focus Hero Bar semantics and persistent non-colour health/importance cues. The resolver receives functional eligibility, never the player's settings or reasons."
+        - "T1 starts the accessibility programme while these seams are already changing: a shared Accessibility settings tab, private effect-named profile, anonymous station/rating eligibility result, per-function assistance schema, keyboard/focus Hero Bar semantics and persistent non-colour health/importance cues. The resolver receives functional eligibility, never the player's settings or reasons."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -152,14 +155,14 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: "Band A2 — Native and Network Foundation"
+      title: "T1 — Native and Network Foundation"
       summary: "The second Bridge Foundations PRD front-loads typed human-readable client/server join codes, a Phoenix rendezvous service over WebSocket, direct or TURN-relayed WebRTC data transport, synchronised host disconnect/Backfill/recovery and a true Windows native host. The native process runs the authoritative simulation, renders the viewscreen through native Bevy/wgpu and presents isolated Ultralight player panes across full-screen monitors, with one or two stations per station monitor, independently captured touch, reusable bridge profiles and per-surface camera/microphone/output setup."
       rationale:
-        - "PRD published as #1093; it is the Native and Network sibling of #1092 in the renamed Band A2 — Bridge Foundations."
+        - "PRD published as #1093; it is the Native and Network sibling of #1092 in T1 — Bridge Foundations (the band formerly named A2)."
         - "Client and server codes use separate project GUID namespaces, one compatible-release version GUID and five-letter suffixes. Every ship host owns a private client code; the fleet-wide privileged server code admits hosts before mission start and restores disconnected fixed ship slots afterwards."
         - "Mission start freezes player-ship slots and loadouts. A disconnected host's ship transitions at an agreed tick to ordinary Backfill on the remaining peers; a replacement machine may reclaim only a disconnected slot and receives the shared snapshot/history."
         - "Phoenix replaces PeerJS rather than layering more product behavior onto its public broker. Secure WebSocket owns rendezvous/signalling; WebRTC DataChannels retain direct game paths and WebRTC media tracks remain available for the unscheduled one-to-one ship-call feature. Managed TURN and diagnostics are required for public Wi-Fi, hotspots and mobile networks."
-        - "Each native pane is an isolated player identity and obeys the same admission and projection contracts as a browser client. The browser route remains complete. A2 proves device enumeration, per-surface assignments and local preview/tests but does not ship inter-ship media."
+        - "Each native pane is an isolated player identity and obeys the same admission and projection contracts as a browser client. The browser route remains complete. T1 proves device enumeration, per-surface assignments and local preview/tests but does not ship inter-ship media."
         - "Accessibility preferences belong to each private player/pane profile rather than the physical bridge profile. Web and native panes share settings, use OS text/contrast/motion preferences as defaults, support explicit overrides, preserve one/two-pane layouts under text scaling and provide keyboard/mouse routes for touch-oriented setup."
     architecture:
       kind: roadmap-milestone
@@ -167,6 +170,43 @@ entities:
       reads: [world-snapshot-artifact, session-station-ownership-state, ship-station-system-topology-state]
       coordinates: [roadmap-p2p-multiship-delivery, native-delivery-host, delivery-version-pin]
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime]
+
+  - component: roadmap-band-a2-falling-skyway-ai-backfill
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "C1 — Falling Skyway AI-Backfill Completion"
+      summary: "Make Falling Skyway require real interaction, then give the AI the verbs to complete it semi-reliably. The scenario is re-authored as a 25-minute interleaved mission (survey beat of three scans plus a Control report, strike/storm/rescue/window threads each posting on their own trigger with no act gates, passive availability escalating on timers, a ×4 clock, and the clean-ledger good ending computed over the #1042 transfer ledger; see docs/falling-skyway-ai-backfill.md). The AI-surface batch then extends AiDirective with the Scan/Operate/Order kinds consumed by newly-affined SystemAffinity emitters just as Comms consumes Hail, so a fully-backfilled crew achieves 80-95 % completion on the mandatory objectives across seeds where today's AI manages almost none. Measurement is a per-objective status rollup in the headless report driven through scripts/balance-runs.mjs."
+      rationale:
+        - "The current scenario passes Act 1 green with an idle crew and settles the strike by first-pick accident, so it proves nothing about Backfill; the FS-3 re-author flips every narrative beat into engaged crew work before the AI-verb batch is justified."
+        - "Humans and AI stay symmetric by construction: the new directives ride the existing scored-objective pool, and emitters are objectives-driven so the objective itself names the verb and target each system should serve."
+        - "The 80-95 % completion interval is the agreed target on the mandatory set, with today's AI near 0 % as the regression baseline; balance-runs.mjs is the seeded sweep harness that measures it."
+        - "Scoped separately from scenario tuning per the FS-4 decision: the scenario edit (issue #1044 suite) and the AI-surface work are independent batches, both landing in content band C1 (moved from the former A2 by the 2026-08-20 track split — this is scenario work, paired with the cruiser). The AI observability it depends on for tuning ships from T1's roadmap-debug-observability."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-configuration-state, world-content-pack-state, fine-system-ai-policy-state, system-control-source-state]
+      coordinates: [roadmap-falling-skyway-foundation, roadmap-falling-skyway-content, roadmap-band-a2-crew-control, fine-system-ai-policy-runtime]
+      runs_in: [host-browser-runtime, headless-runtime, node-tooling-runtime]
+
+  - component: roadmap-debug-observability
+    core:
+      status: accepted
+      confidence: confirmed
+      title: "T1 — Debug Observability for Scenario State, AI State, and Station Activity"
+      summary: "Make the running simulation inspectable. Replace the four pre-formatted-text debug overlays with one structured serde-JSON debug payload schema consumed by the host-page debug dock, the headless report/ndjson, and chart tooling, target-agnostic across browser host, headless and the native host, with demo builds continuing to cfg-strip it. Scenario surface: the flags table, the objective table (id/status/score/directive), pending triggers plus a trigger fire history capturing predicate values at fire time, the delayed-action and deadline queues, and the commitments board and comms dossier state; Rhai runtime internals stay out. AI surface: the per-ship ScoredObjective doctrine pool (candidate scores, chosen directive, target resolution) and a per-host fine-system view over the 19-host ai_flag_hosts registry (current policy state, memory, last transition, blocking guard), with LogCat::Ai populated across src/ai/ and src/console_ai/ so --log ai=debug --log-entity produces decision traces; directive changes and target reselections are structured log events from which a timeline is extracted on demand. Station activity: always-on per-station per-bucket command counters (15s default, configurable) split by control source at command admission, charted live in the debug dock and as a per-station table in the balance report."
+      rationale:
+        - "PRD published as #1144. Scheduled in T1 (2026-08-20 grill), unordered against #1092/#1093. The C1 Falling Skyway AI-backfill tuning is the first consumer of the AI visibility, and every later technical diagnosis benefits."
+        - "The payload schema is the shared substrate the GM console M6 Live Inspector (T4) later builds on: the GM adds authorization and presentation, never a second inspection pipeline."
+        - "The gap is structural, not incidental: FlagStore, ObjectiveManager, pending triggers and the delayed-action queue have no read path beyond the opaque snapshot and the one-way sim digest; ScoredObjective crosses the wire every tick and is rendered nowhere; LogCat::Ai is a built and tested filter with no emitters; the four existing overlays are wasm+server-only strings that cannot be filtered, charted or diffed."
+        - "Station-activity counters are always-on because they are a few integers per station and feed the balance report; rendering stays flag-gated. Counts split human/AI at the admitted-command path both control sources already share, which is what makes the chart read as crew-busyness evidence for Backfill and crew-control tuning."
+        - "Capture must not perturb the simulation: payloads are read-only projections off authoritative state on the existing debug cadence, and the bounded-history primitive (src/bounded_history.rs) backs the fire-history and timeline buffers."
+    architecture:
+      kind: roadmap-milestone
+      authority: authoritative
+      reads: [world-configuration-state, spawned-entity-state, fine-system-ai-policy-state, system-control-source-state, sim-rng-state]
+      coordinates: [fine-system-ai-policy-runtime, roadmap-band-a2-crew-control]
+      runs_in: [host-browser-runtime, headless-runtime, native-host-runtime, node-tooling-runtime]
 
   - component: roadmap-scenario-scripting
     core:
@@ -180,7 +220,7 @@ entities:
         - "It also precedes mod content packs (#856), which would carry executable script — vellum-script's deny-by-default profile (no eval, no imports, no module resolver, no wall clock, bounded operations) becomes the pack trust boundary, and defining the pack format once with it included beats widening it afterwards."
         - "The split follows vellum's charter: the sandbox and call seam come from vellum-script unchanged, and the vocabulary — host functions, effect buffer, loader, span mapping, cross-reference validation — stays in phoenix. The one contribution back is a wasm32 build job in vellum's CI, which proves the sandbox on phoenix's target without widening its API."
         - "Determinism constraints are inherited, not negotiated: integer-only arithmetic (no_float), operation limits rather than timeouts, fixed per-call and per-tick budgets so every peer fails on the same tick, and deferred work represented as serializable (tick, fn_name) pairs rather than live closures."
-        - "The editor becomes a script editor and action-schema.js is deleted (done at M7); sequencing against template-aware editing (#910) is deliberate, since both touch the editor shell in the same band. If release A gets tight, the content conversion and evaluator teardown slip to band B — the host seam, trigger front-end, scheduling, and comms work do not, because Falling Skyway depends on them."
+        - "The editor becomes a script editor and action-schema.js is deleted (done at M7); sequencing against template-aware editing (#910) is deliberate, since both touch the editor shell in the same band. The fallback (slipping content conversion and evaluator teardown past release A) was authorised but never needed — the host seam, trigger front-end, scheduling, and comms work could not slip regardless, because Falling Skyway depends on them."
         - "DELIVERED as planned, and then some: the split held and the fallback was not needed. M0-M5 shipped as a dormant seam; M6 (#984) activated it and converted every world; M7 (#985) deleted the declarative front-end it replaced. The parallel-dispatch mandate in architecture/trigger-pipeline.yaml is retired with it — there is one applier now, reached from one call site per consumer, so per-variant equivalence is structural rather than a contract a test can protect. Each step was gated on the six-world headless digest sweep, byte-identical throughout."
     architecture:
       kind: roadmap-milestone
@@ -213,7 +253,7 @@ entities:
       summary: "Release A. Author the first 30–60 minute Thin Margin mission: damaged skyhook and fuel depots, worker strike, corporate security, radiation storm, civilian traffic, constrained transfer window, altered-record evidence, and a consequential safe-passage decision (#852)."
       rationale:
         - This is release A's narrative scenario, the first content the public build gains after the Combat Test demo. It is not #398, Before the Fire.
-        - Its outcomes are self-contained while remaining compatible with the campaign continuity projected in release C.
+        - Its outcomes are self-contained while remaining compatible with the delivered campaign-continuity projection (#867).
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -241,7 +281,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Full Authoritative Snapshots and Persistence
-      summary: "After the tracer, complete the #848 snapshot adapters, split across the first three release bands: dynamic combat consequences (#863) and scripted progression (#864) in A because Falling Skyway's persistent state depends on them, save-slot UX (#865) and portable import/export (#866) in B because P2P join and recovery ride on the portable record, and campaign-continuity projection (#867) in C once three missions make cross-mission facts real."
+      summary: "After the tracer, complete the #848 snapshot adapters. Dynamic combat consequences (#863), scripted progression (#864), portable import/export (#866) and campaign-continuity projection (#867) are delivered. The one open adapter is save-slot lifecycle UX (#865), scheduled in technical band T2."
       rationale:
         - One portable snapshot must serve persistence, campaign continuity, native hosting, and P2P transfer rather than each surface serialising its own world.
         - "The adapters are split by their consumer rather than shipped as one block: each half-PRD lands in the band whose feature would otherwise be built on a missing adapter."
@@ -295,11 +335,11 @@ entities:
       status: accepted
       confidence: confirmed
       title: Multi-Ship Host-Mesh Delivery
-      summary: "Band A2 networking foundation for multi-ship play. Replace PeerJS with typed server/client join namespaces, Phoenix WebSocket rendezvous/signalling, direct or TURN-relayed WebRTC host links, delayed lockstep exchange, leader handling, snapshot join/recovery, hash diagnostics, and synchronised ship-host disconnect/Backfill/replacement on top of the completed snapshot and determinism foundations. Band B consumes this transport for multi-ship scenario gameplay rather than building it."
+      summary: "Technical band T5 networking capstone for multi-ship play. The two-host protocol — lockstep on the agreed future-tick order, leader-healed divergence recovery, snapshot transfer, disconnect Backfill and slot recovery — ships with T1's #1093 (#1116-#1120). T5 scales and completes it: scenario-state digest widening (#1086), many-instance protocol verification (#1090), and multi-ship scenario authoring — slots, per-ship objectives, shared triggers, fleet comms (#1153). The #854-lineage duplicates (#1084/#1085/#1087/#1088/#1089) were closed 2026-08-20 as superseded by the #1093 batch."
       rationale:
         - P2P is a new product surface, not a prerequisite for the browser demo.
-        - "It runs in A2 after the portable snapshot record: join and recovery are that record with a transport around it, not a second serializer."
-        - It also gates the GM console, which is a host-class peer on this mesh and cannot start until the mesh exists.
+        - "It runs after the portable snapshot record: join and recovery are that record with a transport around it, not a second serializer."
+        - "2026-08-20 resequencing: the mesh moves to T5, after the GM console and Workshop investment (T2-T4). It no longer gates the GM console — the GM's hard transport gates (#1114, #1116-#1118) live under T1's #1093. Any GM milestone needing true multi-ship observation, and content band C2's multi-ship Borrowed Sun variant, wait on T5."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -341,10 +381,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: Mod Content Packs Baseline
-      summary: "Release A. Validated TOML pack export and host overlay resolution are delivered (#759/#760). Close #856, together with template-aware editing (#910), only after confirming its acceptance criteria against the now-stable entity-template, model-sidecar, and snapshot manifest contracts."
+      summary: "Technical band T2, part of the Workshop investment. Validated TOML pack export and host overlay resolution are delivered (#759/#760). Close #856, together with template-aware editing (#910), only after confirming its acceptance criteria against the now-stable entity-template, model-sidecar, and snapshot manifest contracts."
       rationale:
         - Mod-pack work should be verified and integrated with post-demo authoring foundations, not reimplemented as a second system.
-        - "Release A is the earliest honest slot: the entity-template, sidecar, and manifest contracts it must be checked against are all freshly stable at that point, and Falling Skyway is the first real content to author through them."
+        - "Release A was the earliest honest slot — the entity-template, sidecar, and manifest contracts it must be checked against stabilised there. The 2026-08-20 track split re-homes the remaining closure in T2 alongside GM console M1-M3, per the decision to pull Workshop/modding investment ahead of the host mesh."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -356,14 +396,14 @@ entities:
       status: accepted
       confidence: confirmed
       title: Borrowed Sun Foundation — Environmental Fields, Shared Epistemics, and the Complexity Ladder
-      summary: "Release B. Add generic environmental fields — scenario-authored moving volumes with shape, velocity, intensity, and falloff, covering debris density, radiation, and sensor/comms interference — and sensor-derived observations whose confidence narrows with repeat observation. The authored scan ladder covers detection (location/category), identification (transponder/faction/declared identity), classification (class/role/known capabilities), and tactical assessment (observable shields, damage, emissions, active systems); intrusive protected detail waits for Band E. Retrofit Falling Skyway's radiation storm onto the field system with identical observable behaviour. Complete the console complexity-ladder content on A2's station-hosting foundation: star-rung station ratings, per-system detail screens and scenario detail-floor vocabulary, with Sensors as the first detailed console and the Comms evidence/dossier browser as its detail surface."
+      summary: "Content band C2. Add generic environmental fields — scenario-authored moving volumes with shape, velocity, intensity, and falloff, covering debris density, radiation, and sensor/comms interference — and sensor-derived observations whose confidence narrows with repeat observation. The authored scan ladder covers detection (location/category), identification (transponder/faction/declared identity), classification (class/role/known capabilities), and tactical assessment (observable shields, damage, emissions, active systems); intrusive protected detail waits for band C5. Retrofit Falling Skyway's radiation storm onto the field system with identical observable behaviour. Complete the console complexity-ladder content on T1's station-hosting foundation: star-rung station ratings, per-system detail screens and scenario detail-floor vocabulary, with Sensors as the first detailed console and the Comms evidence/dossier browser as its detail surface."
       rationale:
         - "Fields are authored volumes in this band; cause-derived emission from physical sources arrives with the Narrow Season foundation. Consumers (sensors, helm hazard checks, damage application) only ever read field state, so that upgrade is non-breaking."
         - "There is ONE evidence contract: physical sensor readings, third-party data obtained via Comms, and derived estimates all carry confidence and provenance through the #858 dossier surface. No second epistemics system is built for physical measurement."
         - "The Skyway retrofit lands here, before campaign-continuity projection (#867) freezes expectations against mission 1's state, so the toolkit never carries two hazard representations."
-        - "The complexity-ladder framework debuts here rather than with the band-D power network (superseding the earlier engineering-only timing) because its first real content is band B's sensor depth: the detail screen ships with genuine epistemics gameplay, not an empty frame, and D's power detail then lands as deeper rungs of an established ladder."
+        - "The complexity-ladder framework debuts here rather than with the C4 power network (superseding the earlier engineering-only timing) because its first real content is C2's sensor depth: the detail screen ships with genuine epistemics gameplay, not an empty frame, and C4's power detail then lands as deeper rungs of an established ladder."
         - "PRDs published 2026-08-13: #1016 (fields and epistemics) and #1017 (complexity-ladder framework); the later bands' foundation PRDs are #1018 (Narrow Season), #1019 (Broken Tithe), #1020 (Silent Corridor ladder content), #1021 (Patrol Mode)."
-        - "Band B defines how effect-named accessibility assistance composes with star ratings and scenario floors. Station suitability is explained locally, human-seeking consumes only anonymous eligible station/rating combinations, and validation proves every base hull at full player count retains one supported station/rating for a simple scenario."
+        - "Band C2 defines how effect-named accessibility assistance composes with star ratings and scenario floors. Station suitability is explained locally, human-seeking consumes only anonymous eligible station/rating combinations, and validation proves every base hull at full player count retains one supported station/rating for a simple scenario."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -376,7 +416,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Borrowed Sun — Thin Margin Mission 2
-      summary: "Release B. Add evidence confidence/provenance, networked infrastructure capacity and priority, and dynamic debris hazards around failing orbital mirrors (#858)."
+      summary: "Content band C2. Add evidence confidence/provenance, networked infrastructure capacity and priority, and dynamic debris hazards around failing orbital mirrors (#858)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -389,12 +429,12 @@ entities:
       status: accepted
       confidence: confirmed
       title: Narrow Season Foundation — Physical World and Vessel Deltas
-      summary: "Release C. Add compact star/body descriptors, on-rails parametric orbits where body position is a pure function of the logical tick, and a two-tier space: a system-map tier holding bodies, routes, fields, and occlusion/shielding/comms line-of-sight, with the existing local motion model anchored to a map location. Fields gain cause-derived emission from physical sources. Add derived relative-kinematic state and relative-motion operations (match velocity, hold station, intercept, interpose, escort position) as OperationEngine verbs through the existing directive path. Basic station docking uses the same model: request clearance, approach, enter the authored docking envelope, dock and undock; services arrive in D/F. Ladder content for this band: Helm detail, Navigation detail, and probes as launchable remote sensors linked to Sensors."
+      summary: "Content band C3. Add compact star/body descriptors, on-rails parametric orbits where body position is a pure function of the logical tick, and a two-tier space: a system-map tier holding bodies, routes, fields, and occlusion/shielding/comms line-of-sight, with the existing local motion model anchored to a map location. Fields gain cause-derived emission from physical sources. Add derived relative-kinematic state and relative-motion operations (match velocity, hold station, intercept, interpose, escort position) as OperationEngine verbs through the existing directive path. Basic station docking uses the same model: request clearance, approach, enter the authored docking envelope, dock and undock; services arrive in C4/C6. Ladder content for this band: Helm detail, Navigation detail, and probes as launchable remote sensors linked to Sensors."
       rationale:
         - "No flight-model change: docking and tow envelopes are predicates over relative-kinematic state, verbs are AI/human symmetric via the directive path, and there is no thruster-level physics."
         - "No new Vessel abstraction: this foundation audits the Genesis 'authoritative vessel object' proposal against the delivered unified ship model and adds only authored intent/compliance state for civilians, per-vessel knowledge isolation where missing, and LOD-tier profile parity so the full-AI tier and the low-LOD route follower read the same authored profile. NPC bridge crew for unmanned stations is already delivered as Backfill (#842/#870)."
         - "On-rails orbits are deterministic, snapshot-free, and forecastable by pure evaluators, which is what gives Science occlusion-window and radiation-front prediction play."
-        - "Band C supplies list/text alternatives to relative-motion and docking diagrams, keyboard/touch alternatives to gesture-only control and persistent text equivalents for consequential multi-ship coordination."
+        - "Band C3 supplies list/text alternatives to relative-motion and docking diagrams, keyboard/touch alternatives to gesture-only control and persistent text equivalents for consequential multi-ship coordination."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -407,7 +447,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Narrow Season — Thin Margin Mission 3
-      summary: "Release C. Add civilian response profiles, emergency authority, traffic priority orders, and cascading congestion, panic, and coercion incidents (#859)."
+      summary: "Content band C3. Add civilian response profiles, emergency authority, traffic priority orders, and cascading congestion, panic, and coercion incidents (#859)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -420,14 +460,14 @@ entities:
       status: accepted
       confidence: confirmed
       title: Broken Tithe Foundation — Unified Resource Network and Control Tiers
-      summary: "Release D. Generalise the #858 infrastructure-network model into one producer/conduit/buffer/consumer graph ruling power, coolant, containment and life-support load, ship-side and external alike. Power becomes full per-component supply/demand with ship-wide hard battery exhaustion and a separate per-system heat/overpower axis. Life-support failure creates authored survival clocks and crewed-system pressure without individual biological simulation. Engineering/Power detail adds the network graph, load-shedding and one-tap presets from hull defaults plus a small run-local custom set. Repair detail adds diagnostics, triage, repair material and symptom-to-order procedures: the local station reports a symptom, Engineering issues the mapped order, and a wrong order costs time only; lower complexity or accessibility assistance may reveal/automate the mapping after a delay. Shields gains detailed frequency/modulation and arc management. Add named bulk resources, main-drive propellant and repair material, plus docked repair, replenishment and resource transfer."
+      summary: "Content band C4. Generalise the #858 infrastructure-network model into one producer/conduit/buffer/consumer graph ruling power, coolant, containment and life-support load, ship-side and external alike. Power becomes full per-component supply/demand with ship-wide hard battery exhaustion and a separate per-system heat/overpower axis. Life-support failure creates authored survival clocks and crewed-system pressure without individual biological simulation. Engineering/Power detail adds the network graph, load-shedding and one-tap presets from hull defaults plus a small run-local custom set. Repair detail adds diagnostics, triage, repair material and symptom-to-order procedures: the local station reports a symptom, Engineering issues the mapped order, and a wrong order costs time only; lower complexity or accessibility assistance may reveal/automate the mapping after a delay. Shields gains detailed frequency/modulation and arc management. Add named bulk resources, main-drive propellant and repair material, plus docked repair, replenishment and resource transfer."
       rationale:
         - "Binding invariants on the power redesign: no reactor-side floors (the 2026-08-10 revert's lesson stands), Backfill/NPC min_reserve guards kept and re-expressed over network state, and the three-group vocabulary [helm, weapons, shields] kept as the group-level control tier. The exhaustion-lock mechanism alone is open: it is the incumbent a network-native alternative must beat with playtest evidence, and it survives in network terms by default."
         - "The group-level tier's limited AI is the fine-system policy runtime with authority scoped to power allocation — the same machinery as Backfill doctrine, so AI/human symmetry holds and no second control intelligence exists."
-        - "2026-08-17 customisation grill: the supply/demand redesign is FORCED by roadmap-ship-customisation, not chosen for its own sake — soft-budget loadout customisation is impossible on a boost model where power is a group-wide amplifier and a stronger component costs nothing extra to run. The redesign deliberately KEEPS the exhaustion lock on the energy side (John: 'battery then hard lock while it recharges') and RE-HOMES the boost model as the per-system overpower band rather than deleting it, so the net churn is the demand input and the new heat axis, not the failure model. Consequence: D's foundation PRD is materially larger than the pre-grill 'network + load-shedding' scope, and the estimate should be revised UP now rather than when the band opens. Three derived calls await ratification: ops-as-aux-bucket, coolant-at-detail-tier, and the not-upgrade balance contract (a maxed loadout's baseline demand exceeds sustainable generation; the #835 duel harness enforces no dominant loadout)."
+        - "2026-08-17 customisation grill: the supply/demand redesign is FORCED by roadmap-ship-customisation, not chosen for its own sake — soft-budget loadout customisation is impossible on a boost model where power is a group-wide amplifier and a stronger component costs nothing extra to run. The redesign deliberately KEEPS the exhaustion lock on the energy side (John: 'battery then hard lock while it recharges') and RE-HOMES the boost model as the per-system overpower band rather than deleting it, so the net churn is the demand input and the new heat axis, not the failure model. Consequence: C4's foundation PRD is materially larger than the pre-grill 'network + load-shedding' scope, and the estimate should be revised UP now rather than when the band opens. Three derived calls await ratification: ops-as-aux-bucket, coolant-at-detail-tier, and the not-upgrade balance contract (a maxed loadout's baseline demand exceeds sustainable generation; the #835 duel harness enforces no dominant loadout)."
         - "Consumables pass the test 'can another bridge officer make a consequential decision about this resource within a 30-90 minute mission': main-drive propellant is the currency of #860's long-duration operational budgets, repair material turns repair-team work into triage. RCS propellant is excluded (no thruster-level flight), reactor fuel stays scenario-infinite, and bodily needs stay out."
-        - "Battleship content uses A2's complete-station hosting without extending the generic resolver: unclaimed Power seeks Power → Repair → AI as one complete station surface, and unclaimed Shields seeks Shields → Sensors → AI. Neither list continues to unrelated humans."
-        - "Band D delivers the first substantial task assistance on A2/B's schema: timed repair-procedure reveal/automation, simplified and tabular network representations, Power presets/recommendations and configurable diagnostic timing."
+        - "Battleship content uses T1's complete-station hosting without extending the generic resolver: unclaimed Power seeks Power → Repair → AI as one complete station surface, and unclaimed Shields seeks Shields → Sensors → AI. Neither list continues to unrelated humans."
+        - "Band C4 delivers the first substantial task assistance on T1/C2's schema: timed repair-procedure reveal/automation, simplified and tabular network representations, Power presets/recommendations and configurable diagnostic timing."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -440,7 +480,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: The Broken Tithe — Thin Margin Mission 4
-      summary: "Release D. Add hazardous cargo containment, graduated intervention, and longer-duration ship operational allocation under contested authority (#860)."
+      summary: "Content band C4. Add hazardous cargo containment, graduated intervention, and longer-duration ship operational allocation under contested authority (#860)."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -453,10 +493,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: The Silent Corridor — Thin Margin Mission 5
-      summary: "Release E. Combine schedules, traffic, evidence, infrastructure, cascades, commitments and campaign consequences into the regional-crisis finale (#861); the scenario itself composes B-D foundations rather than adding another scenario framework. Ship Tactical detail with calibration, ammunition fabrication, arc/range trade-offs and authored torpedo payload sidegrades whose behavior freezes at launch. Add intrusive deep scan on top of B's knowledge ladder, gaining protected detail at detectable signature and authored diplomatic/tactical risk. Add the EWar MVP — Jam, Spoof and Harden — integrated with Sensors, Comms, power/heat and signature management; broader disruption waits unscheduled. Captain detail remains the commitments/objectives board, and signature management supplies emissions-based detection for player and NPC ships."
+      summary: "Content band C5. Combine schedules, traffic, evidence, infrastructure, cascades, commitments and campaign consequences into the regional-crisis finale (#861); the scenario itself composes C2-C4 foundations rather than adding another scenario framework. Ship Tactical detail with calibration, ammunition fabrication, arc/range trade-offs and authored torpedo payload sidegrades whose behavior freezes at launch. Add intrusive deep scan on top of C2's knowledge ladder, gaining protected detail at detectable signature and authored diplomatic/tactical risk. Add the EWar MVP — Jam, Spoof and Harden — integrated with Sensors, Comms, power/heat and signature management; broader disruption waits unscheduled. Captain detail remains the commitments/objectives board, and signature management supplies emissions-based detection for player and NPC ships."
       rationale:
-        - "Band E's accessibility increment covers uncertainty/signature/EWar semantics, configurable sensory intensity and alert priority, alternatives to rapidly changing radar-only presentation and an audit of every detailed station under the supported option set."
-        - "Band E also delivers GM M6 Integrated Workshop/Live Inspector, then M7 Information Control and M8 In-sim Presentation. The Workshop retires the HTML editor and model viewer only after feature parity; it does not add editor-specific simulation systems to Silent Corridor."
+        - "Band C5's accessibility increment covers uncertainty/signature/EWar semantics, configurable sensory intensity and alert priority, alternatives to rapidly changing radar-only presentation and an audit of every detailed station under the supported option set."
+        - "GM M6 Integrated Workshop/Live Inspector, M7 Information Control and M8 In-sim Presentation now run on the technical track (T4) rather than with this content band, per the 2026-08-20 split. The Workshop retires the HTML editor and model viewer only after feature parity; it does not add editor-specific simulation systems to Silent Corridor."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
@@ -468,13 +508,13 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: Patrol Mode — Authored MVP and Continuing-Run Shell (Band F)
-      summary: "Band F ships one complete hand-authored Patrol run rather than generated assignments. Add the persistent multi-system run shell and mode-profile seam, discrete system-to-system warp with normally abundant warp fuel, mission logging, the shared station-database framework, docking refit/rewards and customisation flesh-out. Intelligence on Comms remains the primary cross-domain search/correlation surface while stations project focused procedures, readings and scenario facts. Band H later uses this authored run as the quality reference for procedural Patrol and War."
+      title: Patrol Mode — Authored MVP and Continuing-Run Shell (Band C6)
+      summary: "Content band C6 ships one complete hand-authored Patrol run rather than generated assignments. Add the persistent multi-system run shell and mode-profile seam, discrete system-to-system warp with normally abundant warp fuel, mission logging, the shared station-database framework, docking refit/rewards and customisation flesh-out. Intelligence on Comms remains the primary cross-domain search/correlation surface while stations project focused procedures, readings and scenario facts. Band C8 later uses this authored run as the quality reference for procedural Patrol and War."
       rationale:
-        - "The authored MVP proves exploration, evidence, assignments, persistence, return-to-run flow and the B-D physical foundations before procedural composition multiplies them."
+        - "The authored MVP proves exploration, evidence, assignments, persistence, return-to-run flow and the C2-C4 physical foundations before procedural composition multiplies them."
         - "PRD published as #1021 (2026-08-13, superseding the same-day PRD-when-E-nears deferral); its issue breakdown via /to-issues still waits for its band."
-        - "GM M9 Campaign Continuity and Deep Pacing moves from Band E to Band F so its campaign persistence, pressure history and authored-action suggestions grow alongside the continuing-run shell rather than preceding it."
-        - "Band F accessibility covers map/list parity, station-database search, persistent mission summaries, warp-route comparison, session return and recap support."
+        - "GM M9 Campaign Continuity and Deep Pacing runs in technical band T6 so its campaign persistence, pressure history and authored-action suggestions grow alongside the C6 continuing-run shell rather than preceding it."
+        - "Band C6 accessibility covers map/list parity, station-database search, persistent mission summaries, warp-route comparison, session return and recap support."
     architecture:
       kind: roadmap-milestone
       authority: non-authoritative
@@ -486,7 +526,7 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: "Band G — War Mode MVP and Strategic Campaign Foundation"
+      title: "Band C7 — War Mode MVP and Strategic Campaign Foundation"
       summary: "Ship one authored pre-Dynasty-war multi-system War run leading to a decisive final mission. Intervening scenarios gather allies, supplies and intelligence, answer or ignore crises and weaken opponents, with outcomes projected into the finale. Add Pursuit; coarse fronts, fleets and allied availability; autonomous allied orders through Comms; and one complete personnel vertical comprising Duty Teams, Duty Officers, Operations, authored Away Missions, boarding, surrender and Medical MVP."
       rationale:
         - "PRD published as #1094."
@@ -504,11 +544,11 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: "Band H — Patrol and War Procedural Generation"
+      title: "Band C8 — Patrol and War Procedural Generation"
       summary: "Build one deterministic seeded generator and Director with separate Patrol and War profiles, authored/versioned content libraries, curated benchmark seeds, constraint and solvability validation, authoring preview, repetition control and automated generated-run telemetry. Generate distress, diplomacy, investigation, infrastructure, Away Mission, pursuit and combat structures. Add expanded anomalies/space terrain and Orbital Mode with a coarse wrapping planetary surface and points of interest."
       rationale:
         - "PRD published as #1095."
-        - "Band H proceduralises the authored Band F Patrol and Band G War references rather than asking generation to invent the mode contracts. Sandbox later consumes the same generator/Director under a wider profile."
+        - "Band C8 proceduralises the authored C6 Patrol and C7 War references rather than asking generation to invent the mode contracts. Sandbox later consumes the same generator/Director under a wider profile."
         - "Generated assignments reuse normal world/entity/Rhai, evidence, Operations and consequence paths. A seed record is sufficient to reproduce generation and diagnose validation failures."
         - "Polish adds seed/run browsing, summaries, procedural maps and diagnostics. Accessibility is a generation constraint: unsupported interaction paths, station/rating coverage or workload reject the assignment, and seed sweeps include accessibility regressions."
     architecture:
@@ -522,7 +562,7 @@ entities:
     core:
       status: accepted
       confidence: confirmed
-      title: "Band I — Sandbox Mode and Persistent Sector"
+      title: "Band C9 — Sandbox Mode and Persistent Sector"
       summary: "Ship a curated starting sector that becomes persistent player-chosen work, faction crises, exploration, trade and conflict. Add a coarse event-driven actor/economy model, discrete cargo lots, layered actor/faction/institution standing, sector control, fleet management, autonomous allies and the wider Sandbox Director profile. Docking, repair, replenishment, refit, Orbital points of interest and generated assignments form the recurring bridge-play loop."
       rationale:
         - "PRD published as #1096."
@@ -541,15 +581,15 @@ entities:
       status: accepted
       confidence: confirmed
       title: Planned but Not Scheduled — Accepted Dependency Clusters
-      summary: "Accepted future work still lacking a release promise after the A2-I plan. Human media remains one-to-one simulated Comms calls with consent, private/viewscreen routing, typed text, transient captions and the Discord adapter. Tactical/ship extensions still unscheduled are persistent mines, post-E cloaking, expanded EWar and multi-interlock self-destruct. Custom peripherals and external show systems also remain unscheduled. Source-level Rhai debugging beyond M6's diagnostics/traces/state breakpoints is accepted but unscheduled. Personnel/Operations and surrender move to G; Pursuit and authored War move to G; Patrol/War PCG and Orbital Mode move to H; Sandbox, trade, standing, sector/fleet state and advanced spectator participation move to I; accessibility assistance is distributed from A2 through I."
+      summary: "Accepted future work still lacking a release promise after the C1-C9/T1-T6 plan. Human media remains one-to-one simulated Comms calls with consent, private/viewscreen routing, typed text, transient captions and the Discord adapter. Tactical/ship extensions still unscheduled are persistent mines, post-C5 cloaking, expanded EWar and multi-interlock self-destruct. Custom peripherals and external show systems also remain unscheduled. Source-level Rhai debugging beyond M6's diagnostics/traces/state breakpoints is accepted but unscheduled. Personnel/Operations, surrender, Pursuit and authored War move to C7; Patrol/War PCG and Orbital Mode move to C8; Sandbox, trade, standing, sector/fleet state and advanced spectator participation move to C9; accessibility assistance is distributed from T1 through C9."
       rationale:
         - "Human media is a Comms capability, not an out-of-fiction voice room. Calls require a known reachable human ship, hail and acceptance; simulated loss interrupts both media tracks and retries for a short grace period. Calls are one-to-one in the first delivery."
         - "Each ship independently routes the accepted call through the device presenting private Comms or promotes audio and video together to the viewscreen endpoint. Existing viewscreen arbitration controls promotion; displacement hands the call back privately without ending it. Media is not recorded, while deliberate typed messages enter the Comms record."
-        - "The Discord bot ships with this feature because Discord is the first test environment, but remains an adapter under the same simulated consent/reachability rules. The A2 native/network PRD supplies RTC media capability and per-surface device routing without scheduling this call feature."
-        - "The accepted Duty Team/Officer, Operations, Away Mission, boarding, surrender and Medical contracts are now the Band G personnel vertical; their detailed design remains authoritative even though this catch-all cluster no longer schedules them."
-        - "The station-database framework is shared with Band F: one evidence/reference model, Intelligence as primary cross-domain correlation, and focused station projections including Engineering procedures, Medical records and Operations history."
-        - "G-I preserve the ratified generated-play contracts: exact/evidence-reported Pursuit, one decisive War destination, autonomous allies ordered through Comms, one shared generator/Director, discrete cargo lots, layered standing and discrete warp."
-        - "Accessibility profiles remain private and describe effects rather than diagnoses. Their A2-I increments preserve the guarantee of one compatible station/rating on the base hull at full supported player count for a simple scenario, not solo completion of every complex scenario."
+        - "The Discord bot ships with this feature because Discord is the first test environment, but remains an adapter under the same simulated consent/reachability rules. The T1 native/network PRD supplies RTC media capability and per-surface device routing without scheduling this call feature."
+        - "The accepted Duty Team/Officer, Operations, Away Mission, boarding, surrender and Medical contracts are now the Band C7 personnel vertical; their detailed design remains authoritative even though this catch-all cluster no longer schedules them."
+        - "The station-database framework is shared with Band C6: one evidence/reference model, Intelligence as primary cross-domain correlation, and focused station projections including Engineering procedures, Medical records and Operations history."
+        - "C7-C9 preserve the ratified generated-play contracts: exact/evidence-reported Pursuit, one decisive War destination, autonomous allies ordered through Comms, one shared generator/Director, discrete cargo lots, layered standing and discrete warp."
+        - "Accessibility profiles remain private and describe effects rather than diagnoses. Their T1-through-C9 increments preserve the guarantee of one compatible station/rating on the base hull at full supported player count for a simple scenario, not solo completion of every complex scenario."
         - "The unscheduled Rhai debugger adds source-expression stepping plus local-variable and stack-frame inspection to M6 Test. M6 already owns compile/runtime source diagnostics, deterministic simulation stepping, host-call/flag/callback traces and scenario-state breakpoints."
         - "Moving a cluster into a band requires a proving scenario or mode, bounded authoritative state, persistence classification, information/accessibility behavior and a vertical acceptance test; moving one cluster schedules none of the others."
     architecture:
@@ -564,14 +604,14 @@ entities:
       status: proposed
       confidence: confirmed
       title: Ship Customisation — Per-Station Materiel Loadout
-      summary: "Per-station MATERIEL customisation — the crew chooses WHAT systems the ship carries, not how it is operated — spanning bands E (MVP) and F (flesh-out), the two post-demo bands that add no new hull. Customise, not upgrade: every option is a net-neutral sidegrade, the sole sanctioned power increase being a mission-authored starbase reactor reward (band F). The budget is SOFT, denominated in the roadmap-broken-tithe-foundation supply/demand power model — nothing is rejected in the lobby; over-fitting is self-limiting at run time (more per-component demand drains the battery toward the exhaustion lock sooner, and overpowered components overheat offline-to-cool). Every system draws power so every station can customise under one currency; the reactor is itself a customisable component ({generation, battery, recovery, dissipation} profile). Authority: the station's lobby CLAIMANT owns its loadout section, unclaimed/AI-backfilled stations fly the hull's authored default (what the Backfill AI already flies), and the loadout is FROZEN AT SPAWN into one deterministic template that rides the initial-state hash like ship selection, refittable only at a starbase. E MVP: a variant-swap tracer built on the delivered #869/#911 fragment composition (each customisable system ships as N balanced variant fragments; lobby choice = which composes in) — NO new data primitive — for ONE hull on TWO axes (reactor profile + one Tactical combat variant), landing AFTER #922 closes the base hulls, with variants authored net-neutral and proven by the #835 seeded duel harness. F flesh-out: typed+sized MOUNTS (the genuinely new primitive — mount topology plus validator) with empty/optional slots, reactor profiles and variant breadth fleet-wide, and the starbase refit/reward path (needs a mid-sim refit command and campaign persistence #863/#867)."
+      summary: "Per-station MATERIEL customisation — the crew chooses WHAT systems the ship carries, not how it is operated — spanning content bands C5 (MVP) and C6 (flesh-out), the two post-demo bands that add no new hull. Customise, not upgrade: every option is a net-neutral sidegrade, the sole sanctioned power increase being a mission-authored starbase reactor reward (band C6). The budget is SOFT, denominated in the roadmap-broken-tithe-foundation supply/demand power model — nothing is rejected in the lobby; over-fitting is self-limiting at run time (more per-component demand drains the battery toward the exhaustion lock sooner, and overpowered components overheat offline-to-cool). Every system draws power so every station can customise under one currency; the reactor is itself a customisable component ({generation, battery, recovery, dissipation} profile). Authority: the station's lobby CLAIMANT owns its loadout section, unclaimed/AI-backfilled stations fly the hull's authored default (what the Backfill AI already flies), and the loadout is FROZEN AT SPAWN into one deterministic template that rides the initial-state hash like ship selection, refittable only at a starbase. C5 MVP: a variant-swap tracer built on the delivered #869/#911 fragment composition (each customisable system ships as N balanced variant fragments; lobby choice = which composes in) — NO new data primitive — for ONE hull on TWO axes (reactor profile + one Tactical combat variant), landing AFTER #922 closes the base hulls, with variants authored net-neutral and proven by the #835 seeded duel harness. C6 flesh-out: typed+sized MOUNTS (the genuinely new primitive — mount topology plus validator) with empty/optional slots, reactor profiles and variant breadth fleet-wide, and the starbase refit/reward path (needs a mid-sim refit command and campaign persistence #863/#867)."
       rationale:
-        - "Settled in a 2026-08-17 grill from ~/Downloads/custom-ship-report.md (EVE/Starsector/Endless Sky/EmptyEpsilon survey). It is the platform capability for E and F specifically because those bands add no new hull, so the 'one capability per band' cadence needs a feature to carry."
-        - "It is a HARD CONSUMER of the band-D power redesign, and in fact forced that redesign's scope: soft-budget sidegrades are impossible on the boost/amplifier power model, where a stronger component costs nothing extra to run and is therefore a strict upgrade. See roadmap-broken-tithe-foundation."
-        - "The MVP is deliberately a tracer bullet against band E's own purpose: E is the full-matrix balance-closure band (#922), and a fit budget multiplies the matchup matrix, so the MVP is scoped to one hull and layered AFTER base closure, with the duel harness — not playtest — the guard that no variant dominates. Reactor-plus-one-combat-axis is the smallest slice that exercises both the soft-budget mechanic and a player-visible loadout choice."
-        - "Staging the mount primitive into F keeps the new-data-model cost out of the balance-heavy band: E reuses fragment composition wholesale and introduces no schema. A non-blocking lobby sustainability meter (sustained vs peak draw vs reactor) belongs in E's polish PRD so the soft budget is legible."
+        - "Settled in a 2026-08-17 grill from ~/Downloads/custom-ship-report.md (EVE/Starsector/Endless Sky/EmptyEpsilon survey). It is the platform capability for C5 and C6 specifically because those bands add no new hull, so the 'one capability per band' cadence needs a feature to carry."
+        - "It is a HARD CONSUMER of the C4 power redesign, and in fact forced that redesign's scope: soft-budget sidegrades are impossible on the boost/amplifier power model, where a stronger component costs nothing extra to run and is therefore a strict upgrade. See roadmap-broken-tithe-foundation."
+        - "The MVP is deliberately a tracer bullet against band C5's own purpose: C5 is the full-matrix balance-closure band (#922), and a fit budget multiplies the matchup matrix, so the MVP is scoped to one hull and layered AFTER base closure, with the duel harness — not playtest — the guard that no variant dominates. Reactor-plus-one-combat-axis is the smallest slice that exercises both the soft-budget mechanic and a player-visible loadout choice."
+        - "Staging the mount primitive into C6 keeps the new-data-model cost out of the balance-heavy band: C5 reuses fragment composition wholesale and introduces no schema. A non-blocking lobby sustainability meter (sustained vs peak draw vs reactor) belongs in C5's polish PRD so the soft budget is legible."
         - "The campaign/skirmish split that protects closed balance is by AUTHORING, not a mode toggle: only campaign scenarios author starbase upgrade rewards, so skirmish and versus stay fixed-budget sidegrade forever."
-        - "Recommended tracer hull is the battleship (the band-D power-network hull, biggest reactor, where profiles matter most); the destroyer is the alternative as the most-onboarded hull. Not yet John-confirmed."
+        - "Recommended tracer hull is the battleship (the C4 power-network hull, biggest reactor, where profiles matter most); the destroyer is the alternative as the most-onboarded hull. Not yet John-confirmed."
     architecture:
       kind: roadmap-milestone
       authority: non-authoritative
@@ -584,7 +624,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Post-Demo Catalogue Readiness
-      summary: "Generalise the demo's readiness mechanisms across the full catalogue (#922) one hull at a time: destroyer in release A, cruiser in B, courier in C behind its doctrine (#877), battleship in D, then full-matrix and mixed-fleet balance closure plus the generalised curation manifest in E. Each hull slice is its contextual station tutorials, its sidecar-owned model LODs, and its seeded matchup evidence together."
+      summary: "Generalise the demo's readiness mechanisms across the full catalogue (#922) one hull at a time: destroyer in release A, cruiser in C1 (#1080-#1083), courier in C3 behind its doctrine (#877), battleship in C4, then full-matrix and mixed-fleet balance closure plus the generalised curation manifest in C5. Each hull slice is its contextual station tutorials, its sidecar-owned model LODs, and its seeded matchup evidence together."
       rationale:
         - "#922 is content and coverage on modules the demo already built — the tutorial overlay framework, the sidecar LOD pipeline, the seeded balance harness, and the curation manifest — so it never needs a new framework, only per-hull authoring."
         - "The one-hull-per-band rollout means every release adds a hull that is actually finished, rather than four half-onboarded hulls appearing at once."
@@ -601,18 +641,19 @@ entities:
       status: accepted
       confidence: confirmed
       title: Game Master Console
-      summary: "Deliver #930's host-class GM peer across four bands, per gm-console-milestones.yaml. Release C keeps the accepted MVP scope: M1 peer tracer, M2 directing and M3 performing. Release D keeps M4 facilitation assistance and M5 operations/safety. Release E inserts M6 Integrated Workshop and Live Inspector, which retires the HTML editor and model viewer after native/browser Authoring/Test parity while reusing constrained M1-M5 Live actions; M7 Information Control and M8 In-sim Presentation follow. Release F moves M9 Campaign Continuity and Deep Pacing alongside the authored Patrol continuing-run shell."
+      summary: "Deliver #930's host-class GM peer across four technical bands, per gm-console-milestones.yaml, deliberately resequenced ahead of the multi-ship host mesh (T5) by the 2026-08-20 track split. T2 keeps the accepted MVP scope: M1 peer tracer, M2 directing and M3 performing. T3 keeps M4 facilitation assistance and M5 operations/safety. T4 delivers M6 Integrated Workshop and Live Inspector, which retires the HTML editor and model viewer after native/browser Authoring/Test parity while reusing constrained M1-M5 Live actions; M7 Information Control and M8 In-sim Presentation follow. T6 closes with M9 Campaign Continuity and Deep Pacing alongside the authored C6 Patrol continuing-run shell."
       rationale:
-        - "The GM is a host-class mesh peer running the full simulation with no ship. Its hard transport gates now live under Band A2 PRD #1093: host admission #1114, deterministic multi-host play #1116 and portable-record transfer #1117, with divergence recovery #1118 for robust drop-in. #854's PeerJS plan is superseded."
+        - "The GM is a host-class peer running the full simulation with no ship. Its hard transport gates live under T1 PRD #1093: host admission #1114, deterministic multi-host play #1116 and portable-record transfer #1117, with divergence recovery #1118 for robust drop-in. #854's PeerJS plan is superseded. The T5 mesh no longer gates the console's start; any GM milestone needing true multi-ship observation waits on T5."
         - "World and mission mutation goes through the trigger-action dispatch pipeline and station puppeting through a gm: admission tier, so the GM adds no authority path that authored content cannot also use."
         - "M1-M5 retain their settled feature scope but are written with M6 in mind: reusable inspectors, role-preset panels, validation descriptors and action adapters rather than disposable pages."
         - "Live exists only in a connected GM session and never writes source; standalone Workshop owns Authoring/Test. Native may edit project roots or one mod workspace, while browser Workshop edits exactly one in-memory mod overlay and downloads a ZIP. Rhai source and model/rig data are fixed during Live runs."
-        - "M4-M9 each get their own PRD when their band is due; only M1-M3 are broken into issues once the A2 host-mesh gates near completion."
+        - "M4-M9 each get their own PRD when their band is due; only M1-M3 are broken into issues once the T1 #1093 transport gates near completion."
+        - "The M6 Live Inspector builds on T1's roadmap-debug-observability substrate — the structured state-inspection payloads — adding GM authorization and presentation rather than a second inspection pipeline."
     architecture:
       kind: roadmap-milestone
       authority: authoritative
       reads: [world-snapshot-artifact, world-configuration-state, spawned-entity-state]
-      coordinates: [roadmap-p2p-multiship-delivery, roadmap-authoritative-snapshots]
+      coordinates: [roadmap-band-a2-native-network-foundation, roadmap-p2p-multiship-delivery, roadmap-authoritative-snapshots, roadmap-debug-observability]
       runs_in: [host-browser-runtime, native-host-runtime, headless-runtime, node-tooling-runtime]
 
   - component: roadmap-release-polish
@@ -620,7 +661,7 @@ entities:
       status: accepted
       confidence: confirmed
       title: Per-Release Visual, UX, and Accessibility Delivery
-      summary: "Every release band A2-I carries a scoped visual/UX polish pass and an accessibility increment, written in detail just before that band starts and informed by previous playtests. Polish follows the new surfaces, viewscreen/effects, onboarding and session flow. Accessibility is one continuous programme: A2 settings/profile/presentation/eligibility seams; B complexity composition; C alternative motion/docking/multi-ship paths; D mastery-task assistance; E dense tactical information; F continuing-mode maps/summary/return; G strategy; H generation constraints; I alternative participation and completion audit."
+      summary: "Every content release C1-C9 carries a scoped visual/UX polish pass and an accessibility increment, written in detail just before that band starts and informed by previous playtests; technical bands are not releases, but T1's Bridge Foundations carry the programme's opening seams. Polish follows the new surfaces, viewscreen/effects, onboarding and session flow. Accessibility is one continuous programme: T1 settings/profile/presentation/eligibility seams; C2 complexity composition; C3 alternative motion/docking/multi-ship paths; C4 mastery-task assistance; C5 dense tactical information; C6 continuing-mode maps/summary/return; C7 strategy; C8 generation constraints; C9 alternative participation and completion audit."
       rationale:
         - Polish is written per release rather than as one standing backlog so each pass can answer real feedback from the build that just shipped.
         - "Scope is visual and UX only: defects are fixed as they arise and never occupy a polish slot."

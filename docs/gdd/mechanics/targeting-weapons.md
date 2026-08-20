@@ -46,7 +46,7 @@ Torpedoes are guided proximity projectiles. Individual tubes have firing arcs an
 
 Torpedoes reward ammunition judgment, tube readiness and attack geometry. The in-flight count is public authoritative state so consoles and AI policies can reason about salvos without inferring them from transient launch messages.
 
-Band E adds authored torpedo payload sidegrades through Tactical calibration and ammunition fabrication. Payloads may trade shield interaction, armour penetration, disruption, marking or another explicit effect rather than forming a simple light-to-heavy damage ladder. A tube loads a selected available payload, and its behavior remains frozen at launch.
+Band C5 adds authored torpedo payload sidegrades through Tactical calibration and ammunition fabrication. Payloads may trade shield interaction, armour penetration, disruption, marking or another explicit effect rather than forming a simple light-to-heavy damage ladder. A tube loads a selected available payload, and its behavior remains frozen at launch.
 
 ## Readiness grammar
 
@@ -76,7 +76,7 @@ AI sees the same Combat Lock and weapon geometry as a human. It must not split f
 
 Weapon statistics, arcs, bank and tube topology, magazine capacity, cooldowns, projectile behavior, frequency behavior, shield pierce and AI policies belong in ship/entity TOML. Scenario scripts may create targets, relationships and objectives, but should not special-case how a named hull fires.
 
-Persistent mines are accepted but unscheduled. They require arming, trigger, detection, ownership, expiry/recovery, AI, save and civilian-risk contracts and therefore sit outside Band E's torpedo-payload work. See [Planned but Not Scheduled](../future/planned-not-scheduled.md).
+Persistent mines are accepted but unscheduled. They require arming, trigger, detection, ownership, expiry/recovery, AI, save and civilian-risk contracts and therefore sit outside Band C5's torpedo-payload work. See [Planned but Not Scheduled](../future/planned-not-scheduled.md).
 
 ## Playtest questions
 

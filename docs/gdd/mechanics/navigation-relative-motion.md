@@ -66,9 +66,9 @@ The accepted movement extension allows Navigation to contribute desired three-di
 
 Orbital or strongly relative scenarios should build on the same identity, waypoint and reference-frame rules. They must not require a separate navigation command model for every scenario. Zero-setup and simple combat remain valid with a primarily planar chart.
 
-Band C adds docking as a relative-motion operation: approach, request clearance, enter the authored docking envelope, dock and undock. Band D adds docked repair, replenishment and resource transfer. Band F adds loadout refit and campaign reactor rewards at authored starbases.
+Band C3 adds docking as a relative-motion operation: approach, request clearance, enter the authored docking envelope, dock and undock. Band C4 adds docked repair, replenishment and resource transfer. Band C6 adds loadout refit and campaign reactor rewards at authored starbases.
 
-Band F's authored continuing-run foundation uses discrete warp jumps between systems rather than continuous interstellar flight. Warp fuel is distinct from local propellant and normally abundant; aid, damage, sabotage, unusual route costs or hazards may make it consequential. Band H adds the coarse planetary Orbital Mode described in [Release Bands G–I](../future/release-bands-g-i.md).
+Band C6's authored continuing-run foundation uses discrete warp jumps between systems rather than continuous interstellar flight. Warp fuel is distinct from local propellant and normally abundant; aid, damage, sabotage, unusual route costs or hazards may make it consequential. Band C8 adds the coarse planetary Orbital Mode described in [Release Bands C7–C9](../future/release-bands-g-i.md).
 
 ## Authoring and tuning
 

@@ -44,9 +44,9 @@ Taking a scan latches `scan.<entity-id>.taken` for scenario logic, but completio
 
 The accepted scan ladder moves from detection, through identification and classification, to tactical assessment and intrusive analysis. Detection supplies location and broad category. Identification adds transponder, faction or declared identity. Classification adds hull class, role and known capabilities. Tactical assessment adds observable shields, damage, emissions and active systems. Individual entities may omit or falsify authored fields, while evidence records how each claim was obtained.
 
-Band B covers detection through tactical assessment using confidence and focused observation. Band E adds intrusive analysis of protected internals, cargo, personnel or vulnerabilities. Intrusive scanning accelerates or unlocks deep information, emits a detectable signature and may trigger authored diplomatic or tactical reactions.
+Band C2 covers detection through tactical assessment using confidence and focused observation. Band C5 adds intrusive analysis of protected internals, cargo, personnel or vulnerabilities. Intrusive scanning accelerates or unlocks deep information, emits a detectable signature and may trigger authored diplomatic or tactical reactions.
 
-Band E also adds the EWar MVP: Jam degrades Sensors and Comms while raising the attacker's signature; Spoof produces uncertain contacts that observation can disprove; Harden protects the ship's Sensors and Comms at an authored power, heat or capability cost. Broader remote disruption remains unscheduled.
+Band C5 also adds the EWar MVP: Jam degrades Sensors and Comms while raising the attacker's signature; Spoof produces uncertain contacts that observation can disprove; Harden protects the ship's Sensors and Comms at an authored power, heat or capability cost. Broader remote disruption remains unscheduled.
 
 ## Evidence and dossiers
 

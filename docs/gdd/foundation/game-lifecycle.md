@@ -72,7 +72,7 @@ Startup failures should name the failed stage and offer a useful recovery action
 
 ### Human-readable join codes
 
-Band A2 replaces raw PeerJS routing identifiers with typed human-readable codes. Client and server joining use separate project GUIDs, a shared compatible-release version GUID and separate five-letter suffixes. Ordinary players enter only the suffix or scan a QR code; the full `PROJECT_GUID_VERSION_GUID_CODE` form supports copying and diagnostics. Each ship host issues a private client code which no other host or simulation state sees. One privileged server code admits and recovers hosts in a multi-ship session.
+T1 replaces raw PeerJS routing identifiers with typed human-readable codes. Client and server joining use separate project GUIDs, a shared compatible-release version GUID and separate five-letter suffixes. Ordinary players enter only the suffix or scan a QR code; the full `PROJECT_GUID_VERSION_GUID_CODE` form supports copying and diagnostics. Each ship host issues a private client code which no other host or simulation state sees. One privileged server code admits and recovers hosts in a multi-ship session.
 
 The rendezvous layer distinguishes unknown, wrong-type and version-mismatched codes before transport setup. The eventual host handshake still refuses incompatible protocol/content stamps authoritatively. Codes survive reconnects and mission transitions. Rotation is explicit and restricted to periods when no mission is running.
 
@@ -174,9 +174,9 @@ A station can be held by at most one connected player. New players are never aut
 
 ### Stationless participants
 
-When all stations are held, another player currently joins without a station. Band A2 formalises this as a Spectator role with one crew-public summary screen. Spectators do not count toward readiness, cannot issue simulation commands and may manually claim an eligible open station.
+When all stations are held, another player currently joins without a station. T1 formalises this as a Spectator role with one crew-public summary screen. Spectators do not count toward readiness, cannot issue simulation commands and may manually claim an eligible open station.
 
-Current readiness counts every connected session, including a stationless participant. Band A2 changes that contract so explicit spectators do not count toward collective readiness.
+Current readiness counts every connected session, including a stationless participant. T1 changes that contract so explicit spectators do not count toward collective readiness.
 
 ### Collective readiness
 
@@ -363,7 +363,7 @@ No current client-side action may shut down the host or end the session for ever
 
 - Define and implement the clean round-reset/world-reload contract, including selecting a different scenario after GameOver.
 - Admit reconnect and terminal-state reconstruction during GameOver.
-- Implement Band A2's spectator role, readiness exclusion, summary surface and manual claim flow.
+- Implement T1's spectator role, readiness exclusion, summary surface and manual claim flow.
 - Decide whether GameOver needs a minimum acknowledgement period before any participant can dismiss it for everyone.
 - Define an explicit participant Leave Game action and whether disconnected session records expire.
 - Define explicit host End Session presentation and the client experience after intentional shutdown versus host failure.

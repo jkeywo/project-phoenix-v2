@@ -214,7 +214,7 @@ A team in transit reveals no new detail and cannot be reprioritised as if alread
 
 ## Future Command
 
-Band A2's auxiliary human-seeking Command station is normally hosted by Captain through hull data and need not create another lobby seat. It lists AI-controlled stations and sets authored standard, alert-neutral or objective-specific stances at station scale. It does not operate individual systems. Its complete lifecycle and shared Hero Bar presentation are defined in [Command and Crew Control](../mechanics/command-and-crew-control.md).
+T1's auxiliary human-seeking Command station is normally hosted by Captain through hull data and need not create another lobby seat. It lists AI-controlled stations and sets authored standard, alert-neutral or objective-specific stances at station scale. It does not operate individual systems. Its complete lifecycle and shared Hero Bar presentation are defined in [Command and Crew Control](../mechanics/command-and-crew-control.md).
 
 ## Future Operations and Medical
 

@@ -1,15 +1,24 @@
-# The Falling Skyway scenario as a causal design model.
+# The Falling Skyway scenario as a causal design model — TARGET design per
+# PRD #1129 (25-minute interleaved mission), ratified in the 2026-08-20
+# grill session:
 #
-# Drafted with `pasm design bootstrap` from assets/worlds/falling_skyway.toml
-# and filled in from the world file's own design commentary, the GDD page
-# (docs/gdd/content/scenarios/falling-skyway.md) and the AI-backfill survey
-# (docs/falling-skyway-ai-backfill.md). Every entity is origin: ai and
-# proposed until a human ratifies it via `pasm review`.
+#   - clocks are ORDER-ONLY: no per-deadline numeric bounds; the requires
+#     chains carry the order (checked against authored dues by
+#     design-content.deadline-order) and one envelope bound holds the whole
+#     mission to 20-30 minutes;
+#   - terminal failure is WORLD-DRIVEN only: no checkpoint logic — the storm
+#     kills a ship that lives in a band, the collapse branch owns the back
+#     half, and the opening era still needs its mechanism authored (open
+#     question below);
+#   - the good ending is the clean-ledger benchmark, modelled as a
+#     consequence plus an invariant proving even a benchmark run lifts only
+#     two of three claims;
+#   - pacing is GLOBAL INTENSITY ERAS (threads live in the gate graph).
 #
-# The world file stays authoritative: no number below is copied — anchors
-# name where each value lives and what the design intends of it, and
-# `pasm validate` reads the file live. `pasm design digest` renders this
-# model with the live values as the entry point for design work.
+# The world file stays authoritative and currently authors the OLD 5-minute
+# arc: the envelope bounds warning on skyway_window_closes is the intended
+# gap marker until the #1129 scenario edit lands. Entities are origin: ai,
+# awaiting ratification via `pasm review`.
 entities:
   - scenario_model: falling-skyway
     core:
@@ -18,13 +27,18 @@ entities:
       origin: ai
       title: Falling Skyway Scenario Model
       summary: >
-        [ai] Closed-world design model for the first Thin Margin scenario.
-        Three acts on an authored clock; every authored deadline below maps
-        to a gate stating what its landing causes, or declares itself benign.
+        [ai] Closed-world design model for the first Thin Margin scenario,
+        re-authored to PRD #1129: eight interleaved threads (survey, strike,
+        storm, rescue, stabilise, window, traffic, evidence) on their own
+        triggers, passively startable from t=0, escalating but never closing
+        a crew-initiated path.
+      open_questions:
+        - "World-driven terminal for the opening era: the storm and the collapse can end a silent run in their eras, but nothing in the world ends a fully silent opening era yet. Ratified direction is world-driven only (no checkpoint logic); the mechanism is unauthored."
+        - "PRD's x4 window close (1880s) exceeds the ratified 20-30 minute envelope (max 1800s); the scenario edit must land the close inside the envelope."
     game_design:
       world_file: assets/worlds/falling_skyway.toml
 
-  # ── Roles and the verbs the causal chain hangs on ──────────────────────────
+  # ── Roles and verbs ─────────────────────────────────────────────────────────
   - role: fs-captain
     core:
       status: proposed
@@ -43,7 +57,7 @@ entities:
       confidence: provisional
       origin: ai
       title: Tactical (Falling Skyway)
-      summary: "[ai] Carries both Act 2 negotiation channels on this hull's comms overlay."
+      summary: "[ai] Carries both negotiation channels on this hull's comms overlay; the strike stews while the survey is still in progress."
     game_design:
       player_verbs: [fs-settle-the-strike]
   - role: fs-operations
@@ -61,24 +75,33 @@ entities:
       confidence: provisional
       origin: ai
       title: Science (Falling Skyway)
-      summary: "[ai] Reads the place: survey scans, the scan-vs-record diff, the rung."
+      summary: "[ai] Reads the place: the three survey scans, the scan-vs-record diff, the rung."
     game_design:
-      player_verbs: [fs-compile-the-survey]
+      player_verbs: [fs-compile-the-survey, fs-file-the-evidence]
+  - role: fs-navigation
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: Navigation (Falling Skyway)
+      summary: "[ai] Orders the civilian traffic off the lane ahead of the bands; nobody should die in the storm without a human (or an AI emitter) at this seat."
+    game_design:
+      player_verbs: [fs-order-the-traffic]
 
   - verb: fs-compile-the-survey
-    core: {status: proposed, confidence: provisional, origin: ai, title: Compile the Survey, summary: "[ai] Scan the head, the depots and the lane so the assessment Control receives is the crew's, not the placeholder."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: Compile the Survey, summary: "[ai] Scan all three published structures (skyhook, depot A, depot B) and report to Control on the comms channel; the three scan.<id>.taken flags gate the report pickup, so a partial survey cannot file a full one."}
     game_design:
       architecture_links: [scenario-script-host-seam]
       owner_role: fs-science
-      produces_facts: [survey-compiled]
+      produces_facts: [scan-skyhook-taken, scan-depot-a-taken, scan-depot-b-taken, survey-reported]
   - verb: fs-settle-the-strike
-    core: {status: proposed, confidence: provisional, origin: ai, title: Settle the Strike, summary: "[ai] Negotiate the committee's two-of-three ground; both promises land on the commitments ledger and stay open."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: Settle the Strike, summary: "[ai] Negotiate the committee's two-of-three ground; both promises land on the commitments ledger and stay open. Timers harden the tree but never close this path."}
     game_design:
       architecture_links: [comms-dialogue-controller]
       owner_role: fs-tactical
       produces_facts: [strike-settled]
   - verb: fs-call-the-vote
-    core: {status: proposed, confidence: provisional, origin: ai, title: Call the Vote, summary: "[ai] Close the negotiation. The backfill survey notes this is gated on ground held, not on evidence shown."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: Call the Vote, summary: "[ai] Close the negotiation. Gated on ground held; the evidence path is the better close, and the escalation keeps the first-pick accident from being a good ending."}
     game_design:
       architecture_links: [comms-dialogue-controller]
       owner_role: fs-captain
@@ -108,6 +131,18 @@ entities:
       architecture_links: [external-operation-runner]
       owner_role: fs-operations
       produces_facts: [skyhook-stabilised]
+  - verb: fs-order-the-traffic
+    core: {status: proposed, confidence: provisional, origin: ai, title: Order the Traffic, summary: "[ai] Divert the civilian craft off the lane ahead of each band; the forecast-to-band gap is sized so a compliant order always lands in time."}
+    game_design:
+      architecture_links: [scenario-script-host-seam]
+      owner_role: fs-navigation
+      produces_facts: [traffic-ordered-clear]
+  - verb: fs-file-the-evidence
+    core: {status: proposed, confidence: provisional, origin: ai, title: File the Evidence, summary: "[ai] The scan-vs-record diff plus the rigger's corroboration, onto Control's record. Opens only for a crew who settled the strike by talking and read the rung."}
+    game_design:
+      architecture_links: [scenario-script-host-seam]
+      owner_role: fs-science
+      produces_facts: [evidence-filed]
   - verb: fs-book-the-window
     core: {status: proposed, confidence: provisional, origin: ai, title: Book the Window, summary: "[ai] Allocate the computed lift among the three claims. There is no state of the world in which all three fit."}
     game_design:
@@ -116,7 +151,7 @@ entities:
       protected: true
       must_not_be: [resolved-by-ai-backfill-or-automation]
 
-  # ── Act 1 (0–90s): read the place ──────────────────────────────────────────
+  # ── Opening thread: the survey is the crew's work ──────────────────────────
   - gate: fs-tether-slip
     core:
       status: proposed
@@ -124,110 +159,104 @@ entities:
       origin: ai
       title: The Tether Slips
       summary: >
-        [ai] t=40: the head loses six condition points, 48 falls to 42, under
-        the authored 45% lift line — the skyhook_lift_capable flag drops and
-        the triage priority names itself. Scripted, not preventable.
+        [ai] The head loses six condition points, under the authored 45% lift
+        line — the lift-capable flag drops and the triage priority names
+        itself. Scripted, not preventable; the opening beat every thread
+        reads from.
     game_design:
       self_resolving: true
       deadline_id: tether_slip
       on_failure: [fs-head-uncertified]
-      enables: [fs-survey-closes-act-one]
-      anchors:
-        - name: tether-slip-due
-          path: assets/worlds/falling_skyway.toml
-          table: deadline
-          match: "id=tether_slip"
-          key: due_secs
-          min: "30"
-          max: "120"
-  - gate: fs-survey-closes-act-one
+  - gate: fs-survey-thread
     core:
       status: proposed
       confidence: provisional
       origin: ai
       title: The Survey Falls Due
       summary: >
-        [ai] t=90: Control wants the assessment. Whatever the crew have by
-        then is what they send; anything still pending is FAILED at the act
-        boundary, which is what makes partial success readable. The act ends
-        on the clock by design — but the backfill survey found a fully silent
-        crew gets all three Act 1 objectives green, so the survey itself is
-        not yet the crew's work. requires_player_action is declared and the
-        zero-input warning on fs-act-one-objectives records the hole.
+        [ai] TARGET (PRD #1129): the survey is a task — scan all three
+        structures and report to Control — so this gate cannot pass while
+        the crew does nothing. Whatever is unreported when the clock lands
+        is failed loudly; early scans are remembered and auto-resolve.
+        (Today's TOML completes this on a timer; the scenario edit closes
+        that gap.)
     game_design:
-      self_resolving: true
+      requires_player_action: [fs-compile-the-survey]
       deadline_id: skyway_survey_due
       requires: [fs-tether-slip]
-      on_failure: [fs-act-two-opens]
-      anchors:
-        - name: survey-due
-          path: assets/worlds/falling_skyway.toml
-          table: deadline
-          match: "id=skyway_survey_due"
-          key: due_secs
-          min: "60"
-          max: "240"
-  - gate: fs-act-one-objectives
-    core:
-      status: proposed
-      confidence: provisional
-      origin: ai
-      title: Act 1 Objectives Prove Nothing Yet
-      summary: >
-        [ai] The backfill survey's finding, promoted into the model: all
-        three Act 1 objectives resolve from scripted events and thresholds,
-        so a silent crew completes the act. This gate deliberately declares
-        no player action and does not claim to be self-resolving, so the
-        zero-input warning stands in CI until the survey becomes the crew's
-        work (fs-compile-the-survey) and this gate names it.
-    game_design:
-      requires: [fs-tether-slip]
-      enables: [fs-survey-closes-act-one]
+      on_failure: [fs-survey-unfiled]
 
-  # ── Act 2 (90–268s): the strike, then the storm ────────────────────────────
-  - gate: fs-storm-front
+  # ── Strike thread: stews mid-survey, on its own trigger ────────────────────
+  - gate: fs-strike-thread
     core:
       status: proposed
       confidence: provisional
       origin: ai
-      title: Control's Forecast Lands
-      summary: "[ai] t=100: the corridor is cleared ahead of the weather and the Lyra's situation becomes the crew's problem."
+      title: The Strike Stews
+      summary: >
+        [ai] Passively startable from t=0, opening while the survey is still
+        in progress. Escalation hardens the committee's tree on its timers
+        (frustrated committee, costlier options) but never closes the
+        talking path.
+    game_design:
+      requires_player_action: [fs-settle-the-strike, fs-call-the-vote]
+      on_success: [fs-strike-settled]
+      on_failure: [fs-strike-hardens]
+
+  # ── Storm thread: arrives whatever the crew decided ────────────────────────
+  - gate: fs-storm-front
+    core: {status: proposed, confidence: provisional, origin: ai, title: Control's Forecast Lands, summary: "[ai] The corridor is cleared ahead of the weather mid-negotiation; the Lyra's situation becomes the crew's problem. Own trigger — no act flag."}
     game_design:
       self_resolving: true
       deadline_id: storm_front_due
-      requires: [fs-survey-closes-act-one]
       on_failure: [fs-corridor-cleared]
-      anchors:
-        - name: storm-front-due
-          path: assets/worlds/falling_skyway.toml
-          table: deadline
-          match: "id=storm_front_due"
-          key: due_secs
-          min: "95"
-          max: "260"
   - gate: fs-storm-band-one
-    core:
-      status: proposed
-      confidence: provisional
-      origin: ai
-      title: First Band, North Corridor
-      summary: >
-        [ai] t=145. Forty-five seconds after the forecast, which is not
-        generosity — it is arithmetic: a bulk hauler makes twelve units a
-        second and needs about thirty-five of them once its authored
-        acknowledge-and-decide delay has run.
+    core: {status: proposed, confidence: provisional, origin: ai, title: First Band, summary: "[ai] The forecast-to-first-band gap is arithmetic, not generosity: sized from hauler speed, lane length and the authored acknowledge-and-decide delay, and it scales with the clock."}
     game_design:
       self_resolving: true
       deadline_id: storm_band_one_due
       requires: [fs-storm-front]
       on_failure: [fs-storm-exposure]
   - gate: fs-storm-band-two
-    core: {status: proposed, confidence: provisional, origin: ai, title: Second Band, summary: "[ai] t=185, over the upper gate. The band the Lyra must be clear of."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: Second Band, summary: "[ai] Over the upper gate — the band the Lyra must be clear of."}
     game_design:
       self_resolving: true
       deadline_id: storm_band_two_due
       requires: [fs-storm-band-one]
       on_failure: [fs-storm-exposure]
+  - gate: fs-storm-band-three
+    core: {status: proposed, confidence: provisional, origin: ai, title: Third Band, summary: "[ai] Over the head itself."}
+    game_design:
+      self_resolving: true
+      deadline_id: storm_band_three_due
+      requires: [fs-storm-band-two]
+      on_failure: [fs-storm-exposure]
+  - gate: fs-storm-passes
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Storm Passes, summary: "[ai] The corridor is clear and traffic goes back on the lane; the back half opens on this flag."}
+    game_design:
+      self_resolving: true
+      deadline_id: storm_passed_due
+      requires: [fs-storm-band-three]
+      on_failure: [fs-back-half-opens]
+
+  # ── Traffic thread: nobody dies without a human (or emitter) at Navigation ─
+  - gate: fs-traffic-thread
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: The Traffic Must Be Ordered Clear
+      summary: >
+        [ai] The civilian craft were flying before the crew arrived; each
+        band that sweeps the lane takes whatever was not ordered off it. The
+        world-driven loud failure of the storm era — losses on the ledger,
+        and a ship that lives in a band does not survive it.
+    game_design:
+      requires_player_action: [fs-order-the-traffic]
+      requires: [fs-storm-front]
+      on_failure: [fs-storm-exposure]
+
+  # ── Rescue thread ───────────────────────────────────────────────────────────
   - gate: fs-lyra-clear
     core:
       status: proposed
@@ -235,40 +264,34 @@ entities:
       origin: ai
       title: The Rescue's Clock
       summary: >
-        [ai] t=192: she is under control by now or the band has her. The
-        flagship causal gate of the storm — it names the player work (the
-        tow) and what failing it costs (the Lyra and her crew). The backfill
-        survey notes AI backfill cannot emit StartOperation, so this gate is
-        unwinnable-by-AI until that gap closes.
+        [ai] She is under control by the second band or the band has her.
+        Names the player work (the tow) and what failing it costs; the AI
+        batch's Operate emitter is what makes this reachable by a
+        backfilled crew.
     game_design:
       requires_player_action: [fs-order-the-tow]
       deadline_id: lyra_clear_due
       requires: [fs-storm-front]
       on_failure: [fs-lyra-lost]
-      anchors:
-        - name: lyra-clear-due
-          path: assets/worlds/falling_skyway.toml
-          table: deadline
-          match: "id=lyra_clear_due"
-          key: due_secs
-          min: "150"
-          max: "260"
-  - gate: fs-storm-band-three
-    core: {status: proposed, confidence: provisional, origin: ai, title: Third Band, summary: "[ai] t=225, over the head itself. Retires at t=265."}
-    game_design:
-      self_resolving: true
-      deadline_id: storm_band_three_due
-      requires: [fs-storm-band-two]
-      on_failure: [fs-storm-exposure]
-  - gate: fs-storm-passes
-    core: {status: proposed, confidence: provisional, origin: ai, title: The Storm Passes, summary: "[ai] t=268: the corridor is clear, traffic goes back on the lane, the act closes on the flag Act 3 opens on."}
-    game_design:
-      self_resolving: true
-      deadline_id: storm_passed_due
-      requires: [fs-storm-band-three]
-      on_failure: [fs-act-three-opens]
 
-  # ── Act 3 (268–470s): the head, and the window ─────────────────────────────
+  # ── Evidence thread ─────────────────────────────────────────────────────────
+  - gate: fs-evidence-thread
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: The Record Can Be Put Right
+      summary: >
+        [ai] The falsified maintenance file, the scan-vs-record diff and the
+        rigger's corroboration. Optional for survival, mandatory for the
+        clean ledger; the talking path keeps it open, the force path burns
+        it.
+    game_design:
+      requires_player_action: [fs-file-the-evidence]
+      requires: [fs-strike-thread]
+      on_success: [fs-evidence-on-record]
+
+  # ── Back half: the head, and the window ────────────────────────────────────
   - gate: fs-skyhook-holds-or-falls
     core:
       status: proposed
@@ -276,25 +299,17 @@ entities:
       origin: ai
       title: The Skyhook Can Fall
       summary: >
-        [ai] t=382: Act 3 puts the head back under the corridor's load and
-        walks its condition toward the structural floor skyhook.toml authors.
-        Three escalating warnings come first; a crew who stabilise at any of
-        them keep the structure. A crew who do not watch destroy_entity take
-        it out of the world mid-mission, and the mission branches into the
-        survivor-rescue epilogue.
+        [ai] The back half puts the head under the corridor's load and walks
+        its condition toward the authored structural floor. Three escalating
+        warnings; a crew who stabilise at any of them keep the structure; a
+        crew who do not watch destroy_entity take it out of the world — the
+        back half's world-driven terminal pressure, with the survivor-rescue
+        epilogue as its branch.
     game_design:
       requires_player_action: [fs-order-the-stabilise]
       deadline_id: skyhook_failure_due
       requires: [fs-storm-passes]
       on_failure: [fs-skyhook-collapse]
-      anchors:
-        - name: skyhook-failure-due
-          path: assets/worlds/falling_skyway.toml
-          table: deadline
-          match: "id=skyhook_failure_due"
-          key: due_secs
-          min: "300"
-          max: "600"
   - gate: fs-window-opens
     core:
       status: proposed
@@ -302,12 +317,11 @@ entities:
       origin: ai
       title: The Transfer Window Opens
       summary: >
-        [ai] t=400: the deadline the crew have watched since the first tick.
-        Demand is authored — three labelled capacity rows on Control's
-        manifest, filed before the crew arrived — and supply is computed at
-        this moment from the head's certification, each rung's line, and
-        whether the people who staff it are at work. Nobody arrives with
-        enough.
+        [ai] The deadline the crew have watched since the first tick. Demand
+        is authored — three labelled capacity rows filed before the crew
+        arrived — and supply is computed at this moment from the head's
+        certification, each rung's line, and whether the people who staff it
+        are at work. Nobody arrives with enough.
     game_design:
       self_resolving: true
       deadline_id: skyway_transfer_window
@@ -319,32 +333,56 @@ entities:
       confidence: provisional
       origin: ai
       title: The Window Closes
-      summary: "[ai] t=470: the window shuts for good. Claims not lifted have lapsed, and the six campaign flag families record what the crew chose."
+      summary: >
+        [ai] The window shuts for good; the ledger decides which two of
+        three claims lifted, and the six campaign flag families carry the
+        rest forward. The envelope anchor below holds the whole mission to
+        20-30 minutes — the current authored 470s trips it on purpose until
+        the #1129 re-author lands.
     game_design:
       self_resolving: true
       deadline_id: skyway_window_closes
       requires: [fs-window-opens]
       requires_player_action: [fs-book-the-window]
+      on_success: [fs-clean-ledger]
       on_failure: [fs-claims-lapse]
       anchors:
-        - name: window-closes-due
+        - name: mission-envelope
           path: assets/worlds/falling_skyway.toml
           table: deadline
           match: "id=skyway_window_closes"
           key: due_secs
-          min: "430"
-          max: "900"
+          min: "1200"
+          max: "1800"
 
   # ── Consequences ────────────────────────────────────────────────────────────
   - consequence: fs-head-uncertified
-    core: {status: proposed, confidence: provisional, origin: ai, title: The Head Loses Certification, summary: "[ai] 42/100 is under the 45% lift line; the lift-capable flag falls and every later supply computation starts from here."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Head Loses Certification, summary: "[ai] Under the 45% lift line; the lift-capable flag falls and every later supply computation starts from here."}
     game_design:
       handler: on_tether_slip
-      depends_on_state: []
-  - consequence: fs-act-two-opens
-    core: {status: proposed, confidence: provisional, origin: ai, title: Act Two Opens, summary: "[ai] The survey lands at Control as-sent; pending objectives fail readable; both negotiation channels open on Tactical."}
+  - consequence: fs-survey-unfiled
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: Control Acts on the Falsified Record
+      summary: >
+        [ai] The survey clock lands with scans missing or the report
+        unfiled: Control proceeds on the record it already has — the
+        falsified one — and the crew's later evidence case starts from
+        behind. Loud, and it echoes through the ledger.
     game_design:
       handler: on_survey_due
+      magnitude_source: which of the three scan flags and the report were missing when the clock landed
+  - consequence: fs-strike-settled
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Strike Settles, summary: "[ai] Two pieces of ground out of three; both promises go on the commitments ledger with the workers as the party and stay open."}
+    game_design:
+      handler: on_settle
+  - consequence: fs-strike-hardens
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Committee Hardens, summary: "[ai] Escalation on the strike's own timers: a more frustrated committee, costlier options — the tree hardens but the talking path never closes."}
+    game_design:
+      handler: on_stall
+      magnitude_source: how far the escalation timers ran before the crew engaged
   - consequence: fs-corridor-cleared
     core: {status: proposed, confidence: provisional, origin: ai, title: The Corridor Clears, summary: "[ai] Civilian traffic is ordered off the lane ahead of the weather; the Lyra cannot comply."}
     game_design:
@@ -354,13 +392,16 @@ entities:
       status: proposed
       confidence: provisional
       origin: ai
-      title: A Band Sweeps the Corridor
+      title: A Band Takes What Was Left In It
       summary: >
         [ai] The destroyer survives crossing a band and does not survive
         living in one; a 60-point civilian hauler cannot cross one at all.
-        Whatever is in the band when it arrives takes that arithmetic.
+        The storm era's world-driven terminal: pure silence leaves ships —
+        possibly the crew's — in the weather.
     game_design:
+      terminal: true
       handler: on_storm_band_one
+      magnitude_source: what was still on the lane when the band arrived
   - consequence: fs-lyra-lost
     core: {status: proposed, confidence: provisional, origin: ai, title: The Lyra Is Lost, summary: "[ai] The band takes her and her crew; the loss report objective opens and the campaign remembers."}
     game_design:
@@ -372,28 +413,45 @@ entities:
       origin: ai
       title: Clearing the Picket Costs People
       summary: >
-        [ai] The casualty count is READ, not rolled: no RNG in script, so the
-        number comes off the workers' mirrored disposition at the moment the
-        order is given, with ten minutes' warning as the captain's lever over
-        it. Deterministic per seed by construction, surfaced on a console
-        four ways.
+        [ai] The casualty count is READ, not rolled: the number comes off the
+        workers' mirrored disposition at the moment the order is given, with
+        ten minutes' warning as the captain's lever over it.
     game_design:
       handler: on_force_now
       magnitude_source: workers' mirrored disposition at the moment the order is given
       depends_on_state: [fs-worker-disposition]
-  - consequence: fs-act-three-opens
-    core: {status: proposed, confidence: provisional, origin: ai, title: Act Three Opens, summary: "[ai] The storm's close writes the flag Act 3 opens on; the head goes back under load."}
+  - consequence: fs-back-half-opens
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Back Half Opens, summary: "[ai] The storm's close writes the flag; rescue debts, the head's decline and the window now crowd the remaining clock together."}
     game_design:
       handler: on_storm_passed
   - consequence: fs-skyhook-collapse
     core: {status: proposed, confidence: provisional, origin: ai, title: The Skyhook Falls, summary: "[ai] destroy_entity takes the head out of the world mid-mission; one berth remains, Control asks for a name, and the mission branches into the survivor-rescue epilogue."}
     game_design:
       handler: on_head_lost
+  - consequence: fs-evidence-on-record
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Evidence Is Filed, summary: "[ai] The diff and the corroboration land on Control's record; one of the clean-ledger criteria, and the campaign's memory of who was telling the truth."}
+    game_design:
+      handler: on_corroboration_filed
   - consequence: fs-window-opens-short
-    core: {status: proposed, confidence: provisional, origin: ai, title: The Window Opens Short, summary: "[ai] Supply is computed, demand is read, and the shortfall is stated in mission copy when the window opens — the choice scene enforces two-of-three by reading the numbers, not by hard-coding 'pick two'."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Window Opens Short, summary: "[ai] Supply is computed, demand is read, and the shortfall is stated in mission copy — the choice scene enforces two-of-three by reading the numbers."}
     game_design:
       handler: on_transfer_window_opens
       magnitude_source: computed lift at window open, from head certification, rung lines, and staffing
+      depends_on_state: [fs-ladder-supply-picture]
+  - consequence: fs-clean-ledger
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: The Clean Ledger
+      summary: >
+        [ai] The good ending, computed over the transfer ledger: mandatory
+        set complete, no civilian traffic lost, commitments kept, skyhook
+        held, evidence filed. It distinguishes a clean run from "completed
+        but mid" — and it still lifts only two of three claims.
+    game_design:
+      handler: on_the_window_shuts_for_good
+      magnitude_source: the five clean-ledger criteria over the transfer ledger and campaign flags
       depends_on_state: [fs-ladder-supply-picture]
   - consequence: fs-claims-lapse
     core: {status: proposed, confidence: provisional, origin: ai, title: Unlifted Claims Lapse, summary: "[ai] The window shuts for good; what was not lifted was chosen against, and the six campaign flag families carry it forward."}
@@ -402,7 +460,7 @@ entities:
 
   # ── State the consequences read ─────────────────────────────────────────────
   - information: fs-worker-disposition
-    core: {status: proposed, confidence: provisional, origin: ai, title: Worker Disposition, summary: "[ai] The workers' mirrored disposition — the number the casualty count is read from. Surfaced on a console four ways, so the captain can weigh the order they are giving."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: Worker Disposition, summary: "[ai] The workers' mirrored disposition — the number the casualty count is read from, surfaced on a console four ways."}
     game_design:
       visibility: team-visible
       enforcement_links: [scenario-script-host-seam]
@@ -412,7 +470,7 @@ entities:
       visibility: team-visible
       enforcement_links: [scenario-script-host-seam]
 
-  # ── The structural scarcity ─────────────────────────────────────────────────
+  # ── Invariants ──────────────────────────────────────────────────────────────
   - design_invariant: fs-window-structural-scarcity
     core:
       status: proposed
@@ -422,10 +480,8 @@ entities:
       summary: >
         [ai] 40 from Ladder A plus 12 from Ladder B is 52; the three claims
         total 66; any two claims fit and all three never do. Nothing in this
-        mission can raise either capacity, so a crew who did everything still
-        arrive short — the window is a choice, not a disaster. The headless
-        test asserts this from the authored numbers rather than from a run,
-        because it is a claim about every run.
+        mission can raise either capacity — and the #1129 re-author must not
+        change that: the 25-minute mission keeps the same arithmetic.
     game_design:
       relation: >
         claim_committee + claim_havelock + claim_convoy (66) exceeds
@@ -466,8 +522,39 @@ entities:
     implementation:
       status: declared
       paths: [tests/headless_runner.rs]
+  - design_invariant: fs-clean-ledger-two-of-three
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: Even the Clean Ledger Lifts Two of Three
+      summary: >
+        [ai] The benchmark run — mandatory set complete, no traffic lost,
+        commitments kept, skyhook held, evidence filed — still cannot lift
+        all three claims: the benchmark criteria and the scarcity arithmetic
+        are independent, so the moral choice survives the best possible run.
+      open_questions:
+        - "The dedicated benchmark headless test (a benchmark-meeting run that still books exactly two claims) does not exist yet; add its name to asserted_by when the #1129 measurement batch lands."
+    game_design:
+      relation: >
+        clean-ledger benchmark met implies exactly two of the three claims
+        lifted; benchmark criteria never alter claim amounts or lift
+        capacity.
+      asserted_by: [a_crew_who_did_everything_still_reach_the_window_short]
+      anchors:
+        # The benchmark criteria never alter the claim amounts; pin one so a
+        # scenario edit that couples them breaks here.
+        - name: committee-claim-unchanged-by-benchmark
+          path: assets/worlds/falling_skyway.toml
+          table: entity.overrides.infrastructure.capacity
+          match: "id=skyway_claim_committee"
+          key: amount
+          expect: "18"
+    implementation:
+      status: declared
+      paths: [tests/headless_runner.rs]
 
-  # ── The pacing budget (unratified — issue #1044's tuning surface) ──────────
+  # ── Pacing: global intensity eras over the 20-30 minute envelope ───────────
   - pacing: fs-mission-clock
     core:
       status: proposed
@@ -475,67 +562,109 @@ entities:
       origin: ai
       title: Falling Skyway Pacing Budget
       summary: >
-        [ai] Three acts over 470 authored seconds. These windows are
-        hypotheses pending the #1044 tuning pass; the deadline anchors above
-        carry generous bounds for exactly that reason, and this budget will
-        flag any deadline the tuning moves out of its act.
+        [ai] Three global intensity eras over the target 20-30 minute clock
+        (threads live in the gate graph, not here). Era boundaries partition
+        the whole envelope, so today's un-retuned clocks still land exactly
+        once each — the gap shows on the envelope anchor, not as coverage
+        noise.
     game_design:
       clock_source: mission first tick; lobby time costs the mission none of its clock
       human_calibration: >
         An authored clock must include the real time needed to read, speak,
         navigate console depth, reconnect, and recover from an understandable
-        mistake. Headless completion time is not human completion time.
+        mistake. Headless completion time is not human completion time; the
+        80-95% backfill sweeps tune inside these eras.
       phases:
-        - phase_id: act-one-read-the-place
+        - phase_id: opening-the-place-reads-back
           from: "0s"
-          to: "95s"
-          intensity_intent: setup
-          engaged_roles: [fs-science, fs-captain]
-          covers_deadlines: [tether_slip, skyway_survey_due]
-        - phase_id: act-two-strike-and-storm
-          from: "95s"
-          to: "290s"
+          to: "380s"
+          intensity_intent: setup-with-the-strike-stewing
+          engaged_roles: [fs-science, fs-captain, fs-tactical]
+          # covers_deadlines for every era is declared when the x4 retune
+          # lands; until then the old clocks squat in this window and any
+          # declaration would only restate the envelope gap.
+        - phase_id: storm-over-a-live-negotiation
+          from: "380s"
+          to: "1100s"
           intensity_intent: rising-to-peak
-          engaged_roles: [fs-tactical, fs-operations, fs-captain, fs-science]
-          covers_deadlines: [storm_front_due, storm_band_one_due, storm_band_two_due, lyra_clear_due, storm_band_three_due, storm_passed_due]
-        - phase_id: act-three-the-window
-          from: "290s"
-          to: "480s"
-          intensity_intent: release-under-scarcity
-          engaged_roles: [fs-operations, fs-captain]
-          covers_deadlines: [skyhook_failure_due, skyway_transfer_window, skyway_window_closes]
+          engaged_roles: [fs-navigation, fs-operations, fs-tactical, fs-captain]
+          # covers_deadlines declared when the x4 retune lands these clocks
+          # in this era; declaring them now would just restate the envelope gap.
+        - phase_id: crowded-back-half
+          from: "1100s"
+          to: "1900s"
+          intensity_intent: everything-lands-at-once
+          engaged_roles: [fs-operations, fs-captain, fs-science]
 
-  # ── Principles: falsifiable, measured, honest about counter-evidence ───────
+  # ── Principles ──────────────────────────────────────────────────────────────
   - design_principle: fs-scarcity-reads-as-choice
     core:
       status: proposed
       confidence: provisional
       origin: ai
       title: The Shortfall Reads as a Choice, Not a Punishment
-      summary: "[ai] Crews should experience the Act 3 window as a hard triage decision they were equipped to make, not a fail state they were ambushed by."
+      summary: "[ai] Crews should experience the window as a hard triage decision they were equipped to make, not a fail state they were ambushed by."
     game_design:
       strength: soft
-      context: Act 3 window, crews who completed the survey and settled the strike
+      context: the transfer window, crews who completed the survey and settled the strike
       construction: [fs-window-structural-scarcity, fs-window-opens, fs-ladder-supply-picture]
       expected_dynamic: crews debate which two claims to honour before the window opens, using numbers they have watched since the first tick
       experience_hypothesis: post-mission, crews describe the window as their decision rather than the game's
       measured_by: [fs-window-choice-claim]
       counter_evidence:
-        - "docs/falling-skyway-ai-backfill.md: AI crews reach the window without engaging the claims, so nothing yet demonstrates the choice reads as theirs"
+        - "docs/falling-skyway-ai-backfill.md: AI crews reach the window without engaging the claims; #1129's re-author and verb surface exist to retire this"
   - design_principle: fs-warning-is-arithmetic
     core:
       status: proposed
       confidence: provisional
       origin: ai
       title: Storm Warnings Are Arithmetic, Not Generosity
-      summary: "[ai] The 45 seconds between forecast and first band is derived from hauler speed, lane length, and the authored acknowledge-and-decide delay — enough to comply, never enough to idle."
+      summary: "[ai] The forecast-to-first-band gap is derived from hauler speed, lane length, and the authored acknowledge-and-decide delay — enough to comply, never enough to idle — and it scales with the clock."
     game_design:
       strength: soft
-      context: Act 2 storm sweep, civilian traffic on authored lanes
-      construction: [fs-storm-front, fs-storm-band-one]
-      expected_dynamic: compliant traffic escapes each band with seconds to spare; the Lyra, who cannot comply, becomes the crew's problem instead
+      context: the storm sweep, civilian traffic on authored lanes
+      construction: [fs-storm-front, fs-storm-band-one, fs-traffic-thread]
+      expected_dynamic: compliant traffic escapes each band with margin; the Lyra, who cannot comply, becomes the crew's problem instead
       experience_hypothesis: the storm reads as lethal weather with fair warning, not as scripted punishment
       measured_by: [traffic_clears_before_each_band_headless_check]
+  - design_principle: fs-backfill-completes-the-set
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: A Fully Backfilled Crew Completes the Mandatory Set
+      summary: >
+        [ai] With the Scan/Operate/Order verb surface, a fully backfilled
+        crew completes the mandatory objective set in 80-95% of seeded runs
+        — high enough that AI teammates are real, low enough that humans
+        still matter. Today's AI sits near 0%, which is the regression
+        baseline.
+    game_design:
+      strength: hard
+      context: fully AI-backfilled crew, seeded balance-runs sweeps over the mandatory set
+      construction: [fs-survey-thread, fs-lyra-clear, fs-traffic-thread, fs-skyhook-holds-or-falls]
+      expected_dynamic: every mandatory objective is AI-addressable by construction; humans and AI differ only in engagement timing
+      experience_hypothesis: a short-handed crew experiences a functioning bridge, not a haunted one
+      measured_by: [balance-runs mandatory-objective completion aggregate (80-95% target)]
+  - design_principle: fs-silence-fails-loudly
+    core:
+      status: proposed
+      confidence: provisional
+      origin: ai
+      title: Silence Fails Loudly in Every Era
+      summary: >
+        [ai] An idle crew fails mandatory objectives visibly in every era,
+        and the world itself — not checkpoint logic — carries the
+        terminality: the storm takes what is left in it, the head falls
+        without a stabilise. The opening era's world-driven mechanism is
+        the open design question on the scenario model.
+    game_design:
+      strength: hard
+      context: fully idle crew, every intensity era
+      construction: [fs-survey-thread, fs-storm-exposure, fs-skyhook-holds-or-falls]
+      expected_dynamic: each era posts a visible failure an idle crew cannot avoid; nothing completes by accident
+      experience_hypothesis: doing nothing is never mistaken for doing fine
+      measured_by: [idle_crew_fails_every_era_headless_checks]
   - playtest-claim: fs-window-choice-claim
     core:
       status: proposed

@@ -3789,8 +3789,8 @@ fn the_composed_player_destroyer_boots_backfilled_and_flies() {
         let (sources, ratings) = q.single(app.world()).expect("exactly one LocalShip");
         assert_eq!(
             ratings.0.len(),
-            4,
-            "the destroyer's four authored seats must survive composition: {:?}",
+            6,
+            "the destroyer's six authored seats must survive composition: {:?}",
             ratings.0
         );
         for (station, rating) in &ratings.0 {
@@ -8008,7 +8008,7 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
     let sim_seconds = 100.0;
     let args = HeadlessArgs {
         world_path: "assets/worlds/falling_skyway.toml".into(),
-        // The mission's authored hull, and the one its four stations are the
+        // The mission's authored hull, and the one its six stations are the
         // small-crew set of.
         ship_path: "assets/entities/alliance_destroyer.toml".into(),
         dt,

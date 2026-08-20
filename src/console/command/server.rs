@@ -8,7 +8,7 @@ use crate::messages::{
     SystemControlPayload, SystemId,
 };
 use crate::ship::command_stance;
-use crate::ship::config::{ShipConfig, StanceKind, StationConfig};
+use crate::ship::config::{ShipConfig, StanceKind, StationConfig, StationStanceConfig};
 use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
 
@@ -22,6 +22,36 @@ use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ShipStationStances(pub HashMap<StationId, String>);
 
+/// Per-ship edge-detection memory for the persist-behind-human trigger
+/// (issue #1108): the last-observed AI/human control state of each Command
+/// directed Station (`true` == that Station was AI-controlled last tick).
+///
+/// # Why this is transient scratch and is NOT folded into the sim digest
+///
+/// It records a value that is itself a pure function of already-authoritative
+/// state — `station_is_ai_controlled`, derived each tick from the ship's
+/// control sources (which the digest already excludes as `derived`). The
+/// AUTHORITATIVE outcome of the Human→AI edge — resuming a persistent stance or
+/// clearing a transient one — lands in [`ShipStationStances`], which IS folded.
+/// This map only remembers *when the last transition was* so the decision fires
+/// once, on the edge, rather than every tick. A host that never saw the prior
+/// state (a fresh spawn) records the current state as its FIRST observation and
+/// fires no edge — the deliberate first-observation no-op below.
+///
+/// The exclusion is safe because the digest is only ever compared in full
+/// replay from tick 0 (headless, within one process), never across a snapshot
+/// boundary: `snapshot.rs` persists NEITHER this scratch NOR
+/// [`ShipStationStances`] today, so every host reconstructs both by replaying
+/// the same ticks over the same control sources. WARNING: if a future change
+/// starts persisting [`ShipStationStances`] in a snapshot (so a restored host
+/// keeps stored stances), it MUST also persist or reseed this scratch —
+/// otherwise a Human→AI transition on the first post-restore tick would fire on
+/// a continuous host (`was_ai == Some(false)`) but be swallowed as a first
+/// observation (`was_ai == None`) on the restored host, diverging the resolved
+/// stance.
+#[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
+pub struct LastDirectedControl(pub HashMap<StationId, bool>);
+
 pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
@@ -30,25 +60,31 @@ impl Plugin for CommandPlugin {
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::system_registry::COMMAND_SYSTEM_ID,
         ));
-        crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
             FixedUpdate,
             (
-                // A human Command operator's stance pick lands first…
-                handle_set_station_stance.in_set(crate::sim_sets::SimSet::Input),
+                // A stored id no longer in the authored catalogue is dropped
+                // FIRST, so the input handlers below never act on a stale
+                // selection (issue #1108 criterion 4).
+                reconcile_station_stances.in_set(crate::sim_sets::SimSet::Input),
+                // A human Command operator's stance pick lands next…
+                handle_set_station_stance
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .after(reconcile_station_stances),
                 // …then the alert-level neutral-to-neutral switch runs, so a
                 // stored neutral follows an alert change the same tick the
                 // captain raises it (issue #1107 criterion 5).
                 apply_alert_change_to_stances
                     .in_set(crate::sim_sets::SimSet::Input)
                     .after(handle_set_station_stance),
-                // The AI Command operator: resets a human's non-persistent order
-                // to neutral when no human holds Command. Gated on the shared AI
-                // cadence, like the Captain AI.
-                operate_command_ai
+                // The persist-behind-human trigger (issue #1108): when the
+                // directed target Station transitions Human→AI, a persistent
+                // stance resumes and a transient one falls back to the current
+                // alert-neutral. Runs EVERY tick (not cadence-gated) so no
+                // control-source edge is missed.
+                reconcile_directed_target_control
                     .in_set(crate::sim_sets::SimSet::Input)
-                    .after(apply_alert_change_to_stances)
-                    .run_if(crate::ai::cadence::ai_snapshot_ready),
+                    .after(apply_alert_change_to_stances),
                 publish_command_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
@@ -210,75 +246,134 @@ fn apply_alert_change_to_stances(
     }
 }
 
-/// The AI Command operator (issue #1107).
+/// Drop any stored selection whose stance has left the directed Station's
+/// authored catalogue (issue #1108 criterion 4).
 ///
-/// When no human holds Command — its coarse system reads `ControlSource::Ai` —
-/// a human's non-persistent standard order is reset to the alert-appropriate
-/// neutral so an old aggressive order does not resume behind the handoff, while
-/// a `persist_behind_human` order and the two neutrals are kept. AI Command uses
-/// the SAME authored catalogue and the SAME stored-selection path a human does;
-/// it never writes an order the human vocabulary does not contain.
-fn operate_command_ai(
+/// A stance id no longer authored — a hull change, or (forward-looking, #1110)
+/// an objective stance whose objective ended — is removed here, so the Station
+/// falls back to the alert-neutral tracking default and the removal is visible
+/// on the next blackboard publish. Membership is decided through the one
+/// `command_stance` catalogue seam, never an ad-hoc check. A station id that no
+/// longer names any station at all is dropped too.
+fn reconcile_station_stances(
+    mut ships: Query<
+        (&ShipConfigComponent, &mut ShipStationStances),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (ship_config, mut stances) in ships.iter_mut() {
+        // Read-only probe first: taking `&mut` does not mark the component
+        // changed until it is deref-mutated, so an already-clean map (the
+        // overwhelming common case) triggers no spurious change detection.
+        if stances.0.is_empty() {
+            continue;
+        }
+        let config = &ship_config.0;
+        let stale: Vec<StationId> = stances
+            .0
+            .iter()
+            .filter(|(station, stance)| match config.station(station) {
+                Some(target) => {
+                    command_stance::reconcile_selection(&target.stances, stance).is_none()
+                }
+                None => true,
+            })
+            .map(|(station, _)| station.clone())
+            .collect();
+        for station in stale {
+            stances.0.remove(&station);
+        }
+    }
+}
+
+/// The persist-behind-human trigger (issue #1108).
+///
+/// Carries an authored Command stance across a human's control of the DIRECTED
+/// Station without constraining that human. While a human holds the target,
+/// `station_is_ai_controlled` is false: the stored order is dormant and the
+/// human sees it only as advice (`publish_command_blackboard` +
+/// `withCommandAdvice`), keeping full ordinary authority. The instant the
+/// target returns to AI — the Human→AI edge — `selection_after_human_lost`
+/// decides per the stance's authored `persist_behind_human`: a persistent
+/// standard order RESUMES its stored id; a transient one (and the neutrals)
+/// falls back to the current alert-neutral, which clears the entry.
+///
+/// Keys on the TARGET Station's control state, not the Command seat's: this is
+/// about the person crewing the directed Station, and it is the same whether a
+/// human or the ship's AI currently holds Command. Edge detection uses
+/// [`LastDirectedControl`]; a first observation records state and fires nothing.
+fn reconcile_directed_target_control(
     mut ships: Query<
         (
             &ShipConfigComponent,
             &ShipSystemControlSources,
             &crate::ship_state::ShipRedAlert,
             &mut ShipStationStances,
+            &mut LastDirectedControl,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (ship_config, control_sources, red_alert, mut stances) in ships.iter_mut() {
+    for (ship_config, control_sources, red_alert, mut stances, mut last) in ships.iter_mut() {
         let config = &ship_config.0;
         let Some(command) = command_station(config) else {
             continue;
         };
-        // Only when Command itself is AI-operated.
-        if control_sources
-            .0
-            .source_for(&crate::system_registry::command_system_id())
-            != ControlSource::Ai
-        {
-            continue;
-        }
         let Some(target) = command.command_target.clone() else {
             continue;
         };
-        let Some(target_station) = config.station(&target) else {
-            continue;
-        };
-        let current = stances.0.get(&target).cloned();
-        let resolved = command_stance::selection_after_human_lost(
-            &target_station.stances,
-            current.as_deref(),
-            red_alert.0,
-        );
-        match resolved {
-            // A neutral outcome is the tracking default — clear the stored entry
-            // so the AI-controlled Station stays byte-identical to a hull that
-            // was never commanded.
-            Some(next)
-                if command_stance::stance_by_id(&target_station.stances, &next).is_some_and(
-                    |s| {
-                        matches!(
-                            s.kind,
-                            StanceKind::NormalAlertNeutral | StanceKind::HighAlertNeutral
-                        )
-                    },
-                ) =>
-            {
-                // `remove` is a no-op when nothing is stored, so the entry ends
-                // up absent either way — byte-identical to a never-commanded hull.
-                stances.0.remove(&target);
+        let now_ai = station_is_ai_controlled(config, &control_sources.0, &target);
+        let was_ai = last.0.get(&target).copied();
+
+        // Human→AI edge only: a first observation (`None`) or any other
+        // transition just records state below.
+        if was_ai == Some(false) && now_ai {
+            if let Some(target_station) = config.station(&target) {
+                let current = stances.0.get(&target).cloned();
+                let resolved = command_stance::selection_after_human_lost(
+                    &target_station.stances,
+                    current.as_deref(),
+                    red_alert.0,
+                );
+                store_resolved_selection(&mut stances, &target, &target_station.stances, resolved);
             }
-            Some(next) => {
-                // Re-inserting an equal value leaves the map unchanged, so an
-                // unconditional insert is equivalent to the guarded one.
-                stances.0.insert(target.clone(), next);
-            }
-            None => {}
         }
+
+        // Record the current observation for next tick's edge detection. Guard
+        // the write so an unchanged state marks nothing dirty.
+        if was_ai != Some(now_ai) {
+            last.0.insert(target.clone(), now_ai);
+        }
+    }
+}
+
+/// Apply a `selection_after_*` outcome to the stored map for `target`.
+///
+/// A neutral outcome is the tracking default, so the entry is CLEARED — an
+/// absent entry is byte-identical to a never-commanded hull, and folds to the
+/// same digest. Any other (standard) stance is stored. `None` leaves the map
+/// untouched.
+fn store_resolved_selection(
+    stances: &mut ShipStationStances,
+    target: &StationId,
+    catalogue: &[StationStanceConfig],
+    resolved: Option<String>,
+) {
+    match resolved {
+        Some(next)
+            if command_stance::stance_by_id(catalogue, &next).is_some_and(|s| {
+                matches!(
+                    s.kind,
+                    StanceKind::NormalAlertNeutral | StanceKind::HighAlertNeutral
+                )
+            }) =>
+        {
+            stances.0.remove(target);
+        }
+        Some(next) => {
+            stances.0.insert(target.clone(), next);
+        }
+        None => {}
     }
 }
 

@@ -472,6 +472,8 @@ console.command.ai_directed,command console — persistent cue that the directed
 console.command.human_held,command console — cue that the directed station is human-held and off the command board,[CREWED — NOT DIRECTABLE]
 console.command.command_auto,command console — cue that Command itself is currently run by the ship AI,[COMMAND ON AI]
 console.command.current_stance,command console — label before the stance currently in force,[Current]
+console.command.advice_heading,"target console — heading over the non-binding Command intent advice shown while a human holds the directed station",[COMMAND INTENT]
+console.command.advice_hint,"target console — note that the shown Command intent is advisory and the human retains control",[Advisory — you retain control]
 console.courier_tactical.doc_title,Browser-tab title of the tactical console page,[Project Phoenix — Courier Tactical]
 console.courier_tactical.screen_label,Phone-frame screen label of the tactical console,Courier Tactical
 console.tactical.weapons,"tactical console — ""Weapons"" panel heading",Weapons

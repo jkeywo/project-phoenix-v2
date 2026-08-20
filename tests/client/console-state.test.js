@@ -26,6 +26,8 @@ import {
   withTutorialOverlay,
   withVisitingSystems,
   soughtSystemHosts,
+  commandAdviceFor,
+  withCommandAdvice,
 } from '../../gui/console-state.js';
 import { ClientSimState } from '../../gui/sim-state.js';
 import { t, getTable } from '../../gui/strings.js';
@@ -722,6 +724,52 @@ describe('buildCommandConsoleState (issue #1107)', () => {
       directed_station_ai: false, selected_stance: '', stances: [],
     })));
     expect(s.directed_station_ai).toBe(false);
+  });
+});
+
+describe('commandAdviceFor / withCommandAdvice (issue #1108)', () => {
+  const bb = (over = {}) => ({
+    blackboards: {
+      command: {
+        directed_station: 'tactical',
+        directed_station_ai: false,
+        selected_stance: 'tactical-weapons-free',
+        stances: [
+          { id: 'tactical-weapons-free', label: 'lbl.wf', kind: 'standard', high_alert: true },
+          { id: 'tactical-normal', label: 'lbl.n', kind: 'normal_alert_neutral', high_alert: false },
+        ],
+        ...over,
+      },
+    },
+  });
+
+  it('surfaces the intent on the human-held directed target console', () => {
+    const a = commandAdviceFor(bb(), 'tactical');
+    expect(a).toEqual({ stance_id: 'tactical-weapons-free', stance_label: 'lbl.wf', high_alert: true });
+  });
+
+  it('is null on a console that is not the directed target', () => {
+    expect(commandAdviceFor(bb(), 'helm')).toBeNull();
+  });
+
+  it('is null while the directed target is AI-controlled (directed, not advised)', () => {
+    expect(commandAdviceFor(bb({ directed_station_ai: true }), 'tactical')).toBeNull();
+  });
+
+  it('is null when no command blackboard has arrived', () => {
+    expect(commandAdviceFor({ blackboards: {} }, 'tactical')).toBeNull();
+  });
+
+  it('falls back to an empty label when the stance is not in the options list', () => {
+    const a = commandAdviceFor(bb({ selected_stance: 'tactical-gone', stances: [] }), 'tactical');
+    expect(a).toEqual({ stance_id: 'tactical-gone', stance_label: '', high_alert: false });
+  });
+
+  it('withCommandAdvice attaches command_advice only on the advised console', () => {
+    const advised = JSON.parse(withCommandAdvice('tactical', bb(), '{}'));
+    expect(advised.command_advice.stance_id).toBe('tactical-weapons-free');
+    const other = JSON.parse(withCommandAdvice('helm', bb(), '{}'));
+    expect(other.command_advice).toBeUndefined();
   });
 });
 

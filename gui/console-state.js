@@ -855,6 +855,64 @@ export function buildCommandConsoleState(state) {
 }
 
 /**
+ * Non-binding Command intent advice for a directed target Station (issue #1108).
+ *
+ * Criterion 2: a human holding the Command-directed Station keeps full ordinary
+ * authority, and may ALSO see the current Command intent as advice. When the
+ * `command` blackboard names THIS console's station as the directed Station and
+ * that Station is human-held (`directed_station_ai === false`), returns the
+ * stance currently in force — `{ stance_id, stance_label, high_alert }` — for
+ * the console to render as advisory, never binding. The stance in force is
+ * always computable server-side (a stored order, else the alert-neutral
+ * fallback), so advice is present whenever the console is the directed target
+ * and human-held. Any other case returns `null`: an AI-controlled directed
+ * Station is *directed* through the Command console, not advised here.
+ *
+ * @param {object} state simState
+ * @param {string} consoleName station id
+ * @returns {{stance_id:string, stance_label:string, high_alert:boolean}|null}
+ */
+export function commandAdviceFor(state, consoleName) {
+  const bb = state && state.blackboards && state.blackboards['command'];
+  if (!bb) return null;
+  if (bb.directed_station !== consoleName) return null;
+  if (bb.directed_station_ai) return null;
+  const id = bb.selected_stance || '';
+  if (!id) return null;
+  const opt = (bb.stances || []).find(s => s && s.id === id) || null;
+  return {
+    stance_id: id,
+    stance_label: opt ? (opt.label || '') : '',
+    high_alert: opt ? !!opt.high_alert : false,
+  };
+}
+
+/**
+ * Attach `command_advice` to a target console's payload (issue #1108).
+ *
+ * A general overlay, applied to every console the same way `withTutorialOverlay`
+ * is: it adds `command_advice` only to the console that is the current directed
+ * target while that Station is human-held, and is a no-op everywhere else. The
+ * target console renders it as a non-binding advisory line.
+ *
+ * @param {string} consoleName station id
+ * @param {object} state simState
+ * @param {string} json the console payload built so far
+ * @returns {string} json, with `command_advice` when this console is advised
+ */
+export function withCommandAdvice(consoleName, state, json) {
+  try {
+    const advice = commandAdviceFor(state, consoleName);
+    if (!advice) return json;
+    const obj = JSON.parse(json);
+    obj.command_advice = advice;
+    return JSON.stringify(obj);
+  } catch (_) {
+    return json;
+  }
+}
+
+/**
  * Payload contract for the Helm console iframe (issue #827). Rendered by
  * gui/battleship/helm.html, gui/cruiser/helm.html and gui/destroyer/helm.html.
  *
@@ -2030,7 +2088,11 @@ if (typeof window !== 'undefined') {
       withStationDamage(
         consoleName,
         state,
-        withVisitingSystems(consoleName, state, inner),
+        withCommandAdvice(
+          consoleName,
+          state,
+          withVisitingSystems(consoleName, state, inner),
+        ),
       ),
     );
   };

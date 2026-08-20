@@ -45,6 +45,7 @@ automated_systems = []
 id = "weapons-free"
 kind = "standard"
 high_alert = true
+persist_behind_human = true
 
 [[station.stance]]
 id = "hold"
@@ -127,10 +128,73 @@ fn spawn_ship(app: &mut App, tactical_ai: bool, command_ai: bool) -> Entity {
             sources,
             AdmittedCommands::default(),
             ShipStationStances::default(),
+            LastDirectedControl::default(),
             crate::ship_state::ShipRedAlert::default(),
             crate::server_app::ShipSystemBlackboards::default(),
         ))
         .id()
+}
+
+/// Flip the directed weapons Station between AI and human control.
+fn set_tactical_ai(app: &mut App, ship: Entity, ai: bool) {
+    let mut ship_mut = app.world_mut().entity_mut(ship);
+    let mut sources = ship_mut.get_mut::<ShipSystemControlSources>().unwrap();
+    sources.0.set(
+        SystemId("phaser-fore".into()),
+        if ai {
+            ControlSource::Ai
+        } else {
+            ControlSource::Human
+        },
+    );
+}
+
+/// Set the ship's red-alert flag.
+fn set_red_alert(app: &mut App, ship: Entity, active: bool) {
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<crate::ship_state::ShipRedAlert>()
+        .unwrap()
+        .0 = active;
+}
+
+/// Store a stance selection directly on the ship (as an admitted order would).
+fn insert_stance(app: &mut App, ship: Entity, station: &str, stance: &str) {
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<ShipStationStances>()
+        .unwrap()
+        .0
+        .insert(StationId(station.into()), stance.into());
+}
+
+/// Run the target-transition trigger once (issue #1108).
+fn run_target_reconcile(app: &mut App) {
+    app.world_mut()
+        .run_system_cached(reconcile_directed_target_control)
+        .unwrap();
+}
+
+/// Read the published `selected_stance` from the Command blackboard.
+fn published_selected_stance(app: &mut App, ship: Entity) -> String {
+    app.world_mut()
+        .run_system_cached(publish_command_blackboard)
+        .unwrap();
+    let bbs = app
+        .world()
+        .entity(ship)
+        .get::<crate::server_app::ShipSystemBlackboards>()
+        .unwrap();
+    let SystemBlackboard::Command(bb) = bbs
+        .0
+        .get(&SystemId(
+            crate::system_registry::COMMAND_SYSTEM_ID.to_string(),
+        ))
+        .expect("a command blackboard is published")
+    else {
+        panic!("expected a Command blackboard");
+    };
+    bb.selected_stance.clone()
 }
 
 fn set_admitted(app: &mut App, ship: Entity, station: &str, stance: &str) {
@@ -259,23 +323,120 @@ fn changing_alert_switches_a_stored_neutral_but_not_a_standard_stance() {
 }
 
 #[test]
-fn ai_command_resets_a_non_persistent_standard_stance_to_neutral() {
-    // Lifecycle: when Command loses its human, a non-persistent standard order
-    // clears back to tracking (an empty entry == the alert-tracking default).
+fn a_persistent_stance_resumes_when_the_target_returns_to_ai() {
+    // Criterion 3: a persist-behind-human standard order is carried across a
+    // human's control of the directed Station and resumes intact on the
+    // Human→AI edge.
     let mut app = App::new();
-    let ship = spawn_ship(&mut app, true, true); // command AI
+    let ship = spawn_ship(&mut app, false, false); // tactical human-held
+    insert_stance(&mut app, ship, "tactical", "weapons-free"); // persist = true
+
+    // First observation while human-held records state, fires no edge.
+    run_target_reconcile(&mut app);
+    assert_eq!(
+        stances(&app, ship).0.get(&tactical()).map(String::as_str),
+        Some("weapons-free"),
+        "a dormant order is untouched while the target is human-held"
+    );
+
+    // Human releases the target → Human→AI edge → persistent order resumes.
+    set_tactical_ai(&mut app, ship, true);
+    run_target_reconcile(&mut app);
+    assert_eq!(
+        stances(&app, ship).0.get(&tactical()).map(String::as_str),
+        Some("weapons-free"),
+        "a persistent stance resumes when the human hands the target back to AI"
+    );
+}
+
+#[test]
+fn a_transient_stance_falls_back_to_neutral_when_the_target_returns_to_ai() {
+    // Criterion 3: a non-persistent standard order does NOT resume behind the
+    // handoff — it clears to the alert-neutral tracking default.
+    let mut app = App::new();
+    let ship = spawn_ship(&mut app, false, false); // tactical human-held
+    insert_stance(&mut app, ship, "tactical", "hold"); // persist = false
+
+    run_target_reconcile(&mut app); // record human-held
+    set_tactical_ai(&mut app, ship, true);
+    run_target_reconcile(&mut app); // Human→AI edge
+
+    assert!(
+        !stances(&app, ship).0.contains_key(&tactical()),
+        "a transient stance clears to neutral tracking on the handoff"
+    );
+}
+
+#[test]
+fn a_transient_handoff_falls_back_to_the_alert_appropriate_neutral() {
+    // Criterion 3 + 5: the transient fallback is BOTH neutrals — the current
+    // alert level's one, observed through the published stance in force.
+    for (red_alert, expected) in [(false, "normal"), (true, "high")] {
+        let mut app = App::new();
+        let ship = spawn_ship(&mut app, false, false); // tactical human-held
+        set_red_alert(&mut app, ship, red_alert);
+        insert_stance(&mut app, ship, "tactical", "hold");
+
+        run_target_reconcile(&mut app);
+        set_tactical_ai(&mut app, ship, true);
+        run_target_reconcile(&mut app);
+
+        assert!(!stances(&app, ship).0.contains_key(&tactical()));
+        assert_eq!(
+            published_selected_stance(&mut app, ship),
+            expected,
+            "a transient handoff falls back to the current alert's neutral"
+        );
+    }
+}
+
+#[test]
+fn a_human_holding_the_target_sees_the_stored_intent_as_advice() {
+    // Criterion 2: while the directed Station is human-held its holder keeps
+    // full authority (a stance order no-ops, pinned elsewhere) and the current
+    // Command intent stays visible as advice — the stored order is still the
+    // published stance in force, which `withCommandAdvice` surfaces on the
+    // target console.
+    let mut app = App::new();
+    let ship = spawn_ship(&mut app, false, false); // tactical human-held
+    insert_stance(&mut app, ship, "tactical", "weapons-free");
+    // A human at the target cannot be re-directed…
+    set_admitted(&mut app, ship, "tactical", "hold");
     app.world_mut()
-        .entity_mut(ship)
-        .get_mut::<ShipStationStances>()
-        .unwrap()
-        .0
-        .insert(tactical(), "hold".into()); // standard, persist=false
+        .run_system_cached(handle_set_station_stance)
+        .unwrap();
+    assert_eq!(
+        stances(&app, ship).0.get(&tactical()).map(String::as_str),
+        Some("weapons-free"),
+        "a human-held target retains full authority — no order lands"
+    );
+    // …but the intent remains readable as non-binding advice.
+    assert_eq!(
+        published_selected_stance(&mut app, ship),
+        "weapons-free",
+        "the current Command intent stays visible while the target is human-held"
+    );
+}
+
+#[test]
+fn an_invalid_stored_stance_falls_back_and_is_visibly_removed() {
+    // Criterion 4: a stored id no longer in the authored catalogue is dropped,
+    // the Station falls back to the alert-neutral, and the removal is visible on
+    // the published blackboard.
+    let mut app = App::new();
+    let ship = spawn_ship(&mut app, true, false);
+    insert_stance(&mut app, ship, "tactical", "objective-escort"); // never authored
     app.world_mut()
-        .run_system_cached(operate_command_ai)
+        .run_system_cached(reconcile_station_stances)
         .unwrap();
     assert!(
         !stances(&app, ship).0.contains_key(&tactical()),
-        "AI Command drops the human's non-persistent order back to neutral"
+        "an unauthored stored stance is reconciled away"
+    );
+    assert_eq!(
+        published_selected_stance(&mut app, ship),
+        "normal",
+        "the directed Station falls back to the alert-neutral, visibly"
     );
 }
 
@@ -418,9 +579,7 @@ fn a_direct_claim_of_the_directed_station_preserves_the_stored_stance_and_digest
     app.world_mut()
         .run_system_cached(handle_set_station_stance)
         .unwrap();
-    app.world_mut()
-        .run_system_cached(operate_command_ai)
-        .unwrap();
+    run_target_reconcile(&mut app);
 
     assert_eq!(
         stances(&app, ship).0.get(&tactical()).map(String::as_str),

@@ -418,6 +418,11 @@ pub fn spawn_entity(
         entity_commands.insert((
             crate::ship_plugin::LastHelmInput::default(),
             crate::command_plugin::ShipStationStances::default(),
+            // Edge-detection scratch for the persist-behind-human trigger
+            // (issue #1108). Transient and NOT folded into the sim digest —
+            // see the type's own docs; a fresh/reloaded hull records its first
+            // observation and fires no edge.
+            crate::command_plugin::LastDirectedControl::default(),
         ));
         // Per-objective route cursors: where this ship is on each objective's
         // route. Read by the low-LOD `simulate_low_lod_ships` path, the high-LOD

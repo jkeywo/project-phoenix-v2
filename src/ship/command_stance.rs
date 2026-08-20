@@ -97,6 +97,20 @@ pub fn selection_after_alert_change(
     }
 }
 
+/// A stored selection reconciled against the current authored catalogue
+/// (issue #1108 criterion 4).
+///
+/// The catalogue is the sole membership authority — the SAME [`is_selectable`]
+/// seam a human order is admitted through, and the one #1110's objective
+/// stances extend when a stance enters or leaves the catalogue. A stored id the
+/// catalogue still authors is kept; one that has left it returns `None`, so the
+/// caller drops the stored entry and the directed Station falls back
+/// deterministically to the alert-neutral tracking default — visibly removed
+/// from the console readout on the next publish.
+pub fn reconcile_selection(catalogue: &[StationStanceConfig], current: &str) -> Option<String> {
+    is_selectable(catalogue, current).then(|| current.to_string())
+}
+
 /// The selection after the Command station loses its human operator (lifecycle:
 /// "reset-to-neutral vs persist-behind-human").
 ///
@@ -225,6 +239,22 @@ mod tests {
             selection_after_alert_change(&c, None, true).as_deref(),
             Some("high"),
         );
+    }
+
+    #[test]
+    fn reconcile_keeps_authored_ids_and_drops_vanished_ones() {
+        // Criterion 4: the catalogue is the single membership authority. An id
+        // still authored survives; one no longer present falls out so the
+        // caller clears it back to the alert-neutral tracking default.
+        let c = catalogue();
+        assert_eq!(
+            reconcile_selection(&c, "weapons-free").as_deref(),
+            Some("weapons-free"),
+        );
+        assert_eq!(reconcile_selection(&c, "normal").as_deref(), Some("normal"));
+        // A stance that has left the catalogue (e.g. an objective stance whose
+        // objective ended, #1110) is dropped.
+        assert_eq!(reconcile_selection(&c, "objective-escort"), None);
     }
 
     #[test]

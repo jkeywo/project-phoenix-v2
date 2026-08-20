@@ -1809,6 +1809,7 @@ station = "command"
 id = "proving-standard"
 kind = "standard"
 high_alert = true
+persist_behind_human = true
 
 [[station.stance]]
 id = "proving-normal"
@@ -1838,6 +1839,10 @@ high_alert = true
         assert_eq!(proving.stances[0].id, "proving-standard");
         assert_eq!(proving.stances[0].kind, StanceKind::Standard);
         assert!(proving.stances[0].high_alert);
+        // The authored persistence flag (issue #1108 AC1) parses and round-trips;
+        // an unauthored stance defaults to non-persistent.
+        assert!(proving.stances[0].persist_behind_human);
+        assert!(!proving.stances[1].persist_behind_human);
         assert_eq!(proving.stances[1].kind, StanceKind::NormalAlertNeutral);
         assert!(!proving.stances[1].high_alert);
         assert_eq!(proving.stances[2].kind, StanceKind::HighAlertNeutral);

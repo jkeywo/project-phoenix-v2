@@ -55,6 +55,39 @@ test('command console: a human-held station is off the board (buttons disabled)'
   await expect(page.locator('#stance-list .stance-btn').first()).toBeDisabled();
 });
 
+// Issue #1108 AC2: a human holding the Command-directed Station sees the current
+// Command intent as NON-BINDING advice on their own console, and keeps full
+// ordinary authority. The advice rides the target console's payload as
+// `command_advice` (attached by `withCommandAdvice`); here it is fed directly to
+// pin the render contract.
+test('target console: shows Command intent as non-binding advice while human-held', async ({ page }) => {
+  await page.goto('/gui/destroyer/tactical.html');
+  const payload = {
+    systems: {},
+    own_hull: null,
+    dossiers: [],
+    command_advice: {
+      stance_id: 'tactical-weapons-free',
+      stance_label: 'entity.alliance_destroyer.station.tactical.stance.weapons_free',
+      high_alert: true,
+    },
+  };
+  await page.evaluate((s) => window.__updateConsole('tactical', JSON.stringify(s)), payload);
+
+  const advice = page.locator('#command-advice');
+  await expect(advice).toBeVisible();
+  await expect(advice.locator('.advice-heading')).toHaveText(ts('console.command.advice_heading'));
+  await expect(advice.locator('.advice-hint')).toHaveText(ts('console.command.advice_hint'));
+  await expect(page.locator('#command-advice-stance')).toHaveText(
+    ts('entity.alliance_destroyer.station.tactical.stance.weapons_free'),
+  );
+
+  // With no advice (the directed Station is AI, or this console is not the
+  // target), the advisory line is hidden entirely.
+  await page.evaluate(() => window.__updateConsole('tactical', JSON.stringify({ systems: {} })));
+  await expect(page.locator('#command-advice')).toBeHidden();
+});
+
 test('command console: clicking a stance emits set_station_stance for that station', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {

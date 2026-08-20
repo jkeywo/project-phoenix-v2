@@ -851,6 +851,45 @@ automated_systems = []
 name = "Simplified"
 automated_systems = ["phaser-omni"]
 
+# Command stance catalogue (issue #1107).
+# [ai] Proving-station choice: Tactical is the destroyer's AI-proving station for
+# Command, because weapons posture is the hull's one existing AI branch that reads
+# Red Alert directly (the `min_alert_to_fire` fire gate), so migrating it onto the
+# neutral-stance path is the faithful realisation of the issue rather than a new
+# invented behaviour. The four stance ids/labels and the `persist_behind_human`
+# choice on "weapons free" are also AI-origin.
+# When nobody claims it, the auxiliary Command station (below, normally
+# hosted by Captain) lists it and applies one of these authored stances. A stance
+# supplies the weapons AI hosts their alert POSTURE the same way Red Alert does —
+# it never buffs a stat or fires a gun itself. The two neutral fallbacks are the
+# migrated Red Alert path: `high_alert_neutral` behaves as "at red alert",
+# `normal_alert_neutral` as "stood down", and changing the ship's alert switches
+# between them without overwriting a standard order.
+[[station.stance]]
+id = "tactical-weapons-free"
+label = "entity.alliance_destroyer.station.tactical.stance.weapons_free"
+kind = "standard"
+high_alert = true
+# A durable order: it survives a human handoff at Command rather than resetting.
+persist_behind_human = true
+
+[[station.stance]]
+id = "tactical-hold"
+label = "entity.alliance_destroyer.station.tactical.stance.hold"
+kind = "standard"
+high_alert = false
+
+[[station.stance]]
+id = "tactical-normal"
+label = "entity.alliance_destroyer.station.tactical.stance.normal"
+kind = "normal_alert_neutral"
+
+[[station.stance]]
+id = "tactical-high"
+label = "entity.alliance_destroyer.station.tactical.stance.high"
+kind = "high_alert_neutral"
+high_alert = true
+
 # Contextual tutorial overlays (issue #921, on the #916 framework). Tactical
 # is system-composed (weapons + navigation + comms families — issue #825),
 # so `state` triggers read `systems.<system-id>.<field>`; anchors are DOM
@@ -900,13 +939,15 @@ description = "entity.alliance_destroyer.station.navigation.description"
 rank = "Ltn."
 short_code = "NAV"
 console = "gui/battleship/navigation.html"
+auxiliary = true
 human_seeking = true
 host_order = ["tactical", "engineering", "captain"]
 visiting_rating = "Simplified"
-# [ai] Navigation remains a complete, directly claimable Station. When it has
-# no active holder it visits only these compatible direct seats, in authored
-# order; an active Helm alone therefore leaves it on ordinary AI rather than
-# turning compatibility into an implicit all-crew fallback.
+# [ai] Navigation is now a hosted-tab-only auxiliary station: it has no dedicated
+# claimable lobby seat (`auxiliary = true`), but stays `human_seeking` and
+# appears as a Hero Bar tab, resolving a host from these compatible direct seats
+# in authored order. An active Helm alone therefore leaves it on ordinary AI
+# rather than turning compatibility into an implicit all-crew fallback.
 
 [[station.rating]]
 name = "Std"
@@ -924,13 +965,20 @@ rank = "Ens."
 short_code = "COM"
 console = "gui/battleship/comms.html"
 manual_overview = "You handle communications. Hail contacts, read and answer incoming traffic, and keep the captain and crew informed of mission developments. Stay on top of the message queue and flag anything urgent."
+auxiliary = true
 human_seeking = true
-host_order = ["tactical", "engineering", "captain", "helm", "navigation"]
+host_order = ["tactical", "engineering", "captain", "helm"]
 visiting_rating = "Std"
-# [ai] Comms carries only one authored rating everywhere it is declared on any
-# hull — there is no Simplified/automated tier for it — so its visiting
-# rating is the same full interface a direct holder gets. Unlike Navigation,
-# a visiting host is never handed a reduced Comms surface.
+# [ai] Comms is now a hosted-tab-only auxiliary station: no dedicated claimable
+# lobby seat (`auxiliary = true`), but still `human_seeking` and shown as a Hero
+# Bar tab, resolving a host from these directly-held seats in authored order.
+# `navigation` was dropped from this chain: it is itself an auxiliary
+# human_seeking (visiting) station now, never directly held, so a visiting
+# station cannot host another visiting station and the resolver skips it anyway.
+# Comms carries only one authored rating everywhere it is declared on any hull —
+# there is no Simplified/automated tier for it — so its visiting rating is the
+# same full interface a direct holder gets. Unlike Navigation, a visiting host
+# is never handed a reduced Comms surface.
 
 [[station.rating]]
 name = "Std"
@@ -998,10 +1046,46 @@ text = "entity.alliance_destroyer.station.engineering.tutorial.damage.text"
 anchor = "hull-integrity"
 trigger = { kind = "state", path = "systems.repair.overall_hull.pct", op = "lt", value = 0.9 }
 
+# Command station (issue #1107). An AUXILIARY, human-seeking station: it is
+# mounted and resolved like any other station but is never offered as its own
+# lobby seat (`auxiliary = true`), and it seeks a human host through authored
+# hull data — `host_order = ["captain"]` — rather than any hard-coded Captain
+# rule. When the Captain seat is directly held its holder hosts Command as a
+# hero-bar tab; when it is not, Command falls to the ship AI, which keeps the
+# directed station in its alert-neutral stance. Command directs the `tactical`
+# station (`command_target`), listing that station's authored stance catalogue
+# above only while Tactical is AI-controlled.
+[[station]]
+id = "command"
+name = "Command"
+description = "entity.alliance_destroyer.station.command.description"
+rank = "Cpt."
+short_code = "CMD"
+console = "gui/command-console.html"
+manual_overview = "You direct the ship's AI-run stations without operating their systems yourself. When Tactical is on the AI, Command lists it here and lets you set its stance — weapons free, hold fire, or leave it to follow the alert level. The stance tells Tactical's AI what posture to hold; it never fires the guns for you."
+auxiliary = true
+human_seeking = true
+host_order = ["captain"]
+visiting_rating = "Std"
+command_target = "tactical"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
 [[system]]
 id = "captain"
 kind = "captain"
 station = "captain"
+
+# The Command capability system (issue #1107): the admitted target for
+# `SetStationStance`. Owned by the auxiliary Command station, so the seek host
+# (Captain, normally) is authorised for stance orders exactly as any other
+# human-seeking station's systems are.
+[[system]]
+id = "command"
+kind = "command"
+station = "command"
 
 [[system]]
 id = "red-alert"

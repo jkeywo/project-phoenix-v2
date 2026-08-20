@@ -57,6 +57,11 @@ entity.alliance_destroyer.station.captain.description,assets/entities/alliance_d
 entity.alliance_destroyer.station.helm.description,assets/entities/alliance_destroyer.toml → [station] description,Pilot the ship.
 entity.alliance_destroyer.station.tactical.description,assets/entities/alliance_destroyer.toml → [station] description,"[Manage weapons, navigation and comms.]"
 entity.alliance_destroyer.station.engineering.description,assets/entities/alliance_destroyer.toml → [station] description,"[Manage shields, power and repairs.]"
+entity.alliance_destroyer.station.command.description,assets/entities/alliance_destroyer.toml → [station] description,[Direct the ship's AI-run stations.]
+entity.alliance_destroyer.station.tactical.stance.weapons_free,assets/entities/alliance_destroyer.toml → [station.stance] label,[Weapons Free]
+entity.alliance_destroyer.station.tactical.stance.hold,assets/entities/alliance_destroyer.toml → [station.stance] label,[Hold Fire]
+entity.alliance_destroyer.station.tactical.stance.normal,assets/entities/alliance_destroyer.toml → [station.stance] label,[Follow Alert (Standing By)]
+entity.alliance_destroyer.station.tactical.stance.high,assets/entities/alliance_destroyer.toml → [station.stance] label,[Follow Alert (Battle Stations)]
 entity.alliance_destroyer.station.helm.tutorial.welcome.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — first-visit helm tip heading,WELCOME TO HELM
 entity.alliance_destroyer.station.helm.tutorial.welcome.text,assets/entities/alliance_destroyer.toml → [station.tutorial] text — first-visit helm tip body,[You fly the destroyer. The radar shows space around you — up is always your heading. Your flight controls are on the right.]
 entity.alliance_destroyer.station.helm.tutorial.joystick.title,assets/entities/alliance_destroyer.toml → [station.tutorial] title — flight-stick tip heading,FLIGHT STICK
@@ -456,6 +461,17 @@ console.captain.shields_power,"captain console — ""Shields & Power"" panel hea
 console.captain.repair,"captain console — ""Repair"" panel heading",Repair
 console.captain.navigation,"captain console — ""Navigation"" panel heading",Navigation
 console.captain.comms,"captain console — ""Comms"" panel heading",Comms
+console.command.doc_title,Browser-tab title of the command console page,[Project Phoenix — Command Console]
+console.command.screen_label,Phone-frame screen label of the command console,[Command]
+console.command.title,command console — main hero heading,[COMMAND]
+console.command.subtitle,command console — hero sub-heading under the title,[STATION DIRECTION]
+console.command.directing,"command console — label before the directed station's name",[Directing]
+console.command.stance_heading,command console — heading over the stance list,[Stance]
+console.command.station_footer,command console — footer station name,[COMMAND STATION]
+console.command.ai_directed,command console — persistent cue that the directed station is under AI control and can be commanded,[AI — DIRECTABLE]
+console.command.human_held,command console — cue that the directed station is human-held and off the command board,[CREWED — NOT DIRECTABLE]
+console.command.command_auto,command console — cue that Command itself is currently run by the ship AI,[COMMAND ON AI]
+console.command.current_stance,command console — label before the stance currently in force,[Current]
 console.courier_tactical.doc_title,Browser-tab title of the tactical console page,[Project Phoenix — Courier Tactical]
 console.courier_tactical.screen_label,Phone-frame screen label of the tactical console,Courier Tactical
 console.tactical.weapons,"tactical console — ""Weapons"" panel heading",Weapons
@@ -517,6 +533,7 @@ station.comms.name,Comms station display name,Comms
 station.engineering.name,Engineering station display name,Engineering
 station.pilot.name,Pilot station display name (courier),Pilot
 station.science.name,Science station display name (cruiser),Science
+station.command.name,Command station display name (issue #1107 auxiliary station),Command
 shield_arc.fore.label,Shield arc label — the forward facing. Shared by every hull's [[shield_arc]] block,Fore
 shield_arc.aft.label,Shield arc label — the rear facing. Shared by every hull's [[shield_arc]] block,Aft
 shield_arc.port.label,Shield arc label — the left-hand facing. Shared by every hull's [[shield_arc]] block,Port

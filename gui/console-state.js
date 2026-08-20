@@ -820,6 +820,41 @@ export function buildCaptainConsoleState(state) {
 }
 
 /**
+ * Payload contract for the Command console iframe (issue #1107). Rendered by
+ * gui/command-console.html.
+ *
+ * @typedef {{ command_system_id: string, directed_station: string,
+ *             directed_station_name: string, directed_station_ai: boolean,
+ *             command_auto: boolean, selected_stance: string,
+ *             stances: Array<{id: string, label: string, kind: string,
+ *                             high_alert: boolean}> }} CommandConsolePayload
+ */
+
+/**
+ * Command console. Returns JSON of {@link CommandConsolePayload}.
+ *
+ * Reads the `command` blackboard mirror (`state.blackboards['command']`), which
+ * carries the directed proving Station, whether it is currently AI-controlled
+ * (and therefore directable), the selectable stances and the stance in force.
+ * The persistent non-colour automation cue the console renders is derived from
+ * `directed_station_ai` / `command_auto` — never from a colour change.
+ *
+ * @param {{ blackboards? }} state
+ */
+export function buildCommandConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['command']) || null;
+  return JSON.stringify({
+    command_system_id:      bb?.command_system_id     ?? 'command',
+    directed_station:       bb?.directed_station       ?? '',
+    directed_station_name:  bb?.directed_station_name  ?? '',
+    directed_station_ai:    bb?.directed_station_ai    ?? false,
+    command_auto:           bb?.command_auto           ?? false,
+    selected_stance:        bb?.selected_stance        ?? '',
+    stances:                bb?.stances                ?? [],
+  });
+}
+
+/**
  * Payload contract for the Helm console iframe (issue #827). Rendered by
  * gui/battleship/helm.html, gui/cruiser/helm.html and gui/destroyer/helm.html.
  *
@@ -2048,6 +2083,7 @@ if (typeof window !== 'undefined') {
       case 'sensors':     return buildSensorsConsoleState(state);
       case 'comms':       return buildCommsConsoleState(state);
       case 'navigation':  return buildNavigationConsoleState(state);
+      case 'command':     return buildCommandConsoleState(state);
       default:            return '{}';
     }
   };

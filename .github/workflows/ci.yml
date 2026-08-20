@@ -22,7 +22,7 @@ jobs:
       # Shared step, fleet-standard: uv setup, uv sync, pasm validate, pasm scan.
       # Keeps this repo's invocation from drifting from the rest of the fleet.
       - name: Validate PASM model
-        uses: jkeywo/vellum/actions/pasm-validate@08b5fdb7608fa732de44885aac8c7af9791e2052
+        uses: jkeywo/vellum/actions/pasm-validate@2eae13194a3449a17b96c4b930aab9564a371e20
         with:
           spec-path: pasm/spec
           scan: gate
@@ -55,7 +55,7 @@ jobs:
       # exposes no shared-key; rust-cache's default key is per-job, and each of
       # these keys had exactly one job, so the caches stay separate as before.
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@08b5fdb7608fa732de44885aac8c7af9791e2052
+        uses: jkeywo/vellum/actions/setup-fleet-rust@2eae13194a3449a17b96c4b930aab9564a371e20
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
@@ -183,7 +183,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@08b5fdb7608fa732de44885aac8c7af9791e2052
+        uses: jkeywo/vellum/actions/setup-fleet-rust@2eae13194a3449a17b96c4b930aab9564a371e20
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
@@ -213,7 +213,7 @@ jobs:
       # Shared step: toolchain + cache. The wasm target is also declared in
       # rust-toolchain.toml; passed here too so the action is self-describing.
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@08b5fdb7608fa732de44885aac8c7af9791e2052
+        uses: jkeywo/vellum/actions/setup-fleet-rust@2eae13194a3449a17b96c4b930aab9564a371e20
         with:
           targets: wasm32-unknown-unknown
 
@@ -451,7 +451,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust and cache
-        uses: jkeywo/vellum/actions/setup-fleet-rust@08b5fdb7608fa732de44885aac8c7af9791e2052
+        uses: jkeywo/vellum/actions/setup-fleet-rust@2eae13194a3449a17b96c4b930aab9564a371e20
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev

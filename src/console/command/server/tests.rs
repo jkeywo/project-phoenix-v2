@@ -46,6 +46,7 @@ id = "weapons-free"
 kind = "standard"
 high_alert = true
 persist_behind_human = true
+ai_engaged = true
 
 [[station.stance]]
 id = "hold"
@@ -216,6 +217,139 @@ fn stances(app: &App, ship: Entity) -> ShipStationStances {
         .get::<ShipStationStances>()
         .unwrap()
         .clone()
+}
+
+/// An app carrying an empty `Sessions` resource, which `operate_command_ai`'s
+/// emit path requires as a system param (an `ai:` token is authorised on
+/// `operate_ai` alone, so the manager is never consulted, but the resource must
+/// exist).
+fn ai_app() -> App {
+    let mut app = App::new();
+    app.insert_resource(crate::lobby::Sessions(
+        crate::lobby::session::SessionManager::new(),
+    ));
+    app
+}
+
+/// One AI Command decision tick through the REAL path: the decider emits an
+/// admitted order, then the shared applier lands it. Driven directly (not
+/// through `app.update()`), matching this module's convention — the cadence gate
+/// itself is pinned in `ai::cadence`, and driving the systems by hand keeps
+/// these tests about selection CONTENT.
+fn run_command_ai_tick(app: &mut App) {
+    app.world_mut()
+        .run_system_cached(operate_command_ai)
+        .unwrap();
+    app.world_mut()
+        .run_system_cached(handle_set_station_stance)
+        .unwrap();
+}
+
+#[test]
+fn ai_command_selects_the_engaged_stance_into_stored_stances_deterministically() {
+    // AC1/AC2/AC5: an uncrewed Command seat (command_ai) directing an AI Tactical
+    // station selects the authored `ai_engaged` stance at Red Alert, lands it in
+    // ShipStationStances through the shared applier, and does so repeatably across
+    // repeated fixed ticks.
+    let mut app = ai_app();
+    let ship = spawn_ship(&mut app, true, true); // tactical AI, Command AI
+    set_red_alert(&mut app, ship, true);
+
+    for _ in 0..6 {
+        run_command_ai_tick(&mut app);
+        assert_eq!(
+            stances(&app, ship).0.get(&tactical()).map(String::as_str),
+            Some("weapons-free"),
+            "AI Command repeatably selects the authored engaged stance at Red Alert",
+        );
+    }
+    // AC2/AC3: the landed id is one the catalogue authors.
+    assert!(crate::ship::command_stance::is_selectable(
+        &command_config().station(&tactical()).unwrap().stances,
+        "weapons-free",
+    ));
+}
+
+#[test]
+fn ai_command_tracks_the_neutral_and_stores_nothing_off_alert() {
+    // Off Red Alert the AI tracks the alert-neutral, which equals the stored
+    // default, so nothing is emitted and the map stays empty — byte-identical to
+    // a never-commanded hull.
+    let mut app = ai_app();
+    let ship = spawn_ship(&mut app, true, true); // tactical AI, Command AI
+    set_red_alert(&mut app, ship, false);
+
+    run_command_ai_tick(&mut app);
+    assert!(
+        stances(&app, ship).0.is_empty(),
+        "an AI Command at normal alert tracks the neutral without storing it",
+    );
+    assert_eq!(published_selected_stance(&mut app, ship), "normal");
+}
+
+#[test]
+fn ai_command_does_not_act_while_the_target_is_human_held() {
+    // AC3 boundary: with a human at Tactical the AI Command makes no selection —
+    // the same target-AI gate the applier enforces.
+    let mut app = ai_app();
+    let ship = spawn_ship(&mut app, false, true); // tactical HUMAN, Command AI
+    set_red_alert(&mut app, ship, true);
+
+    run_command_ai_tick(&mut app);
+    assert!(
+        stances(&app, ship).0.is_empty(),
+        "AI Command does not direct a human-held target station",
+    );
+}
+
+#[test]
+fn ai_command_does_not_act_while_the_command_seat_is_human_held() {
+    // AC1 boundary: the decider only runs for an uncrewed (AI) Command seat. With
+    // a human hosting Command it makes no selection of its own.
+    let mut app = ai_app();
+    let ship = spawn_ship(&mut app, true, false); // tactical AI, Command HUMAN
+    set_red_alert(&mut app, ship, true);
+
+    run_command_ai_tick(&mut app);
+    assert!(
+        stances(&app, ship).0.is_empty(),
+        "a human-hosted Command seat is not driven by the AI decider",
+    );
+}
+
+#[test]
+fn a_human_taking_command_sees_the_ai_intent_and_overrides_it() {
+    // AC4: an AI-selected intent is visible to a later human host and can be
+    // changed through the ordinary SetStationStance path.
+    let mut app = ai_app();
+    let ship = spawn_ship(&mut app, true, true); // tactical AI, Command AI
+    set_red_alert(&mut app, ship, true);
+    run_command_ai_tick(&mut app);
+    assert_eq!(
+        published_selected_stance(&mut app, ship),
+        "weapons-free",
+        "the AI-selected intent is the published stance in force",
+    );
+
+    // A human takes the Command seat and re-picks through the normal UI path.
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<ShipSystemControlSources>()
+        .unwrap()
+        .0
+        .set(
+            crate::system_registry::command_system_id(),
+            ControlSource::Human,
+        );
+    set_admitted(&mut app, ship, "tactical", "hold");
+    app.world_mut()
+        .run_system_cached(handle_set_station_stance)
+        .unwrap();
+    assert_eq!(
+        stances(&app, ship).0.get(&tactical()).map(String::as_str),
+        Some("hold"),
+        "a later human host overrides the AI-selected stance",
+    );
 }
 
 #[test]

@@ -127,6 +127,19 @@ pub struct StationStanceConfig {
     /// target, so the flag is meaningful only on `standard` stances.
     #[serde(default)]
     pub persist_behind_human: bool,
+    /// The posture an AI-operated Command seat adopts for this station when the
+    /// ship is at high (red) alert (issue #1109).
+    ///
+    /// This is the authored answer to "what does an uncrewed Command choose?":
+    /// exactly one `standard` stance per catalogue may set it, and an AI Command
+    /// operator selects that stance (through the ordinary admitted-order path a
+    /// human uses) while the ship is at Red Alert, tracking the alert-neutral
+    /// otherwise. Never a hard-coded stance id in Rust — the choice is authored
+    /// data on the catalogue itself. Meaningful only on `standard` stances (a
+    /// neutral is already the low-alert tracking default); [`validate`] rejects
+    /// it on a neutral or on more than one stance.
+    #[serde(default)]
+    pub ai_engaged: bool,
 }
 
 /// The three authored stance kinds (issue #1107). Every station catalogue that
@@ -399,6 +412,19 @@ pub enum ShipConfigError {
         stance: String,
         kind: StanceKind,
     },
+    /// A stance catalogue flags more than one stance `ai_engaged` (issue #1109).
+    /// The AI Command seat's high-alert choice is a single authored posture, so
+    /// at most one stance may carry the flag.
+    MultipleAiEngagedStances {
+        station: StationId,
+    },
+    /// A neutral stance is flagged `ai_engaged` (issue #1109). The flag names the
+    /// posture an AI Command adopts ABOVE the alert-neutral tracking default, so
+    /// it is meaningful only on a `standard` stance.
+    AiEngagedStanceNotStandard {
+        station: StationId,
+        stance: String,
+    },
 }
 
 impl std::fmt::Display for ShipConfigError {
@@ -629,6 +655,7 @@ pub fn validate(
         // catalogue), and neutral postures that agree with their kind.
         if !station.stances.is_empty() {
             let mut stance_ids = HashSet::new();
+            let mut ai_engaged_count = 0usize;
             for stance in &station.stances {
                 if !stance_ids.insert(stance.id.clone()) {
                     return Err(ShipConfigError::DuplicateStanceId {
@@ -653,6 +680,22 @@ pub fn validate(
                     }
                     _ => {}
                 }
+                // The AI Command high-alert pick (issue #1109): at most one per
+                // catalogue, and only on a `standard` stance.
+                if stance.ai_engaged {
+                    ai_engaged_count += 1;
+                    if stance.kind != StanceKind::Standard {
+                        return Err(ShipConfigError::AiEngagedStanceNotStandard {
+                            station: station.id.clone(),
+                            stance: stance.id.clone(),
+                        });
+                    }
+                }
+            }
+            if ai_engaged_count > 1 {
+                return Err(ShipConfigError::MultipleAiEngagedStances {
+                    station: station.id.clone(),
+                });
             }
             for kind in [StanceKind::NormalAlertNeutral, StanceKind::HighAlertNeutral] {
                 let found = station
@@ -1942,4 +1985,87 @@ high_alert = true
                 if stance == "proving-normal"
         ));
     }
+
+    #[test]
+    fn the_ai_engaged_flag_parses_and_round_trips() {
+        // Issue #1109: a single standard stance may carry the AI Command
+        // high-alert pick, and it survives a serialise/parse round-trip.
+        let config = parse_command(FULL_CATALOGUE_AI_ENGAGED, "").expect("hull parses");
+        let proving = config.station(&StationId("proving".into())).unwrap();
+        assert!(proving.stances[0].ai_engaged);
+        assert!(!proving.stances[1].ai_engaged);
+        let encoded = toml::to_string(&config).expect("serialise");
+        let decoded = ShipConfig::from_toml(&encoded, STANCE_KINDS).unwrap();
+        assert_eq!(decoded, config);
+    }
+
+    #[test]
+    fn catalogue_rejects_more_than_one_ai_engaged_stance() {
+        // Issue #1109: the AI's high-alert choice is a single authored posture.
+        let two = r#"
+[[station.stance]]
+id = "proving-a"
+kind = "standard"
+high_alert = true
+ai_engaged = true
+
+[[station.stance]]
+id = "proving-b"
+kind = "standard"
+high_alert = true
+ai_engaged = true
+
+[[station.stance]]
+id = "proving-normal"
+kind = "normal_alert_neutral"
+
+[[station.stance]]
+id = "proving-high"
+kind = "high_alert_neutral"
+high_alert = true
+"#;
+        assert!(matches!(
+            parse_command(two, ""),
+            Err(ShipConfigError::MultipleAiEngagedStances { .. })
+        ));
+    }
+
+    #[test]
+    fn catalogue_rejects_an_ai_engaged_neutral() {
+        // Issue #1109: a neutral is already the tracking default, so it may not
+        // be flagged as the engaged posture.
+        let bad = r#"
+[[station.stance]]
+id = "proving-normal"
+kind = "normal_alert_neutral"
+ai_engaged = true
+
+[[station.stance]]
+id = "proving-high"
+kind = "high_alert_neutral"
+high_alert = true
+"#;
+        assert!(matches!(
+            parse_command(bad, ""),
+            Err(ShipConfigError::AiEngagedStanceNotStandard { ref stance, .. })
+                if stance == "proving-normal"
+        ));
+    }
+
+    const FULL_CATALOGUE_AI_ENGAGED: &str = r#"
+[[station.stance]]
+id = "proving-standard"
+kind = "standard"
+high_alert = true
+ai_engaged = true
+
+[[station.stance]]
+id = "proving-normal"
+kind = "normal_alert_neutral"
+
+[[station.stance]]
+id = "proving-high"
+kind = "high_alert_neutral"
+high_alert = true
+"#;
 }

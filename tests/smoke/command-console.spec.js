@@ -88,6 +88,55 @@ test('target console: shows Command intent as non-binding advice while human-hel
   await expect(page.locator('#command-advice')).toBeHidden();
 });
 
+// Issue #1109: an uncrewed Command seat is run by the ship AI, which selects an
+// authored stance from the SAME catalogue a human uses. The console surfaces
+// that with the `command_auto` cue and the AI-selected stance in force; a human
+// taking the seat clears the cue and re-picks through the ordinary path. The
+// selection logic itself is pinned in Rust (`operate_command_ai`, admission, the
+// pure `select_stance`); this pins the console-boundary contract.
+test('command console: an uncrewed Command shows the AI stance, and a human taking the seat can change it', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__sendAction = (json) => window.__sent.push(json);
+  });
+
+  // Uncrewed Command: the ship AI holds the seat and has selected the authored
+  // engaged stance (weapons free) at Red Alert.
+  const auto = aiDirectedState();
+  auto.command_auto = true;
+  auto.selected_stance = 'tactical-weapons-free';
+  await page.evaluate((s) => window.__updateConsole('command', JSON.stringify(s)), auto);
+
+  await expect(page.locator('#command-cue')).toBeVisible();
+  await expect(page.locator('#command-cue-text')).toHaveText(ts('console.command.command_auto'));
+  // The AI-selected intent (weapons free, the first authored stance) is the
+  // marked stance in force.
+  const aiSelected = page.locator('.stance-btn[aria-pressed="true"]');
+  await expect(aiSelected).toHaveCount(1);
+  await expect(aiSelected.locator('.name')).toHaveText(
+    ts('entity.alliance_destroyer.station.tactical.stance.weapons_free'),
+  );
+
+  // A human takes the Command seat: the auto cue clears and they can re-pick.
+  const crewed = aiDirectedState();
+  crewed.command_auto = false;
+  crewed.selected_stance = 'tactical-weapons-free'; // still sees the AI intent
+  await page.evaluate((s) => window.__updateConsole('command', JSON.stringify(s)), crewed);
+  await expect(page.locator('#command-cue')).toBeHidden();
+
+  // Re-pick "hold" (the second authored stance) through the ordinary path.
+  await page.locator('#stance-list .stance-btn').nth(1).click();
+  const sent = await page.evaluate(() => window.__sent);
+  expect(sent).toHaveLength(1);
+  expect(JSON.parse(sent[0])).toEqual({
+    action: 'set_station_stance',
+    console: 'command',
+    station: 'tactical',
+    stance: 'tactical-hold',
+  });
+});
+
 test('command console: clicking a stance emits set_station_stance for that station', async ({ page }) => {
   await page.goto(CONSOLE_URL);
   await page.evaluate(() => {

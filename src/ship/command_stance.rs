@@ -137,6 +137,57 @@ pub fn selection_after_human_lost(
     }
 }
 
+/// The current, tick-derived ship knowledge an AI-operated Command seat decides
+/// from (issue #1109).
+///
+/// Deliberately minimal and deterministic: the ship's own Red Alert level, which
+/// the ordinary Captain AI already drives off threat. No wall-clock and no RNG,
+/// so [`select_stance`] is a pure function of the catalogue and this snapshot —
+/// the AC5 repeatable-selection backbone. Threat/contact facts could extend it
+/// later without changing the seam.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CommandKnowledge {
+    /// Whether the ship is at Red Alert this tick.
+    pub red_alert: bool,
+}
+
+/// The single `standard` stance a designer flagged (`ai_engaged`) as the posture
+/// an AI-operated Command seat adopts at high alert (issue #1109), if the
+/// catalogue authors one.
+///
+/// The catalogue is the sole authority for the choice — never a hard-coded id in
+/// Rust. `ship::config::validate` guarantees at most one, and only on a
+/// `standard` stance, so the first match is the answer.
+pub fn ai_engaged_stance(catalogue: &[StationStanceConfig]) -> Option<&str> {
+    catalogue
+        .iter()
+        .find(|stance| stance.ai_engaged)
+        .map(|stance| stance.id.as_str())
+}
+
+/// The stance an AI-operated Command seat selects for its directed Station, from
+/// EXACTLY the authored catalogue a human Command operator selects from
+/// (issue #1109).
+///
+/// Pure and deterministic (AC5): at high alert it adopts the authored
+/// `ai_engaged` standard stance when the catalogue still authors one, otherwise
+/// it tracks the alert-appropriate neutral. Every branch resolves through the
+/// same [`is_selectable`] / [`neutral_stance_for_alert`] seams a human order
+/// passes, so it can NEVER return an id the catalogue does not author — that is
+/// the catalogue-parity guarantee (AC2/AC3) as a property of the function rather
+/// than of caller discipline. `None` only when the catalogue is malformed
+/// (missing its alert-neutral), which `validate` rejects at load.
+pub fn select_stance(catalogue: &[StationStanceConfig], facts: CommandKnowledge) -> Option<String> {
+    if facts.red_alert {
+        if let Some(engaged) = ai_engaged_stance(catalogue) {
+            if is_selectable(catalogue, engaged) {
+                return Some(engaged.to_string());
+            }
+        }
+    }
+    neutral_stance_for_alert(catalogue, facts.red_alert).map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +200,7 @@ mod tests {
                 kind: StanceKind::Standard,
                 high_alert: true,
                 persist_behind_human: true,
+                ai_engaged: true,
             },
             StationStanceConfig {
                 id: "hold".into(),
@@ -156,6 +208,7 @@ mod tests {
                 kind: StanceKind::Standard,
                 high_alert: false,
                 persist_behind_human: false,
+                ai_engaged: false,
             },
             StationStanceConfig {
                 id: "normal".into(),
@@ -163,6 +216,7 @@ mod tests {
                 kind: StanceKind::NormalAlertNeutral,
                 high_alert: false,
                 persist_behind_human: false,
+                ai_engaged: false,
             },
             StationStanceConfig {
                 id: "high".into(),
@@ -170,6 +224,7 @@ mod tests {
                 kind: StanceKind::HighAlertNeutral,
                 high_alert: true,
                 persist_behind_human: false,
+                ai_engaged: false,
             },
         ]
     }
@@ -273,6 +328,72 @@ mod tests {
         // …and a neutral is always kept.
         assert_eq!(
             selection_after_human_lost(&c, Some("normal"), false).as_deref(),
+            Some("normal"),
+        );
+    }
+
+    // ── AI Command selection (issue #1109) ──────────────────────────────────
+
+    #[test]
+    fn ai_command_selects_only_authored_stances() {
+        // AC2/AC3 catalogue parity: whatever the ship knowledge, the pick is
+        // always an id the catalogue authors — never invented. Exhaustively over
+        // both alert levels.
+        let c = catalogue();
+        for red_alert in [false, true] {
+            let picked = select_stance(&c, CommandKnowledge { red_alert })
+                .expect("a well-formed catalogue always resolves a stance");
+            assert!(
+                is_selectable(&c, &picked),
+                "AI Command must only ever select an authored stance; picked {picked:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ai_command_adopts_the_engaged_stance_at_high_alert() {
+        // At Red Alert the AI adopts the authored `ai_engaged` posture…
+        let c = catalogue();
+        assert_eq!(
+            select_stance(&c, CommandKnowledge { red_alert: true }).as_deref(),
+            Some("weapons-free"),
+        );
+        // …and stands down to the normal-alert neutral otherwise.
+        assert_eq!(
+            select_stance(&c, CommandKnowledge { red_alert: false }).as_deref(),
+            Some("normal"),
+        );
+    }
+
+    #[test]
+    fn ai_command_selection_is_repeatable_for_the_same_knowledge() {
+        // AC5 repeatability: a pure function of catalogue + knowledge, so the
+        // same inputs yield the same id every time.
+        let c = catalogue();
+        for red_alert in [false, true] {
+            let facts = CommandKnowledge { red_alert };
+            let first = select_stance(&c, facts);
+            for _ in 0..8 {
+                assert_eq!(select_stance(&c, facts), first);
+            }
+        }
+    }
+
+    #[test]
+    fn ai_command_without_an_engaged_stance_tracks_the_neutral() {
+        // A catalogue that flags no `ai_engaged` posture falls back to the
+        // alert-appropriate neutral at every level — the byte-identical tracking
+        // default, never an invented escalation.
+        let mut c = catalogue();
+        for stance in &mut c {
+            stance.ai_engaged = false;
+        }
+        assert_eq!(
+            select_stance(&c, CommandKnowledge { red_alert: true }).as_deref(),
+            Some("high"),
+        );
+        assert_eq!(
+            select_stance(&c, CommandKnowledge { red_alert: false }).as_deref(),
             Some("normal"),
         );
     }

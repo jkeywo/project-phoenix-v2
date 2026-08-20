@@ -872,6 +872,13 @@ kind = "standard"
 high_alert = true
 # A durable order: it survives a human handoff at Command rather than resetting.
 persist_behind_human = true
+# [ai] The posture an uncrewed Command seat adopts at Red Alert (issue #1109).
+# When nobody hosts Command AND Tactical is on the AI, the ship's own AI directs
+# Tactical to weapons-free while at Red Alert, standing back down to the
+# alert-neutral otherwise — the same authored stance a human would pick, applied
+# through the same admitted-order path. AI-origin: weapons-free is the hull's one
+# aggressive standard order, so it is the natural high-alert engaged choice.
+ai_engaged = true
 
 [[station.stance]]
 id = "tactical-hold"

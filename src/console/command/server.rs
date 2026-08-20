@@ -60,6 +60,11 @@ impl Plugin for CommandPlugin {
         app.register_admitted_consumer(ConsumerMatcher::exact(
             crate::system_registry::COMMAND_SYSTEM_ID,
         ));
+        // The ONE shared AI decision cadence (issues #889, #895): re-armed here
+        // because an uncrewed Command seat now decides through ordinary AI
+        // (issue #1109). Idempotent — every plugin registering a gated system
+        // calls it.
+        crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
             FixedUpdate,
             (
@@ -67,6 +72,18 @@ impl Plugin for CommandPlugin {
                 // FIRST, so the input handlers below never act on a stale
                 // selection (issue #1108 criterion 4).
                 reconcile_station_stances.in_set(crate::sim_sets::SimSet::Input),
+                // An uncrewed Command seat chooses a stance through ordinary AI
+                // (issue #1109). It runs AFTER the catalogue reconcile (so it
+                // never picks a stale id) and BEFORE the applier (so its emitted
+                // order lands the same tick). It emits an admitted order rather
+                // than writing ShipStationStances itself, so #1108's Human→AI
+                // reconcile (below, after the applier) still has the final word
+                // on a handoff tick. Cadence-gated like every other AI operator.
+                operate_command_ai
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .after(reconcile_station_stances)
+                    .before(handle_set_station_stance)
+                    .run_if(crate::ai::cadence::ai_snapshot_ready),
                 // A human Command operator's stance pick lands next…
                 handle_set_station_stance
                     .in_set(crate::sim_sets::SimSet::Input)
@@ -375,6 +392,122 @@ fn store_resolved_selection(
         }
         None => {}
     }
+}
+
+// ── AI Command operator (issue #1109) ──────────────────────────────────────────
+
+/// Operate an uncrewed Command seat through ordinary AI (issue #1109).
+///
+/// When no human hosts Command — its coarse system reads `operate_ai` — the
+/// ship's AI directs the target Station from EXACTLY the authored stance
+/// catalogue a human uses, and applies its choice through the SAME authoritative
+/// path: it emits an admitted `SetStationStance` (via
+/// [`emit_command_ai_command`]) targeting `command_system_id()`, so admission
+/// validates the `ai:` token against the Command system's `operate_ai` policy
+/// and the shared [`handle_set_station_stance`] applier lands it through its
+/// three content gates. This is why AC2/AC3 come for free: the AI can neither
+/// invent a stance nor bypass admission — it goes through the same seam a human
+/// order does. It never writes [`ShipStationStances`] directly.
+///
+/// The choice is [`command_stance::select_stance`]: a pure, tick-derived
+/// function of the ship's own Red Alert and the authored catalogue, with the
+/// high-alert posture named by the catalogue's `ai_engaged` flag (never a
+/// hard-coded id). Emission is guarded on change against the stance currently in
+/// force to avoid admission spam; `SetStationStance` is idempotent so
+/// correctness does not depend on the guard.
+fn operate_command_ai(
+    sessions: Res<crate::lobby::Sessions>,
+    mut ships: Query<
+        (
+            &ShipConfigComponent,
+            &ShipSystemControlSources,
+            &crate::ship_state::ShipRedAlert,
+            &ShipStationStances,
+            &mut AdmittedCommands,
+            Option<&crate::entity_spawner::EntityUuid>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for (ship_config, control_sources, red_alert, stances, mut admitted, entity_uuid) in
+        ships.iter_mut()
+    {
+        let config = &ship_config.0;
+        let Some(command) = command_station(config) else {
+            continue;
+        };
+        // Only when the Command SEAT itself is AI-operated. This is the
+        // uncrewed-Command gate (a) — distinct from the DIRECTED station's
+        // control, which the applier checks as gate (b).
+        if !control_sources
+            .0
+            .policy_for(&crate::system_registry::command_system_id())
+            .operate_ai
+        {
+            continue;
+        }
+        let Some(target) = command.command_target.clone() else {
+            continue;
+        };
+        // Nothing to direct while a human holds the target Station — the applier
+        // would reject the order anyway; skipping here avoids admission spam.
+        if !station_is_ai_controlled(config, &control_sources.0, &target) {
+            continue;
+        }
+        let Some(target_station) = config.station(&target) else {
+            continue;
+        };
+        let Some(chosen) = command_stance::select_stance(
+            &target_station.stances,
+            command_stance::CommandKnowledge {
+                red_alert: red_alert.0,
+            },
+        ) else {
+            continue;
+        };
+        // The stance currently in force: an explicit stored selection, else the
+        // alert level's neutral (the same tracking default the console shows).
+        let in_force = stances.0.get(&target).cloned().or_else(|| {
+            command_stance::neutral_stance_for_alert(&target_station.stances, red_alert.0)
+                .map(str::to_string)
+        });
+        if in_force.as_deref() == Some(chosen.as_str()) {
+            continue;
+        }
+        emit_command_ai_command(
+            entity_uuid,
+            SystemControlPayload::SetStationStance {
+                station: target.clone(),
+                stance: chosen,
+            },
+            control_sources,
+            &sessions,
+            Some(ship_config),
+            &mut admitted,
+        );
+    }
+}
+
+/// Emit an admitted Command AI order targeting the Command system through the
+/// shared [`crate::command_admission::ai_emit::emit_ai_command`] seam, using this
+/// ship's own `ai:<uuid>` token (mirrors `emit_captain_ai_command`).
+fn emit_command_ai_command(
+    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    payload: SystemControlPayload,
+    sources: &ShipSystemControlSources,
+    sessions: &crate::lobby::Sessions,
+    ship_config: Option<&ShipConfigComponent>,
+    admitted: &mut AdmittedCommands,
+) -> bool {
+    crate::command_admission::ai_emit::emit_ai_command(
+        entity_uuid,
+        crate::system_registry::command_system_id(),
+        payload,
+        sources,
+        sessions,
+        ship_config,
+        admitted,
+    )
 }
 
 // ── Blackboard publish ─────────────────────────────────────────────────────────

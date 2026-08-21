@@ -18,6 +18,15 @@ pub mod headless;
 // shipped wasm build.
 pub mod perf;
 
+// The boot seam (issue #1217, Track 2 step B5). One place that composes an
+// `App` for each of the three inventories — Headless, BrowserHost,
+// BrowserAutomation — that `headless::app::build_headless_app` and
+// `server::bridge::wasm_init` today spell out by hand. Additive: nothing calls
+// `boot::build` yet (the headless and wasm adapters adopt it in #1218/#1219).
+// Not behind the headless feature — two of its three profiles are browser
+// (wasm) inventories.
+pub mod boot;
+
 pub mod ai;
 pub mod core;
 pub use ai::core as ai_core;

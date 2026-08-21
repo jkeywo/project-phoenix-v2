@@ -22,7 +22,7 @@ use bevy::prelude::Component;
 /// The helm-path fields it owns are `x`/`y`/`z`/`yaw`/`forward_speed`/
 /// `lateral_speed`/`vertical_speed`/`roll` (the vertical pair added in #744).
 ///
-/// It is deliberately **not** the only writer of these fields overall. Six
+/// It is deliberately **not** the only writer of these fields overall. Seven
 /// out-of-band writers are **sanctioned exceptions**. They are corrections and
 /// overrides layered on top of the helm integration rather than competing
 /// integrators, so they are intentionally left as direct writes and do not
@@ -36,6 +36,7 @@ use bevy::prelude::Component;
 /// | `handle_slow_zone_speed_clamp` | `src/regions/server.rs` | `forward_speed` | An **observer** (`trigger: On<RegionEntered>`), not a scheduled system — it can fire at any point, outside any `SimSet` ordering window, so it cannot be sequenced relative to the helm integrator. |
 /// | `move_towed_targets` (issue #1027) | `src/operations/server.rs` | `x`, `y`, `z`, `forward_speed`, `lateral_speed`, `vertical_speed` | A **tow**: while an operation holds, the towed craft's position is the tug's rig, not its own helm's. The same shape as the collision de-overlap — a correction applied after integration, in `SimSet::Modifiers` — and the speeds are zeroed for the collision responder's reason turned around: a craft released from the rig must not shoot off at a velocity its helm accumulated against a position it was never allowed to reach. |
 /// | `move_coupled_target` (issue #1156) | `src/tractor/server.rs` | `x`, `y`, `z`, `forward_speed`, `lateral_speed`, `vertical_speed` | A **tractor coupling**: the exact shape of `move_towed_targets` above, from the parallel engineering-owned tractor system rather than the operations tow. While the beam holds, the coupled derelict's position is the operator's rig; the speeds are zeroed for the same released-from-the-rig reason. |
+/// | `tick_dock` (issue #1159) | `src/dock/server.rs` | `x`, `y`, `z`, `yaw`, `forward_speed`, `lateral_speed`, `vertical_speed` | A **dock manoeuvre**: writes only the OWN docking ship onto the pose it is placed at, the same after-integration correction shape as the tow and the tractor. Ordered `after` the tractor rig in `SimSet::Modifiers` so the own-ship placement is the deterministic last writer that tick; the speeds are zeroed on every placement for the released-from-the-rig reason. |
 ///
 /// When adding a new writer, prefer helm intent components. Only write these
 /// fields directly if the change is genuinely one of the above shapes — a

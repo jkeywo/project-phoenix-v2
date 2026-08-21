@@ -151,6 +151,20 @@ pub const COMMAND_KIND: &str = "command";
 pub const TRACTOR_SYSTEM_ID: &str = "tractor";
 pub const TRACTOR_KIND: &str = "tractor";
 
+/// Wire `SystemId` for the docking system (issue #1159).
+///
+/// The second slice of PRD #1143's coupling family: a helm-owned `[[system]]`
+/// that declares its own power group, carries a damage entry, is admission-gated
+/// (`Dock` / `Undock`), and publishes its own blackboard. Running it flies an
+/// automatic manoeuvre that mates the two hulls' nearest viable dock-marker pair
+/// (the pure `crate::dock::mating` owns the geometry). Its terms — range, engage
+/// distance, approach speed, mate tolerance, undock clearance, minimum power
+/// level — are authored in a hull's `[dock]` table, and its dock markers in the
+/// rig sidecar, so a hull that declares neither is unchanged in every way. The
+/// docked relationship this forms is what the umbilical (#1160) gates on.
+pub const DOCK_SYSTEM_ID: &str = "dock";
+pub const DOCK_KIND: &str = "dock";
+
 // ── Fine-grained Helm systems (issue #511) ────────────────────────────────────
 
 /// Wire `SystemId` for the Helm Joystick fine system.
@@ -377,6 +391,8 @@ impl SystemKindRegistry {
         registry.register(COMMAND_KIND)?;
         // Tractor-beam system (issue #1156).
         registry.register(TRACTOR_KIND)?;
+        // Docking system (issue #1159).
+        registry.register(DOCK_KIND)?;
         // Fine-grained Helm systems (issue #511)
         registry.register(HELM_JOYSTICK_KIND)?;
         registry.register(HELM_ENGINE_KIND)?;
@@ -502,6 +518,12 @@ pub fn command_system_id() -> SystemId {
 /// under.
 pub fn tractor_system_id() -> SystemId {
     SystemId(TRACTOR_SYSTEM_ID.to_string())
+}
+
+/// The docking system's wire `SystemId` (issue #1159). The admitted target for
+/// `Dock` / `Undock` and the key its blackboard publishes under.
+pub fn dock_system_id() -> SystemId {
+    SystemId(DOCK_SYSTEM_ID.to_string())
 }
 
 // ── Fine Helm system id helpers (issue #511) ──────────────────────────────────

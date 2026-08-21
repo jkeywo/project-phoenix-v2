@@ -15,6 +15,7 @@ import {
   buildWeaponsConsoleState,
   buildCaptainConsoleState,
   buildHelmConsoleState,
+  buildHelmDockView,
   buildRepairConsoleState,
   buildPowerConsoleState,
   buildShieldsConsoleState,
@@ -1033,6 +1034,83 @@ describe('buildHelmConsoleState', () => {
     const s = parse(buildHelmConsoleState({ shipYaw: Math.PI / 2, forwardSpeed: 33 }));
     expect(s.ship_heading).toBeCloseTo(90, 2);
     expect(s.speed).toBeCloseTo(33, 3);
+  });
+});
+
+// The contextual helm dock control (issue #1159): it appears exactly when a
+// berth is in range and becomes the undock control when the two hulls are mated.
+// The client mirrors the server's own `available`/`docked` gate rather than
+// re-deriving range, so the human and the AI agree by construction.
+describe('helm dock control (issue #1159)', () => {
+  it('is absent when the hull publishes no dock blackboard', () => {
+    // No dock system → no `dock` blackboard → no control at all, so a hull
+    // without a dock is unchanged.
+    expect(buildHelmDockView(EMPTY)).toBe(null);
+    expect(parse(buildHelmConsoleState(EMPTY)).dock).toBe(null);
+  });
+
+  it('appears when a berth is in range', () => {
+    const state = {
+      blackboards: {
+        dock: {
+          range: 200,
+          available: true,
+          available_target: 'berth-uuid',
+          available_target_name: 'world.probe_dock.entity.berth.name',
+          engaged: false,
+          docked: false,
+        },
+      },
+    };
+    const dock = parse(buildHelmConsoleState(state)).dock;
+    expect(dock).not.toBe(null);
+    expect(dock.available).toBe(true);
+    expect(dock.docked).toBe(false);
+    expect(dock.available_target_name).toBe('world.probe_dock.entity.berth.name');
+  });
+
+  it('disappears when no berth is in range', () => {
+    // The berth drifted out of range: the server publishes available=false with
+    // nothing engaged or docked, which the helm renders as no control.
+    const state = {
+      blackboards: {
+        dock: { range: 200, available: false, engaged: false, docked: false },
+      },
+    };
+    const dock = parse(buildHelmConsoleState(state)).dock;
+    // The view is still present (the hull has a dock), but its gate is closed —
+    // the helm HTML hides the panel when !available && !engaged && !docked.
+    expect(dock.available).toBe(false);
+    expect(dock.engaged).toBe(false);
+    expect(dock.docked).toBe(false);
+  });
+
+  it('becomes the undock control, naming the partner, once mated', () => {
+    const state = {
+      blackboards: {
+        dock: {
+          range: 200,
+          available: false,
+          engaged: true,
+          docked: true,
+          docked_to: 'berth-uuid',
+          docked_to_name: 'world.probe_dock.entity.berth.name',
+        },
+      },
+    };
+    const dock = parse(buildHelmConsoleState(state)).dock;
+    expect(dock.docked).toBe(true);
+    expect(dock.docked_to).toBe('berth-uuid');
+    expect(dock.docked_to_name).toBe('world.probe_dock.entity.berth.name');
+  });
+
+  it('passes a refusal id straight through for the console to resolve', () => {
+    const state = {
+      blackboards: {
+        dock: { range: 200, available: false, refusal: 'dock.refused.out_of_range' },
+      },
+    };
+    expect(parse(buildHelmConsoleState(state)).dock.refusal).toBe('dock.refused.out_of_range');
   });
 });
 

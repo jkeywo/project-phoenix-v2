@@ -513,6 +513,93 @@ entities:
         - condition_delta
       tests: [cargo test]
 
+  - component: dock-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Dock Controller
+      summary: Runs the helm-owned docking control - the second slice of PRD #1143's coupling family. Takes the dock/undock commands, resolves the two hulls' dock markers, hands the geometry to the pure marker-mating module to pick the nearest viable pair and answer the mating pose, flies the OWN ship onto that pose through a thin adapter over the existing close-in docking manoeuvre, and publishes the dock blackboard. The docked relationship it forms is what the umbilical (#1160) gates on.
+      rationale:
+        - "[ai] IT COPIES THE TRACTOR'S SHAPE (rule 10). A pure Bevy-free `mating` module owns the geometry - the nearest viable dock-marker pair and the pose that mates it, unit-tested in isolation with plain glam types - and a `server` adapter gathers the live world, calls in, and applies what comes back, deciding nothing itself. The dock is a first-class helm `[[system]]`: it declares a power group, carries a damage entry, is admission-gated, registers as an admitted consumer and publishes under its own system id."
+        - "[ai] IT MOVES THE OWN SHIP ONLY. Unlike the tractor rig, which writes the TARGET's position, docking writes only the OWN ship's ShipPhysics/Transform - the ship the crew fly slides onto the berth; the structure it mates with is never touched - so the tractor-review coordination note about a target moved by two couplers does NOT apply. The one hull that could be written by both is a docking ship that is also under someone's tractor, so this system is ordered AFTER the tractor rig in SimSet::Modifiers, giving the own-ship placement a deterministic last writer. A docker holds at most one target (docking_target is a single Option); berth-side occupancy (one docker per target) is not enforced here."
+        - "[ai] DOCK MARKERS ARE THE RIG-MARKER VOCABULARY. A dock marker is a `[markers.<name>]` whose name begins with `dock`, resolved from the rig sidecar into the hull's own frame ONCE at spawn - the same composition ModelMarkers uses - and only for a hull whose `[dock]` table opted it in, so a world whose hulls author no `[dock]` reads no sidecar and its content_digest is unchanged. A hull that declares no dock markers can never be docked with, and the console says so (dock.refused.no_markers)."
+        - "[ai] THE MANOEUVRE IS A THIN ADAPTER OVER docking_close_manoeuvre. The pure module answers the mate pose; the adapter asks the existing close-in manoeuvre for the ship-local intent onto it, rotates that back to world, and advances the own ship at the authored approach speed - not a new flight controller. On mate it snaps to the pose and holds; undock backs the ship straight out along its heading and returns ordinary flight. Each interruption - drifting past the authored range, dropping below min_power_level, damaging the dock to Disabled, or the berth being destroyed - ends the dock cleanly, checked most-actionable-first like the tractor's verdict."
+        - "[ai] HUMAN AND AI ISSUE THE SAME COMMANDS. Dock and Undock target the real, helm-owned dock system, so they take the ordinary station-tenure admission path - the helm holder from the network gate, the dock AI (#1162) through the same validate_and_admit seam - and admission strips source identity before the handler sees it. This slice makes the commands admissible from the helm console; the AI policy host that drives them is #1162."
+        - "[ai] EVERYTHING IS AUTHORED (rule 11). The range, engage distance, approach speed, mate tolerance, undock clearance and minimum power level are the hull's `[dock]` table; the power group, station and damage entry are the dock `[[system]]` block; the marker positions are the rig sidecar. A hull that authors none carries no dock and is unchanged, which is why the demo destroyer is untouched by this slice and the probe fields dedicated hulls."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [dock-relationship-state]
+      reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/dock/mating.rs
+        - src/dock/server.rs
+      symbols:
+        - DockConfig
+        - DockRefusal
+        - nearest_viable_pair
+        - MatingSolution
+        - DockControl
+        - DockMarkers
+        - DockSaveState
+        - DockPlugin
+        - handle_dock_commands
+        - tick_dock
+        - publish_dock_blackboard
+        - resolve_dock_markers
+      messages: [Dock, Undock]
+      tests: [cargo test]
+
+  - state: dock-relationship-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Dock Relationship State
+      summary: "Per-ship: the authored dock terms and resolved power group, and the live half - whether a dock is engaged, whether the two hulls are mated, and which berth is held. Authoritative - a host that thought two hulls were docked disagrees about what the umbilical may bridge."
+      rationale:
+        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own keyed on the minted entity id: the docker's key and the uuid of the hull it is mated to, for every ship actually docked. This is the relationship the umbilical (#1160) gates on and nothing else folds - a mid-approach docker's divergence shows in its own folded position, but the DOCKED FACT (which two hulls are joined) is authoritative state a resume must survive. The authored terms are content, which content_digest is answerable for, and the approach/undock motion is already caught by the ship's folded position, so neither is folded."
+        - "[ai] A ship docked to NOTHING folds NOTHING - not even a row, the tractor namespace's empty-walk affordance. That is what lets a shipped hull gain a `[dock]` table later without moving any committed world's digest, and it is why the demo destroyer stays byte-identical while the probe hulls carry the dock."
+        - "[ai] Snapshotted as a PROJECTION rather than whole: the engage/dock state and the docked target travel (DockSaveState), while the authored config and resolved power group ride the template and are re-derived on spawn. The last refusal and the undock target are not persisted: both are projections the next tick re-derives from the resumed world. EntityConfig sets deny_unknown_fields, so a build predating the `[dock]` table refuses the template outright - which is why this did not bump SNAPSHOT_FORMAT."
+    architecture:
+      classification: authoritative
+      owner: dock-controller
+      writers: [dock-controller]
+      replicas: [dock-published-state]
+    implementation:
+      status: declared
+      paths: [src/dock/server.rs]
+      symbols:
+        - DockControl
+        - DockSaveState
+      tests: [cargo test]
+
+  - state: dock-published-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Published Dock State
+      summary: The client-visible projection of a ship's dock control - the authored reach, whether a berth is available in range, whether a dock is engaged or held, the available/docked hull's uuid and name id, and why the last dock was refused. Published every tick under the dock's own system id by ships that carry a dock, and by nobody else.
+      rationale:
+        - "[ai] A SystemBlackboard variant keyed by the REAL dock system id, not a reserved channel, because unlike an operation the dock IS a thing aboard the ship: it declares a power group, carries a damage entry, and is commanded and refused through the helm console. The helm console reads it as its `dock` view and shows the contextual control exactly when `available` is true - the AC an in-range/out-of-range dock is proved against - and the undock control when `docked`."
+        - "[ai] Additive on the wire in both directions - the adjacently-tagged enum's other variants are untouched by adding Dock, and every field is serde-default, so a payload predating one decodes rather than being refused whole."
+        - "[ai] NO ENGLISH CROSSES THE WIRE. The available/docked hull's name is a world entity name id and every refusal is a strings.csv id (`dock.refused.*`) the console resolves through t(); the refusal is a match in Rust rather than a composed id, so check-strings can see every id a new variant needs a row for."
+    architecture:
+      classification: client-projection
+      owner: dock-controller
+      writers: [dock-controller]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs]
+      symbols:
+        - DockBlackboard
+      tests: [cargo test, npx vitest run]
+
   - component: dossier-projection
     core:
       status: implemented

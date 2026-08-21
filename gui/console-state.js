@@ -1044,7 +1044,45 @@ export function buildHelmConsoleState(state) {
     // placeholder; the component carries none, and paints no overlay at all
     // rather than invent a colour if this arrives null.
     hostile_arc_color:   state.hostileArcColor || null,
+    // ── Contextual dock control (issue #1159) ─────────────────────────────
+    // The dock's own blackboard, published under its system id by a hull whose
+    // helm owns a `dock` system. A hull without one publishes no such
+    // blackboard, so `dock` is null and the helm console shows no dock control
+    // at all — the destroyer is unchanged until #1164 gives it a dock. The
+    // contextual control appears exactly when `available` is true and becomes
+    // the undock control when `docked`; every string it shows is a `t()` id, so
+    // no English crosses here.
+    dock:                buildHelmDockView(state),
   });
+}
+
+/**
+ * The dock control's view for the helm console (issue #1159), read from the raw
+ * `dock` blackboard the helm-owned `dock` system publishes. Returns `null` when
+ * the hull has no dock system (no blackboard), so the console renders no control.
+ *
+ * `present` is the server's own gate; the client mirrors it rather than
+ * re-deriving range so the human and the AI agree by construction. `available`
+ * is when the Dock control shows, `docked` when it becomes Undock, and `refusal`
+ * is a `strings.csv` id the console resolves.
+ *
+ * @param {{ blackboards? }} state
+ * @returns {object|null}
+ */
+export function buildHelmDockView(state) {
+  const bb = state.blackboards && state.blackboards['dock'];
+  if (!bb) return null;
+  return {
+    range: bb.range ?? 0,
+    available: !!bb.available,
+    available_target: bb.available_target ?? null,
+    available_target_name: bb.available_target_name ?? null,
+    engaged: !!bb.engaged,
+    docked: !!bb.docked,
+    docked_to: bb.docked_to ?? null,
+    docked_to_name: bb.docked_to_name ?? null,
+    refusal: bb.refusal ?? null,
+  };
 }
 
 /**

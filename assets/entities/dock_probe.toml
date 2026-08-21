@@ -1,0 +1,93 @@
+# Dock probe — the helm-docking operator for issue #1159.
+#
+# A deliberately lean hull that exercises ONE mechanism end to end: a helm-owned
+# `[[system]] kind = "dock"`, its own `[power_groups.dock]` power group, a damage
+# entry so it can be knocked out, a `[dock]` table carrying the approach terms,
+# and dock markers declared in its rig sidecar (the `dock_probe` variant). It is
+# NOT a shipped combat hull and is flown in no scenario — it is the fixture
+# `assets/worlds/probe_dock.toml` puts a dock control on, kept out of
+# `alliance_destroyer.toml` on purpose so no shipped hull's folded system-hull
+# (and therefore no committed world's digest) moves for this slice. The demo
+# destroyer gains docking in a later integration (#1164 S11a), not here.
+#
+# It flies nothing of its own: the dock manoeuvre moves the own ship onto its
+# mate, so the probe needs no helm axes — the helm station exists only to OWN the
+# dock system and give the Dock/Undock commands a seat to be admitted against.
+
+tags = ["ship"]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+
+[mesh]
+# Shares the courier silhouette but reads its DOCK-MARKER rig from the dedicated
+# `dock_probe` variant sidecar — a bespoke .glb would buy the probe nothing.
+model = "assets/models/alliance_courier.glb"
+variant = "dock_probe"
+shape = "sphere"
+colour = []
+
+[collider]
+shape = "Capsule"
+radius = 0.6
+length = 1.5
+# The dock manoeuvre writes the own ship's position directly (it is the own-ship
+# analogue of the tractor rig), so like the tug this stays the static-terrain
+# default rather than claiming a flyable helm.
+movable = false
+
+[radar_appearance]
+colour = [0.2, 0.9, 0.6]
+size = 5.0
+icon = "ship"
+
+# Power: no `[power]` block, so the reactor takes the default profile. The one
+# small dock group draws well under it and rests at its nominal level.
+[power_groups.dock]
+label = "entity.dock_probe.power_groups.dock.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+# ── The dock's damage entry ──────────────────────────────────────────────────
+# So the dock can be damaged to Disabled — the interruption the probe drives by
+# knocking this system down.
+[[hull.system_hull]]
+system_id = "dock"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+# ── Helm owns the dock ───────────────────────────────────────────────────────
+[[station]]
+id = "helm"
+name = "Helm"
+description = "entity.dock_probe.station.helm.description"
+rank = "Ltn."
+short_code = "HLM"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+# ── The dock system ──────────────────────────────────────────────────────────
+# First-class, helm-owned, power-grouped: the admitted target for Dock / Undock,
+# admission-gated exactly like any other station-owned system.
+[[system]]
+id = "dock"
+kind = "dock"
+station = "helm"
+power_group = "dock"
+
+# ── The dock terms ───────────────────────────────────────────────────────────
+# All authored (AGENTS.md rule 11): the reach the control appears within and a
+# forming/held dock parts past, the distance the close-in manoeuvre engages
+# within, the low approach speed, the mate tolerance, how far undock backs clear,
+# and the lowest power-group level the dock runs at. The dock MARKERS themselves
+# are authored in the rig sidecar, not here.
+[dock]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2

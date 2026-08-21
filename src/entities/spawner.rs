@@ -1266,6 +1266,42 @@ pub fn spawn_entity(
         entity_commands.insert(crate::tractor::HeldResponseSection(held_response.clone()));
     }
 
+    // Docking (issue #1159) — a hull opts into docking with a `[dock]` table.
+    // Its presence, and ONLY its presence, triggers the one spawn-time read of
+    // the model rig sidecar for `dock`-prefixed markers, so a world whose hulls
+    // author no `[dock]` reads no sidecar here and its `content_digest` is
+    // unchanged. Two components come out of it:
+    //
+    //   * `DockMarkers` — the dock markers resolved from the rig sidecar into the
+    //     hull's own frame — on any hull with a `[dock]` table AND dock markers.
+    //     This is what makes a hull DOCKABLE (a passive berth needs only this).
+    //   * `DockControl` — the live dock control — additionally on a hull whose
+    //     `[[system]] kind = "dock"` gives the dock a power group and a station,
+    //     making it an ACTIVE docker. `EntityConfig` validation already paired
+    //     the two, so the resolve below cannot silently drop the control.
+    if let Some(dock) = &config.dock {
+        if let Some(mesh) = &config.mesh {
+            if let Some(model) = mesh.model.as_deref() {
+                if let Some(rig) =
+                    crate::entities::glb_visual::resolve_sidecar_rig(model, mesh.variant.as_deref())
+                {
+                    let markers = crate::dock::resolve_dock_markers(&rig);
+                    if !markers.is_empty() {
+                        entity_commands.insert(markers);
+                    }
+                }
+            }
+        }
+        if let Some(power_group) = config.ship_config.as_ref().and_then(|sc| {
+            sc.systems
+                .iter()
+                .find(|s| s.kind == crate::system_registry::DOCK_KIND)
+                .and_then(|s| s.power_group.clone())
+        }) {
+            entity_commands.insert(crate::dock::DockControl::new(dock.clone(), power_group));
+        }
+    }
+
     // The science scan (issue #1032) — attach the record when `[scan]` is
     // present, on the same argument again. The record carries the authored
     // fidelity ladder AND the last reading: a hull that can scan starts able to
@@ -1849,6 +1885,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1938,6 +1975,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1997,6 +2035,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2061,6 +2100,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2130,6 +2170,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2282,6 +2323,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2367,6 +2409,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2435,6 +2478,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2587,6 +2631,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
         };
 
@@ -2654,6 +2699,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2703,6 +2749,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: Some(faction_id),
             hull: None,
@@ -2819,6 +2866,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -3041,6 +3089,7 @@ regen_per_sec = 0.0
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,

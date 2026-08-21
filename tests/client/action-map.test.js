@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 47 expected action keys', () => {
+  it('contains exactly the 49 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'abort_operation',
       'cancel_impulse',
@@ -17,6 +17,7 @@ describe('ACTION_MAP', () => {
       'clear_comms',
       'clear_navigation_waypoint',
       'dispatch_repair_team',
+      'dock',
       'engage_tractor',
       'fire_blaster',
       'fire_phaser',
@@ -56,6 +57,7 @@ describe('ACTION_MAP', () => {
       'start_impulse_charge',
       'start_operation',
       'toggle_boost',
+      'undock',
       'unload_tube',
     ]);
   });
@@ -80,6 +82,26 @@ describe('fire_phaser', () => {
     const send = mkSend();
     ACTION_MAP.fire_phaser({ action: 'fire_phaser' }, send);
     expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('dock / undock (issue #1159)', () => {
+  it('dock sends ControlSystem Dock targeting the dock system', () => {
+    const send = mkSend();
+    ACTION_MAP.dock({ action: 'dock' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'dock',
+      payload: { type: 'Dock' },
+    });
+  });
+
+  it('undock sends ControlSystem Undock targeting the dock system', () => {
+    const send = mkSend();
+    ACTION_MAP.undock({ action: 'undock' }, send);
+    expect(send).toHaveBeenCalledWith('ControlSystem', {
+      target: 'dock',
+      payload: { type: 'Undock' },
+    });
   });
 });
 

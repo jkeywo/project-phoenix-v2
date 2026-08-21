@@ -113,6 +113,11 @@ pub mod cross_target_probe;
 /// catalogue field list and the pin are shared code, and only the socket loop
 /// (`delivery::serve`) is native-only.
 pub mod delivery;
+/// Helm docking (issue #1159): the pure marker-mating module and its Bevy
+/// adapter. A hull with a `[dock]` table and dock markers in its rig sidecar can
+/// dock with, or be docked by, another hull carrying dock markers; the docked
+/// relationship is a folded, published state the umbilical (#1160) gates on.
+pub mod dock;
 /// Dossiers (issue #1030): the pure per-subject projection of what a crew
 /// knows, and the adapter that publishes it on the local ship's intelligence
 /// channel. Holds no state of its own — every fact is a fold of something

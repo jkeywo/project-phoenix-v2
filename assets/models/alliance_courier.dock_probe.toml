@@ -1,0 +1,30 @@
+# Dock-probe rig variant for issue #1159 — the docking probe's dock markers.
+#
+# A dedicated `dock_probe` VARIANT sidecar over the shipped `alliance_courier.glb`
+# so the docking probe world can field hulls that DECLARE DOCK MARKERS in the
+# ordinary rig-marker vocabulary — the same `[markers.<name>]` blocks that carry
+# engines and hardpoints — without touching the courier's own default sidecar or
+# the shipped destroyer (whose committed digest must not move; destroyer docking
+# is deferred to #1164 S11a). A marker whose name begins with `dock` is a dock
+# marker; a hull whose sidecar declares none can never be docked with.
+#
+# Identity base on purpose: this is a headless test fixture, and an identity rig
+# keeps the mate geometry the probe asserts on readable — a marker authored here
+# is exactly the ship-local point it reads as. The two dock plates sit on the
+# port and starboard beams facing outward, so two hulls drawn up alongside each
+# other mate plate-to-plate.
+
+[base]
+offset = [0.0, 0.0, 0.0]
+rotation = [0.0, 0.0, 0.0]
+scale = [1.0, 1.0, 1.0]
+
+# Port dock plate: 5 units to port (-X), facing outward to port.
+[markers.dock_port]
+position = [-5.0, 0.0, 0.0]
+direction = [-1.0, 0.0, 0.0]
+
+# Starboard dock plate: 5 units to starboard (+X), facing outward to starboard.
+[markers.dock_starboard]
+position = [5.0, 0.0, 0.0]
+direction = [1.0, 0.0, 0.0]

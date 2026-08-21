@@ -4499,6 +4499,17 @@ pub struct EntityConfig {
     /// exactly as #1156 held it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub held_response: Option<crate::tractor::HeldResponseConfig>,
+    /// The dock terms (issue #1159) — range, engage distance, approach speed,
+    /// mate tolerance, undock clearance and minimum power level. Its presence
+    /// opts a hull into docking: it can be docked WITH (its dock markers are read
+    /// from the rig sidecar into a `DockMarkers` component), and, when paired with
+    /// a `[[system]] kind = "dock"` block, it can actively dock. A hull that
+    /// authors no `[dock]` table carries no dock markers and no `DockControl`, can
+    /// neither dock nor be docked with, and is unchanged in every way — which is
+    /// why the shipped destroyer is untouched by this slice and the probe fields
+    /// dedicated hulls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dock: Option<crate::dock::DockConfig>,
     /// The faint world-locked lattice drawn under this hull on the viewscreen.
     /// Present only on a hull meant to be FLOWN — the grid is a motion cue for
     /// the crew looking out of their own ship, and it is only ever read off the
@@ -4943,6 +4954,36 @@ impl EntityConfig {
         // nothing, or holds a target on top of the operator that grabbed it.
         if let Some(ref held_response) = config.held_response {
             held_response.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Validation: a [dock] table has to describe a dock that can mate (issue
+        // #1159), and a `kind = "dock"` SYSTEM has to be paired with a [dock]
+        // table for its terms. Unlike the tractor, the pairing is one-directional:
+        // a [dock] table alone makes a hull DOCKABLE (a passive berth carries its
+        // dock markers but no active control), while the system is what makes it
+        // an active docker — so a [dock] table without a dock system is allowed,
+        // but a dock system without a [dock] table (or a power group) is a control
+        // the crew can press that has no terms to run under.
+        if let Some(ref dock) = config.dock {
+            dock.validate().map_err(SerdeError::custom)?;
+        }
+        if let Some(system) = config.ship_config.as_ref().and_then(|sc| {
+            sc.systems
+                .iter()
+                .find(|s| s.kind == crate::system_registry::DOCK_KIND)
+        }) {
+            if config.dock.is_none() {
+                return Err(SerdeError::custom(
+                    "a [[system]] kind = \"dock\" block needs a matching [dock] table to declare \
+                     its range and approach terms",
+                ));
+            }
+            if system.power_group.is_none() {
+                return Err(SerdeError::custom(
+                    "the [[system]] kind = \"dock\" block must declare a power_group — the dock's \
+                     power allocation is what an interruption checks",
+                ));
+            }
         }
 
         // Validation: a [reference_grid] table has to describe a lattice that

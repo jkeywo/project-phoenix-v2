@@ -186,6 +186,7 @@ use crate::civilian::{CivilianState, CivilianTraffic};
 use crate::command_plugin::ShipStationStances;
 use crate::core::telemetry::RunTelemetry;
 use crate::damage::SystemHull;
+use crate::dock::DockControl;
 use crate::entity_spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::{InfrastructureCondition, InfrastructureState};
 use crate::lobby::WorldResource;
@@ -334,6 +335,7 @@ pub fn world_digest(world: &World) -> u64 {
     acc = fold_weapons_hold_namespace(world, acc);
     acc = fold_station_stances_namespace(world, acc);
     acc = fold_tractor_namespace(world, acc);
+    acc = fold_dock_namespace(world, acc);
     acc = fold_asteroid_namespace(world, acc);
     fold_collisions(world, acc)
 }
@@ -755,6 +757,58 @@ fn fold_tractor_namespace(world: &World, mut acc: u64) -> u64 {
     for (key, _, engaged, target) in rows {
         acc = fold_str(acc, &key.id);
         acc = fold_u64(acc, engaged as u64);
+        acc = fold_str(acc, &target);
+    }
+    acc
+}
+
+/// Every ship DOCKED to another hull (issue #1159), in [`FoldKey`] order, in its
+/// own namespace.
+///
+/// # What is folded, and why it has to be
+///
+/// The docked relationship — the docker's key and the uuid of the hull it is
+/// mated to — for every ship actually docked. This is a relationship between two
+/// hulls that nothing else in the digest records: while a mid-approach docker's
+/// divergence shows in its own folded position, the DOCKED FACT (which two hulls
+/// are joined) is authoritative state the umbilical (#1160) gates on, and a host
+/// that thought two hulls were mated when they were not disagrees about what the
+/// umbilical may bridge. The authored `[dock]` terms are content, which
+/// `content_digest` answers for, and the approach/undock motion is already caught
+/// by the ship's folded position, so neither is folded here.
+///
+/// The empty-walk affordance is [`fold_tractor_namespace`]'s, and does the same
+/// real work: a hull that authored a `[dock]` table and is NOT docked folds
+/// NOTHING — not even a row — so a shipped hull can gain docking without moving
+/// any committed world's digest. The moment one ship is docked the row count is
+/// in the accumulator like everyone else's.
+fn fold_dock_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &DockControl)>() else {
+        // A world that never registered the component runs no docks — the empty
+        // case, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, String)> = query
+        .iter(world)
+        .filter_map(|(entity, uuid, control)| {
+            control.docked_partner().map(|target| {
+                (
+                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                    entity.index(),
+                    target.to_string(),
+                )
+            })
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "dock-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, target) in rows {
+        acc = fold_str(acc, &key.id);
         acc = fold_str(acc, &target);
     }
     acc
@@ -1468,6 +1522,69 @@ mod tests {
             world_digest(&holding_a),
             world_digest(&holding_b),
             "…and a host that thinks the beam has a different hulk must fold to a different number"
+        );
+    }
+
+    /// A docker, optionally mated to a named berth.
+    fn spawn_docker(world: &mut World, uuid: &str, docked_to: Option<&str>) {
+        let mut control = DockControl::new(
+            crate::dock::DockConfig {
+                range: 200.0,
+                engage_distance: 400.0,
+                approach_speed: 60.0,
+                mate_tolerance: 4.0,
+                undock_clear_distance: 120.0,
+                min_power_level: 2,
+            },
+            crate::messages::PowerGroupId("dock".into()),
+        );
+        if let Some(target) = docked_to {
+            control.engaged = true;
+            control.docked = true;
+            control.docking_target = Some(target.to_string());
+        }
+        world.spawn((EntityUuid(uuid.to_string()), control));
+    }
+
+    /// **Issue #1159.** A world with nobody docked folds to exactly the number it
+    /// did before the namespace existed — and so does a hull that authored a dock
+    /// and is not docked. Only a real MATE moves it, and which two hulls are
+    /// joined is what moves it, because that relationship is folded nowhere else.
+    #[test]
+    fn only_a_docked_ship_moves_the_digest_and_the_partner_is_what_moves_it() {
+        let id = "00000000-0000-8000-8000-000000000001";
+
+        let mut idle = fold_world();
+        spawn_docker(&mut idle, id, None);
+        assert_eq!(
+            fold_dock_namespace(&idle, FOLD_SEED),
+            FOLD_SEED,
+            "a dock mated to nothing folds nothing — a folded row here would have moved every \
+             committed world's digest for state none of them carry"
+        );
+
+        let mut docked_a = fold_world();
+        spawn_docker(&mut docked_a, id, Some("berth-A"));
+        let mut docked_a_again = fold_world();
+        spawn_docker(&mut docked_a_again, id, Some("berth-A"));
+        let mut docked_b = fold_world();
+        spawn_docker(&mut docked_b, id, Some("berth-B"));
+
+        assert_ne!(
+            world_digest(&idle),
+            world_digest(&docked_a),
+            "mating a dock must move the digest — nothing else records that the two hulls are joined"
+        );
+        assert_eq!(
+            world_digest(&docked_a),
+            world_digest(&docked_a_again),
+            "two hosts docked to the same berth must agree"
+        );
+        assert_ne!(
+            world_digest(&docked_a),
+            world_digest(&docked_b),
+            "…and a host that thinks the ship is docked to a different hull must fold to a \
+             different number"
         );
     }
 

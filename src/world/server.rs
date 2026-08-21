@@ -605,6 +605,12 @@ impl Plugin for WorldPlugin {
             // because a coupled target is moved through the same after-integration
             // `SimSet::Modifiers` window the tow uses.
             .add_plugins(crate::tractor::server::TractorPlugin)
+            // Helm docking (issue #1159) stands beside the tractor for the same
+            // reason: the own ship is flown onto its mate through the same
+            // after-integration `SimSet::Modifiers` window the tractor rig uses,
+            // and it is ordered after that rig so a hull that is both a docking
+            // ship and a tractor target has a deterministic last writer.
+            .add_plugins(crate::dock::server::DockPlugin)
             .add_plugins(crate::civilian::CivilianPlugin)
             // Dossiers (issue #1030) join them for the same reason: the
             // commitments a fact sheet lists are a field on
@@ -9265,6 +9271,7 @@ seed = 1
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -9565,6 +9572,7 @@ seed = 1
             scan: None,
             tractor: None,
             held_response: None,
+            dock: None,
             civilian: None,
             faction: None,
             behaviour: None,

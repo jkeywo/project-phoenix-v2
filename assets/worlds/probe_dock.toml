@@ -1,0 +1,51 @@
+# Probe world for issue #1159 — helm docking, end to end.
+#
+# One dock-fitted probe hull and one passive berth, drawn up close enough that the
+# probe's helm dock control is in range. There is no combat and no scripted dock:
+# the probe is a backfilled player ship, so the headless test drives the dock
+# through the ordinary admitted Dock / Undock path (the only way to prove the
+# command rides the same admission the helm console's own control would), and lets
+# the dock manoeuvre fly the own ship onto its mate.
+#
+# WHAT THIS WORLD PROVES:
+#
+#   1. TWO HULLS REACH A MATED DOCK. With the berth in range and the dock engaged,
+#      the probe's nearest viable dock-marker pair is flown onto the berth's — its
+#      starboard plate meeting the berth's port plate — and the two hulls settle
+#      into a published, folded docked relationship.
+#
+#   2. UNDOCK SEPARATES THEM. Undock backs the probe clear of the berth and the
+#      docked relationship ends, returning ordinary flight.
+#
+#   3. EACH INTERRUPTION ENDS THE DOCK CLEANLY. The test drives them in turn —
+#      drifting the berth out of range, cutting the dock's power, knocking the dock
+#      out to Disabled, and destroying the berth — and after each the dock ends and
+#      the probe is no longer mated.
+#
+# Nothing this world exercises is authored anywhere but the probe's own `[dock]`
+# table, its `[[system]] kind = "dock"`, and the dock markers in the `dock_probe`
+# rig sidecar. A hull that authored none carries no dock and is unchanged, which
+# is why the shipped destroyer is deliberately NOT the operator here.
+
+[global]
+seed = 1159
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The probe — the backfilled player ship, spawned at game start, facing -Z.
+[[entity]]
+template_path = "assets/entities/dock_probe.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The berth — a passive dockable structure 100 units to starboard, well inside the
+# probe's 200-unit dock range. It carries dock markers (from the shared dock_probe
+# sidecar) and a name the blackboard can report; the test never moves it under its
+# own power, so it holds station until the test drifts or destroys it.
+[[entity]]
+template_path = "assets/entities/dock_berth.toml"
+name = "world.probe_dock.entity.berth.name"
+transform = { position = [100.0, 0.0, 0.0] }

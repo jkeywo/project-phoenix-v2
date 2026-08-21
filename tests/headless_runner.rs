@@ -3498,12 +3498,13 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
     // (`integrate_ship_physics`), the low-LOD substitute
     // (`simulate_low_lod_ships`), the collision responder (`handle_collisions`),
     // blaster recoil (`tick_blaster_system`), the tow rig (`move_towed_targets`,
-    // issue #1027) and the tractor rig (`move_coupled_target`, issue #1156). The
-    // table's remaining entry, `handle_slow_zone_speed_clamp`, is an observer and
-    // so is in no schedule — see `ship_physics_writers`.
+    // issue #1027), the tractor rig (`move_coupled_target`, issue #1156) and the
+    // dock controller (`tick_dock`, issue #1159). The table's remaining entry,
+    // `handle_slow_zone_speed_clamp`, is an observer and so is in no schedule —
+    // see `ship_physics_writers`.
     assert_eq!(
         writers.len(),
-        6,
+        7,
         "the number of scheduled systems writing ShipPhysics changed. Every writer \
          beyond the helm integrator has to be a correction layered on top of it rather \
          than a competing integrator, and has to be documented in the writer-policy \
@@ -3515,24 +3516,26 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
          found:\n{inventory}"
     );
 
-    // Exactly four of them are unfiltered corrections (collision response,
-    // blaster recoil, the tow rig and the tractor rig): they deliberately apply
-    // to every ship, high-LOD and low-LOD alike, and their safety argument is
-    // that they are one-shot corrections rather than integrators — not filter
-    // disjointness. The tow and the tractor are unfiltered on purpose: a demoted
-    // freighter under tow is exactly the case that has to keep working, and dead
-    // reckoning it away from the rig would drag it out of the operator's wake.
+    // Exactly five of them are unfiltered corrections (collision response,
+    // blaster recoil, the tow rig, the tractor rig and the dock controller): they
+    // deliberately apply to every ship, high-LOD and low-LOD alike, and their
+    // safety argument is that they are one-shot corrections rather than
+    // integrators — not filter disjointness. The tow, the tractor and the dock are
+    // unfiltered on purpose: a demoted freighter under tow is exactly the case
+    // that has to keep working, and dead reckoning it away from the rig would drag
+    // it out of the operator's wake; the dock likewise places only its own hull
+    // onto the mate pose as a last-writer correction.
     let unfiltered = (0..writers.len())
         .filter(|i| high_fi.contains(i) && low_lod.contains(i))
         .count();
     assert_eq!(
-        unfiltered, 4,
-        "expected exactly four unfiltered ShipPhysics correction writers (collision \
-         response, blaster recoil, the tow rig and the tractor rig). A change here means \
-         a correction grew an `AiHighFidelity` filter, or an integrator lost one — either \
-         way the set of ships that get moved twice per tick has changed. Reconcile with \
-         the writer-policy table on `ShipPhysics` (src/ship/state.rs). ShipPhysics writers \
-         found:\n{inventory}"
+        unfiltered, 5,
+        "expected exactly five unfiltered ShipPhysics correction writers (collision \
+         response, blaster recoil, the tow rig, the tractor rig and the dock controller). \
+         A change here means a correction grew an `AiHighFidelity` filter, or an integrator \
+         lost one — either way the set of ships that get moved twice per tick has changed. \
+         Reconcile with the writer-policy table on `ShipPhysics` (src/ship/state.rs). \
+         ShipPhysics writers found:\n{inventory}"
     );
 }
 
@@ -15584,5 +15587,328 @@ fn holding_a_failing_structure_arrests_its_decline_and_releasing_resumes_it() {
         after_release < before_release - 6.0,
         "releasing the beam resumes the structure's ordinary decline: from {before_release} to \
          {after_release}"
+    );
+}
+
+// ── #1159: helm docking, end to end ──────────────────────────────────────────
+//
+// `assets/worlds/probe_dock.toml` fields a backfilled player DOCK PROBE (the
+// dedicated `dock_probe` hull — the shipped destroyer is deliberately not
+// touched) and a passive BERTH 100 units to starboard. The test drives the dock
+// through the ordinary admitted `Dock`/`Undock` path and lets the dock manoeuvre
+// fly the own ship onto its mate — proving two hulls reach a mated dock, separate
+// on undock, and that every interruption ends the dock cleanly.
+
+const BERTH_DOCK: &str = "world.probe_dock.entity.berth.name";
+/// An `ai:` token: admission authorises it iff the target system is
+/// AI-controlled, which the probe's helm-owned dock is while nobody is at its
+/// console — the same seam #1162's dock AI will use, and the same one a human
+/// tenure token uses from the other side (AGENTS.md rule 6).
+const DOCK_TOKEN: &str = "ai:dock-probe";
+
+fn dock_args(dt: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_dock.toml".into(),
+        // The player ship IS the probe: game-start swaps the world placeholder for
+        // the lobby-SELECTED hull, so the selection has to be the probe or its
+        // dock never spawns.
+        ship_path: "assets/entities/dock_probe.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(120.0, dt),
+        deterministic: true,
+        seed: Some(1159),
+        ..test_args()
+    }
+}
+
+fn dock_operator(app: &mut App) -> Entity {
+    app.world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the probe world spawns a local dock probe")
+}
+
+fn dock_control_of(app: &mut App) -> project_phoenix::dock::DockControl {
+    let op = dock_operator(app);
+    app.world()
+        .get::<project_phoenix::dock::DockControl>(op)
+        .expect("the probe carries a DockControl")
+        .clone()
+}
+
+fn dock_operator_pos(app: &mut App) -> Vec3 {
+    let op = dock_operator(app);
+    app.world()
+        .get::<Transform>(op)
+        .expect("the probe has a transform")
+        .translation
+}
+
+/// Place the operator by writing its `ShipPhysics`, which `sync_ship_position`
+/// projects into the transform the manoeuvre reads.
+fn place_dock_operator(app: &mut App, position: Vec3) {
+    let op = dock_operator(app);
+    let mut physics = app
+        .world_mut()
+        .get_mut::<ShipPhysics>(op)
+        .expect("the probe is a ship");
+    physics.x = position.x;
+    physics.y = position.y;
+    physics.z = position.z;
+}
+
+/// The berth entity, looked up by name.
+fn berth_entity(app: &mut App) -> Entity {
+    use project_phoenix::entities::spawner::EntityName;
+    app.world_mut()
+        .query::<(Entity, &EntityName)>()
+        .iter(app.world())
+        .find(|(_, n)| n.0 == BERTH_DOCK)
+        .map(|(e, _)| e)
+        .expect("the probe world spawns a berth")
+}
+
+/// Move the passive berth by writing its `Transform` directly — it is a
+/// structure, not a ship, so nothing re-syncs it from a `ShipPhysics`.
+fn move_berth(app: &mut App, position: Vec3) {
+    let berth = berth_entity(app);
+    app.world_mut()
+        .get_mut::<Transform>(berth)
+        .expect("the berth has a transform")
+        .translation = position;
+}
+
+/// Send a dock/undock through the real admission path and give it the ticks to
+/// arrive (drained in `PreUpdate`, admitted before `SimSet::Input`, consumed in
+/// `SimSet::Modifiers` of the same tick).
+fn send_dock(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemId};
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: DOCK_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId(project_phoenix::ship::system_registry::DOCK_SYSTEM_ID.into()),
+                payload,
+            },
+        });
+    run(app, 2);
+}
+
+/// Drop the dock power group below its authored `min_power_level` (2).
+fn cut_dock_power(app: &mut App) {
+    let op = dock_operator(app);
+    let mut ps = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
+        .expect("the probe has a power system");
+    let _ =
+        ps.0.set_group_allocation(&project_phoenix::messages::PowerGroupId("dock".into()), 1);
+}
+
+fn restore_dock_power(app: &mut App) {
+    let op = dock_operator(app);
+    let mut ps = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
+        .expect("the probe has a power system");
+    let _ =
+        ps.0.set_group_allocation(&project_phoenix::messages::PowerGroupId("dock".into()), 2);
+}
+
+fn disable_dock(app: &mut App) {
+    let op = dock_operator(app);
+    let mut hull = app
+        .world_mut()
+        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .expect("the probe has a hull");
+    hull.0
+        .set_hp(&project_phoenix::messages::SystemId("dock".into()), 1.0);
+}
+
+fn repair_dock(app: &mut App) {
+    let op = dock_operator(app);
+    let mut hull = app
+        .world_mut()
+        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .expect("the probe has a hull");
+    hull.0
+        .set_hp(&project_phoenix::messages::SystemId("dock".into()), 30.0);
+}
+
+/// Reset the probe to the origin and the berth 100 units to starboard, engage,
+/// and fly the manoeuvre to completion — the clean docked state each interruption
+/// starts from.
+fn redock(app: &mut App) {
+    use project_phoenix::messages::SystemControlPayload;
+    // Clear any prior state and settle the two hulls back into their start pose.
+    send_dock(app, SystemControlPayload::Undock);
+    place_dock_operator(app, Vec3::ZERO);
+    move_berth(app, Vec3::new(100.0, 0.0, 0.0));
+    run(app, 1);
+    send_dock(app, SystemControlPayload::Dock);
+    run(app, 140);
+    let dock = dock_control_of(app);
+    assert!(
+        dock.docked && dock.docking_target.is_some(),
+        "precondition: the two hulls should be mated, got {dock:?}"
+    );
+}
+
+/// AC: a dock control appears only while a valid target is in range; running it
+/// mates the two hulls; undock separates them; and every interruption ends the
+/// dock cleanly. Also: the docked relationship folds and survives a resume.
+#[test]
+fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_it() {
+    use project_phoenix::dock::DockRefusal;
+    use project_phoenix::messages::SystemControlPayload;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&dock_args(dt)).expect("app should build");
+    // Far enough in that the game is InProgress and the probe is backfilled, so
+    // its helm-owned dock is AI-controlled and the `ai:` token is admitted.
+    run(&mut app, 60);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+    let berth = scan_uuid_named(&mut app, BERTH_DOCK);
+
+    // ── The contextual control appears only in range ─────────────────────────
+    place_dock_operator(&mut app, Vec3::ZERO);
+    move_berth(&mut app, Vec3::new(100.0, 0.0, 0.0));
+    run(&mut app, 2);
+    assert_eq!(
+        dock_control_of(&mut app).available_target.as_deref(),
+        Some(berth.as_str()),
+        "a berth in range makes the dock control available"
+    );
+
+    // Drift the berth far out: the control disappears.
+    move_berth(&mut app, Vec3::new(9000.0, 0.0, 0.0));
+    run(&mut app, 2);
+    assert!(
+        dock_control_of(&mut app).available_target.is_none(),
+        "with no berth in range the dock control is absent"
+    );
+
+    // Back in range: it returns.
+    move_berth(&mut app, Vec3::new(100.0, 0.0, 0.0));
+    run(&mut app, 2);
+    assert_eq!(
+        dock_control_of(&mut app).available_target.as_deref(),
+        Some(berth.as_str()),
+        "the control reappears when the berth is back in range"
+    );
+
+    // ── Dock: the two hulls fly to a mated dock ──────────────────────────────
+    send_dock(&mut app, SystemControlPayload::Dock);
+    run(&mut app, 140);
+    let dock = dock_control_of(&mut app);
+    assert!(
+        dock.docked,
+        "the manoeuvre mated the two hulls, got {dock:?}"
+    );
+    assert_eq!(dock.docking_target.as_deref(), Some(berth.as_str()));
+    assert_eq!(
+        dock.docked_partner(),
+        Some(berth.as_str()),
+        "the docked relationship names the berth — what the umbilical (#1160) reads"
+    );
+    // The probe flew itself onto the mate pose without a helm officer: its
+    // starboard plate meets the berth's port plate at ~(95,0,0), so the probe
+    // origin settles at ~(90,0,0).
+    let mated = dock_operator_pos(&mut app);
+    assert!(
+        (mated - Vec3::new(90.0, 0.0, 0.0)).length() < 5.0,
+        "the probe flew onto the mate pose, got {mated:?}"
+    );
+
+    // ── Undock: the ship backs clear and returns to ordinary flight ──────────
+    send_dock(&mut app, SystemControlPayload::Undock);
+    run(&mut app, 160);
+    let dock = dock_control_of(&mut app);
+    assert!(
+        !dock.docked && !dock.engaged && dock.docking_target.is_none(),
+        "undock ended the mate, got {dock:?}"
+    );
+    let cleared = dock_operator_pos(&mut app);
+    assert!(
+        cleared.distance(Vec3::new(100.0, 0.0, 0.0)) > 100.0,
+        "undock backed the probe clear of the berth, got {cleared:?}"
+    );
+
+    // ── Interruption 1: the hulls drift apart ────────────────────────────────
+    redock(&mut app);
+    move_berth(&mut app, Vec3::new(9000.0, 0.0, 0.0));
+    run(&mut app, 3);
+    let dock = dock_control_of(&mut app);
+    assert!(
+        !dock.docked && !dock.engaged,
+        "drifting apart ended the dock"
+    );
+    assert_eq!(dock.last_refusal, Some(DockRefusal::OutOfRange));
+
+    // ── Interruption 2: the power allocation is lost ─────────────────────────
+    redock(&mut app);
+    cut_dock_power(&mut app);
+    run(&mut app, 3);
+    let dock = dock_control_of(&mut app);
+    assert!(!dock.docked && !dock.engaged, "losing power ended the dock");
+    assert_eq!(dock.last_refusal, Some(DockRefusal::Unpowered));
+
+    // ── Interruption 3: the dock is knocked out to Disabled ──────────────────
+    restore_dock_power(&mut app);
+    redock(&mut app);
+    disable_dock(&mut app);
+    run(&mut app, 3);
+    let dock = dock_control_of(&mut app);
+    assert!(
+        !dock.docked && !dock.engaged,
+        "a disabled dock ended the mate"
+    );
+    assert_eq!(dock.last_refusal, Some(DockRefusal::Disabled));
+
+    // ── Interruption 4: the berth is destroyed ───────────────────────────────
+    repair_dock(&mut app);
+    redock(&mut app);
+    let berth_ent = berth_entity(&mut app);
+    app.world_mut().entity_mut(berth_ent).despawn();
+    run(&mut app, 3);
+    let dock = dock_control_of(&mut app);
+    assert!(
+        !dock.docked && !dock.engaged,
+        "a destroyed berth ended the mate"
+    );
+    assert_eq!(dock.last_refusal, Some(DockRefusal::TargetLost));
+
+    // ── The docked relationship survives a snapshot resume ───────────────────
+    // Interruption 4 despawned the berth, so prove the resume on a fresh app
+    // whose world still has it.
+    let mut app = build_headless_app(&dock_args(dt)).expect("app should build");
+    run(&mut app, 60);
+    let berth = scan_uuid_named(&mut app, BERTH_DOCK);
+    redock(&mut app);
+    let digest_docked = project_phoenix::sim_digest::state_digest(&app);
+    let snap = project_phoenix::snapshot::capture(app.world());
+    send_dock(&mut app, SystemControlPayload::Undock);
+    run(&mut app, 5);
+    assert!(
+        !dock_control_of(&mut app).docked,
+        "precondition: the dock is released before the restore"
+    );
+    project_phoenix::snapshot::restore(app.world_mut(), &snap);
+    let dock = dock_control_of(&mut app);
+    assert!(
+        dock.docked && dock.docking_target.as_deref() == Some(berth.as_str()),
+        "the docked relationship survived the snapshot resume, got {dock:?}"
+    );
+    assert_eq!(
+        project_phoenix::sim_digest::state_digest(&app),
+        digest_docked,
+        "…and the restored world folds to the same digest the captured one did"
     );
 }

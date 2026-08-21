@@ -2217,6 +2217,77 @@ mod tests {
         );
     }
 
+    /// The dock/undock commands (issue #1159).
+    ///
+    /// Both target the real, helm-owned `dock` system rather than a channel of
+    /// their own — the dock IS a thing aboard the ship that can be damaged and
+    /// commanded — so the wire shapes pinned here give them the ordinary
+    /// station-tenure admission check the helm seat holds. Fieldless: the
+    /// manoeuvre mates the nearest viable dock-marker pair, resolved server-side,
+    /// and undock needs no argument.
+    #[test]
+    fn dock_and_undock_control_system_round_trip() {
+        let dock = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::DOCK_SYSTEM_ID.into()),
+            payload: SystemControlPayload::Dock,
+        };
+        assert_client_roundtrip(&JsonCodec, dock.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, dock.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&dock).unwrap(),
+            r#"{"type":"ControlSystem","data":{"target":"dock","payload":{"type":"Dock"}}}"#,
+            "Dock wire shape must stay pinned"
+        );
+
+        let undock = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::DOCK_SYSTEM_ID.into()),
+            payload: SystemControlPayload::Undock,
+        };
+        assert_client_roundtrip(&JsonCodec, undock.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, undock.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&undock).unwrap(),
+            r#"{"type":"ControlSystem","data":{"target":"dock","payload":{"type":"Undock"}}}"#,
+            "Undock wire shape must stay pinned"
+        );
+    }
+
+    /// The dock blackboard (issue #1159): the `SystemBlackboard::Dock` variant
+    /// round-trips, is additive on the wire, and an idle control carries no
+    /// absent-field noise.
+    #[test]
+    fn system_blackboard_dock_round_trips_and_is_additive() {
+        use crate::messages::{DockBlackboard, SystemBlackboard};
+        // A docked control carries the relationship the umbilical (#1160) reads.
+        let docked = SystemBlackboard::Dock(DockBlackboard {
+            range: 200.0,
+            available: false,
+            available_target: None,
+            available_target_name: None,
+            engaged: true,
+            docked: true,
+            docked_to: Some("berth-1".into()),
+            docked_to_name: Some("world.probe_dock.entity.berth.name".into()),
+            refusal: None,
+        });
+        let encoded = serde_json::to_string(&docked).unwrap();
+        let decoded: SystemBlackboard = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, docked);
+
+        // An idle control writes no absent-field noise: every optional field is
+        // skipped, so a bare payload decodes to defaults.
+        let idle = SystemBlackboard::Dock(DockBlackboard::default());
+        let idle_json = serde_json::to_string(&idle).unwrap();
+        assert!(
+            !idle_json.contains("docked_to")
+                && !idle_json.contains("refusal")
+                && !idle_json.contains("available_target"),
+            "an idle dock blackboard omits its optional fields, got {idle_json}"
+        );
+        let idle_decoded: SystemBlackboard = serde_json::from_str(&idle_json).unwrap();
+        assert_eq!(idle_decoded, idle);
+    }
+
     /// The tractor blackboard (issue #1156): the `SystemBlackboard::Tractor`
     /// variant round-trips, is additive on the wire, and an idle beam carries no
     /// absent-field noise.

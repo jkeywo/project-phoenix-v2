@@ -2015,6 +2015,25 @@ pub enum SystemControlPayload {
     /// `tractor` system, the sibling of `EngageTractor` above. No fields — a ship
     /// runs one tractor, so there is nothing to disambiguate.
     ReleaseTractor,
+    /// Dock with the nearest hull carrying dock markers inside the authored range
+    /// (issue #1159).
+    ///
+    /// Targets the helm-owned `dock` system
+    /// (`system_registry::DOCK_SYSTEM_ID`), a real station-owned system, so it
+    /// takes the ordinary station-tenure admission path — the Helm holder may
+    /// send it, an AI operating the dock may emit it (#1162), and nobody else is
+    /// admitted.
+    ///
+    /// No fields: the manoeuvre mates the nearest VIABLE dock-marker pair on the
+    /// two hulls, resolved server-side from the contextual target the console was
+    /// already showing, rather than the command naming a berth a stale UI read a
+    /// tick ago. Explicit intent, not a toggle: `Undock` is its own command, so a
+    /// retried or stale-UI dock is idempotent.
+    Dock,
+    /// Undock, backing the ship clear and returning ordinary flight (issue #1159).
+    /// Targets the `dock` system, the sibling of `Dock` above. No fields — a ship
+    /// holds at most one dock, so there is nothing to disambiguate.
+    Undock,
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -3644,6 +3663,12 @@ pub enum SystemBlackboard {
     /// group, carries a damage entry and is commanded and refused through the
     /// engineering console.
     Tractor(TractorBlackboard),
+    /// The dock control's readout (issue #1159). One per ship carrying a `dock`
+    /// system, keyed by `system_registry::dock_system_id` — a REAL system id, not
+    /// a reserved channel, because unlike an operation the dock IS a thing aboard
+    /// the ship: it declares a power group, carries a damage entry and is
+    /// commanded and refused through the helm console.
+    Dock(DockBlackboard),
 }
 
 /// One verb a hull can perform, as the console offers it (issue #1026).
@@ -3754,6 +3779,59 @@ pub struct TractorBlackboard {
     /// `strings.csv` id for why the last engage or hold could not form —
     /// `tractor.refused.*`. Retained until the operator engages or releases
     /// again; `None` while the beam is idle or holding cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+}
+
+/// Raw sim truth for a ship's dock control, published each tick under its system
+/// id (issue #1159).
+///
+/// Additive on the wire in both directions, the way `TractorBlackboard` is: the
+/// adjacently-tagged `SystemBlackboard` enum's other variants are untouched by
+/// adding `Dock`, and every field here is `#[serde(default)]`, so a payload
+/// predating one decodes rather than being refused whole. No English crosses:
+/// the target name fields are world entity name ids and `refusal` a
+/// `strings.csv` id the console resolves.
+///
+/// The contextual dock control appears on the helm console exactly when
+/// `available` is true (a viable partner is in range and the ship is not already
+/// docked); it becomes the undock control when `docked`. The docked relationship
+/// — `docked` plus `docked_to` — is the folded, published state the umbilical
+/// (#1160) gates on.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct DockBlackboard {
+    /// The authored dock range, so the console can show the crew how close a
+    /// berth must be. Authored content, not live state.
+    #[serde(default)]
+    pub range: f32,
+    /// Whether a viable dock partner is inside range AND the ship is not already
+    /// docked — the exact condition the contextual dock control appears under.
+    #[serde(default)]
+    pub available: bool,
+    /// The uuid of the nearest dockable hull in range, or `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_target: Option<String>,
+    /// The available target's authored world entity name id, resolved for
+    /// display, or `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_target_name: Option<String>,
+    /// Whether the operator has a dock engaged (closing on, or holding, a berth).
+    #[serde(default)]
+    pub engaged: bool,
+    /// Whether the two hulls are actually mated this tick.
+    #[serde(default)]
+    pub docked: bool,
+    /// The uuid of the hull this ship is docked to, or `None` when not docked —
+    /// the relationship the umbilical (#1160) reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docked_to: Option<String>,
+    /// The docked hull's authored world entity name id, resolved for display, or
+    /// `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docked_to_name: Option<String>,
+    /// `strings.csv` id for why the last dock could not form or was ended —
+    /// `dock.refused.*`. Retained until the operator acts again; `None` while the
+    /// control is idle, forming cleanly, or docked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
 }

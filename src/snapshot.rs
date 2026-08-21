@@ -613,6 +613,24 @@ pub struct EntityState {
     /// writing a same-content-digest save to disagree with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tractor: Option<crate::tractor::TractorSaveState>,
+    /// The ship's dock control state (issue #1159) — whether a dock is engaged,
+    /// whether the two hulls are mated, and which berth is held.
+    ///
+    /// A **projection**, not the whole [`crate::dock::DockControl`] component, for
+    /// `tractor`'s reason: the authored `[dock]` terms and the resolved power
+    /// group ride the component and are re-derived from the template on spawn, so
+    /// writing them into a save would put content into the one artefact
+    /// `content_digest` is answerable for. What travels is the pair the fold
+    /// cannot recover — the engage/dock state and the docked target — which
+    /// [`fold_dock_namespace`](crate::sim_digest) folds and which a resume would
+    /// otherwise drop, restoring two mated hulls as adrift.
+    ///
+    /// Did not bump [`SNAPSHOT_FORMAT`] for `tractor`'s reason: a world gains
+    /// docking by its hull TOML gaining a `[dock]` table (and a `kind = "dock"`
+    /// system), and `EntityConfig` sets `deny_unknown_fields`, so a build that
+    /// predates this vocabulary refuses the template outright.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dock: Option<crate::dock::DockSaveState>,
     /// The ship's scan record (issue #1032) — the last reading its sensor suite
     /// took, or why the last scan returned nothing.
     ///
@@ -2648,6 +2666,23 @@ fn capture_tractors(world: &World) -> Vec<(String, crate::tractor::TractorSaveSt
         .collect()
 }
 
+/// The dock control states, in a query of their own, joined by uuid — see
+/// [`EntityState::dock`]. Only hulls that authored a `kind = "dock"` system carry
+/// one, so most worlds capture an empty list. An idle control (engaging nothing,
+/// docked to nothing) captures nothing, the same reading `fold_dock_namespace`
+/// takes.
+fn capture_docks(world: &World) -> Vec<(String, crate::dock::DockSaveState)> {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::dock::DockControl)>() else {
+        return Vec::new();
+    };
+    let idle = crate::dock::DockSaveState::default();
+    query
+        .iter(world)
+        .map(|(uuid, control)| (uuid.0.clone(), control.save_state()))
+        .filter(|(_, state)| *state != idle)
+        .collect()
+}
+
 /// The scan records, in a query of their own, joined by uuid — see
 /// [`EntityState::scan`]. Only hulls that authored `[scan]` carry one, so most
 /// worlds capture an empty list.
@@ -2707,6 +2742,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let infrastructure = capture_infrastructure(world);
     let operations = capture_operations(world);
     let tractors = capture_tractors(world);
+    let docks = capture_docks(world);
     let scans = capture_scans(world);
     let civilians = capture_civilians(world);
     let spawn_origins = capture_spawn_origins(world);
@@ -2763,6 +2799,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
             tractor: tractors
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            dock: docks
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
@@ -4057,6 +4097,11 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(tractor) = &row.tractor {
             if let Some(mut beam) = entity_mut.get_mut::<crate::tractor::TractorBeam>() {
                 beam.restore(tractor);
+            }
+        }
+        if let Some(dock) = &row.dock {
+            if let Some(mut control) = entity_mut.get_mut::<crate::dock::DockControl>() {
+                control.restore(dock);
             }
         }
         if let Some(scan) = &row.scan {

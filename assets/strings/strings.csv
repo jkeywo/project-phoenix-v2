@@ -309,6 +309,8 @@ component.power.title,Power allocation panel heading,POWER ALLOCATION
 component.power.empty,Power panel when the ship defines no power groups,[NO POWER GROUPS]
 component.power.level,Power group level readout. {n} is the allocated level,LVL {n}
 component.power.held,"Power group level readout while the reactor's battery floor is holding the group below its standing order. {n} is the level it is running at, {c} the level it was commanded to",[LVL {n}/{c} HELD]
+component.power.decrease,Accessible name for a power group's minus stepper (issue #1177) — lowers that group's commanded allocation by one level,Lower this group's power
+component.power.increase,Accessible name for a power group's plus stepper (issue #1177) — raises that group's commanded allocation by one level,Raise this group's power
 component.red_alert.title,Red alert control heading (Captain console),RED ALERT
 component.red_alert.active,Red alert button while the alert is raised,RED ALERT
 component.red_alert.standby,Red alert button while the ship is stood down,STAND DOWN

@@ -200,7 +200,9 @@ describe('the scanner agrees with the real surface', () => {
     expect(evalC(read('gui/components/ph-phasers-controls.js')).conformant).toBe(true);
   });
 
-  it('a real debt component (power controls) is not conformant', () => {
-    expect(evalC(read('gui/components/ph-power-controls.js')).conformant).toBe(false);
+  it('a real debt component (the ship picker) is not conformant', () => {
+    // ph-power-controls was this example until #1177 converted it; the ship
+    // picker's clickable <div> cards are still unnamed, unfocusable debt (#1178).
+    expect(evalC(read('gui/components/ph-ship-picker.js')).conformant).toBe(false);
   });
 });

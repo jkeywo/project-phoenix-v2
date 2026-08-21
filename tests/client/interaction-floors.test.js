@@ -63,18 +63,11 @@ const TRACER = [
  */
 const DEBT = {
   // #1176 (helm family and navigation composites) is CONVERTED — its block was
-  // struck off here when ph-helm-joystick, ph-lateral-thrust-joystick and the
-  // navigation composites gained focusable, named, keyboard-operable controls.
-  // The family now passes every floor with no allow-list entry, proved by
-  // tests/client/helm-nav-keyboard.test.js and tests/smoke/helm-nav-keyboard.spec.js.
-  '#1177 — combat family': {
-    'gui/components/ph-power-controls.js':
-      'the −/+ group steppers are glyph-only with no aria-label, and the power pips are '
-      + 'click-delegated <div>s; #1177 names the steppers and makes the pip row keyboard-operable.',
-    'gui/components/ph-shield-facings.js':
-      'the shield arcs are clickable SVG paths — no focusable control, and no role or name '
-      + 'on the host; #1177 makes the facing ring an arrow-cycled named group.',
-  },
+  // struck off here when the helm joysticks and navigation composites gained
+  // focusable, named, keyboard-operable controls, proved by helm-nav-keyboard.
+  // #1177 (combat family) is CONVERTED — its block was struck off here when
+  // ph-power-controls and ph-shield-facings gained named, roled, keyboard-operable
+  // controls, proved by combat-keyboard.test.js / combat-keyboard.spec.js.
   '#1178 — comms, sensors, ops and shared chrome': {
     'gui/components/ph-comms-hail-list.js':
       'hail rows are clickable <div>s with no focusable control, role or name; #1178 makes '

@@ -1,5 +1,3 @@
-// @vitest-environment jsdom
-//
 // Issue #949 — the host channel is a localisation boundary.
 //
 // Rust pushes authored DATA over the host channels, and authored data holds
@@ -9,69 +7,33 @@
 // equivalent boundary, so `#lobby-title` read `world.combat_test.global.title`
 // verbatim — the symptom #949 names.
 //
-// The dispatcher lives inline in server.html (classic script, closed over host
-// state), so there is no module to import. This test lifts the REAL source of
-// localiseHostPayload, the handler table and __hostChannel out of the file and
-// runs them against stub handlers, so it fails if the boundary is removed or
-// routed around rather than re-testing a copy of the logic.
+// Issue #1225 lifted the dispatcher, the handler table and the localisation
+// boundary out of server.html's inline classic script into gui/host-channel.js,
+// so this test imports the real module directly rather than scraping
+// server.html's source text and re-evaluating it.
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { t, localiseTree, has } from '../../gui/strings.js';
-
-const SERVER_HTML = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../server.html',
-);
-const SRC = fs.readFileSync(SERVER_HTML, 'utf-8');
-
-/** The source of one brace-balanced declaration, starting at `marker`. */
-function declaration(marker) {
-  const start = SRC.indexOf(marker);
-  if (start === -1) throw new Error(`server.html no longer contains: ${marker}`);
-  let depth = 0;
-  for (let i = SRC.indexOf('{', start); i < SRC.length; i += 1) {
-    if (SRC[i] === '{') depth += 1;
-    else if (SRC[i] === '}') {
-      depth -= 1;
-      if (depth === 0) return SRC.slice(start, i + 1);
-    }
-  }
-  throw new Error(`unbalanced braces after: ${marker}`);
-}
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { createHostChannel, localiseHostPayload } from '../../gui/host-channel.js';
+import { t, has, localiseTree } from '../../gui/strings.js';
 
 /**
- * The real dispatcher, evaluated against a `window` whose channel handlers
- * record what they were handed.
+ * The real dispatcher, wired to stub handlers that record what they were
+ * handed.
  */
 function mountDispatcher({ strings = { t, has, localiseTree } } = {}) {
   const seen = [];
   const record = (channel) => (payload) => seen.push([channel, payload]);
-  const win = {
-    phStrings: strings,
-    __updateHud: record('hud'),
-    __updateLobby: record('lobby'),
-    __updateChatter: record('chatter'),
-    __audioConfig: record('audio_config'),
-    __audioCue: record('audio_cue'),
-    __audioLevel: record('audio_level'),
-    __applyShake: (x, y) => seen.push(['shake', [x, y]]),
+  const handlers = {
+    hud: record('hud'),
+    lobby: record('lobby'),
+    chatter: record('chatter'),
+    audio_config: record('audio_config'),
+    audio_cue: record('audio_cue'),
+    audio_level: record('audio_level'),
+    shake: record('shake'),
   };
-  const build = new Function(
-    'window',
-    'console',
-    [
-      declaration('function localiseHostPayload(payload)'),
-      declaration('var _hostChannelHandlers = {') + ';',
-      declaration('window.__hostChannel = function(name, payload)') + ';',
-      'return { localiseHostPayload: localiseHostPayload };',
-    ].join('\n'),
-  );
-  const warnings = [];
-  const helpers = build(win, { warn: (...a) => warnings.push(a) });
-  return { win, seen, warnings, ...helpers };
+  const dispatch = createHostChannel({ handlers, strings });
+  return { dispatch, seen };
 }
 
 /** What the handler for `channel` was handed, JSON-decoded. */
@@ -83,11 +45,20 @@ function payloadFor(seen, channel) {
 
 describe('host channel localisation boundary', () => {
   let d;
-  beforeEach(() => { d = mountDispatcher(); });
+  let warnSpy;
+
+  beforeEach(() => {
+    d = mountDispatcher();
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
 
   it('resolves the lobby scenario title and body — the reported symptom', () => {
     // Exactly what src/world/server.rs puts on the wire for combat_test.toml.
-    d.win.__hostChannel('lobby', JSON.stringify({
+    d.dispatch('lobby', JSON.stringify({
       phase: 'Lobby',
       scenario_title: 'world.combat_test.global.title',
       scenario_body: 'world.combat_test.global.description',
@@ -102,7 +73,7 @@ describe('host channel localisation boundary', () => {
   it('resolves the hud game-over message', () => {
     // A `[[trigger.action]] type = "game_over"` message id, which reaches the
     // overlay through GameOverReason untouched.
-    d.win.__hostChannel('hud', JSON.stringify({
+    d.dispatch('hud', JSON.stringify({
       heading: 7,
       hull_pct: 64,
       game_over_message: 'world.combat_test.trigger.action.18.message',
@@ -118,7 +89,7 @@ describe('host channel localisation boundary', () => {
     // Station names are English in the shipped hulls today, but the payload is
     // a tree and the boundary must reach all of it — not just the two fields
     // that happened to be reported.
-    d.win.__hostChannel('lobby', JSON.stringify({
+    d.dispatch('lobby', JSON.stringify({
       phase: 'Lobby',
       stations: [{ name: 'entity.alliance_destroyer.name', rank: 'Cpt.' }],
     }));
@@ -128,7 +99,7 @@ describe('host channel localisation boundary', () => {
   });
 
   it('leaves machine tokens, player names and authored prose alone', () => {
-    d.win.__hostChannel('lobby', JSON.stringify({
+    d.dispatch('lobby', JSON.stringify({
       phase: 'InProgress',
       crew_count: 2,
       all_ready: true,
@@ -149,14 +120,14 @@ describe('host channel localisation boundary', () => {
   it('passes text a phone already resolved through untouched', () => {
     // No CSV `en` value is itself an id, so crossing the rule twice is a no-op.
     const resolved = t('world.combat_test.global.title');
-    d.win.__hostChannel('lobby', JSON.stringify({ scenario_title: resolved }));
+    d.dispatch('lobby', JSON.stringify({ scenario_title: resolved }));
     expect(payloadFor(d.seen, 'lobby').scenario_title).toBe(resolved);
   });
 
   it('routes every channel through the boundary, not just the lobby', () => {
     for (const channel of ['hud', 'chatter', 'audio_config', 'audio_cue']) {
       const fresh = mountDispatcher();
-      fresh.win.__hostChannel(channel, JSON.stringify({
+      fresh.dispatch(channel, JSON.stringify({
         text: 'entity.alliance_destroyer.name',
       }));
       expect(payloadFor(fresh.seen, channel).text)
@@ -165,13 +136,13 @@ describe('host channel localisation boundary', () => {
   });
 
   it('carries the numeric taps through unchanged', () => {
-    d.win.__hostChannel('audio_level', 0.42);
-    d.win.__hostChannel('shake', [3, -4]);
+    d.dispatch('audio_level', 0.42);
+    d.dispatch('shake', [3, -4]);
     expect(d.seen).toEqual([['audio_level', 0.42], ['shake', [3, -4]]]);
   });
 
   it('hands a non-JSON payload to the handler as Rust sent it', () => {
-    d.win.__hostChannel('hud', 'not json {');
+    d.dispatch('hud', 'not json {');
     expect(d.seen).toEqual([['hud', 'not json {']]);
   });
 
@@ -179,13 +150,43 @@ describe('host channel localisation boundary', () => {
     // phStrings is published by a module script; a push that beats it must not
     // throw, and t() on this page degrades the same way.
     const early = mountDispatcher({ strings: undefined });
-    early.win.__hostChannel('lobby', JSON.stringify({ scenario_title: 'world.x.y' }));
+    early.dispatch('lobby', JSON.stringify({ scenario_title: 'world.x.y' }));
     expect(payloadFor(early.seen, 'lobby').scenario_title).toBe('world.x.y');
   });
 
   it('warns rather than throwing on an unknown channel', () => {
-    d.win.__hostChannel('not_a_channel', '{}');
+    d.dispatch('not_a_channel', '{}');
     expect(d.seen).toEqual([]);
-    expect(d.warnings.length).toBe(1);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('localiseHostPayload', () => {
+  const strings = { t, has, localiseTree };
+
+  it('resolves a JSON-string payload and re-encodes it', () => {
+    const payload = JSON.stringify({ scenario_title: 'world.combat_test.global.title' });
+    expect(localiseHostPayload(payload, strings)).toBe(
+      JSON.stringify({ scenario_title: t('world.combat_test.global.title') }),
+    );
+  });
+
+  it('resolves ids inside a non-string (already-decoded) payload — the numeric taps', () => {
+    // audio_level / shake never carry a JSON-string payload; localiseTree runs
+    // directly, and neither a bare number nor an [x, y] array holds a string
+    // id, so both pass through unchanged.
+    expect(localiseHostPayload(0.42, strings)).toBe(0.42);
+    expect(localiseHostPayload([3, -4], strings)).toEqual([3, -4]);
+  });
+
+  it('returns a non-JSON string payload untouched rather than throwing', () => {
+    expect(localiseHostPayload('not json {', strings)).toBe('not json {');
+  });
+
+  it('returns the payload unchanged when strings has no localiseTree', () => {
+    const payload = JSON.stringify({ scenario_title: 'world.x.y' });
+    expect(localiseHostPayload(payload, {})).toBe(payload);
+    expect(localiseHostPayload(payload, null)).toBe(payload);
+    expect(localiseHostPayload(payload, undefined)).toBe(payload);
   });
 });

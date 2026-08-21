@@ -1451,6 +1451,33 @@
        (issue #755). Publishes window.scenarioArbiter for the classic-script
        host logic below. -->
   <script type="module" src="gui/scenario-arbiter.js"></script>
+  <!-- Host Channel dispatcher (issue #1225): the handler table and the
+       localisation boundary that used to live inline in the classic script
+       below now live in gui/host-channel.js so vitest can import them
+       directly. This island builds the real dispatcher over the page's
+       render/audio functions and the string table, then installs it through
+       the #1224 latch just below (window.__hostChannelReady). Everything
+       queued on window.__hostChannel before this module runs flushes to the
+       real dispatcher in order; nothing here assumes it runs before or after
+       WASM finishes loading — see the registration note near
+       set_host_channel_callback further down for the other half of that. -->
+  <script type="module">
+    import { createHostChannel } from './gui/host-channel.js';
+    import { t, has, localiseTree } from './gui/strings.js';
+    const hostChannelDispatch = createHostChannel({
+      handlers: {
+        hud:          function(p) { window.__updateHud(p); },
+        lobby:        function(p) { window.__updateLobby(p); },
+        chatter:      function(p) { window.__updateChatter(p); },
+        audio_config: function(p) { window.__audioConfig(p); },
+        audio_cue:    function(p) { window.__audioCue(p); },
+        audio_level:  function(p) { window.__audioLevel(p); },
+        shake:        function(p) { window.__applyShake(p[0], p[1]); },
+      },
+      strings: { t, has, localiseTree },
+    });
+    window.__hostChannelReady(hostChannelDispatch);
+  </script>
 
   <script>
     // ── Host Channel latch (issue #1224) ────────────────────────────────────
@@ -1482,8 +1509,8 @@
     // `world.combat_test.global.title` verbatim (issue #949).
     //
     // This is the pull half. The push half — everything Rust sends over a host
-    // channel — crosses the boundary once in __hostChannel below; see the note
-    // there for why the two halves are fixed differently.
+    // channel — crosses the boundary once in gui/host-channel.js's dispatcher;
+    // see the note there for why the two halves are fixed differently.
     //
     // localiseTree IS the rule (substitute only what the table actually holds),
     // so a mod pack that authored literal prose still reads, and t()'s
@@ -3521,74 +3548,22 @@ function finishInit() {
   window.wasm_force_start = wasmBindings.wasm_force_start;
   window.set_host_channel_callback = wasmBindings.set_host_channel_callback;
 
-  // ── Host Channel dispatcher (issue #818) ─────────────────────────────────
-  // One flush system in Rust (`flush_host_channels`) drains every host-page
-  // channel and calls `__hostChannel(name, payload)`. The handlers table
-  // routes each named channel to its existing handler function. Adding a
-  // channel = one Rust table row + one entry here.
+  // ── Host Channel dispatcher (issue #1225) ────────────────────────────────
+  // The handler table, the localisation boundary (issue #949) and the
+  // dispatcher itself moved to gui/host-channel.js, where the module island
+  // near the top of <head> builds the real dispatcher and installs it
+  // through the #1224 latch (window.__hostChannelReady).
   //
-  // Payload shapes: JSON string for hud/lobby/chatter/audio_config/audio_cue;
-  // a bare number for audio_level; a two-element [x, y] array for shake.
-  //
-  // JS must not assume any cross-channel ordering: even though a single flush
-  // now walks the channels in a fixed order, that order is an implementation
-  // detail — e.g. the audio config push and the Loading → InProgress edge may
-  // still land in either order within a frame (see startGameAudio).
-  var _hostChannelHandlers = {
-    hud:          function(p) { window.__updateHud(p); },
-    lobby:        function(p) { window.__updateLobby(p); },
-    chatter:      function(p) { window.__updateChatter(p); },
-    audio_config: function(p) { window.__audioConfig(p); },
-    audio_cue:    function(p) { window.__audioCue(p); },
-    audio_level:  function(p) { window.__audioLevel(p); },
-    shake:        function(p) { window.__applyShake(p[0], p[1]); }
-  };
-  // Every host-channel payload is built from authored DATA, so — exactly like a
-  // peer message — it can carry string ids: a world's `[global] title` on the
-  // lobby channel, a `game_over` trigger's `message` on the hud channel. A
-  // phone crosses localiseTree() once, in gui/connection-manager.js, at the
-  // point a peer message is decoded. This dispatcher is the host's equivalent
-  // boundary — the single place every channel payload enters the page — so the
-  // ids are resolved HERE rather than at each render site. Fixing it per render
-  // site is what left `world.combat_test.global.title` on #lobby-title after
-  // the scenario buttons were fixed (issue #949): two call sites found, and no
-  // reason to think a third would not appear.
-  //
-  // Same rule as localiseTree: substitute only what the table actually holds.
-  // Machine tokens (`phase`, station-rating names, the audio cue `kind`),
-  // player-typed names and prose a mod pack authored literally all pass through
-  // untouched — every id in strings.csv is dotted, so none of them can collide.
-  //
-  // Before the strings module has evaluated there is nothing to substitute
-  // WITH, so the payload passes through unchanged, exactly as t() does on this
-  // page.
-  function localiseHostPayload(payload) {
-    var s = window.phStrings;
-    if (!s || typeof s.localiseTree !== 'function') return payload;
-    // Channels whose payload is a JSON string (hud/lobby/chatter/audio_config/
-    // audio_cue) are resolved inside the JSON and re-encoded, because each
-    // handler owns its own parse. The numeric taps (audio_level's bare number,
-    // shake's [x, y]) carry no text but still cross the same call, so the rule
-    // holds for every channel without a per-channel list to keep in step.
-    if (typeof payload !== 'string') return s.localiseTree(payload);
-    try {
-      return JSON.stringify(s.localiseTree(JSON.parse(payload)));
-    } catch (e) {
-      // Not JSON: hand the handler exactly what Rust sent and let it report.
-      return payload;
-    }
-  }
-
-  window.__hostChannel = function(name, payload) {
-    var handler = _hostChannelHandlers[name];
-    if (handler) {
-      handler(localiseHostPayload(payload));
-    } else {
-      console.warn('[Phoenix] unhandled host channel:', name);
-    }
-  };
+  // This registration only needs to hand Rust a STABLE function — not
+  // whichever value window.__hostChannel happens to hold right now. That
+  // module island and this WASM-ready callback race independently, so
+  // window.__hostChannel could still be the #1224 queueing stub the moment
+  // this line runs. A trampoline that re-reads window.__hostChannel on every
+  // call, rather than capturing today's value, closes that race for good:
+  // Rust always reaches the CURRENT window.__hostChannel — stub or real
+  // dispatcher — with no ordering risk either way.
   if (typeof set_host_channel_callback === 'function') {
-    set_host_channel_callback(window.__hostChannel);
+    set_host_channel_callback(function(name, payload) { window.__hostChannel(name, payload); });
   }
 
   // ── HTML console action relay (issue #428) ───────────────────────────────

@@ -44,6 +44,15 @@ title = "Operations Dock Fixture"
 color      = [0.6, 0.55, 0.5]
 brightness = 300.0
 
+# Auto-select the destroyer as the player hull (single [[available_ships]] entry
+# takes server.html's 'auto-select' branch). Without it the host takes the
+# 'legacy-fallback' branch and station-gate-checks a hardcoded
+# alliance_cruiser.toml whose include closure this world never preloads, faulting
+# boot before __wasmReady — see comms-visiting-station.spec.js's DESTROYER_WORLD
+# for the same note.
+[[available_ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+
 [[entity]]
 template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"
@@ -53,10 +62,18 @@ overrides = { dock = { approach_speed = 120.0 }, umbilical = { rate = 40.0 }, in
 
 # The berth — a passive umbilical berth 70 units to starboard, inside the
 # destroyer's 200-unit dock range, its reserve_fuel ledger empty with headroom.
+# Spawned at game_start (like the player ship) rather than at world load: the
+# berth's dock markers come from its dock_probe model-variant rig sidecar, and
+# only a game_start spawn is gated behind the browser asset preload that delivers
+# that sidecar first. A world-load spawn races the async sidecar fetch and can
+# come up with no DockMarkers (and there is no re-resolve), leaving the berth
+# permanently un-dockable in the browser host. The native config cache reads the
+# sidecar synchronously, so this only bites the WASM smoke.
 [[entity]]
 template_path = "assets/entities/umbilical_berth.toml"
 name = "world.smoke_operations.entity.depot.name"
 transform = { position = [70.0, 0.0, 0.0] }
+spawn_on = "game_start"
 `;
 
 async function waitForStation(client, timeout = 5_000) {

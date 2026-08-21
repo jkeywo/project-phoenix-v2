@@ -47,6 +47,15 @@ title = "Operations Tractor Fixture"
 color      = [0.6, 0.55, 0.5]
 brightness = 300.0
 
+# Auto-select the destroyer as the player hull (single [[available_ships]] entry
+# takes server.html's 'auto-select' branch). Without it the host takes the
+# 'legacy-fallback' branch and station-gate-checks a hardcoded
+# alliance_cruiser.toml whose include closure this world never preloads, faulting
+# boot before __wasmReady — see comms-visiting-station.spec.js's DESTROYER_WORLD
+# for the same note.
+[[available_ships]]
+template_path = "assets/entities/alliance_destroyer.toml"
+
 [[entity]]
 template_path = "assets/entities/alliance_destroyer.toml"
 id = "player-ship"

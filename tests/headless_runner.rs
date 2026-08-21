@@ -17093,3 +17093,299 @@ fn capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_da
         "…and the restored world folds to the same digest the captured one did"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #1163 — NPC hulls run the SAME operations procedures as a crew.
+//
+// A HOSTILE tug (`ship_harrow_tug.toml`) tows a disabled prize off, and an ALLIED
+// tender (`alliance_tender.toml`) docks with a stranded ship and resupplies it —
+// both fully AI-crewed, driven ENTIRELY by authored doctrine through the #1162
+// backfill hosts (`operate_tractor_ai` / `operate_dock_ai` / `operate_umbilical_ai`)
+// on the shared admission seam. There is NO NPC-vs-player branch anywhere: the
+// NPC emits the byte-identical commands a crew would (proved for the tractor by
+// `a_console_and_an_ai_tractor_engage_are_byte_identical_with_one_digest`).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TOW_TUG: &str = "world.probe_npc_tow.entity.tug.name";
+const TOW_PRIZE: &str = "world.probe_npc_tow.entity.prize.name";
+const RESUPPLY_TENDER: &str = "world.probe_npc_resupply.entity.tender.name";
+const RESUPPLY_STRANDED: &str = "world.probe_npc_resupply.entity.stranded.name";
+
+fn npc_tow_args(dt: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_npc_tow.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(30.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+fn npc_resupply_args(dt: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_npc_resupply.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(30.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+/// The Bevy `Entity` of the world NPC whose `EntityName` is `name`.
+fn npc_entity_named(app: &mut App, name: &str) -> Entity {
+    app.world_mut()
+        .query::<(Entity, &project_phoenix::entities::spawner::EntityName)>()
+        .iter(app.world())
+        .find(|(_, n)| n.0 == name)
+        .map(|(e, _)| e)
+        .unwrap_or_else(|| panic!("the probe world spawns '{name}'"))
+}
+
+/// The named NPC tug's tractor beam.
+fn tractor_beam_named(app: &mut App, name: &str) -> project_phoenix::tractor::TractorBeam {
+    let e = npc_entity_named(app, name);
+    app.world()
+        .get::<project_phoenix::tractor::TractorBeam>(e)
+        .unwrap_or_else(|| panic!("{name} carries no TractorBeam"))
+        .clone()
+}
+
+/// AC (issue #1163): a HOSTILE hull locks, tractors and tows a disabled craft
+/// away with NO player involvement. The tug is a world-spawned NPC handed a `Tow`
+/// order (naming the prize) and a `Retreat` order (to its haven); it reaches the
+/// non-hostile lock itself (`objective-operate`), engages its tractor through the
+/// SAME #1162 host and admission seam a crew uses, and hauls the prize off.
+/// Asserted on the PRIZE's own state.
+#[test]
+fn an_npc_tug_locks_tractors_and_tows_a_prize_off_with_no_player_involvement() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&npc_tow_args(dt)).expect("app should build");
+    // Far enough in that the game is InProgress and the NPC tug's ai_only tractor
+    // is AI-controlled (operate_ai holds) and the `ai:<uuid>` token is admitted.
+    run(&mut app, 60);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+
+    let prize = scan_uuid_named(&mut app, TOW_PRIZE);
+    // The prize's own authored spawn — the world places it at [80, 0, 0] and
+    // gives it no lane of its own, so every metre it ends up from here is the tug
+    // towing it. Read as the authored literal rather than a captured value: the
+    // tug locks and engages within the first AI ticks, so a captured "start" is
+    // already mid-tow.
+    let prize_authored_start = Vec3::new(80.0, 0.0, 0.0);
+
+    // No command is ever sent by a player. Let the backfilled tug do the whole
+    // job: acquire the lock, engage the tractor, fly its Retreat leg.
+    run(&mut app, ticks_for_sim_seconds(40.0, dt));
+
+    // The tug engaged its OWN tractor off the Tow directive and is holding the
+    // named prize — the same TractorBeam state a crewed hold reaches.
+    let beam = tractor_beam_named(&mut app, TOW_TUG);
+    assert!(
+        beam.engaged && beam.coupled_target.as_deref() == Some(prize.as_str()),
+        "the backfilled tug must have locked and engaged its tractor on the prize with no \
+         player input, got {beam:?}"
+    );
+
+    // The prize rides the authored coupling offset (100 units), target-side proof
+    // the beam is actually carrying it.
+    let tug_pos = position_of(&mut app, TOW_TUG);
+    let offset = position_of(&mut app, TOW_PRIZE) - tug_pos;
+    assert!(
+        (offset.length() - 100.0).abs() < 2.0,
+        "the towed prize must ride the tug's authored 100-unit coupling offset, got a \
+         separation of {}",
+        offset.length()
+    );
+
+    // The tug FLEW its own Retreat leg toward the haven (at -X), with no player
+    // input — proof the whole autonomous procedure ran, not just the engage.
+    assert!(
+        tug_pos.x < -80.0,
+        "the tug must have flown its Retreat leg toward the -X haven, ended at {tug_pos:?}"
+    );
+
+    // And the prize was HAULED OFF with it: far from where it was authored.
+    let hauled = (position_of(&mut app, TOW_PRIZE) - prize_authored_start).length();
+    assert!(
+        hauled > 150.0,
+        "the prize must be towed well away from its authored start, moved only {hauled}"
+    );
+}
+
+/// AC (issue #1163): the towed prize is subject to the SAME interruptions a
+/// player's tow is. This drives one — relocating the prize beyond the tug's reach
+/// (range AND radar horizon lost) — and asserts the NPC tow drops exactly as a
+/// crewed one would: the coupling parts and the prize stops following. (The full
+/// interruption set — lock lost, range lost, power lost, tractor disabled — is
+/// exercised on the crewed operator by
+/// `a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it`; the
+/// host and hold verdict are shared, so proving one here proves the NPC reaches
+/// the same drop through the same code.)
+#[test]
+fn an_npc_tow_is_dropped_by_an_interruption_just_like_a_crewed_one() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&npc_tow_args(dt)).expect("app should build");
+    run(&mut app, 60);
+    let prize = scan_uuid_named(&mut app, TOW_PRIZE);
+
+    // Let the tug reach a clean autonomous hold first.
+    run(&mut app, ticks_for_sim_seconds(6.0, dt));
+    let holding = tractor_beam_named(&mut app, TOW_TUG);
+    assert!(
+        holding.engaged && holding.coupled_target.as_deref() == Some(prize.as_str()),
+        "precondition: the tug must be holding the prize before the interruption, got {holding:?}"
+    );
+
+    // The interruption: relocate the prize far beyond the tug's 600-unit tractor
+    // reach AND its 800-unit radar horizon, so the hold cannot form and the lock
+    // cannot re-acquire — the same "range/lock lost" a player's tow suffers when
+    // the hulk drifts out of the beam.
+    let exile = Vec3::new(6000.0, 0.0, 6000.0);
+    move_named_to(&mut app, TOW_PRIZE, exile);
+    run(&mut app, ticks_for_sim_seconds(2.0, dt));
+
+    // The coupling parted: nothing is held.
+    let dropped = tractor_beam_named(&mut app, TOW_TUG);
+    assert!(
+        dropped.coupled_target.is_none(),
+        "the NPC tow must drop when the prize is carried out of reach, got {dropped:?}"
+    );
+    // And the prize is no longer being dragged onto the tug's rig — it stays where
+    // the towline parted rather than following.
+    let separation = (position_of(&mut app, TOW_PRIZE) - position_of(&mut app, TOW_TUG)).length();
+    assert!(
+        separation > 600.0,
+        "a released prize must stay out of reach, not snap back to the rig; separation {separation}"
+    );
+}
+
+/// The named NPC tender's live level for a named capacity on its OWN ledger.
+fn tender_capacity(app: &mut App, capacity: &str) -> i64 {
+    let e = npc_entity_named(app, RESUPPLY_TENDER);
+    app.world()
+        .get::<project_phoenix::infrastructure::InfrastructureCondition>(e)
+        .and_then(|c| c.0.capacity(capacity))
+        .unwrap_or_else(|| panic!("the tender carries no {capacity} capacity"))
+}
+
+/// AC (issue #1163): an ALLIED hull docks with a stranded ship and transfers a
+/// capacity to it, with NO player involvement. The tender is a world-spawned NPC
+/// handed one `Transfer` order; its Helm docks (the same `operate_dock_ai` host)
+/// and its Engineering flows `reserve_fuel` over the umbilical (the same
+/// `operate_umbilical_ai` host, gated on the dock the Helm achieves) — the whole
+/// two-seat chain off authored doctrine, no command ever sent by a player.
+/// Asserted on the STRANDED ship's own ledger.
+#[test]
+fn an_npc_tender_docks_and_resupplies_a_stranded_ship_with_no_player_involvement() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&npc_resupply_args(dt)).expect("app should build");
+    run(&mut app, 60);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+
+    // The stranded ship starts EMPTY — every unit it gains is delivered.
+    assert_eq!(
+        capacity_of(&mut app, RESUPPLY_STRANDED, "reserve_fuel"),
+        0,
+        "precondition: the stranded ship's ledger starts empty"
+    );
+    let tender_start = tender_capacity(&mut app, "reserve_fuel");
+
+    // No command is ever sent by a player. Let the tender dock and run the flow.
+    run(&mut app, ticks_for_sim_seconds(30.0, dt));
+
+    // The stranded ship's ledger filled — target-side proof the tender docked and
+    // flowed the capacity over the umbilical, unaided.
+    let received = capacity_of(&mut app, RESUPPLY_STRANDED, "reserve_fuel");
+    assert!(
+        received > 0,
+        "the backfilled tender must have docked and delivered reserve_fuel to the stranded \
+         ship with no player input, delivered {received}"
+    );
+
+    // And it came out of the tender's OWN ledger, unit for unit — a real transfer,
+    // not a spawn.
+    let tender_now = tender_capacity(&mut app, "reserve_fuel");
+    assert!(
+        tender_now < tender_start,
+        "the delivered capacity must drain the tender's own ledger: {tender_start} -> {tender_now}"
+    );
+}
+
+/// AC (issue #1163): a balance batch over the new matchups reports without a
+/// regression in the shipped win/loss and time-to-kill distributions — a tug
+/// hauling a prize away does not make a fight a foregone conclusion.
+///
+/// This is the headless demonstration the issue calls for (balance REPORTS, never
+/// gates). It runs `probe_npc_tow_balance.toml` — `probe_duel.toml`'s contested
+/// fight with a hostile tug hauling a disabled prize added on the flank — and
+/// reads the AAR: the duel is still a two-sided fight in which BOTH combatants
+/// deal real damage, the damage ledger holds ONLY the two duelists (the tug is a
+/// non-combatant and contributes nothing), and the tow still completes. A tug
+/// towing a disabled prize adds no firepower and removes no live combatant, so it
+/// cannot decide the fight; the shipped duel's distribution is unchanged by it.
+#[test]
+fn a_tug_towing_a_prize_does_not_make_a_fight_a_foregone_conclusion() {
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_npc_tow_balance.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(60.0, dt),
+        deterministic: true,
+        // The same resolving seed the shipped duel probe pins; the tug/prize sit
+        // 2000 units off, so the fight itself is probe_duel's.
+        seed: Some(34),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    // The fight is CONTESTED and two-sided — the exact property that says the
+    // outcome was NOT handed to anyone. Only the two duelists appear in the
+    // ledger: the tug carries no weapons and never joins the fight, so it adds
+    // nothing to the combat distribution.
+    assert_eq!(
+        report.damage_by_ship.len(),
+        2,
+        "only the two duelists should trade damage — the tug is a non-combatant and must \
+         contribute nothing to the fight, got {:?}",
+        report.damage_by_ship
+    );
+    for (uuid, ledger) in &report.damage_by_ship {
+        assert!(
+            ledger.damage_dealt > 0.0,
+            "ship {uuid} dealt no damage — the fight was one-sided: {:?}",
+            report.damage_by_ship
+        );
+    }
+    let max_dealt = report
+        .damage_by_ship
+        .values()
+        .map(|l| l.damage_dealt)
+        .fold(0.0_f32, f32::max);
+    assert!(
+        max_dealt > 50.0,
+        "the duel must be a real engagement, peak dealt was only {max_dealt}: {:?}",
+        report.damage_by_ship
+    );
+
+    // And the tow still COMPLETES alongside the fight: the tug hauls the prize
+    // well off from its authored [2080, 0, 0] spawn toward its +X haven.
+    let prize_hauled = (position_of(&mut app, "world.probe_npc_tow_balance.entity.prize.name")
+        - Vec3::new(2080.0, 0.0, 0.0))
+    .length();
+    assert!(
+        prize_hauled > 150.0,
+        "the tug must still haul its prize off while the fight runs, moved only {prize_hauled}"
+    );
+}

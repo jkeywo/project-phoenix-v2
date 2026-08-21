@@ -3507,17 +3507,20 @@ fn an_unknown_channel_resolves_to_nothing_on_every_authored_policy() {
         }
     }
     assert_eq!(
-        checked, 147,
-        "the fifteen policy kinds account for 147 of the fleet's 197 AI-capable \
-         fine-system slots (the other 50 are the selectors). A change in this number \
-         means a hull, weapon or kind moved. 147-of-197 since #1028, which added the \
-         TENTH AI-bearing hull — `ship_civilian_hauler`, eleven policy slots and five \
-         selectors, every one of them composed from the fleet baseline except its \
-         stand-down captain; 136-of-181 since #956, which added the \
-         ship-level `weapons_doctrine` kind — one slot on each of the nine AI-bearing \
-         hulls; 127-of-172 after #954 moved the three-weapon RNG-coverage escort out \
-         of `assets/entities/` to the test-fixture directory, and 141-of-191 before \
-         that."
+        checked, 169,
+        "the fifteen policy kinds account for 169 of the fleet's 229 AI-capable \
+         fine-system slots (the other 60 are the selectors). A change in this number \
+         means a hull, weapon or kind moved. 169-of-229 since #1163, which added the \
+         ELEVENTH and TWELFTH AI-bearing hulls — `ship_harrow_tug` and \
+         `alliance_tender`, eleven policy slots and five selectors EACH, both fully \
+         composed from the fleet baseline with no bespoke captain; 147-of-197 since \
+         #1028, which added the TENTH AI-bearing hull — `ship_civilian_hauler`, \
+         eleven policy slots and five selectors, every one of them composed from the \
+         fleet baseline except its stand-down captain; 136-of-181 since #956, which \
+         added the ship-level `weapons_doctrine` kind — one slot on each of the nine \
+         AI-bearing hulls; 127-of-172 after #954 moved the three-weapon RNG-coverage \
+         escort out of `assets/entities/` to the test-fixture directory, and \
+         141-of-191 before that."
     );
 }
 

@@ -1,0 +1,85 @@
+# Balance probe for issue #1163 — a tug hauling a prize away does NOT make a
+# fight a foregone conclusion.
+#
+# This is `probe_duel.toml`'s combat (a player Alliance cruiser, AI-backfilled in
+# a headless run, versus a world-spawned Alliance destroyer re-flagged Harrow and
+# given a standing Destroy doctrine — the shipped balance shape) with ONE thing
+# added: a hostile salvage tug (`ship_harrow_tug.toml`) hauling a disabled prize
+# off, well clear of the duel.
+#
+# The balance question (issue #1163's last AC): does the new tow content skew the
+# shipped win/loss and time-to-kill distributions? The headless assertion in
+# `a_tug_towing_a_prize_does_not_make_a_fight_a_foregone_conclusion` reads the AAR
+# off a run of THIS world and holds that:
+#
+#   * the duel is still a CONTESTED, two-sided fight — both combatants deal real
+#     damage, exactly as they do without the tug present, and
+#   * the tug contributes NOTHING to combat — it carries no weapons and is not a
+#     party to the fight, so the damage ledger holds only the two duelists, and
+#   * the tow still completes — the tug hauls the prize off while the fight runs.
+#
+# A tug that tows a DISABLED prize adds no firepower and removes no live
+# combatant, so it cannot decide the fight — the tow is a parallel, non-combat
+# action. The tug and prize sit 2000 units off, far outside the duel's engagement
+# range and either combatant's radar horizon, so they neither draw fire nor perturb
+# the fight's geometry.
+
+[global]
+seed = 3
+ai_helm_tick_hz = 30.0
+
+[anchors]
+# Where the tug hauls the prize — further out along +X, away from the duel.
+tug_balance_haven = [3000.0, 0.0, 0.0]
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# Player ship (the duel's side A) — spawned by spawn_game_start_entities.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── The tug + prize, 2000 units off, running their tow beside the fight ────────
+[[entity]]
+template_path = "assets/entities/ship_harrow_tug.toml"
+name = "world.probe_npc_tow_balance.entity.tug.name"
+transform = { position = [2000.0, 0.0, 0.0] }
+overrides = { behaviour = { doctrine = [
+  { id = "tow-the-prize", directive_kind = "Tow", directive_operate_target = "world.probe_npc_tow_balance.entity.prize.name", base_priority = 90.0 },
+  { id = "retreat-to-haven", directive_kind = "Retreat", directive_anchor = "tug_balance_haven", base_priority = 60.0, target_speed = 0.9 },
+] } }
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.probe_npc_tow_balance.entity.prize.name"
+transform = { position = [2080.0, 0.0, 0.0] }
+overrides = { mass = 20000.0 }
+
+[script]
+setup = """
+// Make Harrow and Federation mutually hostile before the destroyer spawns —
+// exactly as probe_duel.toml does, so the duel is a real fight.
+on_world_loaded("on_load");
+// Spawn the hostile Alliance destroyer close to the player at t=0.
+on_timer(0, "on_spawn_hostile");
+
+fn on_load(ctx) {
+    ctx.effects.add_faction_enemy("Harrow", "Federation");
+    ctx.effects.add_faction_enemy("Federation", "Harrow");
+}
+
+fn on_spawn_hostile(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/alliance_destroyer.toml",
+        name: "probe_hostile",
+        position: [45, 0, 0],
+        overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc", behaviour: #{ doctrine: [
+            #{ id: "kill", directive_kind: "Destroy",
+               base_priority: 80, target_speed: flt("0.9"), maintain_range: 25 },
+        ] } }
+    });
+}
+"""

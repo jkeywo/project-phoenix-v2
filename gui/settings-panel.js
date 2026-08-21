@@ -50,19 +50,22 @@ import { controlSystemEnvelope } from './command-gateway.js';
 import { renderStationHelp } from './help-panel.js';
 import { renderManual } from './manual-panel.js';
 import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP } from './accessibility-profile.js';
-import { createFocusTrap } from './focus-trap.js';
+import {
+  mountOverlayShell,
+  renderTabBar,
+  makeSectionBuilders,
+  makeRowBuilder,
+  VOLUME_MIN,
+  VOLUME_MAX,
+  VOLUME_STEP,
+} from './settings-overlay-kit.js';
 
 /** localStorage key for the master volume. Unchanged from the pre-#940 slider. */
 const STORAGE_KEY = 'phoenix-settings-volume';
 
-/**
- * Master volume is a 0..1 SCALE factor, offered in whole percent. These are the
- * slider's own resolution, not tunables — 1.0 is the identity (every channel at
- * its authored level), which is why it is also the default.
- */
-const VOLUME_MIN = 0;
-const VOLUME_MAX = 1;
-const VOLUME_STEP = 0.01;
+// Master volume's 0..1 range and percent resolution are shared with the host
+// cog — see `gui/settings-overlay-kit.js` — 1.0 is the identity (every
+// channel at its authored level), which is why it is also the default.
 
 /**
  * The Debug/Cheat tab's overlay toggles.
@@ -414,61 +417,33 @@ export function mountSettings({
     if (typeof _onAccessibility === 'function') _onAccessibility(effect, value);
   };
 
-  // ── Gear button ──────────────────────────────────────────────────────────
-  let btn = doc.getElementById('settings-btn');
-  if (!btn) {
-    btn = doc.createElement('button');
-    btn.id = 'settings-btn';
-    btn.className = 'settings-btn';
-    doc.body.appendChild(btn);
-  }
-  btn.setAttribute('aria-label', t('settings.title'));
-  btn.title = t('settings.title');
-  btn.textContent = '⚙';
-  btn.setAttribute('aria-expanded', 'false');
-
-  // ── Overlay ──────────────────────────────────────────────────────────────
-  let overlay = doc.getElementById('settings-overlay');
-  if (!overlay) {
-    overlay = doc.createElement('div');
-    overlay.id = 'settings-overlay';
-    overlay.className = 'settings-overlay';
-    overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-modal', 'true');
-    doc.body.appendChild(overlay);
-  }
-  overlay.setAttribute('aria-hidden', 'true');
-  overlay.hidden = true;
-
-  // The modal focus contract (issue #1174): Tab/Shift+Tab cycle only inside the
-  // panel, Escape closes it, and focus returns to the cog on close. One shared
-  // helper drives all three — `open`/`close` below only turn it on and off.
-  const focusTrap = createFocusTrap(overlay, { doc, onEscape: () => close() });
+  // ── Gear button + overlay ────────────────────────────────────────────────
+  //
+  // The find-or-create/aria/focus-trap/open-close/backdrop-click mechanics are
+  // shared with the host cog (issue #1238) — see `gui/settings-overlay-kit.js`
+  // for what stayed here vs there.
+  const shell = mountOverlayShell(doc, {
+    buttonId: 'settings-btn',
+    overlayId: 'settings-overlay',
+    buttonClass: 'settings-btn',
+    overlayClass: 'settings-overlay',
+    // The gear sits over consoles that have their own click handling; the
+    // host page has no such layer beneath its cog, so this stays client-only.
+    stopPropagationOnToggle: true,
+  });
+  const { overlay } = shell;
+  // `buildContent` is a hoisted function declaration, so this may run before
+  // its textual definition below.
+  shell.buildContent = buildContent;
 
   // ── Small builders ───────────────────────────────────────────────────────
 
-  function section(labelId) {
-    const el = doc.createElement('div');
-    el.className = 'settings-section';
-    const heading = doc.createElement('div');
-    heading.className = 'settings-section-heading';
-    heading.textContent = t(labelId);
-    el.appendChild(heading);
-    return el;
-  }
-
-  function row(className) {
-    const el = doc.createElement('div');
-    el.className = className;
-    return el;
-  }
-
-  function hint(labelId) {
-    const el = doc.createElement('div');
-    el.className = 'settings-section-hint';
-    el.textContent = t(labelId);
-    return el;
-  }
+  const { section, hint } = makeSectionBuilders(doc, {
+    sectionClass: 'settings-section',
+    headingClass: 'settings-section-heading',
+    hintClass: 'settings-section-hint',
+  });
+  const row = makeRowBuilder(doc, 'settings-row');
 
   /** A toggle button whose pressed state is painted from server truth. */
   function toggle(id, label, on, onClick) {
@@ -724,7 +699,7 @@ export function mountSettings({
       const leaveSection = section('settings.station');
       leaveSection.appendChild(
         action(t('settings.leave_station'), 'settings-leave-btn', () => {
-          close();
+          shell.close();
           emit('ReleaseStation');
         }),
       );
@@ -782,17 +757,7 @@ export function mountSettings({
     body.className = 'settings-body';
     popup.appendChild(body);
 
-    for (const tab of view.tabs) {
-      const el = doc.createElement('button');
-      el.className = 'settings-tab' + (tab.id === activeTab ? ' active' : '');
-      el.setAttribute('data-tab', tab.id);
-      el.textContent = t(tab.labelId);
-      el.addEventListener('click', (e) => {
-        if (e && typeof e.preventDefault === 'function') e.preventDefault();
-        selectTab(tab.id);
-      });
-      tabBar.appendChild(el);
-    }
+    renderTabBar(doc, tabBar, view.tabs, activeTab, 'settings-tab', selectTab);
 
     if (activeTab === 'debug') buildDebugTab(body, view);
     else if (activeTab === 'audio') buildAudioTab(body);
@@ -804,47 +769,8 @@ export function mountSettings({
 
   function selectTab(id) {
     activeTab = id;
-    if (isOpen()) buildContent();
+    if (shell.isOpen()) buildContent();
   }
-
-  function isOpen() {
-    return overlay.hidden === false;
-  }
-
-  function open() {
-    // Rebuilt on every open so the demo gate is re-evaluated and the debug
-    // buttons paint from the latest `DebugState`.
-    buildContent();
-    overlay.hidden = false;
-    overlay.setAttribute('aria-hidden', 'false');
-    overlay.classList.add('open');
-    btn.setAttribute('aria-expanded', 'true');
-    // Trap focus and pull it into the freshly-built panel; the background goes
-    // inert for the duration.
-    focusTrap.activate();
-  }
-
-  function close() {
-    // Lift the trap first so it hands focus back to the cog before the panel is
-    // hidden out from under it.
-    focusTrap.release();
-    overlay.hidden = true;
-    overlay.setAttribute('aria-hidden', 'true');
-    overlay.classList.remove('open');
-    btn.setAttribute('aria-expanded', 'false');
-  }
-
-  btn.addEventListener('click', (e) => {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
-    if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-    if (isOpen()) close();
-    else open();
-  });
-
-  // Dismiss on backdrop click.
-  overlay.addEventListener('click', (e) => {
-    if (e && e.target === overlay) close();
-  });
 
   // `rebuildContent` repaints an OPEN panel from current state. client.html
   // calls it when a `DebugState` arrives, which is the only push that can
@@ -852,12 +778,12 @@ export function mountSettings({
   // rather than per-frame: a rebuild replaces the volume slider element, and
   // doing that under a dragging finger would drop the drag.
   return {
-    open,
-    close,
-    isOpen,
+    open: shell.open,
+    close: shell.close,
+    isOpen: shell.isOpen,
     selectTab,
     rebuildContent: () => {
-      if (isOpen()) buildContent();
+      if (shell.isOpen()) buildContent();
     },
   };
 }

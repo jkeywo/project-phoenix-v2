@@ -71,11 +71,15 @@ const MODAL_FILES = jsFiles().filter((f) => declaresModal(readStripped(f)));
 
 describe('every modal declares the focus contract', () => {
   it('finds the modals to check', () => {
-    // A silent zero would let the whole floor pass while asserting nothing, so
-    // the two cogs that ship today are named — the phone client and the host.
+    // A silent zero would let the whole floor pass while asserting nothing.
+    // The two cogs' `aria-modal`/`role="dialog"` declaration and their
+    // `createFocusTrap` wiring both moved onto the shared shell (issue
+    // #1238's dedup of #939/#940) — `gui/settings-panel.js` and
+    // `gui/server-settings.js` each call `mountOverlayShell` rather than
+    // declaring the contract inline, so the file this floor actually finds
+    // and checks is the shell they share.
     const names = MODAL_FILES.map(rel);
-    expect(names).toContain('gui/settings-panel.js');
-    expect(names).toContain('gui/server-settings.js');
+    expect(names).toContain('gui/settings-overlay-kit.js');
   });
 
   for (const file of MODAL_FILES) {

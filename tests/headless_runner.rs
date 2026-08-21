@@ -15456,3 +15456,133 @@ fn a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it() {
         "…and the restored world folds to the same digest the captured one did"
     );
 }
+
+// ── #1158: the target decides what being held means (arrest-decline) ──────────
+//
+// `assets/worlds/probe_held_response.toml` fields the same backfilled tug and a
+// FAILING STRUCTURE that authors — in its own config — an `arrest-decline`
+// held-response: it loses 6 condition points a second on its own, and while the
+// beam is on it the decline is arrested and it recovers at an authored 20 points
+// a second. The test drives the beam through the ordinary admitted path and
+// reads the structure's OWN condition track and operational flag — observable
+// target state, not a private field — to prove:
+//
+//   * unheld, the decline crosses the structure's own failure threshold DOWN;
+//   * held, the decline is arrested and the recovery crosses the restore
+//     threshold UP, setting the operational flag a scenario reads;
+//   * released, the ordinary decline resumes on the next tick.
+
+const STRUCTURE: &str = "world.probe_held_response.entity.structure.name";
+/// The structure's own operational flag (`depot_transfer`'s authored threshold,
+/// down below 40 % condition, back at 45 %).
+const STRUCTURE_FLAG: &str = "depot_transfer_capable";
+
+fn held_response_args(dt: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_held_response.toml".into(),
+        ship_path: "assets/entities/tractor_tug.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(60.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+/// The named structure's operational flag as its own condition track holds it —
+/// the observable state a scenario's `on_flag_set` reacts to.
+fn structure_flag(app: &mut App, name: &str, flag: &str) -> Option<bool> {
+    app.world_mut()
+        .query::<(
+            &project_phoenix::entities::spawner::EntityName,
+            &project_phoenix::infrastructure::InfrastructureCondition,
+        )>()
+        .iter(app.world())
+        .find(|(entity_name, _)| entity_name.0 == name)
+        .map(|(_, condition)| condition.0.flag(flag))
+        .unwrap_or_else(|| panic!("{name} carries no condition track"))
+}
+
+/// AC: a held target decides what being held means — a failing structure's
+/// decline is arrested and recovered while the beam holds it, and resumes on
+/// release. Progress lives on the structure's OWN condition track.
+#[test]
+fn holding_a_failing_structure_arrests_its_decline_and_releasing_resumes_it() {
+    use project_phoenix::messages::SystemControlPayload;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&held_response_args(dt)).expect("app should build");
+    // Far enough in that the game is InProgress and the tug is backfilled, so its
+    // engineering-owned tractor is AI-controlled and the `ai:` token is admitted.
+    run(&mut app, 60);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+    let structure = scan_uuid_named(&mut app, STRUCTURE);
+    place_operator(&mut app, Vec3::ZERO);
+
+    // The structure opens above its 40 % failure point, so its flag begins UP.
+    assert_eq!(
+        structure_flag(&mut app, STRUCTURE, STRUCTURE_FLAG),
+        Some(true),
+        "precondition: an intact-enough structure starts capable"
+    );
+
+    // ── It declines on its own, crossing its own failure threshold DOWN ───────
+    let before_decline = condition_of(&mut app, STRUCTURE);
+    run(&mut app, 180); // 3 sim-seconds unheld
+    let declined = condition_of(&mut app, STRUCTURE);
+    assert!(
+        declined < before_decline - 12.0,
+        "left alone the structure declines at its authored rate: from {before_decline} to \
+         {declined}"
+    );
+    assert_eq!(
+        structure_flag(&mut app, STRUCTURE, STRUCTURE_FLAG),
+        Some(false),
+        "…and the decline crossed the structure's own 40 % failure point, dropping the \
+         operational flag a scenario reads"
+    );
+
+    // ── Held, the decline is arrested and it recovers at the authored rate ────
+    set_tractor_lock(&mut app, Some(structure.clone()));
+    send_tractor(&mut app, SystemControlPayload::EngageTractor);
+    let beam = tractor_beam_of(&mut app);
+    assert!(
+        beam.engaged && beam.coupled_target.as_deref() == Some(structure.as_str()),
+        "precondition: the beam is holding the structure, got {beam:?}"
+    );
+    let held_start = condition_of(&mut app, STRUCTURE);
+    run(&mut app, 180); // 3 sim-seconds held
+    let recovered = condition_of(&mut app, STRUCTURE);
+    let gain = recovered - held_start;
+    // Net +20/s for three seconds is +60. Were the decline NOT arrested, the
+    // +20/s recovery would fight the −6/s decline and net only +42 — so a gain
+    // past 50 proves the decline is truly arrested, not merely outrun.
+    assert!(
+        gain > 50.0 && gain < 70.0,
+        "held, the −6/s decline is arrested and the structure recovers at the authored +20/s \
+         (≈+60 over three seconds), not the +42 an un-arrested recovery would give: gained \
+         {gain} (from {held_start} to {recovered})"
+    );
+    assert_eq!(
+        structure_flag(&mut app, STRUCTURE, STRUCTURE_FLAG),
+        Some(true),
+        "…and the recovered condition crossed the structure's own restore point UP, setting the \
+         operational flag again — the crossing mirrored by the one system that owns the edges"
+    );
+
+    // ── Released, the ordinary decline resumes on the next tick ───────────────
+    let before_release = condition_of(&mut app, STRUCTURE);
+    send_tractor(&mut app, SystemControlPayload::ReleaseTractor);
+    assert!(!tractor_beam_of(&mut app).engaged, "the beam released");
+    run(&mut app, 120); // 2 sim-seconds unheld again
+    let after_release = condition_of(&mut app, STRUCTURE);
+    assert!(
+        after_release < before_release - 6.0,
+        "releasing the beam resumes the structure's ordinary decline: from {before_release} to \
+         {after_release}"
+    );
+}

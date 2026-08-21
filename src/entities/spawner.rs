@@ -1258,6 +1258,14 @@ pub fn spawn_entity(
         }
     }
 
+    // The held-response (issue #1158) — attach when `[held_response]` is
+    // present, on a TARGET entity. It says what being held DOES to this thing;
+    // the tractor server reads it off whatever it is holding. An entity that
+    // authors nothing carries no component and is merely held in place.
+    if let Some(held_response) = &config.held_response {
+        entity_commands.insert(crate::tractor::HeldResponseSection(held_response.clone()));
+    }
+
     // The science scan (issue #1032) — attach the record when `[scan]` is
     // present, on the same argument again. The record carries the authored
     // fidelity ladder AND the last reading: a hull that can scan starts able to
@@ -1488,6 +1496,92 @@ fails_below = 0.4
             .get::<crate::infrastructure::InfrastructureCondition>(e)
             .expect("the merged config still attaches a track");
         assert_eq!(track.0.condition(), 80.0);
+    }
+
+    // ── Issue #1158: `[held_response]`, on both authoring paths ──
+
+    /// **AC1.** A target that authors `[held_response]` spawns carrying it; one
+    /// that authors nothing carries no component and is merely held in place.
+    ///
+    /// Both directions: the second arm is the whole "a target that authors
+    /// nothing is merely held in place" claim — every derelict and structure
+    /// written before this existed is in it.
+    #[test]
+    fn an_authored_held_response_attaches_a_section_and_omitting_it_attaches_none() {
+        let mut app = test_app();
+        let e = spawn_and_flush(
+            &mut app,
+            &lenient(
+                "[hull]\nhull_integrity = 400.0\n\n[held_response]\nkind = \"arrest-decline\"\n\
+                 recover_per_sec = 20.0\n",
+            ),
+            Vec3::ZERO,
+            "structure".into(),
+            None,
+        );
+        let held = app
+            .world()
+            .get::<crate::tractor::HeldResponseSection>(e)
+            .expect("an authored [held_response] table must attach the section");
+        assert_eq!(held.0.kind, crate::tractor::HeldResponseKind::ArrestDecline);
+        assert_eq!(held.0.recover_per_sec, Some(20.0));
+
+        let mut app = test_app();
+        let e = spawn_and_flush(
+            &mut app,
+            &lenient("[hull]\nhull_integrity = 400.0\n"),
+            Vec3::ZERO,
+            "plain".into(),
+            None,
+        );
+        assert!(
+            app.world()
+                .get::<crate::tractor::HeldResponseSection>(e)
+                .is_none(),
+            "a target that authors no [held_response] carries no component and is merely held in \
+             place — every derelict and structure before this slice is in this arm"
+        );
+    }
+
+    /// **AC1.** The world's `[[entity]].overrides` path reaches the table too —
+    /// the authoring path `probe_held_response.toml` uses to make a shipped depot
+    /// arrest-decline without forking the template.
+    #[test]
+    fn a_world_entity_override_authors_a_held_response_onto_a_target() {
+        let overrides: toml::Value =
+            toml::from_str("[held_response]\nkind = \"arrest-decline\"\nrecover_per_sec = 20.0\n")
+                .expect("the override document parses");
+        let merged = crate::entity_loader::apply_overrides(&lenient(DEPOT_TOML), &overrides)
+            .expect("the override merges onto a target that authored none");
+        let held = merged
+            .held_response
+            .as_ref()
+            .expect("the merged config carries the authored held-response");
+        assert_eq!(held.kind, crate::tractor::HeldResponseKind::ArrestDecline);
+
+        let mut app = test_app();
+        let e = spawn_and_flush(&mut app, &merged, Vec3::ZERO, "depot".into(), None);
+        assert!(
+            app.world()
+                .get::<crate::tractor::HeldResponseSection>(e)
+                .is_some(),
+            "…and the merged target spawns carrying it, over its condition track"
+        );
+    }
+
+    /// **AC7.** A `[held_response]` table whose fields do not match its kind is a
+    /// load error naming the field, not a hold that silently arrests nothing.
+    #[test]
+    fn an_unauthorable_held_response_fails_the_entity_load() {
+        let err = EntityConfig::from_toml_in_mode(
+            "[hull]\nhull_integrity = 400.0\n\n[held_response]\nkind = \"arrest-decline\"\n",
+            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+        )
+        .expect_err("arrest-decline with no recover_per_sec must be refused");
+        assert!(
+            err.to_string().contains("recover_per_sec"),
+            "the refusal must name the missing field, got {err}"
+        );
     }
 
     // ── Issue #1026: `[operations]`, on both authoring paths ──
@@ -1754,6 +1848,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1842,6 +1937,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1900,6 +1996,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1963,6 +2060,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2031,6 +2129,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2182,6 +2281,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2266,6 +2366,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2333,6 +2434,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2484,6 +2586,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
         };
 
@@ -2550,6 +2653,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2598,6 +2702,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: Some(faction_id),
             hull: None,
@@ -2713,6 +2818,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2934,6 +3040,7 @@ regen_per_sec = 0.0
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,

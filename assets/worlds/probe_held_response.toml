@@ -1,0 +1,58 @@
+# Probe world for issue #1158 — the arrest-decline held-response, end to end.
+#
+# One tractor-fitted tug and one FAILING STRUCTURE positioned close enough to
+# couple. The structure declines on its own (an authored `decay_per_sec`), and
+# it authors — in its OWN config — what being held does to it: `arrest-decline`,
+# which stops the decline while the beam is on it and recovers it at an authored
+# rate. The tractor supplies the geometry and knows nothing about which
+# held-response the structure declared.
+#
+# WHAT THIS WORLD PROVES (the headless test drives it):
+#
+#   1. A DECLINING STRUCTURE DECLINES UNHELD. Left alone, the structure's
+#      condition falls at its authored rate and crosses its own failure
+#      threshold DOWN, dropping the operational flag a scenario reads.
+#
+#   2. HOLDING IT ARRESTS THE DECLINE AND RECOVERS IT. With the structure locked
+#      and the beam engaged, the decline stops and the condition climbs at the
+#      authored recover rate, crossing the structure's own restore threshold UP
+#      and setting the operational flag again — the crossing detected and
+#      mirrored by the one system that owns the flag edges, exactly as a scripted
+#      repair's would be.
+#
+#   3. RELEASING RESUMES THE ORDINARY DECLINE ON THE NEXT TICK. Once the beam
+#      lets go, nothing arrests the structure and it falls again.
+#
+# The held-response, the decline rate and the recover rate are authored on the
+# STRUCTURE (through its `[[entity]].overrides`, the same authoring path #1025's
+# `[infrastructure]` and #1026's `[operations]` use), never in Rust and never on
+# the tug. A structure that authored no `[held_response]` would simply be held in
+# place, which is why the shipped derelict of `probe_tractor.toml` is unchanged.
+
+[global]
+seed = 1158
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The tug — the backfilled player ship, spawned at game start. The same lean
+# tractor hull `probe_tractor.toml` fields; its beam rides the ordinary admitted
+# EngageTractor / ReleaseTractor path.
+[[entity]]
+template_path = "assets/entities/tractor_tug.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The failing structure — a transfer depot 80 units off, well inside the tug's
+# 600-unit reach. It starts at 55/100 (above its 40 % failure point, so the
+# `depot_transfer_capable` flag begins UP), loses 6 condition points a second on
+# its own, and authors an `arrest-decline` held-response that holds it steady and
+# recovers it at 20 points a second while the beam is on it. Every one of those
+# numbers is the STRUCTURE's, authored here — nothing about it is in Rust.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_held_response.entity.structure.name"
+transform = { position = [80.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 55.0, decay_per_sec = 6.0 }, held_response = { kind = "arrest-decline", recover_per_sec = 20.0 } }

@@ -4491,6 +4491,14 @@ pub struct EntityConfig {
     /// and a hull that authors one without the other is refused by name at load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tractor: Option<crate::tractor::TractorConfig>,
+    /// What being held by a tractor DOES to this entity as a TARGET (issue
+    /// #1158) — follow, arrest-decline, station-keep or formation-keep. The
+    /// mirror of `tractor`: that table says what a hull can do the holding
+    /// with, this one says what happens to the thing held. Absent for every
+    /// entity that authors nothing, which is merely held in place (station-keep)
+    /// exactly as #1156 held it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held_response: Option<crate::tractor::HeldResponseConfig>,
     /// The faint world-locked lattice drawn under this hull on the viewscreen.
     /// Present only on a hull meant to be FLOWN — the grid is a motion cue for
     /// the crew looking out of their own ship, and it is only ever read off the
@@ -4926,6 +4934,15 @@ impl EntityConfig {
                      tractor's power allocation is what an interruption checks",
                 ));
             }
+        }
+
+        // Validation: a [held_response] table has to match its own kind (issue
+        // #1158). A missing recover_per_sec on an arrest-decline, a zero-length
+        // formation bearing, or a per-kind field on the wrong kind are all
+        // author mistakes whose only other symptom would be a hold that arrests
+        // nothing, or holds a target on top of the operator that grabbed it.
+        if let Some(ref held_response) = config.held_response {
+            held_response.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [reference_grid] table has to describe a lattice that

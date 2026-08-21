@@ -25,12 +25,19 @@
 /// The pure, Bevy-free coupling geometry, hold verdict, authored config and
 /// refusal vocabulary.
 pub mod coupling;
+/// The pure, Bevy-free held-response vocabulary (issue #1158): what being held
+/// DOES to a target, authored on the target itself.
+pub mod held_response;
 /// The Bevy adapter: the component, the fixed-tick systems and the blackboard
 /// publisher.
 pub mod server;
 
 pub use coupling::{coupled_position, hold_status, TractorConfig, TractorRefusal};
+pub use held_response::{
+    condition_delta, held_offset, HeldResponse, HeldResponseConfig, HeldResponseKind,
+};
 pub use server::{
-    handle_tractor_commands, move_coupled_target, publish_tractor_blackboard, tick_tractor,
-    tractor_blackboard_key, TractorBeam, TractorPlugin, TractorSaveState,
+    arrest_held_declines, handle_tractor_commands, move_coupled_target, publish_tractor_blackboard,
+    tick_tractor, tractor_blackboard_key, HeldResponseSection, TractorBeam, TractorPlugin,
+    TractorSaveState,
 };

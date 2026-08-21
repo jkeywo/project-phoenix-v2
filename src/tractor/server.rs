@@ -24,6 +24,8 @@ use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::console::weapons::beam::TacticalRadarSelection;
 use crate::damage::DamageTier;
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
+use crate::infrastructure::condition::ConditionAdjustment;
+use crate::infrastructure::InfrastructureCondition;
 use crate::messages::{
     PowerGroupId, SystemBlackboard, SystemControlPayload, SystemId, TractorBlackboard,
 };
@@ -31,6 +33,8 @@ use crate::ship::power::{power_level_for, ShipPowerSystem};
 use crate::ship::state::ShipPhysics;
 use crate::system_registry::{tractor_system_id, TRACTOR_SYSTEM_ID};
 use crate::tractor::coupling::{coupled_position, hold_status, TractorConfig, TractorRefusal};
+use crate::tractor::held_response::{condition_delta, held_offset, HeldResponseConfig};
+use crate::world::server::WorldContentRuntime;
 
 /// One ship's tractor beam (issue #1156): the authored coupling terms, the power
 /// group it draws from, and the live engage/coupling state.
@@ -119,6 +123,20 @@ pub struct TractorSaveState {
     pub coupled_target: Option<String>,
 }
 
+/// Present on a TARGET entity that authored a `[held_response]` table (issue
+/// #1158): what being held does to it.
+///
+/// Authored, immutable target-side config — the mirror of the OPERATOR's
+/// [`TractorBeam`], which carries what the beam is. A target that authors no
+/// table carries no component and is merely held in place (station-keep). The
+/// tractor server reads this off the held target and applies whatever it
+/// declares: the offset it rides at (via [`held_offset`], for formation-keep)
+/// and the condition it banks (via [`condition_delta`], for arrest-decline).
+/// The tractor itself never branches on the kind — it applies the value the
+/// held target's own config resolves to.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct HeldResponseSection(pub HeldResponseConfig);
+
 /// Registers the tractor systems and its admitted-command consumer (issue
 /// #1156). Added by `WorldPlugin` alongside `OperationsPlugin`.
 pub struct TractorPlugin;
@@ -143,6 +161,15 @@ impl Plugin for TractorPlugin {
                 move_coupled_target
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(tick_tractor),
+                // Bank an arrest-decline target's condition (issue #1158) —
+                // after the hold is decided, and BEFORE the infrastructure tick
+                // that applies the decline this arrests and drains the queue,
+                // the same ordering `tick_operations` keeps so its payoff lands
+                // the same tick.
+                arrest_held_declines
+                    .in_set(crate::sim_sets::SimSet::Modifiers)
+                    .after(tick_tractor)
+                    .before(crate::infrastructure::tick_infrastructure_condition),
                 publish_tractor_blackboard.in_set(crate::sim_sets::SimSet::Publish),
             ),
         );
@@ -324,19 +351,35 @@ pub fn tick_tractor(
 /// released from the rig must not shoot off at a velocity its own helm
 /// accumulated against a position it was never allowed to reach.
 ///
+/// # Where the load rides is what the held target declares (issue #1158)
+///
+/// The offset fed to the pure `coupled_position` is not always the operator's
+/// authored coupling rig: a **formation-kept** target rides its OWN authored
+/// slot ([`held_offset`]), so escort is distinct from station-keeping a target
+/// in place on the operator's rig. Every other response — follow, station-keep,
+/// arrest-decline, and the default a target with no `[held_response]` authors —
+/// rides the operator's rig exactly as before. The offset is chosen by the
+/// held target's own resolved config; this system never branches on the kind.
+///
 /// Determinism: operators are walked in UUID order and each load is placed from
 /// the operator's post-integration transform, so two hosts put the same craft in
 /// the same place on the same tick.
 pub fn move_coupled_target(
     mut set: ParamSet<(
         Query<(&EntityUuid, &Transform, &TractorBeam)>,
-        Query<(&EntityUuid, &mut Transform, Option<&mut ShipPhysics>)>,
+        Query<(
+            &EntityUuid,
+            &mut Transform,
+            Option<&mut ShipPhysics>,
+            Option<&HeldResponseSection>,
+        )>,
     )>,
 ) {
-    // Operator uuid, target uuid, and where the rig puts the load — the offset
-    // is in the operator's own frame, so it is rotated by the operator's
-    // rotation via the pure coupling module.
-    let mut rigs: Vec<(String, String, Vec3)> = set
+    // Operator uuid, target uuid, and the operator's post-integration frame plus
+    // its authored coupling rig — the placement is deferred until the target's
+    // own held-response is known, because a formation-kept target rides its own
+    // slot rather than the operator's rig.
+    let mut rigs: Vec<(String, String, Vec3, Quat, Vec3)> = set
         .p0()
         .iter()
         .filter_map(|(uuid, transform, beam)| {
@@ -344,11 +387,9 @@ pub fn move_coupled_target(
             Some((
                 uuid.0.clone(),
                 target.clone(),
-                coupled_position(
-                    transform.translation,
-                    transform.rotation,
-                    Vec3::from(beam.config.coupling_offset),
-                ),
+                transform.translation,
+                transform.rotation,
+                Vec3::from(beam.config.coupling_offset),
             ))
         })
         .collect();
@@ -357,14 +398,22 @@ pub fn move_coupled_target(
     }
     rigs.sort_by(|a, b| a.0.cmp(&b.0));
 
-    for (_, target_uuid, placed) in rigs {
+    for (_, target_uuid, op_translation, op_rotation, operator_rig) in rigs {
         let mut targets = set.p1();
-        let Some((_, mut transform, physics)) = targets
+        let Some((_, mut transform, physics, held)) = targets
             .iter_mut()
-            .find(|(uuid, _, _)| uuid.0 == target_uuid)
+            .find(|(uuid, _, _, _)| uuid.0 == target_uuid)
         else {
             continue;
         };
+        // The offset the held target declares — its own formation slot, or the
+        // operator's rig for everything else and for a target that authored no
+        // held-response at all.
+        let offset = match held {
+            Some(section) => held_offset(&section.0.resolve(), operator_rig),
+            None => operator_rig,
+        };
+        let placed = coupled_position(op_translation, op_rotation, offset);
         transform.translation = placed;
         if let Some(mut physics) = physics {
             physics.x = placed.x;
@@ -375,6 +424,65 @@ pub fn move_coupled_target(
             physics.vertical_speed = 0.0;
         }
     }
+}
+
+// ── Held-response: arrest-decline (issue #1158) ──────────────────────────────
+
+/// Bank an arrest-decline held target's condition this tick (issue #1158).
+///
+/// For every ship holding a coupled target whose `[held_response]` resolves to
+/// arrest-decline, queue a [`ConditionAdjustment`] on the target's OWN
+/// infrastructure condition track. The pure [`condition_delta`] returns a value
+/// that cancels the decline the infrastructure tick applies this tick and adds
+/// the authored recovery, so the net movement is the authored rate.
+///
+/// Ordered before `tick_infrastructure_condition` (see [`TractorPlugin`]) so the
+/// adjustment lands the SAME tick as the decline it arrests — the ordering the
+/// tow/stabilise payoff keeps. Releasing the beam clears `coupled_target`, so
+/// this queues nothing and the target's ordinary decline resumes on the very
+/// next tick with nothing to arrest it.
+///
+/// The condition move goes through the queue rather than onto the component so
+/// the recovered condition crosses the target's OWN authored thresholds by the
+/// one system that owns the flag edges — the same path a scripted repair takes,
+/// which is why a structure recovered across `restores_above` sets the
+/// operational flag a scenario already reads.
+pub fn arrest_held_declines(
+    runtime: Option<ResMut<WorldContentRuntime>>,
+    time: Option<Res<Time>>,
+    operators: Query<&TractorBeam>,
+    targets: Query<(&EntityUuid, &HeldResponseSection, &InfrastructureCondition)>,
+) {
+    // Collect from read-only queries first, so a world with no arrest-decline
+    // hold never takes `WorldContentRuntime` mutably and marks it changed on a
+    // quiet tick.
+    let dt = time.map(|t| t.delta_secs()).unwrap_or(0.0);
+    let mut adjustments: Vec<ConditionAdjustment> = operators
+        .iter()
+        .filter_map(|beam| {
+            let target_uuid = beam.coupled_target.as_ref()?;
+            let (_, section, condition) =
+                targets.iter().find(|(uuid, _, _)| &uuid.0 == target_uuid)?;
+            let delta = condition_delta(&section.0.resolve(), condition.0.decay_per_sec(), dt);
+            if delta == 0.0 {
+                return None;
+            }
+            Some(ConditionAdjustment {
+                uuid: target_uuid.clone(),
+                delta,
+            })
+        })
+        .collect();
+    if adjustments.is_empty() {
+        return;
+    }
+    // UUID order so two hosts queue identically — the walk-order rule the
+    // infrastructure and operations ticks both keep.
+    adjustments.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+    let Some(mut runtime) = runtime else {
+        return;
+    };
+    runtime.pending_condition_adjustments.extend(adjustments);
 }
 
 // ── The wire ─────────────────────────────────────────────────────────────────

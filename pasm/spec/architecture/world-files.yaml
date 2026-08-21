@@ -408,16 +408,18 @@ entities:
         - "[ai] HUMAN AND AI ISSUE THE SAME COMMANDS. EngageTractor and ReleaseTractor target the real, station-owned tractor system, so they take the ordinary station-tenure admission path - the engineering holder from the network gate, the tractor AI (#1162) through the same validate_and_admit seam - and admission strips source identity before the handler sees it. Nothing downstream asks who sent them. This slice makes the commands admissible from the engineering console; the AI policy host that drives them is #1162."
         - "[ai] THE RIG WRITES THE TARGET'S POSITION DIRECTLY, a sixth row in the ShipPhysics writer-policy table and the exact shape of the tow rig: a correction layered on top of the helm integration in SimSet::Modifiers, after sync_ship_position, not a second integrator. It writes ShipPhysics where the target has one (a demoted craft) and the Transform too so the two agree within the tick; a derelict with no ShipPhysics is moved by the transform write alone. The three speed fields are zeroed for the tow's reason turned around - a craft released from the rig must not shoot off at a velocity its helm accumulated against a position it was never allowed to reach. Operators are walked in UUID order so two hosts place the load identically."
         - "[ai] EVERYTHING IS AUTHORED (rule 11). The range, the coupling offset and the minimum power level are the hull's `[tractor]` table; the power group, station and damage entry are the tractor `[[system]]` block, validated as a pair at load. A hull that authors neither carries no TractorBeam component and is unchanged in every way, which is why the demo destroyer is untouched by this slice and the probe fields a dedicated tug."
+        - "[ai] THE TARGET DECIDES WHAT BEING HELD MEANS (#1158). One tractor serves several verbs because the consequence is authored on the TARGET, in its own `[held_response]` table, and the coupler never branches on which it is: it feeds the offset the held target declares (held_offset - a formation-kept target rides its OWN authored slot, distinct from station-keeping it on the operator's rig) to the same generic coupled_position, and queues the condition the held target declares (condition_delta - an arrest-decline target's decline is arrested and it recovers at an authored rate) onto that target's own infrastructure condition track. arrest_held_declines runs before tick_infrastructure_condition so the adjustment lands the same tick it arrests, and stops queuing the moment the beam lets go, so the ordinary decline resumes on the next tick. A target that authors nothing is merely held in place - the station-keep default - so every derelict and structure before this slice is unchanged."
     architecture:
       kind: subsystem
       authority: authoritative
       owns: [tractor-beam-state]
-      reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state]
+      reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state, held-response-state, infrastructure-condition-state]
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
       paths:
         - src/tractor/coupling.rs
+        - src/tractor/held_response.rs
         - src/tractor/server.rs
       symbols:
         - TractorConfig
@@ -430,6 +432,10 @@ entities:
         - handle_tractor_commands
         - tick_tractor
         - move_coupled_target
+        - arrest_held_declines
+        - HeldResponseSection
+        - held_offset
+        - condition_delta
         - publish_tractor_blackboard
       messages: [EngageTractor, ReleaseTractor]
       tests: [cargo test]
@@ -480,6 +486,32 @@ entities:
       symbols:
         - TractorBlackboard
       tests: [cargo test, npx vitest run]
+
+  - state: held-response-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Held-Response State
+      summary: "Per-TARGET authored config for what being held by a tractor DOES to a thing: follow (tow), arrest-decline (a failing structure's decline is arrested and it recovers at an authored rate), station-keep (hold in place), or formation-keep (hold at an authored offset and distance). The mirror of the operator's `[tractor]` table - that says what a hull holds WITH, this says what happens to the thing held. A target that authors none is merely held in place."
+      rationale:
+        - "[ai] AUTHORED, immutable, and read off the held target by the tractor-beam-coupler; nothing writes it at runtime. It is content the coupler applies - the offset a held target rides at (formation-keep rides its own slot, everything else the operator's rig) and the condition it banks (arrest-decline cancels this tick's decline and adds the authored recovery, so the net movement is the authored rate; every other kind banks nothing). Because the arrest is a queued ConditionAdjustment on the target's OWN infrastructure-condition-state, a recovered structure crosses its own authored thresholds by the one system that owns the flag edges, and a scenario reads completion off target state exactly as it already does - there is no separate operations record."
+        - "[ai] The vocabulary is validated per kind at load (deny_unknown_fields plus a validate that rejects a field on the wrong kind or a missing one): arrest-decline needs a recover_per_sec, formation-keep needs a non-zero offset and a positive distance, follow and station-keep author neither. A mistake is a load error naming the field, not a hold that silently arrests nothing. The pure vocabulary (HeldResponse / held_offset / condition_delta) is Bevy-free and unit-tested against the condition track and the geometry in isolation, rule 10, beside the coupling module."
+        - "[ai] NO NEW PAYLOAD and no digest change: the held-response is target-side content, so a held target's progress already folds through its infrastructure-condition-state namespace, and a target that authors none carries no component and is byte-identical to one built before this slice. The standalone escort verb is dropped (D3) - escort is the formation-keep held-response - so the vocabulary can express the one shipped escort use without a verb of its own."
+    architecture:
+      classification: authored
+      owner: tractor-beam-coupler
+      readers: [tractor-beam-coupler]
+    implementation:
+      status: declared
+      paths: [src/tractor/held_response.rs]
+      symbols:
+        - HeldResponseConfig
+        - HeldResponseKind
+        - HeldResponse
+        - held_offset
+        - condition_delta
+      tests: [cargo test]
 
   - component: dossier-projection
     core:

@@ -611,6 +611,7 @@ mod tests {
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -922,6 +923,7 @@ mod tests {
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1001,6 +1003,7 @@ mod tests {
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1454,6 +1457,7 @@ mod tests {
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -1630,6 +1634,7 @@ mod tests {
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -2000,6 +2005,7 @@ mod tests {
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();
@@ -2066,6 +2072,7 @@ mod tests {
             operations: None,
             scan: None,
             tractor: None,
+            held_response: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

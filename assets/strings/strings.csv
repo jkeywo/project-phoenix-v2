@@ -1016,6 +1016,7 @@ world.probe_operations.entity.depot_storm.name,assets/worlds/probe_operations.to
 world.probe_operations.entity.storm.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Radiation Storm Band]
 world.probe_stabilise.entity.skyhook.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Skyhook]
 world.probe_tractor.entity.derelict.name,assets/worlds/probe_tractor.toml -> [[entity]] name,[Derelict Hulk]
+world.probe_held_response.entity.structure.name,assets/worlds/probe_held_response.toml -> [[entity]] name,[Stricken Platform]
 entity.tractor_tug.power_groups.tractor.label,"Tractor tug power-group label for the tractor group (issue #1156)","[Tractor]"
 entity.tractor_tug.station.engineering.description,"Tractor tug Engineering station description (issue #1156)","[Engineering — power and the tractor beam.]"
 component.civilians.heading,"Civilian traffic panel on the Navigation console — heading above the list of civilian craft (issue #1028)","[TRAFFIC]"

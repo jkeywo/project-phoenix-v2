@@ -190,6 +190,26 @@ describe('buildBlips', () => {
     expect(blips.find(b => b.uuid === 'rock-1').selectable).toBe(false);
   });
 
+  it('marks a non-hostile ship, structure and ally selectable regardless of faction (issue #1155)', () => {
+    // The widened human designation set: selectability is keyed on the
+    // contact's KIND (its `[target] tags`) against the hull's `selects`, never
+    // on faction/stance. A derelict, a structure and an ally therefore read as
+    // selectable exactly as a hostile of the same kind does.
+    const blips = buildBlips(
+      [
+        { uuid: 'hostile', x: 1, z: 0, tags: ['ship'], target_tags: ['ship'], faction: 'harrow', radar_icon: 'ship' },
+        { uuid: 'ally', x: 2, z: 0, tags: ['ship'], target_tags: ['ship'], faction: 'federation', radar_icon: 'ship' },
+        { uuid: 'derelict', x: 3, z: 0, tags: ['ship'], target_tags: ['ship'], radar_icon: 'ship' },
+        { uuid: 'structure', x: 4, z: 0, tags: ['station'], target_tags: ['station'], radar_icon: 'station' },
+      ],
+      0, 0, 0, 100,
+      { shows: ['ship', 'station'], selects: ['ship', 'station'] }
+    );
+    for (const uuid of ['hostile', 'ally', 'derelict', 'structure']) {
+      expect(blips.find(b => b.uuid === uuid).selectable, `${uuid} selectable`).toBe(true);
+    }
+  });
+
   it('allows active objective targets through the show filter and marks them', () => {
     const blips = buildBlips(
       [{ uuid: 'beacon-1', name: 'Patrol Zone', x: 25, z: 0, tags: ['objective_marker'], radar_icon: 'waypoint' }],

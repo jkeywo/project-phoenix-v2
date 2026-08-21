@@ -891,6 +891,253 @@ fn unknown_uuid_replies_with_target_lock_rejected() {
     assert!(get_weapons_target(&mut app).is_none());
 }
 
+// ── Human designation of a NON-HOSTILE contact (issue #1155) ───────────
+//
+// The Combat Lock's applier (`handle_set_target`) is hostility-BLIND: it
+// resolves a UUID and checks the radar horizon, nothing more. So a human can
+// designate a derelict, a structure or an ally onto the ship's ONE lock exactly
+// as they designate a hostile — the same slot, the same admitted `SetTarget`.
+// The AI's auto-lock stays hostile-gated elsewhere (the authored
+// `weapons_console.selector` eligibility, NOT this applier); see
+// `backfilled_tactical_does_not_lock_a_non_objective_named_derelict`.
+
+/// Spawn a non-asteroid contact the applier can resolve. `EntityUuid` +
+/// `Transform` is all `live_entity_xz` needs, so the lock lands regardless of
+/// faction — which is the whole point: designation is kind/liveness-gated, never
+/// hostility-gated. The optional faction only lets a test spell out *ally* vs
+/// *factionless derelict* vs *fixed structure*; the applier never reads it.
+fn spawn_lockable_contact(
+    app: &mut App,
+    uuid: &str,
+    x: f32,
+    z: f32,
+    faction: Option<uuid::Uuid>,
+) -> Entity {
+    let mut ec = app.world_mut().spawn((
+        crate::entity_spawner::EntityUuid(uuid.into()),
+        Transform::from_xyz(x, 0.0, z),
+    ));
+    if let Some(f) = faction {
+        ec.insert(FactionComponent(f));
+    }
+    ec.id()
+}
+
+/// Push a human `SetTarget` on `tactical-radar` and return the tick's outbox.
+fn push_human_set_target(app: &mut App, uuid: &str) -> Vec<OutboundMessage> {
+    push(
+        app,
+        "weapons",
+        ClientMessage::ControlSystem {
+            target: crate::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget { uuid: uuid.into() },
+        },
+    );
+    tick(app)
+}
+
+/// Assert exactly the `TargetLock { uuid, locked }` the applier replied with.
+fn expect_target_lock(out: &[OutboundMessage], uuid: &str, locked: bool) {
+    let lock = out
+        .iter()
+        .find_map(|m| match &m.msg {
+            ServerMessage::TargetLock { uuid: u, locked: l } => Some((u.clone(), *l)),
+            _ => None,
+        })
+        .expect("expected a TargetLock response");
+    assert_eq!(lock.0, uuid, "TargetLock names the designated contact");
+    assert_eq!(lock.1, locked, "TargetLock locked flag");
+}
+
+#[test]
+fn human_locks_a_non_hostile_ally_ship() {
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+    set_tactical_radar_range(&mut app, 300.0);
+    // An allied courier — same faction as the crew, so never a threat. Still a
+    // valid designation for a human hand on the radar.
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    spawn_lockable_contact(&mut app, "ally-courier", 0.0, -30.0, Some(harrow_faction()));
+
+    let out = push_human_set_target(&mut app, "ally-courier");
+
+    expect_target_lock(&out, "ally-courier", true);
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some("ally-courier"),
+        "an ally sets the ship's one Combat Lock exactly as a hostile would"
+    );
+}
+
+#[test]
+fn human_locks_a_structure() {
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+    set_tactical_radar_range(&mut app, 300.0);
+    // A fixed structure (a depot / skyhook-class station). No faction, no threat.
+    spawn_lockable_contact(&mut app, "depot-structure", 0.0, -40.0, None);
+
+    let out = push_human_set_target(&mut app, "depot-structure");
+
+    expect_target_lock(&out, "depot-structure", true);
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some("depot-structure"),
+        "a structure sets the ship's one Combat Lock"
+    );
+}
+
+#[test]
+fn human_locks_a_factionless_derelict() {
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+    set_tactical_radar_range(&mut app, 300.0);
+    // A drifting hulk: no faction at all, reachable only on the radar. The AI
+    // would refuse this (it is not hostile and no objective named it); a human
+    // may still lock it — to tow it, not to shoot it.
+    spawn_lockable_contact(&mut app, "derelict-hulk", 0.0, -50.0, None);
+
+    let out = push_human_set_target(&mut app, "derelict-hulk");
+
+    expect_target_lock(&out, "derelict-hulk", true);
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some("derelict-hulk"),
+        "a derelict sets the ship's one Combat Lock"
+    );
+}
+
+#[test]
+fn combat_lock_is_mutually_exclusive_between_a_hostile_and_a_non_hostile() {
+    let mut app = test_app();
+    start_game_with_weapons(&mut app);
+    set_tactical_radar_range(&mut app, 300.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    // One non-hostile (a factionless derelict) and one genuine hostile
+    // (Federation, an enemy of the crew's Harrow faction), both in radar range.
+    spawn_lockable_contact(&mut app, "derelict-hulk", 0.0, -30.0, None);
+    spawn_lockable_contact(
+        &mut app,
+        "hostile-raider",
+        0.0,
+        -40.0,
+        Some(federation_faction()),
+    );
+
+    // Lock the derelict → the one slot holds it.
+    let out = push_human_set_target(&mut app, "derelict-hulk");
+    expect_target_lock(&out, "derelict-hulk", true);
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some("derelict-hulk")
+    );
+
+    // Now lock the hostile → it REPLACES the derelict. There is no second lock:
+    // taking the firing solution gives up the tow designation.
+    let out = push_human_set_target(&mut app, "hostile-raider");
+    expect_target_lock(&out, "hostile-raider", true);
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some("hostile-raider")
+    );
+
+    // …and back the other way — a hostile lock is given up to re-designate the
+    // derelict. One slot, shared by both kinds.
+    let out = push_human_set_target(&mut app, "derelict-hulk");
+    expect_target_lock(&out, "derelict-hulk", true);
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some("derelict-hulk")
+    );
+}
+
+#[test]
+fn a_non_hostile_ship_and_structure_read_as_selectable() {
+    // AC1: a non-hostile contact reaches the tactical radar's contact set and
+    // reads as selectable. Selectability is authored per hull as
+    // `[weapons_console.radar] selects` (kinds), matched against the contact's
+    // `[target] tags` — never against its faction. So a friendly ship and a
+    // structure read selectable identically to a hostile of the same kind.
+    let mut app = test_app();
+    {
+        let mut cfg = app
+            .world_mut()
+            .resource_mut::<crate::lobby::server::ShipClientConfigResource>();
+        cfg.0.tactical_radar_shows = vec!["ship".into(), "station".into()];
+        cfg.0.tactical_radar_selects = vec!["ship".into(), "station".into()];
+        cfg.0.tactical_radar_range = 300.0;
+    }
+
+    // Two non-hostile contacts: a ship (ally/derelict kind) and a station
+    // (structure kind). Each needs a world-registry snapshot carrying the tags
+    // `project_blip` filters + selects on, plus a live ECS entity to project.
+    let mut ally = crate::messages::EntitySnapshot::asteroid("ally-ship", 0.0, -50.0, 2.0);
+    ally.tags = vec!["ship".into()];
+    ally.target_tags = vec!["ship".into()];
+    ally.radar_icon = Some("ship".into());
+    let mut structure = crate::messages::EntitySnapshot::asteroid("structure-1", 30.0, -40.0, 2.0);
+    structure.tags = vec!["station".into()];
+    structure.target_tags = vec!["station".into()];
+    structure.radar_icon = Some("station".into());
+    app.world_mut()
+        .insert_resource(WorldResource(crate::messages::WorldData {
+            entities: vec![ally, structure],
+            ..Default::default()
+        }));
+    spawn_lockable_contact(&mut app, "ally-ship", 0.0, -50.0, None);
+    spawn_lockable_contact(&mut app, "structure-1", 30.0, -40.0, None);
+
+    start_game(&mut app);
+    tick(&mut app);
+
+    let blips = tactical_blips(&mut app);
+    assert!(
+        blip_for(&blips, "ally-ship").selectable,
+        "a non-hostile ship must read as selectable when the hull selects `ship`"
+    );
+    assert!(
+        blip_for(&blips, "structure-1").selectable,
+        "a structure must read as selectable when the hull selects `station`"
+    );
+}
+
+#[test]
+fn backfilled_tactical_does_not_lock_a_non_objective_named_derelict() {
+    // AC4: the AI's auto-lock stays hostile-gated in the authored selector
+    // eligibility — widening the HUMAN path (above) must not widen the AI's. A
+    // backfilled (AI-operated) Tactical scanning for hostiles must refuse a
+    // factionless derelict it reaches only by radar, because no objective named
+    // it and it is not hostile.
+    let mut app = test_app();
+    let derelict = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 100.0);
+    setup_harrow_ship_hostile_to_federation(&mut app);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // A drifting hulk right next to us — a `Ship` (so it is ON the AI's scan
+    // surface, exactly as a hostile would be) but with NO faction, so the
+    // hostile predicate reads it as non-hostile. It is reachable only by the
+    // radar/scan, never by an objective.
+    app.world_mut().spawn((
+        crate::simulation::Ship,
+        crate::entity_spawner::EntityUuid(derelict.clone()),
+        Transform::from_xyz(0.0, 0.0, -10.0),
+    ));
+    // Arm the nearest-hostile source with an untargeted Destroy doctrine, so the
+    // AI is actively scanning; the derelict is still refused for being non-hostile.
+    insert_untargeted_destroy_objective(&mut app, 35.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a backfilled Tactical must not auto-lock a non-hostile derelict that no \
+         objective has named — the AI's eligibility gate stays hostile-only"
+    );
+}
+
 // ── WeaponsUpdate / fire_ready tests ───────────────────────────────────
 
 #[test]

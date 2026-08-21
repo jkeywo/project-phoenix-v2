@@ -95,6 +95,58 @@ test('tactical console: FIRE buttons call __sendAction with correct envelopes', 
   });
 });
 
+test('tactical console: tapping a non-hostile derelict designates it (issue #1155)', async ({ page }) => {
+  // The human designation path is widened to non-combatants: tapping a
+  // derelict on the tactical radar emits the SAME set_target action a hostile
+  // does. There is no second designation channel — one lock, keyed on the tap,
+  // not on the contact's disposition.
+  await page.setViewportSize({ width: 1280, height: 1024 });
+  await page.goto(CONSOLE_URL);
+
+  await page.evaluate(() => {
+    window.__sent = [];
+    window.__sendAction = (json) => window.__sent.push(json);
+  });
+
+  // One selectable derelict contact, placed at the radar centre so a
+  // centre-of-canvas tap lands on it. `selectable: true` mirrors what the
+  // server publishes for a non-hostile whose kind the hull selects.
+  await page.evaluate(() => window.__updateConsole('Tactical', JSON.stringify({
+    blips: [
+      { uuid: 'derelict-1', radar_x: 0, radar_y: 0, scaled_radius: 0.03, kind: 'ship', icon: 'ship', selectable: true, name: 'Derelict Freighter Kestrel' },
+    ],
+    ship_x: 0, ship_z: 0, ship_heading: 0, ship_speed: 0,
+    banks: [], tubes: [], torpedo_count: 0, torpedo_max: 0, phaser_mode: 'Manual',
+  })));
+
+  // ph-radar projects blips on a requestAnimationFrame loop; flush two frames
+  // so #projectedBlips is populated before the tap hit-tests against it.
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
+  await page.locator('#tactical-radar').locator('canvas').click();
+
+  const sent = await page.evaluate(() => window.__sent);
+  expect(sent).toHaveLength(1);
+  expect(JSON.parse(sent[0])).toEqual({ action: 'set_target', console: 'tactical', uuid: 'derelict-1' });
+});
+
+test('tactical console: the lock readout names a non-hostile contact with no hostile-only wording (issue #1155)', async ({ page }) => {
+  await page.goto(CONSOLE_URL);
+
+  // A locked non-hostile: the footer readout shows the contact's own name,
+  // exactly as it would for a hostile — the readout carries no hostile-only
+  // label of its own (only the neutral console.common.locked / no_target ids).
+  await page.evaluate(() => window.__updateConsole('Tactical', JSON.stringify({
+    target_uuid: 'derelict-1',
+    target_name: 'Derelict Freighter Kestrel',
+    blips: [], banks: [], tubes: [], torpedo_count: 0, torpedo_max: 0, phaser_mode: 'Manual',
+  })));
+
+  const footer = page.locator('#footer-target');
+  await expect(footer).toHaveText('Derelict Freighter Kestrel');
+  await expect(footer).not.toContainText(/hostile|enemy/i);
+});
+
 test('tactical console: short landscape keeps FIRE buttons reachable', async ({ page }) => {
   // Unlike the old standalone weapons-console.html, .console-body here is a
   // scrollable column (matching destroyer/tactical.html's existing pattern)

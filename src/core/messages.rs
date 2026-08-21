@@ -4722,6 +4722,34 @@ pub enum AiDirective {
     /// existing `DockingMotionIntent` one. Named by a world entity name or a
     /// UUID, exactly like `Destroy`.
     Dock { target: String },
+    /// Tow the named target (issue #1162): Engineering locks it and engages the
+    /// tractor. A *per-verb operate directive* — it lives upstream of admission
+    /// and names WHAT to operate on, not the concrete command; the tractor seat
+    /// decides the `EngageTractor`/`ReleaseTractor`. Routes to Engineering.
+    /// `Tow`, `Stabilise` and `Escort` all resolve to "lock target + engage
+    /// tractor"; the target's held-response (#1158) differentiates the effect —
+    /// a `Tow` drags a derelict, a `Stabilise` arrests a failing structure's
+    /// decline, an `Escort` holds a partner on the formation rig.
+    Tow { target: String },
+    /// Stabilise the named target (issue #1162): the same "lock + engage the
+    /// tractor" resolution as `Tow`, aimed at a structure whose held-response is
+    /// `arrest-decline`. Routes to Engineering.
+    Stabilise { target: String },
+    /// Escort the named target (issue #1162): the same "lock + engage the
+    /// tractor" resolution as `Tow`, carried for symmetry with the fleet-doctrine
+    /// vocabulary. Routes to Engineering.
+    Escort { target: String },
+    /// Transfer supplies to the named target (issue #1162): Helm docks with it
+    /// and Engineering runs the umbilical over the mated dock. Routes to BOTH
+    /// Helm (the dock seat decides `Dock`/`Undock`) and Engineering (the
+    /// umbilical seat decides `StartTransfer`/`StopTransfer`), because the
+    /// operation is a chain no single seat completes.
+    Transfer { target: String },
+    /// Field-repair the named target (issue #1162): Repair locks it and
+    /// dispatches a team abroad. Routes to Repair; the dispatch seat decides
+    /// `DispatchExternalRepair`/`RecallExternalRepair`, and the shared free-team
+    /// availability answer keeps it from starving the hull's own repairs.
+    FieldRepair { target: String },
 }
 
 /// Whether an objective originates from the active mission or from standing doctrine.
@@ -4742,6 +4770,21 @@ pub enum SystemAffinity {
     /// AI consumes them from its local scored-objective pool and issues the
     /// same `Hail` action a human Comms officer sends.
     Comms,
+    /// Engineering cares about the tractor and umbilical operate directives
+    /// (issue #1162): `Tow`/`Stabilise`/`Escort` (the tractor) and `Transfer`
+    /// (the umbilical over a mated dock). The backfilled Engineering AI hosts
+    /// consume these from the local scored-objective pool and issue the same
+    /// `EngageTractor`/`StartTransfer` commands a human Engineering officer
+    /// sends.
+    Engineering,
+    /// Repair cares about the `FieldRepair` operate directive (issue #1162): the
+    /// backfilled Repair dispatch AI consumes it from the local scored-objective
+    /// pool and issues the same `DispatchExternalRepair` command a human at the
+    /// repair console sends. Its own affinity, kept apart from `Engineering`, so
+    /// a hull whose repair dispatch is AI-backfilled but whose engineering
+    /// tractor is crewed (or vice versa) routes each directive to exactly the
+    /// seat that owns it.
+    Repair,
 }
 
 /// An objective with its computed utility score, published on the Viewscreen

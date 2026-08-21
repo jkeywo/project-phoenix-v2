@@ -22,18 +22,20 @@
 
 use bevy::prelude::*;
 
+use crate::command_admission::ai_emit::emit_ai_command;
 use crate::console::repair::external::{
     dispatch_status, ExternalRepairConfig, ExternalRepairRefusal,
 };
 use crate::console::weapons::beam::TacticalRadarSelection;
+use crate::damage::DamageTier;
 use crate::entities::spawner::EntityUuid;
 use crate::infrastructure::condition::ConditionAdjustment;
 use crate::infrastructure::InfrastructureCondition;
-use crate::messages::{AdmittedCommands, SystemControlPayload};
-use crate::ship::system_registry::REPAIR_SYSTEM_ID;
+use crate::messages::{AdmittedCommands, SystemAffinity, SystemBlackboard, SystemControlPayload};
+use crate::ship::system_registry::{repair_system_id, REPAIR_SYSTEM_ID};
 use crate::world::server::WorldContentRuntime;
 
-use super::server::ShipRepairTeams;
+use super::server::{RepairRequestQueue, ShipRepairTeams};
 
 /// One ship's external repair-dispatch state (issue #1161): the authored reach
 /// and rate, and which target a team is currently working abroad.
@@ -398,12 +400,208 @@ pub fn apply_external_repair(
     runtime.pending_condition_adjustments.extend(adjustments);
 }
 
+/// Marks a ship whose external repair team the backfill host DISPATCHED to serve
+/// a `FieldRepair` directive (issue #1162). Inserted on dispatch, removed on
+/// recall; the host recalls only while it is present, so it never recalls a team
+/// a console dispatched on the same AI-operated system. Not folded/snapshotted:
+/// re-adopted from the still-present directive on resume.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct ExternalRepairAiDispatched;
+
+/// Teams to hold back from a backfill field-repair dispatch (issue #1162): the
+/// operations + standing-dispatch commitments PLUS one reserved per outstanding
+/// CRITICAL (Disabled/Destroyed) local repair. Pure (AGENTS.md rule 10) so the
+/// "without starving critical repairs" policy is unit-testable Bevy-free.
+///
+/// Folded into the SAME [`crate::modifiers::repair_teams::RepairTeams::free_team_indices`]
+/// availability answer the operations commitment and any standing external
+/// dispatch already eat from — it only makes the host MORE conservative than the
+/// applier's own `has_free_team` gate, so an AI decision to dispatch is always
+/// one the applier admits.
+fn dispatch_committed_teams(
+    ops_committed: u8,
+    external_committed: u8,
+    critical_local_repairs: u8,
+) -> u8 {
+    ops_committed
+        .saturating_add(external_committed)
+        .saturating_add(critical_local_repairs)
+}
+
+/// The count of outstanding CRITICAL (Disabled/Destroyed) local repair requests
+/// on `queue` — one team is reserved per such request (issue #1162).
+fn critical_local_repairs(queue: Option<&RepairRequestQueue>) -> u8 {
+    queue
+        .map(|q| {
+            q.entries
+                .iter()
+                .filter(|e| e.tier >= DamageTier::Disabled)
+                .count() as u8
+        })
+        .unwrap_or(0)
+}
+
+/// Resolve a directive's named target to the UUID the ship's combat lock carries
+/// (issue #1162): a world entity NAME through the runtime map, or the value
+/// itself when it is already a UUID (or the runtime is absent).
+fn resolve_field_repair_target(name: &str, runtime: Option<&WorldContentRuntime>) -> String {
+    runtime
+        .and_then(|rt| rt.name_to_uuid.get(name).cloned())
+        .unwrap_or_else(|| name.to_string())
+}
+
+/// Backfill Repair external-dispatch AI (issue #1162).
+///
+/// On an active `FieldRepair` directive (Repair affinity) naming a target the
+/// ship has LOCKED, dispatch a team abroad — WITHOUT starving its own hull's
+/// critical repairs; with no such directive active, recall a team still working
+/// abroad. The concrete command is exactly the `DispatchExternalRepair`/
+/// `RecallExternalRepair` a human at the repair console emits, sent through the
+/// SAME `emit_ai_command` seam so `handle_external_repair_commands` never learns
+/// who spoke (AGENTS.md rule 6).
+///
+/// The lock is reached upstream by `ai_target_selection`'s `objective-operate`
+/// source (D2), and the dispatch applier reads that same lock, so a human and an
+/// AI dispatch of the same designated ally admit the byte-identical command.
+///
+/// "Without starving critical repairs" is the POLICY half this host adds atop
+/// the symmetric command: it reserves one idle team for each of the hull's own
+/// outstanding CRITICAL (Disabled/Destroyed) repair requests, folding that
+/// reserve into the SAME shared free-team availability answer
+/// (`RepairTeams::free_team_indices`) the operations commitment and any standing
+/// external dispatch already eat from. It never dispatches a team the local
+/// damage-control sweep needs to bring a knocked-out system back. Because the
+/// reserve only makes the host MORE conservative than the applier's own
+/// `has_free_team` check, an AI decision to dispatch is always one the applier
+/// admits. Decides ONLY on the shared AI cadence (rule 7).
+#[allow(clippy::type_complexity)]
+pub fn operate_external_repair_ai(
+    mut commands: Commands,
+    sessions: Res<crate::lobby::Sessions>,
+    runtime: Option<Res<WorldContentRuntime>>,
+    mut ships: Query<(
+        Entity,
+        Option<&EntityUuid>,
+        &crate::ship_plugin::ShipSystemControlSources,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        &ExternalRepairDispatch,
+        Option<&TacticalRadarSelection>,
+        Option<&ShipRepairTeams>,
+        Option<&RepairRequestQueue>,
+        Option<&crate::operations::ShipOperations>,
+        &crate::server_app::ShipSystemBlackboards,
+        Has<ExternalRepairAiDispatched>,
+        &mut AdmittedCommands,
+    )>,
+) {
+    for (
+        entity,
+        uuid,
+        sources,
+        config,
+        dispatch,
+        lock,
+        teams,
+        repair_queue,
+        operations,
+        blackboards,
+        host_dispatched,
+        mut admitted,
+    ) in ships.iter_mut()
+    {
+        if !sources.0.policy_for(&repair_system_id()).operate_ai {
+            continue;
+        }
+        let directive_target: Option<String> = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
+                &vbb.scored_objectives,
+                SystemAffinity::Repair,
+                |d| crate::objectives::field_repair_directive_target(d).is_some(),
+            )
+            .and_then(crate::objectives::field_repair_directive_target)
+            .map(str::to_string),
+            _ => None,
+        };
+
+        let payload = match directive_target {
+            Some(name) => {
+                let resolved = resolve_field_repair_target(&name, runtime.as_deref());
+                let locked_on_target = lock
+                    .and_then(|l| l.0.as_deref())
+                    .is_some_and(|locked| locked == resolved);
+                // The one availability answer (AGENTS.md rule 6): the operations
+                // commitment plus any standing external dispatch, PLUS this
+                // host's own reserve of one team per outstanding critical local
+                // repair — so helping an ally never leaves a knocked-out system
+                // of our own unswept.
+                let committed = dispatch_committed_teams(
+                    operations.map(|o| o.committed_repair_teams()).unwrap_or(0),
+                    dispatch.committed_repair_teams(),
+                    critical_local_repairs(repair_queue),
+                );
+                let has_free_team = teams
+                    .map(|t| !t.0.free_team_indices(committed).is_empty())
+                    .unwrap_or(false);
+                // Dispatch once the ordered ally is locked and a team is free
+                // beyond every other claim. Idempotent — a team already working
+                // this target emits nothing.
+                let already_here = dispatch.dispatched_target.as_deref() == Some(resolved.as_str());
+                let emit = (locked_on_target && has_free_team && !already_here)
+                    .then_some(SystemControlPayload::DispatchExternalRepair);
+                // Claim the dispatch as host-driven while a team is out under this
+                // order (fresh send, or one already working the target).
+                if (emit.is_some() || already_here) && !host_dispatched {
+                    commands.entity(entity).insert(ExternalRepairAiDispatched);
+                }
+                emit
+            }
+            // No field-repair order: recall a team THIS HOST sent — never one a
+            // console dispatched on the same AI-operated system.
+            None => {
+                if dispatch.dispatched_target.is_some() && host_dispatched {
+                    commands
+                        .entity(entity)
+                        .remove::<ExternalRepairAiDispatched>();
+                    Some(SystemControlPayload::RecallExternalRepair)
+                } else {
+                    None
+                }
+            }
+        };
+
+        if let Some(payload) = payload {
+            emit_ai_command(
+                uuid,
+                repair_system_id(),
+                payload,
+                sources,
+                &sessions,
+                config,
+                &mut admitted,
+            );
+        }
+    }
+}
+
 /// Register the external repair-dispatch systems (issue #1161). Called from
 /// `RepairPlugin::build`.
 pub fn register_external_repair(app: &mut App) {
+    // Gated AI decider (issue #1162); `register_ai_cadence` is idempotent, and
+    // `RepairPlugin` (this fn's caller) already installs it for `operate_repair_ai`.
+    crate::ai::cadence::register_ai_cadence(app);
     app.add_systems(
         FixedUpdate,
         (
+            // Backfill Repair external-dispatch AI (issue #1162): on the shared
+            // AI cadence (rule 7), emitting Dispatch / Recall BEFORE
+            // `handle_external_repair_commands` consumes the tick.
+            operate_external_repair_ai
+                .in_set(crate::sim_sets::SimSet::Input)
+                .run_if(crate::ai::cadence::ai_tick_ready)
+                .before(handle_external_repair_commands),
             handle_external_repair_commands.in_set(crate::sim_sets::SimSet::Input),
             tick_external_repair.in_set(crate::sim_sets::SimSet::Modifiers),
             apply_external_repair
@@ -431,6 +629,69 @@ mod tests {
         assert_eq!(r.committed_repair_teams(), 0);
         r.dispatched_target = Some("ally-1".into());
         assert_eq!(r.committed_repair_teams(), 1);
+    }
+
+    fn critical_entry() -> crate::console::repair::server::RepairQueueEntry {
+        crate::console::repair::server::RepairQueueEntry {
+            station_id: "engineering".into(),
+            station_label: "engineering".into(),
+            tier: DamageTier::Disabled,
+            deficit: 0.9,
+        }
+    }
+
+    /// The "without starving critical repairs" reserve (issue #1162): one team is
+    /// held back per outstanding CRITICAL (Disabled/Destroyed) local repair, and
+    /// a merely-Damaged one reserves nothing.
+    #[test]
+    fn critical_local_repairs_reserves_one_team_each_and_damaged_reserves_none() {
+        use crate::console::repair::server::RepairRequestQueue;
+        assert_eq!(critical_local_repairs(None), 0);
+        assert_eq!(
+            critical_local_repairs(Some(&RepairRequestQueue { entries: vec![] })),
+            0
+        );
+        // A merely-Damaged (non-critical) request reserves nothing.
+        let damaged = crate::console::repair::server::RepairQueueEntry {
+            tier: DamageTier::Damaged,
+            ..critical_entry()
+        };
+        assert_eq!(
+            critical_local_repairs(Some(&RepairRequestQueue {
+                entries: vec![damaged],
+            })),
+            0
+        );
+        // Two Disabled requests reserve two teams.
+        assert_eq!(
+            critical_local_repairs(Some(&RepairRequestQueue {
+                entries: vec![critical_entry(), critical_entry()],
+            })),
+            2
+        );
+    }
+
+    /// The reserve folds into the SAME `free_team_indices` answer: a one-team
+    /// hull with a critical local repair outstanding has NO team free to
+    /// dispatch, but frees it the moment the local critical repair clears.
+    #[test]
+    fn a_one_team_hull_reserves_its_last_team_for_a_critical_local_repair() {
+        use crate::modifiers::repair_teams::RepairTeams;
+        let teams = RepairTeams::new(1);
+
+        // A critical local repair reserves the one team → none free to dispatch.
+        let committed = dispatch_committed_teams(0, 0, 1);
+        assert!(
+            teams.free_team_indices(committed).is_empty(),
+            "the last team must be reserved for a critical local repair"
+        );
+
+        // With no critical local repair, the one team is dispatchable.
+        let committed = dispatch_committed_teams(0, 0, 0);
+        assert!(
+            !teams.free_team_indices(committed).is_empty(),
+            "with the local sweep clear the free team is available to help the ally"
+        );
     }
 
     #[test]

@@ -20,6 +20,7 @@
 
 use bevy::prelude::*;
 
+use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::console::weapons::beam::TacticalRadarSelection;
 use crate::damage::DamageTier;
@@ -28,8 +29,8 @@ use crate::entity_config::DEFAULT_ENTITY_MASS;
 use crate::infrastructure::condition::ConditionAdjustment;
 use crate::infrastructure::InfrastructureCondition;
 use crate::messages::{
-    ModifierSlot, ModifierSource, PowerGroupId, SystemBlackboard, SystemControlPayload, SystemId,
-    TractorBlackboard,
+    ModifierSlot, ModifierSource, PowerGroupId, SystemAffinity, SystemBlackboard,
+    SystemControlPayload, SystemId, TractorBlackboard,
 };
 use crate::modifiers::{Modifier, ShipModifiers};
 use crate::ship::power::{power_level_for, ShipPowerSystem};
@@ -128,6 +129,18 @@ pub struct TractorSaveState {
     pub coupled_target: Option<String>,
 }
 
+/// Marks a ship whose tractor is CURRENTLY engaged BY the backfill tractor host
+/// (issue #1162), not by a console. The host inserts it when it engages the beam
+/// to serve a directive and removes it when it releases; it releases a beam only
+/// while this marker is present. That is what lets the host "engage AND release"
+/// its own tows without ever undoing an engagement a console set on the same
+/// AI-operated system — the coexistence the probe worlds' own manual tests rely
+/// on. Not folded and not snapshotted: it is re-derived from the still-present
+/// directive on resume (the host re-adopts a beam it finds engaged while its
+/// directive holds), so a lost marker self-heals within one AI tick.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct TractorAiEngaged;
+
 /// Present on a TARGET entity that authored a `[held_response]` table (issue
 /// #1158): what being held does to it.
 ///
@@ -152,10 +165,23 @@ impl Plugin for TractorPlugin {
         // tractor_commands` reads `EngageTractor` / `ReleaseTractor` for it, so
         // admission fans those commands into every ship's `AdmittedCommands`
         // each tick and the end-of-frame lint never warns them unrouted.
+        // The tractor now carries an AI decider gated on the shared cadence
+        // (issue #1162); `register_ai_cadence` is idempotent, so calling it here
+        // just guarantees the latch exists even in a fixture that adds only this
+        // plugin (the convention every gated-system plugin follows).
+        crate::ai::cadence::register_ai_cadence(app);
         app.register_admitted_consumer(ConsumerMatcher::exact(TRACTOR_SYSTEM_ID));
         app.add_systems(
             FixedUpdate,
             (
+                // Backfill Engineering tractor AI (issue #1162): decides on the
+                // shared AI cadence (rule 7) and emits its EngageTractor /
+                // ReleaseTractor BEFORE `handle_tractor_commands` consumes the
+                // tick's admitted commands, so an AI engage lands the same tick.
+                operate_tractor_ai
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .run_if(crate::ai::cadence::ai_tick_ready)
+                    .before(handle_tractor_commands),
                 handle_tractor_commands.in_set(crate::sim_sets::SimSet::Input),
                 // Decide whether the coupling holds this tick, from the live
                 // lock, range, power and damage.
@@ -222,6 +248,124 @@ pub fn handle_tractor_commands(
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// Resolve a directive's named target to the UUID the ship's combat lock carries
+/// (issue #1162): a world entity NAME through the runtime map, or the value
+/// itself when it is already a UUID (or the runtime is absent, as in fixtures).
+fn resolve_directive_target(name: &str, runtime: Option<&WorldContentRuntime>) -> String {
+    runtime
+        .and_then(|rt| rt.name_to_uuid.get(name).cloned())
+        .unwrap_or_else(|| name.to_string())
+}
+
+/// Backfill Engineering tractor AI (issue #1162).
+///
+/// On an active `Tow`/`Stabilise`/`Escort` directive (Engineering affinity)
+/// naming a target the ship has already LOCKED, engage the tractor; with no such
+/// directive active, release it. The concrete command is exactly the
+/// `EngageTractor`/`ReleaseTractor` a human Engineering officer emits, sent
+/// through the SAME `emit_ai_command` → `validate_and_admit` seam, so nothing in
+/// `handle_tractor_commands` downstream branches on who spoke (AGENTS.md rule 6).
+///
+/// The lock itself is reached UPSTREAM, by `ai_target_selection`'s directive-
+/// gated `objective-operate` source (issue #1162 D2) — this host only decides
+/// engage/release once the lock is on the named target, exactly as a human waits
+/// for Tactical to designate before engaging the beam. `Tow`, `Stabilise` and
+/// `Escort` all resolve to the same "engage against the lock"; the target's own
+/// held-response (#1158) differentiates the effect.
+///
+/// Decides ONLY on the shared AI cadence (AGENTS.md rule 7): registered with
+/// `run_if(ai_tick_ready)`, never per fixed tick. A hull whose tractor is under
+/// human control (or absent) is skipped by the `operate_ai` gate, so "a hull
+/// that authors no policy for the system simply does not operate it".
+#[allow(clippy::type_complexity)]
+pub fn operate_tractor_ai(
+    mut commands: Commands,
+    sessions: Res<crate::lobby::Sessions>,
+    runtime: Option<Res<WorldContentRuntime>>,
+    mut ships: Query<(
+        Entity,
+        Option<&EntityUuid>,
+        &crate::ship_plugin::ShipSystemControlSources,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        &TractorBeam,
+        Option<&TacticalRadarSelection>,
+        &crate::server_app::ShipSystemBlackboards,
+        Has<TractorAiEngaged>,
+        &mut crate::messages::AdmittedCommands,
+    )>,
+) {
+    for (entity, uuid, sources, config, beam, lock, blackboards, host_engaged, mut admitted) in
+        ships.iter_mut()
+    {
+        // Only when the tractor is AI-controlled — the same `operate_ai` gate a
+        // human tenure token faces from the other side of admission.
+        if !sources.0.policy_for(&tractor_system_id()).operate_ai {
+            continue;
+        }
+        // The named target of the top tractor operate directive, owned so the
+        // borrow of the blackboard is released before the emit.
+        let directive_target: Option<String> = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
+                &vbb.scored_objectives,
+                SystemAffinity::Engineering,
+                |d| crate::objectives::tractor_directive_target(d).is_some(),
+            )
+            .and_then(crate::objectives::tractor_directive_target)
+            .map(str::to_string),
+            _ => None,
+        };
+
+        let payload = match directive_target {
+            // A tractor order is active: engage once the ship's ONE combat lock
+            // is on the named target (the `objective-operate` source put it
+            // there). Idempotent — a beam already engaged emits nothing. Claim
+            // the beam as host-driven whenever it is engaged under this order, so
+            // a later withdrawal releases it (and a resume re-adopts it).
+            Some(name) => {
+                let resolved = resolve_directive_target(&name, runtime.as_deref());
+                let locked_on_target = lock
+                    .and_then(|l| l.0.as_deref())
+                    .is_some_and(|locked| locked == resolved);
+                let emit = if locked_on_target && !beam.engaged {
+                    Some(SystemControlPayload::EngageTractor)
+                } else {
+                    None
+                };
+                if (emit.is_some() || beam.engaged) && !host_engaged {
+                    commands.entity(entity).insert(TractorAiEngaged);
+                }
+                emit
+            }
+            // No tractor order: release a beam THIS HOST engaged, so a completed
+            // or withdrawn order lets go — but never touch a beam a console set
+            // on the same AI-operated system (no marker → leave it alone).
+            None => {
+                if beam.engaged && host_engaged {
+                    commands.entity(entity).remove::<TractorAiEngaged>();
+                    Some(SystemControlPayload::ReleaseTractor)
+                } else {
+                    None
+                }
+            }
+        };
+
+        if let Some(payload) = payload {
+            emit_ai_command(
+                uuid,
+                tractor_system_id(),
+                payload,
+                sources,
+                &sessions,
+                config,
+                &mut admitted,
+            );
         }
     }
 }

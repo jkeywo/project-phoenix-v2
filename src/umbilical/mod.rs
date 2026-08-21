@@ -36,6 +36,6 @@ pub use flow::{
     UmbilicalDirection, UmbilicalRefusal,
 };
 pub use server::{
-    handle_umbilical_commands, publish_umbilical_blackboard, tick_umbilical,
+    handle_umbilical_commands, operate_umbilical_ai, publish_umbilical_blackboard, tick_umbilical,
     umbilical_blackboard_key, TransferUmbilical, UmbilicalPlugin, UmbilicalSaveState,
 };

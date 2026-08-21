@@ -24,13 +24,15 @@
 
 use bevy::prelude::*;
 
+use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::damage::DamageTier;
 use crate::dock::DockControl;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::{CapacityAdjustment, InfrastructureCondition};
 use crate::messages::{
-    PowerGroupId, SystemBlackboard, SystemControlPayload, SystemId, UmbilicalBlackboard,
+    PowerGroupId, SystemAffinity, SystemBlackboard, SystemControlPayload, SystemId,
+    UmbilicalBlackboard,
 };
 use crate::ship::power::{power_level_for, ShipPowerSystem};
 use crate::system_registry::{umbilical_system_id, UMBILICAL_SYSTEM_ID};
@@ -149,10 +151,19 @@ impl Plugin for UmbilicalPlugin {
         // it, so admission fans those commands into every ship's
         // `AdmittedCommands` each tick and the end-of-frame lint never warns them
         // unrouted.
+        // Gated AI decider (issue #1162); `register_ai_cadence` is idempotent.
+        crate::ai::cadence::register_ai_cadence(app);
         app.register_admitted_consumer(ConsumerMatcher::exact(UMBILICAL_SYSTEM_ID));
         app.add_systems(
             FixedUpdate,
             (
+                // Backfill Engineering umbilical AI (issue #1162): on the shared
+                // AI cadence (rule 7), emitting StartTransfer / StopTransfer
+                // BEFORE `handle_umbilical_commands` consumes the tick.
+                operate_umbilical_ai
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .run_if(crate::ai::cadence::ai_tick_ready)
+                    .before(handle_umbilical_commands),
                 handle_umbilical_commands.in_set(crate::sim_sets::SimSet::Input),
                 // Move the capacity this tick — after the dock tick that decides
                 // the docked state this gates on, and BEFORE the infrastructure
@@ -200,6 +211,95 @@ pub fn handle_umbilical_commands(
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// Marks a ship whose umbilical the backfill host is RUNNING to serve a
+/// `Transfer` directive (issue #1162). Inserted when the host starts the flow,
+/// removed when it stops; the host stops a flow only while it is present, so it
+/// never stops a flow a console started on the same AI-operated system. Not
+/// folded/snapshotted: re-adopted from the still-present directive on resume.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct UmbilicalAiRunning;
+
+/// Backfill Engineering umbilical AI (issue #1162).
+///
+/// On an active `Transfer` directive (Engineering affinity) once the hull is
+/// DOCKED, start the umbilical; with no such directive active, stop it. The
+/// concrete command is exactly the `StartTransfer`/`StopTransfer` a human
+/// Engineering officer emits, sent through the SAME `emit_ai_command` seam, so
+/// `handle_umbilical_commands` never learns who spoke (AGENTS.md rule 6).
+///
+/// Gated on the dock the Helm dock host (issue #1162) achieves: resupply is a
+/// chain no single seat completes, so the umbilical waits for
+/// `DockControl::docked_partner` exactly as a human Engineering officer waits for
+/// Helm to call the dock made. Decides ONLY on the shared AI cadence (rule 7),
+/// via `run_if(ai_tick_ready)`.
+#[allow(clippy::type_complexity)]
+pub fn operate_umbilical_ai(
+    mut commands: Commands,
+    sessions: Res<crate::lobby::Sessions>,
+    mut ships: Query<(
+        Entity,
+        Option<&EntityUuid>,
+        &crate::ship_plugin::ShipSystemControlSources,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        &TransferUmbilical,
+        &DockControl,
+        &crate::server_app::ShipSystemBlackboards,
+        Has<UmbilicalAiRunning>,
+        &mut crate::messages::AdmittedCommands,
+    )>,
+) {
+    for (entity, uuid, sources, config, umbilical, dock, blackboards, host_running, mut admitted) in
+        ships.iter_mut()
+    {
+        if !sources.0.policy_for(&umbilical_system_id()).operate_ai {
+            continue;
+        }
+        let transfer_active = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
+                &vbb.scored_objectives,
+                SystemAffinity::Engineering,
+                |d| crate::objectives::transfer_directive_target(d).is_some(),
+            )
+            .is_some(),
+            _ => false,
+        };
+
+        let payload = if transfer_active {
+            // Start once the dock is made (the umbilical only flows while docked),
+            // idempotent once running. Claim the flow as host-driven while it runs
+            // under this order.
+            let emit = (dock.docked_partner().is_some() && !umbilical.running)
+                .then_some(SystemControlPayload::StartTransfer);
+            if (emit.is_some() || umbilical.running) && !host_running {
+                commands.entity(entity).insert(UmbilicalAiRunning);
+            }
+            emit
+        } else if umbilical.running && host_running {
+            // No transfer order: stop a flow THIS HOST started — never one a
+            // console started on the same AI-operated system.
+            commands.entity(entity).remove::<UmbilicalAiRunning>();
+            Some(SystemControlPayload::StopTransfer)
+        } else {
+            None
+        };
+
+        if let Some(payload) = payload {
+            emit_ai_command(
+                uuid,
+                umbilical_system_id(),
+                payload,
+                sources,
+                &sessions,
+                config,
+                &mut admitted,
+            );
         }
     }
 }

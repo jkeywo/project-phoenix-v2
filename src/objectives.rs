@@ -217,6 +217,78 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         // command a human Comms officer sends. No consumer filters Hail on
         // `Captain`, so Comms is the sole relevant affinity.
         AiDirective::Hail { .. } => vec![SystemAffinity::Comms],
+        // The tractor operate directives (issue #1162): each routes to the
+        // owning system's affinity — Engineering, which owns the tractor. The
+        // seat decides the concrete `EngageTractor`/`ReleaseTractor`, so these
+        // live upstream of admission and command-level symmetry holds. The
+        // Weapons Tactical selector ALSO reads them (through its own
+        // `objective-operate` source) to lock the named target, but that is not
+        // an affinity — the tractor is Engineering's, not Weapons'.
+        AiDirective::Tow { .. } | AiDirective::Stabilise { .. } | AiDirective::Escort { .. } => {
+            vec![SystemAffinity::Engineering]
+        }
+        // Transfer is a two-seat chain (issue #1162): Helm docks (the dock is
+        // Helm-owned) and Engineering runs the umbilical over the mated dock.
+        // Both seats are relevant so each backfilled host sees the directive.
+        AiDirective::Transfer { .. } => {
+            vec![SystemAffinity::Helm, SystemAffinity::Engineering]
+        }
+        // FieldRepair routes to Repair, which owns the external dispatch. The
+        // Weapons Tactical selector reads it too (to lock the ally), for the
+        // same reason as the tractor verbs above.
+        AiDirective::FieldRepair { .. } => vec![SystemAffinity::Repair],
+    }
+}
+
+/// The top-scored ACTIVE directive relevant to `affinity` whose kind `wanted`
+/// accepts, from a viewscreen scored-objective pool (issue #1162).
+///
+/// The pool is already sorted descending by score (see `scored_pool`), so the
+/// first match is the top one. Pure and Bevy-free (AGENTS.md rule 10), so the
+/// four backfill operate hosts — tractor, umbilical, dock and external repair —
+/// share ONE selection rule and it can be unit-tested without an `App`. A
+/// zero-score objective is skipped exactly as the other AI-facing consumers skip
+/// it, so a boosted or condition-changed directive re-activates without the pool
+/// being republished.
+pub fn top_operate_directive(
+    scored: &[ScoredObjective],
+    affinity: SystemAffinity,
+    wanted: impl Fn(&AiDirective) -> bool,
+) -> Option<&AiDirective> {
+    scored.iter().find_map(|o| {
+        (o.score > 0.0 && o.relevance.contains(&affinity) && wanted(&o.directive))
+            .then_some(&o.directive)
+    })
+}
+
+/// The target a tractor operate directive (`Tow`/`Stabilise`/`Escort`) names, or
+/// `None` for any other directive (issue #1162). The tractor host's `wanted`
+/// predicate, factored out so the host and its tests read one rule.
+pub fn tractor_directive_target(directive: &AiDirective) -> Option<&str> {
+    match directive {
+        AiDirective::Tow { target }
+        | AiDirective::Stabilise { target }
+        | AiDirective::Escort { target } => Some(target.as_str()),
+        _ => None,
+    }
+}
+
+/// The target a `Transfer` directive names, or `None` (issue #1162). Shared by
+/// the Helm dock host and the Engineering umbilical host — the two seats of the
+/// resupply chain.
+pub fn transfer_directive_target(directive: &AiDirective) -> Option<&str> {
+    match directive {
+        AiDirective::Transfer { target } => Some(target.as_str()),
+        _ => None,
+    }
+}
+
+/// The target a `FieldRepair` directive names, or `None` (issue #1162). The
+/// external-repair dispatch host's predicate.
+pub fn field_repair_directive_target(directive: &AiDirective) -> Option<&str> {
+    match directive {
+        AiDirective::FieldRepair { target } => Some(target.as_str()),
+        _ => None,
     }
 }
 
@@ -549,6 +621,143 @@ fn record_to_snapshot(r: &ObjectiveRecord) -> ObjectiveSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── issue #1162: operate-directive relevance + selection ────────────────
+
+    #[test]
+    fn tractor_verbs_route_to_engineering_only() {
+        for d in [
+            AiDirective::Tow { target: "t".into() },
+            AiDirective::Stabilise { target: "t".into() },
+            AiDirective::Escort { target: "t".into() },
+        ] {
+            assert_eq!(
+                directive_relevance(&d),
+                vec![SystemAffinity::Engineering],
+                "tractor verbs route to Engineering, the tractor's owner"
+            );
+        }
+    }
+
+    #[test]
+    fn transfer_routes_to_both_helm_and_engineering() {
+        assert_eq!(
+            directive_relevance(&AiDirective::Transfer { target: "t".into() }),
+            vec![SystemAffinity::Helm, SystemAffinity::Engineering],
+            "Transfer is a two-seat chain: Helm docks, Engineering runs the umbilical"
+        );
+    }
+
+    #[test]
+    fn field_repair_routes_to_repair_only() {
+        assert_eq!(
+            directive_relevance(&AiDirective::FieldRepair { target: "t".into() }),
+            vec![SystemAffinity::Repair],
+        );
+    }
+
+    fn scored_dir(id: &str, score: f32, directive: AiDirective) -> ScoredObjective {
+        let relevance = directive_relevance(&directive);
+        ScoredObjective {
+            id: id.into(),
+            score,
+            directive,
+            source: ObjectiveSource::Mission,
+            relevance,
+            snapshot: ObjectiveSnapshot {
+                id: id.into(),
+                text: String::new(),
+                text_params: BTreeMap::new(),
+                mandatory: false,
+                status: ObjectiveStatus::Active,
+                targets: vec![],
+                source: ObjectiveSource::Mission,
+            },
+        }
+    }
+
+    #[test]
+    fn top_operate_directive_picks_the_first_relevant_positive_match() {
+        // Pool is sorted descending by score (as `scored_pool` leaves it).
+        let pool = vec![
+            scored_dir(
+                "tow",
+                10.0,
+                AiDirective::Tow {
+                    target: "hulk".into(),
+                },
+            ),
+            scored_dir(
+                "tow2",
+                5.0,
+                AiDirective::Tow {
+                    target: "other".into(),
+                },
+            ),
+        ];
+        let picked = top_operate_directive(&pool, SystemAffinity::Engineering, |d| {
+            tractor_directive_target(d).is_some()
+        });
+        assert_eq!(picked.and_then(tractor_directive_target), Some("hulk"));
+    }
+
+    #[test]
+    fn top_operate_directive_skips_zero_score_and_wrong_affinity() {
+        let pool = vec![
+            // Zero score — skipped even though the kind matches.
+            scored_dir("z", 0.0, AiDirective::Tow { target: "a".into() }),
+            // A FieldRepair (Repair affinity) is invisible to an Engineering query.
+            scored_dir("fr", 9.0, AiDirective::FieldRepair { target: "b".into() }),
+        ];
+        assert!(
+            top_operate_directive(&pool, SystemAffinity::Engineering, |d| {
+                tractor_directive_target(d).is_some()
+            })
+            .is_none()
+        );
+        // The FieldRepair IS visible to a Repair query.
+        assert_eq!(
+            top_operate_directive(&pool, SystemAffinity::Repair, |d| {
+                field_repair_directive_target(d).is_some()
+            })
+            .and_then(field_repair_directive_target),
+            Some("b")
+        );
+    }
+
+    #[test]
+    fn transfer_reaches_both_seats_but_not_a_tractor_query() {
+        let pool = vec![scored_dir(
+            "xf",
+            7.0,
+            AiDirective::Transfer {
+                target: "tender".into(),
+            },
+        )];
+        // Both the Helm dock seat and the Engineering umbilical seat see it.
+        assert_eq!(
+            top_operate_directive(&pool, SystemAffinity::Helm, |d| {
+                transfer_directive_target(d).is_some()
+            })
+            .and_then(transfer_directive_target),
+            Some("tender")
+        );
+        assert_eq!(
+            top_operate_directive(&pool, SystemAffinity::Engineering, |d| {
+                transfer_directive_target(d).is_some()
+            })
+            .and_then(transfer_directive_target),
+            Some("tender")
+        );
+        // But a tractor query (Engineering, tractor verbs) does NOT — Transfer
+        // is not a tractor verb, so it never pulls a lock.
+        assert!(
+            top_operate_directive(&pool, SystemAffinity::Engineering, |d| {
+                tractor_directive_target(d).is_some()
+            })
+            .is_none()
+        );
+    }
 
     #[test]
     fn empty_manager_returns_no_snapshots() {

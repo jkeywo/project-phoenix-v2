@@ -15270,6 +15270,320 @@ fn repair_tractor(app: &mut App) {
         .set_hp(&project_phoenix::messages::SystemId("tractor".into()), 30.0);
 }
 
+/// Author a mission objective carrying `directive` onto the running world's
+/// `ObjectiveManagerRes` (issue #1162), so the viewscreen aggregator publishes
+/// it into every ship's scored-objective pool — the same pool a scripted
+/// `add_objective` fills, reached here directly so the test needs no Rhai.
+fn add_operate_objective_tractor(
+    app: &mut App,
+    id: &str,
+    targets: Vec<String>,
+    directive: project_phoenix::messages::AiDirective,
+) {
+    use project_phoenix::objectives::UtilityConfig;
+    let mut mgr = app
+        .world_mut()
+        .resource_mut::<project_phoenix::world::server::ObjectiveManagerRes>();
+    mgr.0.add_full(
+        id,
+        "world.probe.objective.operate.text",
+        true,
+        targets,
+        directive,
+        UtilityConfig {
+            base_priority: 80.0,
+            ..Default::default()
+        },
+        project_phoenix::messages::ObjectiveSource::Mission,
+    );
+}
+
+/// The `(target, payload)` of the LocalShip's first admitted tractor command
+/// this tick, owned so it outlives the world borrow (issue #1162). The
+/// `response_token` is deliberately excluded: it is a reply address a handler
+/// must never branch on (see `AdmittedCommand`), and it is the ONE field that
+/// legitimately differs between a console-issued and an AI-issued command — the
+/// behavioural content is `(target, payload)`.
+fn admitted_tractor_command(
+    app: &mut App,
+) -> Option<(
+    project_phoenix::messages::SystemId,
+    project_phoenix::messages::SystemControlPayload,
+)> {
+    use project_phoenix::messages::AdmittedCommands;
+    let op = tractor_operator(app);
+    app.world()
+        .get::<AdmittedCommands>(op)?
+        .for_target(project_phoenix::ship::system_registry::TRACTOR_SYSTEM_ID)
+        .next()
+        .map(|c| (c.target.clone(), c.payload.clone()))
+}
+
+/// Run `total_ticks`, recording the FIRST admitted tractor command seen (owned).
+/// The command survives the tick it is admitted on — `AdmittedCommands` is
+/// cleared at the start of the NEXT tick — so a single-tick read after each
+/// `update()` catches it before it is cleared.
+fn run_capturing_tractor_command(
+    app: &mut App,
+    total_ticks: u32,
+) -> Option<(
+    project_phoenix::messages::SystemId,
+    project_phoenix::messages::SystemControlPayload,
+)> {
+    let mut captured = None;
+    for _ in 0..total_ticks {
+        run(app, 1);
+        if captured.is_none() {
+            captured = admitted_tractor_command(app);
+        }
+    }
+    captured
+}
+
+/// AC (issue #1162, AGENTS.md rule 6): a console-issued and an AI-issued engage
+/// of the SAME system produce BYTE-IDENTICAL admitted commands and an IDENTICAL
+/// resulting digest. Both runs carry the SAME standing order (a `Tow` directive —
+/// which the backfill host maintains, releasing any engage that contradicts it),
+/// and differ ONLY in who issues the FIRST engage: a console command through the
+/// network/admission path, or the backfill tractor host's `emit_ai_command`.
+/// Nothing downstream may tell them apart.
+#[test]
+fn a_console_and_an_ai_tractor_engage_are_byte_identical_with_one_digest() {
+    use project_phoenix::messages::{AiDirective, ClientMessage, SystemControlPayload, SystemId};
+
+    let dt = 1.0 / 60.0;
+    let tow = || AiDirective::Tow {
+        target: DERELICT.into(),
+    };
+
+    // ── Path H: the FIRST engage issued through the network/admission path ────
+    let mut app_h = build_headless_app(&tractor_args(dt)).expect("app should build");
+    run(&mut app_h, 60);
+    let derelict_h = scan_uuid_named(&mut app_h, DERELICT);
+    place_operator(&mut app_h, Vec3::ZERO);
+    move_named_to(&mut app_h, DERELICT, Vec3::new(80.0, 0.0, 0.0));
+    add_operate_objective_tractor(&mut app_h, "obj-tow-derelict", vec![DERELICT.into()], tow());
+    set_tractor_lock(&mut app_h, Some(derelict_h.clone()));
+    // The console issues the engage. The host would engage on its own next AI
+    // tick, but an already-engaged beam is idempotent, so the console's command
+    // is the one that lands first — the "human-issued" arm.
+    app_h
+        .world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<project_phoenix::lobby::InboundMessage>>()
+        .write(project_phoenix::lobby::InboundMessage {
+            token: TRACTOR_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId(project_phoenix::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+                payload: SystemControlPayload::EngageTractor,
+            },
+        });
+    let cmd_h = run_capturing_tractor_command(&mut app_h, 120);
+    let digest_h = project_phoenix::sim_digest::state_digest(&app_h);
+
+    // ── Path A: the engage issued by the backfill tractor host ───────────────
+    let mut app_a = build_headless_app(&tractor_args(dt)).expect("app should build");
+    run(&mut app_a, 60);
+    let derelict_a = scan_uuid_named(&mut app_a, DERELICT);
+    place_operator(&mut app_a, Vec3::ZERO);
+    move_named_to(&mut app_a, DERELICT, Vec3::new(80.0, 0.0, 0.0));
+    add_operate_objective_tractor(&mut app_a, "obj-tow-derelict", vec![DERELICT.into()], tow());
+    set_tractor_lock(&mut app_a, Some(derelict_a.clone()));
+    let cmd_a = run_capturing_tractor_command(&mut app_a, 120);
+    let digest_a = project_phoenix::sim_digest::state_digest(&app_a);
+
+    assert_eq!(
+        cmd_h,
+        Some((
+            SystemId(project_phoenix::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+            SystemControlPayload::EngageTractor,
+        )),
+        "the console path must admit an EngageTractor on the tractor system"
+    );
+    assert_eq!(
+        cmd_h, cmd_a,
+        "a console-issued and an AI-issued engage must admit the BYTE-IDENTICAL command \
+         (target + payload) — nothing downstream may branch on who sent it (AGENTS.md rule 6)"
+    );
+    assert_eq!(
+        digest_h, digest_a,
+        "the two engages must produce an IDENTICAL resulting digest — the towed derelict \
+         reaches the same folded state whether a console or the AI host engaged the beam"
+    );
+}
+
+/// AC (issue #1162, AGENTS.md rule 7): the tractor host decides ONLY on the
+/// shared AI cadence, never once per rendered frame. Frames faster than the
+/// decision period must not each mint a decision — mirrors the prior-art
+/// `ai_target_selection_runs_on_the_shared_ai_tick_not_per_frame`.
+#[test]
+fn operate_tractor_ai_runs_on_the_shared_ai_tick_not_per_frame() {
+    use project_phoenix::messages::{AiDirective, SystemControlPayload};
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&tractor_args(dt)).expect("app should build");
+    run(&mut app, 60);
+    let derelict = scan_uuid_named(&mut app, DERELICT);
+    place_operator(&mut app, Vec3::ZERO);
+    move_named_to(&mut app, DERELICT, Vec3::new(80.0, 0.0, 0.0));
+    run(&mut app, 1);
+    set_tractor_lock(&mut app, Some(derelict.clone()));
+    add_operate_objective_tractor(
+        &mut app,
+        "obj-tow-derelict",
+        vec![DERELICT.into()],
+        AiDirective::Tow {
+            target: DERELICT.into(),
+        },
+    );
+
+    // Count the fixed steps on which the host emitted an EngageTractor. It must
+    // emit on FEWER than all of them: the release/re-engage below forces a fresh
+    // decision each AI tick, and if the host ran every fixed step it would emit
+    // on (nearly) every one. The shared cadence throttles it to every other step
+    // at the shipped 60/30 rates.
+    let mut emitted_steps = 0usize;
+    let mut total_steps = 0usize;
+    const STEPS: usize = 24;
+    for _ in 0..STEPS {
+        // Force the beam idle each step so the host has a decision to make (an
+        // already-engaged beam emits nothing, which would understate the count).
+        set_tractor_lock(&mut app, Some(derelict.clone()));
+        {
+            let op = tractor_operator(&mut app);
+            if let Some(mut beam) = app
+                .world_mut()
+                .get_mut::<project_phoenix::tractor::TractorBeam>(op)
+            {
+                beam.engaged = false;
+                beam.coupled_target = None;
+            }
+        }
+        run(&mut app, 1);
+        total_steps += 1;
+        if matches!(
+            admitted_tractor_command(&mut app),
+            Some((_, SystemControlPayload::EngageTractor))
+        ) {
+            emitted_steps += 1;
+        }
+    }
+    assert!(
+        emitted_steps > 0,
+        "precondition: the host must engage at least once, or the probe proves nothing"
+    );
+    assert!(
+        emitted_steps < total_steps,
+        "the tractor host must decide on the shared AI cadence, not every fixed step: it \
+         emitted on {emitted_steps} of {total_steps} steps. Emitting on every step means the \
+         `run_if(ai_tick_ready)` gate is gone (issue #889 / AGENTS.md rule 7)"
+    );
+}
+
+/// AC (issue #1162): a headless FULL-AI run with NOBODY connected completes a
+/// TOW against the mission's named target — the backfilled Engineering engages
+/// the tractor off a `Tow` directive, with no human input and no manual engage.
+/// Asserted on the TARGET's own state: the derelict rides the authored coupling
+/// offset.
+///
+/// The ship's ONE combat lock is set once here, standing in for the widened
+/// weapons selector `objective-operate` source that reaches a non-hostile lock —
+/// which is proved separately, and thoroughly, by the D2 unit tests in
+/// `console::weapons::server_tests` (this lean tug authors no weapons console).
+/// What THIS test proves is the tractor HOST: given the order and the lock, the
+/// backfilled Engineering engages the beam autonomously and the derelict is held.
+#[test]
+fn a_full_ai_run_completes_a_tow_against_the_named_derelict() {
+    use project_phoenix::messages::AiDirective;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&tractor_args(dt)).expect("app should build");
+    run(&mut app, 60);
+    let derelict = scan_uuid_named(&mut app, DERELICT);
+
+    place_operator(&mut app, Vec3::ZERO);
+    move_named_to(&mut app, DERELICT, Vec3::new(80.0, 0.0, 0.0));
+    run(&mut app, 1);
+
+    // The mission orders the tow; the ship's one lock is on the derelict (the
+    // D2-tested weapons-selector path's stand-in on this consoleless tug).
+    add_operate_objective_tractor(
+        &mut app,
+        "obj-tow-derelict",
+        vec![DERELICT.into()],
+        AiDirective::Tow {
+            target: DERELICT.into(),
+        },
+    );
+    set_tractor_lock(&mut app, Some(derelict.clone()));
+
+    // No EngageTractor is ever sent — the backfilled Engineering host drives it.
+    run(&mut app, 20);
+
+    let beam = tractor_beam_of(&mut app);
+    assert!(
+        beam.engaged && beam.coupled_target.as_deref() == Some(derelict.as_str()),
+        "the backfilled Engineering must have engaged the tractor off the Tow directive, \
+         got {beam:?}"
+    );
+    let offset = position_of(&mut app, DERELICT) - operator_pos(&mut app);
+    assert!(
+        (offset.length() - 120.0).abs() < 1.0,
+        "the towed derelict must ride the authored 120-unit coupling offset (target-side \
+         state), got a separation of {}",
+        offset.length()
+    );
+}
+
+/// AC (issue #1162): a backfilled Engineering ARRESTS a failing structure's
+/// decline (stabilise) against the mission's named target — a full-AI run off a
+/// `Stabilise` directive, exercising the held-response (#1158) dependency. The
+/// same "lock + engage" resolution as a tow; the structure's own `arrest-decline`
+/// held-response differentiates the effect. Asserted on the TARGET's own state:
+/// its condition stops falling and recovers.
+///
+/// Reuses `probe_held_response`'s failing depot. The lock stands in for the
+/// D2-tested selector path exactly as in the tow test above.
+#[test]
+fn a_full_ai_run_stabilises_a_failing_structure_against_the_named_target() {
+    use project_phoenix::messages::AiDirective;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&held_response_args(dt)).expect("app should build");
+    run(&mut app, 60);
+    let structure = scan_uuid_named(&mut app, STRUCTURE);
+    // The world already places the tug at the origin and the failing structure
+    // 80 units off (a passive infrastructure entity, not a ship, so it is not
+    // repositioned here). It declines on its own until the beam arrests it.
+
+    add_operate_objective_tractor(
+        &mut app,
+        "obj-stabilise-structure",
+        vec![STRUCTURE.into()],
+        AiDirective::Stabilise {
+            target: STRUCTURE.into(),
+        },
+    );
+    set_tractor_lock(&mut app, Some(structure.clone()));
+
+    // Let the host engage, then measure the condition trend while held: an
+    // arrest-decline structure recovers while the beam is on it.
+    run(&mut app, 20);
+    let beam = tractor_beam_of(&mut app);
+    assert!(
+        beam.engaged && beam.coupled_target.as_deref() == Some(structure.as_str()),
+        "the backfilled Engineering must have engaged the tractor off the Stabilise directive, \
+         got {beam:?}"
+    );
+    let condition_held = condition_of(&mut app, STRUCTURE);
+    run(&mut app, 60);
+    let condition_later = condition_of(&mut app, STRUCTURE);
+    assert!(
+        condition_later > condition_held,
+        "a held arrest-decline structure must stop falling and RECOVER while the backfilled \
+         tractor holds it (target-side state): {condition_held} -> {condition_later}"
+    );
+}
+
 /// AC: a derelict is moved by an engaged tractor and released by EACH
 /// interruption (lock lost / release / out of range / power lost / disabled).
 #[test]
@@ -16126,6 +16440,60 @@ fn send_repair(app: &mut App, payload: project_phoenix::messages::SystemControlP
     run(app, 2);
 }
 
+/// AC (issue #1162): a headless FULL-AI run with NOBODY connected completes a
+/// FIELD REPAIR against the mission's named target — the backfilled Repair
+/// dispatches a team abroad off a `FieldRepair` directive, with no human input
+/// and no manual dispatch. Asserted on the TARGET's own state: the ally's
+/// condition rises. The tender carries no local damage, so a free team is
+/// available and the "without starving critical repairs" reserve is zero.
+///
+/// The ship's ONE combat lock is set once here, standing in for the widened
+/// weapons selector `objective-operate` source (the dispatch reads the same
+/// lock) — proved separately by the D2 unit tests. What THIS test proves is the
+/// dispatch HOST: given the order and the lock, the backfilled Repair sends the
+/// team autonomously.
+#[test]
+fn a_full_ai_run_completes_a_field_repair_against_the_named_ally() {
+    use project_phoenix::messages::AiDirective;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&external_repair_args(dt)).expect("app should build");
+    run(&mut app, 60);
+    let ally = scan_uuid_named(&mut app, ALLY);
+
+    place_operator(&mut app, Vec3::ZERO);
+    run(&mut app, 1);
+    let start_condition = condition_of(&mut app, ALLY);
+
+    add_operate_objective_tractor(
+        &mut app,
+        "obj-field-repair-ally",
+        vec![ALLY.into()],
+        AiDirective::FieldRepair {
+            target: ALLY.into(),
+        },
+    );
+    set_tractor_lock(&mut app, Some(ally.clone()));
+
+    // No DispatchExternalRepair is ever sent — the backfilled Repair host does it.
+    run(&mut app, 20);
+    let dispatch = external_dispatch_of(&mut app);
+    assert_eq!(
+        dispatch.dispatched_target.as_deref(),
+        Some(ally.as_str()),
+        "the backfilled Repair must have dispatched a team to the named ally off the \
+         FieldRepair directive, got {dispatch:?}"
+    );
+
+    run(&mut app, 60);
+    let end_condition = condition_of(&mut app, ALLY);
+    assert!(
+        end_condition > start_condition,
+        "a full-AI field repair must raise the ALLY's own condition (target-side state): \
+         {start_condition} -> {end_condition}"
+    );
+}
+
 /// AC: a dispatched team raises an ally's condition at the authored rate while
 /// the hull's own repairs slow (its one team is withdrawn from the sweep), and
 /// recall — or drifting out of range — brings the team home and stops the work,
@@ -16479,6 +16847,91 @@ fn umbilical_redock(app: &mut App) {
     assert!(
         dock.docked && dock.docking_target.is_some(),
         "precondition: the two hulls should be mated, got {dock:?}"
+    );
+}
+
+/// Author a mission objective carrying `directive` onto the running world's
+/// `ObjectiveManagerRes` (issue #1162), so the viewscreen aggregator publishes
+/// it into every ship's scored-objective pool — the same pool a scripted
+/// `add_objective` fills, reached here directly so the test needs no Rhai.
+fn add_operate_objective(
+    app: &mut App,
+    id: &str,
+    targets: Vec<String>,
+    directive: project_phoenix::messages::AiDirective,
+) {
+    use project_phoenix::objectives::UtilityConfig;
+    let mut mgr = app
+        .world_mut()
+        .resource_mut::<project_phoenix::world::server::ObjectiveManagerRes>();
+    mgr.0.add_full(
+        id,
+        // A string id, never English (AGENTS.md rule 3) — this is AI plumbing.
+        "world.probe.objective.operate.text",
+        true,
+        targets,
+        directive,
+        UtilityConfig {
+            base_priority: 80.0,
+            ..Default::default()
+        },
+        project_phoenix::messages::ObjectiveSource::Mission,
+    );
+}
+
+/// AC (issue #1162): a headless FULL-AI run with NOBODY connected completes a
+/// TRANSFER against the mission's named target — the backfilled Helm docks and
+/// the backfilled Engineering runs the umbilical, both off a `Transfer`
+/// directive, with no human input and no manual command. Asserted on the
+/// TARGET's own state: the depot's `reserve_fuel` ledger rises.
+///
+/// Needs no combat lock (the dock reads its own `available_target`, the umbilical
+/// its docked partner), so this is the cleanest end-to-end proof of the operate
+/// hosts on the shared admission path.
+#[test]
+fn a_full_ai_run_completes_a_transfer_against_the_named_depot() {
+    use project_phoenix::messages::AiDirective;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&umbilical_args(dt)).expect("app should build");
+    // Reach InProgress so the probe is backfilled and its helm dock + engineering
+    // umbilical are AI-controlled.
+    run(&mut app, 60);
+
+    let depot = depot_entity(&mut app);
+    let start_fuel = fuel_of(&mut app, depot);
+
+    // The mission names the depot for transfer. Both seats (Helm dock, Engineering
+    // umbilical) read the one `Transfer` directive from the scored pool.
+    add_operate_objective(
+        &mut app,
+        "obj-transfer-depot",
+        vec![DEPOT_NAME.into()],
+        AiDirective::Transfer {
+            target: DEPOT_NAME.into(),
+        },
+    );
+
+    // Give the AI time to dock (fly the manoeuvre) and run the umbilical. No
+    // command is ever sent by the test — the hosts drive the whole chain.
+    run(&mut app, 600);
+
+    let dock = umbilical_dock_of(&mut app);
+    assert!(
+        dock.docked,
+        "the backfilled Helm must have docked with the depot off the Transfer directive, \
+         got {dock:?}"
+    );
+    let umbilical = umbilical_of(&mut app);
+    assert!(
+        umbilical.running,
+        "the backfilled Engineering must have started the umbilical once docked, got {umbilical:?}"
+    );
+    let end_fuel = fuel_of(&mut app, depot);
+    assert!(
+        end_fuel > start_fuel,
+        "a full-AI transfer must raise the DEPOT's own reserve_fuel (target-side state): \
+         started at {start_fuel}, ended at {end_fuel}"
     );
 }
 

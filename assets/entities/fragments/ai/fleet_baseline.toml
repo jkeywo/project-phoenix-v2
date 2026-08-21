@@ -487,7 +487,7 @@ verb = "bring_torpedoes_to_bear"
 # inequality, not term by term.
 
 [weapons_console.selector]
-sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts"]
+sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts", "objective-operate"]
 horizon = 1e9
 switch_margin = 50.0
 # Independent revalidation: `detectable` is required of everything, and beyond
@@ -496,7 +496,16 @@ switch_margin = 50.0
 # independently hostile. That disjunction honours a mission naming a factionless
 # target while refusing a FRIENDLY Sensors designation, which carries only
 # `source_sensors_designation`.
-eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0)"
+#
+# The final `source_operate` disjunct (issue #1162) is DIRECTIVE-GATED: the
+# `objective-operate` source injects a candidate ONLY when an active per-verb
+# operate directive (Tow/Stabilise/Escort/FieldRepair) names that target, so the
+# tractor and external-repair dispatch can reach a NON-hostile lock the ship was
+# ordered to work. The term is inert when no operate directive is active — no
+# candidate carries `source_operate` — so combat auto-lock is unchanged and
+# radar/scan auto-lock stays hostile-gated (`source_radar` still requires
+# `hostile`, unaffected here).
+eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0 or candidate_fact(source_operate) > 0)"
 
 [[weapons_console.selector.score]]
 when = "candidate_fact(source_objective) > 0"
@@ -517,6 +526,16 @@ weight = 100.0
 [[weapons_console.selector.score]]
 when = "candidate_fact(source_radar) > 0"
 weight = 1.0
+
+# An active operate order (issue #1162) is an explicit command decision, the
+# same tier as a named Destroy objective, so it carries the same 1000 weight:
+# the target the crew were ordered to tow / stabilise / field-repair wins the
+# lock over any incidental radar contact. It never stacks with `source_objective`
+# in practice (one names a hostile to destroy, the other a non-hostile to
+# operate on), so the precedence invariant above is unchanged.
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_operate) > 0"
+weight = 1000.0
 
 # Navigation — rank destinations into the shared Waypoint. Only the objective
 # source marks its resolved destination `reachable`, so this policy drives the

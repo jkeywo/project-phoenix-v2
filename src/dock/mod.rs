@@ -29,6 +29,7 @@ pub mod server;
 
 pub use mating::{nearest_viable_pair, DockConfig, DockMarker, DockRefusal, MatingSolution, Pose};
 pub use server::{
-    dock_blackboard_key, handle_dock_commands, publish_dock_blackboard, resolve_dock_markers,
-    tick_dock, DockControl, DockMarkers, DockPlugin, DockSaveState, DOCK_MARKER_PREFIX,
+    dock_blackboard_key, handle_dock_commands, operate_dock_ai, publish_dock_blackboard,
+    resolve_dock_markers, tick_dock, DockControl, DockMarkers, DockPlugin, DockSaveState,
+    DOCK_MARKER_PREFIX,
 };

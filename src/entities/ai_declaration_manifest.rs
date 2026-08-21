@@ -117,11 +117,30 @@ pub enum IdleLever {
     Absent,
 }
 
-/// The twenty AI-capable fine-system kinds, as a closed enum.
+/// The AI-capable fine-system kinds, as a closed enum.
 ///
 /// Exhaustively matched in [`slots_of_kind`] and in the manifest's spawner
-/// cross-check, so a new kind cannot be added without both being updated. The
-/// twentieth is [`FineSystemKey::WeaponsDoctrine`], added by issue #956.
+/// cross-check, so a new kind cannot be added without both being updated.
+///
+/// Two groups:
+///
+/// * The **twenty declaration-tracked kinds** (Captain … CommsSelector). Each
+///   has a matching [`FineSystemKind`] in [`FINE_SYSTEM_KINDS`], an owning
+///   [`ai_flag_hosts::AiHost`], and a per-hull authored block whose presence the
+///   manifest counts. The twentieth is [`FineSystemKey::WeaponsDoctrine`], added
+///   by issue #956.
+/// * The **operate kinds** (Tractor, Umbilical, Dock, ExternalRepair), added by
+///   issue #1162. These are AI-capable — a backfilled crew works them — but
+///   their behaviour is NOT authored per hull: it is driven by a per-verb
+///   operate directive (`Tow`/`Stabilise`/`Escort`/`Transfer`/`FieldRepair`)
+///   and the shared thresholds in `fleet_baseline.toml`, so there is no
+///   `[X.ai]` block to omit and nothing for the declaration manifest to
+///   enforce. They are therefore deliberately NOT in [`FINE_SYSTEM_KINDS`] and
+///   [`slots_of_kind`] returns no slot for them — "a hull that authors no policy
+///   for a new system simply does not operate it" (the issue's own AC) is the
+///   correct behaviour, not a missing declaration. They still live in the closed
+///   enum so the two exhaustive match sites name every AI-capable system in one
+///   place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FineSystemKey {
     Captain,
@@ -144,6 +163,11 @@ pub enum FineSystemKey {
     NavigationSelector,
     RepairSelector,
     CommsSelector,
+    // ── Operate kinds (issue #1162): directive-driven, no per-hull declaration ──
+    Tractor,
+    Umbilical,
+    Dock,
+    ExternalRepair,
 }
 
 impl FineSystemKey {
@@ -172,6 +196,13 @@ impl FineSystemKey {
             Self::NavigationSelector => "navigation_selector",
             Self::RepairSelector => "repair_selector",
             Self::CommsSelector => "comms_selector",
+            // Operate kinds (issue #1162). Named for readability of any future
+            // diagnostic; they never reach the declaration worklist because
+            // `slots_of_kind` yields no slot for them.
+            Self::Tractor => "tractor",
+            Self::Umbilical => "umbilical",
+            Self::Dock => "dock",
+            Self::ExternalRepair => "external_repair",
         }
     }
 }
@@ -578,6 +609,19 @@ pub fn slots_of_kind(kind: &'static FineSystemKind, c: &EntityConfig) -> Vec<Slo
             }],
             None => Vec::new(),
         },
+        // The operate kinds (issue #1162) carry NO per-hull AI declaration: a
+        // backfilled crew works the tractor/umbilical/dock/external-repair from
+        // a per-verb operate directive and the shared `fleet_baseline` thresholds,
+        // not from an authored `[X.ai]` block. There is nothing to omit, so the
+        // manifest tracks no slot for them — and a hull that carries the system
+        // but sees no directive simply does not operate it, unchanged. (These
+        // arms are never reached in practice: the operate kinds are deliberately
+        // absent from `FINE_SYSTEM_KINDS`, which is all `manifest` iterates. They
+        // exist only to keep this match exhaustive over the closed enum.)
+        FineSystemKey::Tractor
+        | FineSystemKey::Umbilical
+        | FineSystemKey::Dock
+        | FineSystemKey::ExternalRepair => Vec::new(),
     }
 }
 
@@ -1321,6 +1365,15 @@ base_priority = 40.0
             FineSystemKey::CommsSelector => w
                 .get::<crate::console::comms::server::CommsTargetSelector>(e)
                 .map(|c| Attached::Selector(c.selector.clone())),
+            // The operate kinds (issue #1162) attach no per-hull AI policy /
+            // selector component: their behaviour is directive-driven, so there
+            // is nothing for this cross-check to find. Never reached in practice
+            // (they are absent from `FINE_SYSTEM_KINDS`, which is all the callers
+            // iterate); present only to keep the match exhaustive.
+            FineSystemKey::Tractor
+            | FineSystemKey::Umbilical
+            | FineSystemKey::Dock
+            | FineSystemKey::ExternalRepair => None,
         }
     }
 
@@ -1398,6 +1451,12 @@ base_priority = 40.0
             FineSystemKey::TorpedoTube => w
                 .get::<crate::weapons_plugin::TorpedoTubeAiPolicies>(e)
                 .map_or(0, |c| c.0.len()),
+            // Operate kinds (issue #1162): no per-hull policy component, so zero
+            // attached. Never reached (absent from `FINE_SYSTEM_KINDS`).
+            FineSystemKey::Tractor
+            | FineSystemKey::Umbilical
+            | FineSystemKey::Dock
+            | FineSystemKey::ExternalRepair => 0,
         }
     }
 

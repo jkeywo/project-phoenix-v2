@@ -10,5 +10,7 @@ pub mod visibility;
 
 pub use dispatch::handle_dispatch_repair_team;
 pub use external::{ExternalRepairConfig, ExternalRepairRefusal};
-pub use external_server::{ExternalRepairDispatch, ExternalRepairSaveState};
+pub use external_server::{
+    operate_external_repair_ai, ExternalRepairDispatch, ExternalRepairSaveState,
+};
 pub use server::*;

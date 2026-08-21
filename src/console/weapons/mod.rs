@@ -1492,6 +1492,14 @@ fn ai_target_selection(
             }
             None => None,
         };
+        // The operate directive's named target (issue #1162), resolved to a live
+        // UUID the same way a Destroy target is. `None` unless an active
+        // Tow/Stabilise/Escort/FieldRepair names something, keeping the
+        // `source_operate` candidate inert in ordinary combat.
+        let operate_target: Option<String> = top_operate_objective_target(Some(&*blackboards))
+            .and_then(|name| {
+                resolve_objective_target_uuid(name, runtime.as_deref(), &other_ships_q)
+            });
 
         // The advisory Sensors designation (AC2), read from the FROZEN
         // viewscreen `science_target` (#829) — never the channel-3
@@ -1587,6 +1595,20 @@ fn ai_target_selection(
         // Source: objective-destroy — the explicit named Destroy target.
         if let Some(obj) = objective_target.as_deref() {
             if let Some(c) = make_candidate(obj, "source_objective") {
+                candidates.push(c);
+            }
+        }
+        // Source: objective-operate (issue #1162) — the target an active
+        // per-verb operate directive named. Injected ONLY here, so the tractor
+        // and external-repair dispatch can reach a NON-hostile lock the ship was
+        // ordered to work. Directive-gated: `operate_target` is `None` with no
+        // such directive, so no candidate carries `source_operate` and the
+        // widened eligibility disjunct stays inert — combat auto-lock is
+        // unchanged and radar/scan auto-lock stays hostile-gated. The candidate
+        // carries its independent `hostile` verdict like any other, but the
+        // authored `source_operate` eligibility term admits it regardless.
+        if let Some(op) = operate_target.as_deref() {
+            if let Some(c) = make_candidate(op, "source_operate") {
                 candidates.push(c);
             }
         }
@@ -1875,6 +1897,42 @@ fn top_destroy_objective_target(
         }
         match &objective.directive {
             crate::messages::AiDirective::Destroy { target } => Some(target.as_str()),
+            _ => None,
+        }
+    })
+}
+
+/// The target named by the top-scored active OPERATE directive that needs the
+/// ship's one combat lock (issue #1162): `Tow`, `Stabilise`, `Escort` (the
+/// tractor verbs) and `FieldRepair` (external dispatch). This is the
+/// `objective-operate` candidate source — the DIRECTIVE-GATED way `ai_target_
+/// selection` reaches a NON-hostile lock.
+///
+/// Deliberately NOT filtered on `SystemAffinity::Weapons`: an operate directive
+/// routes to Engineering / Repair (its owning seat), never Weapons, so the
+/// affinity filter `top_destroy_objective_target` uses would drop every one. It
+/// is instead matched by directive KIND — only the lock-requiring verbs, so a
+/// `Transfer` (dock + umbilical, which use the docked partner, not the combat
+/// lock) never pulls a lock. Returns `None` when no such directive is active, so
+/// the source injects no candidate and the widened eligibility term stays inert.
+fn top_operate_objective_target(
+    blackboards: Option<&crate::server_app::ShipSystemBlackboards>,
+) -> Option<&str> {
+    let bb = blackboards?
+        .0
+        .get(&crate::system_registry::viewscreen_system_id())?;
+    let crate::messages::SystemBlackboard::Viewscreen(viewscreen) = bb else {
+        return None;
+    };
+    viewscreen.scored_objectives.iter().find_map(|objective| {
+        if objective.score <= 0.0 {
+            return None;
+        }
+        match &objective.directive {
+            crate::messages::AiDirective::Tow { target }
+            | crate::messages::AiDirective::Stabilise { target }
+            | crate::messages::AiDirective::Escort { target }
+            | crate::messages::AiDirective::FieldRepair { target } => Some(target.as_str()),
             _ => None,
         }
     })

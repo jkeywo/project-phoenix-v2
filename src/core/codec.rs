@@ -1215,6 +1215,9 @@ mod tests {
             SystemAffinity::Weapons,
             SystemAffinity::Captain,
             SystemAffinity::Comms,
+            // The issue-#1162 operate affinities.
+            SystemAffinity::Engineering,
+            SystemAffinity::Repair,
         ];
         let encoded = serde_json::to_string(&affinities).unwrap();
         let decoded: Vec<SystemAffinity> = serde_json::from_str(&encoded).unwrap();
@@ -1223,6 +1226,60 @@ mod tests {
             encoded.contains("Comms"),
             "the Comms affinity variant must serialize by name"
         );
+        assert!(
+            encoded.contains("Engineering") && encoded.contains("Repair"),
+            "the operate affinities must serialize by name"
+        );
+    }
+
+    /// `AiDirective` round-trips every variant including the issue-#1162 operate
+    /// verbs and `Dock` (#1028). `AiDirective` is replicated inside
+    /// `ScoredObjective` on the viewscreen blackboard, so a new variant that
+    /// failed the wire codec would strand every operate host that reads the pool
+    /// off a projected copy.
+    #[test]
+    fn ai_directive_operate_variants_round_trip() {
+        use crate::messages::AiDirective;
+        let directives = vec![
+            AiDirective::None,
+            AiDirective::Destroy {
+                target: "enemy".into(),
+            },
+            AiDirective::Dock {
+                target: "berth".into(),
+            },
+            AiDirective::Tow {
+                target: "hulk".into(),
+            },
+            AiDirective::Stabilise {
+                target: "depot".into(),
+            },
+            AiDirective::Escort {
+                target: "convoy".into(),
+            },
+            AiDirective::Transfer {
+                target: "tender".into(),
+            },
+            AiDirective::FieldRepair {
+                target: "ally".into(),
+            },
+        ];
+        let encoded = serde_json::to_string(&directives).unwrap();
+        let decoded: Vec<AiDirective> = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, directives);
+        for name in [
+            "Tow",
+            "Stabilise",
+            "Escort",
+            "Transfer",
+            "FieldRepair",
+            "Dock",
+        ] {
+            assert!(
+                encoded.contains(name),
+                "the {name} directive variant must serialize by its tag"
+            );
+        }
     }
 
     /// ChargeBlasterStart / ChargeBlasterCancel codec round-trips (issue #636).

@@ -7543,6 +7543,113 @@ fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) 
     );
 }
 
+/// Insert a viewscreen blackboard carrying a `Tow` operate directive (issue
+/// #1162) naming `target`, at `score`. Engineering-affinity, so it never reaches
+/// the Weapons affinity filter `top_destroy_objective_target` uses — the Tactical
+/// selector reads it ONLY through the directive-kind-matched `objective-operate`
+/// source, which is the whole point of D2.
+fn insert_operate_objective_blackboard(app: &mut App, target: &str, score: f32) {
+    use crate::messages::{
+        AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
+        SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
+    };
+    use crate::server_app::ShipSystemBlackboards;
+
+    let viewscreen = ViewscreenBlackboard {
+        scored_objectives: vec![ScoredObjective {
+            id: format!("obj-tow-{target}"),
+            score,
+            directive: AiDirective::Tow {
+                target: target.into(),
+            },
+            source: ObjectiveSource::Mission,
+            relevance: vec![SystemAffinity::Engineering],
+            snapshot: ObjectiveSnapshot {
+                id: format!("obj-tow-{target}"),
+                text: format!("Tow {target}"),
+                text_params: Default::default(),
+                mandatory: true,
+                status: ObjectiveStatus::Active,
+                targets: vec![target.into()],
+                source: ObjectiveSource::Mission,
+            },
+        }],
+        ..Default::default()
+    };
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&mut ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
+    let mut bbs = q
+        .single_mut(app.world_mut())
+        .expect("LocalShip must have ShipSystemBlackboards");
+    bbs.0.insert(
+        crate::system_registry::viewscreen_system_id(),
+        SystemBlackboard::Viewscreen(viewscreen),
+    );
+}
+
+/// D2 MANDATORY regression (issue #1162): a combat AI with NO operate directive
+/// active never locks a non-hostile it reaches only by radar/scan. The widened
+/// `source_operate` eligibility disjunct must be INERT unless an operate
+/// directive injects the candidate — so combat auto-lock is unchanged.
+#[test]
+fn ai_target_selection_refuses_a_nonhostile_derelict_with_no_operate_directive() {
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // A factionless derelict — non-hostile by construction — reached ONLY by a
+    // Sensors designation (the `sensors-designation` source). No operate
+    // directive names it, and it is not a Destroy objective, so nothing licenses
+    // a lock on it.
+    spawn_entity_target(&mut app, &derelict_uuid, 0.0, -30.0);
+    set_science_designation(&mut app, Some(derelict_uuid.clone()));
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a non-hostile derelict reached only by scan must NOT be locked with no operate \
+         directive active — the widened `source_operate` eligibility term must stay inert, or \
+         combat auto-lock has changed (issue #1162 D2 regression)"
+    );
+}
+
+/// D2 positive (issue #1162): the SAME non-hostile derelict IS locked once an
+/// active `Tow` operate directive names it — through the directive-gated
+/// `objective-operate` source and the `source_operate` eligibility disjunct, the
+/// only path by which the AI reaches a non-hostile lock.
+#[test]
+fn ai_target_selection_locks_a_nonhostile_only_via_an_operate_directive() {
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 200.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    spawn_entity_target(&mut app, &derelict_uuid, 0.0, -30.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), derelict_uuid.clone());
+    // The Tow directive names the derelict, so `ai_target_selection` injects it
+    // as the `source_operate` candidate.
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(derelict_uuid.as_str()),
+        "an active Tow directive naming a non-hostile must lock it through the directive-gated \
+         `source_operate` eligibility disjunct (issue #1162 D2)"
+    );
+}
+
 #[test]
 fn tactical_ai_selects_named_destroy_objective_target() {
     let mut app = test_app();

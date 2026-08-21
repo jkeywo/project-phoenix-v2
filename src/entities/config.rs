@@ -62,6 +62,13 @@ pub struct DoctrineObjective {
     /// Named target for `Hail` directives.
     #[serde(default)]
     pub directive_hail_target: Option<String>,
+    /// Named target for the issue-#1162 operate verbs — `Tow`, `Stabilise`,
+    /// `Escort`, `Transfer` and `FieldRepair`. One shared field for all five,
+    /// the way `Reach`/`Retreat` share `directive_anchor`: each verb names a
+    /// target the owning seat operates on, resolved to a live UUID the same way
+    /// a `Destroy`/`Dock` target is.
+    #[serde(default)]
+    pub directive_operate_target: Option<String>,
     /// Base utility score before modifiers.
     #[serde(default)]
     pub base_priority: f32,
@@ -106,6 +113,10 @@ const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
     ("directive_anchor", "Reach / Retreat"),
     ("directive_hail_target", "Hail"),
     ("directive_dock_target", "Dock"),
+    (
+        "directive_operate_target",
+        "Tow / Stabilise / Escort / Transfer / FieldRepair",
+    ),
 ];
 
 /// Reject a doctrine entry that authors a `directive_*` field belonging to a
@@ -151,10 +162,17 @@ pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<()
             // anchor: a Dock with nothing to dock at resolves to no destination
             // and the hull silently never goes anywhere.
             Some("Dock") => (&["directive_dock_target"], &["directive_dock_target"]),
+            // The issue-#1162 operate verbs. Each requires its shared
+            // `directive_operate_target` for the same reason `Dock` requires its
+            // target: an operate directive naming nothing resolves to no target
+            // and the seat silently never operates.
+            Some("Tow") | Some("Stabilise") | Some("Escort") | Some("Transfer")
+            | Some("FieldRepair") => (&["directive_operate_target"], &["directive_operate_target"]),
             Some(other) => {
                 return Err(format!(
                     "doctrine '{}': unknown directive_kind '{other}'; \
-                     valid: Patrol, Destroy, Reach, Retreat, Hail, Dock",
+                     valid: Patrol, Destroy, Reach, Retreat, Hail, Dock, \
+                     Tow, Stabilise, Escort, Transfer, FieldRepair",
                     d.id
                 ))
             }
@@ -176,6 +194,10 @@ pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<()
                 .as_deref()
                 .is_some_and(|t| !t.is_empty())
                 .then_some("directive_dock_target"),
+            d.directive_operate_target
+                .as_deref()
+                .is_some_and(|t| !t.is_empty())
+                .then_some("directive_operate_target"),
         ]
         .into_iter()
         .flatten()
@@ -2705,6 +2727,15 @@ pub const SENSORS_SELECTOR_SOURCES: &[&str] = &[
 pub const SELECTOR_SOURCE_SENSORS_DESIGNATION: &str = "sensors-designation";
 /// Candidate source: whoever last attacked this ship (`LastShipAttacker`).
 pub const SELECTOR_SOURCE_LAST_ATTACKER: &str = "last-attacker";
+/// Candidate source: the target named by an active per-verb operate directive
+/// (`Tow`/`Stabilise`/`Escort`/`FieldRepair`), resolved from the scored
+/// objective pool (issue #1162). Injected by `ai_target_selection` and tagged
+/// `source_operate`; it is the DIRECTIVE-GATED way the AI reaches a non-hostile
+/// lock. Inert when no operate directive is active — no candidate is added — so
+/// combat auto-lock is unchanged and radar/scan auto-lock stays hostile-gated. A
+/// hull opts into it by adding `... or candidate_fact(source_operate) > 0` to
+/// its `[weapons_console.selector]` eligibility (fleet_baseline authors it).
+pub const SELECTOR_SOURCE_OBJECTIVE_OPERATE: &str = "objective-operate";
 
 /// The registered candidate sources the Tactical target selector may union
 /// (issue #777). `combat-lock` is intentionally absent: it is Tactical's own
@@ -2716,6 +2747,7 @@ pub const TACTICAL_SELECTOR_SOURCES: &[&str] = &[
     SELECTOR_SOURCE_OBJECTIVE_DESTROY,
     SELECTOR_SOURCE_LAST_ATTACKER,
     SELECTOR_SOURCE_RADAR_CONTACTS,
+    SELECTOR_SOURCE_OBJECTIVE_OPERATE,
 ];
 
 /// Candidate source: positive, Navigation-relevant (Helm-affinity) objective
@@ -14033,8 +14065,9 @@ weight = 1.0
         let cfg = crate::entities::authored_ai_pins::shipped_selector_toml("tactical");
         assert!(validate_fine_system_ai_selector(&cfg, TACTICAL_SELECTOR_SOURCES).is_ok());
         let resolved = cfg.to_selector().expect("default selector resolves");
-        // objective, sensors-designation, retained, last-attacker, radar.
-        assert_eq!(resolved.score.len(), 5);
+        // objective, sensors-designation, retained, last-attacker, radar, and
+        // the issue-#1162 operate order.
+        assert_eq!(resolved.score.len(), 6);
     }
 
     /// The precedence invariant that prevents the #777 additive-stacking bug:

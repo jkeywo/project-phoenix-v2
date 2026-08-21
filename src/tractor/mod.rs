@@ -40,6 +40,6 @@ pub use held_response::{
 };
 pub use server::{
     apply_tow_load_penalty, arrest_held_declines, handle_tractor_commands, move_coupled_target,
-    publish_tractor_blackboard, tick_tractor, tractor_blackboard_key, HeldResponseSection,
-    TractorBeam, TractorPlugin, TractorSaveState,
+    operate_tractor_ai, publish_tractor_blackboard, tick_tractor, tractor_blackboard_key,
+    HeldResponseSection, TractorBeam, TractorPlugin, TractorSaveState,
 };

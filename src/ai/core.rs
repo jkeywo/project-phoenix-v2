@@ -717,6 +717,23 @@ pub fn parse_doctrine_directive(
         Some("Dock") => crate::messages::AiDirective::Dock {
             target: d.directive_dock_target.clone().unwrap_or_default(),
         },
+        // The issue-#1162 operate verbs, all reading the shared
+        // `directive_operate_target`.
+        Some("Tow") => crate::messages::AiDirective::Tow {
+            target: d.directive_operate_target.clone().unwrap_or_default(),
+        },
+        Some("Stabilise") => crate::messages::AiDirective::Stabilise {
+            target: d.directive_operate_target.clone().unwrap_or_default(),
+        },
+        Some("Escort") => crate::messages::AiDirective::Escort {
+            target: d.directive_operate_target.clone().unwrap_or_default(),
+        },
+        Some("Transfer") => crate::messages::AiDirective::Transfer {
+            target: d.directive_operate_target.clone().unwrap_or_default(),
+        },
+        Some("FieldRepair") => crate::messages::AiDirective::FieldRepair {
+            target: d.directive_operate_target.clone().unwrap_or_default(),
+        },
         _ => crate::messages::AiDirective::None,
     }
 }

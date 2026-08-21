@@ -357,6 +357,20 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     ("EntityMass", "derived"),
     ("HeldResponseSection", "derived"),
     ("DockMarkers", "derived"),
+    // Derived — the backfill operate hosts' "I am the one driving this system"
+    // markers (issue #1162). Each is re-derived every AI tick from the still-
+    // snapshotted operate directive: the host claims the marker while it holds a
+    // system engaged under a directive and drops it on release, and on a resume
+    // it re-adopts a system it finds engaged while the directive holds. They are
+    // pure functions of the (folded) directive plus the (folded) system state,
+    // never a second copy of either, so they are deliberately not folded — a
+    // lost marker self-heals within one AI tick. See the component docs in
+    // `src/tractor/server.rs`, `src/dock/server.rs`, `src/umbilical/server.rs`
+    // and `src/console/repair/external_server.rs`.
+    ("TractorAiEngaged", "derived"),
+    ("DockAiEngaged", "derived"),
+    ("UmbilicalAiRunning", "derived"),
+    ("ExternalRepairAiDispatched", "derived"),
 
     // Cleared-at-fold (the one new classification term this issue adds,
     // deterministic-simulation.yaml's `digest-exclusion-classes`):

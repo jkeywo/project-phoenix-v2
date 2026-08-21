@@ -1153,14 +1153,21 @@ pub struct Trigger {
 /// messages.
 ///
 /// The mission-side twin of `DIRECTIVE_FIELD_OWNERS` in
-/// `src/entities/config.rs`. One shape difference: a mission objective names a
-/// `Destroy`/`Hail` target with the shared `target` field, where a doctrine
-/// entry has a `directive_target` and a `directive_hail_target` of its own.
+/// `src/entities/config.rs`. One shape difference: a mission objective names its
+/// target-naming directives (`Destroy`/`Hail`/`Dock` and the issue-#1162 operate
+/// verbs `Tow`/`Stabilise`/`Escort`/`Transfer`/`FieldRepair`) with the ONE
+/// shared `target` field, where a doctrine entry has a `directive_target`, a
+/// `directive_hail_target`, a `directive_dock_target` and a
+/// `directive_operate_target` of its own. Both tables carry every directive kind
+/// — `Dock` used to be here on the doctrine side only, which this fixes.
 const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
     ("directive_anchors", "Patrol"),
     ("directive_loop", "Patrol"),
     ("directive_anchor", "Reach / Retreat"),
-    ("target", "Destroy / Hail"),
+    (
+        "target",
+        "Destroy / Hail / Dock / Tow / Stabilise / Escort / Transfer / FieldRepair",
+    ),
 ];
 
 /// Build the [`AiDirective`] for an `add_objective` action, rejecting a
@@ -1190,11 +1197,16 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
     let allowed: &[&str] = match kind {
         None | Some("None") => &[],
         Some("Patrol") => &["directive_anchors", "directive_loop"],
-        Some("Destroy") | Some("Hail") => &["target"],
+        // Every target-naming directive reads the ONE shared `target` field on
+        // the mission side, including `Dock` (issue #1028) and the issue-#1162
+        // operate verbs.
+        Some("Destroy") | Some("Hail") | Some("Dock") | Some("Tow") | Some("Stabilise")
+        | Some("Escort") | Some("Transfer") | Some("FieldRepair") => &["target"],
         Some("Reach") | Some("Retreat") => &["directive_anchor"],
         Some(other) => {
             return Err(format!(
-                "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail",
+                "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail, \
+                 Dock, Tow, Stabilise, Escort, Transfer, FieldRepair",
                 other
             ))
         }
@@ -1285,10 +1297,51 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
                 .clone()
                 .ok_or_else(|| "Directive 'Hail' requires a 'target' field".to_string())?,
         }),
+        // Dock (issue #1028) named the mission side's `target`, but the mission
+        // parser never carried it — the "out of step over Dock" the #1162
+        // decision fixes.
+        Some("Dock") => Ok(AiDirective::Dock {
+            target: raw
+                .target
+                .clone()
+                .ok_or_else(|| "Directive 'Dock' requires a 'target' field".to_string())?,
+        }),
+        // The issue-#1162 operate verbs, each naming its `target` the same way.
+        Some("Tow") => Ok(AiDirective::Tow {
+            target: raw
+                .target
+                .clone()
+                .ok_or_else(|| "Directive 'Tow' requires a 'target' field".to_string())?,
+        }),
+        Some("Stabilise") => Ok(AiDirective::Stabilise {
+            target: raw
+                .target
+                .clone()
+                .ok_or_else(|| "Directive 'Stabilise' requires a 'target' field".to_string())?,
+        }),
+        Some("Escort") => Ok(AiDirective::Escort {
+            target: raw
+                .target
+                .clone()
+                .ok_or_else(|| "Directive 'Escort' requires a 'target' field".to_string())?,
+        }),
+        Some("Transfer") => Ok(AiDirective::Transfer {
+            target: raw
+                .target
+                .clone()
+                .ok_or_else(|| "Directive 'Transfer' requires a 'target' field".to_string())?,
+        }),
+        Some("FieldRepair") => Ok(AiDirective::FieldRepair {
+            target: raw
+                .target
+                .clone()
+                .ok_or_else(|| "Directive 'FieldRepair' requires a 'target' field".to_string())?,
+        }),
         // Unreachable: the `allowed` match above already returned for an
         // unknown kind.
         Some(other) => Err(format!(
-            "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail",
+            "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail, \
+             Dock, Tow, Stabilise, Escort, Transfer, FieldRepair",
             other
         )),
     }

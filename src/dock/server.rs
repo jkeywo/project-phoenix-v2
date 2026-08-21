@@ -24,16 +24,18 @@
 
 use bevy::prelude::*;
 
+use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::damage::DamageTier;
 use crate::dock::mating::{nearest_viable_pair, DockConfig, DockMarker, DockRefusal, Pose};
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
 use crate::messages::{
-    DockBlackboard, PowerGroupId, SystemBlackboard, SystemControlPayload, SystemId,
+    DockBlackboard, PowerGroupId, SystemAffinity, SystemBlackboard, SystemControlPayload, SystemId,
 };
 use crate::ship::power::{power_level_for, ShipPowerSystem};
 use crate::ship::state::ShipPhysics;
 use crate::system_registry::{dock_system_id, DOCK_SYSTEM_ID};
+use crate::world::server::WorldContentRuntime;
 
 /// One hull's dock markers, resolved into the hull's OWN frame at spawn (issue
 /// #1159).
@@ -185,10 +187,19 @@ impl Plugin for DockPlugin {
         // The dock `[[system]]` is an admitted-command consumer: `handle_dock_
         // commands` reads `Dock` / `Undock` for it, so admission fans those
         // commands into every ship's `AdmittedCommands` each tick.
+        // Gated AI decider (issue #1162); `register_ai_cadence` is idempotent.
+        crate::ai::cadence::register_ai_cadence(app);
         app.register_admitted_consumer(ConsumerMatcher::exact(DOCK_SYSTEM_ID));
         app.add_systems(
             FixedUpdate,
             (
+                // Backfill Helm dock AI (issue #1162): on the shared AI cadence
+                // (rule 7), emitting Dock / Undock BEFORE `handle_dock_commands`
+                // consumes the tick.
+                operate_dock_ai
+                    .in_set(crate::sim_sets::SimSet::Input)
+                    .run_if(crate::ai::cadence::ai_tick_ready)
+                    .before(handle_dock_commands),
                 handle_dock_commands.in_set(crate::sim_sets::SimSet::Input),
                 // Decide the dock and fly the own ship onto its mate, after the
                 // tractor rig so a hull that is both a docking ship and a tractor
@@ -254,6 +265,112 @@ pub fn handle_dock_commands(
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// Marks a ship the backfill dock host has DOCKED to serve a `Transfer`
+/// directive (issue #1162). Inserted when the host engages the dock, removed when
+/// it undocks; the host undocks only while it is present, so it never undocks a
+/// dock a console engaged on the same AI-operated system. Not folded/snapshotted:
+/// re-adopted from the still-present directive on resume.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct DockAiEngaged;
+
+/// Resolve a directive's named target to the UUID a dock's `available_target`
+/// carries (issue #1162): a world entity NAME through the runtime map, or the
+/// value itself when it is already a UUID (or the runtime is absent).
+fn resolve_dock_target(name: &str, runtime: Option<&WorldContentRuntime>) -> String {
+    runtime
+        .and_then(|rt| rt.name_to_uuid.get(name).cloned())
+        .unwrap_or_else(|| name.to_string())
+}
+
+/// Backfill Helm dock AI (issue #1162).
+///
+/// On an active `Transfer` directive (Helm affinity) naming a target the dock
+/// reports available in range, engage the dock; with no such directive active,
+/// undock. The concrete command is exactly the `Dock`/`Undock` a human helmsman
+/// emits, sent through the SAME `emit_ai_command` seam so `handle_dock_commands`
+/// never learns who spoke (AGENTS.md rule 6). "When the procedure requires it":
+/// the dock waits until `available_target` names the ordered hull (published by
+/// `tick_dock` once it is in range), exactly as the contextual control only
+/// appears for a human then. Decides ONLY on the shared AI cadence (rule 7).
+#[allow(clippy::type_complexity)]
+pub fn operate_dock_ai(
+    mut commands: Commands,
+    sessions: Res<crate::lobby::Sessions>,
+    runtime: Option<Res<WorldContentRuntime>>,
+    mut ships: Query<(
+        Entity,
+        Option<&EntityUuid>,
+        &crate::ship_plugin::ShipSystemControlSources,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        &DockControl,
+        &crate::server_app::ShipSystemBlackboards,
+        Has<DockAiEngaged>,
+        &mut crate::messages::AdmittedCommands,
+    )>,
+) {
+    for (entity, uuid, sources, config, dock, blackboards, host_engaged, mut admitted) in
+        ships.iter_mut()
+    {
+        if !sources.0.policy_for(&dock_system_id()).operate_ai {
+            continue;
+        }
+        let directive_target: Option<String> = match blackboards
+            .0
+            .get(&crate::system_registry::viewscreen_system_id())
+        {
+            Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
+                &vbb.scored_objectives,
+                SystemAffinity::Helm,
+                |d| crate::objectives::transfer_directive_target(d).is_some(),
+            )
+            .and_then(crate::objectives::transfer_directive_target)
+            .map(str::to_string),
+            _ => None,
+        };
+
+        let payload = match directive_target {
+            // A transfer order is active: dock once the ordered hull is available
+            // in range. Idempotent — a dock already engaged emits nothing. Claim
+            // the dock as host-driven whenever it is engaged under this order.
+            Some(name) => {
+                let resolved = resolve_dock_target(&name, runtime.as_deref());
+                let available_is_target = dock
+                    .available_target
+                    .as_deref()
+                    .is_some_and(|a| a == resolved);
+                let emit =
+                    (available_is_target && !dock.engaged).then_some(SystemControlPayload::Dock);
+                if (emit.is_some() || dock.engaged || dock.docked) && !host_engaged {
+                    commands.entity(entity).insert(DockAiEngaged);
+                }
+                emit
+            }
+            // No transfer order: undock a dock THIS HOST engaged — never one a
+            // console set on the same AI-operated system (no marker → leave it).
+            None => {
+                if (dock.engaged || dock.docked) && host_engaged {
+                    commands.entity(entity).remove::<DockAiEngaged>();
+                    Some(SystemControlPayload::Undock)
+                } else {
+                    None
+                }
+            }
+        };
+
+        if let Some(payload) = payload {
+            emit_ai_command(
+                uuid,
+                dock_system_id(),
+                payload,
+                sources,
+                &sessions,
+                config,
+                &mut admitted,
+            );
         }
     }
 }

@@ -1681,7 +1681,7 @@ condition_on_complete = 20.0
     /// **AC1.** A hull that authors `[operations]` spawns able to perform them;
     /// one that does not spawns exactly as it did before the section existed.
     ///
-    /// This is the TEMPLATE authoring path — the half `probe_stabilise.toml`
+    /// This is the TEMPLATE authoring path — the half `probe_stabilise_resume.toml`
     /// cannot cover, because a world entity's `overrides` block is the other
     /// one. Both directions, because a gate that only ever reads true would pass
     /// the first half alone, and the second half is the whole "omitting it
@@ -1734,7 +1734,7 @@ condition_on_complete = 20.0
     }
 
     /// **AC1.** The world's `[[entity]].overrides` path reaches the same table
-    /// — the path `probe_stabilise.toml` actually authors through.
+    /// — the path `probe_stabilise_resume.toml` actually authors through.
     #[test]
     fn a_world_entity_override_can_grant_a_hull_an_operation_capability() {
         let overrides: toml::Value = toml::from_str(

@@ -1,0 +1,132 @@
+# Probe world for issue #1033 — scripted entity REMOVAL, end to end.
+#
+# This is the minimal, operations-free successor to the retired `probe_destroy`
+# world (#1164, S11a): the per-system probes now cover the operation verbs, so
+# this world keeps ONLY the scripted-removal mechanic #1033 owns and drives it
+# with world-scripting effects alone — no `[operations]` capability anywhere.
+#
+# A scripted destruction is INDISTINGUISHABLE from a combat kill downstream: it
+# chains the same `WorldEvent::Destroyed`, so the same `on_destroyed` and
+# `on_all_destroyed` triggers fire off it, and it leaves the same nothing behind
+# in a snapshot.
+#
+# The authored timeline, in mission seconds:
+#
+#   t=0    `on_start` spawns TWO storm bands into the `storm_band` group and
+#          posts both objectives. The bands are spawned rather than authored as
+#          `[[entity]]` blocks because group membership only registers through
+#          `SpawnEntity` dispatch — an `on_all_destroyed` group has no other way
+#          to learn who is in it.
+#   t=5    the `skyhook_collapse` deadline fires and the script destroys the
+#          skyhook. `on_skyhook_lost` (a chained `on_destroyed`) FAILS its
+#          objective off the same Destroyed event, in the same tick.
+#   t=6    `on_sweep` schedules the first band's retirement two seconds out,
+#          through `ctx.schedule.in_seconds(2).destroy_entity(…)`. The DEFERRED
+#          form, deliberately: it is the same `TriggerAction` on the same queue.
+#   t=8    band A is retired by that deferred call. The group must stay SILENT —
+#          one of two is not all of them.
+#   t=10   `on_sweep_last` retires band B immediately. NOW `on_all_destroyed`
+#          fires and completes the band objective.
+#
+# Every handler writes a counter flag, so the headless test reads fire ORDER and
+# fire COUNT out of the flag store rather than out of a log line.
+
+[global]
+seed = 1033
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The player ship, present because a world needs one. It does no work here.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The structure that collapses on a named deadline. A plain depot; nothing
+# operates on it, it is simply removed by script.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_destroy.entity.skyhook.name"
+transform = { position = [400.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 30.0 } }
+
+# The collapse, as a named thing in the world rather than an anonymous timer —
+# the crew can watch it coming.
+[[deadline]]
+id = "skyhook_collapse"
+label = "world.probe_destroy.deadline.skyhook_collapse.label"
+due_secs = 5
+visible = true
+
+[script]
+setup = """
+on_timer(0, "on_start");
+on_timer(6, "on_sweep");
+on_timer(10, "on_sweep_last");
+
+on_deadline("skyhook_collapse", "on_collapse");
+
+// The two chained triggers. Neither is armed by anything this world shoots at;
+// only a scripted destruction can make either fire.
+on_destroyed("world.probe_destroy.entity.skyhook.name", "on_skyhook_lost");
+on_all_destroyed("storm_band", "on_band_cleared");
+
+fn on_start(ctx) {
+    // Two bands of the same storm, spawned into one group so retiring the
+    // storm means retiring all of it.
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/region_storm_band.toml",
+        name: "storm_band_a",
+        position: [1200, 0, 0],
+        groups: ["storm_band"],
+    });
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/region_storm_band.toml",
+        name: "storm_band_b",
+        position: [1200, 0, 900],
+        groups: ["storm_band"],
+    });
+
+    ctx.effects.add_objective(#{
+        id: "obj-hold-skyhook",
+        text: "world.probe_destroy.objective.hold_skyhook.text",
+        mandatory: true,
+        targets: ["world.probe_destroy.entity.skyhook.name"],
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-clear-band",
+        text: "world.probe_destroy.objective.clear_band.text",
+    });
+}
+
+// The collapse itself: one call, and everything below follows from it.
+fn on_collapse(ctx) {
+    ctx.effects.destroy_entity("world.probe_destroy.entity.skyhook.name");
+    ctx.flags.increment("collapse_fired", 1);
+}
+
+// Chained off the collapse's own Destroyed event, in the same tick.
+fn on_skyhook_lost(ctx) {
+    ctx.effects.fail_objective("obj-hold-skyhook");
+    ctx.flags.increment("skyhook_lost", 1);
+}
+
+// The DEFERRED destroy: same action, same queue, two seconds later.
+fn on_sweep(ctx) {
+    ctx.schedule.in_seconds(2).destroy_entity("storm_band_a");
+    ctx.flags.increment("sweep_scheduled", 1);
+}
+
+fn on_sweep_last(ctx) {
+    ctx.effects.destroy_entity("storm_band_b");
+    ctx.flags.increment("sweep_last", 1);
+}
+
+fn on_band_cleared(ctx) {
+    ctx.effects.complete_objective("obj-clear-band");
+    ctx.flags.increment("band_cleared", 1);
+}
+"""

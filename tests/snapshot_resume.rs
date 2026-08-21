@@ -2202,7 +2202,7 @@ fn the_resumed_world_keeps_a_structures_condition_and_its_operational_flags() {
 // ── Issue #1026: an in-flight operation survives a resume ───────────────────
 
 /// The stabilise probe: one tender, one degraded depot, one scripted operation.
-const STABILISE: &str = "assets/worlds/probe_stabilise.toml";
+const STABILISE: &str = "assets/worlds/probe_stabilise_resume.toml";
 
 /// Frames to run before the stabilise capture.
 ///
@@ -2339,7 +2339,7 @@ fn a_world_with_no_operations_writes_no_operation_state() {
 // ── Issue #1027: a slowed hold and a moved capacity survive a resume ───────
 
 /// The operations probe: five operators, four verbs, one storm band.
-const OPERATIONS: &str = "assets/worlds/probe_operations.toml";
+const OPERATIONS: &str = "assets/worlds/probe_operations_resume.toml";
 
 /// Frames to run before the operations capture.
 ///
@@ -2825,7 +2825,7 @@ fn a_save_written_before_commitment_state_is_refused_on_format() {
 // ── Issue #1035: a settled strike stays settled across a resume ──────────────
 
 /// The strike probe: two sides, two refusals, and a settlement at t=10 s.
-const STRIKE: &str = "assets/worlds/probe_strike.toml";
+const STRIKE: &str = "assets/worlds/probe_strike_min.toml";
 
 /// Frames to run before the strike capture.
 ///
@@ -3047,7 +3047,7 @@ fn a_save_written_before_workforce_state_is_refused_on_format() {
 // ── Issue #1033: an entity destroyed before the save stays destroyed ─────────
 
 /// The destroy probe: a skyhook collapsed by script, two storm bands retired.
-const DESTROY: &str = "assets/worlds/probe_destroy.toml";
+const DESTROY: &str = "assets/worlds/probe_destroy_chain.toml";
 
 /// Frames to run before the destroy capture.
 ///

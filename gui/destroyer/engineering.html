@@ -72,6 +72,19 @@
           <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
           <ph-station-damage id="core-damage" label="Core" data-i18n-attr="label:console.repair.core"></ph-station-damage>
           <ph-repair-teams id="repair-teams"></ph-repair-teams>
+          <!-- External repair-team dispatch (issue #1161): shown only on a hull
+               that authors [repair.external_dispatch]. On this hull the repair
+               system is engineering-owned, so the dispatch control lives on the
+               Engineering console rather than a dedicated Repair one. Reuses the
+               tractor panel's styling. -->
+          <div class="tractor-panel" id="dispatch-panel" hidden>
+            <h2 data-i18n="console.repair.dispatch" style="margin-top:10px">Field Repair</h2>
+            <div class="tractor-row">
+              <button id="dispatch-btn" class="tractor-btn" data-i18n="console.repair.dispatch.send">Dispatch</button>
+              <span id="dispatch-status" class="tractor-status">—</span>
+            </div>
+            <div id="dispatch-refusal" class="tractor-refusal" hidden></div>
+          </div>
           <!-- Tractor beam (issue #1156): shown only on a hull that authors a
                tractor system, so a hull without one is unchanged. -->
           <div class="tractor-panel" id="tractor-panel" hidden>
@@ -126,6 +139,10 @@
     // #1160). Human and AI issue the SAME StartTransfer/StopTransfer through the
     // one admission path — this control just picks which.
     var umbilicalRunning = false;
+    // External-dispatch working state, tracked so the one button toggles
+    // dispatch/recall (issue #1161). Human and AI issue the SAME
+    // DispatchExternalRepair/RecallExternalRepair through the one admission path.
+    var dispatchWorking = false;
     var consoleHandle = initConsole({
       name: 'engineering',
       // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
@@ -215,6 +232,35 @@
           if (um.refusal) { uRefusal.hidden = false; uRefusal.textContent = t(um.refusal); }
           else { uRefusal.hidden = true; uRefusal.textContent = ''; }
         }
+
+        // External repair-team dispatch (issue #1161). The panel shows only on a
+        // hull that authored [repair.external_dispatch] — a hull without one
+        // carries no external_dispatch view on its repair system, so the panel
+        // stays hidden and the console is unchanged. On this hull the repair
+        // system is engineering-owned, so the dispatch view rides `r` (the
+        // repair system) resolved above, the same payload the battleship's
+        // dedicated Repair console reads.
+        var dPanel = document.getElementById('dispatch-panel');
+        var ed = r.external_dispatch || null;
+        if (!ed) { dPanel.hidden = true; }
+        else {
+          dPanel.hidden = false;
+          dispatchWorking = ed.target != null;
+          var dBtn = document.getElementById('dispatch-btn');
+          dBtn.classList.toggle('engaged', dispatchWorking);
+          dBtn.textContent = t(dispatchWorking ? 'console.repair.dispatch.recall' : 'console.repair.dispatch.send');
+          var dStatus = document.getElementById('dispatch-status');
+          if (dispatchWorking) {
+            dStatus.textContent = t('console.repair.dispatch.working')
+              + (ed.target_name ? ' · ' + t(ed.target_name) : '');
+          } else {
+            dStatus.textContent = t('console.repair.dispatch.idle')
+              + ' · ' + t('console.repair.dispatch.range') + ' ' + Math.round(ed.range || 0);
+          }
+          var dRefusal = document.getElementById('dispatch-refusal');
+          if (ed.refusal) { dRefusal.hidden = false; dRefusal.textContent = t(ed.refusal); }
+          else { dRefusal.hidden = true; dRefusal.textContent = ''; }
+        }
       }
     });
 
@@ -228,6 +274,12 @@
     // sends the same admitted command an umbilical AI would (issue #1160).
     document.getElementById('umbilical-btn').addEventListener('click', function() {
       consoleHandle.sendAction(umbilicalRunning ? 'stop_transfer' : 'start_transfer');
+    });
+
+    // The one dispatch button toggles dispatch/recall through the action map,
+    // which sends the same admitted command a repair AI would (issue #1161).
+    document.getElementById('dispatch-btn').addEventListener('click', function() {
+      consoleHandle.sendAction(dispatchWorking ? 'recall_external_repair' : 'dispatch_external_repair');
     });
   </script>
 </body>

@@ -1,0 +1,156 @@
+# Probe world for issue #1037 — a radiation storm as authored regions, end to
+# end.
+#
+# This is the minimal, operations-free successor to the retired `probe_storm`
+# world (#1164, S11a). The retired world proved two things: that a storm band
+# SLOWS a tow (an operation consequence the per-system probes now own) and that a
+# band is survivable to CROSS and fatal to LIVE IN (radiation DAMAGE, which is
+# not an operation at all). Only the second survives here — but the tug/hulk
+# pair that sat inside the tow band is KEPT as idle hulls rather than deleted,
+# because `regions::server::apply_damage_zone_damage` (#1052) sorts every victim
+# inside a damage zone by world id and walks them in one shared draw sequence:
+# removing a victim would shift the draws the couriers receive and move the exact
+# tick the loiterer dies and the hull fraction the crosser comes out on. So the
+# only thing this file drops from the retired world is the `[operations]` tow
+# capability and the two `tow` effects — the entity layout is untouched.
+#
+# The storm is not a system. It is `region_radiation_band.toml` spawned on a
+# named deadline (#1024), doing what its composed effects do, and retired with
+# `destroy_entity` (#1033).
+#
+#   loiterer      an Alliance Courier that never leaves the band    -> DESTROYED
+#   crosser       the SAME hull, moved out at the authored crossing
+#                 time by the test                                  -> survives
+#   bystander     the same hull again, 3 km from anything           -> untouched
+#
+# ── The authored timeline, in mission seconds ────────────────────────────────
+#
+#   t=2    the `storm_front` deadline fires and spawns the TOW band over the idle
+#          tug/hulk pair, into the `storm_bands` group, retiring 18 seconds out.
+#   t=3    the `storm_dwell` deadline fires and spawns the DWELL band over the
+#          damage pair, into the same group, retiring 97 seconds out.
+#   t~89   the loiterer's 200 hull points are gone at the band's effective two
+#          and a half points a second, and it is destroyed. The crosser, moved
+#          out by the test at the authored crossing time, is not.
+#   t=100  the dwell band is retired. NOW `on_all_destroyed("storm_bands")` fires:
+#          the corridor is clear, no region entity is left behind.
+
+[global]
+seed = 1037
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [6000.0, 0.0, 6000.0]
+
+# The player ship. Present because a world needs one; parked far from any band.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [6000.0, 0.0, 6000.0] }
+spawn_on = "game_start"
+
+# ── The idle pair inside the tow band ────────────────────────────────────────
+#
+# No longer towing anything: these two are kept solely so the damage-zone victim
+# set the couriers share a draw sequence with is byte-identical to the retired
+# world's. `tug_storm` sits at the tow band's centre; `hulk_storm` beside it.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_storm.entity.tug_storm.name"
+transform = { position = [0.0, 0.0, 0.0] }
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.probe_storm.entity.hulk_storm.name"
+transform = { position = [70.0, 0.0, 0.0] }
+overrides = { hull = { hull_integrity = 900.0 }, infrastructure = { condition = 30.0, hull_damage_share = 0.0, threshold = [{ flag = "probe_storm_hulk_recovered", fails_below = 0.5 }] } }
+
+# ── The idle pair in clear space ─────────────────────────────────────────────
+#
+# Three kilometres from any band, so never a damage-zone victim; kept only to
+# leave the retired world's spawn order and world-id assignment undisturbed.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_storm.entity.tug_clear.name"
+transform = { position = [0.0, 0.0, 3000.0] }
+
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.probe_storm.entity.hulk_clear.name"
+transform = { position = [70.0, 0.0, 3000.0] }
+overrides = { hull = { hull_integrity = 900.0 }, infrastructure = { condition = 30.0, hull_damage_share = 0.0, threshold = [{ flag = "probe_clear_hulk_recovered", fails_below = 0.5 }] } }
+
+# ── THE DAMAGE PAIR, and the bystander that makes it mean something ──────────
+#
+# Three Alliance Couriers: 200 hull points each. Two start 150 units either side
+# of the dwell band's centre — inside; the bystander is three kilometres clear.
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "world.probe_storm.entity.loiterer.name"
+transform = { position = [-150.0, 0.0, -3000.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "world.probe_storm.entity.crosser.name"
+transform = { position = [150.0, 0.0, -3000.0] }
+
+[[entity]]
+template_path = "assets/entities/alliance_courier.toml"
+name = "world.probe_storm.entity.bystander.name"
+transform = { position = [0.0, 0.0, -6000.0] }
+
+# ── The sweep's clock ────────────────────────────────────────────────────────
+[[deadline]]
+id = "storm_front"
+label = "world.probe_storm.deadline.storm_front.label"
+due_secs = 2
+visible = true
+
+[[deadline]]
+id = "storm_dwell"
+label = "world.probe_storm.deadline.storm_dwell.label"
+due_secs = 3
+visible = true
+
+[script]
+setup = """
+on_deadline("storm_front", "on_storm_front");
+on_deadline("storm_dwell", "on_storm_dwell");
+
+// Fires only when the LAST band goes. One of two is not the whole storm.
+on_all_destroyed("storm_bands", "on_sweep_complete");
+
+fn on_storm_front(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/region_radiation_band.toml",
+        name: "storm_band_tow",
+        position: [0, 0, 0],
+        groups: ["storm_bands"],
+    });
+    // The band retires itself. A band's DWELL is a property of the band, and a
+    // sweep is bands that each carry their own.
+    ctx.schedule.in_seconds(18).destroy_entity("storm_band_tow");
+
+    ctx.effects.add_objective(#{
+        id: "obj-sweep-clear",
+        text: "world.probe_storm.objective.sweep_clear.text",
+    });
+    ctx.flags.increment("front_arrived", 1);
+}
+
+fn on_storm_dwell(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/region_radiation_band.toml",
+        name: "storm_band_dwell",
+        position: [0, 0, -3000],
+        groups: ["storm_bands"],
+    });
+    ctx.schedule.in_seconds(97).destroy_entity("storm_band_dwell");
+    ctx.flags.increment("dwell_arrived", 1);
+}
+
+fn on_sweep_complete(ctx) {
+    ctx.effects.complete_objective("obj-sweep-clear");
+    ctx.flags.increment("sweep_complete", 1);
+}
+"""

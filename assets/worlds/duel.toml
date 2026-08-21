@@ -17,7 +17,12 @@
 #   target/debug/phoenix-headless --world assets/worlds/duel.toml \
 #     --seed 42 --ticks 900 --record target/duel.ron --digest-every 0
 #
-# CURRENT VALUE: 10785935710004737498 (0x95af5761c50875da), moved from
+# CURRENT VALUE: 14650071985412286067 (0xcb4f82d9f066a673), moved from
+# 10785935710004737498 by issue #1164's destroyer coupling systems: the default
+# roster fields alliance destroyers on side B, and giving the destroyer its
+# tractor/umbilical/dock system-hull entries added three entries to each
+# destroyer's damage pool, which moves the per-hull `RegionDamage`/collision
+# draw. 10785935710004737498 (0x95af5761c50875da) was itself moved from
 # 95852357729946676 by the issue #1053 over-cap bleed. The paragraphs below are
 # the history, oldest first; the first number in them is NOT the one to A/B
 # against.

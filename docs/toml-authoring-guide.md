@@ -837,8 +837,9 @@ condition reads the state with the vocabulary it already has
 `on_flag_cleared("workforce.skyway_workers.on_strike", "…")` trigger chains off
 a settlement.
 
-See `assets/worlds/probe_strike.toml` for both bites, both controls, and the
-settlement, in one world.
+See `assets/worlds/probe_strike_min.toml` for the register and its settlement;
+the strike's operation-side bites (a refused transfer, a slowed repair) moved onto
+the per-system slices with the rest of the operations content (#1164).
 
 ### 1.13 Knowing whether the crew went and looked
 
@@ -1182,9 +1183,11 @@ Starting one: `ctx.effects.stabilise(ship, target)` — or `tow`, `escort`,
 `AbortOperation` console command at the `captain` system. Progress reaches the
 crew on the operations blackboard, rendered by `<ph-operation-panel>`, which
 offers a verb picker when the hull can do more than one.
-`assets/worlds/probe_stabilise.toml` is a worked example of one verb end to end;
-`assets/worlds/probe_operations.toml` runs the other four, plus a storm band
-that slows two of them.
+`assets/worlds/probe_stabilise_resume.toml` is a worked example of one verb end
+to end; `assets/worlds/probe_operations_resume.toml` runs a transfer and a
+field-repair, the latter inside a storm band that slows it (both kept as the
+operations feature's snapshot fixtures after #1164 retired the fat operations
+probes).
 
 ### 2.2 Ships
 

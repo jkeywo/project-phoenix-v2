@@ -1,0 +1,63 @@
+# Snapshot fixture for issue #1026 — a ship caught MID-OPERATION.
+#
+# This is the operations-bearing resume fixture carved out of the retired
+# `probe_stabilise` world (#1164, S11a). The operations FEATURE stays live until
+# #1166, so its snapshot/resume coverage stays too: `snapshot_resume`'s
+# `the_resumed_world_keeps_a_ship_mid_operation` needs a world where exactly one
+# ship is holding an in-flight `stabilise` at the capture tick. That is the whole
+# job of this file — it deliberately keeps the `[operations]` capability the four
+# non-op replacement probes drop.
+#
+# One operating ship, one degraded depot. The operation opens at t=1 s (tick 60)
+# and completes three authored seconds later (tick 240), so a capture between the
+# two catches a hold that is genuinely part-way through.
+#
+# THE OPERATING SHIP IS A NAMED WORLD ENTITY, not the player-ship row:
+# `spawn_game_start_entities` mints the player ship a fresh uuid from the
+# lobby-selected template, so a `name`/`overrides` on that row is discarded. A
+# scripted operation addresses both ends by authored NAME, so the operator has to
+# be an entity whose name and uuid actually meet.
+
+[global]
+seed = 1026
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The player ship, present because a world needs one. It carries no operation, so
+# the capture writes exactly one operations record — the tender's.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The operating ship. Named, because a scripted effect addresses both ends of an
+# operation by authored name; same faction as the player, so nothing shoots.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+name = "world.probe_stabilise.entity.tender.name"
+transform = { position = [200.0, 0.0, 0.0] }
+overrides = { operations = { capability = [{ verb = "stabilise", range = 2000.0, duration_secs = 3, power_group = "helm", min_power_level = 2, condition_on_complete = 25.0 }] } }
+
+# The structure under test, spawned already degraded past its own threshold so
+# the operation has real work to do.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_stabilise.entity.skyhook.name"
+transform = { position = [400.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 30.0 } }
+
+[script]
+setup = """
+on_timer(1, "on_begin_stabilise");
+
+fn on_begin_stabilise(ctx) {
+    ctx.effects.stabilise(
+        "world.probe_stabilise.entity.tender.name",
+        "world.probe_stabilise.entity.skyhook.name",
+    );
+    ctx.flags.op_started = 1;
+}
+"""

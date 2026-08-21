@@ -25,11 +25,18 @@
 #   comms_jammed      … and they cannot ask anyone about it. Every party in the
 #                     corridor is behind a channel that stops working exactly
 #                     when the crew most want it.
-#   slow_zone         external work stretches. `slow_zone` is what an operation's
-#                     `[[operations.capability.interrupt]]` names with
-#                     `region_effect = "slow_zone"`, and the RATE lives on the
-#                     capability rather than here — how much worse a storm makes
-#                     a particular job is a judgement about the job.
+#   slow_zone         the ship-movement penalty (thrust/yaw), authored at
+#                     `[effects.slow_zone]` below. It was ALSO the marker an
+#                     operation's `[[operations.capability.interrupt]]` read with
+#                     `region_effect = "slow_zone"` to stretch external work — but
+#                     since issue #1164 no shipped hull authors an operations
+#                     capability, so the storm no longer THROTTLES a crew's
+#                     external work. It reaches the destroyer's coupling systems
+#                     (tractor/umbilical/dock) the way it reaches any system now:
+#                     through `damage_zone` above, which disables them. The
+#                     interrupt vocabulary still exists (retired in #1166), so
+#                     this slow_zone stays a valid presence marker with no shipped
+#                     consumer; here it is purely the movement tax.
 #
 # ── The tuning, and what it is tuned FOR ─────────────────────────────────────
 #

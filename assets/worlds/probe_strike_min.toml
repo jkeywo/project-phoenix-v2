@@ -1,0 +1,82 @@
+# Probe world for issue #1035 — the labour-dispute REGISTER, end to end.
+#
+# This is the minimal, operations-free successor to the retired `probe_strike`
+# world (#1164, S11a). The retired world proved the whole strike slice: that a
+# `work_stoppage` interrupt REFUSES a transfer and SLOWS a repair. Those are
+# consequences the operation verbs impose, and the per-system probes now own
+# that ground — so what survives here is the part that is NOT about operations:
+# the workforce register itself, its mirror into the ordinary flag store, and
+# the settlement lever a dialogue pulls.
+#
+# ── The dispute ──────────────────────────────────────────────────────────────
+#
+# Two sides, and the second one exists to be the control. `probe_operator` is
+# never on strike, so a run reads both halves of a side's state — the status the
+# operations tick used to read, and the disposition a negotiation moves.
+#
+# ── The reversal, and the lever that drives it ───────────────────────────────
+#
+# At t=10 s a handler sets an ordinary world flag. `on_flag_set` chains off it
+# and settles the strike — the SAME seam #1036's negotiation pulls, authored
+# here so the restoration is proved through the path a dialogue pick will take
+# rather than by a test reaching into the register.
+#
+# Timeline (60 Hz), in mission seconds:
+#
+#   t=0    the register arms from `[[workforce]]`: `probe_workers` OUT at a
+#          disposition of 20, `probe_operator` at work at 60. Both mirror into
+#          ordinary world flags a script condition can read.
+#   t=10   `settle_the_strike` sets `probe_strike_settled`; `on_flag_set` fires
+#          `on_settled`, which settles `probe_workers` and moves what they make
+#          of the crew from 20 to 70.
+
+[global]
+seed = 1035
+ai_helm_tick_hz = 30.0
+
+# ── The dispute ──────────────────────────────────────────────────────────────
+[[workforce]]
+id = "probe_workers"
+label = "world.probe_strike.workforce.workers.label"
+on_strike = true
+# [ai] Low, and it moves at the settlement — so the run exercises both halves of
+# a side's state.
+disposition = 20
+
+[[workforce]]
+id = "probe_operator"
+label = "world.probe_strike.workforce.operator.label"
+disposition = 60
+
+[player_spawn]
+position = [6000.0, 0.0, 6000.0]
+
+# The player ship. Present because a world needs one; parked far away and idle.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [6000.0, 0.0, 6000.0] }
+spawn_on = "game_start"
+
+[script]
+setup = """
+on_timer(10, "settle_the_strike");
+
+// THE SEAM. The settlement is chained off an ordinary world flag rather than
+// wired straight into the timer, because that is the shape #1036's negotiation
+// needs: whoever sets the flag — a dialogue pick, a deadline, a later act — gets
+// the same settlement, applied in one place.
+on_flag_set("probe_strike_settled", "on_settled");
+
+fn settle_the_strike(ctx) {
+    ctx.flags.probe_strike_settled = 1;
+}
+
+fn on_settled(ctx) {
+    ctx.effects.settle_strike("probe_workers");
+    // The other half of a side's state, moved at the same beat: they are back
+    // at work AND they think better of the crew for it. [ai] Unratified.
+    ctx.effects.set_workforce_disposition("probe_workers", 70);
+    ctx.flags.increment("strike_settled_handled", 1);
+}
+"""

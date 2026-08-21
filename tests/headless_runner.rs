@@ -1413,9 +1413,9 @@ fn a_destroyed_entity_emits_entity_despawned_exactly_once() {
 
 // ── Scripted entity removal (issue #1033, parent #851) ───────────────────────
 
-/// The two names `probe_destroy.toml` addresses by their authored `[[entity]]`
-/// name; the storm bands are script-spawned and carry plain identifiers.
-const DESTROY_TENDER: &str = "world.probe_destroy.entity.tender.name";
+/// The skyhook `probe_destroy_chain.toml` removes on its deadline, by its
+/// authored `[[entity]]` name; the storm bands are script-spawned and carry
+/// plain identifiers.
 const DESTROY_SKYHOOK: &str = "world.probe_destroy.entity.skyhook.name";
 
 /// Whether an entity with this `EntityName` is still in the world.
@@ -1441,29 +1441,24 @@ fn objective_status(
         .status
 }
 
-/// **Issue #1033.** `probe_destroy.toml` driven for twelve mission seconds: a
-/// script destroys a structure at a named deadline, and every consequence a
-/// combat kill would have follows from it.
+/// **Issue #1033.** `probe_destroy_chain.toml` driven for twelve mission
+/// seconds: a script destroys a structure at a named deadline, and every
+/// consequence a combat kill would have follows from it - the chaining
+/// `on_destroyed`, the group `on_all_destroyed` that needs the LAST member to
+/// go, and the deferred `ctx.schedule.in_seconds(n).destroy_entity(..)` form.
 ///
-/// This is the whole slice on one real run — the effect, the chaining
-/// `WorldEvent::Destroyed`, the `on_destroyed` that rides it, the group
-/// `on_all_destroyed` that needs the LAST member to go, the deferred
-/// `ctx.schedule.in_seconds(n).destroy_entity(…)` form, and an operation whose
-/// target is destroyed out from under it. The probe world's own header carries
-/// the authored timeline this is asserted against.
-///
-/// Nothing in this world shoots at anything: the tender and the player share a
-/// faction and the storm bands are regions. So every destruction observed here
-/// is a scripted one, which is what makes the assertions mean what they say.
+/// The operations-free successor to the retired `probe_destroy` world (#1164
+/// S11a): the per-system probes now cover the operation verbs, so this world
+/// keeps only the scripted-removal mechanic #1033 owns. Nothing here shoots at
+/// anything, so every destruction observed is a scripted one.
 #[test]
-fn a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target() {
+fn a_scripted_destroy_chains_its_triggers_off_the_removal() {
     use project_phoenix::core::messages::ObjectiveStatus;
-    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb};
     use project_phoenix::world::server::WorldContentRuntime;
 
     let dt = 1.0 / 60.0;
     let args = HeadlessArgs {
-        world_path: "assets/worlds/probe_destroy.toml".into(),
+        world_path: "assets/worlds/probe_destroy_chain.toml".into(),
         dt,
         max_ticks: ticks_for_sim_seconds(12.0, dt),
         deterministic: true,
@@ -1472,25 +1467,8 @@ fn a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target()
     };
     let mut app = build_headless_app(&args).expect("app should build");
 
-    // Everything is read tick by tick and asserted on ORDER, not on frame
-    // arithmetic. The mission clock anchors on the first `InProgress` tick rather
-    // than at frame zero, so an assertion pinned to an absolute frame is really an
-    // assertion about how long the lobby took — while the causal order is what the
-    // slice actually claims. `first[…]` is the sim-second each reading first went
-    // true.
     let mut first: std::collections::BTreeMap<&str, f64> = std::collections::BTreeMap::new();
-    // Was the tender ever genuinely mid-operation? A hold that never opened would
-    // "fail on target gone" for free.
-    let mut held_before_collapse = false;
-    // Was there a window where exactly one band was down and the group had not
-    // fired? Without it, "fires at the end" is satisfied by "fires on the first".
     let mut group_silent_at_one_down = false;
-    // The bands are SPAWNED at t=0 rather than authored as `[[entity]]` blocks, so
-    // "absent" reads true for the first few frames too. A removal is only counted
-    // once the band has genuinely been there — the same not-published-yet guard
-    // `an_infrastructure_threshold_flips_its_flag_in_both_directions_in_a_real_run`
-    // carries, and for the same reason: without it every band reads retired on
-    // frame one and the ordering assertions below pass vacuously.
     let (mut band_a_seen, mut band_b_seen) = (false, false);
 
     for tick in 0..args.max_ticks {
@@ -1500,24 +1478,14 @@ fn a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target()
         let skyhook = named_entity_present(&mut app, DESTROY_SKYHOOK);
         let band_a = named_entity_present(&mut app, "storm_band_a");
         let band_b = named_entity_present(&mut app, "storm_band_b");
-        let state = operations_named(&mut app, DESTROY_TENDER)
-            .and_then(|ops| ops.active)
-            .map(|hold| hold.state());
         let flags = &app.world().resource::<WorldContentRuntime>().flags;
         let cleared = flags.counter("band_cleared");
 
-        if skyhook {
-            if state == Some(HoldState::Holding) {
-                held_before_collapse = true;
-            }
-        } else {
+        if !skyhook {
             first.entry("skyhook_gone").or_insert(sim_t);
         }
         if flags.counter("skyhook_lost") > 0 {
             first.entry("skyhook_lost_hook").or_insert(sim_t);
-        }
-        if state == Some(HoldState::Failed(Ineligibility::TargetGone)) {
-            first.entry("hold_failed_target_gone").or_insert(sim_t);
         }
         band_a_seen |= band_a;
         band_b_seen |= band_b;
@@ -1541,21 +1509,13 @@ fn a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target()
             .unwrap_or_else(|| panic!("'{key}' never happened in this run: {first:?}"))
     };
 
-    // ── The scripted destruction happened, and the operation was live for it ──
-    assert!(
-        held_before_collapse,
-        "precondition: the tender must be MID-operation while the skyhook still \
-         stands — otherwise the TargetGone below is free. Seen: {first:?}"
-    );
     let gone_at = at("skyhook_gone");
 
-    // ── It chained. This is the acceptance the whole slice turns on ──
     let hook_at = at("skyhook_lost_hook");
     assert!(
         hook_at - gone_at < 0.2,
         "the chained `on_destroyed` must fire off the scripted removal essentially \
-         at once — its Destroyed event rides `new_events` into the SAME tick's next \
-         chaining pass. Destroyed at {gone_at:.2} s, hook at {hook_at:.2} s"
+         at once. Destroyed at {gone_at:.2} s, hook at {hook_at:.2} s"
     );
     assert_eq!(
         app.world()
@@ -1563,7 +1523,7 @@ fn a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target()
             .flags
             .counter("skyhook_lost"),
         1,
-        "exactly once — a destroy must not chain its event twice"
+        "exactly once - a destroy must not chain its event twice"
     );
     assert_eq!(
         objective_status(&app, "obj-hold-skyhook"),
@@ -1572,47 +1532,22 @@ fn a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target()
          state exactly as a kill does"
     );
 
-    // ── The operation settled on its own reason ──
-    // `TargetGone`, not `OutOfRange`: the tender never moved, and waiting cannot
-    // bring a skyhook back.
-    let failed_at = at("hold_failed_target_gone");
-    assert!(
-        failed_at >= gone_at && failed_at - gone_at < 0.5,
-        "an operation whose target is destroyed mid-flight must end promptly, \
-         through the SAME eligibility spine a hull shot out from under a tug goes \
-         through — with nothing in the destroy path knowing an operation was \
-         running. Destroyed at {gone_at:.2} s, settled at {failed_at:.2} s"
-    );
-    assert_eq!(
-        hold_of(&mut app, DESTROY_TENDER).state(),
-        HoldState::Failed(Ineligibility::TargetGone),
-        "…and it STAYS failed: a settled operation does not quietly resume"
-    );
-    assert_eq!(
-        hold_of(&mut app, DESTROY_TENDER).verb(),
-        OperationVerb::Stabilise
-    );
-
-    // ── The group fired on the LAST member, not the first ──
     let band_a_at = at("band_a_gone");
     let band_b_at = at("band_b_gone");
     let cleared_at = at("band_cleared");
     assert!(
         band_a_at < band_b_at,
-        "precondition: the bands must be retired one at a time ({band_a_at:.2} s, \
-         {band_b_at:.2} s)"
+        "the bands must be retired one at a time ({band_a_at:.2} s, {band_b_at:.2} s)"
     );
     assert!(
         group_silent_at_one_down,
-        "one of two members down is not the whole group: there must be a window \
-         where band A is gone, band B is up, and `on_all_destroyed` has NOT fired. \
-         Without it, a group that fired on the first kill would pass the assertion \
-         below just as well. Seen: {first:?}"
+        "there must be a window where band A is gone, band B is up, and \
+         `on_all_destroyed` has NOT fired. Seen: {first:?}"
     );
     assert!(
         cleared_at >= band_b_at && cleared_at - band_b_at < 0.2,
-        "the group fires when the LAST member goes — the storm-band teardown this \
-         effect exists for. Last band at {band_b_at:.2} s, group at {cleared_at:.2} s"
+        "the group fires when the LAST member goes. Last band at {band_b_at:.2} s, \
+         group at {cleared_at:.2} s"
     );
     assert_eq!(
         app.world()
@@ -1625,19 +1560,13 @@ fn a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target()
     assert_eq!(
         objective_status(&app, "obj-clear-band"),
         ObjectiveStatus::Completed,
-        "…and its handler's effect landed"
+        "...and its handler's effect landed"
     );
 
-    // ── The deferred form did the first band's work ──
-    // Authored as `on_timer(6)` scheduling two seconds out, so band A goes at
-    // t≈8 — after the t=5 collapse and before the t=10 immediate destroy. Had the
-    // deferred call been dropped, `band_a_gone` would never have happened at all
-    // and `at()` would have failed above.
     assert!(
         band_a_at > gone_at,
-        "the DEFERRED `in_seconds(2).destroy_entity` fires after the collapse it \
-         was scheduled behind — same action, same queue, no new machinery \
-         ({band_a_at:.2} s vs {gone_at:.2} s)"
+        "the DEFERRED `in_seconds(2).destroy_entity` fires after the collapse it was \
+         scheduled behind ({band_a_at:.2} s vs {gone_at:.2} s)"
     );
 }
 
@@ -6669,281 +6598,6 @@ fn a_slipped_deadline_fires_at_its_new_tick_and_a_cancelled_one_never_fires() {
     );
 }
 
-// ── Issue #1026: the stabilise operation, end to end in a real run ──────────
-
-/// Read the operating ship's operations record out of a live app.
-///
-/// Found by the component rather than by name: exactly one entity in
-/// `probe_stabilise.toml` authors an `[operations]` table, and a lookup that
-/// went through `EntityName` would be testing name resolution rather than the
-/// operation.
-fn live_operations(
-    app: &mut bevy::prelude::App,
-) -> Option<project_phoenix::operations::ShipOperations> {
-    app.world_mut()
-        .query::<&project_phoenix::operations::ShipOperations>()
-        .iter(app.world())
-        .next()
-        .cloned()
-}
-
-/// Move the operating ship to `x` by writing its `ShipPhysics`, which is what
-/// helm moves. Writing the `Transform` directly would be undone by
-/// `sync_ship_position` on the next tick.
-fn move_operator_to(app: &mut bevy::prelude::App, x: f32) {
-    let entity = app
-        .world_mut()
-        .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<project_phoenix::operations::ShipOperations>>()
-        .iter(app.world())
-        .next()
-        .expect("the probe world spawns one operating ship");
-    app.world_mut()
-        .get_mut::<project_phoenix::ship::state::ShipPhysics>(entity)
-        .expect("the operating ship is a ship")
-        .x = x;
-}
-
-fn stabilise_args(dt: f64, seconds: f64) -> HeadlessArgs {
-    HeadlessArgs {
-        world_path: "assets/worlds/probe_stabilise.toml".into(),
-        dt,
-        max_ticks: ticks_for_sim_seconds(seconds, dt),
-        deterministic: true,
-        seed: Some(42),
-        ..test_args()
-    }
-}
-
-/// **Issue #1026.** A scripted stabilise operation opens, holds, completes, and
-/// the completion lifts the depot back over its own operational threshold —
-/// every link asserted separately, because "the depot ended up capable" would
-/// pass with the operation never having run at all.
-#[test]
-fn a_scripted_stabilise_operation_runs_to_completion_and_restores_the_depot() {
-    use project_phoenix::infrastructure::InfrastructureCondition;
-    use project_phoenix::operations::HoldState;
-    use project_phoenix::world::server::WorldContentRuntime;
-
-    let dt = 1.0 / 60.0;
-    let args = stabilise_args(dt, 6.0);
-    let mut app = build_headless_app(&args).expect("app should build");
-
-    let mut first_seen: std::collections::BTreeMap<&str, f64> = std::collections::BTreeMap::new();
-    let mut max_progress: f32 = 0.0;
-    for tick in 0..args.max_ticks {
-        run(&mut app, 1);
-        let sim_t = (tick + 1) as f64 * dt;
-        if let Some(ops) = live_operations(&mut app) {
-            if let Some(hold) = ops.active.as_ref() {
-                max_progress = max_progress.max(hold.progress());
-                match hold.state() {
-                    HoldState::Holding => {
-                        first_seen.entry("holding").or_insert(sim_t);
-                    }
-                    HoldState::Completed => {
-                        first_seen.entry("completed").or_insert(sim_t);
-                    }
-                    other => panic!(
-                        "the operation ended as {other:?} at {sim_t:.2} s — nothing in this \
-                         world interrupts it"
-                    ),
-                }
-            }
-        }
-        let flags = &app.world().resource::<WorldContentRuntime>().flags;
-        if flags.flag("depot_transfer_capable") {
-            first_seen.entry("capable").or_insert(sim_t);
-        }
-        if flags.flag("depot_restored") {
-            first_seen.entry("restored_hook").or_insert(sim_t);
-        }
-    }
-
-    // ── The script effect opened the hold ──
-    let opened_at = *first_seen.get("holding").unwrap_or_else(|| {
-        panic!("the scripted `stabilise` effect never opened a hold at all: {first_seen:?}")
-    });
-    assert!(
-        (1.0..1.5).contains(&opened_at),
-        "the hold must open just after the t=1 s `on_timer`, not before it and not much after — \
-         opened at {opened_at:.2} s"
-    );
-
-    // ── It completed after its authored duration of ELIGIBLE ticks ──
-    let completed_at = *first_seen.get("completed").unwrap_or_else(|| {
-        panic!(
-            "the hold never completed: three authored seconds at 60 Hz is 180 eligible ticks, \
-             and nothing in this world interrupts it. Seen: {first_seen:?}"
-        )
-    });
-    assert!(
-        (completed_at - opened_at - 3.0).abs() < 0.2,
-        "it must complete three seconds after it opened — the authored duration, counted in \
-         eligible ticks ({opened_at:.2} s to {completed_at:.2} s)"
-    );
-    assert_eq!(
-        max_progress, 1.0,
-        "and the published progress reaches the top"
-    );
-
-    // ── The completion moved the target's condition, through #1025's queue ──
-    let condition = app
-        .world_mut()
-        .query::<&InfrastructureCondition>()
-        .iter(app.world())
-        .next()
-        .map(|c| c.0.condition())
-        .expect("the depot carries its condition track");
-    assert_eq!(
-        condition, 55.0,
-        "30 authored points plus the operation's authored 25 — paid ONCE, on completion, into \
-         the queue tick_infrastructure_condition drains"
-    );
-
-    // ── …which crossed the depot's threshold and flipped its flag ──
-    let capable_at = *first_seen.get("capable").unwrap_or_else(|| {
-        panic!(
-            "`depot_transfer_capable` never came back: 55/100 is above the depot's 45 % restore \
-             point, and the operation is what took it there. Seen: {first_seen:?}"
-        )
-    });
-    assert!(
-        (capable_at - completed_at).abs() < 0.1,
-        "the flag flips on the tick the operation completes, not a tick later: tick_operations \
-         is ordered BEFORE tick_infrastructure_condition precisely so the payoff lands on the \
-         tick it was earned ({completed_at:.2} s vs {capable_at:.2} s)"
-    );
-    assert!(
-        capable_at > opened_at,
-        "…and the depot spawned BELOW its threshold, so this is the operation's crossing rather \
-         than a flag that was up all along"
-    );
-
-    // ── A scenario hook reacted to the crossing ──
-    let hook_at = *first_seen.get("restored_hook").unwrap_or_else(|| {
-        panic!(
-            "the world's `on_flag_set` handler never ran — the crossing wrote the flag store but \
-             never reached the trigger pipeline. Seen: {first_seen:?}"
-        )
-    });
-    assert!(
-        hook_at >= capable_at && hook_at - capable_at < 0.5,
-        "the hook fires promptly after the crossing, on the same one-tick pending_world_events \
-         bridge #1025's rides ({capable_at:.2} s vs {hook_at:.2} s)"
-    );
-}
-
-/// **Issue #1026.** Flying the operating ship off station stalls the hold and
-/// banks nothing; flying it back resumes it from where it stood, and it still
-/// completes.
-///
-/// The interruption arrives through the ship's REAL position — the same input
-/// helm moves — rather than through a flag something else set, which is the
-/// whole claim the ECS adapter makes.
-#[test]
-fn flying_the_operator_off_station_stalls_the_hold_and_returning_resumes_it() {
-    use project_phoenix::operations::{HoldState, Ineligibility};
-
-    let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&stabilise_args(dt, 12.0)).expect("app should build");
-
-    // Past the t=1 s start, with eligible hold banked.
-    run(&mut app, 130);
-    let opened = live_operations(&mut app)
-        .and_then(|o| o.active)
-        .unwrap_or_else(|| panic!("precondition: the scripted effect opens the hold by 130 ticks"));
-    assert_eq!(opened.state(), HoldState::Holding);
-    let banked = opened.elapsed_ticks();
-    assert!(banked > 0, "precondition: it has banked eligible ticks");
-
-    // ── Off station ──
-    move_operator_to(&mut app, 60_000.0);
-    run(&mut app, 120);
-    let stalled = live_operations(&mut app)
-        .and_then(|o| o.active)
-        .expect("the hold survives");
-    assert_eq!(
-        stalled.state(),
-        HoldState::Stalled(Ineligibility::OutOfRange),
-        "leaving the authored range stalls the operation rather than ending it — it is exactly \
-         the thing helm is there to fix"
-    );
-    assert_eq!(
-        stalled.elapsed_ticks(),
-        banked,
-        "…and the ticks already held are not lost. Progress that decayed would make a brief \
-         drift as expensive as never having started."
-    );
-    assert!(
-        stalled.stalled_ticks() > 0,
-        "the stall is counted, so a later slice can budget it"
-    );
-
-    // ── Back on station ──
-    move_operator_to(&mut app, 200.0);
-    run(&mut app, 240);
-    let resumed = live_operations(&mut app)
-        .and_then(|o| o.active)
-        .expect("the hold survives");
-    assert_eq!(
-        resumed.state(),
-        HoldState::Completed,
-        "flying back resumes the hold from where it stood: the operation needs its authored \
-         seconds of ELIGIBLE time, not of wall clock"
-    );
-}
-
-/// **Issue #1026.** The operating ship publishes its hold on the wire, under
-/// the operations blackboard channel rather than onto an existing system's.
-#[test]
-fn the_operating_ship_publishes_its_hold_under_the_operations_blackboard_key() {
-    use project_phoenix::messages::SystemBlackboard;
-
-    let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&stabilise_args(dt, 3.0)).expect("app should build");
-    run(&mut app, 130);
-
-    let key = project_phoenix::messages::SystemId(
-        project_phoenix::operations::OPERATIONS_BLACKBOARD_KEY.to_string(),
-    );
-    let published: Vec<_> = app
-        .world_mut()
-        .query::<&project_phoenix::server_app::ShipSystemBlackboards>()
-        .iter(app.world())
-        .filter_map(|boards| match boards.0.get(&key) {
-            Some(SystemBlackboard::Operations(bb)) => Some(bb.clone()),
-            _ => None,
-        })
-        .collect();
-    let bb = published
-        .first()
-        .expect("the operating ship publishes an operations blackboard");
-    assert_eq!(
-        bb.capabilities
-            .iter()
-            .map(|c| c.verb.as_str())
-            .collect::<Vec<_>>(),
-        vec!["stabilise"],
-        "the hull's authored verbs reach the console"
-    );
-    let active = bb.active.as_ref().expect("the live hold is published");
-    assert_eq!(active.state, "holding");
-    assert!(
-        active.progress > 0.0 && active.progress < 1.0,
-        "progress is published mid-hold, not only at the ends: {}",
-        active.progress
-    );
-    assert_eq!(
-        active.verb_label, "operation.verb.stabilise",
-        "no English crosses the wire — the console resolves this id"
-    );
-    assert_eq!(
-        active.target_name.as_deref(),
-        Some("world.probe_stabilise.entity.skyhook.name"),
-        "and the target is named by its own string id"
-    );
-}
-
 // ── The commitments ledger with a live consumer (issue #1029, parent #851) ───
 
 /// `probe_commitments.toml`, driven for fifteen mission seconds: a promise is
@@ -7137,33 +6791,6 @@ fn a_promise_gates_a_dialogue_option_and_its_resolution_writes_a_campaign_flag()
 
 // ── Issue #1027: the four remaining verbs, end to end in a real run ──────────
 
-/// The named operator's operations record, or `None`.
-///
-/// By `EntityName` rather than by component, because `probe_operations.toml`
-/// runs five operators at once and "the first one the query yielded" would be a
-/// different ship on a different day.
-fn operations_named(
-    app: &mut bevy::prelude::App,
-    name: &str,
-) -> Option<project_phoenix::operations::ShipOperations> {
-    app.world_mut()
-        .query::<(
-            &project_phoenix::entities::spawner::EntityName,
-            &project_phoenix::operations::ShipOperations,
-        )>()
-        .iter(app.world())
-        .find(|(entity_name, _)| entity_name.0 == name)
-        .map(|(_, ops)| ops.clone())
-}
-
-/// The named entity's live hold, which must exist.
-fn hold_of(app: &mut bevy::prelude::App, name: &str) -> project_phoenix::operations::OperationHold {
-    operations_named(app, name)
-        .unwrap_or_else(|| panic!("{name} carries no operations record"))
-        .active
-        .unwrap_or_else(|| panic!("{name} is running no operation"))
-}
-
 /// The named entity's world position, read off its transform.
 fn position_of(app: &mut bevy::prelude::App, name: &str) -> bevy::prelude::Vec3 {
     app.world_mut()
@@ -7223,577 +6850,6 @@ fn move_named_to(app: &mut bevy::prelude::App, name: &str, position: bevy::prelu
     physics.x = position.x;
     physics.y = position.y;
     physics.z = position.z;
-}
-
-const TUG: &str = "world.probe_operations.entity.tug.name";
-const HULK: &str = "world.probe_operations.entity.hulk.name";
-const OUTRIDER: &str = "world.probe_operations.entity.outrider.name";
-const CONVOY: &str = "world.probe_operations.entity.convoy.name";
-const TENDER: &str = "world.probe_operations.entity.tender.name";
-const BERTH: &str = "world.probe_operations.entity.berth.name";
-const SISTER: &str = "world.probe_operations.entity.sister.name";
-const DEPOT_CLEAR: &str = "world.probe_operations.entity.depot_clear.name";
-const PACKHORSE: &str = "world.probe_operations.entity.packhorse.name";
-const DEPOT_STORM: &str = "world.probe_operations.entity.depot_storm.name";
-const THROUGHPUT: &str = "depot_transfer_throughput";
-
-fn operations_args(dt: f64, seconds: f64) -> HeadlessArgs {
-    HeadlessArgs {
-        world_path: "assets/worlds/probe_operations.toml".into(),
-        dt,
-        max_ticks: ticks_for_sim_seconds(seconds, dt),
-        deterministic: true,
-        seed: Some(42),
-        ..test_args()
-    }
-}
-
-/// **Issue #1027, tow.** The load's position becomes the tug's rig and stays
-/// there as the tug moves; a tow that stalls lets go.
-#[test]
-fn a_towed_hulk_rides_the_tugs_rig_and_a_stalled_tow_lets_it_go() {
-    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb};
-
-    let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&operations_args(dt, 20.0)).expect("app should build");
-    run(&mut app, 130);
-
-    let hold = hold_of(&mut app, TUG);
-    assert_eq!(hold.verb(), OperationVerb::Tow);
-    assert_eq!(
-        hold.state(),
-        HoldState::Holding,
-        "the scripted tow opened just after the t=1 s timer"
-    );
-
-    // The rig, not the hulk's own last position: it spawned 80 units to
-    // starboard of the tug and is now 120 astern of it.
-    let offset = position_of(&mut app, HULK) - position_of(&mut app, TUG);
-    assert!(
-        (offset.length() - 120.0).abs() < 1.0,
-        "the load rides the authored 120-unit tow offset, not wherever it happened to be — got a \
-         separation of {}",
-        offset.length()
-    );
-
-    // The tug moves; the load moves with it.
-    move_named_to(&mut app, TUG, bevy::prelude::Vec3::new(900.0, 0.0, -600.0));
-    run(&mut app, 10);
-    let carried = position_of(&mut app, HULK) - position_of(&mut app, TUG);
-    assert!(
-        (carried.length() - 120.0).abs() < 1.0,
-        "…and goes on riding it after the tug moves a kilometre, which is the whole of what a tow \
-         is. Got {}",
-        carried.length()
-    );
-    assert!(
-        position_of(&mut app, HULK).distance(bevy::prelude::Vec3::new(80.0, 0.0, 0.0)) > 500.0,
-        "the hulk really did travel — a test that only compared the two positions would pass with \
-         both of them sitting at the origin"
-    );
-
-    // Out of range: the tow stalls, and the towline parts.
-    let parted_at = position_of(&mut app, HULK);
-    move_named_to(
-        &mut app,
-        TUG,
-        bevy::prelude::Vec3::new(90_000.0, 0.0, 90_000.0),
-    );
-    run(&mut app, 30);
-    assert_eq!(
-        hold_of(&mut app, TUG).state(),
-        HoldState::Stalled(Ineligibility::OutOfRange),
-        "flying beyond the authored range stalls the tow rather than ending it"
-    );
-    assert!(
-        position_of(&mut app, HULK).distance(parted_at) < 200.0,
-        "…and a stalled tow has LET GO: the load stays roughly where the towline parted rather \
-         than being yanked ninety kilometres across the map to wherever the tug got to"
-    );
-}
-
-/// **Issue #1027, escort.** The hold advances against an escortee that is
-/// travelling under its own power, and ends — terminally — when it gets past
-/// the authored separation limit.
-#[test]
-fn an_escort_holds_on_a_moving_convoy_and_fails_when_it_is_lost() {
-    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb};
-
-    let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&operations_args(dt, 20.0)).expect("app should build");
-    run(&mut app, 70);
-
-    let opened = hold_of(&mut app, OUTRIDER);
-    assert_eq!(opened.verb(), OperationVerb::Escort);
-    let convoy_start = position_of(&mut app, CONVOY);
-    // Fifteen seconds. A bulk hauler makes about five units a second, so this
-    // is the window in which its travel becomes unmistakable rather than
-    // arguable — the assertion below is the point of the test and it should not
-    // be scraping its own threshold.
-    run(&mut app, 900);
-
-    let held = hold_of(&mut app, OUTRIDER);
-    assert_eq!(held.state(), HoldState::Holding);
-    assert!(
-        held.elapsed_ticks() > opened.elapsed_ticks() + 800,
-        "the escort banked eligible time throughout — progress ran from {} to {} ticks",
-        opened.elapsed_ticks(),
-        held.elapsed_ticks()
-    );
-    let travelled = position_of(&mut app, CONVOY).distance(convoy_start);
-    assert!(
-        travelled > 50.0,
-        "…and the escortee really was MOVING while it did: it covered {travelled:.1} units on its \
-         own lane. An escort that only held station on something parked would pass a proximity \
-         test without ever exercising the thing escort is for."
-    );
-
-    // The convoy runs for it, past the authored separation limit.
-    move_named_to(
-        &mut app,
-        CONVOY,
-        bevy::prelude::Vec3::new(200_000.0, 0.0, 200_000.0),
-    );
-    run(&mut app, 10);
-    assert_eq!(
-        hold_of(&mut app, OUTRIDER).state(),
-        HoldState::Failed(Ineligibility::Separated),
-        "past the separation limit the relationship is OVER, not stalled — a hold that stalled \
-         here would sit waiting for a convoy that has gone, and the crew would never be told"
-    );
-}
-
-/// **Issue #1027, transfer.** The load moves between two infrastructure
-/// entities, and a second delivery into a depot the first one filled stalls on
-/// the destination's capacity rather than moving anything.
-#[test]
-fn a_transfer_moves_a_capacity_between_two_depots_and_stalls_when_the_far_end_is_full() {
-    use project_phoenix::operations::{HoldState, Ineligibility};
-    use project_phoenix::world::server::WorldContentRuntime;
-
-    let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&operations_args(dt, 20.0)).expect("app should build");
-
-    // Before: forty aboard the tender, twenty in a depot whose ceiling is forty.
-    run(&mut app, 30);
-    assert_eq!(capacity_of(&mut app, TENDER, THROUGHPUT), 40);
-    assert_eq!(capacity_of(&mut app, BERTH, THROUGHPUT), 20);
-
-    // The first delivery opens at t=2 s and needs six authored seconds.
-    run(&mut app, 540);
-    assert_eq!(
-        hold_of(&mut app, TENDER).state(),
-        HoldState::Completed,
-        "the first transfer ran to term"
-    );
-    assert_eq!(
-        (
-            capacity_of(&mut app, TENDER, THROUGHPUT),
-            capacity_of(&mut app, BERTH, THROUGHPUT),
-        ),
-        (20, 40),
-        "twenty berths moved off the tender and into the depot — BOTH ends, on the same tick. A \
-         transfer that only credited the destination would create capacity out of nothing."
-    );
-    assert_eq!(
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .flags
-            .counter(THROUGHPUT),
-        40,
-        "…and the world-flag counter a scenario predicate reads was RE-published, rather than \
-         still carrying the number the depot was authored with. That mirror is why the move goes \
-         through tick_infrastructure_condition instead of onto the component."
-    );
-
-    // The second delivery opens at t=12 s against a depot now at its ceiling.
-    run(&mut app, 660);
-    let blocked = hold_of(&mut app, TENDER);
-    assert_eq!(
-        blocked.state(),
-        HoldState::Stalled(Ineligibility::CapacityUnavailable),
-        "a start is only refused for a capability the hull lacks, so the second transfer OPENS — \
-         and then stalls, because the depot is full. That is the readable behaviour: the crew are \
-         alongside with cargo and nowhere to put it."
-    );
-    assert_eq!(
-        blocked.elapsed_ticks(),
-        0,
-        "and it banks nothing while it waits"
-    );
-    assert_eq!(
-        (
-            capacity_of(&mut app, TENDER, THROUGHPUT),
-            capacity_of(&mut app, BERTH, THROUGHPUT),
-        ),
-        (20, 40),
-        "…and moves nothing. The tender still has twenty aboard, so this refusal is a fact about \
-         the DESTINATION rather than about the source — which is the half a one-ended check would \
-         have missed."
-    );
-}
-
-/// **Issue #1027, field-repair.** Condition is paid per tick rather than on
-/// completion, and a storm band stretches the work — measured against a control
-/// tender doing the identical job in clear space.
-#[test]
-fn a_field_repair_pays_as_it_works_and_a_storm_band_halves_it() {
-    use project_phoenix::operations::{HoldState, OperationVerb, ProgressRate};
-
-    let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&operations_args(dt, 30.0)).expect("app should build");
-    run(&mut app, 70);
-
-    assert_eq!(hold_of(&mut app, SISTER).verb(), OperationVerb::FieldRepair);
-    assert_eq!(
-        hold_of(&mut app, PACKHORSE).rate(),
-        ProgressRate::percent(50),
-        "the tender parked inside the band is working at the rate its capability authored for a \
-         slow zone — through the ship's REAL region membership, not a flag something else set"
-    );
-    assert_eq!(
-        hold_of(&mut app, SISTER).rate(),
-        ProgressRate::FULL,
-        "…and the one six radii clear of it is not"
-    );
-
-    // Part way through: BOTH have already paid, which is what makes this
-    // field-repair rather than stabilise.
-    run(&mut app, 300);
-    let clear_mid = condition_of(&mut app, DEPOT_CLEAR);
-    let storm_mid = condition_of(&mut app, DEPOT_STORM);
-    assert!(
-        clear_mid > 41.0 && !hold_of(&mut app, SISTER).is_settled(),
-        "five seconds into a twenty-second repair the depot is ALREADY better off ({clear_mid}), \
-         with the hold still running. A crew pulled off here keep what they did — which is the \
-         whole difference between a repair and a stabilise."
-    );
-    assert!(
-        storm_mid > 40.0 && storm_mid < clear_mid,
-        "the tender in the band has done real work too, just less of it: {storm_mid} against \
-         {clear_mid}"
-    );
-
-    // Let the clear repair run to term.
-    run(&mut app, 900);
-    assert_eq!(
-        hold_of(&mut app, SISTER).state(),
-        HoldState::Completed,
-        "twenty authored seconds of eligible time"
-    );
-    let clear_total = condition_of(&mut app, DEPOT_CLEAR) - 40.0;
-    assert!(
-        (clear_total - 40.0).abs() < 1.5,
-        "two points a second for twenty seconds is forty points: got {clear_total}"
-    );
-
-    let storm_hold = hold_of(&mut app, PACKHORSE);
-    assert!(
-        !storm_hold.is_settled(),
-        "…while the one in the band is still going, because the band STRETCHED it rather than \
-         cancelling it. That is the storm mechanic in one assertion."
-    );
-    assert_eq!(
-        storm_hold.stalled_ticks(),
-        0,
-        "and it never stalled once, so no authored stall budget would ever have ended it — a \
-         slowed operation is being held, just badly"
-    );
-    let storm_total = condition_of(&mut app, DEPOT_STORM) - 40.0;
-    assert!(
-        (storm_total - clear_total / 2.0).abs() < 2.0,
-        "the payout tracks the rate exactly: half speed, half the repair. {storm_total} against \
-         {clear_total} in clear space. If these matched, parking in a storm would be free."
-    );
-}
-
-/// **Issue #1027, capacity as cost.** A tender holding a field-repair has a
-/// repair team committed for the duration and released when it settles — and
-/// the team never leaves the hull.
-#[test]
-fn a_field_repair_commits_one_of_the_tenders_own_teams_without_moving_it() {
-    use project_phoenix::messages::TeamSlot;
-
-    let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&operations_args(dt, 30.0)).expect("app should build");
-    run(&mut app, 130);
-
-    let ops = operations_named(&mut app, SISTER).expect("the sister carries an operations record");
-    assert_eq!(
-        ops.committed_repair_teams(),
-        1,
-        "the running field-repair holds the capability's authored team count"
-    );
-
-    let slots = app
-        .world_mut()
-        .query::<(
-            &project_phoenix::entities::spawner::EntityName,
-            &project_phoenix::console::repair::server::ShipRepairTeams,
-        )>()
-        .iter(app.world())
-        .find(|(name, _)| name.0 == SISTER)
-        .map(|(_, teams)| teams.0.slots().to_vec())
-        .expect("the sister carries a repair roster");
-    assert!(
-        slots.iter().all(|slot| matches!(slot, TeamSlot::Idle)),
-        "THE TEAMS NEVER LEAVE THE HULL. Nothing is dispatched, nothing travels, and the console \
-         goes on showing idle teams — the commitment is a reservation the dispatchers honour, not \
-         a trip. Got {slots:?}"
-    );
-
-    // Let it finish, and the team comes back.
-    run(&mut app, 1_400);
-    let settled = operations_named(&mut app, SISTER).expect("the record survives");
-    assert!(settled.active.as_ref().is_some_and(|h| h.is_settled()));
-    assert_eq!(
-        settled.committed_repair_teams(),
-        0,
-        "released on completion, without a release step anyone had to remember to write: the \
-         commitment is derived from the live hold, so a settled hold commits nothing"
-    );
-}
-
-/// **Issue #1027.** All five verbs reach the wire under the operations
-/// blackboard channel, each carrying its own progress and rate.
-#[test]
-fn every_operating_ship_publishes_its_verb_and_its_rate_on_the_wire() {
-    use project_phoenix::messages::SystemBlackboard;
-
-    let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&operations_args(dt, 10.0)).expect("app should build");
-    run(&mut app, 200);
-
-    let key = project_phoenix::messages::SystemId(
-        project_phoenix::operations::OPERATIONS_BLACKBOARD_KEY.to_string(),
-    );
-    let mut published: Vec<(String, u16)> = app
-        .world_mut()
-        .query::<&project_phoenix::server_app::ShipSystemBlackboards>()
-        .iter(app.world())
-        .filter_map(|boards| match boards.0.get(&key) {
-            Some(SystemBlackboard::Operations(bb)) => bb
-                .active
-                .as_ref()
-                .map(|active| (active.verb.clone(), active.rate_percent)),
-            _ => None,
-        })
-        .collect();
-    published.sort();
-    assert_eq!(
-        published,
-        vec![
-            ("escort".to_string(), 100),
-            ("field_repair".to_string(), 50),
-            ("field_repair".to_string(), 100),
-            ("tow".to_string(), 100),
-            ("transfer".to_string(), 100),
-        ],
-        "four verbs across five ships reach the console, and the one in the storm reports the \
-         rate the band is holding it to. A bar that crawled with no number beside it would read \
-         as a bug rather than as the storm."
-    );
-}
-
-// ── Issue #1035: the strike gates a depot and un-assists a repair ────────────
-
-const T_STRUCK: &str = "world.probe_strike.entity.tender_struck.name";
-const D_STRUCK: &str = "world.probe_strike.entity.depot_struck.name";
-const T_WORKING: &str = "world.probe_strike.entity.tender_working.name";
-const D_WORKING: &str = "world.probe_strike.entity.depot_working.name";
-const S_STRUCK: &str = "world.probe_strike.entity.sister_struck.name";
-const S_CLEAR: &str = "world.probe_strike.entity.sister_clear.name";
-const RIG_STRUCK: &str = "world.probe_strike.entity.rig_struck.name";
-const RIG_CLEAR: &str = "world.probe_strike.entity.rig_clear.name";
-
-fn strike_args(dt: f64, seconds: f64) -> HeadlessArgs {
-    HeadlessArgs {
-        world_path: "assets/worlds/probe_strike.toml".into(),
-        dt,
-        max_ticks: ticks_for_sim_seconds(seconds, dt),
-        deterministic: true,
-        seed: Some(42),
-        ..test_args()
-    }
-}
-
-/// The operations blackboard the console would render for the named ship, as
-/// `(state, reason)` — the exact pair `ph-operation-panel.js` resolves through
-/// `t()`.
-fn operations_readout(app: &mut bevy::prelude::App, name: &str) -> (String, Option<String>) {
-    use project_phoenix::messages::SystemBlackboard;
-    let key = project_phoenix::operations::operations_blackboard_key();
-    app.world_mut()
-        .query::<(
-            &project_phoenix::entities::spawner::EntityName,
-            &project_phoenix::server_app::ShipSystemBlackboards,
-        )>()
-        .iter(app.world())
-        .find(|(entity_name, _)| entity_name.0 == name)
-        .and_then(|(_, boards)| match boards.0.get(&key) {
-            Some(SystemBlackboard::Operations(bb)) => bb
-                .active
-                .as_ref()
-                .map(|active| (active.state.clone(), active.reason.clone())),
-            _ => None,
-        })
-        .unwrap_or_else(|| panic!("{name} publishes no operations blackboard"))
-}
-
-/// **Issue #1035.** `probe_strike.toml` driven for thirty mission seconds: the
-/// strike refuses a transfer at the depot its people staff, un-assists a repair
-/// on the rig they work, and lets go of both when it is settled — each claim
-/// measured against a control that differs in exactly one authored word.
-///
-/// Every number the run is asserted against comes off a comparison rather than
-/// off arithmetic in this file. "The strike slowed the repair" is `struck <
-/// clear` at the same instant on two rigs that spawned identical; "the strike
-/// refused the transfer" is one depot empty and its twin filled by the same
-/// cargo on the same tick.
-#[test]
-fn a_strike_refuses_a_depot_transfer_and_unassists_a_repair_until_it_is_settled() {
-    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb};
-    use project_phoenix::world::server::WorldContentRuntime;
-
-    let dt = 1.0 / 60.0;
-    let mut app = build_headless_app(&strike_args(dt, 30.0)).expect("app should build");
-
-    // ── The world opens with the dispute already under way (AC1) ────────────
-    //
-    // Sampled on the mission's opening ticks — after the register is armed and
-    // well before the t=1 s handler opens anything, so what is being read is
-    // the world's authored state and not the consequence of a script.
-    run(&mut app, 20);
-    {
-        let register = &app.world().resource::<WorldContentRuntime>().workforce;
-        assert!(
-            register.on_strike("probe_workers"),
-            "the strike is AUTHORED, not scripted on tick one — it was happening before \
-             anybody arrived"
-        );
-        assert!(!register.on_strike("probe_operator"));
-        assert_eq!(register.disposition("probe_workers"), Some(20));
-        assert_eq!(
-            register.disposition("probe_operator"),
-            Some(60),
-            "each side carries its own opinion of the crew, and they are different"
-        );
-        let flags = &app.world().resource::<WorldContentRuntime>().flags;
-        assert!(
-            flags.flag("workforce.probe_workers.on_strike"),
-            "…mirrored into an ordinary world flag, which is how a script condition reads \
-             it and how a later slice chains a trigger off the settlement"
-        );
-        assert!(!flags.flag("workforce.probe_operator.on_strike"));
-        assert_eq!(flags.counter("workforce.probe_workers.disposition"), 20);
-    }
-
-    // ── AC2: the transfer is REFUSED, in words, and its twin is not ─────────
-    run(&mut app, 80); // t ≈ 1.7 s — both transfers opened at t=1.
-    assert_eq!(
-        hold_of(&mut app, T_STRUCK).state(),
-        HoldState::Failed(Ineligibility::WorkStopped),
-        "the delivery came back refused rather than stalling, timing out, or quietly \
-         doing nothing"
-    );
-    assert_eq!(
-        operations_readout(&mut app, T_STRUCK),
-        (
-            "failed".to_string(),
-            Some("operation.refused.work_stopped".to_string())
-        ),
-        "and the console has the REASON, as a strings.csv id — the crew can tell why they \
-         are blocked without reading the world file"
-    );
-    assert_eq!(
-        hold_of(&mut app, T_WORKING).state(),
-        HoldState::Holding,
-        "the control: same hull, same verb, same cargo, same interrupt rule, a depot whose \
-         people are at work — so the refusal is about the STRIKE and not about transfers"
-    );
-
-    // ── AC3: the repair is measurably degraded, against a live control ──────
-    let struck = hold_of(&mut app, S_STRUCK);
-    let clear = hold_of(&mut app, S_CLEAR);
-    assert_eq!(struck.verb(), OperationVerb::FieldRepair);
-    assert_eq!(
-        struck.state(),
-        HoldState::Holding,
-        "still working — the ship's own team can \
-         climb the spine; they are simply on their own"
-    );
-    assert_eq!(
-        (struck.rate().as_percent(), clear.rate().as_percent()),
-        (40, 100),
-        "at the rate the CAPABILITY authored, not one this slice invented at the call site"
-    );
-    assert!(
-        struck.elapsed_ticks() * 2 < clear.elapsed_ticks(),
-        "…so it has banked well under half the control's time: {} against {}",
-        struck.elapsed_ticks(),
-        clear.elapsed_ticks()
-    );
-    assert!(
-        condition_of(&mut app, RIG_STRUCK) < condition_of(&mut app, RIG_CLEAR),
-        "and the WORK is degraded, not just the bar: the payout is scaled by the same rate, \
-         so the two cannot come apart"
-    );
-
-    // The working transfer lands. Its depot fills; the struck one does not.
-    run(&mut app, 400); // t ≈ 8.3 s
-    assert_eq!(hold_of(&mut app, T_WORKING).state(), HoldState::Completed);
-    assert_eq!(
-        (
-            capacity_of(&mut app, D_WORKING, "working_depot_load"),
-            capacity_of(&mut app, D_STRUCK, "struck_depot_load"),
-        ),
-        (20, 0),
-        "the goods moved at the depot whose people were there, and nowhere else"
-    );
-
-    // ── AC4: the settlement, through the flag lever a dialogue will pull ────
-    run(&mut app, 180); // t ≈ 11.3 s — the t=10 s handler has set the flag.
-    {
-        let runtime = app.world().resource::<WorldContentRuntime>();
-        assert!(
-            !runtime.workforce.on_strike("probe_workers"),
-            "the settlement went through `ctx.effects.settle_strike`, chained off an \
-             ordinary `on_flag_set` — the same seam #1036's negotiation pulls"
-        );
-        assert_eq!(
-            runtime.workforce.disposition("probe_workers"),
-            Some(70),
-            "and the other half of a side's state moved with it"
-        );
-        assert_eq!(runtime.flags.counter("strike_settled_handled"), 1);
-        assert!(
-            !runtime.flags.flag("workforce.probe_workers.on_strike"),
-            "the mirror followed the register rather than drifting from it"
-        );
-        assert_eq!(
-            runtime.flags.counter("workforce.probe_workers.disposition"),
-            70
-        );
-    }
-    assert_eq!(
-        hold_of(&mut app, S_STRUCK).rate(),
-        project_phoenix::operations::ProgressRate::FULL,
-        "the assisted rate is back on the next tick, with no restoration path anywhere: \
-         the rule simply stopped firing"
-    );
-
-    // ── AC4, the other bite: the same delivery, to the same depot ───────────
-    run(&mut app, 500); // t ≈ 19.6 s — re-opened at t=12, six seconds to run.
-    assert_eq!(
-        hold_of(&mut app, T_STRUCK).state(),
-        HoldState::Completed,
-        "the depot that refused a delivery eight seconds ago has taken one"
-    );
-    assert_eq!(
-        capacity_of(&mut app, D_STRUCK, "struck_depot_load"),
-        20,
-        "and the cargo is really in it — reversibility is the goods moving, not a flag"
-    );
 }
 
 // ── The dossier projection (issue #1030, parent #851) ───────────────────────
@@ -8518,25 +7574,27 @@ fn a_scan_and_a_dialogue_admission_both_land_on_one_fact_sheet_with_their_proven
     }
 }
 
-/// **Issue #1035, in the scenario rather than in a probe.** The strike the
-/// skeleton world left as prose is authored state, and the crew's own hull
-/// meets both of its bites: a transfer stood up at Ladder Depot B comes back
-/// refused in words, and a field-repair on the head runs at the unassisted rate
-/// while the same repair on the depot the strike does not touch runs at full.
+/// **Issue #1035, migrated onto the crew systems (issue #1165 S11b).** The
+/// strike is authored state — the workers are out and the panel says which rungs
+/// they staffed — and Act 2's negotiation is what resolves it. Its OLD mechanical
+/// bite on the crew's external work (a transfer refused in words at Ladder Depot
+/// B, a head field-repair throttled to an "unassisted" rate) was a property of
+/// the retired operations table: the umbilical and the repair-dispatch that
+/// replaced it (#1160/#1161) read no workforce, so danger reaches the new systems
+/// as damage and power, not as a rate a strike turns down. What this test now
+/// pins is the SETUP the negotiation acts on — the two sides and their staffing —
+/// and that the field-repair beat is genuinely re-pointed onto the crew
+/// procedure: a repair team dispatched to a struck rung raises its OWN condition
+/// exactly as it does on one that is not, because the throttle is gone.
 ///
 /// The ship is moved by hand to each structure in turn. That is the honest
-/// analogue of helm flying it there — the two operations are authored 500 and
-/// 400 units of range, the mission opens the crew a kilometre off both, and
-/// closing is helm's job rather than this test's subject.
+/// analogue of helm flying it there — the dispatch is authored 400 units of
+/// range, the mission opens the crew a kilometre off, and closing is helm's job
+/// rather than this test's subject.
 #[test]
-fn the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted() {
+fn the_strike_no_longer_throttles_the_crews_external_work() {
     use project_phoenix::entities::spawner::EntityName;
     use project_phoenix::infrastructure::InfrastructureCondition;
-    use project_phoenix::operations::{
-        HoldState, Ineligibility, OperationVerb, PendingOperationStart, ProgressRate,
-        ShipOperations,
-    };
-    use project_phoenix::ship::state::ShipPhysics;
     use project_phoenix::world::server::WorldContentRuntime;
 
     const SKYHOOK: &str = "world.falling_skyway.entity.skyhook.name";
@@ -8602,110 +7660,60 @@ fn the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted() {
          A pumps and B does not, and it is authored rather than implied"
     );
 
-    // The crew's hull, and the two verbs it works the skyway with. Found by its
-    // capability table because the player row carries no authored name: its
-    // config comes from the lobby-selected template wholesale.
-    let (ship, ship_uuid) = app
-        .world_mut()
-        .query::<(
-            bevy::prelude::Entity,
-            &project_phoenix::entities::spawner::EntityUuid,
-            &ShipOperations,
-        )>()
-        .iter(app.world())
-        .map(|(entity, uuid, _)| (entity, uuid.0.clone()))
-        .next()
-        .expect("the destroyer authors an [operations] table");
-    let uuid_of = |app: &bevy::prelude::App, name: &str| {
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .name_to_uuid
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| panic!("{name} is not in this world"))
-    };
-    let move_ship = |app: &mut bevy::prelude::App, to: bevy::prelude::Vec3| {
-        let mut physics = app
-            .world_mut()
-            .get_mut::<ShipPhysics>(ship)
-            .expect("a ship");
-        physics.x = to.x;
-        physics.y = to.y;
-        physics.z = to.z;
-    };
-    // The same queue a scripted `ctx.effects.transfer(…)` fills — the applier
-    // resolves the names and `tick_operations` decides, which is the whole path
-    // a console's `start_operation` reaches by a different door.
-    let order = |app: &mut bevy::prelude::App, verb, target: &str| {
-        let target_uuid = uuid_of(app, target);
-        app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .pending_operation_starts
-            .push(PendingOperationStart {
-                ship_uuid: ship_uuid.clone(),
-                verb,
-                target_uuid,
-            });
-    };
+    // The crew's hull, found by the LocalShip marker — the player row carries no
+    // authored name (its config comes from the lobby-selected template wholesale)
+    // and no longer an [operations] table to find it by (#1164). The SKYHOOK
+    // const above is read by AC1's staffing check; here the struck rung the
+    // strike sits on is Ladder Depot B.
+    let (ship, _ship_uuid) = skyway_crew_hull(&mut app);
 
-    // ── AC2: a transfer at Ladder Depot B is refused, with the reason ───────
-    move_ship(&mut app, bevy::prelude::Vec3::new(1180.0, 0.0, 300.0));
-    order(&mut app, OperationVerb::Transfer, DEPOT_B);
-    run(&mut app, 4);
-    let refused = app
-        .world()
-        .get::<ShipOperations>(ship)
-        .and_then(|ops| ops.active.clone())
-        .expect("the transfer opened");
-    assert_eq!(refused.verb(), OperationVerb::Transfer);
-    assert_eq!(
-        refused.state(),
-        HoldState::Failed(Ineligibility::WorkStopped),
-        "alongside, in range, powered — and refused, because nobody down there is \
-         authorising anything"
-    );
-    assert_eq!(
-        refused.state().reason().map(|r| r.string_id()),
-        Some("operation.refused.work_stopped"),
-        "the crew are told WHY on the operations panel, in words, without reading the \
-         world file"
+    // ── AC2/AC3: the field-repair beat, re-pointed onto the crew procedure ──
+    //
+    // A repair team dispatched to a STRUCK rung (Ladder Depot B, whose workforce
+    // is out) raises its OWN condition at the same authored rate it does on one
+    // that is NOT struck (Ladder Depot A, whose crews are in). The old
+    // "unassisted vs assisted" split retired with the operations throttle: the
+    // dispatch reads no workforce, so both now work, which is what "the beat is
+    // re-pointed onto the crew procedure" means. Each is measured on the target's
+    // OWN condition track, alongside for the length of the job.
+    let struck_before = condition_of(&mut app, DEPOT_B);
+    skyway_move(&mut app, ship, bevy::prelude::Vec3::new(1180.0, 0.0, 300.0));
+    run(&mut app, 2);
+    skyway_dispatch_repair(&mut app, ship, DEPOT_B);
+    for _ in 0..(ticks_for_sim_seconds(8.0, dt) / 4) {
+        skyway_move(&mut app, ship, bevy::prelude::Vec3::new(1180.0, 0.0, 300.0));
+        run(&mut app, 4);
+    }
+    let struck_after = condition_of(&mut app, DEPOT_B);
+    assert!(
+        struck_after > struck_before,
+        "a repair team crosses to the struck rung and raises its own condition — the strike \
+         no longer throttles the crew's external work ({struck_before} -> {struck_after})"
     );
 
-    // ── AC3: the head repair runs, and runs un-assisted ─────────────────────
-    move_ship(&mut app, bevy::prelude::Vec3::new(200.0, 0.0, 0.0));
-    order(&mut app, OperationVerb::FieldRepair, SKYHOOK);
-    run(&mut app, 4);
-    let unassisted = app
-        .world()
-        .get::<ShipOperations>(ship)
-        .and_then(|ops| ops.active.clone())
-        .expect("the repair opened");
-    assert_eq!(unassisted.verb(), OperationVerb::FieldRepair);
-    assert_eq!(
-        unassisted.state(),
-        HoldState::Holding,
-        "the ship's own team \
-         can still work the spine — they are simply on their own"
+    // The control, on a rung the strike does not touch: recall the one team,
+    // re-designate, and the identical dispatch raises Ladder Depot A's condition
+    // too, because the dispatch reads no workforce.
+    skyway_system_cmd(
+        &mut app,
+        project_phoenix::ship::system_registry::REPAIR_SYSTEM_ID,
+        project_phoenix::messages::SystemControlPayload::RecallExternalRepair,
     );
-    assert_eq!(
-        unassisted.rate().as_percent(),
-        35,
-        "at the unassisted rate the hull's capability authors. The same job on a structure \
-         the strike does not touch runs at {}%, which is the measurement",
-        ProgressRate::FULL.as_percent()
+    let control_before = condition_of(&mut app, DEPOT_A);
+    skyway_move(&mut app, ship, bevy::prelude::Vec3::new(620.0, 0.0, -180.0));
+    run(&mut app, 2);
+    skyway_dispatch_repair(&mut app, ship, DEPOT_A);
+    for _ in 0..(ticks_for_sim_seconds(8.0, dt) / 4) {
+        skyway_move(&mut app, ship, bevy::prelude::Vec3::new(620.0, 0.0, -180.0));
+        run(&mut app, 4);
+    }
+    let control_after = condition_of(&mut app, DEPOT_A);
+    assert!(
+        control_after > control_before,
+        "…and the same team works a rung whose people never walked out at the same rate: \
+         danger reaches the new systems as damage, not as a strike's rate throttle \
+         ({control_before} -> {control_after})"
     );
-
-    // The control, in the same world on the same tick: Ladder Depot A is worked
-    // by people who are not out, so the identical capability runs at full rate.
-    move_ship(&mut app, bevy::prelude::Vec3::new(620.0, 0.0, -180.0));
-    order(&mut app, OperationVerb::FieldRepair, DEPOT_A);
-    run(&mut app, 4);
-    let assisted = app
-        .world()
-        .get::<ShipOperations>(ship)
-        .and_then(|ops| ops.active.clone())
-        .expect("the control repair opened");
-    assert_eq!(assisted.rate(), ProgressRate::FULL);
 }
 
 // ── The science scan (issue #1032, parent #851) ──────────────────────────────
@@ -9225,46 +8233,6 @@ fn skyway_pick(app: &mut bevy::prelude::App, sender: &str, text: &str) {
     );
 }
 
-/// Order one operation on the crew's hull through the queue a scripted
-/// `ctx.effects.transfer(…)` fills — the #1035 test's route, which is where the
-/// reasoning for using it lives.
-fn skyway_order(
-    app: &mut bevy::prelude::App,
-    ship: bevy::prelude::Entity,
-    verb: project_phoenix::operations::OperationVerb,
-    target: &str,
-) -> project_phoenix::operations::OperationHold {
-    use project_phoenix::operations::{PendingOperationStart, ShipOperations};
-    use project_phoenix::world::server::WorldContentRuntime;
-
-    let ship_uuid = app
-        .world()
-        .get::<project_phoenix::entities::spawner::EntityUuid>(ship)
-        .expect("the hull carries a uuid")
-        .0
-        .clone();
-    let target_uuid = app
-        .world()
-        .resource::<WorldContentRuntime>()
-        .name_to_uuid
-        .get(target)
-        .cloned()
-        .unwrap_or_else(|| panic!("{target} is not in this world"));
-    app.world_mut()
-        .resource_mut::<WorldContentRuntime>()
-        .pending_operation_starts
-        .push(PendingOperationStart {
-            ship_uuid,
-            verb,
-            target_uuid,
-        });
-    run(app, 4);
-    app.world()
-        .get::<ShipOperations>(ship)
-        .and_then(|ops| ops.active.clone())
-        .expect("the operation opened")
-}
-
 /// One structure's live condition, read off the entity rather than off the file.
 fn skyway_condition(app: &mut bevy::prelude::App, name: &str) -> f32 {
     use project_phoenix::entities::spawner::EntityName;
@@ -9290,7 +8258,6 @@ fn skyway_condition(app: &mut bevy::prelude::App, name: &str) -> f32 {
 /// below.
 #[test]
 fn the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promises() {
-    use project_phoenix::operations::{HoldState, Ineligibility, OperationVerb, ProgressRate};
     use project_phoenix::world::commitments::CommitmentState;
     use project_phoenix::world::server::WorldContentRuntime;
 
@@ -9420,28 +8387,36 @@ fn the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promise
         );
     }
 
-    // AC3: #1035's two effects, reversed. The transfer that came back refused
-    // in words now stands up, and the head repair comes off the unassisted rate.
-    skyway_move(&mut app, ship, bevy::prelude::Vec3::new(1180.0, 0.0, 300.0));
-    let transfer = skyway_order(&mut app, ship, OperationVerb::Transfer, SKYWAY_DEPOT_B);
-    assert_ne!(
-        transfer.state(),
-        HoldState::Failed(Ineligibility::WorkStopped),
-        "nobody down there is refusing to authorise it now"
-    );
-    assert_eq!(transfer.state(), HoldState::Holding);
-
-    skyway_move(&mut app, ship, bevy::prelude::Vec3::new(200.0, 0.0, 0.0));
-    let repair = skyway_order(
-        &mut app,
-        ship,
-        OperationVerb::FieldRepair,
-        "world.falling_skyway.entity.skyhook.name",
-    );
-    assert_eq!(
-        repair.rate(),
-        ProgressRate::FULL,
-        "assisted again: the people who work the spine are back on it"
+    // ── AC3: the settled strike lets the crew work the corridor (migrated onto
+    // the new systems, issue #1165 S11b) ──
+    //
+    // #1035's old mechanical bite — a transfer refused in words at Ladder B and a
+    // head repair throttled to an "unassisted" rate while the workers were out —
+    // was a property of the operations table, and retired with it when the
+    // destroyer was re-authored onto the crew systems (#1164): the umbilical and
+    // the repair-dispatch read no workforce. What the settlement leaves observable
+    // is a crew free to get on with the work the new systems carry: a repair team
+    // dispatched to the head raises the head's OWN condition (#1161), the
+    // field-repair beat re-pointed onto the crew procedure the mission now flies.
+    let head = "world.falling_skyway.entity.skyhook.name";
+    let station = bevy::prelude::Vec3::new(200.0, 0.0, 0.0);
+    skyway_move(&mut app, ship, station);
+    run(&mut app, 2);
+    let before = condition_of(&mut app, head);
+    skyway_dispatch_repair(&mut app, ship, head);
+    // Hold station and hold the lock so the team is not flown out of range or
+    // recalled by a stolen designation mid-repair.
+    for _ in 0..(ticks_for_sim_seconds(12.0, SKYWAY_DT) / 4) {
+        skyway_move(&mut app, ship, station);
+        let head_uuid = skyway_uuid(&app, head);
+        skyway_set_lock(&mut app, ship, Some(head_uuid));
+        run(&mut app, 4);
+    }
+    let after = condition_of(&mut app, head);
+    assert!(
+        after > before,
+        "a repair team dispatched to the head raises its own condition — the work the \
+         settled strike lets the crew get on with ({before} -> {after})"
     );
 }
 
@@ -9696,13 +8671,9 @@ fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
 
 // ── The radiation storm and the Act-2 rescue (issue #1037, parent #852) ──────
 
-/// `probe_storm.toml` — the world's own header carries the authored timeline
+/// `probe_radiation.toml` - the world's own header carries the authored timeline
 /// every assertion below is read against.
-const STORM_WORLD: &str = "assets/worlds/probe_storm.toml";
-const STORM_TUG: &str = "world.probe_storm.entity.tug_storm.name";
-const STORM_HULK: &str = "world.probe_storm.entity.hulk_storm.name";
-const CLEAR_TUG: &str = "world.probe_storm.entity.tug_clear.name";
-const CLEAR_HULK: &str = "world.probe_storm.entity.hulk_clear.name";
+const STORM_WORLD: &str = "assets/worlds/probe_radiation.toml";
 const STORM_LOITERER: &str = "world.probe_storm.entity.loiterer.name";
 const STORM_CROSSER: &str = "world.probe_storm.entity.crosser.name";
 const STORM_BYSTANDER: &str = "world.probe_storm.entity.bystander.name";
@@ -9729,23 +8700,6 @@ fn region_entity_count(app: &mut bevy::prelude::App) -> usize {
         .count()
 }
 
-/// The named ship's live modifier cache — what a band actually does to a crew's
-/// instruments, read off the ship rather than off the region.
-fn modifiers_of(
-    app: &mut bevy::prelude::App,
-    name: &str,
-) -> project_phoenix::modifiers::ShipModifiers {
-    app.world_mut()
-        .query::<(
-            &project_phoenix::entities::spawner::EntityName,
-            &project_phoenix::modifiers::ShipModifiers,
-        )>()
-        .iter(app.world())
-        .find(|(entity_name, _)| entity_name.0 == name)
-        .map(|(_, modifiers)| modifiers.clone())
-        .unwrap_or_else(|| panic!("{name} carries no modifier cache"))
-}
-
 /// The named ship's remaining hull as a fraction of its maximum.
 fn hull_fraction_of(app: &mut bevy::prelude::App, name: &str) -> f32 {
     app.world_mut()
@@ -9764,223 +8718,6 @@ fn hull_fraction_of(app: &mut bevy::prelude::App, name: &str) -> f32 {
             }
         })
         .unwrap_or_else(|| panic!("{name} carries no hull"))
-}
-
-/// **Issue #1037, AC1–AC3 and AC7.** A radiation band spawned on a named
-/// deadline degrades the crew's instruments, stretches a tow to half rate, and
-/// retires — all of it an authored region template plus an authored schedule,
-/// with no hazard system anywhere.
-///
-/// The comparison is the point: `tug_storm` and `tug_clear` carry the same hull,
-/// the same capability, the same duration, the same payout and the same
-/// interrupt rule, and differ only in which side of a band they are parked on.
-/// A single tow would pass whatever the rate did.
-#[test]
-fn a_storm_band_degrades_instruments_and_halves_a_tow_until_it_is_retired() {
-    use project_phoenix::messages::{FlagKind, ModifierSlot};
-    use project_phoenix::operations::{HoldState, OperationVerb, ProgressRate};
-    use project_phoenix::world::server::WorldContentRuntime;
-
-    let dt = 1.0 / 60.0;
-    let args = storm_args(dt, 34.0);
-    let mut app = build_headless_app(&args).expect("the probe world must load and build");
-
-    // AC2's precondition, and it can only be checked before the deadline fires:
-    // the band is NOT authored into the world, it arrives.
-    run(&mut app, 30);
-    assert_eq!(
-        region_entity_count(&mut app),
-        0,
-        "the storm is spawned by the schedule, not placed by the file — a band that was \
-         already in the world at half a second has nothing to do with a deadline"
-    );
-
-    // Everything below is read tick by tick and asserted on ORDER and STATE,
-    // never on frame arithmetic. `first[…]` is the sim-second each reading first
-    // went true.
-    let mut first: std::collections::BTreeMap<&str, f64> = std::collections::BTreeMap::new();
-    // Was the storm tow ever genuinely running at the band's rate? Without this,
-    // the "returns to full" reading below is satisfied by a tow that was never
-    // slowed at all.
-    let mut storm_tow_seen_slowed = false;
-    // Did the clear tow ever leave full rate? It is the control, and a control
-    // that wobbled would explain the difference by itself.
-    let mut clear_tow_ever_slowed = false;
-    let mut band_seen = false;
-
-    for tick in 0..args.max_ticks {
-        run(&mut app, 1);
-        let sim_t = (tick + 1) as f64 * dt;
-
-        // The TOW band by its own spawned name, not the region count: the dwell
-        // band is up for the whole of this run, so a count would never fall to
-        // zero and the retirement below would never be observed at all.
-        let tow_band = named_entity_present(&mut app, "storm_band_tow");
-        if tow_band {
-            band_seen = true;
-            first.entry("band_present").or_insert(sim_t);
-        } else if band_seen {
-            first.entry("tow_band_retired").or_insert(sim_t);
-        }
-
-        let storm = operations_named(&mut app, STORM_TUG).and_then(|ops| ops.active);
-        let clear = operations_named(&mut app, CLEAR_TUG).and_then(|ops| ops.active);
-        if let Some(hold) = &storm {
-            if hold.rate() == ProgressRate::percent(50) {
-                storm_tow_seen_slowed = true;
-                first.entry("storm_tow_slowed").or_insert(sim_t);
-            }
-            if storm_tow_seen_slowed && hold.rate() == ProgressRate::FULL {
-                first.entry("storm_tow_back_to_full").or_insert(sim_t);
-            }
-            if hold.state() == HoldState::Completed {
-                first.entry("storm_tow_done").or_insert(sim_t);
-            }
-        }
-        if let Some(hold) = &clear {
-            if hold.rate() != ProgressRate::FULL {
-                clear_tow_ever_slowed = true;
-            }
-            if hold.state() == HoldState::Completed {
-                first.entry("clear_tow_done").or_insert(sim_t);
-            }
-        }
-
-        let flags = &app.world().resource::<WorldContentRuntime>().flags;
-        if flags.counter("storm_hulk_recovered") > 0 {
-            first.entry("storm_hulk_recovered").or_insert(sim_t);
-        }
-        if flags.counter("clear_hulk_recovered") > 0 {
-            first.entry("clear_hulk_recovered").or_insert(sim_t);
-        }
-
-        // AC3's other half, the instruments — sampled while the band is up, off
-        // the OPERATOR's own cache, so this is what a console would render
-        // rather than what the region file says.
-        if tow_band && !first.contains_key("degraded_readings") {
-            let inside = modifiers_of(&mut app, STORM_TUG);
-            if inside.get(&ModifierSlot::RadarRange) < 1.0
-                && inside.has_flag(&FlagKind::CommsJammed)
-                && inside.has_flag(&FlagKind::SensorBlind)
-            {
-                first.entry("degraded_readings").or_insert(sim_t);
-            }
-        }
-    }
-
-    let at = |key: &str| -> f64 {
-        *first
-            .get(key)
-            .unwrap_or_else(|| panic!("'{key}' never happened in this run: {first:?}"))
-    };
-
-    // ── AC1/AC2: the band arrived on its named deadline ──
-    let arrived = at("band_present");
-    assert!(
-        (1.5..3.5).contains(&arrived),
-        "the band arrives on the authored `storm_front` deadline (t=2 s), not whenever a \
-         spawner felt like it — got {arrived:.2} s"
-    );
-
-    // ── AC3: inside a band, the crew's picture is worse ──
-    let degraded = at("degraded_readings");
-    assert!(
-        degraded >= arrived && degraded - arrived < 0.5,
-        "radar range, comms and sensors all degrade essentially as the band arrives \
-         ({arrived:.2} s vs {degraded:.2} s)"
-    );
-    let clear_side = modifiers_of(&mut app, CLEAR_TUG);
-    assert!(
-        (clear_side.get(&ModifierSlot::RadarRange) - 1.0).abs() < 1e-6
-            && !clear_side.has_flag(&FlagKind::CommsJammed)
-            && !clear_side.has_flag(&FlagKind::SensorBlind),
-        "…and the control three kilometres away sees perfectly well, which is what makes \
-         the degradation a fact about the BAND"
-    );
-
-    // ── AC3: the tow is stretched, not stopped ──
-    assert!(
-        storm_tow_seen_slowed,
-        "the tow inside the band must run at the 50 % its capability authors for a slow \
-         zone. Seen: {first:?}"
-    );
-    assert!(
-        !clear_tow_ever_slowed,
-        "…and the identical tow in clear space must never leave full rate. If both \
-         wobbled, the difference below is about something else."
-    );
-    let clear_done = at("clear_tow_done");
-    let storm_done = at("storm_tow_done");
-    assert!(
-        storm_done > clear_done + 4.0,
-        "the storm tow finishes MEASURABLY later than its control off the same 12-second \
-         capability: {storm_done:.2} s against {clear_done:.2} s. If these matched, \
-         working in a storm would be free."
-    );
-
-    // ── AC2: retirement, and its live consequence ──
-    let retired = at("tow_band_retired");
-    let back_to_full = at("storm_tow_back_to_full");
-    assert!(
-        retired > arrived,
-        "precondition: the band has to have been there before it can go"
-    );
-    assert!(
-        back_to_full >= retired && back_to_full - retired < 0.5,
-        "when the band is retired the tow returns to full rate at once — with nothing in \
-         the destroy path knowing an operation was running. Retired at {retired:.2} s, \
-         full rate at {back_to_full:.2} s"
-    );
-    assert!(
-        storm_done > retired,
-        "precondition for the reading above: the tow was still running when its band was \
-         retired ({storm_done:.2} s vs {retired:.2} s)"
-    );
-
-    // ── The completion SIGNAL: the payout crosses the authored threshold ──
-    // This is the whole mechanism the Falling Skyway rescue is read through.
-    for (flag, done) in [
-        ("clear_hulk_recovered", "clear_tow_done"),
-        ("storm_hulk_recovered", "storm_tow_done"),
-    ] {
-        let (raised, completed) = (at(flag), at(done));
-        assert!(
-            raised >= completed && raised - completed < 0.2,
-            "a completed tow pays its `condition_on_complete` into the towed craft, the \
-             payout is queued for the one system that owns condition edges, and the craft's \
-             own threshold flag comes up a tick later — which is what a scenario hangs a \
-             handler off, there being no 'operation completed' trigger to use instead. \
-             {done} at {completed:.3} s, {flag} at {raised:.3} s"
-        );
-    }
-    let (storm_condition, clear_condition) = (
-        condition_of(&mut app, STORM_HULK),
-        condition_of(&mut app, CLEAR_HULK),
-    );
-    assert!(
-        storm_condition > 70.0 && clear_condition > 70.0,
-        "both hulks are carried from 30 of 100 to 75 by the authored 45-point payout — got \
-         {storm_condition} and {clear_condition}"
-    );
-
-    // ── The group is SILENT while the other band is still up ──
-    // One of two is not the whole storm, and a group that fired here would
-    // satisfy a fires-at-the-end assertion just as well as the real thing.
-    assert_eq!(
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .flags
-            .counter("sweep_complete"),
-        0,
-        "the tow band has been retired and the dwell band has not — the sweep is not over, \
-         and `on_all_destroyed` must not have fired"
-    );
-    assert_eq!(
-        region_entity_count(&mut app),
-        1,
-        "exactly the one band that has not reached its own retirement is left"
-    );
-    assert_eq!(hold_of(&mut app, STORM_TUG).verb(), OperationVerb::Tow);
 }
 
 /// **Issue #1037, AC2 and AC3's tuning target.** A band is survivable to cross
@@ -10408,10 +9145,6 @@ fn falling_skyway_act_2_sweeps_the_corridor_and_fails_the_rescue_nobody_ran() {
 #[test]
 fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     use project_phoenix::core::messages::ObjectiveStatus;
-    use project_phoenix::operations::{
-        HoldState, OperationVerb, PendingOperationStart, ProgressRate, ShipOperations,
-    };
-    use project_phoenix::ship::state::ShipPhysics;
     use project_phoenix::world::server::WorldContentRuntime;
 
     let dt = 1.0 / 30.0;
@@ -10427,33 +9160,14 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
     run(&mut app, 10);
 
-    // The crew's hull, found by its capability table: the player row carries no
-    // authored name, because its config comes from the lobby-selected template
-    // wholesale.
-    let (ship, ship_uuid) = app
-        .world_mut()
-        .query::<(
-            bevy::prelude::Entity,
-            &project_phoenix::entities::spawner::EntityUuid,
-            &ShipOperations,
-        )>()
-        .iter(app.world())
-        .map(|(entity, uuid, _)| (entity, uuid.0.clone()))
-        .next()
-        .expect("the destroyer authors an [operations] table");
-    let lyra_uuid = app
-        .world()
-        .resource::<WorldContentRuntime>()
-        .name_to_uuid
-        .get(SKYWAY_LYRA)
-        .cloned()
-        .expect("the Lyra is an authored entity of this world");
+    // The crew's hull. The player row carries no authored name, because its config
+    // comes from the lobby-selected template wholesale — found by the LocalShip
+    // marker rather than by an [operations] table it no longer authors (#1165).
+    let (ship, _ship_uuid) = skyway_crew_hull(&mut app);
 
     // The crew set off with ten seconds to spare before the first band — early
     // enough to bank real progress in clear air, late enough that the weather
-    // catches the tow mid-flight, which is the case the act is actually about.
-    // A crew who waited for the band could not finish at all: 24 authored
-    // seconds at half rate is 48, and by then the deadline is 47 away.
+    // catches the rescue mid-flight, which is the case the act is actually about.
     let start_at = band_at - 10.0;
     assert!(
         start_at > front_at,
@@ -10461,53 +9175,45 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
          ({front_at} s, {start_at} s)"
     );
     let mut opened = false;
-    let mut rate_before_band: Option<ProgressRate> = None;
-    let mut rate_under_band: Option<ProgressRate> = None;
-    let mut completed_at: Option<f64> = None;
     let mut recovered_at: Option<f64> = None;
 
+    // The berth the crew hold the rescue from, captured once when they set off
+    // and held by hand every tick — the honest analogue of helm keeping station
+    // rather than flying the mission's own Reach directives off the job. The beam
+    // draws the Lyra onto the rig, so a fixed berth keeps the whole thing out of
+    // the bands rather than dragging her through them.
+    let mut station: Option<bevy::prelude::Vec3> = None;
     for tick in 0..args.max_ticks {
         let sim_t = tick as f64 * dt;
         if !opened && sim_t >= start_at {
-            // Alongside. Helm's job, done by hand here for the reason every
-            // operations test in this file moves a ship by hand: this is a test
-            // of the rescue, not of station-keeping.
             let drift = position_of(&mut app, SKYWAY_LYRA);
-            let mut physics = app
-                .world_mut()
-                .get_mut::<ShipPhysics>(ship)
-                .expect("the crew's hull is a ship");
-            physics.x = drift.x + 40.0;
-            physics.y = drift.y;
-            physics.z = drift.z + 40.0;
-            app.world_mut()
-                .resource_mut::<WorldContentRuntime>()
-                .pending_operation_starts
-                .push(PendingOperationStart {
-                    ship_uuid: ship_uuid.clone(),
-                    verb: OperationVerb::Tow,
-                    target_uuid: lyra_uuid.clone(),
-                });
+            station = Some(bevy::prelude::Vec3::new(
+                drift.x + 40.0,
+                drift.y,
+                drift.z + 40.0,
+            ));
+            skyway_move(&mut app, ship, station.unwrap());
+            skyway_engage_tractor(&mut app, ship, SKYWAY_LYRA);
             opened = true;
+        }
+        // Hold station and hold the lock on her while the beam recovers her, so
+        // nothing upstream flies the hull off the job or steals the designation.
+        if let Some(station) = station {
+            skyway_move(&mut app, ship, station);
+            if recovered_at.is_none() {
+                let lyra = skyway_uuid(&app, SKYWAY_LYRA);
+                skyway_set_lock(&mut app, ship, Some(lyra));
+            }
         }
         run(&mut app, 1);
         let sim_t = (tick + 1) as f64 * dt;
 
-        if let Some(hold) = app
-            .world()
-            .get::<ShipOperations>(ship)
-            .and_then(|ops| ops.active.clone())
-        {
-            if sim_t > start_at + 1.0 && sim_t < band_at - 1.0 {
-                rate_before_band = Some(hold.rate());
-            }
-            if sim_t > band_at + 1.0 && !hold.is_settled() {
-                rate_under_band = Some(hold.rate());
-            }
-            if hold.state() == HoldState::Completed && completed_at.is_none() {
-                completed_at = Some(sim_t);
-            }
-        }
+        // What a completed hold LEAVES BEHIND is the recovered condition crossing
+        // her own line — the flag rises off it exactly as it rose off the old
+        // tow's payout, which is the only completion signal a scenario ever read.
+        // Once she is under control the crew stand the beam down and pull the
+        // hull well clear of her, so a parked destroyer is not sitting on the
+        // craft it just saved.
         if recovered_at.is_none()
             && app
                 .world()
@@ -10517,42 +9223,26 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
                 > 0
         {
             recovered_at = Some(sim_t);
+            skyway_release_tractor(&mut app);
+            station = station.map(|s| bevy::prelude::Vec3::new(s.x + 900.0, s.y, s.z));
         }
     }
 
-    // ── AC3: the storm made the work cost more, without stopping it ──
-    assert_eq!(
-        rate_before_band,
-        Some(ProgressRate::FULL),
-        "a tow run in clear air runs at full rate — the crew who set off early are the \
-         crew the weather has not reached yet"
-    );
-    assert_eq!(
-        rate_under_band,
-        Some(ProgressRate::percent(50)),
-        "…and once the band is on top of them the SAME tow runs at the 50 % the hull's \
-         capability authors for a slow zone. Stretched, not stopped."
-    );
-
-    // ── AC5: it completes, and the completion is what the mission reads ──
-    let done = completed_at.expect(
-        "a tow started twenty-five seconds before the first band must COMPLETE inside \
-         the rescue's deadline — if it cannot, the act is unwinnable rather than hard",
-    );
-    let recovered = recovered_at.expect("…and its payout must raise the craft's own flag");
-    assert!(
-        done < clear_by,
-        "the rescue lands before its visible deadline ({done:.1} s against {clear_by} s)"
+    // ── AC5: the rescue lands inside the deadline, and the mission reads it ──
+    let recovered = recovered_at.expect(
+        "a rescue begun ten seconds before the first band must LAND inside the rescue's \
+         deadline — if it cannot, the act is unwinnable rather than hard",
     );
     assert!(
-        recovered >= done && recovered - done < 0.5,
-        "the flag comes up off the completion's payout, a tick behind it ({done:.1} s, \
-         {recovered:.1} s)"
+        recovered < clear_by,
+        "the rescue lands before its visible deadline ({recovered:.1} s against {clear_by} s)"
     );
     assert!(
         condition_of(&mut app, SKYWAY_LYRA) > 50.0,
-        "…because the authored 45-point payout carried her over her own half-way line \
-         from 30, which is what `skyway_lyra_under_control` means"
+        "…because the tractor's arrest-decline recovered her from 30 back over her own \
+         half-way line, which is what `skyway_lyra_under_control` means. The band does not \
+         stop it: danger reaches the new systems as damage, not as a rate throttle, and no \
+         band sits on the beam this rescue is run inside"
     );
 
     // ── AC5/AC6: she is still there, and the record says so ──
@@ -12068,33 +10758,139 @@ fn skyway_crew_hull(app: &mut bevy::prelude::App) -> (bevy::prelude::Entity, Str
     (ship, uuid)
 }
 
-/// Queue one operation on the crew's hull through the queue a scripted
-/// `ctx.effects.stabilise(…)` fills — the route every operations test in this
-/// file uses, and the only place range, power and capability are decided.
-fn skyway_start_op(
-    app: &mut bevy::prelude::App,
-    ship_uuid: &str,
-    verb: project_phoenix::operations::OperationVerb,
-    target: &str,
-) {
-    use project_phoenix::operations::PendingOperationStart;
-    use project_phoenix::world::server::WorldContentRuntime;
+/// The `ai:` token every migrated Falling Skyway crew action is sent under
+/// (issue #1165 S11b). Unregistered, so admission routes it to the LocalShip —
+/// the crew's destroyer — and authorises it because that hull is fully
+/// backfilled in a headless run, so its engineering-owned tractor and repair
+/// systems are AI-controlled. The same admission seam a human tenure token
+/// takes from the other side (AGENTS.md rule 6), and the same one #1162's
+/// operate hosts use.
+const SKYWAY_OPS_TOKEN: &str = "ai:skyway-ops";
 
-    let target_uuid = app
-        .world()
-        .resource::<WorldContentRuntime>()
+/// Resolve a world entity NAME to its minted uuid.
+fn skyway_uuid(app: &bevy::prelude::App, name: &str) -> String {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
         .name_to_uuid
-        .get(target)
+        .get(name)
         .cloned()
-        .unwrap_or_else(|| panic!("{target} is not in this world"));
+        .unwrap_or_else(|| panic!("{name} is not in this world"))
+}
+
+/// Set (or clear) the crew hull's ONE Tactical lock, the way a human at Tactical
+/// would with a `SetTarget` — the lock the tractor and the repair-dispatch both
+/// read to decide what they act on (issue #1165 S11b).
+///
+/// Seats a PERSON at the tactical radar first (`ControlSource::Human`), which is
+/// setup rather than cheating and is the whole reason a crew who WORK the beat
+/// are told apart from a backfilled bridge that does not: the destroyer is a
+/// combat hull, so its backfilled tactical AI is the sole writer of the lock and
+/// clears any designation that is not an active-combat or operate-directive
+/// target — a civilian derelict among them. A crew doing the rescue have a hand
+/// on the radar; dropping the AI policy off just the tactical-radar is the
+/// closest this harness has to seating them, exactly as `skyway_at_act_two`
+/// seats a person at Comms. The tractor and repair stay AI-backfilled, so the
+/// `ai:` crew commands below are still admitted through the shared seam
+/// (AGENTS.md rule 6). The neglect tests seat nobody, so their backfilled bridge
+/// clears the lock and works no beat — the honest unattended default.
+fn skyway_set_lock(
+    app: &mut bevy::prelude::App,
+    ship: bevy::prelude::Entity,
+    uuid: Option<String>,
+) {
+    if let Some(mut sources) = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship_plugin::ShipSystemControlSources>(ship)
+    {
+        use project_phoenix::ship::system_registry as reg;
+        // Seat a person at the WHOLE Tactical station — the radar AND the weapon
+        // banks. Just the radar is not enough: a crew who lock a friendly
+        // structure to work it do not open fire on it, but an AI phaser bank left
+        // on a human-designated lock will, and a mixed-rating hull (human radar,
+        // AI banks) is exactly that shape. Seating the banks human stands the guns
+        // down while the crew hold the beam.
+        for sysid in [
+            reg::tactical_radar_system_id(),
+            reg::phaser_fore_system_id(),
+            reg::phaser_aft_system_id(),
+            reg::torpedo_magazine_system_id(),
+            reg::torpedo_tube_fore_port_system_id(),
+            reg::torpedo_tube_fore_starboard_system_id(),
+            reg::torpedo_tube_aft_system_id(),
+        ] {
+            sources.0.set(
+                sysid,
+                project_phoenix::ship::control_source::ControlSource::Human,
+            );
+        }
+    }
     app.world_mut()
-        .resource_mut::<WorldContentRuntime>()
-        .pending_operation_starts
-        .push(PendingOperationStart {
-            ship_uuid: ship_uuid.to_string(),
-            verb,
-            target_uuid,
+        .entity_mut(ship)
+        .insert(project_phoenix::console::weapons::beam::TacticalRadarSelection(uuid));
+}
+
+/// Send one `ControlSystem` command to the crew hull through the real admission
+/// path and give it the ticks to arrive — drained in `PreUpdate`, admitted
+/// before `SimSet::Input`, consumed the same tick (issue #1165 S11b).
+fn skyway_system_cmd(
+    app: &mut bevy::prelude::App,
+    system_id: &str,
+    payload: project_phoenix::messages::SystemControlPayload,
+) {
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemId};
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: SKYWAY_OPS_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId(system_id.into()),
+                payload,
+            },
         });
+    run(app, 2);
+}
+
+/// The crew action that REPLACES a `tow`/`stabilise` operation (issue #1165
+/// S11b): lock the target and engage the tractor, so the target's own
+/// held-response (#1158) arrests its decline and recovers it across the
+/// threshold the scenario already reads. The new-system mirror of the old
+/// `skyway_start_op(Tow|Stabilise, …)` — the crew set off from close aboard and
+/// hold, and what a completed hold LEAVES BEHIND is the recovered condition.
+fn skyway_engage_tractor(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity, target: &str) {
+    use project_phoenix::messages::SystemControlPayload;
+    let uuid = skyway_uuid(app, target);
+    skyway_set_lock(app, ship, Some(uuid));
+    skyway_system_cmd(
+        app,
+        project_phoenix::ship::system_registry::TRACTOR_SYSTEM_ID,
+        SystemControlPayload::EngageTractor,
+    );
+}
+
+/// Stand the tractor hold down (issue #1165 S11b), so the crew can take the next
+/// craft on the line.
+fn skyway_release_tractor(app: &mut bevy::prelude::App) {
+    use project_phoenix::messages::SystemControlPayload;
+    skyway_system_cmd(
+        app,
+        project_phoenix::ship::system_registry::TRACTOR_SYSTEM_ID,
+        SystemControlPayload::ReleaseTractor,
+    );
+}
+
+/// The crew action that REPLACES a `field_repair` operation (issue #1165 S11b):
+/// lock the structure and dispatch a repair team, which raises the target's own
+/// condition track (#1161) across the threshold the scenario reads.
+fn skyway_dispatch_repair(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity, target: &str) {
+    use project_phoenix::messages::SystemControlPayload;
+    let uuid = skyway_uuid(app, target);
+    skyway_set_lock(app, ship, Some(uuid));
+    skyway_system_cmd(
+        app,
+        project_phoenix::ship::system_registry::REPAIR_SYSTEM_ID,
+        SystemControlPayload::DispatchExternalRepair,
+    );
 }
 
 /// The floor crossing the world's authored strain rate reaches, derived from the
@@ -12371,17 +11167,20 @@ fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_ep
     );
 }
 
-/// **Issue #1040, AC3.** THE PLAYTEST. The final warning window is long enough
-/// that a crew who react to the LAST rung still save the structure — driven on
-/// the tick that rung actually fires, not at a time this test knows.
+/// **Issue #1040, AC3 — migrated onto the tractor (issue #1165 S11b).** THE
+/// PLAYTEST. The final warning window is long enough that a crew who react to the
+/// LAST rung still save the structure — driven on the tick that rung actually
+/// fires, not at a time this test knows.
 ///
-/// The margin it measures is the tuned value the world file records: the
-/// stabilise is authored at 18 seconds against a 30-second window, and what is
-/// left over is what a crew get to notice, decide and give the order in.
+/// The save is now the crew coupling the head and holding it: the tractor's
+/// arrest-decline (#1158) recovers the head's condition NET of the 0.2 pt/s
+/// strain, and the recovered condition crossing the top rung's 42 % restore line
+/// IS the save landing — the same reading the old lump-payout stabilise left
+/// behind. What the margin measures is unchanged: how much room the last warning
+/// leaves a crew to notice, decide and give the order in.
 #[test]
 fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
     use project_phoenix::core::messages::ObjectiveStatus;
-    use project_phoenix::operations::{HoldState, OperationVerb, ShipOperations};
     use project_phoenix::world::server::WorldContentRuntime;
 
     let dt = SKYWAY_DT;
@@ -12392,9 +11191,9 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
     let args = skyway_args(dt, projected + 20.0);
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
     run(&mut app, 10);
-    let (ship, ship_uuid) = skyway_crew_hull(&mut app);
+    let (ship, _ship_uuid) = skyway_crew_hull(&mut app);
     // Where Act 3's own approach objective sends a helm, and 247 units off the
-    // head — inside the destroyer's authored 500-unit stabilise range.
+    // head — inside the destroyer's authored 500-unit tractor range.
     let station = bevy::prelude::Vec3::new(180.0, 0.0, 170.0);
 
     let mut ordered_at: Option<f64> = None;
@@ -12403,9 +11202,12 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
     for tick in 0..args.max_ticks {
         // Helm holding station, done by hand for the reason every operations
         // test in this file moves a ship by hand: this is a test of the warning
-        // window, not of station-keeping.
+        // window, not of station-keeping. The lock is re-asserted with the hold
+        // so nothing upstream steals the beam's designation mid-recovery.
         if ordered_at.is_some() && completed_at.is_none() {
             skyway_move(&mut app, ship, station);
+            let head = skyway_uuid(&app, SKYWAY_HEAD);
+            skyway_set_lock(&mut app, ship, Some(head));
         }
         run(&mut app, 1);
         let sim_t = (tick + 1) as f64 * dt;
@@ -12414,19 +11216,15 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
         // test restates — a crew react to the warning, so the test does too.
         if ordered_at.is_none() && skyway_flag(&app, "a3_warning_three") > 0 {
             skyway_move(&mut app, ship, station);
-            skyway_start_op(&mut app, &ship_uuid, OperationVerb::Stabilise, SKYWAY_HEAD);
+            skyway_engage_tractor(&mut app, ship, SKYWAY_HEAD);
             ordered_at = Some(sim_t);
         }
-        if completed_at.is_none() {
-            if let Some(hold) = app
-                .world()
-                .get::<ShipOperations>(ship)
-                .and_then(|ops| ops.active.clone())
-            {
-                if hold.state() == HoldState::Completed {
-                    completed_at = Some(sim_t);
-                }
-            }
+        // The save LANDS when the head's condition, recovered under the beam,
+        // crosses the top rung and `head_holds` stands the watch down — the
+        // scenario's own "the head held" signal, read the way the old completed
+        // stabilise was.
+        if completed_at.is_none() && skyway_flag(&app, "a3_head_held") > 0 {
+            completed_at = Some(sim_t);
         }
     }
 
@@ -12451,8 +11249,8 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
     );
     assert!(
         condition_of(&mut app, SKYWAY_HEAD) >= 42.0,
-        "because the authored 22-point payout carried the head back over the FIRST rung's \
-         42 % restore line from the last one — one run stands the whole ladder down, which \
+        "because the tractor's arrest-decline carried the head back over the FIRST rung's \
+         42 % restore line from the last one — one hold stands the whole ladder down, which \
          is what makes a late reaction a save rather than a stay of execution"
     );
 
@@ -12503,13 +11301,13 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
 /// a crew who lose the head and then go and do the work pull both craft out of
 /// the debris inside the epilogue's own window.
 ///
-/// Both rescues run through the tow the Lyra's did, against condition thresholds
-/// the payout is sized to cross — so the epilogue reuses the act before it
-/// rather than inventing a second rescue mechanic.
+/// Both rescues run through the tractor the Lyra's tow migrated onto (issue
+/// #1165 S11b), against the same condition thresholds the recovery is sized to
+/// cross — so the epilogue reuses the act before it rather than inventing a
+/// second rescue mechanic.
 #[test]
 fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft() {
     use project_phoenix::core::messages::ObjectiveStatus;
-    use project_phoenix::operations::{HoldState, OperationVerb, ShipOperations};
     use project_phoenix::world::server::WorldContentRuntime;
 
     let dt = SKYWAY_DT;
@@ -12520,7 +11318,16 @@ fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft()
     let args = skyway_args(dt, projected + 100.0);
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
     run(&mut app, 10);
-    let (ship, ship_uuid) = skyway_crew_hull(&mut app);
+    let (ship, _ship_uuid) = skyway_crew_hull(&mut app);
+
+    // Each craft's own "secured" flag, the threshold crossing the tractor lands.
+    let secured_flag = |craft: &str| -> &'static str {
+        if craft == SKYWAY_LIGHTER {
+            "skyway_lighter_secured"
+        } else {
+            "skyway_pod_secured"
+        }
+    };
 
     // The two craft, taken in the order the collapse handler spawns them.
     let mut queue = vec![SKYWAY_LIGHTER, SKYWAY_POD];
@@ -12528,9 +11335,10 @@ fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft()
     let mut recovered: Vec<(String, f64)> = Vec::new();
 
     for tick in 0..args.max_ticks {
-        // Alongside whatever is on the line, every tick — a tow is run from
-        // close aboard and the crew are holding it. Done by hand for the reason
-        // every operations test in this file moves a ship by hand.
+        // Alongside whatever is on the line, every tick — the craft is held on
+        // the beam from close aboard, with the lock re-asserted so nothing
+        // upstream steals it. Done by hand for the reason every operations test
+        // in this file moves a ship by hand.
         if let Some(target) = towing {
             let alongside = position_of(&mut app, target);
             skyway_move(
@@ -12538,40 +11346,41 @@ fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft()
                 ship,
                 bevy::prelude::Vec3::new(alongside.x + 40.0, alongside.y, alongside.z + 40.0),
             );
+            let uuid = skyway_uuid(&app, target);
+            skyway_set_lock(&mut app, ship, Some(uuid));
         }
         run(&mut app, 1);
         let sim_t = (tick + 1) as f64 * dt;
 
-        let settled = app
-            .world()
-            .get::<ShipOperations>(ship)
-            .and_then(|ops| ops.active.clone())
-            .map(|hold| hold.state() == HoldState::Completed)
-            .unwrap_or(true);
+        // The craft on the line is recovered when its own secured flag rises off
+        // the condition the tractor's arrest-decline recovered it to — the only
+        // thing a completed hold leaves behind, read the way the old tow was.
+        if let Some(target) = towing {
+            if skyway_flag(&app, secured_flag(target)) > 0 {
+                recovered.push((target.to_string(), sim_t));
+                queue.remove(0);
+                towing = None;
+                skyway_release_tractor(&mut app);
+            }
+        }
 
         // Take the next craft the moment the line is free and there is one in
         // the world to take.
-        if settled {
+        if towing.is_none() {
             if let Some(next) = queue.first().copied() {
                 if named_entity_present(&mut app, next) {
-                    if towing == Some(next) {
-                        recovered.push((next.to_string(), sim_t));
-                        queue.remove(0);
-                        towing = None;
-                    } else {
-                        let alongside = position_of(&mut app, next);
-                        skyway_move(
-                            &mut app,
-                            ship,
-                            bevy::prelude::Vec3::new(
-                                alongside.x + 40.0,
-                                alongside.y,
-                                alongside.z + 40.0,
-                            ),
-                        );
-                        skyway_start_op(&mut app, &ship_uuid, OperationVerb::Tow, next);
-                        towing = Some(next);
-                    }
+                    let alongside = position_of(&mut app, next);
+                    skyway_move(
+                        &mut app,
+                        ship,
+                        bevy::prelude::Vec3::new(
+                            alongside.x + 40.0,
+                            alongside.y,
+                            alongside.z + 40.0,
+                        ),
+                    );
+                    skyway_engage_tractor(&mut app, ship, next);
+                    towing = Some(next);
                 }
             }
         }
@@ -12714,22 +11523,23 @@ fn falling_skyway_losing_the_ship_is_a_hard_fail_and_writes_none_of_the_head_s_f
 
 // ── The collapse mechanism, end to end (issue #1040) ─────────────────────────
 
-const PROBE_COLLAPSE_WORLD: &str = "assets/worlds/probe_collapse.toml";
+const PROBE_COLLAPSE_WORLD: &str = "assets/worlds/probe_collapse_min.toml";
 const PROBE_HOOK_SAVED: &str = "world.probe_collapse.entity.hook_saved.name";
 const PROBE_HOOK_LOST: &str = "world.probe_collapse.entity.hook_lost.name";
 const PROBE_SURVIVOR: &str = "world.probe_collapse.entity.survivor.name";
 
 /// **Issue #1040, AC1/AC2/AC3/AC5.** The whole collapse mechanism in one
 /// twenty-five-second run: a ladder of authored thresholds warns three times as
-/// two identical heads walk down toward their floor, the one with a tender that
-/// ACTS ON THE THIRD WARNING is saved, the one without it is taken out of the
-/// world by `destroy_entity`, and the removal branches into a rescue that
-/// completes.
+/// two identical heads walk down toward their floor, the one whose third warning
+/// SCHEDULES A REPAIR is saved, the one without it is taken out of the world by
+/// `destroy_entity`, and the removal branches into a rescue that completes.
 ///
 /// The two heads are the assertion. They are the same template on the same
 /// strain beat with the same ladder shape, so nothing about their fates can be
-/// coincidence — the only thing that differs is one `ctx.effects.stabilise(…)`
-/// on one `on_flag_cleared` handler.
+/// coincidence — the only thing that differs is one scheduled
+/// `ctx.effects.repair_infrastructure(…)` on one `on_flag_cleared` handler
+/// (issue #1164 re-expressed the old stabilise operation as this scripted payout,
+/// so the probe needs no operation verb).
 #[test]
 fn a_condition_floor_collapses_a_structure_and_a_reaction_inside_the_last_window_prevents_it() {
     use project_phoenix::core::messages::ObjectiveStatus;
@@ -12824,7 +11634,7 @@ fn a_condition_floor_collapses_a_structure_and_a_reaction_inside_the_last_window
     assert!(
         (at("saved_warning_three") - at("lost_warning_three")).abs() < 0.1,
         "the two heads reach their last warning together: they are the same template on \
-         the same beat, and everything after this point is the tender"
+         the same beat, and everything after this point is the scheduled repair"
     );
     assert_eq!(
         (saved_at_warning_three, lost_at_warning_three),
@@ -12836,8 +11646,8 @@ fn a_condition_floor_collapses_a_structure_and_a_reaction_inside_the_last_window
     // ── AC3: the reaction lands inside the final window and prevents it ──
     assert!(
         (at("saved_op_started") - at("saved_warning_three")).abs() < 0.1,
-        "the tender opens its stabilise ON the third warning — the event a crew would be \
-         reacting to, not a second this file also has to keep in step"
+        "the saved side SCHEDULES ITS REPAIR ON the third warning — the event a crew would \
+         be reacting to, not a second this file also has to keep in step"
     );
     let stood_down = at("saved_stood_down");
     let floor = at("lost_floor_crossed");
@@ -12900,8 +11710,8 @@ fn a_condition_floor_collapses_a_structure_and_a_reaction_inside_the_last_window
     );
     assert!(
         at("survivor_recovered") > at("rescue_started"),
-        "the recovery is read off the tow's own payout crossing the craft's authored \
-         threshold — the only completion signal an operation leaves behind"
+        "the recovery is read off the scheduled repair's payout crossing the craft's \
+         authored threshold — the only completion signal the scripted rescue leaves behind"
     );
     assert!(
         at("epilogue_resolved") > at("survivor_recovered"),
@@ -13023,115 +11833,72 @@ fn window_panel_rows(app: &mut bevy::prelude::App) -> Vec<(String, i64)> {
         .unwrap_or_default()
 }
 
-/// Run one external operation on `target` from alongside, holding station for
-/// `seconds` — long enough that the authored duration has expired and the payout
-/// has landed.
+/// Dispatch a repair team onto `target` from alongside, holding station long
+/// enough for the target's own condition track to recover across the threshold
+/// the scenario reads (issue #1165 S11b — the replacement for the retired
+/// `field_repair` operation).
 ///
 /// The ship is pinned by hand for the length of the job, and that is the honest
-/// analogue of helm holding position rather than a shortcut: an operation
-/// re-tests its authored range every tick, and the mission's own Reach
-/// directives would otherwise fly the hull off the job mid-run. Which is helm's
-/// problem, and not this test's subject.
-fn window_operation(
+/// analogue of helm holding position rather than a shortcut: the dispatch
+/// re-tests its authored range every tick, and the mission's own Reach directives
+/// would otherwise fly the hull off the job mid-run. Which is helm's problem, and
+/// not this test's subject. `_ship_uuid` is carried for call-site parity with the
+/// old operations helper; the new-system command routes through admission by the
+/// LocalShip marker.
+fn window_field_repair(
     app: &mut bevy::prelude::App,
     ship: bevy::prelude::Entity,
-    ship_uuid: &str,
-    verb: project_phoenix::operations::OperationVerb,
+    _ship_uuid: &str,
     target: &str,
     alongside: bevy::prelude::Vec3,
-    seconds: f64,
 ) {
-    use project_phoenix::operations::PendingOperationStart;
-    use project_phoenix::world::server::WorldContentRuntime;
-
-    let target_uuid = app
-        .world()
-        .resource::<WorldContentRuntime>()
-        .name_to_uuid
-        .get(target)
-        .cloned()
-        .unwrap_or_else(|| panic!("{target} is not in this world"));
     skyway_move(app, ship, alongside);
     run(app, 2);
-    app.world_mut()
-        .resource_mut::<WorldContentRuntime>()
-        .pending_operation_starts
-        .push(PendingOperationStart {
-            ship_uuid: ship_uuid.to_string(),
-            verb,
-            target_uuid,
-        });
-    let blocks = ticks_for_sim_seconds(seconds, SKYWAY_DT) / 10;
+    skyway_dispatch_repair(app, ship, target);
+    // ~34 sim-seconds of the team working the rung; at the destroyer's authored
+    // 0.5 pt/s that is +17, enough to carry Ladder B from 34 over its 45 %
+    // restore line. The lock is re-asserted every block so the team is not
+    // recalled by a stolen designation.
+    let blocks = ticks_for_sim_seconds(34.0, SKYWAY_DT) / 10;
     for _ in 0..blocks {
         skyway_move(app, ship, alongside);
+        let uuid = skyway_uuid(app, target);
+        skyway_set_lock(app, ship, Some(uuid));
         run(app, 10);
     }
 }
 
-/// A 30-second field repair on `target`, from alongside.
-fn window_field_repair(
-    app: &mut bevy::prelude::App,
-    ship: bevy::prelude::Entity,
-    ship_uuid: &str,
-    target: &str,
-    alongside: bevy::prelude::Vec3,
-) {
-    window_operation(
-        app,
-        ship,
-        ship_uuid,
-        project_phoenix::operations::OperationVerb::FieldRepair,
-        target,
-        alongside,
-        34.0,
-    );
-}
-
-/// Catch the tether: one 18-second stabilise on the skyhook head, run from the
-/// station-keeping berth #1040's own approach objective points helm at.
-///
-/// This is the Act-3 work a crew who are paying attention do, and it is what
-/// keeps the head CERTIFIED as well as standing — a stabilise pays a lump into
-/// the condition track, and the transfer window reads that track's lift
-/// threshold. Unlike a field repair it carries no `work_stoppage` interrupt, so
-/// it pays in full whether or not the strike was ever settled.
-fn window_stabilise_head(
-    app: &mut bevy::prelude::App,
-    ship: bevy::prelude::Entity,
-    ship_uuid: &str,
-) {
-    window_operation(
-        app,
-        ship,
-        ship_uuid,
-        project_phoenix::operations::OperationVerb::Stabilise,
-        WINDOW_HEAD,
-        WINDOW_STATION,
-        22.0,
-    );
-}
-
 /// Hold the head up until the tether's projection has fallen due, then leave the
-/// ship on station.
+/// ship on station (issue #1165 S11b).
 ///
 /// The strain #1040 authors walks the head down 2 points every 10 seconds for as
-/// long as the watch is open, and it opens the moment the storm clears. A crew
-/// who want anything to lift through the transfer window have to catch it more
-/// than once — a single stabilise buys about a hundred seconds before the head
-/// falls back under its lift line — so this runs them until the projection
-/// resolves the act, which is what a crew who never stopped watching look like.
+/// long as the watch is open, and it opens the moment the storm clears. The crew
+/// keep it certified with a repair-team DISPATCH to the spine (#1161, the
+/// field-repair beat) rather than the tractor: a skyhook head is a fixed
+/// structure, and a dispatched team raises its OWN condition track IN PLACE,
+/// where the tractor's arrest-decline would haul the head onto the destroyer's
+/// rig — a crew do not park a station head alongside their own hull for two
+/// minutes. The team's authored rate outpaces the 0.2 pt/s strain, so one
+/// dispatch held to the projection carries the head back over its lift line and
+/// keeps it there — the crew who never stopped watching. (The Act-3 collapse
+/// SAVE, by contrast, is the fast tractor stabilise: it has to cross the top rung
+/// inside the last warning's twelve-second window, which the slower dispatch
+/// could not.)
 fn window_hold_the_tether(
     app: &mut bevy::prelude::App,
     ship: bevy::prelude::Entity,
-    ship_uuid: &str,
+    _ship_uuid: &str,
     until: f64,
 ) {
-    // The last one has to LAND before the projection: an 18-second job started
-    // at t-10 is a job the act resolves out from under.
-    while window_now(app) < until - 24.0 {
-        window_stabilise_head(app, ship, ship_uuid);
+    skyway_move(app, ship, WINDOW_STATION);
+    run(app, 2);
+    skyway_dispatch_repair(app, ship, WINDOW_HEAD);
+    while window_now(app) < until + 3.0 {
+        skyway_move(app, ship, WINDOW_STATION);
+        let head = skyway_uuid(app, WINDOW_HEAD);
+        skyway_set_lock(app, ship, Some(head));
+        run(app, 10);
     }
-    window_run_to(app, until + 3.0);
     skyway_move(app, ship, WINDOW_STATION);
 }
 
@@ -13219,7 +11986,7 @@ fn window_open_time(app: &mut bevy::prelude::App, give_up_at: f64) -> f64 {
 /// crew can REACH that ceiling; this one proves reaching it is not enough.
 #[test]
 fn no_state_of_falling_skyway_covers_all_three_claimants() {
-    use project_phoenix::operations::{OperationVerb, ShipOperations};
+    use project_phoenix::infrastructure::InfrastructureCondition;
 
     let mut app = build_headless_app(&skyway_args(SKYWAY_DT, 2.0)).expect("the world must load");
     run(&mut app, 30);
@@ -13250,24 +12017,19 @@ fn no_state_of_falling_skyway_covers_all_three_claimants() {
     );
 
     // …and that ceiling is a CEILING rather than today's reading, because
-    // nothing the crew fly can put anything into a rung. A real transfer moves
-    // an authored `[transfer]` cargo between two ends carrying the same capacity
-    // id, and the mission's hull authors none — its `transfer` verb stands a
-    // berth up, it does not deliver into one.
+    // nothing the crew fly can put anything into a rung. A real transfer moves an
+    // authored capacity between two ends carrying the same id (the umbilical,
+    // #1160), and the mission's hull authors NO `[infrastructure]` ledger of its
+    // own — deliberately (#1164): a condition or capacity track on the crew's own
+    // hull would fold into every world it flies. With no cargo ledger to draw
+    // from, its umbilical delivers nothing into a rung; standing a transfer up at
+    // a structure moves no capacity, exactly as the retired `transfer` verb did.
     let (ship, _) = window_ship(&mut app);
-    let transfer_terms_exist = app
-        .world()
-        .get::<ShipOperations>(ship)
-        .expect("the destroyer authors an [operations] table")
-        .capabilities
-        .capabilities
-        .iter()
-        .any(|c| c.verb == OperationVerb::Transfer && c.transfer.is_some());
     assert!(
-        !transfer_terms_exist,
-        "the crew's hull must carry no [transfer] terms: a hull that could deliver cargo \
-         into a rung could raise the ladder's ceiling, and the assertion above would stop \
-         being about every run"
+        app.world().get::<InfrastructureCondition>(ship).is_none(),
+        "the crew's hull must carry no infrastructure ledger: a hull that could deliver \
+         cargo into a rung could raise the ladder's ceiling, and the assertion above would \
+         stop being about every run"
     );
 
     // A structural double-check on the pairing the claims are tuned for: ANY

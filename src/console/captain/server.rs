@@ -279,7 +279,7 @@ pub fn mirror_weapons_hold_flags(
     // first draft wrote each of those through `DerefMut`, which marked
     // `WorldContentRuntime` changed on every spawn — and change detection on
     // that resource is read elsewhere, so a world that spawns anything
-    // mid-run saw its behaviour move. `probe_storm.toml`, which spawns three
+    // mid-run saw its behaviour move. `probe_radiation.toml`, which spawns three
     // radiation bands and a stricken hauler while a tow is running, is where
     // that showed up: its committed digest moved with the lever untouched.
     //

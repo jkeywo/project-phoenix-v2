@@ -251,7 +251,7 @@ fn a_built_app_mints_against_its_own_tick() {
 // ── Issue #1033: a scripted removal is deterministic, and mints nothing ──────
 
 /// The destroy probe: a skyhook collapsed by script on a named deadline.
-const DESTROY_WORLD: &str = "assets/worlds/probe_destroy.toml";
+const DESTROY_WORLD: &str = "assets/worlds/probe_destroy_chain.toml";
 /// The structure that collapses, by its authored `[[entity]]` name.
 const DESTROY_SKYHOOK: &str = "world.probe_destroy.entity.skyhook.name";
 

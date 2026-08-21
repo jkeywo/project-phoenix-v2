@@ -220,7 +220,7 @@ entities:
         - src/world/script/schedule.rs
         - src/world/dispatch.rs
         - src/world/server.rs
-        - assets/worlds/probe_destroy.toml
+        - assets/worlds/probe_destroy_chain.toml
         - docs/toml-authoring-guide.md
       symbols:
         - destroy_entity_action
@@ -236,8 +236,8 @@ entities:
         reference: "world::server tests::a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed (src/world/server.rs)"
         summary: "A script destroys group members one at a time through the LIVE trigger pipeline: the group's `OnAllDestroyed` stays silent with one of two down and fires when the LAST one goes. The negative half is what makes the positive half mean anything — a trigger that fired on the first kill would satisfy a fires-at-the-end assertion just as well."
       - kind: test
-        reference: "tests/headless_runner.rs::a_scripted_destroy_chains_its_triggers_and_ends_the_operation_on_its_target"
-        summary: "`probe_destroy.toml` run whole: a t=5 s deadline collapses the skyhook, its chained `on_destroyed` fails an objective within a tick, the tender's in-flight stabilise settles `Failed(TargetGone)`, the DEFERRED `in_seconds(2).destroy_entity` retires the first storm band, and the group fires only on the second. Asserted on causal ORDER rather than frame arithmetic, because the mission clock anchors on the first InProgress tick."
+        reference: "tests/headless_runner.rs::a_scripted_destroy_chains_its_triggers_off_the_removal"
+        summary: "`probe_destroy_chain.toml` run whole (the operations-free #1164 successor to `probe_destroy`): a t=5 s deadline collapses the skyhook, its chained `on_destroyed` fails an objective within a tick, the DEFERRED `in_seconds(2).destroy_entity` retires the first storm band, and the group fires only on the second. The scripted removal is the whole mechanic, asserted on causal ORDER rather than frame arithmetic."
       - kind: test
         reference: "tests/entity_id_minting.rs::two_instances_destroy_on_the_same_tick_and_agree_throughout"
         summary: "Two instances remove on the same tick and fold to the same digest on EVERY tick of the run, and the Entity mint counter is unmoved by the removal."
@@ -596,7 +596,7 @@ entities:
         - src/infrastructure/condition.rs
         - src/operations/hold.rs
         - src/operations/server.rs
-        - assets/worlds/probe_strike.toml
+        - assets/worlds/probe_strike_min.toml
         - assets/worlds/falling_skyway.toml
         - assets/entities/alliance_destroyer.toml
       symbols:
@@ -610,13 +610,13 @@ entities:
         - Ineligibility
         - OperationConditions
         - InfrastructureConfig
-      tests: [cargo test, "cargo test --features headless --test headless_runner a_strike_refuses"]
+      tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike_stays_settled"]
     evidence:
       - kind: test
-        reference: "tests/headless_runner.rs::a_strike_refuses_a_depot_transfer_and_unassists_a_repair_until_it_is_settled"
-        summary: "`probe_strike.toml` driven for thirty mission seconds as four pairs, each an experiment beside a control differing in exactly one authored word. Two tenders with the same capability, cargo and interrupt rule: the one delivering to a depot whose people are out FAILS on its first tick carrying `operation.refused.work_stopped`, and its twin completes and moves twenty units of load. Two sisters with the same rate and duration against two rigs that spawned identical: the struck one holds at 40% and has banked under half the control's time, and its rig's condition is behind. At t=10 s a handler sets an ordinary world flag, `on_flag_set` chains, `ctx.effects.settle_strike` runs — and the rate is back to full on the next tick with no restoration path anywhere, and the same delivery to the same depot lands."
+        reference: "tests/snapshot_resume.rs::a_settled_strike_stays_settled_across_a_resume"
+        summary: "`probe_strike_min.toml` (the operations-free #1164 successor to `probe_strike`): a workforce register arms two sides from `[[workforce]]` - `probe_workers` OUT at a low disposition, `probe_operator` at work - and mirrors each into the ordinary flag store. At t=10 s a handler sets a world flag, `on_flag_set` chains, `ctx.effects.settle_strike` runs and moves the disposition, and the settlement survives a capture-and-resume unchanged. The `work_stopped`/`slow` operation consequences the register used to drive are the per-system slices ground now, plus Falling Skyway own strike test."
       - kind: test
-        reference: "tests/headless_runner.rs::the_skyway_strike_refuses_depot_b_and_leaves_the_head_repair_unassisted"
+        reference: "tests/headless_runner.rs::the_strike_no_longer_throttles_the_crews_external_work"
         summary: "The same two bites in the scenario rather than in a probe, met by the crew's own hull. A transfer stood up alongside Ladder Depot B — in range, powered, eligible on every count — comes back `Failed(WorkStopped)` with its `strings.csv` reason; a field-repair on the head runs at the 35% the destroyer's capability authors; and the identical repair on Ladder Depot A, staffed by people who did not walk out, runs at full rate on the same tick. Falling Skyway's digest is UNCHANGED by the slice (0x14d6dc5dcf05a3c1), which is the claim that the register, the authored `workforce` and an unused capability table are all outside the fold."
 
   - state: workforce-register-state

@@ -2,7 +2,7 @@
 title: WorldPlugin
 type: concept
 tags: [world, plugin, server]
-sources: [src/world/server.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/world/layers.rs, src/world/scenario.rs, src/world/delayed.rs, src/entities/config_cache.rs, src/server/bridge.rs, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
+sources: [src/world/server.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/world/layers.rs, src/world/load/mod.rs, src/world/delayed.rs, src/entities/config_cache.rs, src/server/bridge.rs, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
 updated: 2026-07-16
 ---
 
@@ -138,8 +138,8 @@ Factions are loaded from `assets/factions/*.toml` (`FactionConfig` at `src/ai/fa
 | `src/comms/content.rs` | Pure (Bevy-free) comms runtime types: `CommsDialogueNode`, `CommsResponse`, `ActiveDialogue`, `ScriptedDialogue`, `OpenCommsRequest`, `response_views` |
 | `src/world/dispatch.rs` | Pure trigger-action decision layer: `dispatch_action` + five group functions returning `DispatchResult` for the applier |
 | `src/world/delayed.rs` | Pure (Bevy-free) delayed-action scheduling: `DelayedAction`, `partition_delayed_actions` deciding ready vs. still-pending for the `tick_delayed_actions` applier (#821) |
-| `src/world/layers.rs` | Pure (Bevy-free) world-layer decisions: `evaluate_layer_load` (dedup, parse handling, name→UUID assignment) for the `apply_world_layer_changes` applier (#821). The unload half computed a trigger-removal set until #985 left a layer with no triggers to remove |
-| `src/world/scenario.rs` | Pure (Bevy-free) additive scenario-load decisions: `evaluate_scenario_load` (dedup / requeue / parse branches) for the `apply_pending_scenario_loads` applier (#821) |
+| `src/world/layers.rs` | Pure (Bevy-free) world-layer decisions: `evaluate_layer_load` (dedup, parse handling, name→UUID assignment) for the `apply_world_layer_changes` applier (#821). Routes the parse + `[script]` compile through `world::load` under `Merge`, carrying the compiled set out on `Loaded { scripts }` — the applier drops it (a layered script taking effect is #1045's ledger-freeze policy). The unload half computed a trigger-removal set until #985 left a layer with no triggers to remove |
+| `src/world/load/mod.rs` | The one world-load sequence: `load(LoadRequest) -> LoadedWorld` under `LoadPolicy::{Activate, Merge, Inspect}` over a `WorldReader` seam. The additive scenario-load decisions (dedup / requeue / parse branches) the retired `world::scenario` held now route through `Merge` from `apply_pending_scenario_loads` (#1213, #1215) |
 | `src/world/config.rs` | Pure (Bevy-free): `WorldConfig`, `parse_world`, `entity_template_paths`, `partition_immediate_entities` |
 | `src/world/content.rs` | Pure (Bevy-free) runtime types: `TriggerState`, `FiredTrigger`, `WorldEvent`, `evaluate_triggers`, `condition_matches`. Schema types re-exported from `world/config` |
 | `src/dossier/projection.rs` | Pure (Bevy-free) dossier fold: `DossierSubject` (the whole input port), `SubjectCondition`, `project`, and the closed `SHARED_FACT_LABELS` vocabulary. The place the known/hidden rule is written down (#1030) |

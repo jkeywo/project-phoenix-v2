@@ -42,6 +42,24 @@ pub trait ScriptResolver {
     fn read(&self, path: &str) -> Option<String>;
 }
 
+/// A [`ScriptResolver`] that resolves no sibling files.
+///
+/// Inline `[script]` blocks lift straight from a world's TOML and never consult a
+/// resolver, so this is the resolver for every load that has no sibling-`.rhai`
+/// source to reach for: the pure additive-merge decisions (`world::layers`'
+/// `evaluate_layer_load` and the scenario applier, which route through
+/// `world::load` under `Merge`) and the test fixtures (`world::script::fixture`).
+/// A top-level `script = "file.rhai"` resolved through it is reported as missing —
+/// resolving a *merged* world's sibling scripts is a ledger-freeze policy concern
+/// for issue #1045, not something these pure/decision paths do.
+pub struct NoSiblingScripts;
+
+impl ScriptResolver for NoSiblingScripts {
+    fn read(&self, _path: &str) -> Option<String> {
+        None
+    }
+}
+
 /// A compiled, validated script content set for one world.
 pub struct CompiledScripts {
     /// Retained ASTs keyed by content-relative (or virtual) path, sorted.

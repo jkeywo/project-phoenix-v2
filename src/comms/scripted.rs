@@ -430,50 +430,20 @@ pub(crate) mod tests {
     use crate::comms::content::OpenCommsRequest;
     use crate::comms::server::CommsInboxRes;
     use crate::console::comms::server::handle_comms_channel2;
-    use crate::world::script::engine::RuntimeHost;
-    use crate::world::script::schedule::PendingCallbacks;
 
     /// The virtual path an inline `[script] setup = …` block compiles under.
     /// Shared with the `console::comms::server` tests that seat a scripted
     /// dialogue, so both name the same unit.
     pub(crate) const PATH: &str = "fixture/scripted.toml#script.setup";
 
-    /// A test resolver that reads no sibling files — inline `[script]` blocks are
-    /// lifted from the TOML directly and never consult a resolver.
-    struct NoScriptResolver;
-    impl crate::world::script::load::ScriptResolver for NoScriptResolver {
-        fn read(&self, _path: &str) -> Option<String> {
-            None
-        }
-    }
-
     /// Build a `WorldScriptRuntime` from an inline-`[script]` fixture the SAME
-    /// way `compile_world_scripts` does in production.
+    /// way `compile_world_scripts` does in production, through the single fixture
+    /// compiler (`world::script::fixture`, issue #1215).
     pub(crate) fn compile_fixture(body: &str) -> WorldScriptRuntime {
-        let world_toml = format!("[script]\nsetup = '''{body}'''\n");
-        let value: toml::Value = toml::from_str(&world_toml).expect("valid fixture toml");
-        let compiled = crate::world::script::load::load_world_scripts(
+        crate::world::script::fixture::compile_world_runtime(
             "fixture/scripted.toml",
-            &value,
-            &NoScriptResolver,
-        );
-        assert!(
-            !crate::world::validate::has_error(&compiled.findings),
-            "fixture scripts must compile clean: {:?}",
-            compiled.findings
-        );
-        WorldScriptRuntime {
-            host: RuntimeHost::new(),
-            asts: compiled.asts,
-            triggers: compiled.script_triggers,
-            handlers: Vec::new(),
-            budget: TickBudget::new(),
-            budget_tick: 0,
-            content_hash: compiled.content_hash,
-            pending_callbacks: PendingCallbacks::new(),
-            pending_comms_opens: Vec::new(),
-            deadline_handlers: Vec::new(),
-        }
+            &format!("[script]\nsetup = '''{body}'''\n"),
+        )
     }
 
     /// The smallest app that runs the live drain and delivers what it writes:
@@ -1291,38 +1261,17 @@ fn on_honour(ctx) {
     /// its inline block was lifted to.
     fn compile_default_world() -> (WorldScriptRuntime, String) {
         let text = include_str!("../../assets/worlds/default.toml");
-        let value: toml::Value = toml::from_str(text).expect("default.toml is valid TOML");
-        let compiled = crate::world::script::load::load_world_scripts(
+        let runtime = crate::world::script::fixture::compile_world_runtime(
             "assets/worlds/default.toml",
-            &value,
-            &NoScriptResolver,
+            text,
         );
-        assert!(
-            !crate::world::validate::has_error(&compiled.findings),
-            "the shipped default.toml script must compile and lint clean: {:?}",
-            compiled.findings
-        );
-        let path = compiled
+        let path = runtime
             .asts
             .keys()
             .next()
             .cloned()
             .expect("default.toml lifts one inline script unit");
-        (
-            WorldScriptRuntime {
-                host: RuntimeHost::new(),
-                asts: compiled.asts,
-                triggers: compiled.script_triggers,
-                handlers: Vec::new(),
-                budget: TickBudget::new(),
-                budget_tick: 0,
-                content_hash: compiled.content_hash,
-                pending_callbacks: PendingCallbacks::new(),
-                pending_comms_opens: Vec::new(),
-                deadline_handlers: Vec::new(),
-            },
-            path,
-        )
+        (runtime, path)
     }
 
     /// The raider's `on_attacked` handler emits BOTH of what that event used to

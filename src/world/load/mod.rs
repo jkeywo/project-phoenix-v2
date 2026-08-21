@@ -312,7 +312,10 @@ impl fmt::Display for LoadError {
                 write!(f, "world {path:?} failed to parse: {message}")
             }
             LoadError::RawParseFailed { path, message } => {
-                write!(f, "world {path:?} failed to re-parse as a TOML value: {message}")
+                write!(
+                    f,
+                    "world {path:?} failed to re-parse as a TOML value: {message}"
+                )
             }
             LoadError::TransformFailed { message } => {
                 write!(f, "world raw-value transform failed: {message}")
@@ -391,11 +394,12 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
             let mut children: Vec<LoadedWorld> = Vec::new();
             let mut child_sources: Vec<(String, String)> = Vec::new();
             for child_path in &config.extra_worlds {
-                let child_text = reader
-                    .read(child_path)
-                    .ok_or_else(|| LoadError::ChildReadFailed {
-                        path: child_path.clone(),
-                    })?;
+                let child_text =
+                    reader
+                        .read(child_path)
+                        .ok_or_else(|| LoadError::ChildReadFailed {
+                            path: child_path.clone(),
+                        })?;
                 let child_config =
                     parse_world(&child_text).map_err(|e| LoadError::ChildParseFailed {
                         path: child_path.clone(),

@@ -1114,7 +1114,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/config.rs, src/world/layers.rs, src/world/scenario.rs]
+      paths: [src/world/server.rs, src/world/config.rs, src/world/layers.rs, src/world/load/mod.rs]
       tests: [cargo test]
 
   - state: world-layer-runtime-state

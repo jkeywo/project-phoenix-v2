@@ -17,7 +17,7 @@ use crate::world::dispatch::{
     WORLD_MODIFIER_SOURCE_ID,
 };
 use crate::world::layers::{evaluate_layer_load, LayerLoadOutcome};
-use crate::world::scenario::evaluate_scenario_load;
+use crate::world::load::{load, LoadError, LoadPolicy, LoadRequest, MemoryReader};
 use crate::world::script::effects::BufferedEffect;
 use crate::world::script::engine::{RuntimeHost, ScriptTrigger};
 use crate::world::script::schedule::{PendingCallbacks, SchedClock, TickBudget};
@@ -527,6 +527,36 @@ pub struct WorldScriptRuntime {
     pub deadline_handlers: Vec<crate::world::deadlines::DeadlineHandler>,
 }
 
+impl WorldScriptRuntime {
+    /// Build the live runtime from a compiled script set, or `None` when the set
+    /// has no runnable AST — a script-free world, or an empty `[script]` table.
+    ///
+    /// The one place the `CompiledScripts → WorldScriptRuntime` construction
+    /// lives: [`compile_world_scripts`] (both the pre-compiled headless path and
+    /// the browser's `RawWorldSource` compile) and every `#[cfg(test)]` fixture
+    /// compiler (`world::script::fixture`, and through it the `comms::scripted`
+    /// dialogue fixtures) route through here rather than hand-rolling the literal.
+    /// Returning `None` for an empty set lets a caller insert no resource, leaving
+    /// behaviour identical to a world that never authored a script.
+    pub fn from_compiled(compiled: crate::world::script::load::CompiledScripts) -> Option<Self> {
+        if compiled.asts.is_empty() {
+            return None;
+        }
+        Some(WorldScriptRuntime {
+            host: RuntimeHost::new(),
+            asts: compiled.asts,
+            triggers: compiled.script_triggers,
+            handlers: Vec::new(),
+            budget: TickBudget::new(),
+            budget_tick: 0,
+            content_hash: compiled.content_hash,
+            pending_callbacks: PendingCallbacks::new(),
+            pending_comms_opens: Vec::new(),
+            deadline_handlers: compiled.deadline_handlers,
+        })
+    }
+}
+
 /// The two script-related reads [`tick_trigger_pipeline`] needs, bundled into a
 /// single [`SystemParam`] so the pipeline stays under Bevy's 16-parameter limit.
 ///
@@ -938,25 +968,12 @@ pub(crate) fn compile_world_scripts(
         return;
     }
 
-    // No scripts actually compiled (e.g. an empty `[script]` table) — nothing to
-    // run, so insert no runtime and leave behaviour identical to a script-free
-    // world.
-    if compiled.asts.is_empty() {
-        return;
+    // No scripts actually compiled (e.g. an empty `[script]` table) — `from_compiled`
+    // returns `None`, so insert no runtime and leave behaviour identical to a
+    // script-free world.
+    if let Some(runtime) = WorldScriptRuntime::from_compiled(compiled) {
+        commands.insert_resource(runtime);
     }
-
-    commands.insert_resource(WorldScriptRuntime {
-        host: RuntimeHost::new(),
-        asts: compiled.asts,
-        triggers: compiled.script_triggers,
-        handlers: Vec::new(),
-        budget: TickBudget::new(),
-        budget_tick: 0,
-        content_hash: compiled.content_hash,
-        pending_callbacks: PendingCallbacks::new(),
-        pending_comms_opens: Vec::new(),
-        deadline_handlers: compiled.deadline_handlers,
-    });
 }
 
 /// `OnEnter(GamePhase::InProgress)` system: seeds the `ship_power` counter in
@@ -3527,28 +3544,50 @@ fn apply_pending_scenario_loads(
     let paths: Vec<String> = pending.0.drain(..).collect();
 
     for path in paths {
-        // Decisions (dedup / requeue / parse handling) are pure
-        // (`world::scenario`); this applier resolves the TOML (I/O) and
-        // performs the merges. The dedup check happens before the TOML read
-        // so a duplicate never touches the WASM fetch queue.
-        let already_loaded = runtime.loaded_scenario_paths.contains(&path);
-        let toml_str = if already_loaded {
-            None
-        } else {
-            load_scenario_toml(&path)
-        };
-        let result = evaluate_scenario_load(&path, already_loaded, toml_str.as_deref());
-        for warning in &result.warnings {
-            bevy::log::error!("apply_pending_scenario_loads: {warning}");
-        }
-        if result.requeue {
-            // WASM: TOML not yet available; re-queue for the next frame.
-            pending.0.push(path);
+        // Dedup before any TOML read so a duplicate never touches the WASM fetch
+        // queue — and is never re-marked, since it is already recorded in
+        // `loaded_scenario_paths`. (Absorbed from the former `world::scenario`
+        // decision layer, issue #1215.)
+        if runtime.loaded_scenario_paths.contains(&path) {
             continue;
         }
-        if result.mark_loaded {
-            runtime.loaded_scenario_paths.insert(path);
+        // Resolve the TOML (I/O; also records the text into the content ledger).
+        // `None` means the WASM fetch is still in flight — re-queue for the next
+        // frame without marking the path loaded.
+        let Some(toml_str) = load_scenario_toml(&path) else {
+            pending.0.push(path);
+            continue;
+        };
+        // Route the parse (and the merged world's script-carry, dropped here) through
+        // the one world-load sequence under `Merge`. A `MemoryReader` seeded with the
+        // text `load_scenario_toml` already read — and already recorded — keeps the
+        // decision pure; the returned `LedgerPlan` is dropped (the ledger recording
+        // is owned above) and a layered `[script]` taking effect stays a ledger-freeze
+        // policy question for #1045 (see `world::layers`), so its resolver is
+        // `NoSiblingScripts` and the compiled set is discarded.
+        let reader = MemoryReader::new([(path.clone(), toml_str)]);
+        let request = LoadRequest::new(
+            path.as_str(),
+            &reader,
+            &crate::world::script::load::NoSiblingScripts,
+            LoadPolicy::Merge,
+        );
+        match load(request) {
+            Ok(_loaded) => {}
+            Err(LoadError::ParseFailed { message, .. }) => {
+                bevy::log::error!(
+                    "apply_pending_scenario_loads: failed to parse {path}: {message}"
+                );
+            }
+            // Unreachable with a MemoryReader under Merge (see `world::layers`), but
+            // mapped defensively rather than panicking.
+            Err(other) => {
+                bevy::log::error!("apply_pending_scenario_loads: failed to load {path}: {other}");
+            }
         }
+        // Mark loaded on success AND on parse failure — a broken file must not be
+        // retried frame after frame.
+        runtime.loaded_scenario_paths.insert(path);
     }
 }
 
@@ -3699,7 +3738,15 @@ fn apply_world_layer_changes(
                         name_to_uuid_inserts,
                         scenario_config,
                         emit_world_loaded,
+                        scripts,
                     } => {
+                        // Drop the layer's compiled `[script]` set: a supporting
+                        // world's script does not yet take effect. The route that
+                        // delivers it here is present (issue #1215); making it FIRE
+                        // is a ledger-freeze policy question for #1045 — see
+                        // `world::layers`. `None` for the entire shipped set.
+                        let _ = scripts;
+
                         // Register the layer's named entities in the live
                         // name_to_uuid map. A layer contributes ENTITIES and
                         // nothing else since issue #985 — see `world::layers`.
@@ -4218,41 +4265,11 @@ pub(crate) mod tests {
         );
     }
 
-    /// A test resolver that reads no sibling files — inline `[script]` blocks
-    /// are lifted from the TOML directly and never consult a resolver.
-    struct NoScriptResolver;
-    impl crate::world::script::load::ScriptResolver for NoScriptResolver {
-        fn read(&self, _path: &str) -> Option<String> {
-            None
-        }
-    }
-
     /// Build a `WorldScriptRuntime` from an inline-`[script]` fixture world the
-    /// SAME way `compile_world_scripts` does in production.
+    /// SAME way `compile_world_scripts` does in production, through the single
+    /// fixture compiler (`world::script::fixture`, issue #1215).
     fn compile_fixture_scripts(world_toml: &str) -> WorldScriptRuntime {
-        let value: toml::Value = toml::from_str(world_toml).expect("valid fixture toml");
-        let compiled = crate::world::script::load::load_world_scripts(
-            "fixture/scripted.toml",
-            &value,
-            &NoScriptResolver,
-        );
-        assert!(
-            !crate::world::validate::has_error(&compiled.findings),
-            "fixture scripts must compile clean: {:?}",
-            compiled.findings
-        );
-        WorldScriptRuntime {
-            host: RuntimeHost::new(),
-            asts: compiled.asts,
-            triggers: compiled.script_triggers,
-            handlers: Vec::new(),
-            budget: TickBudget::new(),
-            budget_tick: 0,
-            content_hash: compiled.content_hash,
-            pending_callbacks: PendingCallbacks::new(),
-            pending_comms_opens: Vec::new(),
-            deadline_handlers: Vec::new(),
-        }
+        crate::world::script::fixture::compile_world_runtime("fixture/scripted.toml", world_toml)
     }
 
     /// Issue #984 (Rhai M6 phase 2a), smallest-slice proof: a scripted trigger

@@ -18,7 +18,8 @@ impl ScriptResolver for NoScriptResolver {
 }
 
 /// A one-line valid inline script block that compiles with zero findings.
-const INLINE_SCRIPT_WORLD: &str = "[global]\nseed = 5\n[script]\non_alpha = \"fn on_alpha(ctx) { }\"\n";
+const INLINE_SCRIPT_WORLD: &str =
+    "[global]\nseed = 5\n[script]\non_alpha = \"fn on_alpha(ctx) { }\"\n";
 
 fn request<'a>(
     path: &str,
@@ -34,13 +35,21 @@ fn request<'a>(
 #[test]
 fn inspect_parses_config_and_leaves_everything_else_empty() {
     let reader = MemoryReader::new([("w.toml", "[global]\nseed = 7\n")]);
-    let loaded = load(request("w.toml", &reader, &NoScriptResolver, LoadPolicy::Inspect))
-        .expect("inspect should load");
+    let loaded = load(request(
+        "w.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Inspect,
+    ))
+    .expect("inspect should load");
 
     assert_eq!(loaded.config.global.seed, Some(7));
     assert!(loaded.scripts.is_none(), "inspect compiles no scripts");
     assert!(loaded.children.is_empty(), "inspect recurses no children");
-    assert!(loaded.findings.is_empty(), "inspect runs no composition gate");
+    assert!(
+        loaded.findings.is_empty(),
+        "inspect runs no composition gate"
+    );
     assert!(
         loaded.ledger.records.is_empty(),
         "inspect records nothing in the ledger plan"
@@ -52,8 +61,13 @@ fn inspect_ignores_extra_worlds_children() {
     // A child the reader does not carry — Inspect must not read it, so the load
     // still succeeds (unlike Activate, which would fail with ChildReadFailed).
     let reader = MemoryReader::new([("root.toml", "extra_worlds = [\"missing.toml\"]\n")]);
-    let loaded = load(request("root.toml", &reader, &NoScriptResolver, LoadPolicy::Inspect))
-        .expect("inspect ignores extra_worlds");
+    let loaded = load(request(
+        "root.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Inspect,
+    ))
+    .expect("inspect ignores extra_worlds");
     assert_eq!(loaded.config.extra_worlds, vec!["missing.toml".to_string()]);
     assert!(loaded.children.is_empty());
 }
@@ -61,8 +75,13 @@ fn inspect_ignores_extra_worlds_children() {
 #[test]
 fn inspect_read_failure_is_a_load_error() {
     let reader = MemoryReader::new(std::iter::empty::<(String, String)>());
-    let err = load(request("absent.toml", &reader, &NoScriptResolver, LoadPolicy::Inspect))
-        .expect_err("a missing world must be a LoadError");
+    let err = load(request(
+        "absent.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Inspect,
+    ))
+    .expect_err("a missing world must be a LoadError");
     assert_eq!(
         err,
         LoadError::ReadFailed {
@@ -74,8 +93,13 @@ fn inspect_read_failure_is_a_load_error() {
 #[test]
 fn inspect_parse_failure_is_a_load_error() {
     let reader = MemoryReader::new([("bad.toml", "this is not [ valid toml")]);
-    let err = load(request("bad.toml", &reader, &NoScriptResolver, LoadPolicy::Inspect))
-        .expect_err("a broken world must be a LoadError");
+    let err = load(request(
+        "bad.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Inspect,
+    ))
+    .expect_err("a broken world must be a LoadError");
     assert!(
         matches!(err, LoadError::ParseFailed { ref path, .. } if path == "bad.toml"),
         "expected ParseFailed for bad.toml, got {err:?}"
@@ -89,11 +113,19 @@ fn merge_records_the_world_and_carries_no_scripts_for_a_script_free_world() {
     crate::content_ledger::reset();
     let text = "[global]\nseed = 9\n";
     let reader = MemoryReader::new([("layer.toml", text)]);
-    let loaded = load(request("layer.toml", &reader, &NoScriptResolver, LoadPolicy::Merge))
-        .expect("merge should load");
+    let loaded = load(request(
+        "layer.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Merge,
+    ))
+    .expect("merge should load");
 
     assert_eq!(loaded.config.global.seed, Some(9));
-    assert!(loaded.scripts.is_none(), "a script-free world carries no scripts");
+    assert!(
+        loaded.scripts.is_none(),
+        "a script-free world carries no scripts"
+    );
     assert!(loaded.children.is_empty(), "merge recurses no children");
     assert!(loaded.findings.is_empty(), "merge runs no composition gate");
     assert_eq!(
@@ -128,7 +160,11 @@ fn merge_compiles_inline_scripts_and_carries_them() {
         !scripts.asts.is_empty(),
         "the inline block must produce an AST"
     );
-    assert_eq!(loaded.ledger.records.len(), 1, "merge records the world once");
+    assert_eq!(
+        loaded.ledger.records.len(),
+        1,
+        "merge records the world once"
+    );
 }
 
 // ── Activate ────────────────────────────────────────────────────────────────
@@ -138,8 +174,13 @@ fn activate_records_the_root_with_no_children() {
     crate::content_ledger::reset();
     let text = "[global]\nseed = 3\n";
     let reader = MemoryReader::new([("root.toml", text)]);
-    let loaded = load(request("root.toml", &reader, &NoScriptResolver, LoadPolicy::Activate))
-        .expect("activate should load");
+    let loaded = load(request(
+        "root.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Activate,
+    ))
+    .expect("activate should load");
 
     assert!(loaded.children.is_empty());
     assert!(
@@ -163,8 +204,13 @@ fn activate_loads_children_and_records_the_whole_composition() {
     let child = "[global]\nseed = 2\n";
     let reader = MemoryReader::new([("root.toml", root), ("child.toml", child)]);
 
-    let loaded = load(request("root.toml", &reader, &NoScriptResolver, LoadPolicy::Activate))
-        .expect("activate should load the composition");
+    let loaded = load(request(
+        "root.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Activate,
+    ))
+    .expect("activate should load the composition");
 
     assert_eq!(loaded.children.len(), 1, "the one extra_world is loaded");
     assert_eq!(loaded.children[0].config.global.seed, Some(2));
@@ -196,8 +242,13 @@ fn activate_loads_children_and_records_the_whole_composition() {
 #[test]
 fn activate_missing_child_is_a_load_error() {
     let reader = MemoryReader::new([("root.toml", "extra_worlds = [\"gone.toml\"]\n")]);
-    let err = load(request("root.toml", &reader, &NoScriptResolver, LoadPolicy::Activate))
-        .expect_err("a missing child must abort the load");
+    let err = load(request(
+        "root.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Activate,
+    ))
+    .expect_err("a missing child must abort the load");
     assert_eq!(
         err,
         LoadError::ChildReadFailed {
@@ -212,8 +263,13 @@ fn activate_broken_child_is_a_load_error() {
         ("root.toml", "extra_worlds = [\"child.toml\"]\n"),
         ("child.toml", "not [ valid"),
     ]);
-    let err = load(request("root.toml", &reader, &NoScriptResolver, LoadPolicy::Activate))
-        .expect_err("a broken child must abort the load");
+    let err = load(request(
+        "root.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Activate,
+    ))
+    .expect_err("a broken child must abort the load");
     assert!(
         matches!(err, LoadError::ChildParseFailed { ref path, .. } if path == "child.toml"),
         "expected ChildParseFailed for child.toml, got {err:?}"
@@ -237,7 +293,8 @@ fn raw_transform_runs_before_script_compile_and_leaves_the_config_untouched() {
     };
 
     let reader = MemoryReader::new([("w.toml", "[global]\nseed = 4\n")]);
-    let req = request("w.toml", &reader, &NoScriptResolver, LoadPolicy::Merge).with_transform(&inject);
+    let req =
+        request("w.toml", &reader, &NoScriptResolver, LoadPolicy::Merge).with_transform(&inject);
     let loaded = load(req).expect("transform load should succeed");
 
     assert_eq!(
@@ -255,7 +312,8 @@ fn raw_transform_runs_before_script_compile_and_leaves_the_config_untouched() {
 fn raw_transform_error_aborts_the_load() {
     let boom = |_value: toml::Value| -> Result<toml::Value, String> { Err("boom".to_string()) };
     let reader = MemoryReader::new([("w.toml", "[global]\nseed = 4\n")]);
-    let req = request("w.toml", &reader, &NoScriptResolver, LoadPolicy::Merge).with_transform(&boom);
+    let req =
+        request("w.toml", &reader, &NoScriptResolver, LoadPolicy::Merge).with_transform(&boom);
     let err = load(req).expect_err("a failing transform must abort");
     assert_eq!(
         err,

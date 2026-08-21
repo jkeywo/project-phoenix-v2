@@ -20,7 +20,6 @@ pub mod layers;
 pub mod load;
 pub mod manifest;
 pub mod mod_pack;
-pub mod scenario;
 pub mod script;
 pub mod server;
 /// What a runtime-spawned entity was made from (issue #863) — the template,

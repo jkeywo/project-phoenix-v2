@@ -21,6 +21,25 @@
 // script-in-layers (#1045), which will hand the applier `ScriptTrigger`s to
 // merge rather than parsed `Trigger`s.
 //
+// # The supporting-world script ROUTE (present) vs. its EFFECT (deferred, #1045)
+//
+// This evaluation now runs the layer through the one world-load sequence
+// ([`crate::world::load::load`]) under [`LoadPolicy::Merge`], which compiles the
+// layer's `[script]` block just as the base-world path compiles the base world's.
+// The compiled [`CompiledScripts`] is carried out on
+// [`LayerLoadOutcome::Loaded::scripts`] — the ROUTE is present end to end.
+//
+// The applier (`world::server::apply_world_layer_changes`) still DROPS that set:
+// a supporting world's `[script]` does not yet take effect. That remaining gap is
+// a ledger-FREEZE POLICY question owned by issue #1045, NOT a plumbing omission.
+// A layer loads at runtime, after boot has already `freeze()`d the content
+// ledger; deciding whether a layer's compiled-script digest joins the frozen
+// content set (and how a save reconciles a layer that arrived mid-session) is the
+// policy #1045 settles. Merge under a MemoryReader leaves the frozen digest
+// untouched — the `LoadedWorld.ledger` records are dropped here (the applier
+// already recorded the TOML text via `load_scenario_toml`), and no shipped layer
+// authors a script for the loader to digest — so wiring the route in now moves no
+// behaviour; only #1045's policy will make a layered script fire.
 // # Purity boundaries
 //
 // * **TOML loading is I/O and stays in the applier.** `load_scenario_toml`
@@ -37,7 +56,9 @@
 // * **Logging becomes data.** Failure paths push onto `warnings`; the applier
 //   logs them.
 
-use crate::world::config::{assign_named_entity_uuids, parse_world, WorldConfig};
+use crate::world::config::{assign_named_entity_uuids, WorldConfig};
+use crate::world::load::{load, LoadError, LoadPolicy, LoadRequest, MemoryReader};
+use crate::world::script::load::{CompiledScripts, NoSiblingScripts};
 
 /// Decision produced by [`evaluate_layer_load`].
 #[derive(Debug)]
@@ -48,7 +69,10 @@ pub struct LayerLoadResult {
 }
 
 /// The branch the applier must take for one `WorldLayerChange::Load`.
-#[derive(Debug)]
+///
+/// `Debug` is hand-rolled (not derived) because [`Loaded::scripts`] holds a
+/// [`CompiledScripts`], which carries Rhai `AST`s and is not `Debug`; it prints
+/// as a presence marker, exactly as [`crate::world::load::LoadedWorld`] does.
 pub enum LayerLoadOutcome {
     /// Path already present in `WorldLayerMap` — de-duplicate, no-op.
     AlreadyLoaded,
@@ -68,7 +92,35 @@ pub enum LayerLoadOutcome {
         /// Emit `WorldEvent::WorldLoaded` so a base-world `on_world_loaded`
         /// handler can react to this layer arriving (issue #415).
         emit_world_loaded: bool,
+        /// The layer's compiled `[script]` set, carried out of the `Merge` load
+        /// (`None` for the entire shipped set — no shipped layer authors a
+        /// script). The applier DROPS this today: a supporting world's script
+        /// taking effect is a ledger-freeze policy question for issue #1045 (see
+        /// the module docs). The route is present; only #1045 makes it fire.
+        scripts: Option<CompiledScripts>,
     },
+}
+
+impl std::fmt::Debug for LayerLoadOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LayerLoadOutcome::AlreadyLoaded => f.write_str("AlreadyLoaded"),
+            LayerLoadOutcome::TomlUnavailable => f.write_str("TomlUnavailable"),
+            LayerLoadOutcome::ParseFailed => f.write_str("ParseFailed"),
+            LayerLoadOutcome::Loaded {
+                name_to_uuid_inserts,
+                scenario_config,
+                emit_world_loaded,
+                scripts,
+            } => f
+                .debug_struct("Loaded")
+                .field("name_to_uuid_inserts", name_to_uuid_inserts)
+                .field("scenario_config", scenario_config)
+                .field("emit_world_loaded", emit_world_loaded)
+                .field("scripts", &scripts.as_ref().map(|_| "<compiled>"))
+                .finish(),
+        }
+    }
 }
 
 /// Evaluate one `WorldLayerChange::Load` for `path`.
@@ -97,41 +149,69 @@ where
             warnings: Vec::new(),
         };
     };
-    match parse_world(toml_str) {
-        Err(e) => LayerLoadResult {
-            outcome: LayerLoadOutcome::ParseFailed,
-            warnings: vec![format!("failed to parse {path}: {e}")],
-        },
-        Ok(mut scenario_config) => {
-            if !scenario_config.scenario_detail_floor.is_empty() {
-                return LayerLoadResult {
-                    outcome: LayerLoadOutcome::ParseFailed,
-                    warnings: vec![format!(
-                        "failed to load {path}: scenario_detail_floor is root-world-only; supporting worlds cannot override the selected scenario's crew detail floor"
-                    )],
-                };
-            }
-            // Assign UUIDs to named entities in this layer's config; the
-            // registrations go both into the returned config (for spawning) and
-            // to the applier (for the live runtime map).
-            let new_names = assign_named_entity_uuids(&scenario_config.entities, uuid_source);
-            let mut name_to_uuid_inserts: Vec<(String, String)> = new_names.into_iter().collect();
-            name_to_uuid_inserts.sort();
-            for (name, uuid) in &name_to_uuid_inserts {
-                scenario_config
-                    .name_to_uuid
-                    .insert(name.clone(), uuid.clone());
-            }
 
-            LayerLoadResult {
-                outcome: LayerLoadOutcome::Loaded {
-                    name_to_uuid_inserts,
-                    scenario_config: Box::new(scenario_config),
-                    emit_world_loaded: true,
-                },
-                warnings: Vec::new(),
-            }
+    // Route the parse and the script-carry through the one world-load sequence
+    // ([`load`]) under [`LoadPolicy::Merge`]. A [`MemoryReader`] seeded with the
+    // TOML the applier already read — and already recorded into the content ledger
+    // via `load_scenario_toml` — keeps this a PURE decision: no filesystem, no
+    // bridge. The returned [`LedgerPlan`](crate::world::load::LedgerPlan) is
+    // therefore dropped (the applier owns the one recording), and sibling-`.rhai`
+    // resolution is left to #1045, so a [`NoSiblingScripts`] resolver is passed.
+    let reader = MemoryReader::new([(path.to_string(), toml_str.to_string())]);
+    let request = LoadRequest::new(path, &reader, &NoSiblingScripts, LoadPolicy::Merge);
+    let loaded = match load(request) {
+        Ok(loaded) => loaded,
+        Err(LoadError::ParseFailed { message, .. }) => {
+            return LayerLoadResult {
+                outcome: LayerLoadOutcome::ParseFailed,
+                warnings: vec![format!("failed to parse {path}: {message}")],
+            };
         }
+        // Unreachable with a MemoryReader under Merge — the read cannot fail (the
+        // text is in hand), the raw re-parse cannot fail once `parse_world`
+        // succeeded, and there is no transform or child recursion — but map any
+        // load failure to the same broken-file outcome rather than panic.
+        Err(other) => {
+            return LayerLoadResult {
+                outcome: LayerLoadOutcome::ParseFailed,
+                warnings: vec![format!("failed to load {path}: {other}")],
+            };
+        }
+    };
+
+    let mut scenario_config = loaded.config;
+    // The compiled `[script]` set the Merge load carried. Threaded out to the
+    // applier on `Loaded`, which drops it — see the module docs (#1045).
+    let scripts = loaded.scripts;
+
+    if !scenario_config.scenario_detail_floor.is_empty() {
+        return LayerLoadResult {
+            outcome: LayerLoadOutcome::ParseFailed,
+            warnings: vec![format!(
+                "failed to load {path}: scenario_detail_floor is root-world-only; supporting worlds cannot override the selected scenario's crew detail floor"
+            )],
+        };
+    }
+    // Assign UUIDs to named entities in this layer's config; the registrations go
+    // both into the returned config (for spawning) and to the applier (for the
+    // live runtime map).
+    let new_names = assign_named_entity_uuids(&scenario_config.entities, uuid_source);
+    let mut name_to_uuid_inserts: Vec<(String, String)> = new_names.into_iter().collect();
+    name_to_uuid_inserts.sort();
+    for (name, uuid) in &name_to_uuid_inserts {
+        scenario_config
+            .name_to_uuid
+            .insert(name.clone(), uuid.clone());
+    }
+
+    LayerLoadResult {
+        outcome: LayerLoadOutcome::Loaded {
+            name_to_uuid_inserts,
+            scenario_config: Box::new(scenario_config),
+            emit_world_loaded: true,
+            scripts,
+        },
+        warnings: Vec::new(),
     }
 }
 
@@ -180,6 +260,49 @@ name = "raider_alpha"
             scenario_config.name_to_uuid.get("raider_alpha"),
             Some(&"uuid-1".to_string()),
             "the returned config must carry the same registration for spawning"
+        );
+    }
+
+    /// A scriptless layer (the entire shipped set) carries no compiled scripts:
+    /// the `Merge` load's `compile_scripts` short-circuits on the absent `script`
+    /// key, so nothing is recorded into the content ledger and nothing reaches the
+    /// applier to drop.
+    #[test]
+    fn a_scriptless_layer_carries_no_scripts() {
+        let result =
+            evaluate_layer_load("worlds/l1.toml", false, Some(LAYER_TOML), counter_uuids());
+        let LayerLoadOutcome::Loaded { scripts, .. } = result.outcome else {
+            panic!("expected Loaded, got {:?}", result.outcome);
+        };
+        assert!(
+            scripts.is_none(),
+            "a layer with no [script] block compiles no scripts"
+        );
+    }
+
+    /// The supporting-world script ROUTE is present (issue #1215): a layer that
+    /// authors an inline `[script]` block has it compiled by the `Merge` load and
+    /// carried out on `Loaded { scripts }`. The applier drops it today — a layered
+    /// script TAKING EFFECT is a ledger-freeze policy question for #1045 — but the
+    /// plumbing that would deliver it is exercised here.
+    #[test]
+    fn a_layer_authoring_a_script_carries_the_compiled_set_through() {
+        const WITH_SCRIPT: &str = r#"
+[global]
+seed = 1
+
+[script]
+setup = "fn on_noop(ctx) { }"
+"#;
+        let result =
+            evaluate_layer_load("worlds/l1.toml", false, Some(WITH_SCRIPT), counter_uuids());
+        let LayerLoadOutcome::Loaded { scripts, .. } = result.outcome else {
+            panic!("expected Loaded, got {:?}", result.outcome);
+        };
+        let scripts = scripts.expect("the layer's compiled [script] set is carried through");
+        assert!(
+            scripts.asts.contains_key("worlds/l1.toml#script.setup"),
+            "the inline block lifts to its virtual path in the carried set"
         );
     }
 

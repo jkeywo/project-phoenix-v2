@@ -150,13 +150,17 @@ multiplies the hull's authored `max_speed` by the slot before the helm
 integrates — but a speed cap only binds on a ship pushing it, and every hull
 standing in a shipped band is station-keeping, so that correction moved no
 digest either. Both facts are measured (`±999` A/Bs) rather than reasoned, in
-the world headers of `probe_operations`, `probe_storm`, `probe_destroy` and
-`falling_skyway`.
+the world header of `falling_skyway`.
 
-A `slow_zone` with neither field authored is not a sign error but the presence
-marker an operation's `[[operations.capability.interrupt]]` names; its rate
-lives on the capability as `rate_percent`, which is a true percentage and was
-never affected. Both `slow_zone` guards skip that shape.
+A `slow_zone` with neither field authored is not a sign error but a bare
+presence marker. It was once what an operation's interrupt read to throttle
+external work, but PRD #1143 retired the operations coordinator (#1166) and no
+shipped hull authors an operations capability (#1164), so a hazard band no
+longer throttles a crew's external work at all: it reaches the crew-driven
+coupling systems (tractor, dock, transfer umbilical) the way it reaches any
+system now — through a co-located `damage_zone`, which damages them out — and
+the field-less marker shape still parses but has no shipped consumer. Both
+`slow_zone` guards skip that shape.
 
 On region exit, `on_region_exited` calls `modifiers.clear_source()`
 with the leaving region's `ModifierSource::RegionEffect { uuid }`, removing all

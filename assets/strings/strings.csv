@@ -279,6 +279,7 @@ component.camera_select.empty,Camera selector when no cameras are available,NO C
 component.comms_contacts.empty,Comms contact list when nothing is in hailing range,NO CONTACTS
 component.comms_contacts.hail,Button that hails a comms contact,HAIL
 component.comms_hails.empty,Comms message list when no transmissions have arrived,NO MESSAGES
+component.comms_hails.label,Accessible name (aria-label) for the comms hail list — the keyboard/pointer message selector (issue #1178),Received hails
 component.comms_message.no_active_hail,Comms message panel when no hail is open,[NO ACTIVE HAIL]
 component.comms_message.confirm_important,"Comms response button prompt asking the operator to confirm an important, irreversible response before it is sent",CONFIRM?
 component.comms_message.unavailable,Comms response button tooltip shown when the sender is out of comms range and the response cannot be sent,[OUT OF RANGE]
@@ -298,6 +299,7 @@ component.lateral.title,Lateral thruster joystick heading,LATERAL
 component.lateral.label,Accessible name (aria-label) for the lateral thruster control — the keyboard/pointer strafe control (issue #1176),Lateral thrust control
 component.navigation_map.label,Accessible name (aria-label) for the navigation chart — the keyboard/pointer contact-and-waypoint map (issue #1176),Navigation chart
 component.objectives.empty,Objective list when the mission has no objectives yet,NO OBJECTIVES
+component.objectives.label,Accessible name (aria-label) for the mission objective list — the keyboard/pointer priority selector (issue #1178),Mission objectives
 component.tutorial.heading,Contextual tutorial overlay card (issue #916): eyebrow label above the tip title,TUTORIAL
 component.tutorial.dismiss,Contextual tutorial overlay card: dismiss button — marks the tip as read forever,GOT IT
 component.tutorial.more,Contextual tutorial overlay card: count of further tips queued behind the current one. {n} is that count,+{n} MORE
@@ -377,6 +379,7 @@ component.ship_picker.class.cruiser,Lobby ship picker — hull class badge on a 
 component.ship_picker.class.destroyer,Lobby ship picker — hull class badge on a destroyer card,[DESTROYER]
 component.ship_picker.class.unknown,Lobby ship picker — hull class badge when the entity template authors no class,[UNKNOWN]
 component.ship_picker.empty,Lobby ship picker when the locked scenario offers no playable hull,[No ships available]
+component.ship_picker.label,Accessible name (aria-label) for the lobby ship picker — the keyboard/pointer hull chooser (issue #1178),Ship selection
 component.ship_picker.power,Lobby ship picker — stat label above a hull's power rating,[Power]
 component.ship_picker.stations,Lobby ship picker — stat label above a hull's station count,[Stations]
 component.station_damage.popup_title,Station-damage popup heading. {name} is the owning station (or the ship core),[{name} Systems]

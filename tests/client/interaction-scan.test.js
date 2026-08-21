@@ -200,9 +200,10 @@ describe('the scanner agrees with the real surface', () => {
     expect(evalC(read('gui/components/ph-phasers-controls.js')).conformant).toBe(true);
   });
 
-  it('a real debt component (the ship picker) is not conformant', () => {
-    // ph-power-controls was this example until #1177 converted it; the ship
-    // picker's clickable <div> cards are still unnamed, unfocusable debt (#1178).
-    expect(evalC(read('gui/components/ph-ship-picker.js')).conformant).toBe(false);
-  });
+  // There is no longer a "real debt component (…) is not conformant" example here.
+  // It walked ph-power-controls (#1170→#1177) then the ship picker (#1177→#1178) as
+  // each family converted; #1178 was the final sweep, so no real component fails a
+  // floor any more. The floors-can-fail guarantee lives entirely in the synthetic
+  // negative fixtures above ('the scanner fails a genuine violation'), which isolate
+  // each floor's failure without leaning on a real component that will later be fixed.
 });

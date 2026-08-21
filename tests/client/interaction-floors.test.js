@@ -68,17 +68,11 @@ const DEBT = {
   // #1177 (combat family) is CONVERTED — its block was struck off here when
   // ph-power-controls and ph-shield-facings gained named, roled, keyboard-operable
   // controls, proved by combat-keyboard.test.js / combat-keyboard.spec.js.
-  '#1178 — comms, sensors, ops and shared chrome': {
-    'gui/components/ph-comms-hail-list.js':
-      'hail rows are clickable <div>s with no focusable control, role or name; #1178 makes '
-      + 'the list keyboard-navigable and named.',
-    'gui/components/ph-objective-list.js':
-      'objective rows are clickable <div>s with no focusable control, role or name; #1178 '
-      + 'converts the list.',
-    'gui/components/ph-ship-picker.js':
-      'ship cards are clickable <div>s with no focusable control, role or name; #1178 '
-      + 'converts the picker.',
-  },
+  // #1178 (comms, sensors, ops and shared chrome) is CONVERTED — its block was
+  // struck off here when ph-comms-hail-list, ph-objective-list and ph-ship-picker
+  // became keyboard-navigable, named listboxes of native <button> option rows.
+  // The family now passes every floor with no allow-list entry, proved by
+  // tests/client/comms-ops-keyboard.test.js and tests/smoke/comms-ops-keyboard.spec.js.
 };
 
 /** DEBT flattened to `path -> reason`, the form the floors consult. */

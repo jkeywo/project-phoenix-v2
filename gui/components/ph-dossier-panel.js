@@ -30,8 +30,8 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 /**
  * Provenance code → the strings.csv id for how the crew learned something.
  *
- * A literal table rather than a composed id, for `ph-operation-panel`'s
- * STATE_LABELS reason: a composed id is invisible to the string checker. The
+ * A literal table rather than a composed id: a composed id is invisible to the
+ * string checker. The
  * codes are the four `EvidenceProvenance` names the host sends (issue #1031),
  * and an unmapped one shows no provenance rather than a machine word — the entry
  * itself still renders, so what the crew learned survives a client that is

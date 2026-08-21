@@ -1,0 +1,73 @@
+# Probe world for issue #1163 — a HOSTILE NPC tug locks, tractors and tows a
+# disabled craft off, with NO player involvement.
+#
+# This is the NPC-content mirror of `probe_tractor.toml` (issue #1156). There the
+# operator was the backfilled PLAYER ship and the test drove the beam by hand;
+# here the operator is a world-spawned NPC (`ship_harrow_tug.toml`) that runs the
+# WHOLE procedure itself off authored doctrine — the same `operate_tractor_ai`
+# host (#1162), the same admission seam, no NPC-only branch.
+#
+# WHAT THIS WORLD PROVES (asserted on the prize's OWN state):
+#
+#   1. THE TUG TOWS THE PRIZE OFF UNAIDED. Handed a `Tow` order naming the prize
+#      and a `Retreat` order to its haven, the tug reaches a NON-hostile lock on
+#      the prize (the `objective-operate` selector source, #1162 D2), engages its
+#      tractor, and flies off — dragging the prize at the authored coupling offset
+#      to a position it never started at. No command is ever sent by a player.
+#
+#   2. THE TOW IS SUBJECT TO THE SAME INTERRUPTIONS. Relocating the prize beyond
+#      the tug's reach (range/lock lost) drops the coupling exactly as it would a
+#      player's tow — the prize stops following and stays where the towline parted.
+#
+# The tug's job is authored ENTIRELY as a spawn-time `behaviour.doctrine` override
+# (by-id merge over the template's HOLD default) plus the `tug_haven` anchor below
+# — no scripting, no hardcoded engage. Nothing about the tug's tractor is authored
+# anywhere but its own `[tractor]` table and `[[system]] kind = "tractor"`.
+
+[global]
+seed = 1163
+ai_helm_tick_hz = 30.0
+
+[anchors]
+# Where the tug hauls the prize. Well clear of the spawn so a resolved tow is a
+# visible haul rather than a nudge, and along -X so it never crosses the distant
+# player spawn.
+tug_haven = [-1200.0, 0.0, 0.0]
+
+# Player spawn kept far off and outside AI sensor range, so the AI-backfilled
+# player never detects or interferes with the tug. The world still needs it to
+# reach InProgress and run the NPC sim.
+[player_spawn]
+position = [4000.0, 0.0, 4000.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [4000.0, 0.0, 4000.0] }
+spawn_on = "game_start"
+
+# ── The hostile tug — the fully AI-crewed operator ────────────────────────────
+# Spawned at the origin. The template ships a HOLD default; this override hands it
+# the actual job: TOW the prize (Engineering engages the tractor once locked) and
+# RETREAT to the haven (Helm flies there, dragging the prize).
+[[entity]]
+template_path = "assets/entities/ship_harrow_tug.toml"
+name = "world.probe_npc_tow.entity.tug.name"
+transform = { position = [0.0, 0.0, 0.0] }
+overrides = { behaviour = { doctrine = [
+  { id = "tow-the-prize", directive_kind = "Tow", directive_operate_target = "world.probe_npc_tow.entity.prize.name", base_priority = 90.0 },
+  { id = "retreat-to-haven", directive_kind = "Retreat", directive_anchor = "tug_haven", base_priority = 60.0, target_speed = 0.9 },
+] } }
+
+# ── The prize — a disabled craft, 80 units off, well inside the tug's 600-unit
+# reach and its sensor horizon. A civilian hauler stands in for a hulk (the
+# tractor probe uses it the same way): it carries a Transform the beam can
+# override and a name the lock + blackboard resolve, and it is given no lane, so
+# it drifts nowhere on its own — every metre it moves is the tug towing it.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.probe_npc_tow.entity.prize.name"
+transform = { position = [80.0, 0.0, 0.0] }
+# A HEAVY laden hulk (issue #1157) — past the tug's `half_penalty_mass` knee, so
+# taking it under tow exacts a real helm penalty; the tug still hauls it off.
+overrides = { mass = 60000.0 }

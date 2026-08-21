@@ -79,6 +79,15 @@ export class PhHelmRadar extends HTMLElement {
         this.sendAction = window.sendAction;
       }
     }
+    // Name + role for the scope (issue #1176). Unlike the tactical radar this
+    // scope is a passive contact DISPLAY — it locks no target, so it takes no
+    // tabindex and no arrow cursor (an operationless Tab stop would be a wrong
+    // stop, the same reason ph-radar is EXEMPT). `role="group"` + a catalogue
+    // name label the display for a screen reader without inventing a selection
+    // behaviour; the ON SCREEN button inside stays the one keyboard-operable
+    // control, focusable and Enter/Space-activated as a native button.
+    this.setAttribute('role', 'group');
+    this.setAttribute('aria-label', t('component.helm_radar.label'));
     this.shadowRoot.getElementById('on-screen-btn').addEventListener('click', () => {
       if (this.sendAction) {
         this.sendAction('set_radar_view', {});

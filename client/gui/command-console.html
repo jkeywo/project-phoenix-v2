@@ -19,6 +19,10 @@
        readable without relying on any colour change (issue #1107, accessibility
        direction — non-colour states in the shared Hero Bar). */
     .cue { display: inline-flex; align-items: center; gap: 7px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.14em; padding: 3px 10px; border: 1px solid var(--line-soft); border-radius: 3px; color: var(--ink-faint); }
+    /* A class-set `display` overrides the UA `[hidden]` rule, so the cue's
+       `hidden` toggle needs an explicit escape hatch to actually hide (the same
+       idiom every other hideable styled element in the client uses). */
+    .cue[hidden] { display: none; }
     .cue .glyph { font-size: var(--text-sm); }
     .stance-heading { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); letter-spacing: 0.2em; color: var(--ink-faint); flex-shrink: 0; margin-top: 4px; }
     .stances { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; }

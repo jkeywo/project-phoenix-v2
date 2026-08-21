@@ -19,6 +19,15 @@
     .console-footer { display: flex; align-items: center; gap: 14px; font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); padding: 6px 0; }
     .console-footer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--loaded); }
     .console-footer .spacer { flex: 1; }
+    /* External repair-team dispatch (issue #1161). Shown only on a hull that
+       authors `[repair.external_dispatch]`. */
+    .dispatch-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; }
+    .dispatch-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; }
+    .dispatch-row { display: flex; align-items: center; gap: 10px; }
+    .dispatch-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
+    .dispatch-btn.working { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
+    .dispatch-status { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    .dispatch-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
     @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { padding: 8px; } }
   </style>
 </head>
@@ -34,6 +43,18 @@
         <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
         <ph-station-damage id="core-damage" label="Core" data-i18n-attr="label:console.repair.core"></ph-station-damage>
         <ph-repair-teams id="repair-teams"></ph-repair-teams>
+        <!-- External repair-team dispatch (issue #1161): shown only on a hull
+             that authors `[repair.external_dispatch]`, so a hull without one is
+             unchanged. The one button dispatches a team to the ship's designated
+             target and recalls it. -->
+        <div class="dispatch-panel" id="dispatch-panel" hidden>
+          <h2 data-i18n="console.repair.dispatch">Field Repair</h2>
+          <div class="dispatch-row">
+            <button id="dispatch-btn" class="dispatch-btn" data-i18n="console.repair.dispatch.send">Dispatch</button>
+            <span id="dispatch-status" class="dispatch-status">—</span>
+          </div>
+          <div id="dispatch-refusal" class="dispatch-refusal" hidden></div>
+        </div>
       </div>
       <footer class="console-footer footer-bar">
         <span class="dot"></span>
@@ -51,7 +72,12 @@
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
-    initConsole({
+    // External-dispatch working state, tracked so the one button toggles
+    // dispatch/recall (issue #1161). Human and AI issue the SAME
+    // DispatchExternalRepair/RecallExternalRepair through the one admission path
+    // — this control just picks which.
+    var dispatchWorking = false;
+    var consoleHandle = initConsole({
       name: 'repair',
       // s is a RepairConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
@@ -66,7 +92,39 @@
           pct: Math.round((oh.pct != null ? oh.pct : 1) * 100), active: active, total: total,
         });
         setAutoState(null, document.getElementById('repair-auto-badge'), !!s.repair_auto);
+
+        // External repair-team dispatch (issue #1161). The panel shows only on a
+        // hull that authored `[repair.external_dispatch]` — a hull without one
+        // carries no `external_dispatch` view, so the panel stays hidden and the
+        // console is unchanged.
+        var panel = document.getElementById('dispatch-panel');
+        var ed = s.external_dispatch || null;
+        if (!ed) { panel.hidden = true; }
+        else {
+          panel.hidden = false;
+          dispatchWorking = ed.target != null;
+          var btn = document.getElementById('dispatch-btn');
+          btn.classList.toggle('working', dispatchWorking);
+          btn.textContent = t(dispatchWorking ? 'console.repair.dispatch.recall' : 'console.repair.dispatch.send');
+          var status = document.getElementById('dispatch-status');
+          if (dispatchWorking) {
+            status.textContent = t('console.repair.dispatch.working')
+              + (ed.target_name ? ' · ' + t(ed.target_name) : '');
+          } else {
+            status.textContent = t('console.repair.dispatch.idle')
+              + ' · ' + t('console.repair.dispatch.range') + ' ' + Math.round(ed.range || 0);
+          }
+          var refusal = document.getElementById('dispatch-refusal');
+          if (ed.refusal) { refusal.hidden = false; refusal.textContent = t(ed.refusal); }
+          else { refusal.hidden = true; refusal.textContent = ''; }
+        }
       }
+    });
+
+    // The one dispatch button toggles dispatch/recall through the action map,
+    // which sends the same admitted command a repair AI would (issue #1161).
+    document.getElementById('dispatch-btn').addEventListener('click', function() {
+      consoleHandle.sendAction(dispatchWorking ? 'recall_external_repair' : 'dispatch_external_repair');
     });
   </script>
 </body>

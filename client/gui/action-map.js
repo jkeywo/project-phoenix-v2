@@ -35,6 +35,77 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /** Engage the tractor beam against the ship's current lock (issue #1156). */
+  engage_tractor: (_a, send) => {
+    send('ControlSystem', {
+      target: 'tractor',
+      payload: { type: 'EngageTractor' },
+    });
+  },
+
+  /** Release the tractor beam, dropping any coupling (issue #1156). */
+  release_tractor: (_a, send) => {
+    send('ControlSystem', {
+      target: 'tractor',
+      payload: { type: 'ReleaseTractor' },
+    });
+  },
+
+  /** Dock with the nearest hull in range (issue #1159). The server mates the
+   * nearest viable dock-marker pair; the command carries no target. */
+  dock: (_a, send) => {
+    send('ControlSystem', {
+      target: 'dock',
+      payload: { type: 'Dock' },
+    });
+  },
+
+  /** Undock, backing the ship clear and returning ordinary flight (issue #1159). */
+  undock: (_a, send) => {
+    send('ControlSystem', {
+      target: 'dock',
+      payload: { type: 'Undock' },
+    });
+  },
+
+  /**
+   * Dispatch a repair team to the ship's designated target — a nearby ally or
+   * structure (issue #1161). Targets the `repair` system; the team crosses to
+   * whatever the ship currently has locked, read server-side.
+   */
+  dispatch_external_repair: (_a, send) => {
+    send('ControlSystem', {
+      target: 'repair',
+      payload: { type: 'DispatchExternalRepair' },
+    });
+  },
+
+  /** Recall a dispatched repair team to the hull's own sweep (issue #1161). */
+  recall_external_repair: (_a, send) => {
+    send('ControlSystem', {
+      target: 'repair',
+      payload: { type: 'RecallExternalRepair' },
+    });
+  },
+
+  /** Start the transfer umbilical's flow (issue #1160). The server resolves the
+   * two ledgers from the hull's own `[umbilical]` terms and its docked partner;
+   * the command carries no argument. */
+  start_transfer: (_a, send) => {
+    send('ControlSystem', {
+      target: 'umbilical',
+      payload: { type: 'StartTransfer' },
+    });
+  },
+
+  /** Stop the transfer umbilical's flow (issue #1160). What has moved has moved. */
+  stop_transfer: (_a, send) => {
+    send('ControlSystem', {
+      target: 'umbilical',
+      payload: { type: 'StopTransfer' },
+    });
+  },
+
   /** Fire a specific blaster bank (issue #631). */
   fire_blaster: (a, send) => {
     if (!a.bank) return;
@@ -199,32 +270,6 @@ export const ACTION_MAP = Object.freeze({
     send('ControlSystem', {
       target: 'captain',
       payload: { type: 'SetObjectivePriority', data: { id: a.id } },
-    });
-  },
-
-  /**
-   * Order an external operation on a named target (issue #1026).
-   *
-   * Targets the `captain` system, not an operations system of its own: an
-   * operation is something the ship does, not a thing aboard it, so the command
-   * rides the captain's ordinary station-tenure admission.
-   */
-  start_operation: (a, send) => {
-    if (!a.verb || !a.target_uuid) return;
-    send('ControlSystem', {
-      target: 'captain',
-      payload: {
-        type: 'StartOperation',
-        data: { verb: a.verb, target_uuid: a.target_uuid },
-      },
-    });
-  },
-
-  /** Stand the running external operation down (issue #1026). */
-  abort_operation: (a, send) => {
-    send('ControlSystem', {
-      target: 'captain',
-      payload: { type: 'AbortOperation' },
     });
   },
 

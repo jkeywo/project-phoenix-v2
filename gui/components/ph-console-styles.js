@@ -228,6 +228,45 @@ const CSS = `
   width:  max(100%, var(--hit-expand-w, var(--control-hit-min)));
   height: max(100%, var(--hit-expand-h, var(--control-hit-min)));
 }
+
+/* ── Keyboard focus (issue #1170) ────────────────────────────────
+   The focus ring is a TOKEN-SYSTEM concern, adopted here by the one control
+   family every surface shares — not a per-component outline. This sheet is
+   adopted into every ph-* shadow root AND into the console document
+   (gui/console-core.js), so this single pair of rules puts a visible ring on
+   every focusable control on both sides of every shadow boundary.
+
+   The rules use :focus-visible, not :focus — a mouse/touch press must not
+   paint a ring, only keyboard (and other non-pointer) focus should. The colour
+   and geometry come entirely from the focus tokens in gui/tokens.css, so
+   retinting or thickening the ring — or swapping in the high-contrast half
+   under data-contrast="more" (issue #1171) — is an edit there, never here.
+
+   Two shapes, because the family has two silhouettes:
+
+     1. The DEFAULT is a plain outset outline. It serves every focusable
+        control that is NOT chamfer-clipped — the mode toggles, the overlay
+        toggles, a composite host that takes tabindex (the tactical radar).
+
+     2. The .btn / .mini-btn family clips itself to a chamfer, and a clip-path
+        clips an outset outline away with it — so those controls draw the ring
+        INSET, on the recessed body, where the clip cannot eat it. An inset
+        ring on .btn-bg / .mini-bg is drawn under the label but over the
+        control's own fill, so it reads on the armed-green and danger-red
+        variants alike. */
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+.btn:focus-visible,
+.mini-btn:focus-visible {
+  /* The chamfer clip would swallow an outset ring; draw it inset below. */
+  outline: none;
+}
+.btn:focus-visible > .btn-bg,
+.mini-btn:focus-visible > .mini-bg {
+  box-shadow: inset 0 0 0 var(--focus-ring-width) var(--focus-ring);
+}
 `;
 
 let sheet;

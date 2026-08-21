@@ -120,9 +120,26 @@ export class PhHelmJoystick extends HTMLElement {
       }
     }
     this.#bindEvents();
+    // Focusable, named group (issue #1176). The drag well was a bare <div>: a
+    // pointer control the keyboard could not land on, name, or reach. The host
+    // becomes the one Tab stop — `role="group"` is the honest role for a
+    // composite whose continuous 2-axis state a screen reader cannot enumerate
+    // (name/role hygiene, not narration, exactly like the tactical radar) — and
+    // its name rides the string catalogue. The focus ring comes from the
+    // document-adopted control family (console-core adopts it into `document`),
+    // so there is no per-component outline.
+    this.setAttribute('role', 'group');
+    this.setAttribute('aria-label', t('component.helm_joystick.label'));
+    if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
     // Keyboard (WASD / arrows) + gamepad drive the same set_helm output as the
-    // on-screen thumbstick. Ported from the legacy helm-console.html so the new
-    // per-ship helm consoles keep desktop/controller control (issue: new GUI).
+    // on-screen thumbstick. This is the DELIBERATE key-relay coexistence
+    // (issue #1176): the arrow/WASD flight bindings stay a SINGLE document-level
+    // handler — the same one gui/key-relay.js relays into the console — so a
+    // focused well adds a Tab stop and a name but NOT a second arrow handler,
+    // and one arrow press drives set_helm exactly once whether the event
+    // arrives natively or relayed (the key state is a set keyed by code, so a
+    // native + relayed pair cannot double-count). Ported from the legacy
+    // helm-console.html so the new per-ship helm consoles keep desktop control.
     if (typeof document !== 'undefined') {
       document.addEventListener('keydown', this.#onKeyDown);
       document.addEventListener('keyup', this.#onKeyUp);

@@ -4,6 +4,12 @@ class = "destroyer"
 hull_id = "NCC-0741"
 power_rating = 70
 css = "gui/themes/cruiser.css"
+# Authored mass (issue #1154), the game's own mass unit. Surfaced on a
+# Sensors scan and the deterministic input a mass-driven mechanic (the
+# tow/tractor helm penalty) reads instead of guessing from the hull's other
+# stats. [ai] Unratified — a destroyer-class weight, mid-ladder between the
+# courier and the battleship.
+mass = 14000.0
 # Player identity (the `player` tag + `playerShip` radar icon) is NOT authored
 # here — it is injected onto the selected hull at the player game-start spawn
 # (see `player_ship_identity` in `src/server_app.rs`). A world-spawned copy of
@@ -103,7 +109,11 @@ target_speed  = 0.0
 #   Alliance  courier 200 | destroyer 300 | cruiser 500 | battleship 800
 #
 # The Alliance figures were reached by scaling each hull's authored system HP
-# proportionally, so the relative weighting between systems is unchanged.
+# proportionally, so the relative weighting between systems is unchanged. The
+# three COUPLING systems (tractor/umbilical/dock, issue #1164) added below are
+# operational rather than combat systems and sit OUTSIDE this ladder — see the
+# note on their damage entries — so the 300 is the combat pool the balance pass
+# tuned, not the raw `is_destroyed` sum.
 #
 # RADAR SYSTEMS CARRY NO HULL. `helm-radar`, `tactical-radar` and `sensor-radar`
 # have no `[[hull.system_hull]]` entry on any Alliance hull, so they cannot be
@@ -212,10 +222,70 @@ damaged_threshold_pct = 0.5
 disabled_threshold_pct = 0.15
 debuff_magnitude = 0.20
 
+# ── Coupling-system damage entries (issue #1164 S11a) ────────────────────────
+# The tractor, umbilical and dock (authored as systems further down) each carry
+# a hull entry so a storm can KNOCK THEM OUT — this is the damage half of how
+# the Falling Skyway storm now reaches the crew's external work. The old
+# operations model let a `region_effect = "slow_zone"` interrupt THROTTLE the
+# tow/repair rate; there is no throttle any more. A radiation band's
+# `damage_zone` picks these systems the same way it picks any other (issue
+# #1052's ordered `RegionDamage` draw over `EntitySystemHull`), and a tractor or
+# umbilical damaged to `Disabled` stops where it stands through its OWN
+# interruption — danger reaching an operational system exactly as it reaches a
+# gun or an engine.
+#
+# 30 HP each MIRRORS the shipped NPC counterparts (`ship_harrow_tug.toml`,
+# `alliance_tender.toml`) that own the identical systems — the player/NPC
+# symmetry PRD #1143 is built on — and at the radiation band's ~2.5 effective
+# points a second that is about ten seconds of exposure to disable one, a felt
+# threat across a ~48-second crossing rather than an instant loss. These three
+# are OPERATIONAL, not combat, systems: they sit OUTSIDE the 300-point combat
+# durability ladder above (every hull that ladder was tuned against authors none
+# of them), so the hull's combat pool is unchanged in intent even though the
+# raw `is_destroyed` sum now includes them.
+[[hull.system_hull]]
+system_id = "tractor"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "umbilical"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "dock"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
 [repair]
 repair_team_count = 2
 travel_duration_secs = 5
 repair_rate_hp_per_sec = 0.5
+
+# External repair-team dispatch (issue #1161), the replacement for the retired
+# `field_repair` operations capability (issue #1164 S11a). The old capability
+# sent one of the hull's two teams to a structure to put condition back into it
+# in the field; the same trade is now the engineering-owned `repair` system's
+# `DispatchExternalRepair` verb, admission-gated exactly like every other system
+# and AI-drivable through `operate_external_repair_ai` (#1162).
+#
+# The two numbers are carried straight across from the `field_repair` capability
+# they replace: `range = 400` was its reach, and `repair_rate = 0.5` is its
+# `condition_per_second` — half a condition point a second on the target's own
+# track, so a team dispatched abroad restores the same 15 points over 30 seconds
+# the old verb paid, with one of the hull's two teams committed for the duration
+# (the "own repairs slow while a team is away" trade the tender probe proves).
+# [ai] Both unratified, preserved from the capability rather than re-tuned here.
+[repair.external_dispatch]
+range = 400.0
+repair_rate = 0.5
 
 [weapons_console]
 power_multipliers = [ -0.5, 0, 0.25, 0.5 ]
@@ -766,7 +836,7 @@ description = "entity.alliance_destroyer.station.helm.description"
 rank = "Ltn."
 short_code = "HLM"
 console = "gui/destroyer/helm.html"
-manual_overview = "You fly the destroyer — a fast, agile hull that rewards aggressive flying. Throttle and steering set your line; lateral thrust slides you across a target's arc; boost and impulse close or break range in a hurry. Keep the omni phaser on target for Tactical. Simplified rating lets the AI hold lateral thrust."
+manual_overview = "You fly the destroyer — a fast, agile hull that rewards aggressive flying. Throttle and steering set your line; lateral thrust slides you across a target's arc; boost and impulse close or break range in a hurry. Keep the omni phaser on target for Tactical. When the mission calls for a transfer, dock with a structure or tender so Engineering can run the umbilical across. Simplified rating lets the AI hold lateral thrust."
 
 [[station.rating]]
 name = "Std"
@@ -872,6 +942,13 @@ kind = "standard"
 high_alert = true
 # A durable order: it survives a human handoff at Command rather than resetting.
 persist_behind_human = true
+# [ai] The posture an uncrewed Command seat adopts at Red Alert (issue #1109).
+# When nobody hosts Command AND Tactical is on the AI, the ship's own AI directs
+# Tactical to weapons-free while at Red Alert, standing back down to the
+# alert-neutral otherwise — the same authored stance a human would pick, applied
+# through the same admitted-order path. AI-origin: weapons-free is the hull's one
+# aggressive standard order, so it is the natural high-alert engaged choice.
+ai_engaged = true
 
 [[station.stance]]
 id = "tactical-hold"
@@ -991,7 +1068,7 @@ description = "entity.alliance_destroyer.station.engineering.description"
 rank = "Ltn."
 short_code = "ENG"
 console = "gui/destroyer/engineering.html"
-manual_overview = "You keep the destroyer running and, on this hull, you also mind the shields. Allocate reactor power between helm, weapons, and shields, focus a shield arc against the bearing you are taking fire from, and dispatch repair teams by priority. The generated Shields section below reads this ship's real arc strength and regen. Simplified rating lets the AI run the repair teams."
+manual_overview = "You keep the destroyer running and, on this hull, you also mind the shields. Allocate reactor power between helm, weapons, and shields, focus a shield arc against the bearing you are taking fire from, and dispatch repair teams by priority. You also work the ship's coupling gear: a tractor beam to take a crippled craft under tow, a transfer umbilical to pass supplies across a dock the Helm has made, and a field dispatch to send a repair team across to an ally or structure. The generated Shields section below reads this ship's real arc strength and regen. Simplified rating lets the AI run the repair teams."
 
 [[station.rating]]
 name = "Std"
@@ -1275,6 +1352,45 @@ station = "engineering"
 id = "repair"
 kind = "repair"
 station = "engineering"
+
+# ── Coupling systems (issue #1164 S11a) ──────────────────────────────────────
+#
+# The three first-class systems that replace the retired `[[operations.capability]]`
+# blocks: a TRACTOR beam and a transfer UMBILICAL on Engineering, and the DOCK
+# on Helm the umbilical runs its flow over. Each is admission-gated exactly like
+# any other station-owned system, drives the SAME #1162 backfill hosts a crewed
+# seat and an NPC (`ship_harrow_tug.toml`, `alliance_tender.toml`) drive, and
+# carries the damage entry authored up with the hull so a storm can knock it
+# out. There is no operations-vs-systems branch: these systems ARE the mechanism
+# (AGENTS.md rule 6).
+#
+# POWER GROUP — every coupling system rides the existing `helm` group at
+# `min_power_level = 2`, exactly as all four operations capabilities they replace
+# did (`power_group = "helm"`). A power group draws by its LEVEL, not per-system,
+# so hanging these three off `helm` adds NO new resting draw and leaves the
+# reactor budget (`[power] sustainable_total = 6`, helm+weapons+shields resting
+# at 2 each) untouched — a fresh `ops` group like the lean tug/tender hulls
+# author would rest a fourth group above that sustainable total and drain a
+# combat hull at station. It also preserves the old interaction verbatim: a
+# Power officer who robs Helm below level 2 takes the coupling work down with the
+# drive, the same lever the operations `min_power_level = 2` was.
+[[system]]
+id = "tractor"
+kind = "tractor"
+station = "engineering"
+power_group = "helm"
+
+[[system]]
+id = "umbilical"
+kind = "umbilical"
+station = "engineering"
+power_group = "helm"
+
+[[system]]
+id = "dock"
+kind = "dock"
+station = "helm"
+power_group = "helm"
 
 # ── Reference grid ───────────────────────────────────────────────────────────
 #
@@ -1570,155 +1686,75 @@ commit_range = 120.0
 aggression = 1.0
 sensor_range = 400.0
 
-# ── External operations (issue #1035) ────────────────────────────────────────
+# ── Coupling terms (issue #1164 S11a) ────────────────────────────────────────
 #
-# The verbs the band-A crew hull works the Falling Skyway with, and the
-# first `[operations]` table on a shipped hull rather than on a probe world's
-# override. They are here rather than on the world because
-# `spawn_game_start_entities` replaces the player row's config with the
-# LOBBY-SELECTED template wholesale — a world cannot give the crew's own hull a
-# capability, which the probe worlds record at length.
+# The authored terms for the tractor, umbilical and dock systems declared above,
+# and the whole of what the retired `[[operations.capability]]` blocks (transfer,
+# field_repair, tow, stabilise) became. Falling Skyway's own migration onto these
+# systems is a following slice (#1165 S11b); this hull carries every replacement
+# system that scenario will need before it starts.
 #
-# BOTH CARRY THE SAME AUTHORED CAUSE AND ANSWER IT DIFFERENTLY. That is the
-# whole of #1035 in eight lines of TOML: a stoppage means "nobody is signing
-# this off" to a transfer and "you are on your own" to a repair, and neither
-# meaning is anywhere in Rust. Settle the strike and both rules stop firing;
-# there is no restoration path, because nothing latched.
-#
-# Adding this table moves NO shipped world's simulation digest: a hull that can
-# perform an operation and never has folds nothing (`fold_operations_namespace`),
-# and this hull deliberately gains no `[infrastructure]` block — a condition
-# track on the crew's own hull would fold in every world it flies in, over state
-# no scenario asked for.
+# The mapping — four capabilities onto three systems:
+#   tow + stabilise -> the TRACTOR. Both were "take the strain off a crippled
+#                      craft and hold it": one beam that couples a locked target
+#                      and holds it does both. `[tractor.tow_load]` is the
+#                      held-load helm penalty (#1157) the old verbs never had.
+#   transfer        -> the UMBILICAL, run over the DOCK. A transfer stood up at a
+#                      structure is now Helm achieving a dock and Engineering
+#                      flowing a capacity across it (#1159/#1160).
+#   field_repair    -> `[repair.external_dispatch]`, authored up with `[repair]`.
 
-# Working a berth at a depot or a skyhook head. [ai] Every number below is
-# unratified.
+# TRACTOR — the coupling reach, where a held load rides, the lowest powered rung,
+# and the mass -> helm-penalty curve. [ai] Unratified.
 #
-# It authors NO `[transfer]` terms, which is deliberate and is the reason
-# `target_requirement` is stated by hand: what a Falling Skyway transfer
-# actually MOVES is #1042's (the transfer window), both ends of a real transfer
-# have to carry the same `[[infrastructure.capacity]]` id, and this hull carries
-# no hold to put one on. What the verb means TODAY is the crew standing a
-# transfer up at a structure — timed, interruptible, and refusable by the people
-# who work it, which is what the strike is about.
-[[operations.capability]]
-verb = "transfer"
+# `range = 500` is the destroyer's OWN longest authored coupling reach, carried
+# from the old `stabilise` (stand-off work off a shedding head); it comfortably
+# covers the old `tow`'s 300-unit close work in the one beam. `coupling_offset`
+# is the old `tow`'s `tow_offset` verbatim — the load rides 90 units astern in
+# the destroyer's own frame, so turning the ship swings it round rather than
+# dragging it sideways. `[tractor.tow_load]` adopts the fleet curve the tug and
+# the tractor probe author (half-penalty at #1154's default entity mass, a 0.8
+# ceiling a laden hulk approaches but never reaches).
+[tractor]
 range = 500.0
-duration_secs = 20
-power_group = "helm"
+coupling_offset = [ 0.0, 0.0, -90.0 ]
 min_power_level = 2
-target_requirement = "condition_track"
 
-# Nobody is authorising a pump. `fail` rather than `pause`, because a refused
-# transfer is a refusal and not a queue: the crew are told, on the operations
-# panel, in words, and they go and do something about it.
-[[operations.capability.interrupt]]
-cause = "work_stoppage"
-response = "fail"
+[tractor.tow_load]
+half_penalty_mass = 10000.0
+max_penalty = 0.8
 
-# Putting condition back into a structure in the field. [ai] Unratified.
-#
-# 30 seconds and half a condition point a second is 15 points — enough to take a
-# skyhook head that has slipped under its 45 % lift line back over it, inside an
-# act, with one of the hull's two repair teams committed for the duration.
-[[operations.capability]]
-verb = "field_repair"
-range = 400.0
-duration_secs = 30
-power_group = "helm"
+# DOCK — the approach terms the umbilical's flow gates on (a transfer waits on
+# Helm having achieved the dock, #1159). The values are the shipped dock
+# vocabulary (`alliance_tender.toml`, `dock_probe`): the reach the control
+# appears within and a held dock parts past, the close-in engage distance, the
+# low approach speed, the mate tolerance, how far undock backs clear, and the
+# lowest powered rung. The dock MARKERS themselves are authored in the rig
+# sidecar (`alliance_destroyer.model.toml`), not here.
+[dock]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
 min_power_level = 2
-condition_per_second = 0.5
-repair_teams = 1
 
-# The local crews have walked off, so the ship's own team does the whole job.
-# `slow`, not `fail`: a repair party with a torch can still work a spine, it
-# simply takes them far longer without the people who know the structure.
+# UMBILICAL — what the transfer moves, how fast, which way, and the lowest
+# powered rung. The capacity id both docked ends must carry is `reserve_fuel`,
+# the shipped resupply ledger (`alliance_tender.toml`, `umbilical_probe`);
+# `direction = "deliver"` sends the operator's capacity to the docked partner,
+# which is a crew pumping load INTO a depot's demand rows the way Falling
+# Skyway's transfer berths are authored. `rate = 20` is the shipped flow rate.
+# [ai] Unratified.
 #
-# 35 % of normal turns a 30-second job into an 86-second one and pays out at
-# 0.175 points a second instead of 0.5 — the rate scales the payout, so the work
-# and what it earns cannot come apart. [ai] Unratified: this is the number the
-# tuning pass moves to make "a job that used to take one act now takes longer
-# than you have" land exactly.
-[[operations.capability.interrupt]]
-cause = "work_stoppage"
-response = "slow"
-rate_percent = 35
-
-# Taking a crippled craft under tow (issue #1037). The third verb this hull
-# works a crisis with, and the one the Falling Skyway rescue is made of.
-# [ai] Every number below is unratified.
-#
-# `range = 300` is close work: a tow is run from alongside, and a crew who drift
-# off the rig stall rather than dragging a hulk from a kilometre away. The load
-# rides 90 units astern in the DESTROYER'S own frame, so turning the ship swings
-# it round rather than dragging it sideways.
-#
-# 24 seconds of held time is the honest length of "get a line on her, take the
-# strain, and hold it until she is following". It is short enough that a crew who
-# start early finish before a storm band reaches them, and long enough that a
-# crew who wait until the band is on top of them cannot — which is the whole
-# shape of the rescue, authored in two numbers rather than scripted anywhere.
-[[operations.capability]]
-verb = "tow"
-range = 300.0
-duration_secs = 24
-power_group = "helm"
+# This hull authors NO `[infrastructure]` ledger of its own — deliberately, for
+# the reason the old operations note carried: a condition/capacity track on the
+# crew's own hull would fold into every world it flies. Until #1165 gives the
+# transfer an end to draw from, the flow refuses `NoCapacity` — inert in
+# combat_test and patrol, where the destroyer never docks, and re-homed by the
+# Falling Skyway slice that follows.
+[umbilical]
+capacity = "reserve_fuel"
+rate = 20.0
+direction = "deliver"
 min_power_level = 2
-tow_offset = [0.0, 0.0, -90.0]
-# What a COMPLETED tow is worth to the craft on the other end of the line, in
-# condition points, for any craft that keeps a condition track. It is the lump
-# form (`condition_on_complete`, not `condition_per_second`) for `stabilise`'s
-# reason: a tow half-run has moved nobody anywhere, and a crew who let go at
-# twenty seconds should not keep twenty seconds of rescue.
-#
-# It is also the SIGNAL a scenario reads. There is no "operation completed"
-# trigger — what a completion leaves behind IS its payoff — so a mission that
-# needs to know a tow landed authors a condition threshold on the towed craft
-# and hangs `on_flag_set` off it. Falling Skyway does exactly that; its Act-2
-# section says so at length.
-condition_on_complete = 45.0
-
-# A storm stretches a tow rather than ending it. `slow`, not `pause` and not
-# `fail`: the line is on, the crew are holding it, and the front is simply
-# making every metre cost more. Half rate turns 24 authored seconds into 48.
-[[operations.capability.interrupt]]
-cause = "region"
-region_effect = "slow_zone"
-response = "slow"
-rate_percent = 50
-
-# Holding a degrading structure steady under load (issue #1040). The fourth verb,
-# and the one the Falling Skyway collapse is answered with: a skyhook head whose
-# condition is walking toward its structural floor is saved by a crew who take
-# the strain off it, not by a crew who patch its plating.
-#
-# [ai] Every number below is unratified.
-#
-# `range = 500` is stand-off work — the ship holds station off the head and
-# works it from there, so a crew do not have to fly into a structure that is
-# already shedding load.
-#
-# 18 SECONDS AND 22 POINTS ARE THE PAIR THE WARNING LADDER IS SIZED AGAINST, and
-# the arithmetic belongs to the world rather than to this file: Falling Skyway's
-# Act-3 header derives its final warning window from its own strain rate and
-# checks that this duration fits inside it with room to give the order. The
-# payout is a LUMP for `condition_on_complete`'s stated reason — a stabilise
-# either held long enough to arrest the decline or it did not — and it is sized
-# to carry a head sitting on its LAST warning rung back over its FIRST one in a
-# single run, so a crew who react late are still, unambiguously, a crew who
-# saved it.
-#
-# NO `work_stoppage` INTERRUPT, unlike `field_repair` above, and the omission is
-# the judgement rather than an oversight. A field repair is the ship's team on
-# somebody else's spine with a torch: without the people who know the structure
-# it is slow, which is what that rule says. A stabilise is the ship's own drives
-# and rig taking load off a head from alongside — there is nobody up there to
-# refuse it and nobody up there whose absence makes it harder. A strike costs
-# the crew the repair, not the catch.
-[[operations.capability]]
-verb = "stabilise"
-range = 500.0
-duration_secs = 18
-power_group = "helm"
-min_power_level = 2
-condition_on_complete = 22.0

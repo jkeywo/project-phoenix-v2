@@ -6,8 +6,9 @@
 // a button — not a log.
 //
 // NOTHING HERE KNOWS WHAT A STRUCTURE IS. Every row is a `(label, value)` pair
-// the server derived from the subject's own condition track and labelled with a
-// `strings.csv` id the scenario authored beside the number. There is no
+// the server derived from the subject's own condition track (or, for mass —
+// issue #1154 — its content identity) and labelled with a `strings.csv` id
+// the scenario authored beside the number. There is no
 // per-structure branch, no table of known depots, and — the point of the whole
 // slice — no authored scan prose to render: the payload carries no field for
 // one (see `system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose`
@@ -173,6 +174,14 @@ export class PhScanReadout extends HTMLElement {
         formatCondition(reading.condition_fraction, reading.condition_step),
         false,
         formatTolerance(reading.condition_step),
+      ));
+      // Mass (issue #1154) is content identity, not a live measurement, so —
+      // unlike condition — it is never coarser at one band than another and
+      // never carries a tolerance.
+      rows.appendChild(this.#row(
+        t('component.scan.mass'),
+        String(reading.mass),
+        false,
       ));
       for (const entry of reading.flags || []) {
         const [label, held] = entry;

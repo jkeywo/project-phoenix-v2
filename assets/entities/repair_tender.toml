@@ -1,0 +1,87 @@
+# Repair tender — the probe-world operator for external repair-team dispatch
+# (issue #1161).
+#
+# A deliberately lean hull that exists to exercise ONE mechanism end to end: a
+# `[repair]` block that gives it a single repair team and a
+# `[repair.external_dispatch]` table carrying the reach a team can cross and the
+# rate it works a target's condition track at. It is NOT a shipped combat hull
+# and is not flown in any scenario — it is the fixture
+# `assets/worlds/probe_external_repair.toml` puts a dispatch on, kept out of
+# `alliance_destroyer.toml` on purpose so no shipped hull's folded state (and
+# therefore no committed world's digest) moves for this slice. A shipped hull
+# gains external dispatch in a later integration, not here.
+#
+# It flies nothing: the probe drives the operator's position and its Tactical
+# lock from the test, and the dispatch/recall through the ordinary admitted-
+# command path, so the tender needs no helm, weapons or AI policy of its own.
+# It authors NO `[repair.selector]`, so `operate_repair_ai` never auto-dispatches
+# its one team — the test is the only thing that moves it, which is what keeps
+# the "own repairs slow" trade observable.
+
+tags = ["ship"]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+mass = 9000.0
+
+[mesh]
+model = "assets/models/alliance_courier.glb"
+shape = "sphere"
+colour = []
+
+[collider]
+shape = "Capsule"
+radius = 0.6
+length = 1.5
+# No helm capability, so per the movable/helm invariant this stays the
+# static-terrain default; the probe moves the operator by writing ShipPhysics.
+movable = false
+
+[radar_appearance]
+colour = [0.3, 0.9, 0.5]
+size = 5.0
+icon = "ship"
+
+# ── The one repair team + its external-dispatch reach ────────────────────────
+# One team so the trade is crisp: dispatch it abroad and the hull's own
+# damage-control sweep has nobody left. Travel is short so an internal dispatch
+# lands within a tick of the test issuing it. Every number is authored (rule 11).
+[repair]
+repair_team_count = 1
+travel_duration_secs = 0.2
+repair_rate_hp_per_sec = 5.0
+
+# The external-dispatch terms: how far a team can cross, and the condition
+# points per second it raises the target's own track by while it works there.
+[repair.external_dispatch]
+range = 600.0
+repair_rate = 20.0
+
+# ── Engineering owns the ship-wide repair system ─────────────────────────────
+# The `repair` system (engineering-owned like the destroyer's, issue #1013/#830)
+# is what `DispatchExternalRepair` / `RecallExternalRepair` target and admission
+# gates: backfill-rated, so with nobody at the console it is AI-controlled and
+# the probe's `ai:` token is admitted — the same seam #1162's repair AI will use.
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "entity.repair_tender.station.engineering.description"
+rank = "Ltn."
+short_code = "ENG"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+[[system]]
+id = "repair"
+kind = "repair"
+station = "engineering"
+
+# A single damage entry so the tender carries a non-empty hull; nothing in the
+# probe damages it — the "own repairs slow" trade is proved through the team
+# availability answer, not through this bar.
+[[hull.system_hull]]
+system_id = "repair"
+max_hp = 100
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15

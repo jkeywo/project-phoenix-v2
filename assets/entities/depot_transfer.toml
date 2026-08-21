@@ -19,6 +19,11 @@
 
 name = "entity.depot_transfer.name"
 tags = ["station", "infrastructure"]
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the structure's other stats. [ai] Unratified — a smaller
+# freestanding depot, lighter than the tethered skyhook head.
+mass = 180000.0
 
 [target]
 tags = ["station"]

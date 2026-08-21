@@ -78,6 +78,8 @@ export class ClientSimState {
     // projection instead of briefly falling back to the lobby rating.
     const controlSources = preserveAuthorityProjection ? this.controlSources : {};
     const stationHosts = preserveAuthorityProjection ? this.stationHosts : {};
+    const stationHealth = preserveAuthorityProjection ? this.stationHealth : {};
+    const stationImportance = preserveAuthorityProjection ? this.stationImportance : {};
     /** Static world snapshot { entities: [EntitySnapshot], scenario_title, scenario_description } */
     this.world = defaultWorld();
     /** 'Auto' | 'Manual' */
@@ -130,8 +132,29 @@ export class ClientSimState {
     /** Station → system id list, populated from Welcome ship_config.station_systems.
      *  Used by aggregateStationHull to compute per-station damage from consoleHull. */
     this.stationSystems = {};
+    /** Anonymous eligibility projection (issue #1103): station → rating →
+     *  assist-function ids that station forces manual. From Welcome
+     *  ship_config.station_assist_gaps. Hull-derived config, never a profile. */
+    this.stationAssistGaps = {};
     /** Authoritative complete human-seeking Station placements by Station id. */
     this.stationHosts = stationHosts;
+    /**
+     * Authoritative per-Station hull health by Station id (issue #1100).
+     * Value is a fraction in [0,1], or `null` for the neutral "no-damage-model"
+     * state — a Station that owns no damageable capacity. Published
+     * station-level by the host, so the Hero Bar shows a Station's health from
+     * this map rather than summing recipient-scoped damage rows.
+     */
+    this.stationHealth = stationHealth;
+    /**
+     * Authoritative per-Station importance by Station id (issue #1101).
+     * Each value is `{ unread, critical }` — a one-off unread event (cleared
+     * when the Station is visited) and a continuing critical condition (cleared
+     * only when it resolves), held apart from health. Host-derived and rebuilt
+     * from `snap.station_importance` every SimState, so a Station whose
+     * importance has resolved simply drops out of the map.
+     */
+    this.stationImportance = stationImportance;
     /** Per-system control source ("Human" or "Ai"), populated from SimSnapshot. */
     this.controlSources = controlSources;
     /** Per-system blackboard mirror, keyed by SystemId string.
@@ -223,6 +246,21 @@ export class ClientSimState {
      * other, for a different reason of its own.
      */
     this.tutorialProgress = this.tutorialProgress || { dismissed: {}, used: {} };
+    /**
+     * Client-LOCAL, PRIVATE accessibility profile (issue #1102): the player's
+     * explicit presentation effects (text scale, contrast, motion) plus a
+     * declared-but-inert per-function assistance schema. Not server state and
+     * never sent to any peer — hydrated from localStorage by
+     * gui/accessibility-profile.js and PRESERVED across Welcome resets, so an
+     * explicit choice survives a reconnect. Kept OUT of every server-projected
+     * field for the same privacy reason (AC5). The default shape is spelled out
+     * here (rather than imported) to avoid a sim-state ↔ accessibility-profile
+     * import cycle — the canonical builder is emptyAccessibilityProfile().
+     */
+    this.accessibilityProfile = this.accessibilityProfile || {
+      presentation: { textScale: 'default', contrast: 'default', reducedMotion: 'default' },
+      assistance: {},
+    };
   }
 
   /**
@@ -256,6 +294,20 @@ export class ClientSimState {
         const snap = d.snapshot || {};
         this.stationHosts = Object.fromEntries(
           (snap.station_hosts || []).filter(Boolean).map(entry => [entry.station, entry]),
+        );
+        // Authoritative per-Station health (issue #1100). `health` is omitted on
+        // the wire for the neutral no-damage-model state, so a missing value
+        // becomes an explicit `null` the Hero Bar renders as that neutral cue.
+        this.stationHealth = Object.fromEntries(
+          (snap.station_health || []).filter(Boolean)
+            .map(entry => [entry.station, typeof entry.health === 'number' ? entry.health : null]),
+        );
+        // Authoritative per-Station importance (issue #1101), rebuilt wholesale
+        // each tick: a Station absent from the list carries no importance, so a
+        // resolved unread/critical clears authoritatively (never optimistically).
+        this.stationImportance = Object.fromEntries(
+          (snap.station_importance || []).filter(Boolean)
+            .map(entry => [entry.station, { unread: !!entry.unread, critical: !!entry.critical }]),
         );
         this.navigationWaypoint = snap.navigation_waypoint || null;
         // The host publishes the LocalShip's effective fine-System authority.
@@ -292,6 +344,8 @@ export class ClientSimState {
         // These are the real round boundaries. Welcome is instead the
         // reconnect handshake for a peer already in the current round.
         this.stationHosts = {};
+        this.stationHealth = {};
+        this.stationImportance = {};
         this.controlSources = {};
         break;
       case 'Welcome': {
@@ -318,6 +372,11 @@ export class ClientSimState {
         this.stationTutorials  = sc.station_tutorials   || {};
         this.stationRatings = d.station_ratings || {};
         this.stationSystems = sc.station_systems || {};
+        // Anonymous eligibility projection (issue #1103): per station → per
+        // rating → the assist-functions that station forces manual. Hull-derived
+        // config, never anyone's profile; the lobby glue runs the SAME rule as
+        // the host from it. Absent on a legacy server → {} → everyone eligible.
+        this.stationAssistGaps = sc.station_assist_gaps || {};
         if (world) {
           // Reset to defaults but preserve the world snapshot from Welcome.
           this.world = world;

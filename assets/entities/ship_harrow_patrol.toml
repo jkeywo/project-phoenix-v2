@@ -53,6 +53,11 @@ display_name = "entity.ship_harrow_patrol.display_name"
 class = "cruiser"
 tags = ["ship", "npc", "comms_contact"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the hull's other stats. [ai] Unratified — a medium-weight
+# patrol cruiser, lighter than the combat-tuned Ironveil cruiser.
+mass = 18000.0
 
 [target]
 tags = ["ship"]

@@ -1,0 +1,108 @@
+# Tractor tug — the probe-world operator for the tractor beam (issue #1156).
+#
+# A deliberately lean hull that exists to exercise ONE mechanism end to end: an
+# engineering-owned `[[system]] kind = "tractor"`, its own `[power_groups.tractor]`
+# power group, a damage entry so it can be knocked out, and a `[tractor]` table
+# carrying the coupling terms. It is NOT a shipped combat hull and is not flown in
+# any scenario — it is the fixture `assets/worlds/probe_tractor.toml` puts a beam
+# on, kept out of `alliance_destroyer.toml` on purpose so no shipped hull's folded
+# system-hull (and therefore no committed world's digest) moves for this slice.
+# The demo destroyer gains the tractor in a later integration, not here.
+#
+# It flies nothing: the probe drives the operator's position and its Tactical lock
+# from the test, and the beam's engage/release through the ordinary admitted-command
+# path, so the tug needs no helm, weapons or AI policy of its own.
+
+tags = ["ship"]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+# Authored mass (issue #1154). Read by the later helm-penalty slice (#1157), not
+# by this one — the coupling geometry takes transforms and the offset only.
+mass = 12000.0
+
+[mesh]
+# Shares the courier silhouette; a bespoke .glb would buy the probe nothing.
+model = "assets/models/alliance_courier.glb"
+shape = "sphere"
+colour = []
+
+[collider]
+shape = "Capsule"
+radius = 0.6
+length = 1.5
+# No helm capability (see header), so per the movable/helm invariant this
+# stays the static-terrain default rather than claiming to be a flyable hull.
+movable = false
+
+[radar_appearance]
+colour = [0.2, 0.8, 0.9]
+size = 5.0
+icon = "ship"
+
+# Power: no `[power]` block, so the reactor takes the default 100-unit capacity /
+# resting-total-6 profile. The tug's one small group (tractor, nominal level 2)
+# draws well under that, so the battery stays charged and the group rests at its
+# nominal level without the probe having to nurse it.
+
+# ── The tractor's own power group ────────────────────────────────────────────
+# Declared here rather than shared with helm/weapons/shields: the tractor draws
+# its own allocation, and an interruption checks THIS group's level against the
+# `[tractor]` min_power_level below.
+[power_groups.tractor]
+label = "entity.tractor_tug.power_groups.tractor.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+# ── The tractor's damage entry ───────────────────────────────────────────────
+# So the beam can be damaged to Disabled — the interruption the probe drives by
+# knocking this system down.
+[[hull.system_hull]]
+system_id = "tractor"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+# ── Engineering owns the tractor ─────────────────────────────────────────────
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "entity.tractor_tug.station.engineering.description"
+rank = "Ltn."
+short_code = "ENG"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+# ── The tractor system ───────────────────────────────────────────────────────
+# First-class, engineering-owned, power-grouped: the admitted target for
+# EngageTractor / ReleaseTractor, admission-gated exactly like any other
+# station-owned system.
+[[system]]
+id = "tractor"
+kind = "tractor"
+station = "engineering"
+power_group = "tractor"
+
+# ── The coupling terms ───────────────────────────────────────────────────────
+# All authored (AGENTS.md rule 11): the reach, where the held load rides in the
+# operator's own frame (120 units astern), and the lowest power-group level the
+# beam holds at.
+[tractor]
+range = 600.0
+coupling_offset = [0.0, 0.0, -120.0]
+min_power_level = 2
+
+# ── The tow-load helm penalty curve (issue #1157) ────────────────────────────
+# The mass → penalty curve, authored here rather than inlined (AGENTS.md rule
+# 11): while the beam holds a target, the operator's top speed AND turn rate are
+# cut by `max_penalty * m / (m + half_penalty_mass)` of the held target's own
+# authored mass. `half_penalty_mass` is the knee — a load of this mass costs half
+# the cap — set at #1154's default entity mass so an unauthored hulk is a
+# felt-but-fair tow; `max_penalty` is the ceiling a laden freighter approaches
+# but never reaches. A buoy near zero mass is barely felt; a heavy hull is
+# severe; both from these two numbers.
+[tractor.tow_load]
+half_penalty_mass = 10000.0
+max_penalty = 0.8

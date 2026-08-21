@@ -722,31 +722,10 @@ export function buildWeaponsConsoleState(state) {
  *             viewscreen_auto: boolean, view_direction: string,
  *             camera_views: Array, view_mode: string, objectives: Array,
  *             boosted_objective_id: string|null, deadlines: Array,
- *             operations: {capabilities: Array, active: object|null,
- *                          refusal: string|null},
  *             hull_integrity_pct: number, game_status: string,
  *             blips: RadarBlip[],
  *             own_hull: StationHullAggregate }} CaptainConsolePayload
  */
-
-/**
- * The ship's external-operation readout (issue #1026).
- *
- * Its own blackboard under its own channel key, not a field on the captain's:
- * an operation is something the ship does rather than a system aboard it. A
- * hull that authored no `[operations]` publishes none at all, which is the empty
- * shape returned here — the panel renders its own "no capability" state off it
- * rather than the console guessing.
- * @param {{ blackboards }} state
- */
-function operationsPayload(state) {
-  const bb = (state.blackboards && state.blackboards['operations']) || {};
-  return {
-    capabilities: bb.capabilities ?? [],
-    active:       bb.active       ?? null,
-    refusal:      bb.refusal      ?? null,
-  };
-}
 
 /**
  * CaptainChair console. Returns JSON of {@link CaptainConsolePayload}.
@@ -774,9 +753,6 @@ export function buildCaptainConsoleState(state) {
       // Visible mission deadlines, already counted down server-side against the
       // authoritative SimTick (issue #1024) — the client formats, never clocks.
       deadlines:             bb.deadlines              ?? [],
-      // The external-operation readout (issue #1026) — a blackboard of its own,
-      // so it is read from its own key rather than off the captain's.
-      operations:            operationsPayload(state),
       hull_integrity_pct:    bb.hull_integrity_pct     ?? 100,
       game_status:           bb.game_status            ?? '',
       blips:                 state.blips               || [],
@@ -806,10 +782,6 @@ export function buildCaptainConsoleState(state) {
     // No blackboard, no deadlines: the legacy fallback has no wire source for
     // them, and an empty list renders the panel's own empty state.
     deadlines:             [],
-    // Operations ride their own blackboard, so the legacy fallback carries them
-    // unchanged rather than blanking them: a captain blackboard that has not
-    // arrived says nothing about whether an operations one has.
-    operations:            operationsPayload(state),
     hull_integrity_pct:    state.hullPct     || 100,
     game_status:           state.redAlert
                              ? 'RED ALERT — All hands to battlestations.'
@@ -852,6 +824,64 @@ export function buildCommandConsoleState(state) {
     selected_stance:        bb?.selected_stance        ?? '',
     stances:                bb?.stances                ?? [],
   });
+}
+
+/**
+ * Non-binding Command intent advice for a directed target Station (issue #1108).
+ *
+ * Criterion 2: a human holding the Command-directed Station keeps full ordinary
+ * authority, and may ALSO see the current Command intent as advice. When the
+ * `command` blackboard names THIS console's station as the directed Station and
+ * that Station is human-held (`directed_station_ai === false`), returns the
+ * stance currently in force — `{ stance_id, stance_label, high_alert }` — for
+ * the console to render as advisory, never binding. The stance in force is
+ * always computable server-side (a stored order, else the alert-neutral
+ * fallback), so advice is present whenever the console is the directed target
+ * and human-held. Any other case returns `null`: an AI-controlled directed
+ * Station is *directed* through the Command console, not advised here.
+ *
+ * @param {object} state simState
+ * @param {string} consoleName station id
+ * @returns {{stance_id:string, stance_label:string, high_alert:boolean}|null}
+ */
+export function commandAdviceFor(state, consoleName) {
+  const bb = state && state.blackboards && state.blackboards['command'];
+  if (!bb) return null;
+  if (bb.directed_station !== consoleName) return null;
+  if (bb.directed_station_ai) return null;
+  const id = bb.selected_stance || '';
+  if (!id) return null;
+  const opt = (bb.stances || []).find(s => s && s.id === id) || null;
+  return {
+    stance_id: id,
+    stance_label: opt ? (opt.label || '') : '',
+    high_alert: opt ? !!opt.high_alert : false,
+  };
+}
+
+/**
+ * Attach `command_advice` to a target console's payload (issue #1108).
+ *
+ * A general overlay, applied to every console the same way `withTutorialOverlay`
+ * is: it adds `command_advice` only to the console that is the current directed
+ * target while that Station is human-held, and is a no-op everywhere else. The
+ * target console renders it as a non-binding advisory line.
+ *
+ * @param {string} consoleName station id
+ * @param {object} state simState
+ * @param {string} json the console payload built so far
+ * @returns {string} json, with `command_advice` when this console is advised
+ */
+export function withCommandAdvice(consoleName, state, json) {
+  try {
+    const advice = commandAdviceFor(state, consoleName);
+    if (!advice) return json;
+    const obj = JSON.parse(json);
+    obj.command_advice = advice;
+    return JSON.stringify(obj);
+  } catch (_) {
+    return json;
+  }
 }
 
 /**
@@ -986,7 +1016,78 @@ export function buildHelmConsoleState(state) {
     // placeholder; the component carries none, and paints no overlay at all
     // rather than invent a colour if this arrives null.
     hostile_arc_color:   state.hostileArcColor || null,
+    // ── Contextual dock control (issue #1159) ─────────────────────────────
+    // The dock's own blackboard, published under its system id by a hull whose
+    // helm owns a `dock` system. A hull without one publishes no such
+    // blackboard, so `dock` is null and the helm console shows no dock control
+    // at all — the destroyer is unchanged until #1164 gives it a dock. The
+    // contextual control appears exactly when `available` is true and becomes
+    // the undock control when `docked`; every string it shows is a `t()` id, so
+    // no English crosses here.
+    dock:                buildHelmDockView(state),
+    // ── Under-tow-load indicator (issue #1157) ────────────────────────────
+    // The helm feels the tractor's load: while this ship's beam holds a target,
+    // its top speed and turn rate are penalised, and the console says so and
+    // why. Read from the same `tractor` blackboard the engineering console
+    // shows; a hull with no tractor publishes none, so this is null and no
+    // indicator appears. The label and the towed hull's name are both `t()` ids
+    // — no English crosses here.
+    tow_load:            buildHelmTowLoadView(state),
   });
+}
+
+/**
+ * The under-tow-load indicator for the helm console (issue #1157), read from the
+ * raw `tractor` blackboard this ship's tractor system publishes. Returns `null`
+ * when the hull has no tractor (no blackboard) or is not currently holding a
+ * target, so the console shows no indicator — a hull without a tractor is
+ * unchanged.
+ *
+ * The ship is "under tow load" exactly while the coupling holds a target: the
+ * server's own `coupled_target` is the gate, mirrored here rather than
+ * re-derived so the helm and the engineering console agree by construction.
+ * `target_name` is the towed hull's own name id — the "why" — resolved by the
+ * console through `t()`; never English.
+ *
+ * @param {{ blackboards? }} state
+ * @returns {object|null}
+ */
+export function buildHelmTowLoadView(state) {
+  const bb = state.blackboards && state.blackboards['tractor'];
+  if (!bb || !bb.coupled_target) return null;
+  return {
+    active: true,
+    target_name: bb.coupled_target_name ?? null,
+  };
+}
+
+/**
+ * The dock control's view for the helm console (issue #1159), read from the raw
+ * `dock` blackboard the helm-owned `dock` system publishes. Returns `null` when
+ * the hull has no dock system (no blackboard), so the console renders no control.
+ *
+ * `present` is the server's own gate; the client mirrors it rather than
+ * re-deriving range so the human and the AI agree by construction. `available`
+ * is when the Dock control shows, `docked` when it becomes Undock, and `refusal`
+ * is a `strings.csv` id the console resolves.
+ *
+ * @param {{ blackboards? }} state
+ * @returns {object|null}
+ */
+export function buildHelmDockView(state) {
+  const bb = state.blackboards && state.blackboards['dock'];
+  if (!bb) return null;
+  return {
+    range: bb.range ?? 0,
+    available: !!bb.available,
+    available_target: bb.available_target ?? null,
+    available_target_name: bb.available_target_name ?? null,
+    engaged: !!bb.engaged,
+    docked: !!bb.docked,
+    docked_to: bb.docked_to ?? null,
+    docked_to_name: bb.docked_to_name ?? null,
+    refusal: bb.refusal ?? null,
+  };
 }
 
 /**
@@ -1234,6 +1335,17 @@ export function buildRepairConsoleState(state) {
       // dedicated Repair station vs. cruiser/destroyer's Engineering), so
       // this works uniformly across all ship classes.
       repair_auto:          state.controlSources?.['repair'] === 'Ai',
+      // External repair-team dispatch (issue #1161). Non-null only on a hull
+      // that authored `[repair.external_dispatch]` (its blackboard carries a
+      // `range`), so the console shows the dispatch control on exactly those
+      // hulls; a hull without it renders nothing new. The target/refusal are
+      // name/string ids the console resolves through `t()` — no English crosses.
+      external_dispatch:    bb.external_dispatch_range == null ? null : {
+        range:       bb.external_dispatch_range,
+        target:      bb.external_dispatch_target ?? null,
+        target_name: bb.external_dispatch_target_name ?? null,
+        refusal:     bb.external_dispatch_refusal ?? null,
+      },
     });
   }
   // Legacy fallback: derive damageable_systems from consoleHull (SystemId-keyed
@@ -1775,7 +1887,55 @@ export function consoleForSystemId(id) {
   if (id === 'shields-system' || id.startsWith('shield-arc-')) return 'shields';
   if (id === 'power-reactor' || id === 'power-battery') return 'power';
   if (id === 'repair') return 'repair';
+  if (id === 'tractor') return 'tractor';
+  if (id === 'umbilical') return 'umbilical';
   return null;
+}
+
+/**
+ * Tractor console family (issue #1156). Reads the raw tractor blackboard the
+ * engineering-owned `tractor` system publishes under its own system id and
+ * returns JSON of the small view the engineering console's tractor control
+ * renders: the authored reach, whether the beam is engaged, the coupled
+ * target's uuid/name id, and the `strings.csv` id of the last refusal (which the
+ * console resolves through `t()` — no English crosses the wire). A hull with no
+ * tractor publishes no such blackboard, so this returns the idle shape and the
+ * control renders its own "no beam" state.
+ * @param {{ blackboards }} state
+ */
+export function buildTractorConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['tractor']) || {};
+  return JSON.stringify({
+    range: bb.range ?? 0,
+    engaged: !!bb.engaged,
+    coupled_target: bb.coupled_target ?? null,
+    coupled_target_name: bb.coupled_target_name ?? null,
+    refusal: bb.refusal ?? null,
+  });
+}
+
+/**
+ * Umbilical console family (issue #1160). Reads the raw umbilical blackboard the
+ * engineering-owned `umbilical` system publishes under its own system id and
+ * returns JSON of the small view the engineering console's umbilical control
+ * renders: the authored capacity id, rate and direction, whether the flow is
+ * running, both docked ends' current levels, and the `strings.csv` id of the last
+ * refusal (which the console resolves through `t()` — no English crosses the
+ * wire). A hull with no umbilical publishes no such blackboard, so this returns
+ * the idle shape and the control renders its own "no umbilical" state.
+ * @param {{ blackboards }} state
+ */
+export function buildUmbilicalConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['umbilical']) || {};
+  return JSON.stringify({
+    capacity: bb.capacity ?? null,
+    rate: bb.rate ?? 0,
+    direction: bb.direction ?? null,
+    running: !!bb.running,
+    operator_level: bb.operator_level ?? null,
+    partner_level: bb.partner_level ?? null,
+    refusal: bb.refusal ?? null,
+  });
 }
 
 /**
@@ -1863,6 +2023,10 @@ export function buildSystemStationConsoleState(stationId, state) {
     (view) => { view.power_auto = controlSources['power-reactor'] === 'Ai'; });
   add('repair', buildRepairConsoleState,
     (view) => { view.repair_auto = controlSources['repair'] === 'Ai'; });
+  add('tractor', buildTractorConsoleState,
+    (view) => { view.tractor_auto = controlSources['tractor'] === 'Ai'; });
+  add('umbilical', buildUmbilicalConsoleState,
+    (view) => { view.umbilical_auto = controlSources['umbilical'] === 'Ai'; });
 
   // Dossiers (issue #1030) ride this top-level key rather than under
   // `systems['comms']`. That used to be enough because the destroyer's Intel
@@ -2030,7 +2194,11 @@ if (typeof window !== 'undefined') {
       withStationDamage(
         consoleName,
         state,
-        withVisitingSystems(consoleName, state, inner),
+        withCommandAdvice(
+          consoleName,
+          state,
+          withVisitingSystems(consoleName, state, inner),
+        ),
       ),
     );
   };

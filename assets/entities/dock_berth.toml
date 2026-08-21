@@ -1,0 +1,34 @@
+# Dock berth — the passive dockable structure for issue #1159.
+#
+# A hull that can be DOCKED WITH but does not dock: it authors a `[dock]` table
+# (whose presence opts it in and triggers the one spawn-time read of its rig
+# sidecar for dock markers) and declares its dock markers in the `dock_probe`
+# variant sidecar, but carries no `[[system]] kind = "dock"`, so it gets a
+# `DockMarkers` component and no `DockControl`. Its `[dock]` terms are inert — a
+# passive berth runs no manoeuvre — but present because the table is the opt-in.
+# It never moves: only the docker's own ship is flown onto the mate.
+
+tags = ["structure"]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+
+[mesh]
+model = "assets/models/alliance_courier.glb"
+variant = "dock_probe"
+shape = "sphere"
+colour = []
+
+[radar_appearance]
+colour = [0.9, 0.7, 0.2]
+size = 5.0
+icon = "ship"
+
+# The opt-in. A passive berth runs no manoeuvre, so these numbers are inert; they
+# are authored because the `[dock]` table's presence is what reads the sidecar
+# for this hull's dock markers.
+[dock]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2

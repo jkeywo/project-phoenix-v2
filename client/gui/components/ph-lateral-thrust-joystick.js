@@ -69,6 +69,19 @@ export class PhLateralThrustJoystick extends HTMLElement {
       }
     }
     this.#bindEvents();
+    // Focusable, named group (issue #1176). The drag track was a bare <div>
+    // the keyboard could not reach or name; the host becomes the one Tab stop.
+    // `role="group"` is the honest role for a composite whose continuous axis a
+    // screen reader cannot enumerate, and the name rides the string catalogue.
+    // The focus ring comes from the document-adopted control family.
+    this.setAttribute('role', 'group');
+    this.setAttribute('aria-label', t('component.lateral.label'));
+    if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
+    // Q/E + arrows + gamepad bumpers drive set_lateral_thrust. Deliberate
+    // key-relay coexistence (issue #1176): one document-level handler — the
+    // same path gui/key-relay.js relays — so a focused track adds a Tab stop
+    // and a name but no second arrow handler, and the key state is a set keyed
+    // by code so a native + relayed press cannot double-fire.
     if (typeof document !== 'undefined') {
       document.addEventListener('keydown', this.#onKeyDown);
       document.addEventListener('keyup', this.#onKeyUp);

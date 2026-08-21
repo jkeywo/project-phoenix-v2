@@ -1,6 +1,16 @@
 # Radiation storm band — a sweeping hazard that makes work take longer
 # (issue #1027).
 #
+# ORPHANED SINCE ISSUE #1164. This slow-only band existed for the operations
+# interrupt to read `region_effect = "slow_zone"` and stretch external work. Its
+# only consumers were `probe_operations` and `probe_destroy`, both retired in
+# #1164 when the destroyer's operations capabilities became first-class systems;
+# a storm now reaches those systems through damage, not by throttling an
+# operation (see `region_radiation_band.toml`). The template is kept — it is a
+# valid, correctly-signed slow zone any future scenario can place — but no world
+# ships it today. The operations interrupt vocabulary it was built for is retired
+# in #1166.
+#
 # The Falling Skyway storm is authored as REGION TEMPLATES spawned and retired
 # on a schedule rather than as new hazard code, and this is the piece of it that
 # external operations read. Deliberately generic: any scenario that wants

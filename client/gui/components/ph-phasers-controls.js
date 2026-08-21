@@ -6,9 +6,11 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
+import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 
 export class PhPhasersControls extends HTMLElement {
   #state = null;
+  #roving = null;
 
   constructor() {
     super();
@@ -43,6 +45,12 @@ export class PhPhasersControls extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
+    // Role + accessible name (issue #1170). The panel is a toolbar — a group of
+    // command buttons the arrow keys rove between; its name is the same string
+    // its visible heading already shows, so the two never drift.
+    this.setAttribute('role', 'toolbar');
+    this.setAttribute('aria-orientation', 'vertical');
+    this.setAttribute('aria-label', t('component.phasers.title'));
     const toggle = this.shadowRoot.getElementById('mode-toggle');
     toggle.addEventListener('click', () => {
       if (!this.sendAction) return;
@@ -50,6 +58,26 @@ export class PhPhasersControls extends HTMLElement {
       // Flip between the two operator modes; Auto = banks fire themselves.
       this.sendAction('set_phaser_mode', { mode: mode === 'Auto' ? 'Manual' : 'Auto' });
     });
+    // Roving tabindex over the mode toggle + each bank's FIRE button (issue
+    // #1170): one Tab stop for the whole toolbar, arrows between its controls.
+    // Native buttons keep their own Enter/Space activation — no fork.
+    this.#roving ??= installRovingTabindex(this, {
+      getItems: () => this.#rovingItems(),
+      orientation: 'vertical',
+    });
+    this.#syncRoving();
+  }
+
+  /** The toolbar's rovable controls, in visual order. */
+  #rovingItems() {
+    const toggle = this.shadowRoot.getElementById('mode-toggle');
+    const fires = Array.from(this.shadowRoot.querySelectorAll('#banks .btn'));
+    return [toggle, ...fires].filter(Boolean);
+  }
+
+  /** Re-establish the single tab stop after a render adds/removes banks. */
+  #syncRoving() {
+    syncRovingTabindex(this.#rovingItems());
   }
 
   set state(val) {
@@ -73,6 +101,7 @@ export class PhPhasersControls extends HTMLElement {
 
     if (banks.length === 0) {
       container.innerHTML = '<div class="empty">' + t('component.phasers.empty') + '</div>';
+      this.#syncRoving();
       return;
     }
 
@@ -157,6 +186,10 @@ export class PhPhasersControls extends HTMLElement {
       btn.className = 'btn' + (ready ? ' armed' : ' disabled');
       btn.querySelector('.led').className = 'led' + (ready ? ' on' : '');
     });
+
+    // Banks were reconciled above; keep the toolbar's single tab stop over the
+    // new button set (issue #1170).
+    this.#syncRoving();
   }
 }
 

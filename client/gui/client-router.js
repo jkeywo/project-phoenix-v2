@@ -53,17 +53,32 @@ export function playerStation(uiState, myToken) {
 }
 
 /**
- * True while the lobby/station-select panel is being shown over an
- * in-progress game: true spectators, and mid-game claimants who have picked a
- * station but not yet pressed Ready. Single source of truth for render()'s
- * vis.lobby override and the SimState/BlackboardUpdate render guards — those
- * messages arrive at ~10Hz and must skip the lobby DOM rebuild in this state,
- * or a click on Ready/Leave can land between the old button being torn down
- * and the new one's listener being attached.
+ * True when the local player is an explicit Spectator (issue #1105) — the real
+ * session role, not the "no station" heuristic. A Spectator gets the crew-public
+ * summary surface, never the station-select lobby.
+ */
+export function isSpectator(uiState, myToken) {
+  const player = playerFor(uiState, myToken);
+  return !!(player && player.spectator);
+}
+
+/**
+ * True while the station-select lobby panel is being shown over an in-progress
+ * game: mid-game claimants who have picked a station but not yet pressed Ready,
+ * and stationless-but-not-spectator players. Single source of truth for
+ * render()'s vis.lobby override and the SimState/BlackboardUpdate render guards
+ * — those messages arrive at ~10Hz and must skip the lobby DOM rebuild in this
+ * state, or a click on Ready/Leave can land between the old button being torn
+ * down and the new one's listener being attached.
+ *
+ * An explicit Spectator (issue #1105) is deliberately EXCLUDED: they render the
+ * summary surface instead, which is read-only and must re-paint live on each
+ * SimState — so it must NOT be gated behind this "skip the lobby rebuild" guard.
  */
 export function showingLobbyDuringGame(uiState, myToken, pendingMidGameClaim) {
   if (uiState.phase !== 'InProgress') return false;
   const player = playerFor(uiState, myToken);
+  if (player && player.spectator) return false; // spectators get the summary surface
   return !!pendingMidGameClaim || !playerStation(uiState, myToken)
     || !!(player && !player.ready);
 }
@@ -277,6 +292,32 @@ export function routeMessage(msg, ctx) {
       }
       rebuildStations = true;
       break;
+    case 'SpectatorChanged':
+      // Explicit Spectator role delta (issue #1105). The seat-clear and unready
+      // ride on their own StationAssigned{None}/ReadyChanged{false} messages;
+      // this just tracks the role flag. rebuildStations re-folds the roster and
+      // schedules the render that swaps to (or from) the summary surface.
+      if (lobbyState) {
+        uiState.players = lobbyState.players;
+      } else {
+        const p = uiState.players.find(p => p.token === msg.data.token);
+        if (p) p.spectator = msg.data.spectator;
+      }
+      rebuildStations = true;
+      break;
+    case 'AfkChanged':
+      // AFK presence delta (issue #1104). The delegation/restore ride on their
+      // own RatingChanged messages and the seat is never vacated (no
+      // StationAssigned), so this only tracks the presence flag on the roster
+      // for presence rendering — mirroring ReadyChanged/SpectatorChanged.
+      if (lobbyState) {
+        uiState.players = lobbyState.players;
+      } else {
+        const p = uiState.players.find(p => p.token === msg.data.token);
+        if (p) p.afk = msg.data.afk;
+      }
+      rebuildStations = true;
+      break;
     case 'ObjectiveSummary':
       break; // fall through to the render guard
     default:
@@ -294,4 +335,5 @@ export function routeMessage(msg, ctx) {
 // at global scope, and a module assignment would silently replace it.
 if (typeof window !== 'undefined') {
   window.routeMessage = routeMessage;
+  window.routerIsSpectator = isSpectator;
 }

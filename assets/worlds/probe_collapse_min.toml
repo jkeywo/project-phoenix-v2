@@ -1,0 +1,324 @@
+# Probe world for issue #1040 — a structure WARNING, then FALLING, then leaving
+# a rescue behind it.
+#
+# This is the minimal, operations-free successor to the retired `probe_collapse`
+# world (#1164, S11a). The four claims #1040 owns are all here — a warning
+# ladder, a condition floor that removes the structure, a reaction inside the
+# final window that prevents it, and a rescue that completes — and none of them
+# is about an operation verb. The retired world drove the SAVE with a `stabilise`
+# and the RESCUE with a `tow`; both are re-expressed here as scripted
+# `repair_infrastructure` payouts on the same clock, so the world needs no
+# `[operations]` capability at all.
+#
+# TWO HEADS, SIDE BY SIDE, is how it holds claims 2 and 3 apart in one run. Both
+# are the same `skyhook.toml` on the same strain schedule; the only difference
+# between them is that ONE IS SAVED by a scripted repair on the third warning.
+#
+# EACH HEAD AUTHORS ITS OWN THRESHOLD LADDER, replacing the template's wholesale
+# (arrays replace at the instance layer): a threshold `flag` is the scenario's
+# namespace, so two heads inheriting one ladder would overwrite each other.
+#
+# ── The authored timeline, in mission seconds ────────────────────────────────
+#
+# Both heads open on 30 of 100 points and lose 2 every 2 seconds.
+#
+#   t=1    the strain begins; both heads step 30 → 28 → 26 …
+#   t=5    24 — under 25 %: `*_bearing` falls        WARNING ONE (both)
+#   t=11   18 — under 19 %: `*_tensioned` falls      WARNING TWO (both)
+#   t=17   12 — under 13 %: `*_holding` falls        WARNING THREE (both), and the
+#          saved side schedules a repair FOUR SECONDS OUT — the window a crew has
+#          to react in, expressed as a script call so the probe needs no console.
+#   t≈21   the scheduled repair pays 26 points into a head sitting on 8, which
+#          carries it back over the FIRST rung's restore line. The flag rising IS
+#          the save: the watch closes and the strain stops.
+#   t=23   6 — under 7 %: the LOST side's `*_stable` falls. `destroy_entity` takes
+#          it, `on_destroyed` chains, the projection deadline is called off, and
+#          the epilogue opens.
+#   t=25   a survivor lighter is spawned into the debris on 20 of 100 points.
+#   t=27   the rescue begins; a repair is scheduled three seconds out.
+#   t=30   the payout carries the lighter over its line: `on_flag_set` records
+#          the recovery.
+#   t=35   the epilogue resolves, ten seconds after the craft came out of the
+#          wreck, and completes its objective.
+#
+# EVERY REGISTRATION THAT READS A FLAG GOING **UP** CARRIES A `when`: a condition
+# track publishes its `initial_flags` on its first tick, so every rung is UP at
+# load and a flag trigger is single-shot. `when` suppresses a firing WITHOUT
+# consuming the trigger.
+
+[global]
+seed = 1040
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[anchors]
+# Where the lost head's survivors end up. Off the head, because the wreck is
+# where the ribbon was.
+probe_debris = [900.0, 0.0, 240.0]
+
+# The player ship, present because a world needs one. It does no work here.
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# ── The head that is saved ───────────────────────────────────────────────────
+#
+# Its ladder is the template's shape at a quarter of the template's numbers,
+# because this probe drives a head from 30 points rather than from 48.
+[[entity]]
+template_path = "assets/entities/skyhook.toml"
+id = "hook_saved"
+name = "world.probe_collapse.entity.hook_saved.name"
+transform = { position = [400.0, 0.0, 0.0] }
+
+[entity.overrides.infrastructure]
+condition = 30.0
+
+[[entity.overrides.infrastructure.capacity]]
+id = "probe_saved_berths"
+amount = 2
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "probe_saved_bearing"
+fails_below = 0.25
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "probe_saved_tensioned"
+fails_below = 0.19
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "probe_saved_holding"
+fails_below = 0.13
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "probe_saved_stable"
+fails_below = 0.07
+
+# ── The head that is lost ────────────────────────────────────────────────────
+#
+# Identical, to the point. Nobody saves it.
+[[entity]]
+template_path = "assets/entities/skyhook.toml"
+id = "hook_lost"
+name = "world.probe_collapse.entity.hook_lost.name"
+transform = { position = [800.0, 0.0, 0.0] }
+
+[entity.overrides.infrastructure]
+condition = 30.0
+
+[[entity.overrides.infrastructure.capacity]]
+id = "probe_lost_berths"
+amount = 2
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "probe_lost_bearing"
+fails_below = 0.25
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "probe_lost_tensioned"
+fails_below = 0.19
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "probe_lost_holding"
+fails_below = 0.13
+
+[[entity.overrides.infrastructure.threshold]]
+flag = "probe_lost_stable"
+fails_below = 0.07
+
+# The projected failure, one second AFTER the arithmetic says the lost head
+# crosses its floor, so the run proves the collapse CANCELS it rather than races
+# it.
+[[deadline]]
+id = "probe_projection_due"
+label = "world.probe_collapse.deadline.projection.label"
+due_secs = 24
+visible = true
+
+[script]
+setup = """
+on_timer(1, "on_strain");
+
+on_deadline("probe_projection_due", "on_projection_due");
+
+// The two ladders, read as flags falling.
+on_flag_cleared("probe_saved_bearing", "on_saved_warning_one");
+on_flag_cleared("probe_saved_tensioned", "on_saved_warning_two");
+on_flag_cleared("probe_saved_holding", "on_saved_warning_three");
+on_flag_cleared("probe_saved_stable", "on_saved_gives_way");
+
+on_flag_cleared("probe_lost_bearing", "on_lost_warning_one");
+on_flag_cleared("probe_lost_tensioned", "on_lost_warning_two");
+on_flag_cleared("probe_lost_holding", "on_lost_warning_three");
+on_flag_cleared("probe_lost_stable", "on_lost_gives_way");
+
+// THE SAVE, read off the top rung coming back up. Both flags are UP at load, so
+// each registration carries the `when` that keeps its single-shot trigger armed
+// until the real crossing.
+on_flag_set("probe_saved_bearing", "on_saved_stands_down")
+    .when("counter(probe_watch) > 0");
+on_flag_set("probe_lost_bearing", "on_lost_stands_down")
+    .when("counter(probe_watch) > 0");
+
+// The collapse's consequences, chained off the REMOVAL rather than written
+// beside it (#1033).
+on_destroyed("world.probe_collapse.entity.hook_lost.name", "on_lost_head_gone");
+
+// The rescue's completion signal. The survivor spawns UNDER its line, so the
+// flag is down from its first tick and no `when` is needed.
+on_flag_set("probe_survivor_secured", "on_survivor_recovered");
+
+// The strain: 2 condition points off BOTH heads every 2 seconds, re-arming
+// itself while the watch is open. One beat drives two ladders, so the two heads
+// cannot drift apart for any reason other than the save.
+fn on_strain(ctx) {
+    if ctx.flags.probe_stopped > 0 { return; }
+    ctx.flags.probe_watch = 1;
+    if ctx.flags.probe_saved_held == 0 {
+        ctx.effects.damage_infrastructure("world.probe_collapse.entity.hook_saved.name", 2);
+    }
+    if ctx.flags.probe_lost_gone == 0 {
+        ctx.effects.damage_infrastructure("world.probe_collapse.entity.hook_lost.name", 2);
+    }
+    ctx.flags.increment("strain_beats", 1);
+    ctx.schedule.after(2, |ctx| { on_strain(ctx); });
+}
+
+fn on_saved_warning_one(ctx)   { ctx.flags.increment("saved_warning_one", 1); }
+fn on_saved_warning_two(ctx)   { ctx.flags.increment("saved_warning_two", 1); }
+fn on_lost_warning_one(ctx)    { ctx.flags.increment("lost_warning_one", 1); }
+fn on_lost_warning_two(ctx)    { ctx.flags.increment("lost_warning_two", 1); }
+fn on_lost_warning_three(ctx)  { ctx.flags.increment("lost_warning_three", 1); }
+
+// THE REACTION, and the whole of claim 3. On the THIRD warning the saved side
+// schedules a repair four seconds out — the window a crew has to react in. If the
+// final window is ever tuned shorter than four seconds, the head falls first and
+// the assertion below it fails. This is the `repair_infrastructure` re-expression
+// of the retired world's `stabilise`, on the same four-second clock.
+fn on_saved_warning_three(ctx) {
+    ctx.flags.increment("saved_warning_three", 1);
+    ctx.schedule.after(4, |ctx| {
+        ctx.effects.repair_infrastructure("world.probe_collapse.entity.hook_saved.name", 26);
+    });
+    ctx.flags.increment("saved_op_started", 1);
+}
+
+// The save landing, read off the top rung coming back up. `probe_saved_held` is
+// what takes this head off the strain beat, so the two heads part company here.
+fn on_saved_stands_down(ctx) {
+    ctx.flags.probe_saved_held = 1;
+    ctx.effects.complete_objective("obj-probe-saved");
+    ctx.flags.increment("saved_stood_down", 1);
+}
+
+// Registered for symmetry and expected NEVER TO FIRE.
+fn on_lost_stands_down(ctx) {
+    ctx.flags.increment("lost_stood_down", 1);
+}
+
+// The floor on the saved side: registered, and expected never to fire either.
+fn on_saved_gives_way(ctx) {
+    ctx.flags.increment("saved_floor_crossed", 1);
+    ctx.effects.destroy_entity("world.probe_collapse.entity.hook_saved.name");
+}
+
+// THE FLOOR, and claim 2. One call; everything else hangs off the removal.
+fn on_lost_gives_way(ctx) {
+    ctx.flags.increment("lost_floor_crossed", 1);
+    ctx.effects.destroy_entity("world.probe_collapse.entity.hook_lost.name");
+}
+
+fn on_lost_head_gone(ctx) {
+    ctx.flags.probe_lost_gone = 1;
+    // The berths went with the head.
+    ctx.flags["probe_lost_berths"] = 0;
+    ctx.flags.increment("lost_head_gone", 1);
+    if ctx.deadlines.state("probe_projection_due") == "pending" {
+        ctx.deadlines.cancel("probe_projection_due");
+    }
+    ctx.effects.fail_objective("obj-probe-lost");
+    // The branch. Two seconds out, so the craft reads as coming out of the wreck.
+    ctx.schedule.after(2, |ctx| { on_survivors(ctx); });
+}
+
+// Expected never to fire: the collapse cancels this deadline a second before it
+// is due.
+fn on_projection_due(ctx) {
+    ctx.flags.increment("projection_fired", 1);
+}
+
+// The epilogue, and claim 4. One craft, spawned with `overrides` because it does
+// not exist until the head comes apart, carrying its own threshold flag.
+fn on_survivors(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/ship_civilian_hauler.toml",
+        name: "world.probe_collapse.entity.survivor.name",
+        anchor: "probe_debris",
+        groups: ["probe_survivors"],
+        overrides: #{
+            infrastructure: #{
+                condition: 20,
+                hull_damage_share: 0,
+                threshold: [ #{ flag: "probe_survivor_secured", fails_below: flt("0.5") } ],
+            },
+        },
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-probe-survivors",
+        text: "world.probe_collapse.objective.survivors.text",
+        mandatory: true,
+    });
+    ctx.flags.increment("epilogue_open", 1);
+    // Two seconds later the rescue begins and pays out three seconds after that —
+    // the `repair_infrastructure` re-expression of the retired world's `tow`, on
+    // the same clock. Deferring the spawn's read into `name_to_uuid` too.
+    ctx.schedule.after(2, |ctx| {
+        ctx.flags.increment("rescue_started", 1);
+        ctx.schedule.after(3, |ctx| {
+            ctx.effects.repair_infrastructure("world.probe_collapse.entity.survivor.name", 45);
+        });
+    });
+    // The epilogue's own clock, measured from the collapse: ten seconds.
+    ctx.schedule.after(10, |ctx| { on_epilogue_resolves(ctx); });
+}
+
+fn on_survivor_recovered(ctx) {
+    ctx.flags.probe_survivor_safe = 1;
+    ctx.flags.increment("survivor_recovered", 1);
+}
+
+fn on_epilogue_resolves(ctx) {
+    if ctx.flags.probe_survivor_safe > 0 {
+        ctx.effects.complete_objective("obj-probe-survivors");
+    } else {
+        ctx.effects.fail_objective("obj-probe-survivors");
+        ctx.effects.destroy_entity("world.probe_collapse.entity.survivor.name");
+    }
+    // Nothing left to strain: the saved head is off the beat and the lost one is
+    // gone. Stopping the chain keeps the run from carrying a callback nobody
+    // is watching.
+    ctx.flags.probe_stopped = 1;
+    ctx.flags.increment("epilogue_resolved", 1);
+}
+
+on_world_loaded("on_arrival");
+
+fn on_arrival(ctx) {
+    ctx.effects.add_objective(#{
+        id: "obj-probe-saved",
+        text: "world.probe_collapse.objective.saved.text",
+        mandatory: true,
+        targets: ["world.probe_collapse.entity.hook_saved.name"],
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-probe-lost",
+        text: "world.probe_collapse.objective.lost.text",
+        mandatory: true,
+        targets: ["world.probe_collapse.entity.hook_lost.name"],
+    });
+}
+"""

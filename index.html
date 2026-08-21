@@ -1021,7 +1021,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-6d2648979bab6096.js" crossorigin="anonymous" integrity="sha384-qVa51JgRrmsUVBC4weZBDpCRBCmjXg8bxWM87VboE5IVBDQrEYpDjdiZeN72gX1Q"><link rel="preload" href="./project-phoenix-6d2648979bab6096_bg.wasm" crossorigin="anonymous" integrity="sha384-0qfMZ+RHXdfKjFGH+Y9ZFASx/nU39fm0iwuGm0LiUm+WWuMNNzrV/bRnjMgLF8Y2" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-e9269035d5d0195.js" crossorigin="anonymous" integrity="sha384-qoFIgWFRT/h+/u4d/oroqT1eeBUB2/jMfoPKRtKZJOY3Zfe0+EOQY8a11FdbCKld"><link rel="preload" href="./project-phoenix-e9269035d5d0195_bg.wasm" crossorigin="anonymous" integrity="sha384-mN20O2eMnyOK6p9uWEbrYgBeb0JgkyGL/FOSrJ0A6L1pVC68GZUIMHP0cijz3WfV" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1413,8 +1413,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-6d2648979bab6096.js';
-const wasm = await init({ module_or_path: './project-phoenix-6d2648979bab6096_bg.wasm' });
+import init, * as bindings from './project-phoenix-e9269035d5d0195.js';
+const wasm = await init({ module_or_path: './project-phoenix-e9269035d5d0195_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -3384,6 +3384,12 @@ function finishInit() {
   window.wasm_validate_stations = wasmBindings.wasm_validate_stations;
   window.wasm_set_debug_regions = wasmBindings.wasm_set_debug_regions;
   window.wasm_is_debug_regions_enabled = wasmBindings.wasm_is_debug_regions_enabled;
+  // Reduced motion (issue #1173): the viewscreen forwards the host's
+  // `prefers-reduced-motion` preference to the renderer so hull-damage screen
+  // shake and the shield-hit white flash honour it. The getter lets the
+  // reduced-motion smoke prove the value reached the WASM render path.
+  window.wasm_set_reduced_motion = wasmBindings.wasm_set_reduced_motion;
+  window.wasm_is_reduced_motion = wasmBindings.wasm_is_reduced_motion;
   // Performance capture (issue #868). Read-only: it returns what the wasm
   // collector has sampled so far and changes nothing in the running page.
   window.wasm_perf_capture = wasmBindings.wasm_perf_capture;
@@ -3723,6 +3729,25 @@ function startServer() {
   const urlParams = new URLSearchParams(location.search);
   if (urlParams.get('debug_regions') === '1') {
     wasm_set_debug_regions(true);
+  }
+
+  // Reduced motion (issue #1173): the viewscreen is a television in a room, so
+  // it takes its motion-comfort cue from the host machine's OS preference
+  // (`prefers-reduced-motion: reduce`) rather than any per-phone accessibility
+  // profile. Forward it to the renderer before wasm_init so the first frame
+  // already honours it, and keep it live on change (no reload needed — Rust
+  // drains the flag every frame). The same OS media query also caps the CSS
+  // red-alert vignette pulse (see the `@media (prefers-reduced-motion: reduce)`
+  // block above), so one source drives both the wgpu and CSS feedback.
+  if (typeof wasm_set_reduced_motion === 'function' && typeof window.matchMedia === 'function') {
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    wasm_set_reduced_motion(motionQuery.matches);
+    const onMotionChange = (e) => wasm_set_reduced_motion(e.matches);
+    if (typeof motionQuery.addEventListener === 'function') {
+      motionQuery.addEventListener('change', onMotionChange);
+    } else if (typeof motionQuery.addListener === 'function') {
+      motionQuery.addListener(onMotionChange); // older WebKit
+    }
   }
 
   // Logging: ?log= sets category levels, ?log_entity= restricts to named

@@ -5,6 +5,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import { rovingKeyTarget } from '../roving-tabindex.js';
 
 export class PhShieldFacings extends HTMLElement {
   #state = null;
@@ -14,6 +15,12 @@ export class PhShieldFacings extends HTMLElement {
   #arcsGroup = null;
   #autoHintEl = null;
   #autoHintTimer = null;
+  // The keyboard target cursor (issue #1177): the arc the arrow keys have moved
+  // to, which Enter/Space then commits. Like the tactical scope, the facing
+  // ring is one focusable group cycled by arrows rather than a set of roving
+  // child controls — the arcs are SVG paths, not focusable DOM elements.
+  #cursorArcId = null;
+  #keydownBound = false;
 
   constructor() {
     super();
@@ -33,6 +40,13 @@ export class PhShieldFacings extends HTMLElement {
     .arc-path { cursor: pointer; transition: opacity 0.2s, filter 0.2s; }
     .arc-path:hover, .arc-path.hover { filter: brightness(1.3); }
     .arc-path.focused { filter: brightness(1.5) drop-shadow(0 0 4px var(--loaded)); }
+    /* The keyboard target cursor (issue #1177): a dashed ring in the shared
+       focus-ring token colour around the arc the arrows have moved to, distinct
+       from the solid server-side .focused highlight. It draws "where the
+       keyboard is" before Enter commits — the arc-scope equivalent of the
+       tactical radar's dashed cursor. A CSS rule beats the presentation-attribute
+       stroke the render sets, so it paints over whatever fill the arc carries. */
+    .arc-path.kbd-cursor { stroke: var(--focus-ring); stroke-width: 2.5; stroke-dasharray: 4 2; }
     .arc-path.down { opacity: 0.3; cursor: default; }
     /* Brief acknowledgment flash on any arc press (#1009) — retriggered via the
        classList remove/reflow/add trick in #flashArc, matching the rejection
@@ -80,6 +94,85 @@ export class PhShieldFacings extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
+    // Role + accessible name + keyboard reach (issue #1177). The facing ring is
+    // one Tab stop (`tabindex="0"`); `role="group"` with a name is the honest
+    // role for a composite whose SVG arcs a screen reader cannot enumerate.
+    // Arrow keys then cycle the target cursor and Enter/Space commit it, so the
+    // ring is fully keyboard-operable without a pointer.
+    this.setAttribute('role', 'group');
+    this.setAttribute('aria-label', t('component.shield_facings.title'));
+    if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
+    if (!this.#keydownBound) {
+      this.addEventListener('keydown', this.#onKeyDown);
+      this.#keydownBound = true;
+    }
+  }
+
+  #onKeyDown = (event) => {
+    const s = this.#state || {};
+    const facings = Array.isArray(s.facings) ? s.facings : [];
+    if (facings.length === 0) return;
+    const ids = facings.map((f) => f.arc_id);
+    const key = event.key;
+
+    // Enter / Space commit the cursor's facing through the SAME named action a
+    // tap emits (issue #1177) — one focus path, no keyboard-only fork.
+    if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
+      if (this.#cursorArcId) {
+        event.preventDefault();
+        const f = facings.find((x) => x.arc_id === this.#cursorArcId);
+        const g = this.#facingGs.get(this.#cursorArcId);
+        this.#activateArc(this.#cursorArcId, f && f.label, g && g.children[0]);
+      }
+      return;
+    }
+
+    const current = ids.indexOf(this.#cursorArcId);
+    let next;
+    if (current < 0) {
+      // No cursor yet: the first navigation key lands on an end of the ring
+      // rather than skipping the facing under it.
+      if (key === 'ArrowUp' || key === 'ArrowLeft' || key === 'End') next = ids.length - 1;
+      else if (key === 'ArrowDown' || key === 'ArrowRight' || key === 'Home') next = 0;
+      else return;
+    } else {
+      next = rovingKeyTarget(ids.length, current, key, 'both');
+    }
+    if (next < 0) return;
+    event.preventDefault();
+    this.#cursorArcId = ids[next];
+    this.#paintCursor();
+  };
+
+  /**
+   * Commit a facing press — the ONE path both the pointer tap and the keyboard
+   * Enter run through (issue #1177), so the two can never dispatch different
+   * things. Every press flashes for feedback; an auto-mode press shows the hint
+   * instead of sending; otherwise it toggles focus via the same
+   * `set_shield_focus` the tap always sent (#1009).
+   * @param {string} arcId
+   * @param {string|undefined} arcLabel
+   * @param {SVGElement|null} outline
+   */
+  #activateArc(arcId, arcLabel, outline) {
+    const cur = this.#state || {};
+    if (outline) this.#flashArc(outline);
+    if (cur.auto) {
+      this.#showAutoHint();
+      return;
+    }
+    if (this.sendAction && arcId) {
+      const isFocusedNow = cur.focused_facing === arcId || cur.focused_facing === arcLabel;
+      this.sendAction('set_shield_focus', { arc_id: arcId, focused: !isFocusedNow });
+    }
+  }
+
+  /** Move the dashed cursor ring to the arc the arrows have landed on. */
+  #paintCursor() {
+    for (const [id, g] of this.#facingGs) {
+      const outline = g.children[0];
+      if (outline) outline.classList.toggle('kbd-cursor', id === this.#cursorArcId);
+    }
   }
 
   set state(val) {
@@ -120,6 +213,9 @@ export class PhShieldFacings extends HTMLElement {
     for (const [key, g] of this.#facingGs) {
       if (!live.has(key)) { g.remove(); this.#facingGs.delete(key); }
     }
+    // Drop the keyboard cursor if the facing it rested on left the ring, so a
+    // stale dashed ring never hangs where no arc is (issue #1177).
+    if (this.#cursorArcId && !live.has(this.#cursorArcId)) this.#cursorArcId = null;
 
     facings.forEach((f, i) => {
       const id = f.arc_id;
@@ -149,20 +245,8 @@ export class PhShieldFacings extends HTMLElement {
         const hitPath = g.children[4];
         hitPath.addEventListener('mouseenter', () => outline.classList.add('hover'));
         hitPath.addEventListener('mouseleave', () => outline.classList.remove('hover'));
-        hitPath.addEventListener('click', () => {
-          const cur = this.#state || {};
-          // Every press gets a visible acknowledgment — previously an auto-mode
-          // press was silently swallowed here with no feedback at all (#1009).
-          this.#flashArc(outline);
-          if (cur.auto) {
-            this.#showAutoHint();
-            return;
-          }
-          if (this.sendAction && id) {
-            const isFocusedNow = cur.focused_facing === id || cur.focused_facing === f.label;
-            this.sendAction('set_shield_focus', { arc_id: id, focused: !isFocusedNow });
-          }
-        });
+        // The tap runs the SAME commit path the keyboard Enter does (#1177).
+        hitPath.addEventListener('click', () => this.#activateArc(id, f.label, outline));
         this.#facingGs.set(id, g);
         this.#arcsGroup.appendChild(g);
       }
@@ -187,7 +271,10 @@ export class PhShieldFacings extends HTMLElement {
         + (isFocused ? ' focused' : '')
         + (!online ? ' down' : '')
         + (keepHover ? ' hover' : '')
-        + (keepFlash ? ' press-flash' : ''));
+        + (keepFlash ? ' press-flash' : '')
+        // The keyboard cursor rides through the wholesale rewrite too, so a
+        // state push does not drop the dashed ring the arrows placed (#1177).
+        + (this.#cursorArcId === id ? ' kbd-cursor' : ''));
 
       // Enlarged touch target: same wedge, padded outward/inward so a press
       // doesn't need pixel-perfect accuracy on the (fairly thin) visual

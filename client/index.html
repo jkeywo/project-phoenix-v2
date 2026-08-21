@@ -44,10 +44,14 @@
        payload normaliser. -->
   <script type="module" src="gui/mount-plan.js"></script>
   <script type="module" src="gui/content-switcher.js"></script>
+  <script type="module" src="gui/console-mount.js"></script>
   <script type="module" src="gui/hero-bar.js"></script>
   <script type="module" src="gui/station-roster.js"></script>
   <script type="module" src="gui/client-router.js"></script>
   <script type="module" src="gui/lobby-view.js"></script>
+  <!-- Crew-public Spectator summary surface (issue #1105). Depends on
+       gui/hero-bar.js for the shared health/importance classifiers. -->
+  <script type="module" src="gui/spectator-view.js"></script>
   <!-- Onboarding/session-flow state (PRD #1023 module 4): the in-flight
        scenario/ship pick, the game-over frame, and whether a console's link is
        live, still loading or dead. All three are pure rules the inline script
@@ -91,6 +95,12 @@
   <script type="module" src="gui/connection-manager.js"></script>
   <!-- Settings panel: client controls plus Station Help and Ship Manual. -->
   <script type="module" src="gui/settings-panel.js"></script>
+  <!-- Private per-player Accessibility profile (issue #1102): presentation
+       effects + inert assistance schema. Hydrates simState.accessibilityProfile
+       from localStorage in the module graph and defines
+       window.applyAccessibilityProfile / setAccessibilityPresentation for the
+       inline script below. Never sent to the host — client-local. -->
+  <script type="module" src="gui/accessibility-profile.js"></script>
   <style>
     /* The lobby's vocabulary is gui/tokens.css, linked above — it used to keep
        a parallel `:root` here whose `--edge` was a different colour from the
@@ -222,7 +232,7 @@
       background: var(--surface-panel); border-bottom: 1px solid var(--edge-strong);
       font-family: 'Chakra Petch', monospace;
     }
-    #station-hero-tabs { display: flex; gap: 4px; overflow-x: auto; grid-row: 1 / span 3; }
+    #station-hero-tabs { display: flex; gap: 4px; overflow-x: auto; grid-row: 1 / span 4; }
     #station-hero-tabs button {
       width: auto; margin: 0; padding: 3px 9px; min-height: var(--control-hit-min);
       display: flex; flex-direction: column; gap: 1px; white-space: nowrap;
@@ -232,9 +242,18 @@
       border-color: var(--signal); min-height: var(--control-hit-min);
     }
     .station-tab-owner { font-size: var(--text-xs); color: var(--ink-dim); }
-    #station-hero-title, #station-hero-meta, #station-hero-ai { grid-column: 2; }
+    /* Persistent per-tab health cue (issue #1100): a text/shape token, not
+       colour, so it reads regardless of theme or colour vision and survives
+       beside any importance alert on the tab. */
+    .station-tab-health { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.06em; }
+    /* Persistent per-tab importance cue (issue #1101): its OWN element and glyph
+       token, held apart from the health cue above, so an off-screen event or a
+       continuing condition reads on every tab without colour and alongside
+       health. Never a sort key — importance never reorders tabs. */
+    .station-tab-importance { font-size: var(--text-xs); color: var(--ink-dim); letter-spacing: 0.06em; }
+    #station-hero-title, #station-hero-meta, #station-hero-ai, #station-hero-health { grid-column: 2; }
     #station-hero-title { font-size: var(--text-md); font-weight: 700; }
-    #station-hero-meta, #station-hero-ai { font-size: var(--text-xs); color: var(--ink-dim); }
+    #station-hero-meta, #station-hero-ai, #station-hero-health { font-size: var(--text-xs); color: var(--ink-dim); }
     /* --- Phone-bezel red alert glow animation -----------------------------
        Pure CSS no PNGs. A thin 2px inset border holds the base frame color;
        when .alert-on is toggled we swap `--bezel-frame` to red and kick off
@@ -294,18 +313,21 @@
        The answer is to stop the ANIMATION, not to hide the STATE — so the
        bezel holds at the keyframe's peak: full red border and full glow,
        simply not moving. Someone reading the room still sees a ship at red
-       alert. This is the reduced-motion contract, and module 3 of PRD #1023
-       generalises it to every indefinitely looping animation. The rest of the
-       lobby's live at the END of this stylesheet, for the reason written
-       there; this one can stay beside the loop it stills because the loop is
-       declared above it. */
-    @media (prefers-reduced-motion: reduce) {
-      #phone-bezel.alert-on {
-        animation: none;
-        border-color: var(--fire-hot);
-        box-shadow: inset 0 0 8px var(--bezel-red),
-                    0 0 16px calc(var(--bezel-glow-size) * 4) rgba(var(--rgb-fire), 0.9);
-      }
+       alert.
+
+       The global layer in gui/tokens.css (issue #1172) already collapses this
+       loop's duration off BOTH the OS media query and the stamped
+       `data-reduced-motion` attribute; this rule only holds the BRIGHTER frame.
+       It is attribute-driven, not `@media`, so the tri-state resolves cleanly:
+       it lands exactly when the profile stamps `reduce` (explicit ON, or OS
+       reduce folded through the resolver) and steps aside for an explicit OFF.
+       Its `data-reduced-motion` attribute plus the id/class outweigh the bare
+       loop rule above, so it wins wherever it sits. */
+    :root[data-reduced-motion="reduce"] #phone-bezel.alert-on {
+      animation: none;
+      border-color: var(--fire-hot);
+      box-shadow: inset 0 0 8px var(--bezel-red),
+                  0 0 16px calc(var(--bezel-glow-size) * 4) rgba(var(--rgb-fire), 0.9);
     }
 
      #phone-bezel[aria-hidden="true"] { display: none; }
@@ -559,6 +581,38 @@
       -webkit-user-select: none; user-select: none;
       pointer-events: auto;
     }
+    /* -- Spectator summary surface (issue #1105) ------------------------- */
+    #spectator-ui { display: none; }
+    #spectator-ui.active {
+      display: flex; flex-direction: column; gap: 12px;
+      position: fixed; inset: 0; z-index: 6; overflow: auto;
+      padding: 44px 12px 12px;
+      background: var(--surface-abyss); color: var(--ink);
+      font-family: 'Chakra Petch', system-ui, sans-serif;
+    }
+    #spectator-header { font-size: var(--text-lg); font-weight: 600; letter-spacing: .06em; }
+    #spectator-alert { font-size: var(--text-md); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); }
+    #spectator-alert[data-alert="red"] { color: var(--tactical-bright); font-weight: 700; }
+    #spectator-hull { font-size: var(--text-sm); color: var(--ink-dim); font-family: 'JetBrains Mono', monospace; }
+    .spectator-section { display: flex; flex-direction: column; gap: 4px; }
+    .spectator-heading { font-size: var(--text-xs); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-dim); }
+    .spectator-station-row { display: flex; justify-content: space-between; font-size: var(--text-sm); }
+    .spectator-station-health { color: var(--ink-dim); font-family: 'JetBrains Mono', monospace; }
+    .spectator-objective-row { font-size: var(--text-sm); }
+    .spectator-objective-row.done { text-decoration: line-through; color: var(--ink-dim); }
+    .spectator-objectives-empty { font-size: var(--text-xs); color: var(--ink-dim); }
+    /* Claim-an-open-Station list (issue #1106). Rows reuse the lobby
+       .station-row visuals (claim/ineligible buttons, inline reason); only the
+       list container and the neutral stale-claim notice are scoped here. */
+    #spectator-claims { display: flex; flex-direction: column; gap: 6px; }
+    #spectator-claim-status:empty { display: none; }
+    #spectator-claim-status { font-size: var(--text-sm); color: var(--ink-dim); }
+    #spectator-claim-status[data-state="taken"] { color: var(--reloading); }
+    .spectator-claims-empty { font-size: var(--text-xs); color: var(--ink-dim); }
+    #spectate-btn { padding: 6px 14px; border-radius: 4px; background: var(--surface-panel-up);
+      color: var(--ink); border: 1px solid var(--edge-strong); font-family: 'Chakra Petch', sans-serif;
+      letter-spacing: .06em; }
+
     /* Ship header */
     #lobby-header { display: flex; align-items: center; justify-content: space-between;
       padding: 4px 0 8px; border-bottom: 1px solid var(--edge); flex-shrink: 0; }
@@ -625,6 +679,14 @@
       border-color: var(--signal); }
     .station-row .action .taken-btn { background: var(--surface-panel); color: var(--ink-faint);
       border-color: var(--edge); cursor: default; }
+    /* A free seat blocked by this player's private accessibility profile
+       (issue #1103 AC1). Muted like 'taken'; the functional reason sits inline
+       under the station name and is local-only. */
+    .station-row .action .ineligible-btn { background: var(--surface-panel); color: var(--ink-faint);
+      border-color: var(--edge); cursor: not-allowed; }
+    .station-row.ineligible { opacity: 0.75; }
+    .station-row .info .ineligible-reason { font-size: var(--text-sm); color: var(--ink-dim);
+      margin-top: 2px; line-height: 1.4; font-style: italic; }
     /* Detail panel */
     #detail-panel { flex-shrink: 0; border-top: 1px solid var(--edge);
       padding: 8px 0 4px; margin-top: 4px; transition: opacity .3s ease; }
@@ -900,42 +962,37 @@
     .manual-rating-systems { flex: 1; word-break: break-word; }
 
     /* ── Reduced motion, continued ──────────────────────────────
-       LAST in the stylesheet, and that position is the whole point.
+       These loops hold a BRIGHTER frame than their base while the global layer
+       in gui/tokens.css (issue #1172) collapses the motion off both the OS
+       media query and the stamped `data-reduced-motion` attribute.
 
-       A media query adds no specificity. `@media (prefers-reduced-motion)
-       { #ready-pill.go { animation: none } }` and the `#ready-pill.go` that
-       starts the pulse are the same weight, so the one written LATER wins —
-       and these four loops are all declared further down the file than the
-       red-alert bezel is. Written up beside the bezel, as they first were,
-       every one of them silently lost, and the page went on pulsing at a
-       player who had asked it not to. A reduced-motion rule that loses the
-       cascade is indistinguishable from one nobody wrote.
-
-       So they live here, after everything they override. The alternative —
-       `!important` on each — wins the same argument by shouting, and leaves
-       the next reader unable to tell which rules genuinely need it.
-       tests/client/control-floors.test.js asserts the ORDER, not just the
-       presence, for exactly this reason. */
-    @media (prefers-reduced-motion: reduce) {
-      /* The two spinners. A spinner says "still working", and a ring with one
-         arc in a different colour still reads as a progress indicator that has
-         stopped moving — which is honest, because the work IS proceeding.
-         Removing it would leave a blank panel reading as broken, which is a
-         defect this same PRD fixes elsewhere. */
-      #asset-loading .spinner-ring,
-      #waiting-overlay .spinner-ring {
-        animation: none;
-      }
-      /* The two "you are good to go" glows, held at the peak of their own
-         pulse so the ready state is still the brightest thing in the footer. */
-      #ready-pill.go {
-        animation: none;
-        box-shadow: 0 0 12px rgba(var(--rgb-signal), 0.5);
-      }
-      #ready-btn.armed.glow {
-        animation: none;
-        box-shadow: 0 0 18px rgba(var(--rgb-signal), 0.7);
-      }
+       Attribute-driven, matching the bezel above: they land when the profile
+       stamps `reduce` and step aside for an explicit OFF, so the tri-state
+       resolves both ways. And an attribute selector adds specificity where a
+       bare `@media` override did not: `@media (prefers-reduced-motion)
+       { #ready-pill.go { animation: none } }` weighs exactly as much as the
+       `#ready-pill.go` that starts the pulse, so it had to be written LATER to
+       win — the reason these once lived last in the file. The
+       `:root[data-reduced-motion="reduce"]` prefix outweighs the loop rule
+       outright, so they now win wherever they sit. */
+    /* The two spinners. A spinner says "still working", and a ring with one
+       arc in a different colour still reads as a progress indicator that has
+       stopped moving — which is honest, because the work IS proceeding.
+       Removing it would leave a blank panel reading as broken, which is a
+       defect this same PRD fixes elsewhere. */
+    :root[data-reduced-motion="reduce"] #asset-loading .spinner-ring,
+    :root[data-reduced-motion="reduce"] #waiting-overlay .spinner-ring {
+      animation: none;
+    }
+    /* The two "you are good to go" glows, held at the peak of their own pulse
+       so the ready state is still the brightest thing in the footer. */
+    :root[data-reduced-motion="reduce"] #ready-pill.go {
+      animation: none;
+      box-shadow: 0 0 12px rgba(var(--rgb-signal), 0.5);
+    }
+    :root[data-reduced-motion="reduce"] #ready-btn.armed.glow {
+      animation: none;
+      box-shadow: 0 0 18px rgba(var(--rgb-signal), 0.7);
     }
   </style>
 </head>
@@ -998,7 +1055,41 @@
       <!-- Footer -->
       <div id="lobby-footer">
         <span id="status-line" data-i18n="client.connecting_host">Connecting to host…</span>
+        <!-- Spectate toggle (issue #1105): opt out of a station into the
+             explicit Spectator role, or (when spectating) opt back into the
+             crew. Label + handler are set by renderLobby from the view model. -->
+        <button id="spectate-btn" data-i18n="client.spectator.spectate" style="display:none">Spectate</button>
         <button id="ready-btn" data-i18n="client.ready">READY</button>
+      </div>
+    </section>
+
+    <!-- Spectator summary surface (issue #1105): the one crew-public read-only
+         view a Spectator sees during an in-progress mission, instead of the
+         station-select lobby. It shows only Audience::All crew-public data —
+         objectives, red-alert, ship-wide hull, per-Station health — never any
+         per-station private feed (a seatless client never receives one). -->
+    <section id="spectator-ui" aria-hidden="true">
+      <div id="spectator-header" data-i18n="client.spectator.title">Spectating</div>
+      <div id="spectator-alert" role="status" aria-live="polite"></div>
+      <div id="spectator-hull" role="status" aria-live="polite"></div>
+      <div class="spectator-section">
+        <div class="spectator-heading" data-i18n="client.spectator.stations_heading">Crew stations</div>
+        <div id="spectator-stations"></div>
+      </div>
+      <div class="spectator-section">
+        <div class="spectator-heading" data-i18n="client.spectator.objectives_heading">Objectives</div>
+        <div id="spectator-objectives"></div>
+      </div>
+      <!-- Claim an open Station (issue #1106): a Spectator may enter play by
+           taking any currently-open seat it is eligible for, through the SAME
+           authoritative SelectStation path an ordinary lobby claim uses. Only
+           OPEN∩ELIGIBLE seats offer a live button; an ineligible open seat is
+           shown disabled with a private reason; a lost race / stale seat leaves
+           the participant here with a neutral notice. -->
+      <div class="spectator-section">
+        <div class="spectator-heading" data-i18n="client.spectator.claim_heading">Open stations</div>
+        <div id="spectator-claim-status" role="status" aria-live="polite"></div>
+        <div id="spectator-claims"></div>
       </div>
     </section>
 
@@ -1007,6 +1098,7 @@
       <div id="station-hero-title"></div>
       <div id="station-hero-meta"></div>
       <div id="station-hero-ai" role="status" aria-live="polite"></div>
+      <div id="station-hero-health" role="status" aria-live="polite"></div>
     </nav>
 
     <!-- Console sections are mounted dynamically by mountConsoles() when a
@@ -1126,7 +1218,7 @@
     // -- Click sound --------------------------------------------------------
     // Message types that should NOT trigger a click (continuous / connection
     // setup messages that are not the result of a deliberate button press).
-    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName']);
+    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName', 'ReportStationEligibility']);
 
     const CLICK_PITCH_VARIANCE = 0.08; // +/- 8% playback-rate jitter so repeated clicks don't sound identical
 
@@ -1329,6 +1421,12 @@
     // confirm string; second click sends ReleaseStation. In-progress only —
     // lobby release stays immediate. Reset whenever we leave InProgress.
     let releaseArmed = false;
+    // #1106: the station id a Spectator last tapped "claim" on. A lost race /
+    // stale seat is a silent server no-op (no self-addressed message), so the
+    // client watches this seat: when it reappears as taken, we show a neutral
+    // "that seat was taken" line and keep the participant on the spectator
+    // surface. Cleared whenever we are no longer spectating.
+    let pendingSpectatorClaim = null;
 
     // Single source of truth for changing the active console. Called only by
     // the render() reconciler now that the tab bar and swipe gesture are gone
@@ -1373,7 +1471,16 @@
     function showingLobbyDuringGame(s) {
       if (s.phase !== 'InProgress') return false;
       const player = me(s);
+      // An explicit Spectator (issue #1105) renders the crew-public summary
+      // surface, never the station-select lobby — and its read-only surface
+      // must re-paint live on each SimState, so it is excluded from this
+      // "skip the lobby rebuild" guard.
+      if (player && player.spectator) return false;
       return pendingMidGameClaim || !playerStation(s) || !!(player && !player.ready);
+    }
+    // Explicit Spectator role during an in-progress mission (issue #1105).
+    function spectatingInGame(s) {
+      return s.phase === 'InProgress' && !!(me(s) && me(s).spectator);
     }
     function isCaptain(s)     { return playerStation(s) === 'captain'; }
     function isHelm(s)        { return playerStation(s) === 'helm'; }
@@ -1622,10 +1729,21 @@
             game: s.phase === 'InProgress' || s.phase === 'GameOver',
             bezel: s.phase === 'InProgress' || s.phase === 'GameOver' };
       const mine = myConsoles(s);
-      // Spectators and pending mid-game claimants stay in the lobby. Ready is
-      // the point where the server actually hands the station over from AI.
-      if (showingLobbyDuringGame(s)) {
+      // An explicit Spectator (issue #1105) gets the crew-public summary surface
+      // instead of the station-select lobby OR the game shell. Checked first so
+      // it wins over the mid-game-claimant lobby override below.
+      const spectating = spectatingInGame(s);
+      // Pending mid-game claimants (and stationless non-spectators) stay in the
+      // lobby. Ready is the point where the server hands the station over from AI.
+      if (spectating) {
+        vis.lobby = false; vis.game = false; vis.bezel = false;
+      } else if (showingLobbyDuringGame(s)) {
         vis.lobby = true; vis.game = false; vis.bezel = false;
+      }
+      const specSection = $('spectator-ui');
+      if (specSection) {
+        specSection.className = spectating ? 'active' : '';
+        specSection.setAttribute('aria-hidden', spectating ? 'false' : 'true');
       }
       const inGame = vis.game;
       $('lobby-ui').className = vis.lobby ? 'active' : '';
@@ -1645,6 +1763,8 @@
               stationSystems: window.simState && window.simState.stationSystems,
               blackboards: window.simState && window.simState.blackboards,
               stationHosts: window.simState && window.simState.stationHosts,
+              stationHealth: window.simState && window.simState.stationHealth,
+              stationImportance: window.simState && window.simState.stationImportance,
               stationRatings: window.simState && window.simState.stationRatings,
               activeStation: activeConsole,
             }) : { tabs: mine.map(id => ({ id })), selected: mine[0] || null };
@@ -1665,17 +1785,22 @@
       // returns null and is silently skipped.
       const stationIds = ((s.shipStations && s.shipStations.stations) || [])
         .map(st => st.id).filter(Boolean);
-      const sections = (typeof window.consoleSections === 'function')
-        ? window.consoleSections(activeConsole, inGame, stationIds)
-        : Object.fromEntries(stationIds.map(id => {
-            // Boot-race fallback: canonical `${id}-ui` scheme + the one
-            // tactical → weapons alias (single home: gui/mount-plan.js).
-            const base = id === 'tactical' ? 'weapons' : id;
-            return [base + '-ui', inGame && activeConsole === id];
-          }));
-      for (const [sectionId, visible] of Object.entries(sections)) {
-        const el = $(sectionId);
-        if (el) el.className = visible ? 'console-section active' : 'console-section';
+      if (typeof window.applyConsoleVisibility === 'function') {
+        // The tab-switch seam (gui/console-mount.js): a pure `.active` toggle
+        // over the mounted sections. It never touches iframe nodes, so session-
+        // local console state survives a switch away and back (issue #1099 AC1).
+        window.applyConsoleVisibility(document, activeConsole, inGame, stationIds);
+      } else {
+        // Boot-race fallback: canonical `${id}-ui` scheme + the one tactical →
+        // weapons alias (single home: gui/mount-plan.js).
+        const sections = Object.fromEntries(stationIds.map(id => {
+          const base = id === 'tactical' ? 'weapons' : id;
+          return [base + '-ui', inGame && activeConsole === id];
+        }));
+        for (const [sectionId, visible] of Object.entries(sections)) {
+          const el = $(sectionId);
+          if (el) el.className = visible ? 'console-section active' : 'console-section';
+        }
       }
 
       // Orientation drives console CSS via the container's data attribute.
@@ -1728,8 +1853,146 @@
         waitingEl.style.display = (window.lobbyState && window.lobbyState.waitingForScenario) ? 'flex' : 'none';
       }
 
-      if (inGame) renderGame(s);
-      else if (!(window.lobbyState && window.lobbyState.waitingForScenario)) renderLobby(s);
+      if (spectating) {
+        renderSpectator(s);
+      } else {
+        // A successful claim (issue #1106) seats the ex-Spectator and clears the
+        // role, so we drop off the spectator surface; forget any pending claim
+        // so a later re-spectate never shows a stale "seat taken" notice.
+        pendingSpectatorClaim = null;
+        if (inGame) renderGame(s);
+        else if (!(window.lobbyState && window.lobbyState.waitingForScenario)) renderLobby(s);
+      }
+    }
+
+    // Render the crew-public Spectator summary surface (issue #1105) from the
+    // already-held simState. A Spectator receives only Audience::All broadcasts,
+    // so this shows exactly the crew-public set — objectives, red-alert,
+    // ship-wide hull, per-Station health — and no per-station private feed.
+    function renderSpectator(s) {
+      if (typeof window.spectatorSummaryModel !== 'function'
+          || typeof window.renderSpectatorDom !== 'function') return;
+      const sim = window.simState || {};
+      const model = window.spectatorSummaryModel({
+        redAlert: sim.redAlert,
+        hullAggregate: sim.hullAggregate,
+        hullDestroyed: sim.hullDestroyed,
+        stations: (s.shipStations && s.shipStations.stations) || [],
+        stationHealth: sim.stationHealth,
+        stationImportance: sim.stationImportance,
+        objectives: sim.objectives,
+      });
+      window.renderSpectatorDom({
+        alertEl: $('spectator-alert'),
+        hullEl: $('spectator-hull'),
+        stationsEl: $('spectator-stations'),
+        objectivesEl: $('spectator-objectives'),
+        model,
+        translate: (id, params) => t(id, params),
+        // Objective text is a wire string id (may carry text_params); resolve it
+        // the same way the rest of the shell resolves wire copy.
+        objectiveText: (o) => (window.phStrings && window.phStrings.has(o.text))
+          ? t(o.text, o.textParams || {}) : (o.text || ''),
+      });
+      renderSpectatorClaims(s);
+    }
+
+    // Render the "claim an open Station" list on the Spectator surface (issue
+    // #1106). A Spectator may enter play by taking any currently-open, eligible
+    // seat — through the SAME authoritative SelectStation message an ordinary
+    // lobby claim sends (AC2). Open∩eligible seats get a live claim button;
+    // ineligible open seats are shown disabled with the private #1103 reason
+    // (AC1); a lost race / stale seat leaves a neutral notice and keeps the
+    // participant here (AC3). The roster is live because StationAssigned is
+    // broadcast to all, so a race lost to another player repaints as taken.
+    function renderSpectatorClaims(s) {
+      const listEl = $('spectator-claims');
+      const statusEl = $('spectator-claim-status');
+      if (!listEl || typeof window.spectatorClaimModel !== 'function') return;
+      const roster = s.stations || [];
+
+      // Neutral stale/lost-race notice (AC3): the seat we tapped came back
+      // taken. Keep the Spectator on the surface; leak no other-player identity.
+      if (statusEl) {
+        const stale = typeof window.spectatorClaimStale === 'function'
+          && window.spectatorClaimStale(roster, pendingSpectatorClaim, myToken);
+        if (stale) {
+          statusEl.textContent = t('client.spectator.claim_taken');
+          statusEl.dataset.state = 'taken';
+          pendingSpectatorClaim = null;
+        } else if (!pendingSpectatorClaim) {
+          statusEl.textContent = '';
+          statusEl.removeAttribute('data-state');
+        }
+      }
+
+      const rows = window.spectatorClaimModel(roster, stationEligibility);
+      listEl.innerHTML = '';
+      if (rows.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'spectator-claims-empty';
+        empty.textContent = t('client.spectator.claim_none');
+        listEl.appendChild(empty);
+        return;
+      }
+      for (const row of rows) {
+        const rowEl = document.createElement('div');
+        // Reuse the lobby row visuals (issue #1106): the claim/ineligible
+        // buttons and inline reason are styled under `.station-row`.
+        rowEl.className = 'station-row spectator-claim-row'
+          + (row.button === 'ineligible' ? ' ineligible' : '');
+        rowEl.dataset.station = row.id;
+
+        const info = document.createElement('div');
+        info.className = 'info';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'name';
+        nameEl.textContent = stationLabel(row);
+        info.appendChild(nameEl);
+        if (row.rank) {
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          const rankEl = document.createElement('span');
+          rankEl.textContent = row.rank;
+          meta.appendChild(rankEl);
+          info.appendChild(meta);
+        }
+        // A free seat this player is INELIGIBLE for (issue #1103 AC1): the
+        // private functional reason, local-only, mirroring the lobby roster.
+        if (row.button === 'ineligible' && row.ineligibleReason) {
+          const why = document.createElement('div');
+          why.className = 'ineligible-reason';
+          const fns = (row.ineligibleReason.functions || [])
+            .map(f => t('client.assist_function.' + f))
+            .join(', ');
+          why.textContent = t('client.station_ineligible_reason', { functions: fns });
+          info.appendChild(why);
+        }
+        rowEl.appendChild(info);
+
+        const action = document.createElement('div');
+        action.className = 'action';
+        const btn = document.createElement('button');
+        if (row.button === 'ineligible') {
+          // Blocked claim: the disabled control never sends SelectStation.
+          btn.className = 'ineligible-btn';
+          btn.textContent = t('client.station_ineligible');
+          btn.disabled = true;
+        } else {
+          btn.className = 'claim-btn';
+          btn.textContent = t('client.claim');
+          btn.addEventListener('click', () => {
+            // Remember the seat so a lost race can render its neutral notice,
+            // then send the SAME authoritative message the lobby roster uses.
+            pendingSpectatorClaim = row.id;
+            send('SelectStation', { station: row.name });
+            scheduleRender();
+          });
+        }
+        action.appendChild(btn);
+        rowEl.appendChild(action);
+        listEl.appendChild(rowEl);
+      }
     }
 
     // "Mods active" lobby list (issue #990): render the packs the host applied
@@ -1770,6 +2033,75 @@
       }
     }
 
+    // ── Anonymous accessibility eligibility (issue #1103) ─────────────────
+    // The client evaluates the complete station surface at its required rating
+    // against its PRIVATE profile (gui/accessibility-profile.js), blocks and
+    // privately explains an ineligible direct claim (AC1), and reports ONLY the
+    // anonymous ineligible station-id set to the host (AC2). The profile and the
+    // functional reasons never leave the device.
+
+    /** The required rating for a station: the in-game visiting rating when the
+     *  human-seeking resolver has placed it, else the direct-claim rating, else
+     *  the station's authored base rating. */
+    function requiredRatingForStation(id, ratings) {
+      const sim = window.simState;
+      const host = sim && sim.stationHosts && sim.stationHosts[id];
+      if (host && host.rating) return host.rating;
+      const direct = sim && sim.stationRatings && sim.stationRatings[id];
+      if (direct) return direct;
+      return (ratings && ratings[0]) || '';
+    }
+
+    /** Eligibility for one lobby roster station — { eligible, reason }. The
+     *  `reason` is the PRIVATE functional explanation, shown only to this
+     *  player; it is never sent anywhere. */
+    function stationEligibility(st) {
+      const sim = window.simState;
+      if (!sim || typeof window.deriveStationEligibility !== 'function') {
+        return { eligible: true, reason: null };
+      }
+      const rating = requiredRatingForStation(st.id, st.ratings);
+      const gaps = (sim.stationAssistGaps || {})[st.id];
+      return window.deriveStationEligibility(sim.accessibilityProfile, gaps, rating);
+    }
+
+    /** Recompute the anonymous ineligible-station set and report it to the host.
+     *  Only station ids cross the wire — no reason, no setting. */
+    function computeAndSendEligibility() {
+      const sim = window.simState;
+      if (!sim || typeof window.deriveStationEligibility !== 'function') return;
+      const gaps = sim.stationAssistGaps || {};
+      const profile = sim.accessibilityProfile;
+      const ineligible = [];
+      const seen = new Set();
+      const evalStation = (id, ratings) => {
+        if (seen.has(id)) return;
+        seen.add(id);
+        const rating = requiredRatingForStation(id, ratings);
+        const r = window.deriveStationEligibility(profile, gaps[id], rating);
+        if (!r.eligible) ineligible.push(id);
+      };
+      // Claimable seats carry their authored ratings in the roster; any other
+      // station the projection knows (auxiliary / human-seeking) is evaluated at
+      // its in-game visiting rating when present, permissively otherwise.
+      for (const st of (uiState.stations || [])) evalStation(st.id, st.ratings);
+      for (const id of Object.keys(gaps)) evalStation(id, null);
+      ineligible.sort();
+      send('ReportStationEligibility', { ineligible });
+    }
+
+    // Re-report whenever the private assistance profile changes (the hook is
+    // fired by gui/accessibility-profile.js after it persists the change).
+    window.onAccessibilityAssistanceChanged = computeAndSendEligibility;
+
+    /** Re-report on the messages that change a published required rating or the
+     *  projection: Welcome (projection + ratings arrive) and RatingChanged. */
+    function maybeReportEligibility(msg) {
+      if (msg && (msg.type === 'Welcome' || msg.type === 'RatingChanged')) {
+        computeAndSendEligibility();
+      }
+    }
+
     function renderLobby(s) {
       renderActiveMods();
       const list = document.getElementById('station-list');
@@ -1782,6 +2114,8 @@
         labelFor: stationLabel,
         describeFor: stationDescription,
         stationRatings: window.simState ? window.simState.stationRatings : null,
+        // Anonymous accessibility eligibility per row (issue #1103 AC1).
+        eligibilityFor: stationEligibility,
       });
       // Detail-panel console auto-select (and clear on release) is part of
       // the view model.
@@ -1857,6 +2191,19 @@
         }
         rowEl.appendChild(info);
 
+        // A free seat this player is INELIGIBLE for (issue #1103 AC1): explain
+        // privately, in functional terms, right on the row. The reason is
+        // local-only — it is never sent to the host or another player.
+        if (row.button === 'ineligible' && row.ineligibleReason) {
+          const why = document.createElement('div');
+          why.className = 'ineligible-reason';
+          const fns = (row.ineligibleReason.functions || [])
+            .map(f => t('client.assist_function.' + f))
+            .join(', ');
+          why.textContent = t('client.station_ineligible_reason', { functions: fns });
+          info.appendChild(why);
+        }
+
         const action = document.createElement('div');
         action.className = 'action';
         const btn = document.createElement('button');
@@ -1867,6 +2214,11 @@
         } else if (row.button === 'taken') {
           btn.className = 'taken-btn';
           btn.textContent = t('client.taken');
+          btn.disabled = true;
+        } else if (row.button === 'ineligible') {
+          // Blocked direct claim: the disabled control never sends SelectStation.
+          btn.className = 'ineligible-btn';
+          btn.textContent = t('client.station_ineligible');
           btn.disabled = true;
         } else {
           btn.className = 'claim-btn';
@@ -1980,6 +2332,21 @@
           readyBtn.onclick = () => send('SetReady', { ready: vm.readyBtn.sendReady });
         } else {
           readyBtn.style.display = 'none';
+        }
+      }
+
+      // Spectate toggle (issue #1105): opt into / out of the explicit Spectator
+      // role. 'spectate' sends SetSpectator{true} (vacate seat + unready on the
+      // server); 'join' sends SetSpectator{false} to rejoin the crew.
+      const spectateBtn = document.getElementById('spectate-btn');
+      if (spectateBtn) {
+        if (vm.spectateBtn && vm.spectateBtn.visible) {
+          spectateBtn.style.display = 'block';
+          const joining = vm.spectateBtn.mode === 'join';
+          spectateBtn.textContent = joining ? t('client.spectator.join') : t('client.spectator.spectate');
+          spectateBtn.onclick = () => send('SetSpectator', { spectator: !joining });
+        } else {
+          spectateBtn.style.display = 'none';
         }
       }
 
@@ -2100,6 +2467,12 @@
         // covers every station id the ship mounts (including engineering /
         // science aggregates the old per-name switch never handled).
         pushConsoleStateFor(consoleName);
+        // Re-apply the private Accessibility profile to this same-origin console
+        // now that its document has (re)loaded — a reload otherwise resets the
+        // iframe :root, losing the text-scale var until the next apply (#1102).
+        if (typeof window.applyAccessibilityProfile === 'function') {
+          window.applyAccessibilityProfile({ iframes: [iframeEl] });
+        }
       });
     }
 
@@ -2122,6 +2495,8 @@
         stationSystems: window.simState && window.simState.stationSystems,
         blackboards: window.simState && window.simState.blackboards,
         stationHosts: window.simState && window.simState.stationHosts,
+        stationHealth: window.simState && window.simState.stationHealth,
+        stationImportance: window.simState && window.simState.stationImportance,
         stationRatings: window.simState && window.simState.stationRatings,
         activeStation: activeConsole,
       });
@@ -2132,10 +2507,18 @@
         titleEl: $('station-hero-title'),
         metaEl: $('station-hero-meta'),
         aiEl: $('station-hero-ai'),
+        healthEl: $('station-hero-health'),
         model,
         translate: t,
         onActivate: stationId => {
           setActiveConsole(stationId);
+          // Tell the host this Station's tab was visited (issue #1101), so it
+          // clears the one-off `unread` importance flag authoritatively through
+          // the next SimState — NOT an optimistic local clear. In-game only:
+          // renderStationHero returns early outside a live game, so onActivate
+          // never fires in the lobby. A continuing `critical` condition is
+          // immune host-side, so this cannot lower an alert.
+          send('StationVisited', { station: stationId });
           scheduleRender();
         },
       });
@@ -2181,30 +2564,14 @@
     function mountConsoles(shipStations) {
       const container = $('console-container');
       if (!container) return;
-
-      // Remove all previously-mounted console sections (identified by class),
-      // but leave the lobby-ui sibling untouched.
-      const existing = container.querySelectorAll('.console-section');
-      for (const el of existing) el.remove();
-
-      const plan = (typeof window.planMounts === 'function')
-        ? window.planMounts(shipStations) : [];
-      for (const mount of plan) {
-        const section = document.createElement('section');
-        section.id = mount.sectionId;
-        section.className = 'console-section';
-
-        const iframe = document.createElement('iframe');
-        iframe.id = mount.iframeId;
-        iframe.src = mount.url;
-        iframe.title = mount.title;
-        iframe.allowFullscreen = true;
-
-        section.appendChild(iframe);
-        container.appendChild(section);
-
-        // Attach load listener so the iframe re-pushes state after load/reload.
-        _attachIframeLoadListener(iframe, mount.stationId);
+      // The mount seam lives in gui/console-mount.js (issues #827, #1099): it
+      // owns node creation (via gui/mount-plan.js planMounts) so the iframe
+      // nodes it creates are the persistent ones a tab switch must preserve.
+      // We attach the per-iframe load listener here so the iframe re-pushes
+      // state after load/reload.
+      if (typeof window.mountConsolesDom === 'function') {
+        window.mountConsolesDom(document, container, shipStations,
+          (iframe, mount) => _attachIframeLoadListener(iframe, mount.stationId));
       }
     }
 
@@ -2334,6 +2701,10 @@
       if (result.myName !== undefined) myName = result.myName;
       for (const fx of result.sideEffects) applySideEffect(fx);
       if (result.rebuildStations) rebuildStations();
+      // Re-derive and report anonymous eligibility AFTER the roster/projection/
+      // ratings have folded in (issue #1103): only the ineligible station-id set
+      // — no reason, no setting — goes back to the host.
+      maybeReportEligibility(msg);
       if (result.shouldRender) scheduleRender();
     }
 
@@ -2437,7 +2808,19 @@
               ...uiState,
               stationRatings: window.simState ? window.simState.stationRatings : {},
               debugFlags: window.simState ? window.simState.debugFlags : null,
+              // Private Accessibility profile (issue #1102); the tab paints the
+              // player's explicit choices from it. Client-local, never on the wire.
+              accessibilityProfile: window.simState ? window.simState.accessibilityProfile : null,
             }),
+            // The Accessibility tab's write path (issue #1102): update the
+            // client-local profile, persist it privately, and re-apply to the
+            // shell + every mounted console iframe. Deliberately NOT `send` —
+            // no accessibility setting ever becomes a ClientMessage (AC5).
+            onAccessibility: (effect, value) => {
+              if (typeof window.setAccessibilityPresentation === 'function') {
+                window.setAccessibilityPresentation(effect, value);
+              }
+            },
             // Every audio channel this page owns. Master volume scales each
             // element's own authored level rather than replacing it, so adding
             // a channel here needs no other change (issue #940).
@@ -2445,6 +2828,13 @@
             getManual: () => (window.simState ? window.simState.shipManual : null),
             myToken: myToken,
           });
+        }
+
+        // Apply the private Accessibility profile to the shell at boot (issue
+        // #1102). Console iframes are (re)covered as they mount and on every
+        // iframe load — see mountConsoles / _attachIframeLoadListener.
+        if (typeof window.applyAccessibilityProfile === 'function') {
+          window.applyAccessibilityProfile();
         }
 
         console.log('[PeerJS] fetching ICE servers');

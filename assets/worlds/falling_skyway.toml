@@ -197,6 +197,25 @@
 #   target/debug/phoenix-headless --world assets/worlds/falling_skyway.toml \
 #     --seed 42 --ticks 900 --record target/t1_falling_skyway.ron --digest-every 0
 #
+# STILL 0x1fa0f17dd3285616 AFTER THE CREW-SYSTEMS RE-AUTHOR (issues #1164/#1165),
+# tick-0 number and all (0x2b82554aab902790 / 3135162069797578640). The
+# paragraphs below that name the destroyer's `[operations]` table or its
+# `tow`/`stabilise`/`transfer`/`field_repair` capabilities are the history AS EACH
+# SLICE MEASURED IT; the operations model they name was retired in #1164, where
+# the crew's destroyer gained a tractor, a transfer umbilical and a dock (each
+# with a `[[hull.system_hull]]` entry) plus a repair-dispatch, and #1165 gave the
+# Lyra, the head and the two survivor craft an `[held_response]` table so Falling
+# Skyway works its tow/stabilise beats through the tractor. The number does not
+# move on any of it — RE-MEASURED against the current templates at seed 42 / 900
+# ticks, both anchors reproduce EXACTLY. That is what the operations-era A/Bs
+# below already predicted: the digest window is fifteen mission seconds and Act 2
+# opens at ninety, so no beat is ever RUN inside it; a coupling system that is
+# only ever idle here moves nothing a completed tow or transfer would, exactly as
+# the retired operations capability moved nothing until a tow was run. And a
+# `[held_response]` is a config component the digest does not walk at all, so
+# #1165's four tables could not have moved it either. The historical entries below
+# are left as they were measured, because a rewritten measurement is a fiction.
+#
 # #1034 recorded the first value: final digest 0x14d6dc5dcf05a3c1
 # (1501629821237961665), and 8541878955160725293 at tick 0. Measured on a clean
 # tree at the commit that added this line. It was a NEW number, not a preserved
@@ -768,8 +787,9 @@ depot_b_hull = [1180.0, 0.0, 240.0]
 #
 # Not larger, because a berth still has to read as "at the depot". Twelve is
 # inside the hauler's own 20-unit `waypoint_arrival_radius`, so the leg
-# completes where it always did; inside the destroyer's 500-unit `transfer` and
-# 300-unit `tow` ranges by two orders of magnitude; and under a tenth of the
+# completes where it always did; inside the destroyer's 500-unit tractor and
+# 400-unit repair-dispatch reaches (issue #1164, the coupling ranges that replace
+# the old `transfer`/`tow`) by two orders of magnitude; and under a tenth of the
 # 130-unit gap from Depot B to the nearest mooring (`worker_mooring`, at
 # sqrt(70^2 + 110^2) = 130.4), so nothing on that rung has moved relative to
 # anything else.
@@ -844,7 +864,7 @@ rigger_mooring = [1050.0, 0.0, 430.0]
 #
 # Where the head's own craft end up when it comes apart. Off the head rather than
 # at it, because the wreck is where the ribbon was and nobody survives sitting in
-# it; and inside the destroyer's authored 300-unit `tow` range of
+# it; and inside the destroyer's authored 500-unit tractor range of
 # `station_keeping`, so a crew who were doing their job in Act 3 are already
 # close enough to start pulling people out.
 head_debris_field = [120.0, 0.0, 140.0]
@@ -953,11 +973,32 @@ transform = { anchor = "skyway_head" }
 
 [entity.overrides.infrastructure]
 condition = 48.0
-# The head is worked by the people who are out (issue #1035). A field-repair
-# here is still possible — the ship's own team can climb the spine — but it runs
-# at the unassisted rate the destroyer's capability authors, which is the strike
-# arriving in the crew's work queue rather than in a briefing.
+# The head is worked by the people who are out (issue #1035). This records WHO
+# staffs the spine; a repair-team dispatch (issue #1161, the replacement for the
+# retired `field_repair` operation) can still cross to it and climb, because the
+# ship carries its own team. The strike's old mechanical bite — a field-repair
+# throttled to an "unassisted" rate while the workers were out — retired with the
+# operations table (issue #1164), so this flag is now the negotiation's business
+# and the dossier's, not a rate multiplier the crew feel in a work queue.
 workforce = "skyway_workers"
+
+# WHAT CATCHING THE TETHER DOES (issue #1165 S11b). The stabilise beat is now the
+# TRACTOR (issue #1156) coupling the head and its held-response (#1158) arresting
+# the strain while it holds, in place of the retired `stabilise` operation.
+# `arrest-decline` recovers the head's condition at the authored rate; the
+# recovered condition crosses `skyhook_load_bearing` (the top rung's 42 % restore
+# line) by the one system that owns the flag edges, so `on_head_stands_down`
+# fires exactly as it did off the old lump payout and the scenario's DETECTION is
+# unchanged. The head's decline is a SCRIPTED beat (`tether_strain`, not
+# `decay_per_sec`), so the recovery runs NET of the 0.2 pt/s strain: two points a
+# second is 1.8 net, carrying it from the third warning's 24 over the 42 line in
+# about ten seconds — inside the twelve-plus-second window the last warning
+# leaves. The moment it crosses, `on_head_stands_down` stands the watch down and
+# the strain stops, so one hold saves it outright.
+# [ai] Unratified — the tuning surface of the save margin.
+[entity.overrides.held_response]
+kind = "arrest-decline"
+recover_per_sec = 2.0
 
 # There are people on the head, and Act 3 is them calling the ship (issue #1040).
 # The template gives the structure a 1,600-unit `[comms] range` and stops there —
@@ -1404,26 +1445,25 @@ visible = true
 # ── The rescue, and the two numbers that make it a real decision ─────────────
 #
 # The payload of the act is a TOW: the Lyra Ascending, a bulk hauler with a dead
-# drive, adrift in the corridor with the front coming down on her. The crew's
-# destroyer authors `tow` at 24 seconds with a 50 % slow-zone rule, and the two
-# numbers decide the whole thing between them:
+# drive, adrift in the corridor with the front coming down on her. The crew take
+# her under the destroyer's TRACTOR (issue #1156) and her held-response (#1158,
+# authored on her `[entity.overrides.held_response]` above) recovers her while
+# the beam holds — the replacement for the retired `tow` operation (issue #1164).
+# The recovery is authored to carry her over her line in about thirteen seconds,
+# so the crew still make a real decision around the storm: set off early, in
+# clear air, and the rescue lands well inside the deadline; wait for the picture
+# to improve and the picture is what you lose, because inside a band the radar is
+# at a third and the channels are jammed. The old `tow`'s 50 % slow-zone rule is
+# gone — the storm no longer THROTTLES external work (issue #1164); it reaches the
+# coupling systems as damage and power like any other system — so the deciding is
+# about SEEING and about the deadline, not about a rate the band turns down.
 #
-#   started at t=105, in clear air     24 s of work, done at t=129
-#   started at t=140, band at t=145     5 s clear + 38 s slowed, done at t=183
-#   started at t=150, inside the band  48 s of work, done at t=198 — TOO LATE
-#
-# So the rescue is completable and it is failable, and which one happens is a
-# decision the crew make around t=145 rather than a die the mission rolls. Wait
-# for the picture to improve and the picture is what you lose: inside a band the
-# radar is at a third and the channels are jammed, so the crew who set off early
-# are the crew who could still see.
-#
-# HOW A COMPLETED TOW IS DETECTED. There is no "operation completed" trigger —
-# what a completion leaves behind IS its payoff — so the rescue is read the only
-# honest way there is: the destroyer's tow authors `condition_on_complete = 45`,
-# the Lyra authors a condition threshold at half of her hundred points and
-# starts at thirty, and the payout is what carries her over it. The flag rising
-# IS the tow landing, and `on_flag_set` hangs off it like any other world flag.
+# HOW A COMPLETED RESCUE IS DETECTED — UNCHANGED. There is no "operation
+# completed" trigger; what the work leaves behind IS its payoff. The Lyra authors
+# a condition threshold at half of her hundred points and starts at thirty, and
+# the tractor's arrest-decline recovery is what carries her over it. The flag
+# rising IS the rescue landing, and `on_flag_set` hangs off it like any other
+# world flag — the same reading the old lump payout left behind.
 # [ai] This is a judgement call about what a condition track means on a stricken
 # CRAFT: hers is her drive and her rig, not her plating (`hull_damage_share = 0`
 # says so), so "under control" is the reading that moves when somebody takes the
@@ -1506,6 +1546,22 @@ hull_damage_share = 0.0
 flag = "skyway_lyra_under_control"
 fails_below = 0.5
 label = "world.falling_skyway.threshold.under_control.label"
+
+# WHAT TAKING THE STRAIN OFF HER DOES (issue #1165 S11b). The rescue is now the
+# TRACTOR (issue #1156) coupling her and its held-response (#1158) recovering
+# her, in place of the retired `tow` operation. `arrest-decline` is the reading
+# the header above argues for: her condition track is her drive and her rig, so
+# holding her steady lets it recover, and the recovered condition crosses the
+# `skyway_lyra_under_control` line by the one system that owns the flag edges —
+# `on_flag_set` still hangs off it exactly as it did off the old payout, so the
+# scenario's DETECTION is unchanged. She authors no `decay_per_sec`, so the
+# `recover_per_sec` below is her NET rate: two points a second carries her from
+# 30 over her 55-point restore line in about thirteen seconds, inside the
+# rescue's window with the same room the 24-second tow had.
+# [ai] Unratified — the whole tuning surface of the rescue's pace.
+[entity.overrides.held_response]
+kind = "arrest-decline"
+recover_per_sec = 2.0
 
 # ── Act 2's clock ────────────────────────────────────────────────────────────
 #
@@ -1598,32 +1654,34 @@ visible = true
 # ── THE SAVE MARGIN, derived rather than asserted ────────────────────────────
 #
 # The AC this slice is held to is that a crew who react to the LAST warning can
-# still save the structure. The arithmetic:
+# still save the structure. The save is now the crew coupling the head with the
+# TRACTOR (issue #1156) and its arrest-decline held-response recovering it (issue
+# #1158, authored on the head's `[entity.overrides.held_response]` above), in
+# place of the retired `stabilise` operation (issue #1164). The arithmetic:
 #
 #   final warning window            30 s   (24 points → 18 points at 0.2 pt/s)
-#   destroyer's `stabilise`         18 s   (authored on the hull)
+#   tractor arrest-decline recovery ~10 s  (24 -> the 42 line, net of the strain)
 #   ────────────────────────────────────
-#   SLACK FOR GIVING THE ORDER      12 s
+#   SLACK FOR GIVING THE ORDER      ~20 s
 #
-# Twelve seconds is the tuned margin, and it is what a crew get to notice a
-# warning, decide, and open the operation in. The stabilise pays 22 points on
-# completion, which from a head sitting on 22 (one beat into the window) carries
-# it to 44 — back over the FIRST rung's 42 % restore line, so one run stands the
-# whole ladder down rather than buying another thirty seconds. That is the point
-# of the lump payout: a crew who react late are unambiguously a crew who saved
-# it.
+# The recovery arrests the head's decline the moment the beam takes hold and
+# recovers it NET of the 0.2 pt/s strain, carrying it from the third warning's 24
+# back over the FIRST rung's 42 % restore line — and the moment it crosses, the
+# watch stands down and the strain stops, so one hold stands the whole ladder
+# down rather than buying another thirty seconds. A crew who react late are
+# unambiguously a crew who saved it, with real room to spare.
 #
-# The travel term is zero on purpose. `stabilise` is authored at 500 units and
+# The travel term is zero on purpose. The tractor is authored at 500 units and
 # Act 3's own approach objective puts the ship at `station_keeping`, 247 units
 # off the head — so a crew flying the mission's own shape are already in range
 # when the first warning lands, and the margin is about DECIDING rather than
-# about flying. A crew who wandered off pay their own travel out of the twelve.
+# about flying. A crew who wandered off pay their own travel out of it.
 #
 # `falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head` is
 # the playtest, and it is a playtest rather than an assertion about arithmetic:
-# it waits for the third warning to actually fire, opens the stabilise then, and
+# it waits for the third warning to actually fire, engages the tractor then, and
 # asserts the head is still in the world after the tick the floor would have been
-# crossed on. [ai] Twelve seconds is unratified — it is the number the tuning
+# crossed on. [ai] The recover rate is unratified — it is the number the tuning
 # pass moves to make "you can react to the last warning, but only if you were
 # paying attention" land exactly.
 #
@@ -1691,10 +1749,10 @@ visible = true
 #
 # Losing the skyhook is a worse ending, not a game over. Two craft come off the
 # head as it goes — its crew lighter and a work pod — spawned by the collapse
-# handler into the debris, adrift, with condition tracks the destroyer's `tow`
-# payout is sized to cross. That is the Lyra's machinery reused exactly: there is
-# no "operation completed" trigger, so what a completed tow LEAVES BEHIND is the
-# signal, and `on_flag_set` hangs off the threshold it crosses.
+# handler into the debris, adrift, with condition tracks the tractor's
+# arrest-decline recovery is sized to cross. That is the Lyra's machinery reused
+# exactly: there is no "operation completed" trigger, so what a held tow LEAVES
+# BEHIND is the signal, and `on_flag_set` hangs off the threshold it crosses.
 #
 # The epilogue has [75] seconds, its own two objectives (an approach carrying the
 # Reach directive, and the rescue that records the work — split for the reason
@@ -1842,10 +1900,13 @@ fn on_lift_tolerance_lost(ctx) {
     ctx.effects.complete_objective("obj-a1-triage");
 }
 
-// The workers go back (#1035). One call, and both bites let go at once: Depot
-// B stops refusing transfers and the skyhook's field-repairs come off the
-// unassisted rate, on the next tick, with nothing to un-latch. What they make
-// of the crew afterwards is #1036's — the two resolution paths part company
+// The workers go back (#1035). One call sets the register straight and clears
+// the strike, with nothing to un-latch. The old operations model let a stoppage
+// refuse a transfer at Depot B and throttle the head's field-repair to an
+// unassisted rate; that mechanical bite retired with the operations table
+// (#1164), so settling the strike is now a workforce-and-negotiation fact — the
+// new coupling and repair-dispatch systems read no workforce. What the workers
+// make of the crew afterwards is #1036's — the two resolution paths part company
 // exactly there, and this handler deliberately takes no view.
 //
 // #1036 hangs the act-2 objective off it and nothing else: BOTH endings reach
@@ -2299,7 +2360,7 @@ fn picket_cleared(ctx) {
 
     if hurt > 0 {
         // The rung does not come out of it clean either. Four points a casualty
-        // is a real move on a condition track the operations panel is already
+        // is a real move on a condition track the crew's panels are already
         // showing, which is the difference between a consequence and a sentence
         // about one.
         ctx.effects.damage_infrastructure("world.falling_skyway.entity.depot_ladder_b.name", 4 * hurt);
@@ -2358,11 +2419,12 @@ on_deadline("storm_band_three_due", "on_storm_band_three");
 on_deadline("lyra_clear_due", "on_lyra_clear_due");
 on_deadline("storm_passed_due", "on_storm_passed");
 
-// THE RESCUE'S COMPLETION SIGNAL. A completed tow pays its authored
-// `condition_on_complete` into the towed craft, and the Lyra authors a
-// threshold the payout is sized to cross. There is no "operation completed"
-// trigger, and this is the honest substitute: what a completion leaves behind
-// is its payoff, so a scenario reads the payoff.
+// THE RESCUE'S COMPLETION SIGNAL. The tractor's arrest-decline (issue #1158)
+// recovers the towed craft's condition while the beam holds, and the Lyra
+// authors a threshold that recovery is sized to cross. There is no "operation
+// completed" trigger, and this is the honest substitute: what the work leaves
+// behind is its payoff, so a scenario reads the payoff — unchanged from the old
+// operation's lump payout it replaces.
 on_flag_set("skyway_lyra_under_control", "on_lyra_recovered");
 
 // The consequence, chained off the removal rather than written beside it. A
@@ -2480,8 +2542,9 @@ fn on_storm_band_three(ctx) {
     ctx.flags.increment("a2_band_three", 1);
 }
 
-// The tow landed. The flag rose because the payout carried her condition track
-// over its authored line, which is the only thing a completed tow leaves behind.
+// The rescue landed. The flag rose because the tractor's recovery carried her
+// condition track over its authored line, which is the only thing a held tow
+// leaves behind.
 fn on_lyra_recovered(ctx) {
     ctx.effects.complete_objective("obj-a2-rescue");
     // Campaign state. One of this and `skyway_lyra_lost` is ALWAYS written, so
@@ -2971,12 +3034,12 @@ on_flag_cleared("skyhook_tether_tensioned", "on_head_warning_two");
 on_flag_cleared("skyhook_station_holding", "on_head_warning_three");
 on_flag_cleared("skyhook_tether_stable", "on_head_gives_way");
 
-// THE SAVE, read off the same ladder from the other side. A completed stabilise
-// pays a lump into the condition track and the track carries the TOP rung back
-// over its restore line; the flag rising IS the save landing, exactly as the
-// Lyra's rising flag IS her tow landing. The top rung rather than the bottom
-// one, because a crew who react to the FIRST warning never cleared the lower
-// ones and would otherwise save the head into silence.
+// THE SAVE, read off the same ladder from the other side. The tractor's
+// arrest-decline recovery carries the condition track's TOP rung back over its
+// restore line; the flag rising IS the save landing, exactly as the Lyra's
+// rising flag IS her rescue landing. The top rung rather than the bottom one,
+// because a crew who react to the FIRST warning never cleared the lower ones and
+// would otherwise save the head into silence.
 //
 // THE `when` IS LOAD-BEARING, and an `if` at the top of the handler cannot do
 // its job. A condition track publishes its `initial_flags` on the structure's
@@ -2985,8 +3048,8 @@ on_flag_cleared("skyhook_tether_stable", "on_head_gives_way");
 // predicate this registration would be spent in the lobby and the real save, six
 // minutes later, would fire nothing. A `when` that reads false suppresses the
 // firing WITHOUT consuming the trigger, which is the distinction
-// `combat_test.toml` records at length and `probe_stabilise.toml` uses for this
-// same "restored after it broke" shape.
+// `combat_test.toml` records at length and `probe_stabilise_resume.toml` uses for
+// this same "restored after it broke" shape.
 on_flag_set("skyhook_load_bearing", "on_head_stands_down")
     .when("counter(skyway_tether_watch) > 0");
 
@@ -2999,7 +3062,7 @@ on_destroyed("world.falling_skyway.entity.skyhook.name", "on_head_lost");
 
 // The epilogue's two completion signals, on the Lyra's pattern and for her
 // reason: there is no "operation completed" trigger, so a scenario reads what a
-// completed tow LEAVES BEHIND.
+// held tow LEAVES BEHIND — the recovered condition crossing the craft's line.
 on_flag_set("skyway_lighter_secured", "on_lighter_recovered");
 on_flag_set("skyway_pod_secured", "on_pod_recovered");
 
@@ -3264,8 +3327,9 @@ fn on_head_lost(ctx) {
 // ── The epilogue ─────────────────────────────────────────────────────────────
 //
 // Losing the skyhook is a worse ending, not a game over. Two craft come off the
-// head as it goes, adrift in the debris with condition tracks the destroyer's
-// `tow` payout is sized to cross — the Lyra's machinery, reused exactly.
+// head as it goes, adrift in the debris with condition tracks the tractor's
+// arrest-decline recovery is sized to cross — the Lyra's machinery, reused
+// exactly (each carries the same `[held_response]` on its spawn override below).
 //
 // Spawned with `overrides` rather than authored as `[[entity]]` rows for the
 // obvious reason (they do not exist until the head comes apart), and each
@@ -3275,8 +3339,8 @@ fn on_head_lost(ctx) {
 //
 // [20] of [100] points each, under their own authored half-way line ([50] %), so
 // both flags are DOWN from their first tick and each one's rise is an event. The
-// destroyer's `tow` pays 45 on completion, which clears the [55] % restore line
-// with room — a survivor craft is a rescue, not a puzzle. `hull_damage_share = 0`
+// tractor's arrest-decline recovers each over the [55] % restore line with room
+// to spare — a survivor craft is a rescue, not a puzzle. `hull_damage_share = 0`
 // for the Lyra's reason: what is wrong with a survivor craft is that it has no
 // way home, not that its paint is scratched. [ai] All four unratified.
 fn head_survivors(ctx) {
@@ -3296,6 +3360,12 @@ fn head_survivors(ctx) {
                     label: "world.falling_skyway.threshold.under_tow.label",
                 } ],
             },
+            // The tow that pulls her clear is now the TRACTOR (issue #1165 S11b):
+            // arrest-decline recovers her from 20 over her 55-point line while
+            // held, and `on_flag_set("skyway_lighter_secured", …)` reads the
+            // crossing exactly as it read the old tow's payout. The Lyra's
+            // machinery, reused exactly — same recover rate, same detection.
+            held_response: #{ kind: "arrest-decline", recover_per_sec: flt("2.0") },
         },
     });
     ctx.effects.spawn_entity(#{
@@ -3314,6 +3384,10 @@ fn head_survivors(ctx) {
                     label: "world.falling_skyway.threshold.under_tow.label",
                 } ],
             },
+            // Towed clear the same way the lighter is (issue #1165 S11b): the
+            // tractor's arrest-decline recovers her over her own line, read off
+            // `skyway_pod_secured` with no operation-completed trigger.
+            held_response: #{ kind: "arrest-decline", recover_per_sec: flt("2.0") },
         },
     });
 

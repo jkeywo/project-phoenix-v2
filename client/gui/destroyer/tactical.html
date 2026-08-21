@@ -12,6 +12,11 @@
     .hero { display: flex; align-items: baseline; justify-content: space-between; flex-shrink: 0; gap: 12px; padding: 4px 0; align-self: flex-start; }
     .hero h1 { font-size: var(--text-2xl); letter-spacing: 0.22em; color: var(--ink); margin: 0; }
     .hero h1 .sub { font-family: "JetBrains Mono", monospace; font-size: var(--text-sm); letter-spacing: 0.22em; color: var(--ink-faint); margin-top: 2px; font-weight: 400; }
+    .command-advice { flex-shrink: 0; display: flex; align-items: baseline; gap: 12px; padding: 6px 12px; border: 1px dashed var(--edge); background: rgba(var(--rgb-panel), 0.4); font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); }
+    .command-advice[hidden] { display: none; }
+    .command-advice .advice-heading { font-family: "Chakra Petch", sans-serif; font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; }
+    .command-advice .advice-stance { color: var(--ink); font-weight: 700; letter-spacing: 0.08em; }
+    .command-advice .advice-hint { color: var(--ink-faint); margin-left: auto; font-style: italic; }
     .console-body { flex: 1; min-height: 0; }
     .console-body .col { display: flex; flex-direction: column; background: rgba(var(--rgb-panel), 0.6); border: 1px solid var(--edge); padding: 12px; min-height: 0; overflow-y: auto; height: 100%; }
     .console-body .col h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; padding: 0; flex-shrink: 0; border-bottom: 1px solid var(--edge); padding-bottom: 6px; }
@@ -52,6 +57,14 @@
                of which station is currently hosting Comms. -->
           <button class="overlay-toggle" id="intel-toggle" data-overlay="intel-overlay" data-active="false" data-i18n="console.common.intel_toggle">Intel</button>
         </div>
+      </div>
+      <!-- Non-binding Command intent advice (issue #1108). Shown only while
+           Command directs this Station and a human holds it: advisory, never a
+           control. Populated from `s.command_advice` in render(). -->
+      <div class="command-advice" id="command-advice" hidden>
+        <span class="advice-heading" data-i18n="console.command.advice_heading">COMMAND INTENT</span>
+        <span class="advice-stance" id="command-advice-stance">—</span>
+        <span class="advice-hint" data-i18n="console.command.advice_hint">Advisory — you retain control</span>
       </div>
       <div class="console-body">
         <div class="col">
@@ -129,6 +142,18 @@
         // rating change by one tick). The composite already forwarded this flag.
         setAutoState(null, document.getElementById('tactical-auto-badge'), !!w.tactical_auto);
         document.getElementById('station-damage').state = s.own_hull || null;
+        // Non-binding Command intent advice (issue #1108): present only while
+        // Command directs this Station and a human holds it. The label is a
+        // strings id resolved here; falls back to the raw stance id.
+        var adviceEl = document.getElementById('command-advice');
+        var advice = s.command_advice || null;
+        if (advice) {
+          document.getElementById('command-advice-stance').textContent =
+            advice.stance_label ? t(advice.stance_label) : (advice.stance_id || '');
+          adviceEl.hidden = false;
+        } else {
+          adviceEl.hidden = true;
+        }
       }
     });
   </script>

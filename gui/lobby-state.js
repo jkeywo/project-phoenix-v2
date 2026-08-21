@@ -37,7 +37,7 @@ export function playerStationId(player) {
 }
 
 function normalisePlayer(p) {
-  return { ready: false, ...p, station: playerStationId(p) };
+  return { ready: false, spectator: false, afk: false, ...p, station: playerStationId(p) };
 }
 
 function defaultShipStations() {
@@ -178,6 +178,22 @@ export class LobbyState {
         if (p) p.ready = d.ready;
         break;
       }
+      case 'SpectatorChanged': {
+        // Explicit Spectator role delta (issue #1105). The seat-vacate and
+        // unready arrive as their own StationAssigned/ReadyChanged messages, so
+        // this only tracks the role flag on the player record.
+        const p = this.players.find(p => p.token === d.token);
+        if (p) p.spectator = d.spectator;
+        break;
+      }
+      case 'AfkChanged': {
+        // AFK presence delta (issue #1104). The delegation/restore arrive as
+        // their own RatingChanged messages and the seat is never vacated, so
+        // this only tracks the presence flag on the player record.
+        const p = this.players.find(p => p.token === d.token);
+        if (p) p.afk = d.afk;
+        break;
+      }
       case 'StationAssigned': {
         // Post issue #619: StationAssigned carries `station_id` (lowercase
         // station id) and the legacy `station` (display name). A station is
@@ -194,6 +210,13 @@ export class LobbyState {
         const target = this.players.find(p => p.token === d.token);
         if (target) {
           target.station = stationId;
+          // Mirror the Rust `set_station` invariant (src/lobby/session.rs):
+          // seating a player clears the Spectator role — a seat and the
+          // Spectator role are mutually exclusive. On a claim the host emits
+          // StationAssigned (+ RatingChanged) but NO SpectatorChanged, so
+          // without this a Spectator who successfully claims an open Station
+          // would stay stuck on the read-only spectator surface (issue #1106).
+          if (stationId) target.spectator = false;
         }
         break;
       }

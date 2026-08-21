@@ -3,6 +3,11 @@ display_name = "entity.ship_requiem_courier.display_name"
 class = "courier"  # [ai] picker badge / scan subtitle
 tags = ["ship", "npc", "comms_contact"]
 faction = "dddddddd-4444-4444-8444-dddddddddddd"
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the hull's other stats. [ai] Unratified — a light courier
+# weight, close to the Alliance courier's.
+mass = 3200.0
 
 [target]
 tags = ["ship"]
@@ -280,7 +285,7 @@ verb = "bring_torpedoes_to_bear"
 # engagement is not broken off by a fresh attacker. Retune against that
 # inequality, not term by term.
 [weapons_console.selector]
-sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts"]
+sources = ["sensors-designation", "objective-destroy", "last-attacker", "radar-contacts", "objective-operate"]
 horizon = 1e9
 switch_margin = 50.0
 # Independent revalidation: `detectable` is required of everything, and beyond
@@ -289,7 +294,13 @@ switch_margin = 50.0
 # independently hostile. That disjunction honours a mission naming a factionless
 # target while refusing a FRIENDLY Sensors designation, which carries only
 # `source_sensors_designation`.
-eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0)"
+#
+# The final `source_operate` disjunct (issue #1162) is DIRECTIVE-GATED: it
+# injects a candidate ONLY when an active per-verb operate directive names that
+# target, so the tractor / external-repair dispatch reach a NON-hostile lock;
+# inert otherwise. Kept byte-for-byte identical to the shared
+# `fragments/ai/fleet_baseline.toml` selector (this hull authors it inline).
+eligibility = "candidate_fact(detectable) > 0 and (candidate_fact(source_objective) > 0 or candidate_fact(source_last_attacker) > 0 or candidate_fact(source_retained) > 0 or candidate_fact(hostile) > 0 or candidate_fact(source_operate) > 0)"
 
 [[weapons_console.selector.score]]
 when = "candidate_fact(source_objective) > 0"
@@ -310,6 +321,10 @@ weight = 100.0
 [[weapons_console.selector.score]]
 when = "candidate_fact(source_radar) > 0"
 weight = 1.0
+
+[[weapons_console.selector.score]]
+when = "candidate_fact(source_operate) > 0"
+weight = 1000.0
 
 # Navigation — rank destinations into the shared Waypoint. Only the objective
 # source marks its resolved destination `reachable`, so this policy drives the

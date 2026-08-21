@@ -40,6 +40,7 @@
 import '../strings-boot.js';
 import { t, has } from '../strings.js';
 import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 
 /**
  * Resolve `value` when it is a known string id; pass anything else through.
@@ -113,6 +114,7 @@ export function shipArtStyle(card) {
 
 export class PhShipPicker extends HTMLElement {
   #state = null;
+  #roving = null;
 
   constructor() {
     super();
@@ -126,11 +128,17 @@ export class PhShipPicker extends HTMLElement {
     :host { display: block; font-family: 'JetBrains Mono', monospace; }
     :host * { box-sizing: border-box; }
     .ship-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; padding: 4px 0; }
+    /* The card is a native <button role="option"> (issue #1178): focusable,
+       named by its hull name, choosing the hull on Enter/Space through the SAME
+       ship-selected event a pointer tap dispatches. The reset strips the
+       browser button chrome so it still reads as a card. */
     .ship-card {
+      width: 100%; margin: 0; font: inherit; text-align: left; -webkit-appearance: none; appearance: none;
       background: var(--surface-panel); border: 1px solid var(--cyan-dim); border-radius: 6px;
       padding: 12px 14px; cursor: pointer; transition: all 0.15s ease;
       display: flex; flex-direction: column; gap: 6px; min-height: var(--control-hit-min);
     }
+    .ship-card:disabled { cursor: default; }
     .ship-card:hover { background: var(--surface-panel-up); border-color: var(--edge-control); }
     .ship-card:active { background: var(--surface-panel-up); border-color: var(--violet); }
     /* The hull itself (PRD #1023 user story 3). One yaw tile out of the
@@ -187,6 +195,26 @@ export class PhShipPicker extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
+    // Role + accessible name + keyboard operation (issue #1178). The cards were
+    // clickable <div>s; the grid is now a listbox — one Tab stop, arrows roving
+    // over the option cards — with the pending pick marked selected.
+    this.setAttribute('role', 'listbox');
+    this.setAttribute('aria-label', t('component.ship_picker.label'));
+    this.#roving ??= installRovingTabindex(this, {
+      getItems: () => this.#rovingItems(),
+      orientation: 'both',
+    });
+    this.#syncRoving();
+  }
+
+  /** The grid's rovable option cards, in document order. */
+  #rovingItems() {
+    return Array.from(this.shadowRoot.querySelectorAll('.ship-card'));
+  }
+
+  /** Re-establish the single tab stop after a render rebuilds the grid. */
+  #syncRoving() {
+    syncRovingTabindex(this.#rovingItems());
   }
 
   set state(val) {
@@ -232,8 +260,12 @@ export class PhShipPicker extends HTMLElement {
       // picture is decoration and a screen reader should not announce it.
       const art = shipArtStyle(shipCards ? shipCards[ship.template_path] : null);
       const isPending = pendingTemplate === ship.template_path;
+      // When a pick is out (busy), every card but the chosen one is disabled —
+      // the keyboard equivalent of the `pointer-events: none` the CSS applies,
+      // so an arrow never lands on a card that would not answer anyway.
+      const disabled = pendingTemplate && !isPending ? ' disabled' : '';
       return `
-  <div class="ship-card${isPending ? ' pending' : ''}" data-template="${ship.template_path}">
+  <button type="button" role="option" aria-selected="${isPending}" class="ship-card${isPending ? ' pending' : ''}" data-template="${ship.template_path}"${disabled}>
     ${art ? `<div class="ship-art" aria-hidden="true" style="${art}"></div>` : ''}
     <div class="ship-name">${name}</div>
     <div class="ship-meta">
@@ -246,10 +278,12 @@ export class PhShipPicker extends HTMLElement {
       ${stations ? `<div class="ship-stat"><span class="ship-stat-label">${t('component.ship_picker.stations')}</span><span class="ship-stat-value">${stations}</span></div>` : ''}
     </div>` : ''}
     ${isPending ? `<div class="ship-pending">${t('client.pick_pending')}</div>` : ''}
-  </div>`;
+  </button>`;
     }).join('');
 
     grid.querySelectorAll('.ship-card').forEach(card => {
+      // Enter/Space (native to the button) and a pointer tap alike run this one
+      // handler, dispatching the SAME ship-selected event.
       card.addEventListener('click', () => {
         const templatePath = card.dataset.template;
         const ship = ships.find(s => s.template_path === templatePath);
@@ -260,6 +294,7 @@ export class PhShipPicker extends HTMLElement {
         }));
       });
     });
+    this.#syncRoving();
   }
 }
 

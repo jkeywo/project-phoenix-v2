@@ -279,13 +279,16 @@ component.camera_select.empty,Camera selector when no cameras are available,NO C
 component.comms_contacts.empty,Comms contact list when nothing is in hailing range,NO CONTACTS
 component.comms_contacts.hail,Button that hails a comms contact,HAIL
 component.comms_hails.empty,Comms message list when no transmissions have arrived,NO MESSAGES
+component.comms_hails.label,Accessible name (aria-label) for the comms hail list — the keyboard/pointer message selector (issue #1178),Received hails
 component.comms_message.no_active_hail,Comms message panel when no hail is open,[NO ACTIVE HAIL]
 component.comms_message.confirm_important,"Comms response button prompt asking the operator to confirm an important, irreversible response before it is sent",CONFIRM?
 component.comms_message.unavailable,Comms response button tooltip shown when the sender is out of comms range and the response cannot be sent,[OUT OF RANGE]
 component.comms_message.rejected,Comms response button tooltip shown when the host rejected the attempted submission,REJECTED
 component.helm_joystick.title,Helm joystick panel heading,HELM
+component.helm_joystick.label,Accessible name (aria-label) for the helm thrust/yaw joystick — the keyboard/pointer flight control (issue #1176),Helm thrust and yaw control
 component.helm_joystick.fwd,Joystick axis label: forward,FWD
 component.helm_joystick.rev,Joystick axis label: reverse,REV
+component.helm_radar.label,Accessible name (aria-label) for the helm radar scope — the pilot's contact display (issue #1176),Helm radar
 component.hull_integrity.title,Hull integrity panel heading,HULL INTEGRITY
 component.hull_integrity.no_data,Hull integrity panel when no hull telemetry is available,[NO HULL DATA]
 component.hull_integrity.systems,Hull integrity panel: per-system breakdown heading,SYSTEMS
@@ -293,7 +296,10 @@ component.impulse.title,Impulse drive control panel heading,IMPULSE DRIVE
 component.impulse.ready,Impulse button in its ready state,IMPULSE
 component.impulse.cancel,Impulse button while charging. {pct} is charge percent; pressing cancels,CANCEL {pct}%
 component.lateral.title,Lateral thruster joystick heading,LATERAL
+component.lateral.label,Accessible name (aria-label) for the lateral thruster control — the keyboard/pointer strafe control (issue #1176),Lateral thrust control
+component.navigation_map.label,Accessible name (aria-label) for the navigation chart — the keyboard/pointer contact-and-waypoint map (issue #1176),Navigation chart
 component.objectives.empty,Objective list when the mission has no objectives yet,NO OBJECTIVES
+component.objectives.label,Accessible name (aria-label) for the mission objective list — the keyboard/pointer priority selector (issue #1178),Mission objectives
 component.tutorial.heading,Contextual tutorial overlay card (issue #916): eyebrow label above the tip title,TUTORIAL
 component.tutorial.dismiss,Contextual tutorial overlay card: dismiss button — marks the tip as read forever,GOT IT
 component.tutorial.more,Contextual tutorial overlay card: count of further tips queued behind the current one. {n} is that count,+{n} MORE
@@ -305,6 +311,8 @@ component.power.title,Power allocation panel heading,POWER ALLOCATION
 component.power.empty,Power panel when the ship defines no power groups,[NO POWER GROUPS]
 component.power.level,Power group level readout. {n} is the allocated level,LVL {n}
 component.power.held,"Power group level readout while the reactor's battery floor is holding the group below its standing order. {n} is the level it is running at, {c} the level it was commanded to",[LVL {n}/{c} HELD]
+component.power.decrease,Accessible name for a power group's minus stepper (issue #1177) — lowers that group's commanded allocation by one level,Lower this group's power
+component.power.increase,Accessible name for a power group's plus stepper (issue #1177) — raises that group's commanded allocation by one level,Raise this group's power
 component.red_alert.title,Red alert control heading (Captain console),RED ALERT
 component.red_alert.active,Red alert button while the alert is raised,RED ALERT
 component.red_alert.standby,Red alert button while the ship is stood down,STAND DOWN
@@ -334,6 +342,8 @@ component.torpedoes.title,Torpedo controls panel heading,TORPEDOES
 component.torpedoes.empty,Torpedo controls when the ship has no torpedo tubes,[NO TORPEDO TUBES]
 component.torpedoes.pattern_step,Torpedo patterned-attack step indicator (step number of total),STEP {step}/{total}
 component.torpedoes.barrels,Torpedo patterned-attack active-barrel indicator listing firing barrel indices,BARRELS {barrels}
+component.torpedoes.volley_decrease,Accessible name for the torpedo volley minus stepper (issue #1170) — lowers the torpedoes loaded for the next volley,Fewer torpedoes in the volley
+component.torpedoes.volley_increase,Accessible name for the torpedo volley plus stepper (issue #1170) — raises the torpedoes loaded for the next volley,More torpedoes in the volley
 component.boost.binding,Boost control key-binding hint (Shift key or gamepad A),[HOLD SHIFT · A]
 component.impulse.binding,Impulse control key-binding hint (Ctrl key or gamepad B),[CTRL · B]
 console.stance.friendly,Contact stance badge on the comms contact list,FRIENDLY
@@ -369,6 +379,7 @@ component.ship_picker.class.cruiser,Lobby ship picker — hull class badge on a 
 component.ship_picker.class.destroyer,Lobby ship picker — hull class badge on a destroyer card,[DESTROYER]
 component.ship_picker.class.unknown,Lobby ship picker — hull class badge when the entity template authors no class,[UNKNOWN]
 component.ship_picker.empty,Lobby ship picker when the locked scenario offers no playable hull,[No ships available]
+component.ship_picker.label,Accessible name (aria-label) for the lobby ship picker — the keyboard/pointer hull chooser (issue #1178),Ship selection
 component.ship_picker.power,Lobby ship picker — stat label above a hull's power rating,[Power]
 component.ship_picker.stations,Lobby ship picker — stat label above a hull's station count,[Stations]
 component.station_damage.popup_title,Station-damage popup heading. {name} is the owning station (or the ship core),[{name} Systems]
@@ -386,6 +397,7 @@ console.comms.current_thread,"comms console — ""Current Thread"" panel heading
 console.helm.screen_label,Phone-frame screen label of the helm console,Helm Console
 console.helm.title,helm console — main hero heading,HELM
 console.helm.station_footer,helm console — footer station name,HELM STATION
+console.helm.under_tow,"helm console — indicator shown while this ship's tractor holds a target and the helm is under the tow's mass penalty (issue #1157)","[Under tow load]"
 console.navigation.doc_title,Browser-tab title of the navigation console page,[Project Phoenix - Navigation Console]
 console.navigation.screen_label,Phone-frame screen label of the navigation console,Navigation Console
 console.navigation.title,navigation console — main hero heading,NAVIGATION
@@ -472,6 +484,8 @@ console.command.ai_directed,command console — persistent cue that the directed
 console.command.human_held,command console — cue that the directed station is human-held and off the command board,[CREWED — NOT DIRECTABLE]
 console.command.command_auto,command console — cue that Command itself is currently run by the ship AI,[COMMAND ON AI]
 console.command.current_stance,command console — label before the stance currently in force,[Current]
+console.command.advice_heading,"target console — heading over the non-binding Command intent advice shown while a human holds the directed station",[COMMAND INTENT]
+console.command.advice_hint,"target console — note that the shown Command intent is advisory and the human retains control",[Advisory — you retain control]
 console.courier_tactical.doc_title,Browser-tab title of the tactical console page,[Project Phoenix — Courier Tactical]
 console.courier_tactical.screen_label,Phone-frame screen label of the tactical console,Courier Tactical
 console.tactical.weapons,"tactical console — ""Weapons"" panel heading",Weapons
@@ -521,6 +535,7 @@ console.repair.footer_status,repair console footer — hull percent and repair-t
 console.radar.science_target,Radar blip label for the science-locked target,SCIENCE TARGET
 console.radar.tactical_target,Radar blip label for the tactical-locked target,TACTICAL TARGET
 console.radar.torpedo_armed,"Tactical radar badge drawn beside a hostile contact whose hull carries torpedo tubes. A capability warning shown before that contact fires, not a launch warning. Sits next to a blip, so keep it very short",[TORP]
+component.tactical_radar.label,Accessible name (aria-label) for the Tactical console's radar target scope — the keyboard/pointer target picker (issue #1170),Tactical radar
 station.captain.name,Captain station display name (station ids stay English in TOML),Captain
 station.helm.name,Helm station display name,Helm
 station.tactical.name,Tactical station display name,Tactical
@@ -638,6 +653,9 @@ settings.qr_code,Settings — QR code section heading,QR Code
 settings.toggle_qr,Settings — button that shows/hides the join QR code on the viewscreen,[Toggle QR on Screen]
 settings.station,Settings — station section heading,Station
 settings.leave_station,Settings — button that releases the player's claimed station,Leave Station
+settings.afk,Settings — Away From Keyboard section heading (issue #1104),Away
+settings.afk_enter,"Settings — button to step away; delegates the player's station systems to AI while keeping the seat",Go AFK
+settings.afk_active,"Settings — button state while AFK; tap to return and restore control",Away — Tap to Return
 settings.tab.debug,Server settings menu — name of the Debug/Cheat tab (hidden in a release build),[Debug / Cheat]
 settings.tab.audio,Server settings menu — name of the Audio tab,Audio
 settings.tab.gameplay,Server settings menu — name of the Gameplay tab,Gameplay
@@ -668,6 +686,23 @@ settings.gameplay.pause,Server settings menu — button that pauses the simulati
 settings.gameplay.resume,Server settings menu — button that resumes a paused simulation clock,Resume
 settings.gameplay.session,"Server settings menu — Gameplay tab, heading over the exit control",Session
 settings.gameplay.exit_to_lobby,Server settings menu — ends the current mission and returns everyone to the lobby,[Exit to Lobby]
+settings.tab.accessibility,Phone client settings menu — name of the Accessibility tab,Accessibility
+settings.accessibility.presentation,Phone client Accessibility tab — heading over the presentation (display) settings,Presentation
+settings.accessibility.intro_hint,Phone client Accessibility tab — explains the settings change how YOUR console presents information; effect-named and never asks for or infers a reason or condition,[Adjust how your console looks and moves. Turn on whatever helps you play.]
+settings.accessibility.local_hint,Phone client Accessibility tab — states the profile is private to this player and stored on this device only,[Private to you and saved on this device.]
+settings.accessibility.text_scale,Phone client Accessibility tab — heading over the text size control,Text Size
+settings.accessibility.text_scale_value,Phone client Accessibility tab — text size readout as a percentage. {value} is the whole-number percentage.,{value}%
+settings.accessibility.text_scale_hint,Phone client Accessibility tab — explains larger text size scales every label and readout on your consoles,[Scales the text on all of your console screens.]
+settings.accessibility.text_scale_reset,Phone client Accessibility tab — button that returns text size to the default,[Reset Text Size]
+settings.accessibility.contrast,Phone client Accessibility tab — heading over the contrast control,Contrast
+settings.accessibility.contrast_hint,Phone client Accessibility tab — explains higher contrast strengthens the difference between text and background,[Strengthen the difference between text and background.]
+settings.accessibility.reduced_motion,Phone client Accessibility tab — heading over the motion control,Motion
+settings.accessibility.reduced_motion_hint,Phone client Accessibility tab — explains reducing motion stills non-essential animation such as pulses and flashes,[Still non-essential animation such as pulses and flashes.]
+settings.accessibility.follow_system,Phone client Accessibility tab — tri-state option that follows the device system preference,System
+settings.accessibility.contrast_more,Phone client Accessibility tab — contrast option that forces higher contrast on,More
+settings.accessibility.contrast_standard,Phone client Accessibility tab — contrast option that forces standard contrast,Standard
+settings.accessibility.motion_reduce,Phone client Accessibility tab — motion option that forces reduced motion on,Reduce
+settings.accessibility.motion_allow,Phone client Accessibility tab — motion option that allows full motion even when the device asks to reduce it,Allow
 station.rating.std.name,Display name of the Std station rating (identifier in TOML),STANDARD
 station.rating.simplified.name,Display name of the Simplified station rating,SIMPLIFIED
 station.rating.backfill.name,"Display name of the implicit Backfill rating (station unmanned, AI operates all its systems)",BACKFILL (AI)
@@ -755,6 +790,12 @@ client.ship_destroyed,Game-over overlay headline when the hull reaches zero,Ship
 client.release,Station card button — release your own claimed station,RELEASE
 client.taken,Station card button — station is held by another player,TAKEN
 client.claim,Station card button — claim a free station,CLAIM
+client.station_ineligible,Station card button — a free station incompatible with this player's private accessibility assistance profile (issue #1103),[UNAVAILABLE]
+client.station_ineligible_reason,"Station card — private functional explanation shown only to this player when a seat is incompatible with their requested assistance (issue #1103); {functions} is a comma-joined list of functional labels","[This seat runs these manually here, and you asked for help with them: {functions}.]"
+client.assist_function.helm.course-keeping,Functional label for the helm course-keeping assist-function (issue #1103),[keeping course]
+client.assist_function.tactical.target-selection,Functional label for the tactical target-selection assist-function (issue #1103),[selecting targets]
+client.assist_function.sensors.contact-triage,Functional label for the sensors contact-triage assist-function (issue #1103),[triaging contacts]
+client.assist_function.comms.dialogue-timing,Functional label for the comms dialogue-timing assist-function (issue #1103),[timing dialogue]
 client.leave,Station detail button — leave the current station,LEAVE
 client.take_station,Lobby readiness button relabelled during an active round — takes the claimed station from Backfill AI,TAKE STATION
 client.release_confirm,Station release button after arming — asks the player to confirm returning the station to Backfill AI mid-round,CONFIRM RELEASE?
@@ -915,39 +956,52 @@ system_hull.power_reactor.display_name,Shared hull component display name — th
 system_hull.power_battery.display_name,Shared hull component display name — the ship's battery. Shared by every hull carrying that component,Power Battery
 system_hull.core.display_name,Shared hull component display name — the ship's core. Shared by every hull carrying that component,Core
 entity.asteroid.name,Shared entity name for every asteroid variant (assets/entities/asteroid_*.toml),Asteroid
-component.operations.heading,"External-operation panel — heading above the ship's current operation (issue #1026)","[EXTERNAL OPS]"
-component.operations.none,"External-operation panel when the hull can perform no operations at all (issue #1026)","[NO OPS CAPABILITY]"
-component.operations.idle,"External-operation panel when the hull is capable and running nothing (issue #1026)","[NO OPERATION RUNNING]"
-component.operations.start,"External-operation panel — button that orders the operation against the selected target (issue #1026)","[BEGIN OPERATION]"
-component.operations.abort,"External-operation panel — button that stands the running operation down (issue #1026)","[STAND DOWN]"
-component.operations.verb_picker,"External-operation panel — accessible label on the control that chooses which of the hull's verbs to order (issue #1027)","[OPERATION]"
-component.operations.slowed,"External-operation panel — shown beside the bar when a hazard band is stretching the operation; {rate} is the percentage of normal speed (issue #1027)","[SLOWED TO {rate}%]"
-component.operations.state.holding,"External-operation panel — state word while the crew are holding the conditions and progress is advancing (issue #1026)","[HOLDING]"
-component.operations.state.stalled,"External-operation panel — state word while eligibility has lapsed and progress is frozen (issue #1026)","[STALLED]"
-component.operations.state.completed,"External-operation panel — state word once the operation has run to term (issue #1026)","[COMPLETE]"
-component.operations.state.aborted,"External-operation panel — state word once a console has stood the operation down (issue #1026)","[STOOD DOWN]"
-component.operations.state.failed,"External-operation panel — state word once the operation has ended without completing (issue #1026)","[FAILED]"
-operation.verb.stabilise,"Crew-facing name of the stabilise operation verb (issue #1026)","[Stabilise]"
-operation.verb.tow,"Crew-facing name of the tow operation verb (issue #1027)","[Take Under Tow]"
-operation.verb.escort,"Crew-facing name of the escort operation verb (issue #1027)","[Escort]"
-operation.verb.transfer,"Crew-facing name of the transfer operation verb (issue #1027)","[Transfer Cargo]"
-operation.verb.field_repair,"Crew-facing name of the field-repair operation verb (issue #1027)","[Field Repair]"
-operation.refused.not_capable,"External-operation refusal — this hull authored no capability for the verb (issue #1026)","[This hull cannot perform that operation.]"
-operation.refused.target_gone,"External-operation refusal — the target is no longer there (issue #1026)","[Target lost.]"
-operation.refused.target_not_applicable,"External-operation refusal — the target is there but the verb means nothing on it (issue #1026)","[Nothing to work on there.]"
-operation.refused.out_of_range,"External-operation refusal — the ship is outside the operation's authored range (issue #1026)","[Out of range — close on the target.]"
-operation.refused.insufficient_power,"External-operation refusal — the operation's power group is below its authored level (issue #1026)","[Insufficient power allocated.]"
-operation.refused.separated,"External-operation refusal — the escorted party is past the authored separation limit and the escort is over (issue #1027)","[Escort separated — contact lost.]"
-operation.refused.capacity_unavailable,"External-operation refusal — one end of the transfer has nothing to give or no room to take it (issue #1027)","[No capacity at one end of the transfer.]"
-operation.refused.teams_unavailable,"External-operation refusal — fewer repair teams are free than the operation commits (issue #1027)","[Not enough repair teams free.]"
-operation.refused.under_attack,"External-operation refusal — the ship is under fire and the operation cannot be worked through it (issue #1027)","[Under fire — cannot work the operation.]"
-operation.refused.hazard_band,"External-operation refusal — the ship is inside a hazard band the operation cannot be worked in (issue #1027)","[Hazard band — cannot work the operation.]"
-operation.refused.work_stopped,"External-operation refusal — the people who staff the target have stopped work, and an authored interrupt rule says this operation cannot be worked without them (issue #1035)","[The line is down. Nobody down there is authorising anything.]"
+tractor.refused.no_lock,"Tractor-beam refusal — Tactical holds no lock, so the beam has nothing to grip (issue #1156)","[No lock — designate a target on Tactical.]"
+tractor.refused.out_of_range,"Tractor-beam refusal — the locked target is past the beam's authored range (issue #1156)","[Out of range — close on the target.]"
+tractor.refused.unpowered,"Tractor-beam refusal — the tractor's power group is below its authored minimum level (issue #1156)","[Insufficient power allocated.]"
+tractor.refused.disabled,"Tractor-beam refusal — the tractor system is damaged to Disabled (issue #1156)","[Tractor disabled.]"
+console.engineering.tractor,"Engineering console — Tractor panel heading (issue #1156)","[Tractor]"
+console.tractor.engage,"Engineering console — Tractor engage button (issue #1156)","[Engage]"
+console.tractor.release,"Engineering console — Tractor release button (issue #1156)","[Release]"
+console.tractor.idle,"Engineering console — Tractor status when the beam is idle and holding nothing (issue #1156)","[Idle]"
+console.tractor.holding,"Engineering console — Tractor status prefix when the beam is holding a target (issue #1156)","[Holding]"
+console.tractor.range,"Engineering console — Tractor range readout label (issue #1156)","[Range]"
+dock.refused.no_markers,"Dock refusal — the hull (or the target) declares no dock markers, so nothing can mate (issue #1159)","[No dock markers on this hull.]"
+dock.refused.no_target,"Dock refusal — no hull carrying dock markers is within the authored dock range (issue #1159)","[No berth in range.]"
+dock.refused.out_of_range,"Dock refusal — the dock-marker pair drifted past the authored range while forming or held (issue #1159)","[Drifted out of dock range.]"
+dock.refused.unpowered,"Dock refusal — the dock's power group is below its authored minimum level (issue #1159)","[Insufficient power allocated.]"
+dock.refused.disabled,"Dock refusal — the dock system is damaged to Disabled (issue #1159)","[Dock disabled.]"
+dock.refused.target_lost,"Dock refusal — the docked hull no longer exists (issue #1159)","[Berth lost.]"
+console.dock.dock,"Helm console — Dock button (issue #1159)","[Dock]"
+console.dock.undock,"Helm console — Undock button (issue #1159)","[Undock]"
+console.dock.available,"Helm console — dock status when a berth is in range (issue #1159)","[Berth in range]"
+console.dock.docked,"Helm console — dock status prefix when the two hulls are mated (issue #1159)","[Docked]"
+repair.dispatch.refused.no_free_team,"External repair-dispatch refusal — every repair team is already out on a job or spoken for, so none is free to send abroad (issue #1161)","[No team free to dispatch.]"
+repair.dispatch.refused.no_target,"External repair-dispatch refusal — the ship has designated no target, so there is nowhere to send a team (issue #1161)","[No target — designate an ally or structure.]"
+repair.dispatch.refused.out_of_range,"External repair-dispatch refusal — the designated target is past the authored dispatch range (issue #1161)","[Out of range — close on the target.]"
+console.repair.dispatch,"Repair console — External repair-dispatch panel heading (issue #1161)","[Field Repair]"
+console.repair.dispatch.send,"Repair console — button that dispatches a repair team to the designated target (issue #1161)","[Dispatch]"
+console.repair.dispatch.recall,"Repair console — button that recalls a dispatched repair team home (issue #1161)","[Recall]"
+console.repair.dispatch.idle,"Repair console — external-dispatch status when no team is working abroad (issue #1161)","[No team dispatched]"
+console.repair.dispatch.working,"Repair console — external-dispatch status prefix when a team is working a target abroad (issue #1161)","[Working]"
+console.repair.dispatch.range,"Repair console — external-dispatch range readout label (issue #1161)","[Reach]"
+umbilical.refused.undocked,"Transfer-umbilical refusal — the umbilical is not docked to anything, so there is nothing to bridge (issue #1160)","[Not docked — the umbilical bridges nothing.]"
+umbilical.refused.unpowered,"Transfer-umbilical refusal — the umbilical's power group is below its authored minimum level (issue #1160)","[Insufficient power allocated.]"
+umbilical.refused.disabled,"Transfer-umbilical refusal — the umbilical system is damaged to Disabled (issue #1160)","[Umbilical disabled.]"
+umbilical.refused.no_capacity,"Transfer-umbilical refusal — a docked end carries no capacity under the authored id, most often the partner (issue #1160)","[Nothing to transfer here.]"
+console.engineering.umbilical,"Engineering console — Umbilical panel heading (issue #1160)","[Umbilical]"
+console.umbilical.start,"Engineering console — Umbilical start button (issue #1160)","[Start]"
+console.umbilical.stop,"Engineering console — Umbilical stop button (issue #1160)","[Stop]"
+console.umbilical.idle,"Engineering console — Umbilical status when the flow is idle (issue #1160)","[Idle]"
+console.umbilical.flowing,"Engineering console — Umbilical status when the flow is running (issue #1160)","[Flowing]"
+console.umbilical.rate,"Engineering console — Umbilical rate readout label (issue #1160)","[Rate]"
+console.umbilical.levels,"Engineering console — Umbilical both-ends level readout label, operator then partner (issue #1160)","[Levels]"
 component.scan.heading,"Science scan readout — heading above the last sensor reading (issue #1032)","[SENSOR RETURN]"
 component.scan.none,"Science scan readout when the hull carries no survey suite at all (issue #1032)","[NO SURVEY SUITE]"
 component.scan.idle,"Science scan readout when the suite is fitted and nothing has been read yet (issue #1032)","[NOTHING SCANNED]"
 component.scan.take,"Science scan readout — button that reads the selected contact (issue #1032)","[TAKE READING]"
 component.scan.condition,"Science scan readout — row label for the subject's structural condition, derived from its condition track (issue #1032)","[Structural condition]"
+component.scan.mass,"Science scan readout — row label for the subject's authored mass, content identity rather than a live measurement (issue #1154)","[Mass]"
 component.scan.flag.held,"Science scan readout — value shown for an operational flag the subject is still holding (issue #1032)","[Nominal]"
 component.scan.flag.down,"Science scan readout — value shown for an operational flag the subject has dropped (issue #1032)","[Failed]"
 scan.refusal.not_capable,"Scan refusal — this hull authored no survey suite (issue #1032)","[This hull carries no survey suite.]"
@@ -976,6 +1030,23 @@ world.probe_operations.entity.packhorse.name,assets/worlds/probe_operations.toml
 world.probe_operations.entity.depot_storm.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Stormside Depot]
 world.probe_operations.entity.storm.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Radiation Storm Band]
 world.probe_stabilise.entity.skyhook.name,assets/worlds/probe_stabilise.toml -> [[entity]] name,[Skyhook]
+world.probe_tractor.entity.derelict.name,assets/worlds/probe_tractor.toml -> [[entity]] name,[Derelict Hulk]
+world.probe_held_response.entity.structure.name,assets/worlds/probe_held_response.toml -> [[entity]] name,[Stricken Platform]
+world.probe_external_repair.entity.ally.name,assets/worlds/probe_external_repair.toml -> [[entity]] name,[Allied Depot]
+entity.repair_tender.station.engineering.description,"Repair tender Engineering station description (issue #1161)","[Engineering — repair teams and field dispatch.]"
+entity.tractor_tug.power_groups.tractor.label,"Tractor tug power-group label for the tractor group (issue #1156)","[Tractor]"
+entity.tractor_tug.station.engineering.description,"Tractor tug Engineering station description (issue #1156)","[Engineering — power and the tractor beam.]"
+world.probe_dock.entity.berth.name,assets/worlds/probe_dock.toml -> [[entity]] name,[Dock Berth]
+entity.dock_probe.power_groups.dock.label,"Dock probe power-group label for the dock group (issue #1159)","[Dock]"
+entity.dock_probe.station.helm.description,"Dock probe Helm station description (issue #1159)","[Helm — flies the ship and works the dock.]"
+world.probe_umbilical.entity.depot.name,assets/worlds/probe_umbilical.toml -> [[entity]] name,[Supply Depot]
+world.probe_operations.entity.derelict.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Derelict Hulk]
+world.probe_operations.entity.depot.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Supply Depot]
+world.probe_operations.entity.ally.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Allied Depot]
+entity.umbilical_probe.power_groups.dock.label,"Umbilical probe power-group label for the dock group (issue #1160)","[Dock]"
+entity.umbilical_probe.power_groups.umbilical.label,"Umbilical probe power-group label for the umbilical group (issue #1160)","[Umbilical]"
+entity.umbilical_probe.station.helm.description,"Umbilical probe Helm station description (issue #1160)","[Helm — flies the ship and works the dock.]"
+entity.umbilical_probe.station.engineering.description,"Umbilical probe Engineering station description (issue #1160)","[Engineering — power and the transfer umbilical.]"
 component.civilians.heading,"Civilian traffic panel on the Navigation console — heading above the list of civilian craft (issue #1028)","[TRAFFIC]"
 component.civilians.empty,"Civilian traffic panel when the world carries no civilian craft (issue #1028)","[NO CIVILIAN TRAFFIC]"
 component.civilians.compliance.unordered,"Civilian traffic panel — the craft is under no order and flying its own lane (issue #1028)","[ON LANE]"
@@ -1358,5 +1429,39 @@ client.hero.owner.visiting,Hero Bar ownership label for a complete Station visit
 client.hero.owner.ai,Hero Bar ownership label for a human-seeking Station whose compatible host order is exhausted,[AI]
 client.hero.meta,"Hero Bar selected Station metadata. {owner} is Direct/Visiting/AI and {rating} is its authored active rating",[{owner} · {rating}]
 client.hero.ai_status,"Hero Bar non-commandable status naming human-seeking Stations currently operated by AI. {stations} is a comma-separated list of Station names",[AI: {stations}]
+client.hero.health.readout,Hero Bar selected-Station hull health readout. {pct} is the whole-number percentage of summed hull capacity remaining,[Hull {pct}%]
+client.hero.health.none,Hero Bar readout and per-tab cue label for a Station with no damageable Systems — the neutral no-damage-model state,[No damage model]
+client.hero.health.cue.healthy,Hero Bar per-tab non-colour health cue for a Station at full hull,[◇ Full]
+client.hero.health.cue.damaged,Hero Bar per-tab non-colour health cue for a Station with hull damage,[◆ Damaged]
+client.hero.health.cue.none,Hero Bar per-tab non-colour health cue for a Station with no damage model,[○ —]
+client.hero.importance.cue.none,Hero Bar per-tab non-colour importance cue for a Station with no pending events — the neutral state,[—]
+client.hero.importance.cue.unread,Hero Bar per-tab non-colour importance cue for a Station with a one-off unread off-screen event awaiting a visit,[✦ New]
+client.hero.importance.cue.critical,Hero Bar per-tab non-colour importance cue for a Station under a continuing critical condition,[‼ Critical]
+client.hero.importance.cue.both,Hero Bar per-tab non-colour importance cue for a Station with both a one-off unread event and a continuing critical condition,[‼✦ Critical · New]
+client.spectator.spectate,Lobby button to opt out of a station and become a spectator,[Spectate]
+client.spectator.join,Lobby button for a spectator to opt back in and join the crew,[Join crew]
+client.spectator.lobby_status,Lobby status line shown to a spectator who holds no station,[Spectating — you will watch the mission without a station]
+client.spectator.title,Heading of the spectator summary surface shown during an in-progress mission,[Spectating]
+client.spectator.alert.normal,Spectator summary alert banner when the ship is not at red alert,[Condition normal]
+client.spectator.alert.red,Spectator summary alert banner when the ship is at red alert,[RED ALERT]
+client.spectator.hull.none,Spectator summary hull readout when the ship reports no damage model,[Ship hull — no damage model]
+client.spectator.hull.readout,Spectator summary ship-wide hull readout. {pct} is the whole-number percentage of hull remaining,[Ship hull {pct}%]
+client.spectator.objectives_heading,Spectator summary heading over the mission objective list,[Objectives]
+client.spectator.stations_heading,Spectator summary heading over the per-station health list,[Crew stations]
+client.spectator.claim_heading,Spectator surface heading over the list of open stations a spectator may claim to enter play (issue #1106),[Open stations — tap to take a seat]
+client.spectator.claim_none,Shown on the Spectator surface when no open station is currently available to claim (issue #1106),[No open stations right now]
+client.spectator.claim_taken,"Neutral notice on the Spectator surface after a spectator's claim lost the race and the seat is now held by someone else (issue #1106); leaks no other-player identity",[That seat was just taken — still spectating]
 entity.alliance_destroyer.station.navigation.description,Alliance Destroyer lobby description for its complete human-seeking Navigation Station,[Plot waypoints and manage the system chart.]
 entity.alliance_destroyer.station.comms.description,Alliance Destroyer lobby description for its complete human-seeking Comms Station,[Hail contacts and manage incoming traffic.]
+world.probe_npc_tow.entity.tug.name,assets/worlds/probe_npc_tow.toml -> [[entity]] name,[Harrow Salvage Tug]
+world.probe_npc_tow.entity.prize.name,assets/worlds/probe_npc_tow.toml -> [[entity]] name,[Disabled Freighter]
+world.probe_npc_resupply.entity.tender.name,assets/worlds/probe_npc_resupply.toml -> [[entity]] name,[Alliance Tender]
+world.probe_npc_resupply.entity.stranded.name,assets/worlds/probe_npc_resupply.toml -> [[entity]] name,[Stranded Cutter]
+entity.ship_harrow_tug.power_groups.helm.label,"Harrow salvage tug helm power-group label (issue #1163)",[Helm]
+entity.ship_harrow_tug.power_groups.weapons.label,"Harrow salvage tug weapons power-group label (issue #1163)",[Weapons]
+entity.ship_harrow_tug.power_groups.ops.label,"Harrow salvage tug ops power-group label — the tractor bus (issue #1163)",[Ops]
+entity.alliance_tender.power_groups.helm.label,"Alliance tender helm power-group label (issue #1163)",[Helm]
+entity.alliance_tender.power_groups.weapons.label,"Alliance tender weapons power-group label (issue #1163)",[Weapons]
+entity.alliance_tender.power_groups.ops.label,"Alliance tender ops power-group label — the dock/umbilical bus (issue #1163)",[Ops]
+world.probe_npc_tow_balance.entity.tug.name,assets/worlds/probe_npc_tow_balance.toml -> [[entity]] name,[Harrow Salvage Tug]
+world.probe_npc_tow_balance.entity.prize.name,assets/worlds/probe_npc_tow_balance.toml -> [[entity]] name,[Disabled Freighter]

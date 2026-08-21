@@ -134,6 +134,11 @@ display_name = "entity.ship_harrow_destroyer.display_name"
 class = "destroyer"  # [ai] picker badge / scan subtitle
 tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the hull's other stats. [ai] Unratified — a lean destroyer
+# weight, tuned for its fly-through attack-pass doctrine.
+mass = 13000.0
 
 [target]
 tags = ["ship"]

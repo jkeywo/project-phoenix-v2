@@ -201,6 +201,17 @@
   --root-size-portrait:   clamp(11px, 3vw, 15px);
   --root-size-landscape:  clamp(13px, 1.65vw, 16px);
 
+  /* ── Accessibility (issue #1102) ────────────────────────────────
+     The private per-player Accessibility profile (gui/accessibility-profile.js)
+     drives these at runtime. `--a11y-text-scale` multiplies the console root
+     font-size (see gui/console.css), so a larger text size scales EVERY
+     rem-based string on every console at once. `1` is the identity — no
+     scaling — and is the value when no explicit profile has been applied. The
+     profile sets it on the shell `:root` and each same-origin console iframe
+     `:root`; it is named here so the reference in console.css resolves to a
+     defined token rather than only to its inline fallback. */
+  --a11y-text-scale:   1;
+
   /* SVG user-space type. A radar overlay draws into `viewBox="0 0 100 100"`,
      where a font-size is in VIEWBOX UNITS and scales with the element — so it
      is not on the CSS ramp and the px floor above does not apply to it. Its
@@ -261,4 +272,201 @@
   --cham-panel:        0.875rem;
   --cham-panel-inner:  0.8125rem;
   --cham-inset:        1.125rem;
+
+  /* ── Focus (issue #1170) ────────────────────────────────────────
+     The keyboard focus indicator, defined ONCE and as a PAIR so the whole
+     fleet's focus ring is retinted from here, the same way every other colour
+     is. Before this token there was no visible focus styling anywhere in the
+     client — thirty-eight consoles' worth of controls with nothing to say
+     which one the keyboard was on.
+
+     The pair is the point. `--focus-ring` is the standard ring; a player who
+     sets contrast to "more" (accessibility profile → `data-contrast="more"`
+     on the root, gui/accessibility-profile.js) gets `--focus-ring-contrast`
+     swapped in for it. Issue #1170 defines and adopts the standard half;
+     issue #1171 wires the `data-contrast` swap to the contrast half — which is
+     why the contrast value lands here now, defined and usable, rather than a
+     file later.
+
+     Both are quoted against --surface-base, the reference background the
+     consoles actually paint on, so a focused control is unmistakable on every
+     panel. The shared control family (gui/components/ph-console-styles.js) is
+     the ONE place that reads these — it draws every control's `:focus-visible`
+     from them. Nothing else hard-codes an outline; a per-component focus
+     colour would be exactly the drift this vocabulary exists to end. */
+  --focus-ring:          var(--signal);   /* 11.16:1 on --surface-base — standard ring (see --signal) */
+  --focus-ring-contrast: #ffffff;         /* 18.79:1 on --surface-base — the data-contrast="more" ring (issue #1171) */
+  --focus-ring-width:    2px;             /* ring thickness; a token so the family reads it, not a literal */
+  --focus-ring-offset:   2px;             /* gap between control edge and ring, for the un-clipped outline path */
+}
+
+/* ── High-contrast palette (issue #1171) ────────────────────────────
+   The accessibility profile (gui/accessibility-profile.js) resolves the
+   tri-state contrast preference — OS `prefers-contrast: more` by default,
+   an explicit on/off overriding it both ways — and STAMPS the result as
+   `data-contrast="more"` (or `"standard"`) on every root it reaches: the
+   shell `:root` AND each same-origin console iframe `:root`. Before this
+   block that attribute changed nothing. This is where it earns its keep.
+
+   `:root[data-contrast="more"]` (specificity above the bare `:root`) swaps
+   the palette to a genuine high-contrast variant. tokens.css is `@import`ed
+   by console.css and `<link>`ed by the lobby/viewscreen, and custom
+   properties inherit THROUGH every shadow boundary, so redefining the base
+   rungs here retints the whole fleet — consoles, components and lobby —
+   from one block, exactly as the standard palette is.
+
+   The variant is NOT monochrome. The game reads as hued signals on a dark
+   field; high contrast keeps that identity and instead:
+     - drops the reference background to pure black, which lifts EVERY
+       colour's ratio against it (the standard ratios were quoted on the
+       navy #0a1028; on #000000 they only climb),
+     - flattens the surface ramp toward black so region separation comes
+       from BORDERS, and raises those borders — including the content
+       dividers the standard palette holds below the UI floor and exempts —
+       to be plainly visible,
+     - brightens each text/signal rung so it clears 7:1 (WCAG AAA) on black,
+     - swaps the focus ring to its high-contrast half so #1170's indicator
+       stays unmistakable on the raised palette.
+
+   Only the hex-literal base rungs and the rgb() channel triplets are
+   redefined; every `var()` alias (--bg-*, --line*, the scrims) resolves at
+   use time and follows for free. Ratios in the comments are measured
+   against this block's --surface-base (#000000). */
+:root[data-contrast="more"] {
+  /* Surfaces — flattened to black; separation moves onto the edges below. */
+  --surface-void:      #000000;
+  --surface-abyss:     #000000;
+  --surface-deep:      #000000;
+  --surface-base:      #000000;   /* the reference background, now pure black */
+  --surface-card:      #0b0f1e;   /*  1.10:1 — a whisper of panel lift */
+  --surface-raised:    #12182f;   /*  1.20:1 */
+  --surface-high:      #161d38;   /*  1.27:1 */
+  --surface-lift:      #1c2340;   /* pressed / chamfer floor */
+  --surface-ridge:     #2a3568;   /*  1.81:1 — chamfer stroke */
+  --surface-panel:     #000000;   /* the content-column fill, now black */
+  --surface-panel-up:  #1a2030;
+
+  /* Edges — the standard palette holds --edge / --edge-faint at the authored
+     navy and exempts them (they divide content, WCAG 1.4.11 does not reach a
+     legible column's border). High contrast wants those regions drawn, so
+     every edge here is a bright, clearly-visible stroke well past 3:1. */
+  --edge-faint:        #7c88b8;   /*  6.07:1 — content divider, now visible */
+  --edge:              #9aa6d4;   /*  8.78:1 — panel border */
+  --edge-control:      #b6c2f0;   /* 11.96:1 — control boundary */
+  --edge-strong:       #c8d2ff;   /* 14.12:1 */
+  --edge-bright:       #e0e8ff;   /* 17.16:1 */
+
+  /* Ink — every text rung to AAA (7:1) and beyond on black. */
+  --ink:               #ffffff;   /* 21.00:1 */
+  --ink-dim:           #c8d2ff;   /* 14.12:1 */
+  --ink-faint:         #aab4dc;   /* 10.27:1 */
+
+  /* Accents — the bare rung is the one used as text/stroke; each brightened
+     to clear 7:1 on black while holding its hue (the -dim/-deep filled and
+     recessed rungs stay dark and are unchanged). */
+  --tactical:          #ffa860;   /* 11.02:1 — weapons orange */
+  --fire:              #ff6a4a;   /*  7.41:1 — danger red */
+  --loaded:            #6ee890;   /* 13.61:1 — armed / ready */
+  --reloading:         #ffcf66;   /* 14.37:1 — amber */
+  --cyan:              #a0dcf0;   /* 13.99:1 */
+  --science:           #66aaff;   /*  8.76:1 — informational blue */
+  --signal:            #88e8f5;   /* 14.91:1 — active accent */
+  --gold:              #f0c840;   /* 13.04:1 — waypoints, torpedo badges */
+  --sky:               #aec4ff;   /* 12.14:1 — links, "this is mine" */
+  --violet:            #b48ce8;   /*  7.86:1 */
+
+  /* Focus — swap #1170's standard ring for its high-contrast half, so the
+     keyboard indicator stays unmistakable under the raised palette. */
+  --focus-ring:        var(--focus-ring-contrast);   /* #ffffff — 21.00:1 on black */
+
+  /* rgb() channel triplets — the alpha uses (scrims, glows, arc fills) read
+     these, not the hexes above, so the changed colours are mirrored here to
+     keep the translucent layers coherent with the opaque ones. */
+  --rgb-base:          0, 0, 0;
+  --rgb-deep:          0, 0, 0;
+  --rgb-panel:         0, 0, 0;
+  --rgb-ink:           255, 255, 255;
+  --rgb-edge:          154, 166, 212;
+  --rgb-edge-control:  182, 194, 240;
+  --rgb-edge-strong:   200, 210, 255;
+  --rgb-tactical:      255, 168, 96;
+  --rgb-fire:          255, 106, 74;
+  --rgb-loaded:        110, 232, 144;
+  --rgb-reloading:     255, 207, 102;
+  --rgb-cyan:          160, 220, 240;
+  --rgb-signal:        136, 232, 245;
+  --rgb-gold:          240, 200, 64;
+  --rgb-sky:           174, 196, 255;
+  --rgb-science:       102, 170, 255;
+  --rgb-violet:        180, 140, 232;
+}
+
+/* ── Reduced motion (issue #1172) ────────────────────────────
+   The accessibility profile (gui/accessibility-profile.js) resolves the
+   tri-state motion preference — OS `prefers-reduced-motion: reduce` by default,
+   an explicit on/off overriding it both ways — and STAMPS the result as
+   `data-reduced-motion="reduce"` (or `"no-preference"`) on every root it
+   reaches: the shell `:root` AND each same-origin console iframe `:root`.
+   Before this block that attribute changed nothing — only the OS media query
+   drove suppression, so an explicit ON with the OS silent did nothing, and an
+   explicit OFF under an OS that asked for reduce was ignored. This is the ONE
+   global layer that makes the setting real, and it drives off BOTH signals.
+
+   tokens.css is `@import`ed by console.css and `<link>`ed by the lobby, so this
+   layer applies inside every console iframe and the shell alike — the same
+   reach the high-contrast palette above rides.
+
+   Two drivers, so an explicit choice overrides the OS both ways:
+     - `:root[data-reduced-motion="reduce"]` — the resolved decision, and the
+       authoritative one once JS has stamped it (explicit ON, or OS-reduce
+       folded through the resolver).
+     - `@media (prefers-reduced-motion: reduce)` gated by
+       `:root:not([data-reduced-motion="no-preference"])` — the OS default for
+       the pre-JS window and a JS-off client, which YIELDS the moment the
+       profile stamps `no-preference` for an explicit OFF.
+
+   The reset collapses DURATION rather than writing `animation: none`. A one-shot
+   entrance that ends on a `forwards` frame (server.html's chatter bubble starts
+   at opacity 0 and animates up) must still REACH that frame; a near-zero
+   duration runs it there instantly, where `none` would strand it at opacity 0.
+   Looping animations take iteration-count 1 as well, so a spinner or pulse
+   settles on its first frame and stops. Functional feedback survives — the end
+   state is reached — only the travel to it is removed. Individual loops that
+   want to hold a BRIGHTER frame than their base (the red-alert bezel, the ready
+   glows) layer a more-specific `data-reduced-motion="reduce"` override on top,
+   in the file that declares them. */
+
+/* Shadow-DOM reach. A universal descendant selector cannot cross a shadow
+   boundary, but a custom property inherits THROUGH one. A component with a
+   looping animation reads `animation-play-state: var(--a11y-anim-play)` so the
+   stamped attribute reaches inside its shadow root — gui/components/
+   ph-battery-bar.js is the one loop that needs it. */
+:root { --a11y-anim-play: running; }
+
+:root[data-reduced-motion="reduce"] { --a11y-anim-play: paused; }
+
+:root[data-reduced-motion="reduce"] *,
+:root[data-reduced-motion="reduce"] *::before,
+:root[data-reduced-motion="reduce"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduced-motion="no-preference"]) { --a11y-anim-play: paused; }
+
+  :root:not([data-reduced-motion="no-preference"]) *,
+  :root:not([data-reduced-motion="no-preference"]) *::before,
+  :root:not([data-reduced-motion="no-preference"]) *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }

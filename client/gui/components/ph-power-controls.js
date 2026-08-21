@@ -5,6 +5,7 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 
 /**
  * The lowest rung to draw for a group whose entry carries no `min_level`.
@@ -23,6 +24,7 @@ export class PhPowerControls extends HTMLElement {
   #state = null;
   #pipCache = new Map();
   #emptyEl = null;
+  #roving = null;
 
   constructor() {
     super();
@@ -79,6 +81,30 @@ export class PhPowerControls extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
+    // Role + accessible name (issue #1177). The panel is a toolbar — the group
+    // of +/− command steppers the arrow keys rove between; its name is the same
+    // string its visible heading already shows, so the two never drift.
+    this.setAttribute('role', 'toolbar');
+    this.setAttribute('aria-orientation', 'vertical');
+    this.setAttribute('aria-label', t('component.power.title'));
+    // Roving tabindex over every group's − / + stepper (issue #1177): one Tab
+    // stop for the whole panel, arrows between the steppers. The steppers are
+    // native buttons that keep their own Enter/Space activation — no fork.
+    this.#roving ??= installRovingTabindex(this, {
+      getItems: () => this.#rovingItems(),
+      orientation: 'vertical',
+    });
+    this.#syncRoving();
+  }
+
+  /** The panel's rovable controls: every group's − and + stepper, in DOM order. */
+  #rovingItems() {
+    return Array.from(this.shadowRoot.querySelectorAll('.mini-btn'));
+  }
+
+  /** Re-establish the single tab stop after a render adds/removes groups. */
+  #syncRoving() {
+    syncRovingTabindex(this.#rovingItems());
   }
 
   set state(val) {
@@ -98,6 +124,7 @@ export class PhPowerControls extends HTMLElement {
 
     if (groups.length === 0) {
       if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = t('component.power.empty'); container.appendChild(this.#emptyEl); }
+      this.#syncRoving();
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
@@ -126,9 +153,9 @@ export class PhPowerControls extends HTMLElement {
             <span class="level-text"></span>
           </div>
           <div class="pip-cluster">
-            <button type="button" class="mini-btn" data-action="decr"><span class="mini-bg"></span><span class="lbl">−</span></button>
-            <div class="pip-row"></div>
-            <button type="button" class="mini-btn" data-action="incr"><span class="mini-bg"></span><span class="lbl">+</span></button>
+            <button type="button" class="mini-btn" data-action="decr" aria-label="${t('component.power.decrease')}"><span class="mini-bg"></span><span class="lbl">−</span></button>
+            <div class="pip-row" role="presentation"></div>
+            <button type="button" class="mini-btn" data-action="incr" aria-label="${t('component.power.increase')}"><span class="mini-bg"></span><span class="lbl">+</span></button>
           </div>
         `;
         const pipRow = el.querySelector('.pip-row');
@@ -195,6 +222,12 @@ export class PhPowerControls extends HTMLElement {
           pip = document.createElement('div');
           pip.className = 'pip hit-expand';
           pip.dataset.level = i;
+          // The pips are a visual level readout duplicating the .level-text
+          // label beside them; the − / + steppers are the keyboard controls
+          // that set the level, and the pip row keeps its pointer shortcut.
+          // So the pips are presentational — not a second, unnamed control the
+          // keyboard would have to stop on (issue #1177).
+          pip.setAttribute('role', 'presentation');
           this.#pipCache.set(key, pip);
           pipRow.appendChild(pip);
         }
@@ -216,6 +249,10 @@ export class PhPowerControls extends HTMLElement {
       incrBtn.disabled = auto || commanded >= maxLevel;
       decrBtn.disabled = auto || commanded <= minLevel;
     });
+
+    // Groups were reconciled above; keep the toolbar's single tab stop over the
+    // new stepper set, parked on an enabled one (issue #1177).
+    this.#syncRoving();
   }
 
   /**

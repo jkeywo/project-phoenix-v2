@@ -1,0 +1,149 @@
+# Umbilical probe — the transfer-umbilical operator for issue #1160.
+#
+# A deliberately lean hull that exercises the third slice of PRD #1143's coupling
+# family end to end, and it needs BOTH earlier seats to do it: Helm achieves the
+# dock (#1159), Engineering runs the umbilical over it. So this hull carries two
+# stations on one ship — a helm-owned `[[system]] kind = "dock"` with its own
+# `[power_groups.dock]`, and an engineering-owned `[[system]] kind = "umbilical"`
+# with its own `[power_groups.umbilical]` — each with a damage entry so it can be
+# knocked out, the `[dock]` and `[umbilical]` terms, dock markers from the shared
+# `dock_probe` rig variant, and an `[infrastructure]` ledger carrying the
+# transferable `reserve_fuel` capacity it delivers across the dock.
+#
+# It is NOT a shipped combat hull and is flown in no scenario — it is the fixture
+# `assets/worlds/probe_umbilical.toml` puts the umbilical on, kept out of
+# `alliance_destroyer.toml` on purpose so no shipped hull's folded system-hull (and
+# therefore no committed world's digest) moves for this slice. The demo destroyer
+# gains resupply in a later integration, not here.
+
+tags = ["ship"]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+
+[mesh]
+# Shares the courier silhouette but reads its DOCK-MARKER rig from the dedicated
+# `dock_probe` variant sidecar — the same markers the dock probe mates on.
+model = "assets/models/alliance_courier.glb"
+variant = "dock_probe"
+shape = "sphere"
+colour = []
+
+[collider]
+shape = "Capsule"
+radius = 0.6
+length = 1.5
+# The dock manoeuvre writes the own ship's position directly, so like the dock
+# probe this stays the static-terrain default rather than claiming a flyable helm.
+movable = false
+
+[radar_appearance]
+colour = [0.3, 0.9, 0.7]
+size = 5.0
+icon = "ship"
+
+# Power: no `[power]` block, so the reactor takes the default profile. The two
+# small groups (dock, umbilical) draw well under it and rest at their nominal
+# levels.
+[power_groups.dock]
+label = "entity.umbilical_probe.power_groups.dock.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.umbilical]
+label = "entity.umbilical_probe.power_groups.umbilical.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+# ── The transferable capacity ────────────────────────────────────────────────
+# The operator starts full and DELIVERS across the umbilical, so its ledger is the
+# source. `decay_per_sec = 0` and `hull_damage_share = 0` keep the condition track
+# inert — this probe uses `[infrastructure]` only as a capacity ledger, not as a
+# degrading structure, so damaging the umbilical system never touches the fuel.
+[infrastructure]
+condition_max = 100.0
+decay_per_sec = 0.0
+hull_damage_share = 0.0
+
+[[infrastructure.capacity]]
+id = "reserve_fuel"
+amount = 100
+ceiling = 100
+
+# ── The dock's and umbilical's damage entries ────────────────────────────────
+# So each can be damaged to Disabled — the interruptions the probe drives by
+# knocking a system down.
+[[hull.system_hull]]
+system_id = "dock"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "umbilical"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+# ── Helm owns the dock ───────────────────────────────────────────────────────
+[[station]]
+id = "helm"
+name = "Helm"
+description = "entity.umbilical_probe.station.helm.description"
+rank = "Ltn."
+short_code = "HLM"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+# ── Engineering owns the umbilical ───────────────────────────────────────────
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "entity.umbilical_probe.station.engineering.description"
+rank = "Ltn."
+short_code = "ENG"
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
+# ── The dock system ──────────────────────────────────────────────────────────
+[[system]]
+id = "dock"
+kind = "dock"
+station = "helm"
+power_group = "dock"
+
+# ── The umbilical system ─────────────────────────────────────────────────────
+# First-class, engineering-owned, power-grouped: the admitted target for
+# StartTransfer / StopTransfer, admission-gated exactly like any other
+# station-owned system.
+[[system]]
+id = "umbilical"
+kind = "umbilical"
+station = "engineering"
+power_group = "umbilical"
+
+# ── The dock terms ───────────────────────────────────────────────────────────
+[dock]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2
+
+# ── The umbilical terms ──────────────────────────────────────────────────────
+# All authored (AGENTS.md rule 11): the capacity id both docked ends must carry,
+# the units-per-second it moves, the direction from the operator's point of view
+# (deliver = operator → docked partner), and the lowest power-group level the flow
+# runs at.
+[umbilical]
+capacity = "reserve_fuel"
+rate = 20.0
+direction = "deliver"
+min_power_level = 2

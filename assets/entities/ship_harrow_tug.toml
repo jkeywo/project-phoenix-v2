@@ -1,0 +1,250 @@
+# Harrow Salvage Tug (issue #1163) — a HOSTILE, fully AI-crewed tug that locks a
+# disabled craft, engages its tractor and hauls the prize off, with NO player
+# involvement.
+#
+# ── The point of this hull (PRD #1143 / issue #1163) ──────────────────────────
+#
+# The world acts on the crew with the same verbs the crew act with. This hull is
+# the NPC side of the tractor family (issues #1156-#1158): it owns exactly the
+# same admission-gated `[[system]] kind = "tractor"` a crewed hull does, and it
+# runs it through the SAME backfill hosts (`operate_tractor_ai`, #1162) on the
+# shared AI cadence — there is NO NPC-vs-player branch anywhere. An NPC "runs the
+# same procedure" purely by owning the system and being handed a `Tow` directive
+# that names its target; the host emits the byte-identical `EngageTractor` a human
+# Engineering officer would, through `emit_ai_command` → `validate_and_admit`.
+#
+# ── How it is DIRECTED ────────────────────────────────────────────────────────
+#
+# World-agnostic on purpose: this template authors only a HOLD default doctrine,
+# so it attaches a `BehaviourSection` (which satisfies strict AI-declaration mode
+# and lets `aggregate_doctrine_blackboards` publish its scored objectives) and
+# sits still until ordered. A world hands it the actual job by OVERRIDING
+# `behaviour.doctrine` on the spawn (by-id merge) with:
+#
+#   * a `Tow` directive whose `directive_operate_target` names the prize — the
+#     Engineering tractor host engages the beam once the ship's one Tactical lock
+#     is on that target, and
+#   * a `Retreat` (or `Reach`) directive naming a haven anchor — the Helm flies
+#     there, and the coupling drags the prize along at the authored offset.
+#
+# The lock itself is reached by the widened weapons selector's `objective-operate`
+# source (issue #1162 D2), composed from `fleet_baseline.toml`: a per-verb operate
+# directive naming a target injects a NON-hostile candidate, so the tug reaches a
+# lock on the disabled craft it was ordered to tow without the target ever being
+# hostile. See `assets/worlds/probe_npc_tow.toml` for the driving world.
+#
+# It is NOT a shipped combat hull and flies in no scenario — it is the NPC content
+# the #1163 headless tests put a beam on. Kept out of every shipped hull so no
+# committed world's digest moves for this slice.
+
+includes = ["fragments/ai/fleet_baseline.toml", "fragments/ai/captain_alliance.toml"]
+
+class = "courier"  # picker badge / scan subtitle — a light salvage hull
+tags = ["ship", "npc"]
+faction = "cccccccc-3333-4333-8333-cccccccccccc"  # Harrow — hostile to the Federation
+# Authored mass (issue #1154): a light, powerful little tug. Read by the tow-load
+# helm penalty (#1157) as the operator's own mass; the prize's mass is what
+# actually loads the drive.
+mass = 9000.0
+
+[collider]
+shape = "Capsule"
+radius = 0.8
+length = 2.0
+# A ship is a MOBILE contact (issue #958); it flies its Retreat leg under power.
+movable = true
+
+[radar_appearance]
+colour = [0.9, 0.5, 0.2]
+size = 5.0
+icon = "ship"
+
+[mesh]
+# Shares the courier silhouette; a bespoke .glb would buy the probe nothing.
+model = "assets/models/alliance_courier.glb"
+shape = "sphere"
+colour = []
+
+# A modest drive — enough to haul a laden prize off the field, not enough to run
+# down a warship.
+[helm_console]
+max_speed = 16.0
+max_reverse_speed = 5.0
+impulse_speed_multiplier = 4.0
+acceleration = 4.0
+deceleration = 10.0
+max_yaw_rate = 0.2
+max_bank_deg = 8.0
+
+[ai_profile]
+aggression = 0.2
+# Wide enough that the tug reaches its ordered tow target's lock across the whole
+# of the tractor's own reach (the `objective-operate` candidate is range-gated on
+# this horizon).
+sensor_range = 800.0
+
+# ── High-fidelity bubble ──────────────────────────────────────────────────────
+# A `LodBubble` carrier is itself ALWAYS full-fidelity (see `LodBubble`). Without
+# it, a tug operating far from the player would sit in the cheap dead-reckoned
+# low-LOD path and never fly its own helm doctrine — the tow would form but the
+# tug would never haul the prize off. Small radius: it self-promotes the tug (and
+# the prize inside it), not the whole map.
+[lod_bubble]
+radius = 300.0
+
+# ── Behaviour ─────────────────────────────────────────────────────────────────
+#
+# Only a HOLD default: this makes `spawn_entity`/game-start attach the
+# `BehaviourSection` and satisfies strict AI-declaration mode, but leaves the tug
+# idle until a world overrides `behaviour.doctrine` with the actual Tow + Retreat
+# order (see the header). No Destroy doctrine — a salvage tug does not go hunting.
+[behaviour]
+
+[[behaviour.doctrine]]
+id            = "hold-station"
+directive_kind = "None"
+base_priority = 5.0
+target_speed  = 0.0
+
+# ── Systems: every one ownerless + `ai_only`, so the NPC spawn path puts each
+# under `ControlSource::Ai` and the #1162 hosts' `operate_ai` gate holds. The
+# Red Alert system the captain policy drives is synthesised for any hull with a
+# `[behaviour]` block, so it is not listed here.
+
+# Per-axis helm (the tug flies its Retreat leg).
+[[system]]
+id = "helm-thrust"
+kind = "helm_thrust"
+ai_only = true
+
+[[system]]
+id = "helm-steering"
+kind = "helm_steering"
+ai_only = true
+
+[[system]]
+id = "helm-impulse"
+kind = "helm_impulse"
+ai_only = true
+
+# Tactical radar — the surface the weapons selector's `objective-operate` source
+# resolves the tow target's lock onto.
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+ai_only = true
+
+# Fine power (reactor + battery) for per-instance damage and the group allocator.
+[[system]]
+id = "power-reactor"
+kind = "power_reactor"
+ai_only = true
+
+[[system]]
+id = "power-battery"
+kind = "power_battery"
+ai_only = true
+
+# ── The tractor system ────────────────────────────────────────────────────────
+# First-class, ownerless + `ai_only`, power-grouped: the admitted target for
+# EngageTractor / ReleaseTractor, admission-gated exactly like a crewed hull's.
+#
+# It draws from the dedicated `ops` power bus. This hull composes
+# `fleet_baseline.toml`, whose `[power.ai_policy]` manages the `helm` and
+# `weapons` channels — so those groups are authored below (a `[power_groups.*]`
+# block replaces the canonical defaults wholesale, per `authored_power_group_seed`,
+# so the policy's channels must be re-declared) — and `ops` is added beside them
+# for the tractor. It rests at its seeded level 2, at or above the
+# `min_power_level` below.
+[[system]]
+id = "tractor"
+kind = "tractor"
+ai_only = true
+power_group = "ops"
+
+# ── Power groups ──────────────────────────────────────────────────────────────
+# `helm` + `weapons` re-declare the canonical groups `fleet_baseline`'s power
+# policy manages (authoring any group replaces the defaults, so these must be
+# restated); `ops` is the tractor's own bus. All seeded at level 2 by
+# `authored_power_group_seed`.
+[power_groups.helm]
+label = "entity.ship_harrow_tug.power_groups.helm.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.weapons]
+label = "entity.ship_harrow_tug.power_groups.weapons.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+[power_groups.ops]
+label = "entity.ship_harrow_tug.power_groups.ops.label"
+default_level = 2
+min_level = 1
+max_level = 4
+
+# ── The coupling terms (all authored — AGENTS.md rule 11) ─────────────────────
+[tractor]
+range = 600.0
+coupling_offset = [0.0, 0.0, -100.0]
+min_power_level = 2
+
+# The mass → helm-penalty curve (issue #1157): a laden prize slows the tug.
+[tractor.tow_load]
+half_penalty_mass = 10000.0
+max_penalty = 0.8
+
+# ── Per-system hull ───────────────────────────────────────────────────────────
+# So the tractor can be knocked out (the "tractor destroyed" interruption) and the
+# tug can be killed. "core" is the ownerless bucket RepairTarget::Core dispatches
+# to. Radar carries no hull, matching fleet convention.
+[[hull.system_hull]]
+system_id = "core"
+max_hp = 24
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.10
+
+[[hull.system_hull]]
+system_id = "tractor"
+max_hp = 30
+damaged_threshold_pct = 0.5
+disabled_threshold_pct = 0.15
+debuff_magnitude = 0.15
+
+[[hull.system_hull]]
+system_id = "helm-thrust"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-steering"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "helm-impulse"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "power-reactor"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20
+
+[[hull.system_hull]]
+system_id = "power-battery"
+max_hp = 20
+damaged_threshold_pct = 0.75
+disabled_threshold_pct = 0.25
+debuff_magnitude = 0.20

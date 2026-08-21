@@ -24,6 +24,21 @@
     .console-footer .sep { color: var(--line-soft); }
     .console-footer .spacer { flex: 1; }
     .hero-controls { display: flex; align-items: center; gap: 8px; }
+    /* Contextual dock control (issue #1159): shown only while a berth is in
+       range or a dock is held, so a hull with no dock system is unchanged. */
+    .dock-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; }
+    .dock-panel[hidden] { display: none; }
+    .dock-row { display: flex; align-items: center; gap: 10px; }
+    .dock-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
+    .dock-btn.docked { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
+    .dock-status { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    .dock-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
+    /* Under-tow-load indicator (issue #1157): shown only while this ship's
+       tractor holds a target, so a hull with no tractor is unchanged. */
+    .tow-load-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; display: flex; align-items: center; gap: 8px; }
+    .tow-load-panel[hidden] { display: none; }
+    .tow-load-label { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; color: var(--reloading); }
+    .tow-load-target { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
 
     @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .ctrl-col { padding: 8px; } .console-body .radar-col { order: -2; } .console-body .joystick-col { order: -1; } }
     /* Landscape is height-starved, so the hero stops being an in-flow row and
@@ -91,6 +106,26 @@
             <ph-impulse-btn id="impulse-btn"></ph-impulse-btn>
             <ph-boost-btn id="boost-btn"></ph-boost-btn>
           </div>
+          <!-- Contextual dock control (issue #1159): a hull whose helm owns a
+               `dock` system publishes a `dock` blackboard; a hull without one
+               never does, so this panel stays hidden and the console is
+               unchanged. -->
+          <div class="dock-panel" id="dock-panel" hidden>
+            <div class="dock-row">
+              <button id="dock-btn" class="dock-btn" data-i18n="console.dock.dock">Dock</button>
+              <span id="dock-status" class="dock-status">—</span>
+            </div>
+            <div id="dock-refusal" class="dock-refusal" hidden></div>
+          </div>
+          <!-- Under-tow-load indicator (issue #1157): shown only while this
+               ship's tractor holds a target, so the helm can see it is under
+               load and why. A hull with no tractor publishes no `tractor`
+               blackboard, so this banner stays hidden and the console is
+               unchanged. -->
+          <div class="tow-load-panel" id="tow-load-panel" hidden>
+            <span class="tow-load-label" data-i18n="console.helm.under_tow">Under tow load</span>
+            <span id="tow-load-target" class="tow-load-target"></span>
+          </div>
         </div>
         <div class="radar-col">
           <ph-helm-radar id="helm-radar"></ph-helm-radar>
@@ -121,7 +156,11 @@
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
 
-    initConsole({
+    // Dock engage state, tracked so the one button toggles dock/undock (issue
+    // #1159). Human and AI issue the SAME Dock/Undock through the one admission
+    // path — this control just picks which.
+    var docked = false;
+    var consoleHandle = initConsole({
       name: 'helm',
       // s is a HelmConsolePayload — see the @typedef in gui/console-state.js.
       // Helm is a FLAT payload: it owns one console family, so it has no
@@ -139,7 +178,56 @@
         boostEl.state = { available: !!s.boost_enabled, active: !!s.boost_active, recharge_pct: s.boost_battery != null ? s.boost_battery * 100 : 100, auto: !!s.helm_auto };
         setAutoState(null, document.getElementById('helm-auto-badge'), !!s.helm_auto);
         document.getElementById('station-damage').state = s.own_hull || null;
+
+        // Contextual dock control (issue #1159). The panel shows only while the
+        // dock is available (a berth in range) or a dock is engaged/held; a hull
+        // with no dock system publishes no `dock` view, so the panel stays hidden
+        // and the console is unchanged.
+        var dockPanel = document.getElementById('dock-panel');
+        var d = s.dock || null;
+        if (!d || (!d.available && !d.engaged && !d.docked)) {
+          dockPanel.hidden = true;
+          docked = false;
+        } else {
+          dockPanel.hidden = false;
+          docked = !!d.docked;
+          var dockBtn = document.getElementById('dock-btn');
+          dockBtn.classList.toggle('docked', docked);
+          // Docked → Undock; otherwise → Dock (whether idle-in-range or closing).
+          dockBtn.textContent = t(docked ? 'console.dock.undock' : 'console.dock.dock');
+          var dockStatus = document.getElementById('dock-status');
+          if (docked) {
+            dockStatus.textContent = t('console.dock.docked')
+              + (d.docked_to_name ? ' · ' + t(d.docked_to_name) : '');
+          } else {
+            dockStatus.textContent = t('console.dock.available')
+              + (d.available_target_name ? ' · ' + t(d.available_target_name) : '');
+          }
+          var dockRefusal = document.getElementById('dock-refusal');
+          if (d.refusal) { dockRefusal.hidden = false; dockRefusal.textContent = t(d.refusal); }
+          else { dockRefusal.hidden = true; dockRefusal.textContent = ''; }
+        }
+
+        // Under-tow-load indicator (issue #1157). Shown only while this ship's
+        // tractor holds a target; a hull with no tractor publishes no `tractor`
+        // view, so `tow_load` is null and the banner stays hidden. Both the
+        // label and the towed hull's name resolve through t() — no English.
+        var towPanel = document.getElementById('tow-load-panel');
+        var tl = s.tow_load || null;
+        if (!tl || !tl.active) {
+          towPanel.hidden = true;
+        } else {
+          towPanel.hidden = false;
+          var towTarget = document.getElementById('tow-load-target');
+          towTarget.textContent = tl.target_name ? '· ' + t(tl.target_name) : '';
+        }
       }
+    });
+
+    // The one dock button toggles dock/undock through the action map, which sends
+    // the same admitted command a dock AI would (issue #1159).
+    document.getElementById('dock-btn').addEventListener('click', function() {
+      consoleHandle.sendAction(docked ? 'undock' : 'dock');
     });
   </script>
 </body>

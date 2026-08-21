@@ -22,6 +22,11 @@
 name = "entity.ship_civilian_hauler.name"
 tags = ["ship", "npc", "civilian"]
 faction = "dddddddd-4444-4444-8444-dddddddddddd"
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the hull's other stats. [ai] Unratified — a bulk freighter,
+# heavier than a combat courier despite carrying no weapons.
+mass = 9000.0
 
 # The fifteen ship-level AI declarations every hull with a `[behaviour]` block
 # owes (PRD #774 US7). The Captain one is authored inline below instead, because

@@ -26,7 +26,7 @@ export class PhBatteryBar extends HTMLElement {
     .bar-wrap .fill.red { background: linear-gradient(90deg, var(--fire-dim), var(--fire)); }
     .bar-wrap .threshold-marker { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: 0.7; pointer-events: none; }
     .bar-wrap .label { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; font-size: var(--text-xs); letter-spacing: 0.1em; color: var(--ink); text-shadow: 0 0 4px var(--surface-void); pointer-events: none; }
-    .charging-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: none; align-items: center; justify-content: center; font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--loaded); pointer-events: none; animation: pulse-glow 1.5s ease-in-out infinite; }
+    .charging-indicator { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: none; align-items: center; justify-content: center; font-size: var(--text-xs); letter-spacing: 0.15em; color: var(--loaded); pointer-events: none; animation: pulse-glow 1.5s ease-in-out infinite; animation-play-state: var(--a11y-anim-play, running); }
     /* Vertical orientation (orientation="vertical"): a tall narrow gutter that
        fills from the bottom instead of left→right. The host stretches to its
        flex container's height; the gauge takes a thin fixed width. */
@@ -38,10 +38,18 @@ export class PhBatteryBar extends HTMLElement {
     :host([orientation="vertical"]) .bar-wrap .threshold-marker { top: auto; left: 0; width: 100%; height: 2px; }
     :host([orientation="vertical"]) .bar-wrap .label,
     :host([orientation="vertical"]) .charging-indicator { writing-mode: vertical-rl; text-orientation: mixed; font-size: var(--text-xs); letter-spacing: 0.18em; }
-    /* Reduced motion (PRD #1023 module 3). The pulse says "charging"; held
-       at the bright end of its own loop it still says charging, without a
-       glow breathing at the edge of an officer's vision for the whole of a
-       long recharge. */
+    /* Reduced motion (PRD #1023 module 3; global layer issue #1172). The pulse
+       says "charging"; held at the bright end of its own loop it still says
+       charging, without a glow breathing at the edge of an officer's vision for
+       the whole of a long recharge.
+
+       This lives in a shadow root, which the global layer's universal selector
+       in tokens.css cannot cross. Two things carry the setting in instead: the
+       --a11y-anim-play custom property (above), which INHERITS through the
+       shadow boundary and pauses the loop the moment the stamped attribute
+       flips — the explicit-ON path the OS media query alone cannot serve; and
+       this media block, which the OS default still evaluates inside the
+       shadow tree, holding the bright frame. */
     @media (prefers-reduced-motion: reduce) {
       .charging-indicator {
         animation: none;

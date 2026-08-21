@@ -1,0 +1,61 @@
+# Probe world for issue #1161 — external repair-team dispatch, end to end.
+#
+# One repair-team-fitted tender and one ALLY STRUCTURE positioned close enough
+# to send a team across. The tender carries a single repair team and, in its own
+# `[repair.external_dispatch]` table, the reach a team can cross and the rate it
+# works a target's condition track at. There is no combat and no scripted
+# dispatch: the tender is a backfilled player ship, so the headless test drives
+# the dispatch through the ordinary admitted DispatchExternalRepair /
+# RecallExternalRepair path (the only way to prove the command rides the same
+# admission the repair console's own control would), sets the ship's one Tactical
+# lock the way `SetTarget` would, and moves the operator by hand.
+#
+# WHAT THIS WORLD PROVES (the headless test drives it):
+#
+#   1. A DISPATCHED TEAM RAISES THE ALLY'S CONDITION. With the ally designated
+#      and in range, dispatching a team raises the ALLY's own condition track at
+#      the authored rate — progress that lives on the ally, not the tender.
+#
+#   2. THE HULL'S OWN REPAIRS SLOW. While the one team is committed abroad it is
+#      withdrawn from the tender's internal damage-control sweep: the tender's
+#      own free-team count drops to zero and an internal dispatch of that team is
+#      refused, so helping the ally is a real trade against fixing itself.
+#
+#   3. RECALL RETURNS THE TEAM AND LEAVES THE WORK DONE. Recalling brings the
+#      team home — the sweep can use it again — and the condition it banked on the
+#      ally stays. Drifting the tender out of range brings the team home the same
+#      way.
+#
+# The dispatch reach and the repair rate are authored on the TENDER's own
+# `[repair.external_dispatch]` table; the ally's condition track and thresholds
+# are the ally's — nothing about either is in Rust. A hull that authored no
+# `[repair.external_dispatch]` carries no dispatch capability, which is why the
+# shipped destroyer is deliberately NOT the operator here.
+
+[global]
+seed = 1161
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The tender — the backfilled player ship, spawned at game start. The game-start
+# spawn swaps the world's `player-ship` placeholder for the lobby-SELECTED hull,
+# so the selection has to be the tender or its repair team never spawns.
+[[entity]]
+template_path = "assets/entities/repair_tender.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The ally — a transfer depot 80 units off, well inside the tender's 600-unit
+# reach. It starts at 40/100 and, for a crisp probe, declines at ZERO on its own
+# (overridden below) so its condition only moves by the dispatched team's work —
+# +20 points a second while a team is over there, nothing when the team is home.
+# A structure that authors no `[held_response]` is untouched by tractors; a hull
+# that authors no `[repair.external_dispatch]` is untouched by this slice.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_external_repair.entity.ally.name"
+transform = { position = [80.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 40.0, decay_per_sec = 0.0 } }

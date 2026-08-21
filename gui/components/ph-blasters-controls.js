@@ -6,10 +6,12 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
+import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 
 export class PhBlastersControls extends HTMLElement {
   #state = null;
   #emptyEl = null;
+  #roving = null;
 
   constructor() {
     super();
@@ -47,6 +49,27 @@ export class PhBlastersControls extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
+    // Role + accessible name (issue #1170): a toolbar of charge/fire buttons,
+    // named by the same string its visible heading shows.
+    this.setAttribute('role', 'toolbar');
+    this.setAttribute('aria-orientation', 'vertical');
+    this.setAttribute('aria-label', t('component.blasters.title'));
+    // Roving tabindex over the per-bank charge buttons (issue #1170).
+    this.#roving ??= installRovingTabindex(this, {
+      getItems: () => this.#rovingItems(),
+      orientation: 'vertical',
+    });
+    this.#syncRoving();
+  }
+
+  /** The toolbar's rovable controls (one charge/fire button per bank). */
+  #rovingItems() {
+    return Array.from(this.shadowRoot.querySelectorAll('#banks .btn')).filter(Boolean);
+  }
+
+  /** Re-establish the single tab stop after a render adds/removes banks. */
+  #syncRoving() {
+    syncRovingTabindex(this.#rovingItems());
   }
 
   set state(val) {
@@ -63,6 +86,7 @@ export class PhBlastersControls extends HTMLElement {
 
     if (banks.length === 0) {
       if (!this.#emptyEl) { this.#emptyEl = document.createElement('div'); this.#emptyEl.className = 'empty'; this.#emptyEl.textContent = t('component.blasters.empty'); container.appendChild(this.#emptyEl); }
+      this.#syncRoving();
       return;
     }
     if (this.#emptyEl) { this.#emptyEl.remove(); this.#emptyEl = null; }
@@ -131,6 +155,38 @@ export class PhBlastersControls extends HTMLElement {
           }
         }, { passive: false });
         btn.addEventListener('touchcancel', () => {
+          if (!btn.disabled && this.sendAction && bank.state === 'charging') {
+            this.sendAction('fire_blaster', { bank: bank.id });
+          }
+        });
+        // Keyboard press = the same hold-to-fire the pointer does (issue
+        // #1170): Enter/Space down charges, the release fires. This mirrors
+        // mousedown/mouseup onto the SAME named actions — a blaster button
+        // takes no plain `click`, so without this it was the one control on
+        // the console the keyboard could reach but not operate. `repeat` is
+        // ignored so a held key does not re-charge every autorepeat tick.
+        btn.addEventListener('keydown', (e) => {
+          if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+          e.preventDefault();
+          if (e.repeat) return;
+          if (!btn.disabled && this.sendAction) {
+            this.sendAction('charge_blaster_start', { bank: bank.id });
+          }
+        });
+        btn.addEventListener('keyup', (e) => {
+          if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+          e.preventDefault();
+          if (!btn.disabled && this.sendAction) {
+            this.sendAction('fire_blaster', { bank: bank.id });
+          }
+        });
+        // Focus-out releases a mid-charge, mirroring `mouseleave`/`touchcancel`
+        // for the pointer (issue #1170): hold Enter/Space to charge, then move
+        // focus before the keyup, and without this the charge sticks forever.
+        // Same guard, same action as `mouseleave` — it only fires while the bank
+        // is still charging, so the keyup path (which clears that state) cannot
+        // double-fire with it.
+        btn.addEventListener('blur', () => {
           if (!btn.disabled && this.sendAction && bank.state === 'charging') {
             this.sendAction('fire_blaster', { bank: bank.id });
           }
@@ -254,6 +310,9 @@ export class PhBlastersControls extends HTMLElement {
         patternRow.querySelector('.pattern-barrels').textContent = '';
       }
     });
+
+    // Keep the toolbar's single tab stop over the reconciled button set (#1170).
+    this.#syncRoving();
   }
 }
 

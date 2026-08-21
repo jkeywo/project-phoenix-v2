@@ -1,0 +1,57 @@
+# Probe world for issue #1156 — the tractor beam, end to end.
+#
+# One tractor-fitted tug and one derelict, positioned close enough to couple.
+# There is no combat and no scripted engage: the tug is a backfilled player ship,
+# so the headless test drives the beam through the ordinary admitted EngageTractor
+# / ReleaseTractor path (the only way to prove the command rides the same
+# admission the engineering console's own control would), sets the ship's one
+# Tactical lock the way `SetTarget` would, and moves the operator by hand.
+#
+# WHAT THIS WORLD PROVES:
+#
+#   1. A DERELICT IS MOVED BY AN ENGAGED TRACTOR. With the derelict locked and the
+#      beam engaged and in range, the derelict rides 120 units astern of the tug
+#      (the authored `coupling_offset`) and goes on riding it after the tug moves
+#      a kilometre — the whole of what the coupling is.
+#
+#   2. EACH INTERRUPTION DROPS THE HOLD. The test drives every one in turn —
+#      dropping the lock, releasing the beam, flying out of the authored range,
+#      cutting the tractor's power allocation, and knocking the tractor out to
+#      Disabled — and after each the derelict stays where the towline parted
+#      rather than following.
+#
+# Nothing this world exercises is authored anywhere but the tug's own `[tractor]`
+# table and its `[[system]] kind = "tractor"` — no scenario text, no hardcoded
+# range or offset. A hull that authored neither carries no tractor and is
+# unchanged, which is why the shipped destroyer is deliberately NOT the operator
+# here.
+
+[global]
+seed = 1156
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The tug — the backfilled player ship, spawned at game start.
+[[entity]]
+template_path = "assets/entities/tractor_tug.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The derelict — an inert hull 80 units off, well inside the tug's 600-unit reach.
+# A civilian hauler stands in for a hulk (the operations probe uses the same
+# template the same way): it carries a Transform the tractor can override and a
+# name the blackboard can report, and the test never gives it a lane, so it drifts
+# nowhere on its own.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.probe_tractor.entity.derelict.name"
+transform = { position = [80.0, 0.0, 0.0] }
+# A HEAVY authored mass (issue #1157) — a laden hulk, well past the tug's
+# `half_penalty_mass` knee, so taking it under tow exacts a severe helm penalty
+# the headless test can measure as a fall in the tug's achieved speed. Overrides
+# the hauler template's own lighter mass on this instance only; nothing else
+# about the derelict changes.
+overrides = { mass = 240000.0 }

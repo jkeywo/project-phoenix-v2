@@ -1,0 +1,62 @@
+# Probe world for issue #1163 — an ALLIED NPC tender docks with a stranded ship
+# and transfers a capacity to it, with NO player involvement.
+#
+# The NPC-content mirror of `probe_umbilical.toml` (issue #1160). There the
+# operator was the backfilled PLAYER ship and the test drove Dock + StartTransfer
+# by hand; here the operator is a world-spawned NPC (`alliance_tender.toml`) that
+# runs the WHOLE two-seat chain itself off one authored `Transfer` directive — the
+# same `operate_dock_ai` then `operate_umbilical_ai` hosts (#1162), the same
+# admission seam, no NPC-only branch.
+#
+# WHAT THIS WORLD PROVES (asserted on the stranded ship's OWN ledger):
+#
+#   1. THE TENDER RESUPPLIES THE STRANDED SHIP UNAIDED. Handed a `Transfer` order
+#      naming the stranded ship, the tender's Helm docks once the ordered hull is
+#      reported in range, then its Engineering flows `reserve_fuel` across the
+#      umbilical — the stranded ship's empty ledger fills, unit for unit, at the
+#      authored rate. No command is ever sent by a player.
+#
+# The tender starts within the 200-unit dock range of the stranded ship, so the
+# dock host engages without a navigation leg (the dock manoeuvre flies it onto the
+# berth). Its job is authored ENTIRELY as a spawn-time `behaviour.doctrine`
+# override (by-id merge over the template's HOLD default). Nothing about the dock
+# or umbilical is authored anywhere but the tender's own `[dock]` / `[umbilical]`
+# tables and its `[[system]]` blocks.
+
+[global]
+seed = 1163
+ai_helm_tick_hz = 30.0
+
+# Player spawn kept far off and outside AI sensor range, so the AI-backfilled
+# player never interferes. The world still needs it to reach InProgress.
+[player_spawn]
+position = [4000.0, 0.0, 4000.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [4000.0, 0.0, 4000.0] }
+spawn_on = "game_start"
+
+# ── The allied tender — the fully AI-crewed operator ──────────────────────────
+# Spawned at the origin, full of `reserve_fuel`. The template ships a HOLD
+# default; this override hands it the job: TRANSFER to the stranded ship (Helm
+# docks, Engineering runs the umbilical).
+[[entity]]
+template_path = "assets/entities/alliance_tender.toml"
+name = "world.probe_npc_resupply.entity.tender.name"
+transform = { position = [0.0, 0.0, 0.0] }
+overrides = { behaviour = { doctrine = [
+  { id = "resupply-the-stranded", directive_kind = "Transfer", directive_operate_target = "world.probe_npc_resupply.entity.stranded.name", base_priority = 90.0 },
+] } }
+
+# ── The stranded ship — the docked partner with the empty receiving ledger.
+# A passive dockable hull 100 units to starboard, well inside the tender's
+# 200-unit dock range. It authors a `[dock]` opt-in (so it reads its dock markers)
+# and an empty `reserve_fuel` ledger with headroom the tender delivers into. It
+# runs no dock and no umbilical of its own and never moves under its own power —
+# every unit of fuel it gains is the tender delivering it.
+[[entity]]
+template_path = "assets/entities/umbilical_berth.toml"
+name = "world.probe_npc_resupply.entity.stranded.name"
+transform = { position = [100.0, 0.0, 0.0] }

@@ -214,6 +214,39 @@ entities:
       symbols: [operate_captain_ai, nearest_hostile_range, CAPTAIN_HOSTILE_CONTACT_FACT, CAPTAIN_HOSTILE_RANGE_FACT, ai_helm_thrust, ai_helm_steering, ai_helm_lateral_thrust, ai_helm_vertical_thrust, ai_helm_impulse, ai_helm_boost, ai_phaser_auto_fire, tick_blaster_auto_fire, ai_torpedo_load, ai_torpedo_auto_fire, ai_shield_focus, tick_shield_focus_ai, ai_power_allocation, operate_comms_response_ai, HelmEnginesAiPolicy, HelmSteeringAiPolicy, HelmLateralAiPolicy, HelmVerticalAiPolicy, HelmImpulseAiPolicy, HelmBoostAiPolicy, PhaserBankAiPolicies, BlasterBankAiPolicies, TorpedoTubeAiPolicies, TorpedoMagazineAiPolicy, ShieldsFocusAiPolicy, PowerAiPolicy, CommsResponseAiPolicy, seed_helm_actuator_facts, seed_phaser_bank_facts, seed_blaster_bank_facts, seed_torpedo_tube_load_facts, seed_torpedo_tube_launch_facts, seed_torpedo_magazine_facts, seed_shields_focus_facts, seed_power_facts, seed_comms_response_facts, resolve_channel, evaluate_with, best_in, resolve_channel_in_state, resolve_transition, evaluate_stateful, AiPolicyMachine, AiPolicyState, AiPolicyTransition, AiPolicyRuntimeState, AiPolicyMemory, HelmBoostAiPolicyState, HelmEnginesAiPolicyState, HelmSteeringAiPolicyState, HelmPassSurface, ai_policy_state_tick, tick_policy_machine, build_pass_surface, resolve_helm_channel, seed_helm_travel_facts, seed_memory_derived_facts, seed_recovery_facts, seed_pressed_facts, MIN_RANGE_TARGET_MEMORY, target_relative_motion, plan_fly_through_pass, plan_recovery_orbit, plan_artillery_position, FlyThroughLeg, FlyThroughPassInput, RecoveryOrbitInput, ArtilleryPositionInput, TargetRelativeMotion, HoldCommittedHeading, AiPolicyTickClock, AiHighFidelityComponents, ai_high_fidelity_components, HelmRecoveryHistory, BoundedHistory, CompositeKey, composite_seed, signed_choice, key_from_name]
       tests: [cargo test]
 
+  - component: ai-policy-host-spine
+    core:
+      status: implemented
+      confidence: confirmed
+      title: AI Policy Host Spine
+      summary: The single Admission-facing AI host module — a pure gate/declare/resolve decision, a bare-Res world-context SystemParam, and an admission emitter — that every fine-system AI operator is intended to run its spine through.
+      rationale:
+        - "[ai] The four-step spine every AI host shares — gate on the Control Source being AI, check the fine system declares a policy, resolve the winning verb for a channel, emit it through the shared admission seam — belongs in one module rather than hand-inlined at the top of twenty-one host bodies."
+        - "Issue #1205 lands the module ADDITIVELY: no host consumes it yet. src/ai/host.rs::decide is the pure, Bevy-free half — decide(sources, policy, &HostTick) -> HostOutcome (NotAiOperated / Undeclared / Held / Act(&verb)), unit-testable with a hand-built HostTick and no App. The three non-acting outcomes stay distinct because a host and its tests care WHY nothing emitted: a human (or an offline system) holds it, it is AI-run but authors no policy (strict declaration, #885), or it authors one that held this tick. Resolution runs the frozen ai::policy evaluator — resolve_channel for a stateless tick, resolve_channel_in_state when the HostTick carries a HostState — so decide adds a gate and a declaration check around the existing runtime, inventing no second evaluator."
+        - "AiHostEnv is the Bevy half: a SystemParam holding BARE Res for WorldContentRuntime, WorldLayerMap and Sessions plus the EntityOriginLayer query, exposing flag_chain(ship) (the entity_flag_chain layered walk every current host runs) and emitter(). Bare Res, not Option<Res<..>>, is the deliberate interface choice — the pre-existing hosts each carry their own Option<Res<..>> copies precisely so a bare App could skip them silently, and consolidating here ends that: a fixture that runs a host through this env must register the same resources production does or fail loudly at Bevy schedule build. register_ai_host_env(app) is the ONE wiring point that registers them (idempotent init_resource for the two Default resources; Sessions inserted only when the lobby plugin has not), called by both the AI host plugin (ConsoleAiPlugin) and ship::test_support so a fixture cannot take a different code path than the shipped app."
+        - "The dependency on host-command-admission is the whole reason the emit path re-homes here. PASM's observed-edge attribution discards edges from a file owned by more than one entity, which is why the per-host emit_*_ai_command shims existed. src/ai/host.rs is owned by exactly ONE entity, so its `use crate::command_admission::ai_emit::emit_ai_command` — wrapped as AiEmitter, the AI side of the typed input path — is an UNAMBIGUOUS observed admission edge. Routing an AI decision through the seam (rather than writing authoritative state) is what keeps AI and human commands symmetric (AGENTS.md #6): the spine is non-authoritative, the admission seam it depends on is the authority."
+    architecture:
+      kind: service
+      authority: non-authoritative
+      depends_on:
+        - host-command-admission
+      runs_in:
+        - host-browser-runtime
+    implementation:
+      status: observed
+      paths:
+        - src/ai/host.rs
+      symbols:
+        - decide
+        - HostOutcome
+        - HostState
+        - HostTick
+        - AiHostEnv
+        - AiEmitter
+        - register_ai_host_env
+      tests:
+        - cargo test
+
   - component: per-bank-weapon-policy
     core:
       status: implemented

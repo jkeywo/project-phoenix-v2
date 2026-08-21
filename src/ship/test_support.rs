@@ -126,6 +126,12 @@ pub fn test_app() -> App {
                 .chain(),
         )
         .add_plugins(ShipPlugin);
+    // The shared AI host spine's read-only world context (issue #1205), the same
+    // single wiring point the AI host plugin calls. `AiHostEnv` takes bare `Res`,
+    // so a fixture that runs a host through it must register these here or fail
+    // loudly at schedule build — which is the point: the fixture cannot take a
+    // different code path than production.
+    crate::ai::host::register_ai_host_env(&mut app);
     drive_one_fixed_step_per_update(&mut app, TEST_TICK);
     let hull_config = &[
         (crate::messages::SystemId("helm".into()), 25.0_f32),
@@ -598,6 +604,12 @@ pub fn test_app_with_engine_hull() -> App {
                 .chain(),
         )
         .add_plugins(ShipPlugin);
+    // The shared AI host spine's read-only world context (issue #1205), the same
+    // single wiring point the AI host plugin calls. `AiHostEnv` takes bare `Res`,
+    // so a fixture that runs a host through it must register these here or fail
+    // loudly at schedule build — which is the point: the fixture cannot take a
+    // different code path than production.
+    crate::ai::host::register_ai_host_env(&mut app);
     drive_one_fixed_step_per_update(&mut app, TEST_TICK);
     let hull_config = &[
         (crate::messages::SystemId("helm".into()), 25.0_f32),

@@ -73,6 +73,11 @@ impl Plugin for ConsoleAiPlugin {
         // refresh rate, over a `WorldSnapshot` rebuilt on an unrelated clock.
         // They now share the helm axes' latch, derived from the logical tick.
         crate::ai::cadence::register_ai_cadence(app);
+        // The shared AI host spine's read-only world context (issue #1205). No
+        // host in this plugin consumes `AiHostEnv` yet — this is the additive
+        // wiring point so the bare-`Res` env is registered wherever the AI host
+        // plugin runs, mirrored by `ship::test_support` for fixtures.
+        crate::ai::host::register_ai_host_env(app);
         app.add_systems(
             FixedUpdate,
             (

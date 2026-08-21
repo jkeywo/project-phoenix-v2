@@ -493,7 +493,18 @@ mod tests {
     /// drives the shipped authored blocks directly rather than hosting them. It
     /// replaced `default_ai_policy_pins`, which sat here for the same reason,
     /// when #885b stage 5d deleted the synthesisers that suite pinned.
-    const NON_HOST_FILES: &[&str] = &["src/entities/authored_ai_pins.rs"];
+    ///
+    /// `src/ai/host.rs` is the Admission-facing AI host spine (issue #1205). Its
+    /// `decide` calls `resolve_channel` / `resolve_channel_in_state` GENERICALLY
+    /// over facts and a flag chain the CALLER seeds and hands it in a `HostTick`
+    /// — the spine owns no fact vocabulary and builds no flag chain of its own,
+    /// so there is nothing for a host-table row to pin. The seeding and the
+    /// `flag_chain` plumbing this table polices stay in each host that will call
+    /// the spine, and are pinned there.
+    const NON_HOST_FILES: &[&str] = &[
+        "src/entities/authored_ai_pins.rs",
+        "src/ai/host.rs",
+    ];
 
     fn crate_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

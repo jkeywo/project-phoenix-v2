@@ -1479,6 +1479,21 @@
     window.__hostChannelReady(hostChannelDispatch);
   </script>
 
+  <!-- ICE/TURN config bridge (issue #1226): gui/connection-manager.js is the
+       single source of truth for the STUN pair, the OpenRelay TURN fallback
+       triple, and the worker→OpenRelay fallback policy (covered by
+       connection-manager.test.js). server.html used to re-declare all of
+       that inline; this island publishes fetchIceServers() through the ICE
+       config latch below (window.__iceConfigReady) instead, the same
+       classic-script-can't-`import`-a-module bridge the #1224/#1225
+       host-channel latch uses — but as a single wait-for-ready promise since
+       getIceServers() only ever needs the one function, not a replayable
+       queue of calls made before the module was ready. -->
+  <script type="module">
+    import { fetchIceServers } from './gui/connection-manager.js';
+    window.__iceConfigReady(fetchIceServers);
+  </script>
+
   <script>
     // ── Host Channel latch (issue #1224) ────────────────────────────────────
     // window.__hostChannel exists here, first thing this script parses, so
@@ -2074,38 +2089,25 @@
       .map(b => b.toString(16).padStart(2, '0')).join('');
     const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/index.html#' + hostPeerId;
 
+    // ── ICE config latch (issue #1226) ─────────────────────────────────────
+    // gui/connection-manager.js's fetchIceServers() is now the single source
+    // of truth for the STUN/TURN server list and the worker→OpenRelay
+    // fallback policy — this script used to re-declare all of that inline.
+    // It can't `import` the module directly (classic script), so the module
+    // island above publishes fetchIceServers() through this latch once it
+    // has loaded. Mirrors the #1224/#1225 host-channel latch's shape, but as
+    // a single wait-for-ready promise rather than a replay queue: unlike the
+    // WASM→JS host-channel callback (which can fire before the module is
+    // ready and must not drop messages), getIceServers() is only ever called
+    // from this same script's own initPeerJS(), so there is nothing to queue
+    // — just one await for the module to finish loading.
+    let _resolveIceConfig;
+    const iceConfigReady = new Promise(resolve => { _resolveIceConfig = resolve; });
+    window.__iceConfigReady = function(fetchIceServersFn) { _resolveIceConfig(fetchIceServersFn); };
+
     async function getIceServers() {
-      // Mirrors gui/connection-manager.js fetchIceServers(): worker
-      // credentials first; if the worker is unreachable, fall back to
-      // Metered's free shared OpenRelay TURN (staticauth. hostname — the
-      // bare openrelay.metered.ca has no DNS records any more). relaySource
-      // 'openrelay' gets a mild degraded notice in the lobby.
-      const base = [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-      ];
-      try {
-        const r = await fetch('https://phoenix-turn-credentials.project-phoenix.workers.dev');
-        if (r.ok) {
-          const extra = await r.json();
-          console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);
-          const servers = [...base, ...extra];
-          const relayAvailable = servers.some(s => {
-            const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
-            return urls.some(u => typeof u === 'string' && (u.startsWith('turn:') || u.startsWith('turns:')));
-          });
-          return { servers, relayAvailable, relaySource: relayAvailable ? 'worker' : null };
-        }
-        console.warn('[ICE] Metered.ca fetch returned', r.status, '— falling back to shared OpenRelay TURN');
-      } catch (e) {
-        console.warn('[ICE] Metered.ca fetch failed — falling back to shared OpenRelay TURN:', e.message);
-      }
-      const openRelay = [
-        { urls: 'turn:staticauth.openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:staticauth.openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turns:staticauth.openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-      ];
-      return { servers: [...base, ...openRelay], relayAvailable: true, relaySource: 'openrelay' };
+      const fetchIceServersFn = await iceConfigReady;
+      return fetchIceServersFn();
     }
 
     async function initPeerJS() {

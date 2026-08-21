@@ -153,6 +153,90 @@ describe('contrast-bearing tokens meet WCAG AA', () => {
   });
 });
 
+// ── 2b. The high-contrast palette (issue #1171) ─────────────────────────────
+
+describe('data-contrast="more" swaps in a genuine high-contrast palette', () => {
+  // The accessibility profile stamps `data-contrast="more"` on every root
+  // (shell + each console iframe); this block is where that attribute becomes
+  // a visible palette. It redefines the base rungs under
+  // `:root[data-contrast="more"]`, whose specificity beats the bare `:root`.
+  const block = (() => {
+    const m = TOKENS.match(/:root\[data-contrast="more"\]\s*\{([\s\S]*?)\}/);
+    return m ? m[1] : null;
+  })();
+
+  const hexIn = (src, name) => {
+    const m = src && src.match(new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`));
+    return m ? m[1] : null;
+  };
+  const channel = (c) => {
+    const v = c / 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = (h) => {
+    const [r, g, b] = [1, 3, 5].map((i) => channel(parseInt(h.slice(i, i + 2), 16)));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ratio = (a, b) => {
+    const [la, lb] = [luminance(a), luminance(b)];
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  };
+
+  it('exists as a block that overrides the base :root', () => {
+    expect(block).not.toBeNull();
+  });
+
+  const HC_BASE = hexIn(block, '--surface-base'); // the high-contrast reference bg
+
+  it('drops the reference background to pure black', () => {
+    expect(HC_BASE).toBe('#000000');
+  });
+
+  // Every text/signal rung clears WCAG AAA (7:1) on the high-contrast surface —
+  // a strictly higher bar than the standard palette's 4.5:1 floor.
+  for (const name of ['--ink', '--ink-dim', '--ink-faint', '--tactical', '--fire',
+    '--loaded', '--reloading', '--cyan', '--gold', '--signal', '--sky', '--science',
+    '--violet']) {
+    it(`${name} clears 7:1 (AAA) as text on the high-contrast background`, () => {
+      const value = hexIn(block, name);
+      expect(value).not.toBeNull();
+      expect(ratio(value, HC_BASE)).toBeGreaterThanOrEqual(7);
+    });
+  }
+
+  // The content dividers the standard palette exempts (below the 3:1 UI floor)
+  // are raised here to be plainly visible — region separation moves onto them
+  // now that the surfaces are flat black.
+  for (const name of ['--edge-faint', '--edge', '--edge-control']) {
+    it(`${name} is a clearly visible border (>= 3:1) under high contrast`, () => {
+      const value = hexIn(block, name);
+      expect(value).not.toBeNull();
+      expect(ratio(value, HC_BASE)).toBeGreaterThanOrEqual(3);
+    });
+  }
+
+  it('raises contrast versus the standard palette — a visible change, not a copy', () => {
+    // The standard palette's dimmest divider and faint ink sit far lower; the
+    // high-contrast variant must measurably out-contrast them on its own bg.
+    const stdBase = TOKENS.match(/--surface-base:\s*(#[0-9a-fA-F]{6})/)[1];
+    const stdFaintEdge = TOKENS.match(/--edge-faint:\s*(#[0-9a-fA-F]{6})/)[1];
+    const stdFaintInk = TOKENS.match(/--ink-faint:\s*(#[0-9a-fA-F]{6})/)[1];
+    expect(ratio(hexIn(block, '--edge-faint'), HC_BASE))
+      .toBeGreaterThan(ratio(stdFaintEdge, stdBase));
+    expect(ratio(hexIn(block, '--ink-faint'), HC_BASE))
+      .toBeGreaterThan(ratio(stdFaintInk, stdBase));
+  });
+
+  it('keeps the keyboard focus ring visible by swapping in its high-contrast half', () => {
+    // #1170 defined the pair; here `--focus-ring` resolves to the contrast half
+    // so the ring stays unmistakable on the raised palette.
+    expect(block).toMatch(/--focus-ring:\s*var\(--focus-ring-contrast\)/);
+    // And that half is itself maximally legible on the high-contrast bg.
+    const contrastRing = TOKENS.match(/--focus-ring-contrast:\s*(#[0-9a-fA-F]{6})/)[1];
+    expect(ratio(contrastRing, HC_BASE)).toBeGreaterThanOrEqual(7);
+  });
+});
+
 // ── 3. Adoption ─────────────────────────────────────────────────────────────
 
 describe('every component adopts the shared control family', () => {
@@ -224,7 +308,14 @@ describe('no custom property is defined in terms of itself', () => {
       let m;
       while ((m = decl.exec(source)) !== null) {
         const [, name, value] = m;
-        if (new RegExp(`var\\(\\s*${name}\\b`).test(value)) cycles.push(`${name}: ${value.trim()}`);
+        // A self-reference is `var(--x)` — the SAME property, closed by a
+        // delimiter (`)` or the `,` before a fallback). Terminating on a bare
+        // `\b` would misread `var(--focus-ring-contrast)` as a cycle of
+        // `--focus-ring`, since a hyphen is a word boundary; the high-contrast
+        // palette legitimately aliases `--focus-ring: var(--focus-ring-contrast)`
+        // (issue #1171). The documented real cycle — `var(--btn-cham)` closed by
+        // `)` — is still caught.
+        if (new RegExp(`var\\(\\s*${name}\\s*[,)]`).test(value)) cycles.push(`${name}: ${value.trim()}`);
       }
       expect(cycles).toEqual([]);
     });

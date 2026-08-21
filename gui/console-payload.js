@@ -39,3 +39,49 @@ export function systemView(s, ...ids) {
   }
   return {};
 }
+
+/**
+ * Normalise a console payload to the keyed shape (issue #1233, T4.C1.5 of the
+ * console-seam programme).
+ *
+ * `buildConsoleStateInner` (gui/console-state.js) emits a FLAT plain-builder
+ * payload for a single-family station (fields read straight off `s`, e.g.
+ * `s.red_alert`) and a system-id-KEYED `SystemStationConsolePayload` (fields
+ * read via `systemView`/`system(s, ...ids)`) for a multi-family station. A
+ * console written against the keyed accessor gets nothing back — `systemView`
+ * falls through every candidate id to `{}` — when it is fed a flat payload
+ * directly: the exact #925 defect (wrong shape in ⇒ silently blank console).
+ *
+ * `gui/console-core.js` calls this on every inbound payload before handing it
+ * to a console's `render`, so a console reading through `systemView` never has
+ * to know whether the wire payload arrived flat or keyed:
+ *
+ *  - A payload that already carries a `.systems` object is a genuine
+ *    multi-family `SystemStationConsolePayload` (or one this function already
+ *    normalised) and is returned unchanged — its `systems` is keyed by fine
+ *    system id, exactly as `systemView` expects.
+ *  - A flat payload (no `.systems`) is wrapped: the SAME object is nested
+ *    under `systems[family]`, alongside the original top-level fields (so any
+ *    reader that still expects the flat shape directly — every console today
+ *    — keeps working unchanged). `family` is the console-family name the
+ *    payload's fields belong to (`'captain'`, `'helm'`, `'tactical'`, …), the
+ *    one thing a flat console's own HTML always knows about itself.
+ *  - A flat payload with no known `family` (a console with no family concept,
+ *    e.g. the Command console) is returned unchanged — there is nothing to
+ *    key it under.
+ *
+ * @param {object} s        parsed console payload (flat or keyed)
+ * @param {string} [family] this console's console-family name; omit for a
+ *                          console with no single-family concept, or one that
+ *                          already reads a genuinely keyed payload
+ * @returns {object} `s` unchanged, or a shallow copy of `s` with a new
+ *   `systems[family]` entry pointing at (the unmodified) `s`
+ */
+export function normalizeConsolePayload(s, family) {
+  if (!s || typeof s !== 'object') return s;
+  if (s.systems) return s; // already keyed — system ids are the ground truth
+  if (!family) return s;   // no family to key a flat payload under
+  const keyed = { ...s };
+  keyed.systems = { [family]: s };
+  return keyed;
+}

@@ -79,6 +79,7 @@
     var dispatchWorking = false;
     var consoleHandle = initConsole({
       name: 'repair',
+      family: 'repair',
       // s is a RepairConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         var oh = s.overall_hull || {};

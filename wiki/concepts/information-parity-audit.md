@@ -270,11 +270,15 @@ follow-up filed.
    returned `null` and `planMounts` skipped the seat — a blank station. #925 now
    authors a `console` on every NPC-hull seat, chosen by the fine systems the
    seat OWNS (not by hull name — AGENTS.md #11), reusing the console of a
-   similar player class. Two dimensions decide the reuse: the seat's owned
-   *families* must be covered by the console, AND the payload *shape* must match.
-   `buildConsoleStateInner` emits a FLAT plain-builder payload for a single-family
-   seat and a system-id-KEYED payload for a multi-family seat, and each console
-   consumes exactly one shape. The four four-seat Harrow hulls
+   similar player class. Reuse hinges on family coverage: the seat's owned
+   *families* must be covered by the console. `buildConsoleStateInner` emits a
+   FLAT plain-builder payload for a single-family seat and a system-id-KEYED
+   payload for a multi-family seat; `gui/console-core.js` normalises every
+   inbound payload to the keyed shape before a console's `render` sees it
+   (issue #1233, `normalizeConsolePayload` in `gui/console-payload.js`), so a
+   console reading through `systemView`/`system(s, …)` gets the right data
+   whichever shape the wire payload arrived in — payload shape is no longer a
+   second dimension a hull's reuse has to get right. The four four-seat Harrow hulls
    (`ship_harrow_cruiser`, `ship_harrow_destroyer`, `ship_harrow_warhawk`,
    `ship_harrow_patrol`) each have four single-family seats (captain→captain,
    helm→helm, tactical→tactical, engineering→power), so they reuse the FLAT
@@ -287,13 +291,15 @@ follow-up filed.
    seats render their real banks (the battleship mounts no blaster bank, so it is
    visually unchanged). The two-seat `ship_requiem_courier` has two MULTI-family
    seats ({captain,power} and {helm,tactical}), so it reuses the KEYED
-   `gui/courier/{captain,tactical}.html`. Neither dimension is left to chance: a
-   console spec map (`gui/console-families.js`, `{ families, shape }` per console)
-   plus a Vitest test (`tests/client/npc-hull-console-coverage.test.js`) asserts,
-   for every NPC hull's `ship_stations`, that `planMounts` yields an iframe for
-   every seat, that each seat's owned families are covered by its console, and
-   that the console's payload shape matches the seat's family-count — a family
-   gap OR a shape mismatch fails CI loudly instead of mounting a blank panel.
+   `gui/courier/{captain,tactical}.html`. Family coverage is not left to
+   chance: a console spec map (`gui/console-families.js`, `{ families }` per
+   console) plus a Vitest test (`tests/client/npc-hull-console-coverage.test.js`)
+   asserts, for every NPC hull's `ship_stations`, that `planMounts` yields an
+   iframe for every seat and that each seat's owned families are covered by
+   its console — a family gap fails CI loudly instead of mounting a blank
+   panel. The former second dimension (payload shape) is checked nowhere
+   because there is nothing left to check: console-core's normalisation makes
+   every console's `render` shape-agnostic (see above).
 
    The four facts only Harrow hulls author — their human counterparts:
 

@@ -162,9 +162,12 @@
     var docked = false;
     var consoleHandle = initConsole({
       name: 'helm',
+      family: 'helm',
       // s is a HelmConsolePayload — see the @typedef in gui/console-state.js.
-      // Helm is a FLAT payload: it owns one console family, so it has no
-      // `systems` map of its own.
+      // Helm is a FLAT payload: it owns one console family. console-core
+      // normalises it to `s.systems['helm']` before render() sees it (issue
+      // #1233); this render body still reads the flat fields directly since
+      // the wrap mirrors them at the top level too.
       render: function(s) {
         var radarEl = document.getElementById('helm-radar');
         var joystickEl = document.getElementById('helm-joystick');

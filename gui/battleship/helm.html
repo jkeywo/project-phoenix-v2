@@ -99,6 +99,7 @@
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'helm',
+      family: 'helm',
       // s is a HelmConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         document.getElementById('helm-radar').state = { blips: s.blips || [], range: s.range || 500, x: s.x || 0, z: s.z || 0, ship_heading: s.ship_heading || 0, speed: s.speed || 0, on_screen_active: !!s.on_screen, config: {}, engine_port_thrust: s.engine_port_thrust || 0, engine_stbd_thrust: s.engine_stbd_thrust || 0, hostile_arcs: s.hostile_arcs || [], hostile_arc_color: s.hostile_arc_color || null };

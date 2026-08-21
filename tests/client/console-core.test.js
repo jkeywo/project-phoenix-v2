@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { initConsole } from '../../gui/console-core.js';
+import { systemView } from '../../gui/console-payload.js';
 
 // ── Global window shim ───────────────────────────────────────────────────────
 // Node has no `window`. Set global.window before each test so that
@@ -354,5 +355,73 @@ describe('initConsole — BroadcastChannel inbound context gating (#482)', () =>
         expect(bcConstructed).toBe(0);
       },
     );
+  });
+});
+
+// ── Inbound: payload shape normalisation (issue #1233, T4.C1.5) ─────────────
+//
+// #925's defect class: `buildConsoleStateInner` emits a FLAT payload for a
+// single-family station and a system-id-KEYED payload for a multi-family
+// one, and a console written against `systemView` finds nothing when handed
+// the flat shape directly (every candidate id falls through to `{}`), which
+// renders blank. `initConsole({ family })` now normalises every inbound
+// payload before `render` sees it, so a console reading through `systemView`
+// gets the right data whichever shape the wire payload arrived in.
+describe('initConsole — payload shape normalisation (#925 regression)', () => {
+  beforeEach(() => {
+    global.BroadcastChannel = function() { return { postMessage: vi.fn(), onmessage: null }; };
+  });
+
+  // A render function written the way a keyed-style console reads its
+  // payload — via `systemView`, never off top-level fields directly. Any
+  // console migrated to read this way must render correctly no matter which
+  // shape the wire payload used, once console-core normalises inbound state.
+  function keyedStyleRender(calls) {
+    return function render(s) {
+      calls.push(systemView(s, 'power', 'power-reactor', 'power-battery'));
+    };
+  }
+
+  it('renders a keyed-style console correctly when the wire payload is FLAT', () => {
+    const calls = [];
+    initConsole({ name: 'power', family: 'power', render: keyedStyleRender(calls) });
+    const flatPayload = { battery_charge: 42, battery_max: 100, groups: [], own_hull: { pct: 1 } };
+    window.__updateConsole('power', JSON.stringify(flatPayload));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(flatPayload);
+  });
+
+  it('renders a keyed-style console correctly when the wire payload is already KEYED', () => {
+    const calls = [];
+    initConsole({ name: 'power', family: 'power', render: keyedStyleRender(calls) });
+    const view = { battery_charge: 77, battery_max: 100, groups: [] };
+    const keyedPayload = { systems: { 'power-reactor': view }, station_id: 'engineering', system_ids: ['power-reactor'] };
+    window.__updateConsole('power', JSON.stringify(keyedPayload));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(view);
+  });
+
+  it('without a declared family, a flat payload stays flat and a keyed-style read finds nothing (documents the pre-#1233 symptom)', () => {
+    const calls = [];
+    // No `family` passed — the console never opts into normalisation, so the
+    // historic defect is exactly reproducible: systemView finds no `.systems`.
+    initConsole({ name: 'power', render: keyedStyleRender(calls) });
+    const flatPayload = { battery_charge: 42, battery_max: 100 };
+    window.__updateConsole('power', JSON.stringify(flatPayload));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({});
+  });
+
+  it('a flat-style render (reading top-level fields directly) is unaffected by normalisation', () => {
+    // Backward compatibility: every currently-shipped flat console still
+    // reads `s.<field>` directly. Normalisation must not break that.
+    const render = vi.fn();
+    initConsole({ name: 'power', family: 'power', render });
+    const flatPayload = { battery_charge: 42, battery_max: 100 };
+    window.__updateConsole('power', JSON.stringify(flatPayload));
+    expect(render).toHaveBeenCalledTimes(1);
+    const received = render.mock.calls[0][0];
+    expect(received.battery_charge).toBe(42);
+    expect(received.systems.power).toEqual(flatPayload);
   });
 });

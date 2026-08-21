@@ -55,6 +55,7 @@
     import { setAutoState } from '../console-ui.js';
     initConsole({
       name: 'tactical',
+      family: 'tactical',
       // s is a WeaponsConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
         document.getElementById('tactical-radar').state = { blips: s.blips || [], x: s.ship_x || 0, z: s.ship_z || 0, speed: s.ship_speed || 0, ship_heading: s.ship_heading || 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null, target_uuid: s.target_uuid || null };

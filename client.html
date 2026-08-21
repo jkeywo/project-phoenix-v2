@@ -1177,8 +1177,8 @@
     // so it cannot import gui/strings.js. Publish the API on window and
     // substitute the static data-i18n markup once the table is loaded.
     import './gui/strings-boot.js';
-    import { t, has, applyToDom } from './gui/strings.js';
-    window.phStrings = { t, has, applyToDom };
+    import { t, has, applyToDom, wireText } from './gui/strings.js';
+    window.phStrings = { t, has, applyToDom, wireText };
     applyToDom(document);
   </script>
 
@@ -1207,6 +1207,16 @@
     // falls back to the raw id, and every call site re-resolves on render.
     function t(id, params) {
       return window.phStrings ? window.phStrings.t(id, params) : id;
+    }
+
+    // Resolve a value that MAY be a string id, via the same module bridge —
+    // gui/strings.js's wireText() encodes the has(value) ? t(value) : fallback
+    // rule once; this just forwards to it (or reproduces its default before the
+    // module bridge has mounted, same shape as `t` above).
+    function wireText(value, fallback) {
+      if (window.phStrings) return window.phStrings.wireText(value, fallback);
+      if (fallback !== undefined) return fallback;
+      return value === null || value === undefined ? '' : String(value);
     }
 
     // ── Page chrome bridge (issue #1227) ────────────────────────────────────
@@ -1243,27 +1253,17 @@
     // the derived station.<id>.name string when the table has one.
     function stationLabel(st) {
       if (!st) return '';
-      const key = 'station.' + st.id + '.name';
-      if (window.phStrings && window.phStrings.has(key)) return window.phStrings.t(key);
-      return st.name || st.id || '';
-    }
-    // Resolve a value that arrived over the wire and MAY be a string id.
-    // A phone's copy came through localiseTree and is already resolved text;
-    // a mod pack's literal prose never was an id. Substitute only what the
-    // table actually holds — the same passthrough rule as
-    // gui/components/ph-ship-picker.js.
-    function wireText(value) {
-      if (!value) return '';
-      if (window.phStrings && window.phStrings.has(value)) return window.phStrings.t(value);
-      return String(value);
+      return wireText('station.' + st.id + '.name', st.name || st.id || '');
     }
     // What a station DOES, shown on its lobby row before the claim tap (PRD
     // #1023 module 4). The copy is already authored per hull as
     // `entity.<hull>.station.<id>.description` and rides the wire in
     // StationDef.description — this reuses those ids rather than minting a
-    // second, diverging set.
+    // second, diverging set. A phone's copy came through localiseTree and is
+    // already resolved text; a mod pack's literal prose never was an id —
+    // wireText() substitutes only what the table actually holds.
     function stationDescription(st) {
-      return st ? wireText(st.description) : '';
+      return st ? wireText(st.description, '') : '';
     }
 
     // -- Click sound --------------------------------------------------------
@@ -1518,9 +1518,7 @@
     // first paint never blanks out.
     function consoleLabel(name) {
       if (!name) return '';
-      const key = 'station.' + name + '.name';
-      if (window.phStrings && window.phStrings.has(key)) return window.phStrings.t(key);
-      return name;
+      return wireText('station.' + name + '.name', name);
     }
 
     // Defer re-render so rapid server messages don't steal pointer events.
@@ -2284,7 +2282,7 @@
             for (const r of vm.detail.ratings.list) {
               const ratingBtn = document.createElement('button');
               ratingBtn.className = 'rating-btn' + (r === activeRating ? ' active' : '');
-              ratingBtn.textContent = (window.phStrings && window.phStrings.has('station.rating.' + r.toLowerCase() + '.name')) ? t('station.rating.' + r.toLowerCase() + '.name') : r.toUpperCase();
+              ratingBtn.textContent = wireText('station.rating.' + r.toLowerCase() + '.name', r.toUpperCase());
               ratingBtn.addEventListener('click', () => {
                 if (r !== activeRating) send('SetStationRating', { rating_name: r });
               });

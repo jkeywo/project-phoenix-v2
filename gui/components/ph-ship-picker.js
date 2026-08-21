@@ -38,19 +38,9 @@
 // table is populated, so #render's t() calls never see an empty table. No-op
 // under vitest, where setup-strings.js owns the table.
 import '../strings-boot.js';
-import { t, has } from '../strings.js';
+import { t, wireText } from '../strings.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 import { PhElement, phDefine } from './ph-element.js';
-
-/**
- * Resolve `value` when it is a known string id; pass anything else through.
- * @param {string|null|undefined} value
- * @returns {string} the resolved text, or '' when there is nothing to show
- */
-function localised(value) {
-  if (!value) return '';
-  return has(value) ? t(value) : String(value);
-}
 
 /**
  * The build-time `template_path` → card-art index, once fetched.
@@ -239,15 +229,15 @@ export class PhShipPicker extends PhElement {
       return;
     }
     grid.innerHTML = ships.map(ship => {
-      const name = localised(ship.label) || localised(ship.name)
+      const name = wireText(ship.label) || wireText(ship.name)
         || ship.template_path.split('/').pop().replace('.toml', '');
       // `cls` stays the raw token: it is also the badge's CSS class. Only the
       // caption is localised, falling back to the token so a hull class with
-      // no authored caption still reads (the same has()/t() shape as
+      // no authored caption still reads (the same wireText() shape as
       // gui/manual-panel.js ratingCaption).
       const cls = (ship.class || 'unknown').toLowerCase();
       const clsId = `component.ship_picker.class.${cls}`;
-      const clsLabel = has(clsId) ? t(clsId) : cls;
+      const clsLabel = wireText(clsId, cls);
       const hullId = ship.hull_id ? `#${ship.hull_id}` : '';
       const power = ship.power_rating != null ? `⚡${ship.power_rating}` : '';
       const stations = ship.station_count || '';

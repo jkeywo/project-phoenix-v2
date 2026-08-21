@@ -43,7 +43,7 @@
  * exported function so vitest drives it without a DOM.
  */
 
-import { t, has } from './strings.js';
+import { t, wireText } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
 import { visibleClientTabs, resolveClientActiveTab } from './settings-tabs.js';
 import { controlSystemEnvelope } from './command-gateway.js';
@@ -214,7 +214,7 @@ export function buildSettingsState(opts = {}) {
     const key = 'station.rating.' + String(name).toLowerCase() + '.name';
     return {
       name,
-      label: has(key) ? t(key) : String(name).toUpperCase(),
+      label: wireText(key, String(name).toUpperCase()),
       active: name === activeRating,
     };
   });

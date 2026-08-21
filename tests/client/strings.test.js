@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
-  parseCsv, buildTable, setTable, getTable, t, has, applyToDom, localiseTree,
+  parseCsv, buildTable, setTable, getTable, t, has, applyToDom, localiseTree, wireText,
 } from '../../gui/strings.js';
 
 describe('parseCsv', () => {
@@ -160,6 +160,39 @@ describe('has', () => {
     setTable(new Map([['a', '[A]']]));
     expect(has('a')).toBe(true);
     expect(has('b')).toBe(false);
+  });
+});
+
+describe('wireText', () => {
+  beforeEach(() => {
+    setTable(new Map([['station.rating.std.name', '[STANDARD]']]));
+  });
+
+  it('resolves a known id, ignoring the fallback', () => {
+    expect(wireText('station.rating.std.name', 'STD')).toBe('[STANDARD]');
+  });
+
+  it('uses the given fallback when the id is unknown', () => {
+    expect(wireText('station.rating.backfill.name', 'BACKFILL')).toBe('BACKFILL');
+  });
+
+  it('uses an empty-string fallback verbatim rather than the default', () => {
+    expect(wireText('nope', '')).toBe('');
+  });
+
+  it('stringifies the value when no fallback is given', () => {
+    expect(wireText('dreadnought')).toBe('dreadnought');
+  });
+
+  it('defaults a nullish value with no fallback to an empty string', () => {
+    expect(wireText(null)).toBe('');
+    expect(wireText(undefined)).toBe('');
+  });
+
+  it('passes a non-string id-shaped value through when the table lacks it', () => {
+    // Mirrors localiseTree's "not everything is an id" rule: only substitute
+    // what the table actually holds.
+    expect(wireText('helm-engine-port', 'fallback')).toBe('fallback');
   });
 });
 

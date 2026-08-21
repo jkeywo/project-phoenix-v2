@@ -96,6 +96,12 @@ pub enum ModifierSource {
     /// as it takes damage). Keyed by the system's own `SystemId` so each
     /// damaged system's contribution can be independently added/removed.
     SystemDamage(SystemId),
+    /// The helm movement penalty a ship carries while its tractor holds a
+    /// target (issue #1157). A fieldless source — a ship holds at most one
+    /// tractor coupling at a time — so it adds and removes independently of
+    /// impulse, power groups, regions and system damage on the same
+    /// `MaxSpeed` / `MaxYawRate` slots, and lifts the tick the coupling drops.
+    TractorLoad,
 }
 
 impl Eq for ModifierSource {}
@@ -122,6 +128,9 @@ impl std::hash::Hash for ModifierSource {
             ModifierSource::SystemDamage(sid) => {
                 5u8.hash(state);
                 sid.hash(state);
+            }
+            ModifierSource::TractorLoad => {
+                6u8.hash(state);
             }
         }
     }

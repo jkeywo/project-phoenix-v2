@@ -1579,6 +1579,10 @@ mod tests {
                 range: 600.0,
                 coupling_offset: [0.0, 0.0, -120.0],
                 min_power_level: 2,
+                tow_load: crate::tractor::TowLoadCurve {
+                    half_penalty_mass: 10_000.0,
+                    max_penalty: 0.8,
+                },
             },
             crate::messages::PowerGroupId("tractor".into()),
         );

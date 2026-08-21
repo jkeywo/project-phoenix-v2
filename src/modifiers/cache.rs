@@ -472,6 +472,7 @@ fn format_source(source: &ModifierSource) -> String {
         ModifierSource::World { id, tag } => format!("World({id}/{tag})"),
         ModifierSource::PowerGroup(g) => format!("PowerGroup({})", g.0),
         ModifierSource::SystemDamage(sid) => format!("SystemDamage({})", sid.0),
+        ModifierSource::TractorLoad => "TractorLoad".to_string(),
     }
 }
 

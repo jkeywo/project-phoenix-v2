@@ -63,6 +63,90 @@ pub struct TractorConfig {
     /// from the group's nominal rung, so a hull can make its tractor cheap or
     /// dear independent of what else shares the group.
     pub min_power_level: u8,
+    /// The authored mass → helm-penalty curve (issue #1157). While the beam
+    /// holds a target, the operator's top speed AND turn rate are cut by
+    /// [`tow_load_penalty`] of that target's authored mass, read from these two
+    /// numbers rather than a coefficient inlined anywhere. This is the concern
+    /// the coupling-*position* module deliberately kept out of its signature:
+    /// where the load rides takes transforms only; how much it drags the tug
+    /// takes mass, and lives here beside it.
+    pub tow_load: TowLoadCurve,
+}
+
+/// The authored curve mapping a held target's mass to the helm movement penalty
+/// it exacts (issue #1157) — the `[tractor.tow_load]` sub-table.
+///
+/// A saturating curve, so a light target is barely felt and a heavy one is
+/// severe, both from these two authored numbers (AGENTS.md rule 11 — no
+/// coefficient inlined in Rust or JS). The penalty of a held mass `m` is
+///
+/// ```text
+/// max_penalty · m / (m + half_penalty_mass)
+/// ```
+///
+/// which is `0` at zero mass, exactly `max_penalty / 2` at `half_penalty_mass`,
+/// and approaches `max_penalty` as the held mass grows without bound. It is the
+/// SAME curve for every target: a buoy near zero mass barely registers while a
+/// laden freighter saturates toward the cap, with no branch deciding which.
+///
+/// The penalty is applied as a NEGATIVE bonus on both `MaxSpeed` and
+/// `MaxYawRate`, so `max_penalty` is the most of the ship's top speed and turn
+/// rate the heaviest tow can ever cost — a `0.75` cap can never take more than
+/// three-quarters of either, and the ship can never be dragged to a standstill.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TowLoadCurve {
+    /// The held mass at which the penalty reaches half of [`Self::max_penalty`]
+    /// — the curve's knee. A hull tows loads around this mass at a moderate
+    /// penalty; much lighter is barely felt, much heavier saturates toward the
+    /// cap.
+    pub half_penalty_mass: f32,
+    /// The most of the ship's top speed and turn rate a tow can ever cost, as a
+    /// fraction in `[0, 1)` — approached asymptotically as the held mass grows.
+    pub max_penalty: f32,
+}
+
+impl TowLoadCurve {
+    /// Reject an authored `[tractor.tow_load]` curve that could never produce a
+    /// sane penalty (issue #1157): a non-positive knee mass (which would make
+    /// the curve undefined or negative), or a cap outside `[0, 1)` (a penalty of
+    /// `1.0` or more would stop the ship dead, which no tow should).
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.half_penalty_mass.is_finite() || self.half_penalty_mass <= 0.0 {
+            return Err(format!(
+                "[tractor.tow_load] half_penalty_mass must be a positive mass, got {}",
+                self.half_penalty_mass
+            ));
+        }
+        if !self.max_penalty.is_finite() || self.max_penalty < 0.0 || self.max_penalty >= 1.0 {
+            return Err(format!(
+                "[tractor.tow_load] max_penalty must be a fraction in [0, 1) — a penalty of 1.0 \
+                 would drag the ship to a dead stop, got {}",
+                self.max_penalty
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// **The tow-load penalty.** The fraction of the operator's top speed AND turn
+/// rate a held target of the given `mass` costs, read from the authored curve
+/// (issue #1157).
+///
+/// Unlike [`coupled_position`], this takes MASS — it is the helm-penalty concern
+/// the coupling-position module deliberately kept out of its signature (#1156),
+/// living here in the same pure module so the number is a deterministic function
+/// of a folded property rather than a guess. A target that authored no mass
+/// carries #1154's `DEFAULT_ENTITY_MASS`, so this returns that mass's penalty
+/// for it with no special case.
+///
+/// Returns a non-negative fraction the adapter applies as a NEGATIVE bonus on
+/// `MaxSpeed` and `MaxYawRate`. Monotonically increasing in mass and bounded
+/// above by `curve.max_penalty`. `half_penalty_mass` is validated positive, so
+/// the denominator is always positive and there is no division by zero.
+pub fn tow_load_penalty(mass: f32, curve: &TowLoadCurve) -> f32 {
+    let m = mass.max(0.0);
+    curve.max_penalty * m / (m + curve.half_penalty_mass)
 }
 
 impl TractorConfig {
@@ -92,6 +176,7 @@ impl TractorConfig {
                     .to_string(),
             );
         }
+        self.tow_load.validate()?;
         Ok(())
     }
 }
@@ -347,12 +432,21 @@ mod tests {
 
     // ── Config validation ────────────────────────────────────────────────────
 
+    /// A valid tow-load curve for the config literals below.
+    fn curve() -> TowLoadCurve {
+        TowLoadCurve {
+            half_penalty_mass: 10_000.0,
+            max_penalty: 0.8,
+        }
+    }
+
     #[test]
     fn a_well_formed_tractor_config_validates() {
         let cfg = TractorConfig {
             range: 600.0,
             coupling_offset: [0.0, 0.0, -120.0],
             min_power_level: 2,
+            tow_load: curve(),
         };
         assert!(cfg.validate().is_ok());
     }
@@ -363,6 +457,7 @@ mod tests {
             range: 600.0,
             coupling_offset: [0.0, 0.0, -120.0],
             min_power_level: 2,
+            tow_load: curve(),
         };
         assert!(TractorConfig {
             range: 0.0,
@@ -388,5 +483,141 @@ mod tests {
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn a_tractor_config_with_a_bad_tow_load_curve_is_rejected() {
+        // The curve is validated as part of the config, so a bad `[tractor.
+        // tow_load]` is a load error like any other authoring mistake.
+        let base = TractorConfig {
+            range: 600.0,
+            coupling_offset: [0.0, 0.0, -120.0],
+            min_power_level: 2,
+            tow_load: curve(),
+        };
+        assert!(TractorConfig {
+            tow_load: TowLoadCurve {
+                half_penalty_mass: 0.0,
+                max_penalty: 0.8,
+            },
+            ..base.clone()
+        }
+        .validate()
+        .is_err());
+        assert!(TractorConfig {
+            tow_load: TowLoadCurve {
+                half_penalty_mass: 10_000.0,
+                max_penalty: 1.0,
+            },
+            ..base
+        }
+        .validate()
+        .is_err());
+    }
+
+    // ── The tow-load penalty (issue #1157) ───────────────────────────────────
+
+    #[test]
+    fn a_well_formed_tow_load_curve_validates_and_a_bad_one_does_not() {
+        assert!(curve().validate().is_ok());
+        // Zero-and-below cap is a legal (if pointless) "no penalty" curve.
+        assert!(TowLoadCurve {
+            half_penalty_mass: 10_000.0,
+            max_penalty: 0.0,
+        }
+        .validate()
+        .is_ok());
+        // Knee mass must be positive; cap must stay under 1.0; both must be finite.
+        for bad in [
+            TowLoadCurve {
+                half_penalty_mass: -1.0,
+                max_penalty: 0.5,
+            },
+            TowLoadCurve {
+                half_penalty_mass: f32::NAN,
+                max_penalty: 0.5,
+            },
+            TowLoadCurve {
+                half_penalty_mass: 10_000.0,
+                max_penalty: 1.0,
+            },
+            TowLoadCurve {
+                half_penalty_mass: 10_000.0,
+                max_penalty: -0.1,
+            },
+        ] {
+            assert!(bad.validate().is_err(), "{bad:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn the_penalty_is_zero_at_zero_mass_and_halves_the_cap_at_the_knee() {
+        let c = curve();
+        assert!(
+            tow_load_penalty(0.0, &c).abs() < 1e-6,
+            "a massless load is free"
+        );
+        // At exactly the knee mass the penalty is half the cap, by construction.
+        let at_knee = tow_load_penalty(c.half_penalty_mass, &c);
+        assert!(
+            (at_knee - c.max_penalty / 2.0).abs() < 1e-6,
+            "the knee mass yields half the cap: got {at_knee}"
+        );
+    }
+
+    #[test]
+    fn a_light_target_is_barely_felt_and_a_heavy_one_is_severe_from_the_same_curve() {
+        let c = curve();
+        // A buoy an order of magnitude under the knee: a whisper of a penalty.
+        let light = tow_load_penalty(1_000.0, &c);
+        assert!(
+            light < 0.1,
+            "a light target is barely felt: penalty {light} should be well under 0.1"
+        );
+        // A laden freighter many times the knee: most of the way to the cap.
+        let heavy = tow_load_penalty(200_000.0, &c);
+        assert!(
+            heavy > 0.7,
+            "a heavy target is severe: penalty {heavy} should be most of the 0.8 cap"
+        );
+        // Same curve, so heavier always costs more, and neither ever reaches the
+        // cap (which is only approached asymptotically).
+        assert!(heavy > light);
+        assert!(heavy < c.max_penalty);
+    }
+
+    #[test]
+    fn the_penalty_is_monotonic_in_mass_and_bounded_by_the_cap() {
+        let c = curve();
+        let mut prev = -1.0;
+        for mass in [0.0, 500.0, 5_000.0, 10_000.0, 50_000.0, 1_000_000.0, 1e9] {
+            let p = tow_load_penalty(mass, &c);
+            assert!(
+                p > prev,
+                "penalty must strictly increase with mass at {mass}"
+            );
+            assert!(
+                p < c.max_penalty,
+                "penalty must stay under the cap at {mass}"
+            );
+            prev = p;
+        }
+    }
+
+    #[test]
+    fn the_unauthored_mass_default_folds_a_moderate_penalty() {
+        // A target that authored no mass carries #1154's DEFAULT_ENTITY_MASS, so
+        // the penalty it exacts is exactly that mass's point on the curve — no
+        // special case for "unauthored".
+        let c = curve();
+        let default_mass = crate::entity_config::DEFAULT_ENTITY_MASS;
+        let expected = c.max_penalty * default_mass / (default_mass + c.half_penalty_mass);
+        assert!((tow_load_penalty(default_mass, &c) - expected).abs() < 1e-6);
+        // DEFAULT_ENTITY_MASS (10_000) sits right at this curve's knee, so it is
+        // half the cap — a sanity check that the default is a felt-but-fair tow.
+        assert!(
+            (tow_load_penalty(default_mass, &c) - c.max_penalty / 2.0).abs() < 1e-3,
+            "the default mass sits at this curve's knee"
+        );
     }
 }

@@ -33,6 +33,12 @@
     .dock-btn.docked { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
     .dock-status { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
     .dock-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
+    /* Under-tow-load indicator (issue #1157): shown only while this ship's
+       tractor holds a target, so a hull with no tractor is unchanged. */
+    .tow-load-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 8px; margin-top: 4px; display: flex; align-items: center; gap: 8px; }
+    .tow-load-panel[hidden] { display: none; }
+    .tow-load-label { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; color: var(--reloading); }
+    .tow-load-target { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
 
     @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .ctrl-col { padding: 8px; } .console-body .radar-col { order: -2; } .console-body .joystick-col { order: -1; } }
     /* Landscape is height-starved, so the hero stops being an in-flow row and
@@ -110,6 +116,15 @@
               <span id="dock-status" class="dock-status">—</span>
             </div>
             <div id="dock-refusal" class="dock-refusal" hidden></div>
+          </div>
+          <!-- Under-tow-load indicator (issue #1157): shown only while this
+               ship's tractor holds a target, so the helm can see it is under
+               load and why. A hull with no tractor publishes no `tractor`
+               blackboard, so this banner stays hidden and the console is
+               unchanged. -->
+          <div class="tow-load-panel" id="tow-load-panel" hidden>
+            <span class="tow-load-label" data-i18n="console.helm.under_tow">Under tow load</span>
+            <span id="tow-load-target" class="tow-load-target"></span>
           </div>
         </div>
         <div class="radar-col">
@@ -191,6 +206,20 @@
           var dockRefusal = document.getElementById('dock-refusal');
           if (d.refusal) { dockRefusal.hidden = false; dockRefusal.textContent = t(d.refusal); }
           else { dockRefusal.hidden = true; dockRefusal.textContent = ''; }
+        }
+
+        // Under-tow-load indicator (issue #1157). Shown only while this ship's
+        // tractor holds a target; a hull with no tractor publishes no `tractor`
+        // view, so `tow_load` is null and the banner stays hidden. Both the
+        // label and the towed hull's name resolve through t() — no English.
+        var towPanel = document.getElementById('tow-load-panel');
+        var tl = s.tow_load || null;
+        if (!tl || !tl.active) {
+          towPanel.hidden = true;
+        } else {
+          towPanel.hidden = false;
+          var towTarget = document.getElementById('tow-load-target');
+          towTarget.textContent = tl.target_name ? '· ' + t(tl.target_name) : '';
         }
       }
     });

@@ -1053,7 +1053,40 @@ export function buildHelmConsoleState(state) {
     // the undock control when `docked`; every string it shows is a `t()` id, so
     // no English crosses here.
     dock:                buildHelmDockView(state),
+    // ── Under-tow-load indicator (issue #1157) ────────────────────────────
+    // The helm feels the tractor's load: while this ship's beam holds a target,
+    // its top speed and turn rate are penalised, and the console says so and
+    // why. Read from the same `tractor` blackboard the engineering console
+    // shows; a hull with no tractor publishes none, so this is null and no
+    // indicator appears. The label and the towed hull's name are both `t()` ids
+    // — no English crosses here.
+    tow_load:            buildHelmTowLoadView(state),
   });
+}
+
+/**
+ * The under-tow-load indicator for the helm console (issue #1157), read from the
+ * raw `tractor` blackboard this ship's tractor system publishes. Returns `null`
+ * when the hull has no tractor (no blackboard) or is not currently holding a
+ * target, so the console shows no indicator — a hull without a tractor is
+ * unchanged.
+ *
+ * The ship is "under tow load" exactly while the coupling holds a target: the
+ * server's own `coupled_target` is the gate, mirrored here rather than
+ * re-derived so the helm and the engineering console agree by construction.
+ * `target_name` is the towed hull's own name id — the "why" — resolved by the
+ * console through `t()`; never English.
+ *
+ * @param {{ blackboards? }} state
+ * @returns {object|null}
+ */
+export function buildHelmTowLoadView(state) {
+  const bb = state.blackboards && state.blackboards['tractor'];
+  if (!bb || !bb.coupled_target) return null;
+  return {
+    active: true,
+    target_name: bb.coupled_target_name ?? null,
+  };
 }
 
 /**

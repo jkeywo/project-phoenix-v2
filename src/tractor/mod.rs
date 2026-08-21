@@ -32,12 +32,14 @@ pub mod held_response;
 /// publisher.
 pub mod server;
 
-pub use coupling::{coupled_position, hold_status, TractorConfig, TractorRefusal};
+pub use coupling::{
+    coupled_position, hold_status, tow_load_penalty, TowLoadCurve, TractorConfig, TractorRefusal,
+};
 pub use held_response::{
     condition_delta, held_offset, HeldResponse, HeldResponseConfig, HeldResponseKind,
 };
 pub use server::{
-    arrest_held_declines, handle_tractor_commands, move_coupled_target, publish_tractor_blackboard,
-    tick_tractor, tractor_blackboard_key, HeldResponseSection, TractorBeam, TractorPlugin,
-    TractorSaveState,
+    apply_tow_load_penalty, arrest_held_declines, handle_tractor_commands, move_coupled_target,
+    publish_tractor_blackboard, tick_tractor, tractor_blackboard_key, HeldResponseSection,
+    TractorBeam, TractorPlugin, TractorSaveState,
 };

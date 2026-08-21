@@ -93,3 +93,16 @@ power_group = "tractor"
 range = 600.0
 coupling_offset = [0.0, 0.0, -120.0]
 min_power_level = 2
+
+# ── The tow-load helm penalty curve (issue #1157) ────────────────────────────
+# The mass → penalty curve, authored here rather than inlined (AGENTS.md rule
+# 11): while the beam holds a target, the operator's top speed AND turn rate are
+# cut by `max_penalty * m / (m + half_penalty_mass)` of the held target's own
+# authored mass. `half_penalty_mass` is the knee — a load of this mass costs half
+# the cap — set at #1154's default entity mass so an unauthored hulk is a
+# felt-but-fair tow; `max_penalty` is the ceiling a laden freighter approaches
+# but never reaches. A buoy near zero mass is barely felt; a heavy hull is
+# severe; both from these two numbers.
+[tractor.tow_load]
+half_penalty_mass = 10000.0
+max_penalty = 0.8

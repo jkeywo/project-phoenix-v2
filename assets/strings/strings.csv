@@ -386,6 +386,7 @@ console.comms.current_thread,"comms console — ""Current Thread"" panel heading
 console.helm.screen_label,Phone-frame screen label of the helm console,Helm Console
 console.helm.title,helm console — main hero heading,HELM
 console.helm.station_footer,helm console — footer station name,HELM STATION
+console.helm.under_tow,"helm console — indicator shown while this ship's tractor holds a target and the helm is under the tow's mass penalty (issue #1157)","[Under tow load]"
 console.navigation.doc_title,Browser-tab title of the navigation console page,[Project Phoenix - Navigation Console]
 console.navigation.screen_label,Phone-frame screen label of the navigation console,Navigation Console
 console.navigation.title,navigation console — main hero heading,NAVIGATION

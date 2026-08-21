@@ -15460,6 +15460,144 @@ fn a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it() {
     );
 }
 
+// ── #1157: the helm feels the tow ─────────────────────────────────────────────
+//
+// The SAME `probe_tractor.toml` tug, now driven forward under its own full
+// thrust through the real physics integrator, loses top speed the moment it
+// takes the (heavily-authored) derelict under tow and recovers it on release —
+// the achieved speed, not a private field, proving the mass-derived `MaxSpeed`
+// penalty reaches the integrator and lifts when the coupling drops. The derelict
+// authors a heavy `mass` (240 000, well past the tug's 10 000-mass knee), so the
+// penalty is severe; a light target would barely move the number.
+
+/// Drive the operator forward at the given throttle by writing its `ThrustInput`
+/// directly. The helm-less tug's helm axes default to `Human` (`operate_ai ==
+/// false`) and carry no admitted helm command, so neither the backfill helm AI
+/// nor `process_helm_inputs` touches this latch — it persists and the shared
+/// `integrate_ship_physics` accelerates the tug toward its (possibly penalised)
+/// cap exactly as it would any hull.
+fn set_operator_thrust(app: &mut App, thrust: f32) {
+    let op = tractor_operator(app);
+    let mut ti = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship::helm::ThrustInput>(op)
+        .expect("the tug carries a ThrustInput via AiHighFidelity");
+    ti.0 = thrust;
+}
+
+/// The operator's achieved forward speed — the integrated `ShipPhysics` value the
+/// helm's own cap gates, not a modifier readback.
+fn operator_forward_speed(app: &mut App) -> f32 {
+    let op = tractor_operator(app);
+    app.world()
+        .get::<ShipPhysics>(op)
+        .expect("the tug is a ship")
+        .forward_speed
+}
+
+/// Put the operator back at the origin, at a dead stop and level, so each speed
+/// measurement is a clean acceleration from rest that never flies the tug far
+/// enough to reach the arena boundary (which would clamp its velocity and
+/// confound the reading).
+fn reset_operator_to_rest(app: &mut App) {
+    let op = tractor_operator(app);
+    let mut p = app
+        .world_mut()
+        .get_mut::<ShipPhysics>(op)
+        .expect("the tug is a ship");
+    p.x = 0.0;
+    p.y = 0.0;
+    p.z = 0.0;
+    p.yaw = 0.0;
+    p.forward_speed = 0.0;
+    p.lateral_speed = 0.0;
+    p.vertical_speed = 0.0;
+}
+
+/// AC: a heavy target taken under tow drops the same ship's achieved speed, and
+/// releasing it recovers the speed — the mass-derived helm penalty end to end.
+#[test]
+fn a_heavy_tow_drops_the_operators_achieved_speed_and_release_recovers_it() {
+    use project_phoenix::messages::SystemControlPayload;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&tractor_args(dt)).expect("app should build");
+    // Far enough in that the game is InProgress and the tug is backfilled, so its
+    // engineering-owned tractor is AI-controlled and the `ai:` token is admitted.
+    run(&mut app, 60);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+    let derelict = scan_uuid_named(&mut app, DERELICT);
+
+    // Each phase is a clean acceleration from rest at the origin (see
+    // `reset_operator_to_rest`), so the tug reaches steady state without flying
+    // far enough to touch the arena boundary. 300 ticks is 5 s — well past the
+    // ~3 s the default cap needs to settle.
+    const SETTLE: u64 = 300;
+
+    // ── Baseline: full ahead, nothing under tow ──────────────────────────────
+    reset_operator_to_rest(&mut app);
+    set_operator_thrust(&mut app, 1.0);
+    run(&mut app, SETTLE);
+    let baseline = operator_forward_speed(&mut app);
+    assert!(
+        baseline > 20.0,
+        "the free tug reaches a real cruising speed under full thrust, got {baseline}"
+    );
+
+    // ── Take the heavy derelict under tow: the achieved speed falls ──────────
+    // Reset to rest, drop the derelict onto the tug's rig (well within the
+    // 600-unit reach), lock it and engage. It then rides 120 astern and is
+    // dragged along as the tug flies, so the hold persists while speed is read.
+    reset_operator_to_rest(&mut app);
+    move_named_to(&mut app, DERELICT, Vec3::new(0.0, 0.0, 100.0));
+    run(&mut app, 1);
+    set_tractor_lock(&mut app, Some(derelict.clone()));
+    send_tractor(&mut app, SystemControlPayload::EngageTractor);
+    assert!(
+        tractor_beam_of(&mut app).coupled_target.as_deref() == Some(derelict.as_str()),
+        "precondition: the beam is holding the heavy derelict, got {:?}",
+        tractor_beam_of(&mut app)
+    );
+    // Full thrust from rest; the towed cap holds the steady state well down.
+    set_operator_thrust(&mut app, 1.0);
+    run(&mut app, SETTLE);
+    let towed = operator_forward_speed(&mut app);
+    assert!(
+        tractor_beam_of(&mut app).coupled_target.as_deref() == Some(derelict.as_str()),
+        "the hold survived the tow run (the derelict rides the rig in range)"
+    );
+    assert!(
+        towed < baseline * 0.75,
+        "a heavy tow is a severe penalty: towed speed {towed} should be well under three-\
+         quarters of the free {baseline}"
+    );
+
+    // ── Release: the penalty lifts and the speed recovers ────────────────────
+    send_tractor(&mut app, SystemControlPayload::ReleaseTractor);
+    assert!(
+        !tractor_beam_of(&mut app).engaged && tractor_beam_of(&mut app).coupled_target.is_none(),
+        "the beam released"
+    );
+    reset_operator_to_rest(&mut app);
+    set_operator_thrust(&mut app, 1.0);
+    run(&mut app, SETTLE);
+    let recovered = operator_forward_speed(&mut app);
+    assert!(
+        recovered > towed + 3.0,
+        "releasing the tow recovers speed: {recovered} should climb back well above the towed \
+         {towed}"
+    );
+    assert!(
+        (recovered - baseline).abs() < baseline * 0.1,
+        "…back to (near) the unencumbered cruising speed: recovered {recovered} vs free \
+         {baseline}"
+    );
+}
+
 // ── #1158: the target decides what being held means (arrest-decline) ──────────
 //
 // `assets/worlds/probe_held_response.toml` fields the same backfilled tug and a

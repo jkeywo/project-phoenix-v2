@@ -23,16 +23,21 @@ use bevy::prelude::*;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::console::weapons::beam::TacticalRadarSelection;
 use crate::damage::DamageTier;
-use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
+use crate::entities::spawner::{EntityMass, EntityName, EntitySystemHull, EntityUuid};
+use crate::entity_config::DEFAULT_ENTITY_MASS;
 use crate::infrastructure::condition::ConditionAdjustment;
 use crate::infrastructure::InfrastructureCondition;
 use crate::messages::{
-    PowerGroupId, SystemBlackboard, SystemControlPayload, SystemId, TractorBlackboard,
+    ModifierSlot, ModifierSource, PowerGroupId, SystemBlackboard, SystemControlPayload, SystemId,
+    TractorBlackboard,
 };
+use crate::modifiers::{Modifier, ShipModifiers};
 use crate::ship::power::{power_level_for, ShipPowerSystem};
 use crate::ship::state::ShipPhysics;
 use crate::system_registry::{tractor_system_id, TRACTOR_SYSTEM_ID};
-use crate::tractor::coupling::{coupled_position, hold_status, TractorConfig, TractorRefusal};
+use crate::tractor::coupling::{
+    coupled_position, hold_status, tow_load_penalty, TractorConfig, TractorRefusal,
+};
 use crate::tractor::held_response::{condition_delta, held_offset, HeldResponseConfig};
 use crate::world::server::WorldContentRuntime;
 
@@ -159,6 +164,15 @@ impl Plugin for TractorPlugin {
                 // hold, so a beam that dropped this tick moves nothing, exactly
                 // as the tow rig is ordered after `tick_operations`.
                 move_coupled_target
+                    .in_set(crate::sim_sets::SimSet::Modifiers)
+                    .after(tick_tractor),
+                // Carry (or lift) the operator's tow-load helm penalty from
+                // whatever the hold decided this tick (issue #1157) — after
+                // `tick_tractor`, so a beam that just dropped its coupling lifts
+                // the penalty the same tick it lets go. Writes a `MaxSpeed` /
+                // `MaxYawRate` modifier that `integrate_ship_physics` reads on
+                // the next tick, exactly like impulse and power do.
+                apply_tow_load_penalty
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(tick_tractor),
                 // Bank an arrest-decline target's condition (issue #1158) —
@@ -426,6 +440,69 @@ pub fn move_coupled_target(
     }
 }
 
+// ── The helm feels the tow (issue #1157) ─────────────────────────────────────
+
+/// Carry each tractor operator's tow-load helm penalty this tick, derived from
+/// the held target's authored mass (issue #1157).
+///
+/// While a ship's beam holds a target, its top speed AND turn rate are cut by
+/// [`tow_load_penalty`] of that target's authored [`EntityMass`] — a NEGATIVE
+/// bonus on `MaxSpeed` and `MaxYawRate`, attributed to [`ModifierSource::
+/// TractorLoad`] so it stacks independently of impulse, power, regions and
+/// system damage on the same slots and lifts the tick the coupling drops.
+///
+/// The penalty is a deterministic function of a folded property: the number the
+/// pure [`tow_load_penalty`] returns from the target's own mass and the
+/// operator's authored `[tractor.tow_load]` curve, decided nowhere but in the
+/// coupling module (rule 10). A target that authored no mass carries #1154's
+/// [`DEFAULT_ENTITY_MASS`], so its penalty is that mass's point on the curve —
+/// the same fallback the spawner applies, never a special case here.
+///
+/// Ordered after `tick_tractor` (see [`TractorPlugin`]): `coupled_target` is
+/// already this tick's verdict, so a beam that dropped its hold for ANY reason —
+/// release, lost lock, out of range, unpowered, disabled — has a `None` target
+/// here and the penalty is removed. `remove` is a no-op when nothing is held, so
+/// an idle beam neither carries a penalty nor floods the modifier-event stream.
+///
+/// Human and AI operators reach this identically — it reads only the beam's
+/// coupling state, never who engaged it (AGENTS.md rule 6). The two queries
+/// touch disjoint components (the beam's `ShipModifiers` versus every entity's
+/// `EntityMass`), so they need no `ParamSet` even though an operator also
+/// carries an `EntityMass` of its own.
+pub fn apply_tow_load_penalty(
+    masses: Query<(&EntityUuid, &EntityMass)>,
+    mut operators: Query<(&TractorBeam, &mut ShipModifiers)>,
+) {
+    for (beam, mut modifiers) in operators.iter_mut() {
+        match beam.coupled_target.as_deref() {
+            Some(target_uuid) => {
+                // Every spawned entity carries `EntityMass`; the `unwrap_or` is
+                // the same DEFAULT_ENTITY_MASS fallback #1154 uses, so a target
+                // that somehow lacks the component is treated as the default
+                // mass rather than as weightless.
+                let mass = masses
+                    .iter()
+                    .find(|(uuid, _)| uuid.0 == target_uuid)
+                    .map(|(_, m)| m.0)
+                    .unwrap_or(DEFAULT_ENTITY_MASS);
+                let penalty = tow_load_penalty(mass, &beam.config.tow_load);
+                for slot in [ModifierSlot::MaxSpeed, ModifierSlot::MaxYawRate] {
+                    modifiers.add_or_update(Modifier {
+                        source: ModifierSource::TractorLoad,
+                        slot,
+                        bonus: -penalty,
+                    });
+                }
+            }
+            None => {
+                for slot in [ModifierSlot::MaxSpeed, ModifierSlot::MaxYawRate] {
+                    modifiers.remove(&ModifierSource::TractorLoad, &slot);
+                }
+            }
+        }
+    }
+}
+
 // ── Held-response: arrest-decline (issue #1158) ──────────────────────────────
 
 /// Bank an arrest-decline held target's condition this tick (issue #1158).
@@ -536,6 +613,10 @@ mod tests {
                 range: 500.0,
                 coupling_offset: [0.0, 0.0, -120.0],
                 min_power_level: 2,
+                tow_load: crate::tractor::TowLoadCurve {
+                    half_penalty_mass: 10_000.0,
+                    max_penalty: 0.8,
+                },
             },
             PowerGroupId("tractor".into()),
         )

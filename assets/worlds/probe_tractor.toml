@@ -49,3 +49,9 @@ spawn_on = "game_start"
 template_path = "assets/entities/ship_civilian_hauler.toml"
 name = "world.probe_tractor.entity.derelict.name"
 transform = { position = [80.0, 0.0, 0.0] }
+# A HEAVY authored mass (issue #1157) — a laden hulk, well past the tug's
+# `half_penalty_mass` knee, so taking it under tow exacts a severe helm penalty
+# the headless test can measure as a fall in the tug's achieved speed. Overrides
+# the hauler template's own lighter mass on this instance only; nothing else
+# about the derelict changes.
+overrides = { mass = 240000.0 }

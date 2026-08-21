@@ -16,6 +16,7 @@ import {
   buildCaptainConsoleState,
   buildHelmConsoleState,
   buildHelmDockView,
+  buildHelmTowLoadView,
   buildRepairConsoleState,
   buildPowerConsoleState,
   buildShieldsConsoleState,
@@ -1111,6 +1112,58 @@ describe('helm dock control (issue #1159)', () => {
       },
     };
     expect(parse(buildHelmConsoleState(state)).dock.refusal).toBe('dock.refused.out_of_range');
+  });
+});
+
+// The under-tow-load indicator (issue #1157): the helm feels the tractor's mass
+// penalty, and the console says so and why. Read from the same `tractor`
+// blackboard the engineering console shows; a hull with no tractor is unchanged.
+describe('helm under-tow-load indicator (issue #1157)', () => {
+  it('is absent when the hull publishes no tractor blackboard', () => {
+    // No tractor system → no `tractor` blackboard → no indicator at all.
+    expect(buildHelmTowLoadView(EMPTY)).toBe(null);
+    expect(parse(buildHelmConsoleState(EMPTY)).tow_load).toBe(null);
+  });
+
+  it('is absent when the tractor is engaged but holding nothing', () => {
+    // Engaged with no coupling (e.g. refused) is not "under load": the gate is
+    // an actually-held target, mirroring the server's own `coupled_target`.
+    const state = {
+      blackboards: {
+        tractor: { engaged: true, coupled_target: null, refusal: 'tractor.refused.out_of_range' },
+      },
+    };
+    expect(buildHelmTowLoadView(state)).toBe(null);
+    expect(parse(buildHelmConsoleState(state)).tow_load).toBe(null);
+  });
+
+  it('appears while a target is held, naming the towed hull as the reason', () => {
+    const state = {
+      blackboards: {
+        tractor: {
+          range: 600,
+          engaged: true,
+          coupled_target: 'derelict-1',
+          coupled_target_name: 'world.probe_tractor.entity.derelict.name',
+          refusal: null,
+        },
+      },
+    };
+    const tow = parse(buildHelmConsoleState(state)).tow_load;
+    expect(tow).not.toBe(null);
+    expect(tow.active).toBe(true);
+    // The "why" is a machine name id the console resolves through t() — never
+    // English.
+    expect(tow.target_name).toBe('world.probe_tractor.entity.derelict.name');
+  });
+
+  it('stays active even if the towed hull carries no name id', () => {
+    // A held target without a name still puts the helm under load; the console
+    // simply shows the label with no partner name appended.
+    const state = { blackboards: { tractor: { coupled_target: 'derelict-1' } } };
+    const tow = buildHelmTowLoadView(state);
+    expect(tow.active).toBe(true);
+    expect(tow.target_name).toBe(null);
   });
 });
 

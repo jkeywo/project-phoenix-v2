@@ -1088,6 +1088,33 @@ mod tests {
         }
     }
 
+    /// The tow-load helm penalty's `ModifierSource::TractorLoad` (issue #1157)
+    /// crosses the wire on the same `ModifierAdded` / `ModifierRemoved` messages
+    /// every other source rides. The table above pins one sample per
+    /// discriminant, not one per `ModifierSource` variant, so the new fieldless
+    /// variant gets its own round-trip here — added and removed, on both the
+    /// `MaxSpeed` and `MaxYawRate` slots it writes.
+    #[test]
+    fn tractor_load_modifier_source_round_trips() {
+        for slot in [ModifierSlot::MaxSpeed, ModifierSlot::MaxYawRate] {
+            assert_server_roundtrip(
+                &JsonCodec,
+                ServerMessage::ModifierAdded {
+                    source: ModifierSource::TractorLoad,
+                    slot: slot.clone(),
+                    bonus: -0.37,
+                },
+            );
+            assert_server_roundtrip(
+                &JsonCodec,
+                ServerMessage::ModifierRemoved {
+                    source: ModifierSource::TractorLoad,
+                    slot,
+                },
+            );
+        }
+    }
+
     // ── Wire-format string pins ────────────────────────────────────────────
     //
     // These assert an exact JSON string rather than just round-trip equality

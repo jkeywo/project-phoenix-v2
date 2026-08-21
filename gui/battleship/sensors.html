@@ -76,55 +76,13 @@
     import '../components/ph-sensor-panel.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { setAutoState } from '../console-ui.js';
-    import { t } from '../strings.js';
+    // The render lives in gui/battleship/sensors.console.js (issue #1235):
+    // the shared Sensors renderer + this hull's variant. s is a
+    // SensorsConsolePayload — see the @typedef in gui/console-state.js. The
+    // vitest suite imports the same renderStation.
+    import { renderStation } from './sensors.console.js';
 
-    function renderShieldFacings(state) {
-      var target = document.getElementById('shield-facings');
-      var shields = state.target_shields || [];
-      var freqTag = document.getElementById('shield-freq-tag');
-      freqTag.textContent = state.target_shield_freq != null
-        ? Math.round(state.target_shield_freq * 100) + '%'
-        : t('console.common.no_data');
-      if (!shields.length && state.target_shield_fraction == null) {
-        target.textContent = t('console.common.no_shield_data');
-        document.getElementById('shields-tag').textContent = t('console.common.no_data');
-        return;
-      }
-      if (!shields.length && state.target_shield_fraction != null) {
-        var pct = Math.max(0, Math.round(state.target_shield_fraction * 100));
-        target.innerHTML = '<div class="s-facing"><span class="lbl">' + t('console.shield.shld') + '</span> <span class="pct">' + (pct > 0 ? pct + '%' : t('console.shield.down')) + '</span></div>';
-        document.getElementById('shields-tag').textContent = pct > 0 ? t('console.shield.online') : t('console.shield.shield_down');
-        return;
-      }
-      target.innerHTML = shields.map(function(f) {
-        var pct = f.max_hp > 0 ? Math.round((f.hp / f.max_hp) * 100) : 0;
-        return '<div class="s-facing"><span class="lbl">' + (f.label || '?').toUpperCase() + '</span> <span class="pct">' + (f.online === false ? t('console.shield.down') : pct + '%') + '</span></div>';
-      }).join('');
-      document.getElementById('shields-tag').textContent = shields.some(function(f) { return f.online === false; }) ? t('console.shield.degraded') : t('console.shield.online');
-    }
-
-    var consoleApi = initConsole({
-      name: 'sensors',
-      family: 'sensors',
-      // s is a SensorsConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        document.getElementById('sensor-radar').state = s;
-        document.getElementById('sensor-panel').state = s;
-        document.getElementById('station-damage').state = s.own_hull || null;
-        document.getElementById('scan-range-val').textContent = String(s.scan_range || 0);
-        var blipCount = (s.blips || []).length;
-        document.getElementById('contact-sub').textContent = blipCount === 1
-          ? t('console.common.contacts.one', { n: 1 })
-          : t('console.common.contacts.other', { n: blipCount });
-        document.getElementById('tgt-name').textContent = s.target_name || t('console.common.no_target');
-        document.getElementById('tgt-kind-tag').textContent = s.target_kind ? String(s.target_kind).toUpperCase() : t('console.common.no_contact');
-        document.getElementById('footer-target').textContent = s.target_name || t('console.common.no_target');
-        document.getElementById('btn-cancel-impulse').hidden = !(s.impulse_charge_progress > 0);
-        renderShieldFacings(s);
-        setAutoState(document.getElementById('btn-cancel-impulse'), document.getElementById('sensors-auto-badge'), !!s.sensors_auto);
-      }
-    });
+    var consoleApi = initConsole({ name: 'sensors', family: 'sensors', render: renderStation });
 
     document.getElementById('btn-cancel-impulse').addEventListener('click', function() {
       consoleApi.sendAction('cancel_impulse', {});

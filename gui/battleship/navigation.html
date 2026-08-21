@@ -75,31 +75,13 @@
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
-    import { setAutoState } from '../console-ui.js';
+    // The render lives in gui/battleship/navigation.console.js (issue
+    // #1235): the shared Navigation renderer + this hull's variant. s is a
+    // NavigationConsolePayload — see the @typedef in gui/console-state.js.
+    // The vitest suite imports the same renderStation.
+    import { renderStation } from './navigation.console.js';
 
-    var consoleApi = initConsole({
-      name: 'navigation',
-      family: 'navigation',
-      // s is a NavigationConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        // `regions` carries the area hulls (nebulae, belts, objective zones);
-        // the objective rings ride the `objective_target` flag already stamped
-        // on both the regions and the blips.
-        document.getElementById('navigation-map').state = { blips: s.blips || [], regions: s.regions || [], range: s.radar_range || 5000, ship_pos: { x: s.ship_x || 0, z: s.ship_z || 0 }, ship_heading: s.ship_heading || 0, waypoint: s.waypoint || null };
-        document.getElementById('objective-list').state = { objectives: s.objectives || [] };
-        // Civilian traffic (issue #1028): who is on which lane, and who is not
-        // doing as asked. Server-derived; the panel never infers it from the
-        // chart, because a craft that has not turned yet and one that has
-        // refused look identical on a map.
-        document.getElementById('civilian-traffic').state = { civilians: s.civilians || [] };
-        document.getElementById('station-damage').state = s.own_hull || null;
-        document.getElementById('nav-contact-count').textContent = String((s.blips || []).length);
-        var wpName = s.waypoint && s.waypoint.name ? s.waypoint.name : (s.waypoint ? t('console.common.waypoint') : t('console.navigation.not_set'));
-        document.getElementById('waypoint-name').textContent = wpName;
-        document.getElementById('footer-target').textContent = wpName;
-        setAutoState(document.getElementById('btn-on-screen'), document.getElementById('navigation-auto-badge'), !!s.navigation_auto);
-      }
-    });
+    var consoleApi = initConsole({ name: 'navigation', family: 'navigation', render: renderStation });
 
     var navMap = document.getElementById('navigation-map');
     // The map selects a chart contact on tap (navselect event); it does not set

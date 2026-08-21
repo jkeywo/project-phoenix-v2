@@ -765,14 +765,6 @@ pub fn process_coordination_lag(
     }
 }
 
-pub fn handle_coordination_messages(mut reader: MessageReader<InboundMessage>) {
-    for msg in reader.read() {
-        let ClientMessage::SendCoordination { .. } = &msg.msg else {
-            continue;
-        };
-    }
-}
-
 #[cfg(test)]
 // Fixture ids only (issue #907): a test that needs "some distinct id" has no
 // run to reproduce. Production identity is minted by `crate::world_id`, and

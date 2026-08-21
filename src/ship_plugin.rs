@@ -13,8 +13,8 @@ pub use crate::ship::components::{
     BANK_LERP_RATE,
 };
 pub use crate::ship::coordination_systems::{
-    handle_coordination_enqueue, handle_coordination_messages, process_coordination_lag,
-    resolve_human_seeking_hosts, write_scenario_detail_floor,
+    handle_coordination_enqueue, process_coordination_lag, resolve_human_seeking_hosts,
+    write_scenario_detail_floor,
 };
 pub use crate::ship::damage_sync::{detect_damage_tier_crossings, sync_console_damage_tiers};
 pub(crate) use crate::ship::helm_admission::{
@@ -247,7 +247,6 @@ impl Plugin for ShipPlugin {
                         .after(integrate_ship_physics),
                     handle_station_rating_change.in_set(crate::sim_sets::SimSet::Input),
                     handle_coordination_enqueue.in_set(crate::sim_sets::SimSet::Input),
-                    handle_coordination_messages.in_set(crate::sim_sets::SimSet::Input),
                     process_coordination_lag.in_set(crate::sim_sets::SimSet::Modifiers),
                     sync_console_damage_tiers.in_set(crate::sim_sets::SimSet::Damage),
                     detect_damage_tier_crossings.in_set(crate::sim_sets::SimSet::Damage),

@@ -504,6 +504,20 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // family, always written) and the Rust types that hold it. The slice adds no
     // Rust at all, so it moved no `SNAPSHOT_FORMAT`: the names land in a map
     // `ScenarioState` already saves.
+    //
+    // Issue #1214's `PreCompiledScripts` joins the same seam and for the same
+    // reason. It is the boot→Startup handoff that carries the world's scripts,
+    // compiled ONCE in `world::load::load` (the headless path), to
+    // `compile_world_scripts` — which consumes it instead of re-parsing
+    // `RawWorldSource` and compiling a second time. It is authoritative-but-
+    // deferred exactly as `RawWorldSource` is: it holds the same `CompiledScripts`
+    // the runtime is built from, its content is bound into the CONTENT digest via
+    // the content ledger (never the authoritative fold), and it is emptied
+    // (`Option::take`) the moment the runtime is built. Registered in the census
+    // run because `compile_world_scripts` references it via `Option<ResMut>`
+    // (headless also inserts it), so it appears here for the same reason
+    // `RawWorldSource` does.
+    "project_phoenix::world::server::PreCompiledScripts",
     "project_phoenix::world::server::RawWorldSource",
     "project_phoenix::world::server::WorldScriptRuntime",
 ];

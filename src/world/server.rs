@@ -409,18 +409,20 @@ pub struct WorldEventBuffer(pub Vec<WorldEvent>);
 /// `Value`.
 ///
 /// `WorldConfig` drops the raw `[script]` / `script` keys the Rhai loader needs,
-/// so this carries the whole TOML alongside its path. Populated on both
-/// targets — headless inserts it directly in `build_headless_app`, the browser
-/// via `insert_raw_world_source_resource` reading `server::bridge::
-/// get_raw_world_source()` at `Startup` — and read once by
-/// `compile_world_scripts`.
+/// so this carries the whole TOML alongside its path. Since issue #1214 it is the
+/// **browser's** route only: `insert_raw_world_source_resource` reads
+/// `server::bridge::get_raw_world_source()` at `Startup` and inserts it, and
+/// `compile_world_scripts` reads it once. Headless no longer inserts it — it
+/// compiles the world's scripts once in `world::load::load` and hands the result
+/// to `compile_world_scripts` as [`PreCompiledScripts`], so a headless run does
+/// not parse this raw value or compile a second time.
 ///
 /// "Raw" is about SHAPE, not provenance: unparsed TOML with nothing dropped,
 /// which is not the same as untouched. On a harnessed duel run
-/// (`--side-a`/`--side-b`) what lands here is the world TOML *after*
-/// `headless::duel::apply_duel_sides` has regenerated the slot roster inside its
-/// `[script]` source — deliberately, since this resource is what
-/// `compile_world_scripts` compiles.
+/// (`--side-a`/`--side-b`) the duel transform runs as `world::load`'s
+/// `raw_transform` hook, regenerating the slot roster inside the `[script]`
+/// source before it is compiled — so the compiled set headless hands over already
+/// reflects the roster, exactly as the value that used to land here did.
 #[derive(Resource, Clone, Debug)]
 pub struct RawWorldSource {
     /// The world TOML's path (its content-ledger / snapshot-boundary key).
@@ -429,6 +431,23 @@ pub struct RawWorldSource {
     /// carrying any `[script]` / `script` key.
     pub toml: toml::Value,
 }
+
+/// A world's scripts, compiled ONCE at build time and handed to
+/// [`compile_world_scripts`] for the runtime insertion (issue #1214, Track 2 A2).
+///
+/// The headless path (`build_headless_app`) runs the world through
+/// `world::load::load` a single time — the same pass that feeds the build-time
+/// fail-fast gate — and inserts the compiled result here. [`compile_world_scripts`]
+/// then consumes it (`Option<ResMut>` + `.take()`) instead of re-reading
+/// [`RawWorldSource`] and compiling a second time, so a headless run parses and
+/// compiles a world's scripts only once. The browser still arrives via
+/// [`RawWorldSource`] (populated by [`insert_raw_world_source_resource`] on wasm);
+/// both targets converge on the identical `WorldScriptRuntime` construction. The
+/// inner value is `None` for a script-free world (`world::load` returns no
+/// scripts), which short-circuits exactly as the absent-`script`-key arm of the
+/// `RawWorldSource` path does.
+#[derive(Resource)]
+pub struct PreCompiledScripts(pub Option<crate::world::script::load::CompiledScripts>);
 
 /// A reference to the script handler fn that supplies one scripted trigger's
 /// effects at runtime.
@@ -811,9 +830,9 @@ pub(crate) fn insert_world_config_resource(mut commands: Commands) {
 /// The script-loader's twin of [`insert_world_config_resource`]: `WorldConfig`
 /// has dropped the raw `[script]` / `script` keys, so the Rhai loader needs the
 /// untouched TOML text. On native `get_raw_world_source()` has no equivalent
-/// (headless inserts `RawWorldSource` directly in `build_headless_app`), so this
-/// system only ever inserts on wasm; on native it is a no-op and never disturbs
-/// the resource the headless path already inserted.
+/// (headless compiles its scripts once in `world::load::load` and hands them to
+/// `compile_world_scripts` as [`PreCompiledScripts`] — issue #1214), so this
+/// system only ever inserts on wasm; on native it is a no-op.
 #[cfg_attr(
     not(all(target_arch = "wasm32", feature = "server")),
     allow(unused_mut, unused_variables)
@@ -849,29 +868,62 @@ pub(crate) fn insert_raw_world_source_resource(mut commands: Commands) {
 /// `WorldScriptRuntime`, no content-ledger records, nothing that could move a
 /// digest.
 ///
+/// # One compile per load (issue #1214)
+///
+/// Two sources feed this system, checked in order:
+///
+/// * [`PreCompiledScripts`] — the headless path. `build_headless_app` compiled
+///   the world's scripts once in `world::load::load` (recording their content
+///   into the not-yet-frozen content ledger there) and hands the result over, so
+///   this system takes ownership and builds the runtime WITHOUT recompiling. This
+///   is what collapses the old headless double-compile.
+/// * [`RawWorldSource`] — the browser path. On wasm the raw world TOML is
+///   inserted at `Startup` and this system compiles it here, as before.
+///
+/// Either way the construction below is identical; the only difference is where
+/// the `CompiledScripts` came from.
+///
 /// Findings fold into the SAME atomic activation gate the composition findings
 /// use: on a script error this records the block (read by
 /// [`world_activation_blocked`]) so a script-error world spawns zero entities,
 /// and inserts no runtime. Headless additionally hard-fails the build for a
 /// script error (see `build_headless_app`), so a broken script never reaches a
 /// running authoritative host.
-pub(crate) fn compile_world_scripts(mut commands: Commands, raw: Option<Res<RawWorldSource>>) {
+pub(crate) fn compile_world_scripts(
+    mut commands: Commands,
+    pre: Option<ResMut<PreCompiledScripts>>,
+    raw: Option<Res<RawWorldSource>>,
+) {
     // Reset the per-load gate: every world load writes it fresh, so a script-free
     // world (or an app that never runs this system) reads `false`.
     set_script_activation_blocked(false);
 
-    let Some(raw) = raw else {
-        return;
+    // Prefer scripts already compiled at build time (issue #1214): the headless
+    // path runs the world through `world::load::load` once and hands the result
+    // over as `PreCompiledScripts`, so this builds the runtime from it rather than
+    // re-reading `RawWorldSource` and compiling a second time. `.take()` leaves the
+    // resource holding `None`; a script-free `world::load` already stored `None`
+    // there, which short-circuits exactly as the absent-`script`-key arm below.
+    // The browser (no `PreCompiledScripts`) falls through to the `RawWorldSource`
+    // compile it always did.
+    let compiled = if let Some(mut pre) = pre {
+        let Some(compiled) = pre.0.take() else {
+            return;
+        };
+        compiled
+    } else {
+        let Some(raw) = raw else {
+            return;
+        };
+        // No `script` key → nothing to compile. Short-circuit before building any
+        // Rhai engine so the entire shipped (script-free) set pays nothing and can
+        // never record into the content ledger.
+        if raw.toml.get("script").is_none() {
+            return;
+        }
+        let resolver = crate::config_cache::production_script_resolver();
+        crate::world::script::load::load_world_scripts(&raw.path, &raw.toml, &resolver)
     };
-    // No `script` key → nothing to compile. Short-circuit before building any
-    // Rhai engine so the entire shipped (script-free) set pays nothing and can
-    // never record into the content ledger.
-    if raw.toml.get("script").is_none() {
-        return;
-    }
-
-    let resolver = crate::config_cache::production_script_resolver();
-    let compiled = crate::world::script::load::load_world_scripts(&raw.path, &raw.toml, &resolver);
 
     if crate::world::validate::has_error(&compiled.findings) {
         for f in compiled.findings.iter().filter(|f| f.is_error()) {

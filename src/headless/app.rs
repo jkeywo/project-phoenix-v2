@@ -420,48 +420,68 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // previous run's files (see `content_ledger`'s reset-semantics docs).
     crate::content_ledger::reset();
 
-    // World config. `insert_world_config_resource` (a `Startup` system in
-    // `WorldPlugin`) sources this from the JS bridge, which has no native
-    // equivalent — it no-ops off-browser. Inserting it here pre-empts that.
-    let world_toml = read_toml(&args.world_path, "world")?;
-    crate::content_ledger::record(&args.world_path, &world_toml);
-    let world_config = crate::world::config::parse_world(&world_toml)
-        .map_err(|e| BuildError(format!("world {:?} failed to parse: {e}", args.world_path)))?;
+    // World load (issue #1214, Track 2 A2). ONE `world::load::load` call replaces
+    // what used to be several inline steps here: the `parse_world` of the root
+    // world, the raw `toml::Value` re-parse the Rhai loader needs, the
+    // `--side-a`/`--side-b` duel transform of that raw value, and — further down —
+    // the `validate_composition` sweep plus the fail-fast script compile. It reads
+    // the root world and every `extra_worlds` child, validates the composition,
+    // and compiles the world's scripts EXACTLY ONCE. The compiled set feeds both
+    // the build-time fail-fast gate below and the runtime insertion at `Startup`
+    // (handed over as `PreCompiledScripts`), so headless no longer compiles a
+    // world's scripts twice, nor inserts a `RawWorldSource` for
+    // `compile_world_scripts` to re-parse and re-compile.
+    //
+    // `insert_world_config_resource` (a `Startup` system in `WorldPlugin`) sources
+    // `WorldConfig` from the JS bridge, which has no native equivalent — it no-ops
+    // off-browser — so the config parsed here is inserted directly below to
+    // pre-empt that.
+    let reader = crate::world::load::FsReader;
+    let script_resolver = crate::config_cache::production_script_resolver();
 
-    // The raw world TOML for the Rhai loader (issue #984, Rhai M6 phase 2a):
-    // `WorldConfig` above dropped the `[script]` / `script` keys, so the script
-    // seam needs the untouched value. Native's answer to the browser's
-    // `insert_raw_world_source_resource` (which reads `SNAPSHOT_WORLD`): inserted
-    // directly here so `compile_world_scripts` at `Startup` finds it.
-    let mut raw_world_toml: toml::Value = toml::from_str(&world_toml).map_err(|e| {
-        BuildError(format!(
-            "world {:?} failed to re-parse as a TOML value: {e}",
-            args.world_path
-        ))
-    })?;
-
-    // Duel side transform (issue #844). Only when `--side-a`/`--side-b` is
-    // given, so a plain `--world` run is untouched. Since the duel slots became
-    // script (issue #984, M6) the transform rewrites the RAW TOML — it
-    // regenerates the slot drivers inside `duel.toml`'s `[script]` source — so it
-    // has to run BEFORE `RawWorldSource` is inserted, because that resource is
-    // what the script loader reads. `world_config` is not touched by it at all.
-    // The filesystem-backed resolver is injected here in production.
-    if !args.side_a.is_empty() || !args.side_b.is_empty() {
-        raw_world_toml = super::duel::apply_duel_sides(
-            raw_world_toml,
+    // Duel side transform (issue #844), now the load's `raw_transform` hook. It
+    // rewrites only the raw `toml::Value` the script loader reads — regenerating
+    // the slot drivers inside `duel.toml`'s `[script]` source — and never the
+    // parsed `WorldConfig`, which `world::load` derives from the untouched text.
+    // Attached only when `--side-a`/`--side-b` is given, so a plain `--world` run's
+    // raw value is untouched (byte-for-byte the old condition).
+    let duel_active = !args.side_a.is_empty() || !args.side_b.is_empty();
+    let duel_transform = |raw: toml::Value| -> Result<toml::Value, String> {
+        super::duel::apply_duel_sides(
+            raw,
             &args.side_a,
             &args.side_b,
             &super::duel::resolve_template,
             &super::duel::DuelTemplateLoader,
         )
-        .map_err(|e| BuildError(format!("duel sides: {e}")))?;
+        .map_err(|e| e.to_string())
+    };
+    let mut request = crate::world::load::LoadRequest::new(
+        args.world_path.clone(),
+        &reader,
+        &script_resolver,
+        crate::world::load::LoadPolicy::Activate,
+    );
+    if duel_active {
+        request = request.with_transform(&duel_transform);
     }
-
-    app.insert_resource(crate::world::server::RawWorldSource {
-        path: args.world_path.clone(),
-        toml: raw_world_toml.clone(),
-    });
+    let crate::world::load::LoadedWorld {
+        config: world_config,
+        scripts: compiled_scripts,
+        children: loaded_children,
+        findings: composition_findings,
+        ledger: ledger_plan,
+    } = crate::world::load::load(request).map_err(|e| match e {
+        // Preserve the substring `missing_world_file_is_a_clean_error` asserts.
+        crate::world::load::LoadError::ReadFailed { path } => {
+            BuildError(format!("could not read world {path:?}"))
+        }
+        // Preserve the `duel sides:` prefix the harness has always reported.
+        crate::world::load::LoadError::TransformFailed { message } => {
+            BuildError(format!("duel sides: {message}"))
+        }
+        other => BuildError(format!("world load: {other}")),
+    })?;
 
     // Seed precedence: `--seed`, then the world TOML's `[global] seed`, then a
     // seed drawn from the OS. Resolved here because this is the first point at
@@ -479,45 +499,19 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         "headless: seed={} ({})", sim_rng.seed(), sim_rng.source().as_str()
     );
 
-    // Atomic composition validation (issue #750). Resolve every authored world
-    // reference across the effective composition (root + additive
-    // `extra_worlds`) BEFORE the world config is inserted and anything spawns.
-    // Any error finding aborts the whole build, so a broken composition leaves
-    // zero partial root-world content active.
+    // Atomic composition validation (issue #750). `world::load` ran
+    // `validate_composition` over the effective composition (root + additive
+    // `extra_worlds`) as part of the load above; here we log its findings and
+    // abort on any error, exactly as the inline sweep did — so a broken
+    // composition leaves zero partial root-world content active.
     //
-    // This runs AFTER the template preload above, deliberately: headless is an
+    // The load ran AFTER the template preload above, deliberately: headless is an
     // authoritative host, so `validate_composition` hard-fails a `template_path`
     // that does not resolve (issue #973), and the loader it asks is the same one
     // the spawn will ask — the preloaded cache, then the filesystem.
     {
-        use crate::world::validate::{has_error, validate_composition, WorldSource};
-        // Own the child TOML sources + parsed configs so the borrowed
-        // `WorldSource`s outlive the validation call.
-        let mut child_owned: Vec<(String, String, crate::world::config::WorldConfig)> = Vec::new();
-        for path in &world_config.extra_worlds {
-            match std::fs::read_to_string(path) {
-                Ok(toml) => match crate::world::config::parse_world(&toml) {
-                    Ok(cfg) => child_owned.push((path.clone(), toml, cfg)),
-                    Err(e) => {
-                        return Err(BuildError(format!(
-                            "world composition: extra_world {path:?} failed to parse: {e}"
-                        )));
-                    }
-                },
-                Err(e) => {
-                    return Err(BuildError(format!(
-                        "world composition: could not read extra_world {path:?}: {e}"
-                    )));
-                }
-            }
-        }
-        let root_src = WorldSource::new(args.world_path.clone(), &world_toml, &world_config);
-        let children: Vec<WorldSource> = child_owned
-            .iter()
-            .map(|(p, t, c)| WorldSource::new(p.clone(), t, c))
-            .collect();
-        let findings = validate_composition(&root_src, &children);
-        for f in &findings {
+        use crate::world::validate::{has_error, Severity};
+        for f in &composition_findings {
             let loc = f
                 .source
                 .line
@@ -527,15 +521,15 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
                 target: "world",
                 "world validation [{}] {}: {} ({loc})",
                 match f.severity {
-                    crate::world::validate::Severity::Error => "error",
-                    crate::world::validate::Severity::Warning => "warn",
+                    Severity::Error => "error",
+                    Severity::Warning => "warn",
                 },
                 f.category,
                 f.message
             );
         }
-        if has_error(&findings) {
-            let errors: Vec<String> = findings
+        if has_error(&composition_findings) {
+            let errors: Vec<String> = composition_findings
                 .iter()
                 .filter(|f| f.is_error())
                 .map(|f| {
@@ -554,19 +548,19 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
             )));
         }
 
-        // Issue #935: extra-world TOML text, and the whole world's declared
-        // entity-template set (root + extra worlds), recorded into the
-        // content ledger. This is native's answer to the browser's JS-driven
-        // preload — an EAGER walk from the parsed config, not a lazy record
-        // as things spawn, because a streamed world's declared set would
-        // otherwise not be fully known until streaming finished. See
-        // `content_ledger::eager_record_world_entities`'s docs.
-        for (path, toml, _cfg) in &child_owned {
-            crate::content_ledger::record(path, toml);
-        }
+        // Issue #935: the root + extra-world TOML text the load read, plus the
+        // whole world's declared entity-template set (root + extra worlds),
+        // recorded into the content ledger before the `freeze` below.
+        // `LedgerPlan::apply` writes the `(path, text)` records `world::load`
+        // gathered (root first, then children — native's answer to the browser's
+        // JS-driven preload); `eager_record_world_entities` walks the declared
+        // template set from each parsed config. The content-ledger fold is
+        // path-sorted and order-independent (see `content_ledger`'s docs), so this
+        // yields the byte-identical frozen digest the inline sequence did.
+        ledger_plan.apply();
         crate::content_ledger::eager_record_world_entities(&world_config);
-        for (_, _, cfg) in &child_owned {
-            crate::content_ledger::eager_record_world_entities(cfg);
+        for child in &loaded_children {
+            crate::content_ledger::eager_record_world_entities(&child.config);
         }
     }
 
@@ -595,22 +589,19 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     app.insert_resource(PendingShipConfig(ship_config));
     app.insert_resource(SelectedShipResource(ship_path.clone()));
 
-    // Compile the world's Rhai scripts at build time (issue #984, Rhai M6 phase
-    // 2a) and hard-fail on any error, exactly as `validate_composition` above
-    // hard-fails a broken composition — so a broken script never reaches a
-    // running authoritative host, and a script-error world activates zero
-    // content. Runs BEFORE `freeze` so a sibling `.rhai`'s content folds into the
-    // frozen digest (the `OverlayScriptResolver` records what it reads, #988).
-    // The `Startup` `compile_world_scripts` system re-compiles for the runtime
-    // insertion + trigger merge; this pass is only the fail-fast gate. A
-    // script-free world short-circuits before any engine is built.
-    if raw_world_toml.get("script").is_some() {
-        let resolver = crate::config_cache::production_script_resolver();
-        let compiled = crate::world::script::load::load_world_scripts(
-            &args.world_path,
-            &raw_world_toml,
-            &resolver,
-        );
+    // Script fail-fast gate (issue #984), now over the `CompiledScripts`
+    // `world::load` produced above rather than a SECOND inline compile (issue
+    // #1214). A script error aborts the build exactly as a broken composition
+    // does, so a script-error world activates zero content and never reaches a
+    // running authoritative host. The single `load_world_scripts` call inside the
+    // load already recorded the sibling-`.rhai` content and the `<world>#scripts`
+    // digest into the (not-yet-frozen) content ledger — so a script edit still
+    // folds into the frozen digest, once. The compiled set is then handed to the
+    // `Startup` `compile_world_scripts` system as `PreCompiledScripts`, which
+    // builds the runtime from it instead of compiling a second time. A script-free
+    // world's `compiled_scripts` is `None`, so no gate runs and the runtime is
+    // absent, exactly as before.
+    if let Some(compiled) = &compiled_scripts {
         if crate::world::validate::has_error(&compiled.findings) {
             let errors: Vec<String> = compiled
                 .findings
@@ -625,6 +616,12 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
             )));
         }
     }
+    // Hand the once-compiled set to `compile_world_scripts` at `Startup`. The
+    // ordering contract `compile_world_scripts < setup_world < spawn_world_entities`
+    // is unchanged: that system still sets the activation gate and inserts the
+    // `WorldScriptRuntime` in the same `WorldPlugin` Startup chain slot — it merely
+    // consumes this resource instead of re-reading `RawWorldSource`.
+    app.insert_resource(crate::world::server::PreCompiledScripts(compiled_scripts));
 
     // Issue #935: the world's declared file set — scenario/extra-world TOML,
     // every referenced entity template and its fragments, the player's hull —

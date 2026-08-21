@@ -79,8 +79,13 @@
     import '../components/ph-comms-current-message.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    import { systemView } from '../console-payload.js';
+    // The render lives in gui/courier/captain.console.js (issue #1235): the
+    // shared Captain renderer + this hull's variant (Shields, Power, Repair,
+    // Navigation and Comms all absorbed into the same Station — the compact
+    // courier hull has no dedicated seat for any of them). s is a
+    // SystemStationConsolePayload. The vitest suite imports the same
+    // renderStation.
+    import { renderStation } from './captain.console.js';
 
     function close() {
       document.querySelectorAll('.overlay').forEach(el => el.classList.remove('open'));
@@ -92,39 +97,7 @@
       const open = overlay.classList.contains('open'); close();
       if (!open) { overlay.classList.add('open'); button.classList.add('active'); }
     }
-    // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
-    initConsole({ name: 'captain', render(s) {
-      const command = systemView(s, 'captain', 'viewscreen', 'red-alert');
-      const shields = systemView(s, 'shields-system', 'shield-arc-fore', 'shield-arc-aft');
-      const power = systemView(s, 'power-reactor', 'power-battery');
-      const repair = systemView(s, 'repair');
-      const nav = systemView(s, 'navigation');
-      const comms = systemView(s, 'comms');
-      // The Courier's compact bridge exposes only its Fore hull view and the
-      // authored Cinematic view, even if the model carries extra markers.
-      const courierViews = (command.camera_views || []).filter(view => view === 'camera_fore' || view === 'cinematic');
-      document.getElementById('camera').state = { views: courierViews, current_view: command.view_direction || '', auto: !!command.viewscreen_auto };
-      document.getElementById('red-alert').state = { active: !!command.red_alert, hold: !!command.weapons_hold, auto: !!command.red_alert_auto };
-      document.getElementById('objectives').state = { objectives: command.objectives || [], boosted_objective_id: command.boosted_objective_id ?? null };
-      document.getElementById('shields').state = { facings: shields.facings || [], focused_facing: shields.focused_facing || null, auto: !!shields.shields_auto };
-      const threatRow = document.getElementById('threat-row');
-      if (shields.threat_bearing != null) {
-        threatRow.classList.add('active');
-        document.getElementById('threat-bearing').textContent = Math.round(shields.threat_bearing) + '°M';
-      } else {
-        threatRow.classList.remove('active');
-        document.getElementById('threat-bearing').textContent = '—';
-      }
-      document.getElementById('power').state = { groups: power.consoles || [], auto: !!power.power_auto };
-      document.getElementById('battery').state = { level_pct: power.battery_max ? power.battery_charge / power.battery_max * 100 : 0, charging: !!power.battery_online && !!power.charging, emergency_threshold_pct: 20 };
-      document.getElementById('hull').state = { total_pct: repair.overall_hull?.pct ?? 1, destroyed_pct: repair.overall_hull?.destroyed_pct };
-      document.getElementById('repair').state = { teams: repair.teams || [], auto: !!repair.repair_auto, targets: repair.dispatch_targets || [], damaged: repair.damaged_systems || [] };
-      document.getElementById('nav').state = { blips: nav.blips || [], regions: nav.regions || [], range: nav.radar_range || 800, ship_pos: { x: nav.ship_x || 0, z: nav.ship_z || 0 }, ship_heading: nav.ship_heading || 0, waypoint: nav.waypoint || null };
-      document.getElementById('contacts').state = { contacts: comms.contacts || [] };
-      const messages = comms.messages || [];
-      document.getElementById('message').state = { thread: messages.find(m => !m.is_read) || messages.at(-1) || null, rejection: comms.rejection };
-      document.getElementById('damage').state = s.own_hull || null;
-    }});
+    initConsole({ name: 'captain', render: renderStation });
     document.getElementById('nav-toggle').onclick = () => toggle('nav');
     document.getElementById('comms-toggle').onclick = () => toggle('comms');
     document.getElementById('nav-back').onclick = close;

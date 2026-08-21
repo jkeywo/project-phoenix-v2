@@ -65,24 +65,11 @@
     import '../components/ph-comms-current-message.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    import { setAutoState } from '../console-ui.js';
-    initConsole({
-      name: 'comms',
-      family: 'comms',
-      // s is a CommsConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        var comms = s.comms || s;
-        var msgs = comms.messages || [];
-        var threadMsg = msgs.find(function(m) { return !m.is_read; }) || msgs[msgs.length - 1] || null;
-        document.getElementById('comms-contact-list').state = { contacts: comms.contacts || [] };
-        document.getElementById('comms-hail-list').state = comms;
-        document.getElementById('comms-current-message').state = { thread: threadMsg, rejection: comms.rejection };
-        document.getElementById('station-damage').state = s.own_hull || null;
-        document.getElementById('footer-target').textContent = threadMsg ? (threadMsg.sender_name || t('console.common.active_hail')) : t('console.common.no_active_hail');
-        setAutoState(null, document.getElementById('comms-auto-badge'), !!s.comms_auto);
-      }
-    });
+    // The render lives in gui/battleship/comms.console.js (issue #1235): one
+    // shared Comms renderer, this hull's variant. s is a flat
+    // CommsConsolePayload. The vitest suite imports the same renderStation.
+    import { renderStation } from './comms.console.js';
+    initConsole({ name: 'comms', family: 'comms', render: renderStation });
   </script>
 </body>
 </html>

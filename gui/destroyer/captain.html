@@ -93,47 +93,13 @@
     import '../components/ph-sensor-panel.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    import { setAutoState } from '../console-ui.js';
-    import { systemView } from '../console-payload.js';
-
-    initConsole({
-      name: 'captain',
-      // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        var cameraEl = document.getElementById('camera-select');
-        var redAlertEl = document.getElementById('red-alert');
-        var objectiveEl = document.getElementById('objective-list');
-        var sensorRadarEl = document.getElementById('sensor-radar');
-        var sensorEl = document.getElementById('sensor-panel');
-        var cap = systemView(s, 'captain', 'red-alert', 'viewscreen');
-        var sensors = systemView(s, 'sensors', 'sensor-radar');
-        cameraEl.state = { views: cap.camera_views || [], current_view: cap.view_direction || '', auto: cap.viewscreen_auto || false };
-        redAlertEl.state = { active: !!cap.red_alert, hold: !!cap.weapons_hold, auto: cap.red_alert_auto || false };
-        objectiveEl.state = { objectives: cap.objectives || [], boosted_objective_id: cap.boosted_objective_id ?? null };
-        // Visible mission deadlines, counted down server-side (issue #1024).
-        document.getElementById('deadline-list').state = { deadlines: cap.deadlines || [] };
-        // The science scan (issue #1032). The readout is DERIVED server-side
-        // from the subject's own condition track — there is no authored scan
-        // text anywhere behind it — and the button aims at whatever the captain
-        // has selected on the sensor radar.
-        document.getElementById('scan-readout').state = {
-          scan: sensors.scan || {},
-          target_uuid: sensors.target_uuid || null,
-        };
-        sensorRadarEl.state = sensors;
-        sensorEl.state = sensors;
-        var targetName = sensors.target_name || null;
-        document.getElementById('footer-target').textContent = targetName ? '\u25C9 ' + targetName : t('console.common.no_target');
-        document.getElementById('footer-target').style.color = targetName ? 'var(--tactical)' : 'var(--ink-faint)';
-        // Station badge: the retired composite's captain_auto meant "station
-        // is Backfill-rated". The per-system equivalent is every owned system
-        // AI-run \u2014 the conjunction of the resolved views' *_auto flags
-        // (controlSources can lag a rating change by one tick).
-        setAutoState(null, document.getElementById('captain-auto-badge'), !!(cap.red_alert_auto && cap.viewscreen_auto && sensors.sensors_auto));
-        document.getElementById('station-damage').state = s.own_hull || null;
-      }
-    });
+    // The render lives in gui/destroyer/captain.console.js (issue #1235): the
+    // shared Captain renderer + this hull's variant (Sensors absorbed into
+    // the same Station — the destroyer has no separate Sensors seat). s is a
+    // SystemStationConsolePayload. The vitest suite imports the same
+    // renderStation.
+    import { renderStation } from './captain.console.js';
+    initConsole({ name: 'captain', render: renderStation });
   </script>
 </body>
 </html>

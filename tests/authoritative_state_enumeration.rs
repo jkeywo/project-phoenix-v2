@@ -272,6 +272,17 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     // attention — so by the "does it change what the sim computes" line above
     // it is presentation, not authoritative.
     ("StationImportanceRes", "presentation"),
+    // Presentation — the host viewscreen's reduced-motion comfort state (issue
+    // #1173, PRD #1168): the reduced-motion profile value plus the shake
+    // intensity comfort-slider scale. It only decides how the hull-damage shake
+    // and shield flash are DRAWN (native camera jitter / WASM whole-page
+    // translate / white-flash uniform), and nothing in the fixed tick reads it —
+    // it is `init_resource`'d by the server-only `ViewscreenBorderPlugin`, which
+    // the headless sim app never adds, so it is a forward declaration here (like
+    // `EntitySpawnOrigin` above) rather than a response to a census failure. By
+    // the "does it change what the sim computes" line, presentation, not
+    // authoritative.
+    ("ViewscreenMotion", "presentation"),
 
     // Broadcast caches — one-directional delta-suppression mirrors of
     // already-authoritative state, not a second copy of simulation truth.

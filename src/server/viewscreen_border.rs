@@ -51,6 +51,25 @@ const SHAKE_WINDOW_SECS: f32 = 2.0;
 /// Maximum shake magnitude in CSS pixels (WASM) or world units (native).
 const SHAKE_MAX_MAGNITUDE: f32 = 2.5;
 
+/// Total hull damage in the rolling window that saturates the shake to
+/// [`SHAKE_MAX_MAGNITUDE`]. It doubles as the shield-absorb amount that
+/// saturates the white flash — the two feedbacks share one "full hit" scale.
+const SHAKE_DAMAGE_FULL: f32 = 30.0;
+
+/// Default global shake-intensity scale (issue #1173, PRD #1168). The
+/// comfort-slider seam: [`ViewscreenMotion::shake_intensity`] multiplies the
+/// derived magnitude, so a future accessibility "screen shake" slider drives
+/// `0.0..=1.0` through this one field. `1.0` is the shipped, no-reduction
+/// baseline — normal motion is unchanged when nothing requests a reduction.
+const DEFAULT_SHAKE_INTENSITY: f32 = 1.0;
+
+/// Shield-flash intensity ceiling applied while reduced motion is active
+/// (issue #1173). `0.0` fully disables the white shield-hit flash: a sudden
+/// full-frame brightness jolt is exactly what a viewer who asked for stillness
+/// should not be given. A future comfort slider can raise this to soften rather
+/// than remove the cue.
+const REDUCED_MOTION_FLASH_CAP: f32 = 0.0;
+
 // ── Resources ────────────────────────────────────────────────────────
 
 /// Cached handle to the single `RedAlertVignetteMaterial` instance,
@@ -80,6 +99,45 @@ pub struct ShakeState {
     /// Rolling window of `(simulation_time, hull_damage)` entries.
     /// Pruned to the last [`SHAKE_WINDOW_SECS`] each frame.
     pub entries: Vec<(f32, f32)>,
+}
+
+/// Host-side viewscreen motion-comfort state (issue #1173, PRD #1168).
+///
+/// PRESENTATION state — never folded into the sim digest; classified
+/// `presentation` in `tests/authoritative_state_enumeration.rs`. It carries the
+/// host's reduced-motion preference to the render systems, and is set on both
+/// render paths:
+///
+/// - **WASM**: the host page forwards `prefers-reduced-motion: reduce` through
+///   [`crate::server::bridge::wasm_set_reduced_motion`], which
+///   [`sync_reduced_motion`] drains into this resource each frame.
+/// - **Native**: [`init_native_reduced_motion`] seeds it once at startup from
+///   the `PHOENIX_REDUCED_MOTION` environment variable — the desktop viewscreen
+///   has no DOM `prefers-reduced-motion` to read.
+///
+/// Both `#[cfg]` branches of [`apply_camera_shake`] and
+/// [`drive_vignette_intensity`] read it, so the reduced-motion decision reaches
+/// the native camera jitter and the WASM whole-page translate identically.
+#[derive(Resource, Debug, Clone)]
+pub struct ViewscreenMotion {
+    /// The reduced-motion profile value. When `true`, hull-damage screen shake
+    /// (native camera jitter AND the WASM whole-page translate) is forced to
+    /// zero and the shield-hit white flash is capped to
+    /// [`REDUCED_MOTION_FLASH_CAP`].
+    pub reduced_motion: bool,
+    /// Global shake-intensity scale in `0.0..=1.0` — the comfort-slider seam
+    /// (issue #1173 AC5). Multiplies the derived shake magnitude in
+    /// [`shake_magnitude`]; a future accessibility slider drives it.
+    pub shake_intensity: f32,
+}
+
+impl Default for ViewscreenMotion {
+    fn default() -> Self {
+        Self {
+            reduced_motion: false,
+            shake_intensity: DEFAULT_SHAKE_INTENSITY,
+        }
+    }
 }
 
 // ── Red Alert vignette material ──────────────────────────────────────
@@ -129,6 +187,7 @@ impl Plugin for ViewscreenBorderPlugin {
             .add_message::<LobbyStateChanged>()
             .init_resource::<ShieldFlashState>()
             .init_resource::<ShakeState>()
+            .init_resource::<ViewscreenMotion>()
             // The border frame, lobby UI, and red-alert vignette are rendered by the
             // HTML overlay in `server.html` (`window.__updateLobby` / `__updateHud`);
             // this plugin pushes the `LobbyStatePayload` / `ViewscreenHudState`
@@ -168,7 +227,46 @@ impl Plugin for ViewscreenBorderPlugin {
             )
             // On GameOver, push one final HUD state with the game-over message.
             .add_systems(OnEnter(GamePhase::GameOver), push_game_over_hud_state);
+
+        // Reduced-motion source, one per render path (issue #1173, AC3). The
+        // WASM host forwards `prefers-reduced-motion` live; the native build
+        // seeds the preference once at startup from the environment. Both write
+        // the same `ViewscreenMotion` resource the shake/flash systems read.
+        #[cfg(target_arch = "wasm32")]
+        app.add_systems(
+            Update,
+            sync_reduced_motion
+                .before(apply_camera_shake)
+                .before(drive_vignette_intensity),
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_systems(Startup, init_native_reduced_motion);
     }
+}
+
+/// WASM: drain the host page's reduced-motion preference into
+/// [`ViewscreenMotion`] each frame (issue #1173). The host page forwards
+/// `prefers-reduced-motion: reduce` through
+/// [`crate::server::bridge::wasm_set_reduced_motion`]; reading it every frame
+/// (rather than once at init) lets an OS-level change take effect without a
+/// page reload.
+#[cfg(target_arch = "wasm32")]
+fn sync_reduced_motion(mut motion: ResMut<ViewscreenMotion>) {
+    let requested = crate::server::bridge::reduced_motion_requested();
+    if motion.reduced_motion != requested {
+        motion.reduced_motion = requested;
+    }
+}
+
+/// Native: seed [`ViewscreenMotion::reduced_motion`] from the host environment
+/// at startup (issue #1173). The desktop viewscreen has no DOM
+/// `prefers-reduced-motion` to read, so
+/// [`crate::server::bridge::native_reduced_motion`] reads the env-var seam that
+/// is the native analog of the WASM host page forwarding the browser
+/// preference. An unset/other value leaves the shipped default (normal motion).
+#[cfg(not(target_arch = "wasm32"))]
+fn init_native_reduced_motion(mut motion: ResMut<ViewscreenMotion>) {
+    motion.reduced_motion = crate::server::bridge::native_reduced_motion();
 }
 
 /// Reads server lobby resources and emits `LobbyStateChanged` for the HTML
@@ -300,7 +398,7 @@ fn process_shield_flash(
     for msg in outbound.read() {
         if let ServerMessage::DamageTaken { shield, .. } = &msg.msg {
             if *shield > 0.0 {
-                flash.intensity = (*shield / 30.0).min(1.0);
+                flash.intensity = (*shield / SHAKE_DAMAGE_FULL).min(1.0);
             }
         }
     }
@@ -347,6 +445,7 @@ fn process_hull_shake(
 #[allow(clippy::disallowed_methods)]
 fn apply_camera_shake(
     time: Res<Time>,
+    motion: Res<ViewscreenMotion>,
     mut shake: ResMut<ShakeState>,
     #[cfg(not(target_arch = "wasm32"))] mut cam_query: Query<&mut Transform, With<GameCamera>>,
 ) {
@@ -355,9 +454,14 @@ fn apply_camera_shake(
     // Prune entries outside the rolling window.
     shake.entries.retain(|&(t, _)| now - t <= SHAKE_WINDOW_SECS);
 
-    // Sum hull damage in the window and derive magnitude.
+    // Sum hull damage in the window and derive magnitude. Under reduced motion
+    // the pure helper returns exactly `0.0`, so BOTH the native camera-jitter
+    // branch and the WASM whole-page-translate branch below collapse to the
+    // no-shake path (issue #1173). The comfort-slider scale
+    // (`ViewscreenMotion::shake_intensity`) is applied here too, giving future
+    // sliders a seam without touching either apply branch.
     let total_hull: f32 = shake.entries.iter().map(|&(_, h)| h).sum();
-    let magnitude = (total_hull / 30.0).min(1.0) * SHAKE_MAX_MAGNITUDE;
+    let magnitude = shake_magnitude(total_hull, motion.shake_intensity, motion.reduced_motion);
 
     if magnitude > 0.01 {
         let mut rng = rand::rng();
@@ -392,6 +496,7 @@ fn apply_camera_shake(
 /// path still drives this shared material.
 fn drive_vignette_intensity(
     time: Res<Time>,
+    motion: Res<ViewscreenMotion>,
     window: Query<&Window>,
     handle: Option<Res<VignetteMaterialHandle>>,
     mut materials: ResMut<Assets<RedAlertVignetteMaterial>>,
@@ -402,9 +507,11 @@ fn drive_vignette_intensity(
         return;
     };
 
-    // Decay flash intensity toward zero.
+    // Decay flash intensity toward zero, then cap it for reduced motion: a
+    // sudden full-frame white jolt is capped/disabled under the profile
+    // (issue #1173). Normal motion passes the decayed value through unchanged.
     flash.intensity = (flash.intensity - time.delta_secs() * FLASH_DECAY_RATE).max(0.0);
-    material.flash_intensity = flash.intensity;
+    material.flash_intensity = capped_flash_intensity(flash.intensity, motion.reduced_motion);
 
     // CSS owns the red-alert vignette now; keep the Bevy ring dark.
     material.intensity = 0.0;
@@ -416,6 +523,34 @@ fn drive_vignette_intensity(
 }
 
 // ── Pure helpers ─────────────────────────────────────────────────────
+
+/// Derive the per-frame hull-shake magnitude — CSS pixels on WASM, world units
+/// on native — from the rolling window's total hull damage (issue #1173).
+///
+/// `intensity` is the comfort-slider scale ([`ViewscreenMotion::shake_intensity`],
+/// AC5); `reduced` is the reduced-motion profile value and forces the result to
+/// exactly `0.0`. Both render paths call this, so the reduced-motion decision
+/// and the intensity seam apply identically whether the shake moves a camera or
+/// the whole page. Kept pure (no Bevy, no RNG) so `cargo test` covers the
+/// zero-under-reduced and intensity-scaling logic without a GPU.
+pub fn shake_magnitude(total_hull_damage: f32, intensity: f32, reduced: bool) -> f32 {
+    if reduced {
+        return 0.0;
+    }
+    let saturated = (total_hull_damage / SHAKE_DAMAGE_FULL).clamp(0.0, 1.0);
+    saturated * SHAKE_MAX_MAGNITUDE * intensity.clamp(0.0, 1.0)
+}
+
+/// Cap the shield-hit white flash under reduced motion (issue #1173). Normal
+/// motion passes the flash through unchanged; reduced motion clamps it down to
+/// [`REDUCED_MOTION_FLASH_CAP`] (`0.0` = disabled).
+pub fn capped_flash_intensity(raw: f32, reduced: bool) -> f32 {
+    if reduced {
+        raw.min(REDUCED_MOTION_FLASH_CAP)
+    } else {
+        raw
+    }
+}
 
 /// Convert a ship yaw in radians to a 0–359 integer compass bearing.
 ///
@@ -607,6 +742,82 @@ fn push_hud_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── reduced motion: shake_magnitude (issue #1173) ────────────────
+
+    #[test]
+    fn shake_scales_with_damage_and_saturates() {
+        // Normal motion, full intensity: linear up to the full-hit threshold,
+        // then clamped to the max magnitude.
+        let half = shake_magnitude(SHAKE_DAMAGE_FULL / 2.0, 1.0, false);
+        assert!((half - SHAKE_MAX_MAGNITUDE * 0.5).abs() < 1e-6);
+        let full = shake_magnitude(SHAKE_DAMAGE_FULL, 1.0, false);
+        assert!((full - SHAKE_MAX_MAGNITUDE).abs() < 1e-6);
+        // Beyond the threshold it does not keep growing.
+        let over = shake_magnitude(SHAKE_DAMAGE_FULL * 10.0, 1.0, false);
+        assert!((over - SHAKE_MAX_MAGNITUDE).abs() < 1e-6);
+    }
+
+    #[test]
+    fn shake_is_zero_under_reduced_motion() {
+        // The reduced-motion profile forces exactly zero regardless of damage
+        // or intensity — the AC1 guarantee for BOTH render paths.
+        assert_eq!(shake_magnitude(SHAKE_DAMAGE_FULL, 1.0, true), 0.0);
+        assert_eq!(shake_magnitude(SHAKE_DAMAGE_FULL * 100.0, 1.0, true), 0.0);
+        assert_eq!(shake_magnitude(5.0, 0.5, true), 0.0);
+    }
+
+    #[test]
+    fn shake_intensity_is_the_comfort_slider_seam() {
+        // AC5: intensity scales the magnitude linearly, so a future slider can
+        // dial it between full and off without any other change.
+        let base = shake_magnitude(SHAKE_DAMAGE_FULL, 1.0, false);
+        let half = shake_magnitude(SHAKE_DAMAGE_FULL, 0.5, false);
+        let off = shake_magnitude(SHAKE_DAMAGE_FULL, 0.0, false);
+        assert!((half - base * 0.5).abs() < 1e-6);
+        assert_eq!(off, 0.0);
+        // Out-of-range intensity is clamped, never amplified past the max.
+        let over = shake_magnitude(SHAKE_DAMAGE_FULL, 4.0, false);
+        assert!((over - SHAKE_MAX_MAGNITUDE).abs() < 1e-6);
+    }
+
+    #[test]
+    fn no_damage_no_shake() {
+        assert_eq!(shake_magnitude(0.0, 1.0, false), 0.0);
+    }
+
+    // ── reduced motion: capped_flash_intensity (issue #1173) ─────────
+
+    #[test]
+    fn flash_passes_through_at_normal_motion() {
+        // AC4: normal motion is unchanged — the decayed value is untouched.
+        assert_eq!(capped_flash_intensity(1.0, false), 1.0);
+        assert_eq!(capped_flash_intensity(0.42, false), 0.42);
+        assert_eq!(capped_flash_intensity(0.0, false), 0.0);
+    }
+
+    #[test]
+    fn flash_is_capped_under_reduced_motion() {
+        // AC2: the white shield flash is capped/disabled under reduced motion.
+        assert_eq!(capped_flash_intensity(1.0, true), REDUCED_MOTION_FLASH_CAP);
+        assert_eq!(capped_flash_intensity(0.7, true), REDUCED_MOTION_FLASH_CAP);
+        // Already below the cap → unchanged (the min never raises it).
+        assert_eq!(capped_flash_intensity(0.0, true), 0.0);
+    }
+
+    #[test]
+    fn viewscreen_motion_default_is_full_normal_motion() {
+        let m = ViewscreenMotion::default();
+        assert!(!m.reduced_motion);
+        assert_eq!(m.shake_intensity, DEFAULT_SHAKE_INTENSITY);
+        // The default must leave shake untouched from the pre-#1173 formula.
+        assert!(
+            (shake_magnitude(SHAKE_DAMAGE_FULL, m.shake_intensity, m.reduced_motion)
+                - SHAKE_MAX_MAGNITUDE)
+                .abs()
+                < 1e-6
+        );
+    }
 
     // ── compute_hud_state ────────────────────────────────────────────
 

@@ -202,6 +202,15 @@ thread_local! {
     /// `wasm_set_debug_regions()` before `wasm_init()`.
     static DEBUG_REGIONS_ENABLED: RefCell<bool> = const { RefCell::new(false) };
 
+    /// Whether the host page's reduced-motion preference
+    /// (`prefers-reduced-motion: reduce`) is active, forwarded by
+    /// [`wasm_set_reduced_motion`] (issue #1173). Drained each frame into the
+    /// `ViewscreenMotion` resource by `viewscreen_border::sync_reduced_motion`.
+    /// Unlike `DEBUG_REGIONS_ENABLED` it is read continuously, so an OS-level
+    /// change of the preference takes effect without a page reload.
+    #[cfg(target_arch = "wasm32")]
+    static REDUCED_MOTION: RefCell<bool> = const { RefCell::new(false) };
+
     /// Mirror of the `SimulationPaused` resource, written by
     /// `drain_debug_toggles` so `wasm_is_paused()` can answer without a Bevy
     /// world handle. The host settings menu's Gameplay tab reads it each frame
@@ -937,6 +946,55 @@ pub fn wasm_set_debug_regions(enabled: bool) {
 #[wasm_bindgen]
 pub fn wasm_is_debug_regions_enabled() -> bool {
     DEBUG_REGIONS_ENABLED.with(|v| *v.borrow())
+}
+
+/// Called by the host page to forward its reduced-motion preference
+/// (`window.matchMedia('(prefers-reduced-motion: reduce)').matches`) to the
+/// viewscreen renderer (issue #1173). May be called before `wasm_init()` and at
+/// any time after (e.g. from the media-query `change` listener): the value is
+/// drained into `ViewscreenMotion` every frame by
+/// `viewscreen_border::sync_reduced_motion`, so a runtime change takes effect
+/// without a reload.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_set_reduced_motion(enabled: bool) {
+    REDUCED_MOTION.with(|v| *v.borrow_mut() = enabled);
+}
+
+/// Called by JS (or the viewscreen reduced-motion smoke) to query the
+/// reduced-motion preference the host page last forwarded — the observable
+/// proof that the profile value reached the WASM render path (issue #1173).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_is_reduced_motion() -> bool {
+    REDUCED_MOTION.with(|v| *v.borrow())
+}
+
+/// Read the current reduced-motion request for `sync_reduced_motion` to drain
+/// into the `ViewscreenMotion` resource each frame (issue #1173).
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn reduced_motion_requested() -> bool {
+    REDUCED_MOTION.with(|v| *v.borrow())
+}
+
+/// Native: the host's reduced-motion preference, read from the
+/// `PHOENIX_REDUCED_MOTION` environment variable (issue #1173). The desktop
+/// viewscreen has no DOM `prefers-reduced-motion`, so this env var is the native
+/// analog of the WASM host page forwarding the browser preference — it seeds
+/// `ViewscreenMotion` once at startup via
+/// `viewscreen_border::init_native_reduced_motion`. Enabled by any of
+/// `1`/`true`/`yes`/`on`/`reduce` (case-insensitive); unset or anything else
+/// leaves normal motion in place.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn native_reduced_motion() -> bool {
+    std::env::var("PHOENIX_REDUCED_MOTION")
+        .map(|val| {
+            matches!(
+                val.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on" | "reduce"
+            )
+        })
+        .unwrap_or(false)
 }
 
 /// Called by JS to set the log category/level spec from `?log=` in the URL.

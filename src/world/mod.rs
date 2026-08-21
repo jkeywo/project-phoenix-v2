@@ -12,6 +12,12 @@ pub mod delayed;
 pub mod dispatch;
 pub mod flags;
 pub mod layers;
+/// The world-loading sequence owned in one place (issue #1213): a
+/// [`WorldReader`](load::WorldReader) seam, a [`LoadPolicy`](load::LoadPolicy)
+/// over [`load`](load::load), and the content-ledger writes returned as a
+/// [`LedgerPlan`](load::LedgerPlan) for the caller to apply. A thin wrapper over
+/// `parse_world` / `validate_composition` / `load_world_scripts`.
+pub mod load;
 pub mod manifest;
 pub mod mod_pack;
 pub mod scenario;

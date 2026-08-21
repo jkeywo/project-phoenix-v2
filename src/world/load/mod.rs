@@ -1,0 +1,488 @@
+//! The world-loading sequence, owned in one place (issue #1213, Track 2 step A1).
+//!
+//! Every path that turns a world file into live content today does the same
+//! handful of steps in the same order, spread across three call sites: the
+//! browser bridge, `headless::app::build_headless_app`, and the additive
+//! layer/scenario merge. Each reads the TOML, parses it into a
+//! [`WorldConfig`](crate::world::config::WorldConfig), re-parses the raw
+//! [`toml::Value`] the Rhai loader needs, (optionally) transforms that raw value,
+//! validates the composition, compiles the scripts, and records what it read into
+//! the [content ledger](crate::content_ledger). This module is that sequence
+//! expressed once, as a function over a [`LoadRequest`].
+//!
+//! # A wrapper, deliberately
+//!
+//! This is a *thin wrapper over today's code paths*: it calls
+//! [`parse_world`](crate::world::config::parse_world),
+//! [`validate_composition`](crate::world::validate::validate_composition), and
+//! [`load_world_scripts`](crate::world::script::load::load_world_scripts)
+//! unchanged. Issue #1213 converts **zero** production call sites — later issues
+//! (A2 headless, B5/B6 boot) adopt it — so it must not change any runtime
+//! behaviour or digest. Nothing here parses a world a second way.
+//!
+//! # The ledger is data, not a side effect
+//!
+//! The one place today's boot paths differ from a pure function is the content
+//! ledger: they `reset()` at the start of a load, `record(path, text)` each file,
+//! and `freeze()` once the declared set is known. [`load`] does **not** freeze
+//! and does not reset — it returns the world/child-TOML records it read as a
+//! [`LedgerPlan`], for the caller (the future `boot::ingest_world`) to apply and
+//! then freeze in one documented order. The compiled-script *digest* is the one
+//! record still written eagerly, because it rides inside the wrapped
+//! [`load_world_scripts`](crate::world::script::load::load_world_scripts) exactly
+//! as it does today; the content-ledger fold is path-sorted and order-independent
+//! (see [`crate::content_ledger::ContentLedger::fold`]), so interleaving that
+//! record with the caller's `LedgerPlan` application yields a byte-identical
+//! frozen digest.
+//!
+//! # The reader seam
+//!
+//! [`WorldReader`] abstracts "read the TOML at this path": [`FsReader`] on native,
+//! [`WasmReader`] over the browser bridge's pending-fetch queue, and
+//! [`MemoryReader`] for tests. It is deliberately **not** named `WorldSource` —
+//! that name belongs to [`crate::world::validate::WorldSource`], the parsed
+//! (path, toml, config) triple the composition validator borrows.
+
+use std::collections::BTreeMap;
+use std::fmt;
+
+use crate::world::config::{parse_world, WorldConfig};
+use crate::world::script::load::{load_world_scripts, CompiledScripts, ScriptResolver};
+use crate::world::validate::{validate_composition, WorldFinding, WorldSource};
+
+// ── The reader seam ─────────────────────────────────────────────────────────
+
+/// A source of world TOML text, keyed by authored path.
+///
+/// The one thing a world load needs from its host that differs per target:
+/// native reads the filesystem, the browser reads a JS-delivered fetch queue, a
+/// test reads an in-memory map. Returns `None` when the path cannot be read (not
+/// yet fetched, missing file, absent key) — the caller turns that into a
+/// [`LoadError`].
+pub trait WorldReader {
+    /// Read the world TOML at `path`, or `None` if it cannot be read.
+    fn read(&self, path: &str) -> Option<String>;
+}
+
+/// Native/headless reader: the world TOML off the filesystem.
+///
+/// Mirrors `world::server::load_scenario_toml_text`'s native arm
+/// (`std::fs::read_to_string(path).ok()`), so a converted call site reads exactly
+/// what it reads today.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct FsReader;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WorldReader for FsReader {
+    fn read(&self, path: &str) -> Option<String> {
+        std::fs::read_to_string(path).ok()
+    }
+}
+
+/// Browser reader: the world TOML off the config-cache's JS-delivered pending
+/// queue, firing a fetch request when it is not yet present.
+///
+/// Mirrors `world::server::load_scenario_toml_text`'s wasm arm. Both
+/// [`pop_pending_world_toml`](crate::config_cache::pop_pending_world_toml) and
+/// [`request_world_fetch`](crate::config_cache::request_world_fetch) have native
+/// no-op stubs, so this adapter compiles on every target (and simply reads
+/// `None` off-browser) without a `cfg` gate of its own.
+pub struct WasmReader;
+
+impl WorldReader for WasmReader {
+    fn read(&self, path: &str) -> Option<String> {
+        crate::config_cache::pop_pending_world_toml(path).or_else(|| {
+            crate::config_cache::request_world_fetch(path.to_string());
+            None
+        })
+    }
+}
+
+/// Test reader: an in-memory `path -> TOML` map.
+///
+/// The single fixture source for [`load`]'s unit tests — a world composition
+/// (root plus `extra_worlds` children) authored as literal strings, with no
+/// filesystem or bridge involved.
+pub struct MemoryReader(pub BTreeMap<String, String>);
+
+impl MemoryReader {
+    /// Build a reader from `(path, toml)` pairs.
+    pub fn new<I, K, V>(entries: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        MemoryReader(
+            entries
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        )
+    }
+}
+
+impl WorldReader for MemoryReader {
+    fn read(&self, path: &str) -> Option<String> {
+        self.0.get(path).cloned()
+    }
+}
+
+// ── Request / policy ────────────────────────────────────────────────────────
+
+/// How much of the load sequence to run for a [`LoadRequest`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoadPolicy {
+    /// Full boot ingestion: parse, recurse `extra_worlds` children, validate the
+    /// composition, compile scripts, and gather every file read into the
+    /// [`LedgerPlan`] for the caller to apply and freeze. The policy the future
+    /// `boot::ingest_world` (and today's `build_headless_app`) uses.
+    Activate,
+    /// Additive layer/scenario merge: parse the single world, record its TOML,
+    /// and carry its compiled scripts as data — no composition gate and no child
+    /// recursion, because a layer merges into an already-active composition. The
+    /// policy `scenario.rs` folds into (issue #1045 plumbing).
+    Merge,
+    /// The pure kernel: [`parse_world`](crate::world::config::parse_world) only,
+    /// no ledger and no scripts. The policy the manifest / mod-pack linters use
+    /// to inspect a world without loading it.
+    Inspect,
+}
+
+/// One world-load request: where to read from, how to resolve sibling scripts,
+/// which [`LoadPolicy`] to run, and an optional pre-compile transform of the raw
+/// world value.
+pub struct LoadRequest<'a> {
+    /// Authored path of the root world TOML (its content-ledger / snapshot key).
+    pub path: String,
+    /// The TOML reader for this target.
+    pub reader: &'a dyn WorldReader,
+    /// Resolver for a world's sibling `.rhai` scripts (the existing script-load
+    /// seam). Unused under [`LoadPolicy::Inspect`].
+    pub script_resolver: &'a dyn ScriptResolver,
+    /// Which slice of the sequence to run.
+    pub policy: LoadPolicy,
+    /// Optional transform applied to the raw [`toml::Value`] **before** scripts
+    /// are compiled — the seam `headless::duel::apply_duel_sides` rewrites the
+    /// slot roster through. It touches only the raw value the script loader
+    /// reads; the parsed [`WorldConfig`] is derived from the untouched text, so a
+    /// transform never perturbs entity/anchor content. `Err` aborts the load with
+    /// [`LoadError::TransformFailed`].
+    pub raw_transform: Option<&'a dyn Fn(toml::Value) -> Result<toml::Value, String>>,
+}
+
+impl<'a> LoadRequest<'a> {
+    /// A request with no [`raw_transform`](Self::raw_transform).
+    pub fn new(
+        path: impl Into<String>,
+        reader: &'a dyn WorldReader,
+        script_resolver: &'a dyn ScriptResolver,
+        policy: LoadPolicy,
+    ) -> Self {
+        LoadRequest {
+            path: path.into(),
+            reader,
+            script_resolver,
+            policy,
+            raw_transform: None,
+        }
+    }
+
+    /// This request with a raw-value transform attached.
+    pub fn with_transform(
+        mut self,
+        transform: &'a dyn Fn(toml::Value) -> Result<toml::Value, String>,
+    ) -> Self {
+        self.raw_transform = Some(transform);
+        self
+    }
+}
+
+// ── Result / ledger / error ─────────────────────────────────────────────────
+
+/// One content-ledger record a load produced by reading a file: the file's
+/// authored path and the raw text read at it.
+///
+/// Applied by the caller as `content_ledger::record(&record.path, &record.text)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LedgerRecord {
+    /// Authored path (the content-ledger key, before canonicalisation).
+    pub path: String,
+    /// The raw TOML text read at `path`.
+    pub text: String,
+}
+
+/// The content-ledger writes a load gathered, returned as data.
+///
+/// [`load`] never touches the global ledger for these records nor calls
+/// [`freeze`](crate::content_ledger::freeze); it hands them back so the caller
+/// applies them (and freezes) in one place. Carries the world-TOML records — the
+/// root and every `extra_worlds` child — that the boot paths record today. The
+/// entity-template eager walk and the `freeze` itself stay with the caller, and
+/// the compiled-script digest is recorded inside the wrapped `load_world_scripts`
+/// (order-independent under the ledger's path-sorted fold).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LedgerPlan {
+    /// The `(path, text)` records to apply, in the order the loader read them
+    /// (root first, then children). Order does not affect the folded digest.
+    pub records: Vec<LedgerRecord>,
+}
+
+impl LedgerPlan {
+    /// Apply every record to the content ledger via
+    /// [`crate::content_ledger::record`]. The caller calls this (then
+    /// [`crate::content_ledger::freeze`]) — [`load`] never does.
+    pub fn apply(&self) {
+        for record in &self.records {
+            crate::content_ledger::record(&record.path, &record.text);
+        }
+    }
+}
+
+/// One fully-loaded world: its parsed config, compiled scripts, loaded children,
+/// composition findings, and the ledger records the load read.
+///
+/// `findings` carries the **composition**-level findings (from
+/// [`validate_composition`](crate::world::validate::validate_composition)); the
+/// **script**-level findings ride in `scripts`'s own
+/// [`CompiledScripts::findings`](crate::world::script::load::CompiledScripts). A
+/// caller gating activation checks both, exactly as the boot paths do today:
+/// `has_error(&loaded.findings)` and, when `scripts` is `Some`,
+/// `has_error(&scripts.findings)`.
+pub struct LoadedWorld {
+    /// The parsed world configuration (from the untouched TOML text).
+    pub config: WorldConfig,
+    /// The compiled, validated script set, or `None` for a world with no
+    /// `script` key or under [`LoadPolicy::Inspect`].
+    pub scripts: Option<CompiledScripts>,
+    /// The `extra_worlds` children, loaded and recorded (populated only under
+    /// [`LoadPolicy::Activate`]).
+    pub children: Vec<LoadedWorld>,
+    /// Composition-level validation findings (empty except under
+    /// [`LoadPolicy::Activate`]).
+    pub findings: Vec<WorldFinding>,
+    /// The content-ledger records this load read (empty under
+    /// [`LoadPolicy::Inspect`]).
+    pub ledger: LedgerPlan,
+}
+
+impl fmt::Debug for LoadedWorld {
+    // Hand-rolled because [`CompiledScripts`] carries Rhai `AST`s and is not
+    // `Debug`; the compiled set is shown as a presence marker so a `LoadedWorld`
+    // (and any test asserting over one) can still be printed.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LoadedWorld")
+            .field("config", &self.config)
+            .field("scripts", &self.scripts.as_ref().map(|_| "<compiled>"))
+            .field("children", &self.children)
+            .field("findings", &self.findings)
+            .field("ledger", &self.ledger)
+            .finish()
+    }
+}
+
+/// Why a load could not produce a [`LoadedWorld`] at all.
+///
+/// Composition and script *validation* outcomes are **not** errors here — they
+/// ride in [`LoadedWorld::findings`] / the compiled scripts, and the caller gates
+/// activation on them. A `LoadError` is reserved for the failures that stop a
+/// world being produced: an unreadable file, a TOML that will not parse, or a
+/// failing transform — mirroring the boot paths, which hard-fail exactly those.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LoadError {
+    /// The reader returned `None` for the root world path.
+    ReadFailed { path: String },
+    /// [`parse_world`](crate::world::config::parse_world) rejected the root TOML.
+    ParseFailed { path: String, message: String },
+    /// The raw `toml::Value` re-parse (needed for the script seam) failed.
+    RawParseFailed { path: String, message: String },
+    /// The [`raw_transform`](LoadRequest::raw_transform) hook returned `Err`.
+    TransformFailed { message: String },
+    /// An `extra_worlds` child could not be read.
+    ChildReadFailed { path: String },
+    /// An `extra_worlds` child's TOML would not parse.
+    ChildParseFailed { path: String, message: String },
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LoadError::ReadFailed { path } => write!(f, "world {path:?} could not be read"),
+            LoadError::ParseFailed { path, message } => {
+                write!(f, "world {path:?} failed to parse: {message}")
+            }
+            LoadError::RawParseFailed { path, message } => {
+                write!(f, "world {path:?} failed to re-parse as a TOML value: {message}")
+            }
+            LoadError::TransformFailed { message } => {
+                write!(f, "world raw-value transform failed: {message}")
+            }
+            LoadError::ChildReadFailed { path } => {
+                write!(f, "extra_world {path:?} could not be read")
+            }
+            LoadError::ChildParseFailed { path, message } => {
+                write!(f, "extra_world {path:?} failed to parse: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for LoadError {}
+
+// ── The load sequence ───────────────────────────────────────────────────────
+
+/// Run the world-loading sequence described by `request`.
+///
+/// Wraps today's code paths; see the [module docs](self) for the ledger and
+/// no-behaviour-change contract. Dispatches on [`LoadRequest::policy`]:
+///
+/// * [`Inspect`](LoadPolicy::Inspect) — read + `parse_world`. No scripts, no
+///   ledger, no children.
+/// * [`Merge`](LoadPolicy::Merge) — read + `parse_world`, record the TOML, and
+///   compile scripts (carried, not activated). No composition gate, no children.
+/// * [`Activate`](LoadPolicy::Activate) — the full sequence: read + `parse_world`,
+///   record, recurse and record `extra_worlds` children, validate the
+///   composition, and compile scripts.
+pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
+    let LoadRequest {
+        path,
+        reader,
+        script_resolver,
+        policy,
+        raw_transform,
+    } = request;
+
+    let text = read_root(reader, &path)?;
+    let config = parse_root(&path, &text)?;
+
+    match policy {
+        LoadPolicy::Inspect => Ok(LoadedWorld {
+            config,
+            scripts: None,
+            children: Vec::new(),
+            findings: Vec::new(),
+            ledger: LedgerPlan::default(),
+        }),
+        LoadPolicy::Merge => {
+            let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
+            Ok(LoadedWorld {
+                config,
+                scripts,
+                children: Vec::new(),
+                findings: Vec::new(),
+                ledger: LedgerPlan {
+                    records: vec![LedgerRecord {
+                        path: path.clone(),
+                        text,
+                    }],
+                },
+            })
+        }
+        LoadPolicy::Activate => {
+            let mut records = vec![LedgerRecord {
+                path: path.clone(),
+                text: text.clone(),
+            }];
+
+            // Read, parse and record each `extra_worlds` child. The `(path, text)`
+            // pairs are owned here so the borrowed `WorldSource`s below outlive the
+            // composition call, exactly as `build_headless_app` owns its
+            // `child_owned` triples.
+            let mut children: Vec<LoadedWorld> = Vec::new();
+            let mut child_sources: Vec<(String, String)> = Vec::new();
+            for child_path in &config.extra_worlds {
+                let child_text = reader
+                    .read(child_path)
+                    .ok_or_else(|| LoadError::ChildReadFailed {
+                        path: child_path.clone(),
+                    })?;
+                let child_config =
+                    parse_world(&child_text).map_err(|e| LoadError::ChildParseFailed {
+                        path: child_path.clone(),
+                        message: e,
+                    })?;
+                records.push(LedgerRecord {
+                    path: child_path.clone(),
+                    text: child_text.clone(),
+                });
+                child_sources.push((child_path.clone(), child_text));
+                children.push(LoadedWorld {
+                    config: child_config,
+                    scripts: None,
+                    children: Vec::new(),
+                    findings: Vec::new(),
+                    ledger: LedgerPlan::default(),
+                });
+            }
+
+            // Atomic composition validation over root + children. Findings (not
+            // errors) — the caller gates activation on them.
+            let root_src = WorldSource::new(path.clone(), &text, &config);
+            let child_srcs: Vec<WorldSource> = children
+                .iter()
+                .zip(child_sources.iter())
+                .map(|(child, (child_path, child_text))| {
+                    WorldSource::new(child_path.clone(), child_text.as_str(), &child.config)
+                })
+                .collect();
+            let findings = validate_composition(&root_src, &child_srcs);
+            drop(child_srcs);
+            drop(root_src);
+
+            let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
+
+            Ok(LoadedWorld {
+                config,
+                scripts,
+                children,
+                findings,
+                ledger: LedgerPlan { records },
+            })
+        }
+    }
+}
+
+// ── Private helpers (each wraps one of today's steps) ────────────────────────
+
+fn read_root(reader: &dyn WorldReader, path: &str) -> Result<String, LoadError> {
+    reader.read(path).ok_or_else(|| LoadError::ReadFailed {
+        path: path.to_string(),
+    })
+}
+
+fn parse_root(path: &str, text: &str) -> Result<WorldConfig, LoadError> {
+    parse_world(text).map_err(|e| LoadError::ParseFailed {
+        path: path.to_string(),
+        message: e,
+    })
+}
+
+/// Build the raw [`toml::Value`] the script loader reads, apply the optional
+/// transform, and compile the world's scripts — or `Ok(None)` for a world with no
+/// `script` key. Mirrors `build_headless_app`'s script gate: config comes from
+/// the untouched text (the caller already parsed it); the transform rewrites only
+/// this raw value.
+fn compile_scripts(
+    path: &str,
+    text: &str,
+    resolver: &dyn ScriptResolver,
+    raw_transform: Option<&dyn Fn(toml::Value) -> Result<toml::Value, String>>,
+) -> Result<Option<CompiledScripts>, LoadError> {
+    let mut raw: toml::Value = toml::from_str(text).map_err(|e| LoadError::RawParseFailed {
+        path: path.to_string(),
+        message: e.to_string(),
+    })?;
+
+    if let Some(transform) = raw_transform {
+        raw = transform(raw).map_err(|message| LoadError::TransformFailed { message })?;
+    }
+
+    if raw.get("script").is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(load_world_scripts(path, &raw, resolver)))
+}
+
+#[cfg(test)]
+mod tests;

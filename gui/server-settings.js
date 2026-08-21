@@ -30,6 +30,7 @@
 import { t } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
 import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
+import { createFocusTrap } from './focus-trap.js';
 
 // ── Wiring tables ────────────────────────────────────────────────────────────
 //
@@ -194,6 +195,11 @@ export function mountServerSettings(opts = {}) {
   }
   overlay.hidden = true;
   overlay.setAttribute('aria-hidden', 'true');
+
+  // The modal focus contract (issue #1174): the same shared trap the phone
+  // client's cog uses. Tab/Shift+Tab cycle inside the panel, Escape closes it,
+  // and focus returns to the cog; `open`/`close` only switch it on and off.
+  const focusTrap = createFocusTrap(overlay, { doc, onEscape: () => close() });
 
   const outputHost = doc.getElementById(OUTPUT_HOST_ID);
   const outputContent = doc.getElementById(OUTPUT_CONTENT_ID);
@@ -503,9 +509,14 @@ export function mountServerSettings(opts = {}) {
     overlay.setAttribute('aria-hidden', 'false');
     overlay.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
+    // Trap focus in the freshly-built panel; the page behind it goes inert.
+    focusTrap.activate();
   }
 
   function close() {
+    // Lift the trap first so focus is handed back to the cog before the panel
+    // is hidden.
+    focusTrap.release();
     overlay.hidden = true;
     overlay.setAttribute('aria-hidden', 'true');
     overlay.classList.remove('open');

@@ -50,6 +50,7 @@ import { controlSystemEnvelope } from './command-gateway.js';
 import { renderStationHelp } from './help-panel.js';
 import { renderManual } from './manual-panel.js';
 import { TEXT_SCALE_MIN, TEXT_SCALE_MAX, TEXT_SCALE_STEP } from './accessibility-profile.js';
+import { createFocusTrap } from './focus-trap.js';
 
 /** localStorage key for the master volume. Unchanged from the pre-#940 slider. */
 const STORAGE_KEY = 'phoenix-settings-volume';
@@ -439,6 +440,11 @@ export function mountSettings({
   overlay.setAttribute('aria-hidden', 'true');
   overlay.hidden = true;
 
+  // The modal focus contract (issue #1174): Tab/Shift+Tab cycle only inside the
+  // panel, Escape closes it, and focus returns to the cog on close. One shared
+  // helper drives all three — `open`/`close` below only turn it on and off.
+  const focusTrap = createFocusTrap(overlay, { doc, onEscape: () => close() });
+
   // ── Small builders ───────────────────────────────────────────────────────
 
   function section(labelId) {
@@ -813,9 +819,15 @@ export function mountSettings({
     overlay.setAttribute('aria-hidden', 'false');
     overlay.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
+    // Trap focus and pull it into the freshly-built panel; the background goes
+    // inert for the duration.
+    focusTrap.activate();
   }
 
   function close() {
+    // Lift the trap first so it hands focus back to the cog before the panel is
+    // hidden out from under it.
+    focusTrap.release();
     overlay.hidden = true;
     overlay.setAttribute('aria-hidden', 'true');
     overlay.classList.remove('open');

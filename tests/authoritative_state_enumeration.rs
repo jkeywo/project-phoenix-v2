@@ -17,11 +17,22 @@
 //! the same registry, see `bevy_ecs::component::ComponentInfo`'s own doc
 //! comment), and requires each one to be accounted for by exactly one of:
 //!
-//! 1. [`AUTHORITATIVE_SYMBOLS`] — transcribed, not invented, from the
-//!    `implementation.symbols` lists this issue back-filled onto PASM. Every
-//!    name here is literally readable out of a `pasm/spec/architecture/*.yaml`
-//!    file today.
-//! 2. The declaration registry ([`StateCensus`], read here via
+//! 1. The declaration registry ([`StateCensus`], read here via
+//!    [`census_authoritative_short_names`]) — authoritative simulation state,
+//!    each type declared at its OWNING `build()` site via
+//!    `App::declare_state::<T>(class, pasm)` as one of the two authoritative fold
+//!    shapes: `Folded` (state `src/sim_digest.rs` walks every tick) or
+//!    `DeferredFold` (authoritative state the record classifies as in-the-fold
+//!    but that `world_digest` does not walk yet). Before issue #1222 this was a
+//!    hand-maintained `AUTHORITATIVE_SYMBOLS` const in this file transcribed from
+//!    the `implementation.symbols` lists on PASM's `classification: authoritative`
+//!    `state` entities; the guard now reads the set back out of the census the
+//!    built app populates. The traceability-only symbols that const also carried
+//!    (function/accessor names, and value types that ride a larger folded
+//!    resource rather than register in their own right) stay in PASM as
+//!    `implementation.symbols` back-references — they could never key a type
+//!    registry — and are not declared here.
+//! 2. The same declaration registry ([`StateCensus`], read here via
 //!    [`census_excluded_short_names`]) — real, legitimately-registered
 //!    non-authoritative state, each type declared at its OWNING plugin's
 //!    `build()` via `App::declare_state::<T>(class, pasm)` (issue #1221) with
@@ -80,159 +91,54 @@ const WORLD: &str = "assets/worlds/rng_coverage.toml";
 const TICKS: u64 = 300;
 const SEED: u64 = 20260894;
 
-/// Every Rust type name that appears in `implementation.symbols` on a
-/// `classification: authoritative` `state` entity, across every file in
-/// `pasm/spec/architecture/*.yaml`, as of this issue's symbol-backfill pass.
+/// Derive the AUTHORITATIVE set — the guard's "list 1" — from the
+/// authoritative-state declaration registry ([`StateCensus`]) the running sim
+/// app populated, rather than from a hand-maintained `const`.
 ///
-/// Transcribed, not curated: every entry here is one this guard's own author
-/// could point at inside a committed `.yaml` file. A handful of PASM entries
-/// could not honestly name a dedicated Rust TYPE (a `thread_local!` pair, a
-/// field on a larger resource, a value composed fresh on every read rather
-/// than stored) — see the inline comment next to that entity's `symbols:` key
-/// in its `.yaml` file for which and why. Those entries' function/accessor
-/// names are still listed here for traceability; they simply never match a
-/// registered Bevy component or resource, which is harmless — this list is a
-/// superset check, not an exact-membership one.
+/// Since issue #1222 (Track 3 step C10) every authoritative type that used to
+/// live in the local `AUTHORITATIVE_SYMBOLS` const is declared at its owning
+/// `build()` site via `App::declare_state::<T>(class, pasm)` (see
+/// `src/authoritative.rs` and the block in `server_app::add_simulation_plugins_with`),
+/// and this guard reads the set back out of the census — the mirror image of
+/// [`census_excluded_short_names`] below. The two authoritative fold shapes count
+/// here: `Folded` (state `src/sim_digest.rs`'s `world_digest` walks every tick)
+/// and `DeferredFold` (authoritative state the record classifies as in-the-fold
+/// but that `world_digest` does not walk yet). Every declared EXCLUSION class
+/// (`Presentation`/`Cache`/`Timer`/`Derived`/`ClearedAtFold`/`TestInfra`) is
+/// filtered OUT — those are list 2, read by [`census_excluded_short_names`].
 ///
-/// This is the FULL union across all 73 entities (the 21 this issue
-/// back-filled plus the 52 that already had `implementation.symbols` before
-/// it) — regenerated mechanically from the `.yaml` files themselves, not
-/// hand-curated, so it cannot silently drift from what PASM actually says.
-/// `WorldResource` (the AC5 "IN" call) has no dedicated PASM `state` entity of
-/// its own as of this issue — it is named directly in
-/// `digest-boundary-reviewer-answers` instead — so it is listed separately
-/// below rather than mixed into this transcription.
-#[rustfmt::skip]
-const AUTHORITATIVE_SYMBOLS: &[&str] = &[
-    "ActiveBeam", "ActiveDialogue", "ActiveStationRatings", "AiDirective", "AiHistory",
-    "AiPolicyMemory", "AiPolicyRuntimeState", "AiWorldEntity", "AssetPreloadResource",
-    "AsteroidData", "AsteroidEntityMap", "AsteroidWindow", "BlasterVolleyState", "BoostCommand",
-    "BoostState", "CaptainPriorityBoost", "CivilianConfig", "CivilianSection", "CivilianState",
-    "CivilianTraffic", "CommsHailable", "CommsInbox", "CommsInboxRes", "CommsRange",
-    "CommsRuntime", "ControlSourceResolver", "CoordinationLagQueue", "CoordinationQueue",
-    "CurrentPhaserMode", "DamageRecord", "DesiredMotion", "EntityConfig",
-    "EntityId", "EntityName", "EntityOriginLayer", "EntityUuid", "FactionConfig",
-    "FactionRegistry", "FieldOrigin", "FlagStore", "GameOverReason", "GamePhase", "GodMode",
-    "HazardAssessment", "HazardAssessmentRaw", "HazardContribution", "HelmAiShipFrame",
-    "HelmAiSurfacesFrame", "HelmBoostAiPolicy", "HelmCapabilityConfig", "HelmCapabilitySection",
-    "HelmImpulseAiPolicy", "INTENT_NARRATION_SPAWN_SITES", "ImpulseCommand", "ImpulsePhase",
-    "ImpulseState", "InfrastructureCondition", "InfrastructureState",
-    "LastHelmInput", "LateralThrustInput", "LodBubble", "Manifest", "MergeStep",
-    "ModelMarkers", "ModelRig", "NavigationWaypoint", "ObjectiveManager",
-    // Issue #1027. `ResolvedCapacity` is the live half of a structure's named
-    // capacity (a level and a ceiling, resolved at load the way a threshold is)
-    // and `CapacityAdjustment` is one queued move of it — both transcribed from
-    // `infrastructure-condition-state` and `infrastructure-condition-tracker`.
-    //
-    // This slice registered NO new Bevy component or resource, which is why the
-    // guard's own computed set is unchanged: both are value types carried on a
-    // component already registered, so there was nothing to register and nothing
-    // extra to classify.
-    "ResolvedCapacity", "CapacityAdjustment",
-    // Issue #1032, the science scan. `ShipScanRecord` is the one new Bevy
-    // COMPONENT — the per-ship survey suite and the last reading it took — and
-    // the reading is the part no fold can recover: it is what the crew saw when
-    // they looked, at the fidelity that moment bought them, and the structure
-    // has moved on since (#1031's evidence log is stored for the same reason).
-    // `ScanReading`, `ScanRefusal` and `ScanSaveState` are the value types
-    // behind it, listed for traceability; `ScanConfig`
-    // is the authored ladder, which is content re-derived at spawn rather than
-    // saved. Transcribed from `science-scan-state` in
-    // pasm/spec/architecture/world-files.yaml.
-    "ShipScanRecord", "ScanReading", "ScanRefusal", "ScanSaveState", "ScanConfig",
-    "PendingArcBearingRequest", "PendingWorldLayerChanges", "PhaserCooldown",
-    "Player", "PowerBlackboard", "Provenance", "QualifiedRef", "RecentCombatActivity",
-    "RegionEffectKind", "RepairBlackboard", "RepairTeams", "ResolvedTemplate", "ScenarioCatalog",
-    "ScenarioCatalogWire", "ScoredObjective", "SensorRadarSelection", "SessionManager",
-    "Severity", "ShieldSystem", "ShieldsDamageHistory", "ShipBoost", "ShipConfig", "ShipImpulse",
-    "ShipIntentNarration", "ShipModifiers", "ShipPhysics", "ShipRedAlert",
-    // Issue #1041's tactical restraint lever. Authoritative and FOLDED, in its
-    // own `fold_weapons_hold_namespace` — transcribed from the
-    // `authoritative-weapons-hold-state` entity in
-    // pasm/spec/architecture/red-alert.yaml.
-    "ShipWeaponsHold",
-    // Issue #1107's Command stance selection. `ShipStationStances` is the
-    // per-ship map of the stance a human Command operator has selected for each
-    // AI-controlled Station the hull's Command station directs. Authoritative
-    // and FOLDED, in its own `fold_station_stances_namespace` — a stored stance
-    // persists tick to tick and changes the directed Station's weapons AI
-    // posture, and (unlike `HumanSeekingHosts`/`VisitingStationHosts` below) it
-    // is NOT re-derived each tick from digest-free inputs, so a divergent
-    // selection must be caught on the tick it happens, exactly as
-    // `ShipWeaponsHold` above. The namespace folds nothing while every hull's
-    // map is empty, so an uncommanded world stays byte-identical. Transcribed
-    // from the `command-stance-selection-state` entity in
-    // pasm/spec/architecture/command-stances.yaml.
-    "ShipStationStances",
-    // Issue #863's spawn provenance. `EntitySpawnOrigin` is a new Bevy
-    // COMPONENT — what a mid-run scripted spawn was made from, so a resume can
-    // rebuild the ship no fresh boot re-derives — and `SpawnOrigin` is the
-    // Bevy-free record it wraps. Authoritative and NOT folded, like the deadline
-    // table and the commitments ledger beside it.
-    //
-    // The guard's own computed set does NOT move for this entry, and the reason
-    // is worth writing down rather than leaving as a coincidence: the component
-    // is registered the first time a world runs a scripted `spawn_entity`, and
-    // this guard's world (`rng_coverage.toml`) authors none. So the entry is a
-    // FORWARD declaration — transcribed from the `runtime-spawn-origin-state`
-    // entity in pasm/spec/architecture/trigger-pipeline.yaml — rather than a
-    // response to a failure, and the day a spawning world becomes the guard's
-    // world it is already accounted for.
-    "EntitySpawnOrigin", "SpawnOrigin",
-    "SimRng",
-    "SimRngState", "SimulationPaused", "SourceLocation", "StationConfig", "SteeringInput",
-    "SystemBlackboard",
-    "StaticPointDefence", "SystemHull", "TacticalRadarSelection", "TeamSlot", "ThrustInput", "Torpedo",
-    "TorpedoDetonation", "TorpedoSystem", "TorpedoTube", "TubeBurstState", "VerticalMovementMode",
-    "ViewscreenArbiter", "ViewscreenResolution", "WaypointMode", "WeaponsDoctrineAiPolicy",
-    "WorldConfig", "WorldEntity",
-    "WorldEventBuffer", "WorldFinding", "WorldLayerChange", "WorldLayerMap", "WorldRuntime",
-    "WorldSnapshot", "WorldSource", "WorldView",
-    // Issue #907's tick-scoped id mint. Authoritative, and FOLDED: its
-    // per-namespace counters are in the digest's run-scope preamble for the
-    // same reason `SimRng`'s stream positions are, so a divergent spawn count
-    // is caught on the tick it happens. Backed by the `world-id-mint-state`
-    // entity in deterministic-simulation.yaml.
-    "WorldIdMint", "WorldId", "IdNamespace",
-    // PRD #1143's operations systems. Each of these four carries MUTABLE runtime
-    // engagement state that FOLDS into the sim digest — the engaged tractor and
-    // its held target (`fold_tractor_namespace`), the docked FACT joining two
-    // hulls (`fold_dock_namespace`), whether a transfer umbilical is running
-    // (`fold_umbilical_namespace`) and which target a repair team is working
-    // abroad (`fold_external_repair_namespace`), all in `src/sim_digest.rs` — and
-    // is captured/restored as a projection in `src/snapshot.rs` (`capture_tractors`
-    // / `capture_docks` / `capture_umbilicals` / `capture_external_repair` and the
-    // matching restore arm). Each namespace folds NOTHING while idle, so a world
-    // fielding a capable hull that never engages stays byte-identical. Authoritative
-    // and folded, exactly like `ShipWeaponsHold` / `ShipStationStances` above.
-    // Transcribed from `tractor-beam-state` (#1156), `dock-relationship-state`
-    // (#1159), `umbilical-flow-state` (#1160) and `external-repair-dispatch-state`
-    // (#1161) in pasm/spec/architecture/world-files.yaml, whose
-    // `implementation.symbols` name each of these types.
-    "TractorBeam", "DockControl", "TransferUmbilical", "ExternalRepairDispatch",
-    // Function/accessor names transcribed for traceability even though they
-    // never match a registered component/resource (see the doc comment
-    // above) — harmless in a superset check.
-    "apply_arc_bearing_request", "apply_world_layer_changes", "assess_hazards",
-    "assign_named_entity_uuids", "build_catalog", "build_helm_ai_surfaces_frame",
-    "clear_mod_pack_overlay", "encode_local_facing", "encode_local_velocity", "is_instagib",
-    "mod_pack_overlay_get", "on_site_systems", "seed_helm_actuator_facts",
-    "push_mod_pack", "remove_mod_pack", "reorder_mod_packs", "active_packs",
-    "spawn_immediate_entities_internal", "sync_ship_position",
-    "tick_boost", "tick_impulse", "visible_entities", "wasm_load_world", "wasm_select_ship",
-    // Named directly in `digest-boundary-reviewer-answers` (AC5's verbatim
-    // "IN" calls) rather than backed by its own PASM `state` entity's
-    // `implementation.symbols` as of this issue.
-    "WorldResource",
-    // Named in `digest-fold-order-policy` (the namespace-sequence rule) as
-    // the second minted-id namespace, sibling to `EntityUuid` above.
-    "AsteroidUuid",
-    // The tick counter itself — the digest-exclusion-classes rationale
-    // already depends on this being in the fold ("the tick counter is
-    // already in the fold via SimTick") to justify excluding the AI cadence
-    // latches as pure functions of it; stated as an explicit member here too.
-    "SimTick",
-];
+/// The ~100 traceability names the old const also carried — function/accessor
+/// names, `thread_local!` pairs, and value types that live on a larger folded
+/// resource rather than register in their own right (`ScanReading`, `WorldId`,
+/// `SpawnOrigin`, `SimRngState`, `InfrastructureState`, the `apply_*`/`tick_*`
+/// systems, `INTENT_NARRATION_SPAWN_SITES`, …) — could never key a type registry,
+/// so they are NOT declared here; they stay as `implementation.symbols` back-
+/// references on their owning `state` entities in `pasm/spec/architecture/*.yaml`
+/// (and the consolidating `digest-census-traceability-symbols` note in
+/// `deterministic-simulation.yaml`), exactly where they were transcribed from.
+///
+/// `GamePhase` and `EntitySpawnOrigin` are declared as forward declarations
+/// (real authoritative types this world never registers), so their short names
+/// appear here even though no registered type matches them — harmless in a
+/// superset check, and what keeps [`ac5_reviewer_answers_match_the_pasm_record`]'s
+/// `GamePhase` IN-call answerable from the census alone.
+///
+/// Reduced to SHORT names for the same reason the exclusion set is: the two
+/// superset lists are consulted by short name, only [`UNCLASSIFIED_BASELINE`]
+/// keys on the full path (see [`short_name`]).
+fn census_authoritative_short_names(app: &App) -> std::collections::BTreeSet<String> {
+    app.world()
+        .get_resource::<StateCensus>()
+        .map(|census| {
+            census
+                .entries()
+                .iter()
+                .filter(|(_, (class, _))| !is_digest_exclusion(*class))
+                .map(|(full, _)| short_name(full))
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 /// Derive the digest EXCLUSION set — the guard's "list 2" — from the
 /// authoritative-state declaration registry ([`StateCensus`]) the running sim
@@ -267,7 +173,8 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
 /// the set honest the day a folded declaration lands beside these.
 ///
 /// `EntitySnapshot` (`src/core/messages.rs`) is deliberately covered by NEITHER
-/// this set nor [`AUTHORITATIVE_SYMBOLS`]: it carries no
+/// this set nor the census-derived authoritative set
+/// ([`census_authoritative_short_names`]): it carries no
 /// `#[derive(Component)]`/`#[derive(Resource)]` at all (a plain wire-message
 /// struct), so it can never appear in the registry this guard scans. Its
 /// rejection as a digest-boundary shortcut is recorded in
@@ -295,17 +202,18 @@ fn is_digest_exclusion(class: StateClass) -> bool {
 }
 
 /// The honest remainder: every crate-local component/resource the sim app
-/// registers that neither [`AUTHORITATIVE_SYMBOLS`] nor the census-derived
-/// exclusion set ([`census_excluded_short_names`]) reaches yet, computed from a
-/// real run and committed here as a ratchet.
+/// registers that neither the census-derived authoritative set
+/// ([`census_authoritative_short_names`]) nor the census-derived exclusion set
+/// ([`census_excluded_short_names`]) reaches yet, computed from a real run and
+/// committed here as a ratchet.
 ///
 /// This is NOT a claim that any of these 171-components/134-resources-worth
 /// of remaining state SHOULD stay out of the digest forever — issue #894's
 /// own scope note says classifying all of it is bigger than this issue's
-/// acceptance criteria. It is the worklist: shrinking this list means moving
-/// an entry into `AUTHORITATIVE_SYMBOLS` (with a PASM `implementation.symbols`
-/// entry to match) or into an `App::declare_state` exclusion declaration at its
-/// owning plugin (with a reason class). Growing it silently
+/// acceptance criteria. It is the worklist: shrinking this list means declaring
+/// an entry authoritative (`Folded`/`DeferredFold`, with a PASM
+/// `implementation.symbols` entry to match) or as an `App::declare_state`
+/// exclusion at its owning plugin (with a reason class). Growing it silently
 /// is exactly what `unclassified_types_match_the_committed_baseline` exists
 /// to prevent — a brand-new type lands here as a test FAILURE naming it,
 /// never as a quiet pass.
@@ -634,11 +542,10 @@ const CRATE_PREFIX: &str = "project_phoenix::";
 /// hypothetical `BroadcastRegistry<Other>`) collapse to one key and one can
 /// silently hide the other from the unclassified ratchet. The census key is now
 /// the FULL path ([`registered_crate_local_type_names`]); this short name
-/// survives only as the lookup into the [`AUTHORITATIVE_SYMBOLS`] superset list
-/// and the census-derived exclusion set ([`census_excluded_short_names`]), both
-/// consulted by short name — the symbols transcribed from PASM
-/// `implementation.symbols` as short names on purpose, the exclusions reduced to
-/// short names from the census's full-path keys. Only [`UNCLASSIFIED_BASELINE`]
+/// survives only as the lookup into the two census-derived superset sets — the
+/// authoritative set ([`census_authoritative_short_names`]) and the exclusion set
+/// ([`census_excluded_short_names`]) — both consulted by short name, each reduced
+/// to short names from the census's full-path keys. Only [`UNCLASSIFIED_BASELINE`]
 /// — the exhaustive remainder
 /// that must distinguish collapsing generics — keys on the full path.
 fn short_name(full: &str) -> String {
@@ -693,11 +600,14 @@ fn every_registered_type_maps_to_the_digest_record() {
          resource at all — CRATE_PREFIX or the registry lookup is wrong"
     );
 
-    let authoritative: std::collections::BTreeSet<&str> =
-        AUTHORITATIVE_SYMBOLS.iter().copied().collect();
-    // "List 2": the exclusion set, now derived from the declaration registry
-    // (`StateCensus`) the built app populated, not a local `EXCLUSIONS` const
-    // (issue #1221). Still consulted by SHORT name, as it always was.
+    // "List 1": the authoritative (folded / deferred-fold) set, now derived from
+    // the declaration registry (`StateCensus`) the built app populated, not a
+    // local `AUTHORITATIVE_SYMBOLS` const (issue #1222). Consulted by SHORT name,
+    // as it always was.
+    let authoritative: std::collections::BTreeSet<String> = census_authoritative_short_names(&app);
+    // "List 2": the exclusion set, likewise derived from the declaration registry
+    // (`StateCensus`), not a local `EXCLUSIONS` const (issue #1221). Still
+    // consulted by SHORT name, as it always was.
     let excluded: std::collections::BTreeSet<String> = census_excluded_short_names(&app);
     let baseline: std::collections::BTreeSet<&str> =
         UNCLASSIFIED_BASELINE.iter().copied().collect();
@@ -722,15 +632,17 @@ fn every_registered_type_maps_to_the_digest_record() {
         newly_unclassified.is_empty(),
         "{} crate-local type(s) registered by the sim app are UNCLASSIFIED by \
          the #894 digest-boundary record: {newly_unclassified:?}\n\
-         Classify each one in tests/authoritative_state_enumeration.rs:\n\
-         \x20 - if it is authoritative simulation state, add it to a PASM \
+         Classify each one by declaring it at its OWNING plugin's `build()` via \
+         `app.declare_state::<T>(class, pasm)` (issue #1220's registry):\n\
+         \x20 - if it is authoritative simulation state, declare it \
+         `StateClass::Folded` when `src/sim_digest.rs` folds it or \
+         `StateClass::DeferredFold` when it does not yet — the census feeds this \
+         authoritative set — and add its name to the owning PASM \
          `classification: authoritative` state entity's `implementation.symbols` \
-         under pasm/spec/architecture/*.yaml, then add its name to \
-         AUTHORITATIVE_SYMBOLS here;\n\
-         \x20 - otherwise declare it at its OWNING plugin's `build()` via \
-         `app.declare_state::<T>(class, pasm)` with the right StateClass \
+         under pasm/spec/architecture/*.yaml;\n\
+         \x20 - otherwise declare it with the right exclusion StateClass \
          (Presentation/Cache/Timer/Derived/ClearedAtFold/TestInfra) — the census \
-         feeds this exclusion set — and if the reason class is new, record it in \
+         feeds the exclusion set — and if the reason class is new, record it in \
          pasm/spec/architecture/deterministic-simulation.yaml's \
          digest-exclusion-classes entity too.\n\
          See pasm/spec/architecture/deterministic-simulation.yaml for the fold \
@@ -751,11 +663,11 @@ fn the_committed_baseline_names_only_types_still_registered_and_unclassified() {
     let registered: std::collections::BTreeSet<String> = registered_crate_local_type_names(&app)
         .into_iter()
         .collect();
-    let authoritative: std::collections::BTreeSet<&str> =
-        AUTHORITATIVE_SYMBOLS.iter().copied().collect();
-    // The exclusion set, derived from the declaration registry (`StateCensus`)
-    // rather than a local `EXCLUSIONS` const (issue #1221) — same short-name
-    // "is it now classified elsewhere" semantics as before.
+    // Both superset lists are now derived from the declaration registry
+    // (`StateCensus`): the authoritative set (issue #1222) and the exclusion set
+    // (issue #1221) — same short-name "is it now classified elsewhere" semantics
+    // as when both were hand-maintained consts.
+    let authoritative: std::collections::BTreeSet<String> = census_authoritative_short_names(&app);
     let excluded: std::collections::BTreeSet<String> = census_excluded_short_names(&app);
 
     let mut stale: Vec<&str> = UNCLASSIFIED_BASELINE
@@ -788,8 +700,12 @@ fn the_committed_baseline_names_only_types_still_registered_and_unclassified() {
 /// this file enforces.
 #[test]
 fn ac5_reviewer_answers_match_the_pasm_record() {
-    let authoritative: std::collections::BTreeSet<&str> =
-        AUTHORITATIVE_SYMBOLS.iter().copied().collect();
+    // Read the answers back out of the census the built app populates (issue
+    // #1222), not a hand-maintained const: the IN calls must be declared
+    // `Folded`/`DeferredFold` at their owning sites, the OUT calls must be absent
+    // from the authoritative set entirely.
+    let app = build_and_run();
+    let authoritative: std::collections::BTreeSet<String> = census_authoritative_short_names(&app);
     for must_be_in in [
         "SimRng",
         "GamePhase",
@@ -800,22 +716,22 @@ fn ac5_reviewer_answers_match_the_pasm_record() {
     ] {
         assert!(
             authoritative.contains(must_be_in),
-            "{must_be_in} must be in AUTHORITATIVE_SYMBOLS — the #894 HITL \
-             thread settled this as an explicit IN call, quoted verbatim in \
+            "{must_be_in} must be declared authoritative (`Folded`/`DeferredFold`) \
+             into StateCensus — the #894 HITL thread settled this as an explicit \
+             IN call, quoted verbatim in \
              pasm/spec/architecture/deterministic-simulation.yaml \
              (digest-boundary-reviewer-answers)."
         );
     }
-    // RenderInterp OUT: it must never be added to AUTHORITATIVE_SYMBOLS. It is
-    // declared `Presentation` at `RendererPlugin::build`, a plugin the headless
-    // run never adds, so it never registers here (see `census_excluded_short_names`
-    // above), and the only check possible ahead of it being built is this
-    // negative one.
+    // RenderInterp OUT: it must never be declared authoritative. It is declared
+    // `Presentation` at `RendererPlugin::build`, a plugin the headless run never
+    // adds, so it never registers here (see `census_excluded_short_names` above),
+    // and the only check possible ahead of it being built is this negative one.
     assert!(
         !authoritative.contains("RenderInterp"),
         "RenderInterp is the #894 HITL thread's explicit OUT call — it folds \
-         frame-time-interpolated presentation data and must never enter \
-         AUTHORITATIVE_SYMBOLS. See digest-render-interp-fold-point in \
+         frame-time-interpolated presentation data and must never be declared \
+         authoritative. See digest-render-interp-fold-point in \
          pasm/spec/architecture/deterministic-simulation.yaml."
     );
     // EntitySnapshot rejected as a shortcut: it must never be treated as the

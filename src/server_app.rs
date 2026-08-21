@@ -814,6 +814,303 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             );
     }
 
+    // Authoritative-state DECLARATIONS (issue #1222, Track 3 step C10). This
+    // block finishes the census migration #1220/#1221 began: the authoritative
+    // half of the digest-boundary record — the types the census's old
+    // `AUTHORITATIVE_SYMBOLS` const named — is now declared here in Rust, at the
+    // sim-assembly owning site, exactly as #1221 declared the exclusion half in
+    // the block just above (and where this function natively owns `SimRng`,
+    // `CaptainPriorityBoost`, `GameOverReason`, `GodMode`, `AsteroidUuid`,
+    // `ShipBoost` and `ShipImpulse` a few lines further down). Full type paths so
+    // the census keys on the canonical name regardless of the alias written here.
+    //
+    // Two authoritative shapes, split exactly as `src/sim_digest.rs` folds them:
+    //
+    // * `Folded` — state `world_digest` walks every tick (`fold_run_scope`, the
+    //   entity/infrastructure/civilian/weapons-hold/station-stances/tractor/dock/
+    //   external-repair/umbilical/asteroid namespaces). A divergence in one of
+    //   these is caught on the tick it happens.
+    // * `DeferredFold` — authoritative state the record classifies as in-the-fold
+    //   but that `world_digest` does NOT walk today (the honest "deferred, and the
+    //   digest may grow to cover it" list in `sim_digest`'s module docs: weapons
+    //   state machines, AI policy surfaces, selections, per-ship input, world
+    //   layer/runtime tables, and the like). It is authoritative — never an
+    //   exclusion — so the enumeration guard reads it into the authoritative set
+    //   beside `Folded`, but marking it `Folded` would claim a fold that does not
+    //   exist yet.
+    //
+    // The declaration is inert to the digest (`src/authoritative.rs`): nothing in
+    // `world_digest` or the snapshot reads `StateCensus`, and the declaration-order
+    // determinism guard proves it directly. `GamePhase` and `EntitySpawnOrigin` are
+    // forward declarations — real authoritative types this world never registers
+    // (`GamePhase` folds through `State<GamePhase>`, whose registry entry is a Bevy
+    // path the crate-local scan filters out; `EntitySpawnOrigin` registers only
+    // once a world runs a scripted spawn) — declared so the record stays complete
+    // the day either one enters the scanned registry.
+    {
+        use crate::authoritative::{DeclareState, StateClass};
+        app
+            // ---- Folded: walked by `world_digest` every tick. ----
+            // Run-scope preamble (`fold_run_scope`).
+            .declare_state::<crate::sim_tick::SimTick>(
+                StateClass::Folded,
+                "digest-render-interp-fold-point",
+            )
+            .declare_state::<crate::sim_rng::SimRng>(StateClass::Folded, "sim-rng-state")
+            .declare_state::<crate::world_id::WorldIdMint>(
+                StateClass::Folded,
+                "world-id-mint-state",
+            )
+            .declare_state::<GamePhase>(StateClass::Folded, "game-phase-state")
+            .declare_state::<GameOverReason>(StateClass::Folded, "game-over-reason-state")
+            .declare_state::<CaptainPriorityBoost>(
+                StateClass::Folded,
+                "captain-objective-priority-state",
+            )
+            .declare_state::<crate::lobby::server::WorldResource>(
+                StateClass::Folded,
+                "digest-boundary-reviewer-answers",
+            )
+            // Entity namespace (`fold_entity_namespace`).
+            .declare_state::<crate::entities::spawner::EntityUuid>(
+                StateClass::Folded,
+                "spawned-entity-state",
+            )
+            .declare_state::<crate::ship::state::ShipPhysics>(
+                StateClass::Folded,
+                "authoritative-ship-motion-state",
+            )
+            .declare_state::<crate::ship::state::ShipRedAlert>(
+                StateClass::Folded,
+                "authoritative-red-alert-state",
+            )
+            // Per-namespace folds (issues #1025/#1028/#1041/#1107/#1143/#907).
+            .declare_state::<crate::infrastructure::InfrastructureCondition>(
+                StateClass::Folded,
+                "infrastructure-condition-state",
+            )
+            .declare_state::<crate::civilian::server::CivilianTraffic>(
+                StateClass::Folded,
+                "civilian-traffic-state",
+            )
+            .declare_state::<crate::ship::state::ShipWeaponsHold>(
+                StateClass::Folded,
+                "authoritative-weapons-hold-state",
+            )
+            .declare_state::<crate::console::command::server::ShipStationStances>(
+                StateClass::Folded,
+                "command-stance-selection-state",
+            )
+            .declare_state::<crate::tractor::server::TractorBeam>(
+                StateClass::Folded,
+                "tractor-beam-state",
+            )
+            .declare_state::<crate::dock::server::DockControl>(
+                StateClass::Folded,
+                "dock-relationship-state",
+            )
+            .declare_state::<crate::console::repair::external_server::ExternalRepairDispatch>(
+                StateClass::Folded,
+                "external-repair-dispatch-state",
+            )
+            .declare_state::<crate::umbilical::server::TransferUmbilical>(
+                StateClass::Folded,
+                "umbilical-flow-state",
+            )
+            .declare_state::<AsteroidUuid>(StateClass::Folded, "digest-fold-order-policy")
+            // ---- DeferredFold: authoritative, not yet walked by `world_digest`. ----
+            .declare_state::<crate::ai::server::LodBubble>(
+                StateClass::DeferredFold,
+                "npc-ai-controller-state",
+            )
+            .declare_state::<crate::ai::server::WorldSnapshot>(
+                StateClass::DeferredFold,
+                "world-snapshot-state",
+            )
+            .declare_state::<crate::asteroids::lifecycle::AsteroidEntityMap>(
+                StateClass::DeferredFold,
+                "asteroid-window-state",
+            )
+            .declare_state::<crate::asteroids::lifecycle::AsteroidWindow>(
+                StateClass::DeferredFold,
+                "asteroid-window-state",
+            )
+            .declare_state::<crate::civilian::server::CivilianSection>(
+                StateClass::DeferredFold,
+                "civilian-traffic-adapter",
+            )
+            .declare_state::<crate::comms::component::CommsHailable>(
+                StateClass::DeferredFold,
+                "comms-range-state",
+            )
+            .declare_state::<crate::comms::component::CommsRange>(
+                StateClass::DeferredFold,
+                "comms-range-state",
+            )
+            .declare_state::<crate::comms::server::CommsInboxRes>(
+                StateClass::DeferredFold,
+                "comms-inbox-state",
+            )
+            .declare_state::<crate::comms::server::CommsRuntime>(
+                StateClass::DeferredFold,
+                "comms-dialogue-state",
+            )
+            .declare_state::<crate::console::navigation::NavigationWaypoint>(
+                StateClass::DeferredFold,
+                "navigation-waypoint-state",
+            )
+            .declare_state::<crate::console::weapons::WeaponsDoctrineAiPolicy>(
+                StateClass::DeferredFold,
+                "weapon-family-arc-bearing-coordination",
+            )
+            .declare_state::<crate::console::weapons::beam::ActiveBeam>(
+                StateClass::DeferredFold,
+                "phaser-beam-state",
+            )
+            .declare_state::<crate::console::weapons::beam::CurrentPhaserMode>(
+                StateClass::DeferredFold,
+                "phaser-beam-state",
+            )
+            .declare_state::<crate::console::weapons::beam::PhaserCooldown>(
+                StateClass::DeferredFold,
+                "phaser-beam-state",
+            )
+            .declare_state::<crate::console::weapons::beam::TacticalRadarSelection>(
+                StateClass::DeferredFold,
+                "weapons-target-state",
+            )
+            .declare_state::<crate::debug_overlay::SimulationPaused>(
+                StateClass::DeferredFold,
+                "host-debug-simulation-override-state",
+            )
+            .declare_state::<crate::entities::model_rig::ModelMarkers>(
+                StateClass::DeferredFold,
+                "model-marker-runtime-state",
+            )
+            .declare_state::<crate::entities::spawner::EntityId>(
+                StateClass::DeferredFold,
+                "spawned-entity-state",
+            )
+            .declare_state::<crate::entities::spawner::EntityName>(
+                StateClass::DeferredFold,
+                "spawned-entity-state",
+            )
+            .declare_state::<crate::entities::spawner::HelmCapabilitySection>(
+                StateClass::DeferredFold,
+                "vertical-movement-mode-state",
+            )
+            .declare_state::<crate::entities::spawner::StaticPointDefence>(
+                StateClass::DeferredFold,
+                "spawned-entity-state",
+            )
+            .declare_state::<crate::entities::spawner::EntitySpawnOrigin>(
+                StateClass::DeferredFold,
+                "runtime-spawn-origin-state",
+            )
+            .declare_state::<GodMode>(
+                StateClass::DeferredFold,
+                "host-debug-simulation-override-state",
+            )
+            .declare_state::<ShipBoost>(StateClass::DeferredFold, "boost-drive-state")
+            .declare_state::<ShipImpulse>(StateClass::DeferredFold, "impulse-drive-state")
+            .declare_state::<crate::modifiers::cache::ShipModifiers>(
+                StateClass::DeferredFold,
+                "ship-modifier-state",
+            )
+            .declare_state::<crate::science::server::ShipScanRecord>(
+                StateClass::DeferredFold,
+                "science-scan-state",
+            )
+            .declare_state::<crate::server::asset_preload::AssetPreloadResource>(
+                StateClass::DeferredFold,
+                "asset-loading-state",
+            )
+            .declare_state::<crate::ship::combat_activity::RecentCombatActivity>(
+                StateClass::DeferredFold,
+                "recent-combat-activity-state",
+            )
+            .declare_state::<crate::ship::components::ActiveStationRatings>(
+                StateClass::DeferredFold,
+                "active-station-rating-state",
+            )
+            .declare_state::<crate::ship::components::CoordinationQueue>(
+                StateClass::DeferredFold,
+                "coordination-lag-queue-state",
+            )
+            .declare_state::<crate::ship::components::LastHelmInput>(
+                StateClass::DeferredFold,
+                "last-helm-input-state",
+            )
+            .declare_state::<crate::ship::components::PendingArcBearingRequest>(
+                StateClass::DeferredFold,
+                "pending-arc-bearing-request-state",
+            )
+            .declare_state::<crate::ship::helm::BoostCommand>(
+                StateClass::DeferredFold,
+                "helm-actuator-input-state",
+            )
+            .declare_state::<crate::ship::helm::ImpulseCommand>(
+                StateClass::DeferredFold,
+                "helm-actuator-input-state",
+            )
+            .declare_state::<crate::ship::helm::LateralThrustInput>(
+                StateClass::DeferredFold,
+                "helm-actuator-input-state",
+            )
+            .declare_state::<crate::ship::helm::SteeringInput>(
+                StateClass::DeferredFold,
+                "helm-actuator-input-state",
+            )
+            .declare_state::<crate::ship::helm::ThrustInput>(
+                StateClass::DeferredFold,
+                "helm-actuator-input-state",
+            )
+            .declare_state::<crate::ship::helm_ai::HelmAiSurfacesFrame>(
+                StateClass::DeferredFold,
+                "helm-ai-surfaces-frame-state",
+            )
+            .declare_state::<crate::ship::helm_ai::HelmBoostAiPolicy>(
+                StateClass::DeferredFold,
+                "impulse-manoeuvre-policy-state",
+            )
+            .declare_state::<crate::ship::helm_ai::HelmImpulseAiPolicy>(
+                StateClass::DeferredFold,
+                "impulse-manoeuvre-policy-state",
+            )
+            .declare_state::<crate::ship::intent_narration_systems::ShipIntentNarration>(
+                StateClass::DeferredFold,
+                "intent-narration-state",
+            )
+            .declare_state::<crate::ship::sensors::SensorRadarSelection>(
+                StateClass::DeferredFold,
+                "sensors-target-state",
+            )
+            .declare_state::<crate::ship::shields::ShieldsDamageHistory>(
+                StateClass::DeferredFold,
+                "shields-damage-history-state",
+            )
+            .declare_state::<crate::world::config::WorldConfig>(
+                StateClass::DeferredFold,
+                "world-configuration-state",
+            )
+            .declare_state::<crate::world::server::EntityOriginLayer>(
+                StateClass::DeferredFold,
+                "world-layer-runtime-state",
+            )
+            .declare_state::<crate::world::server::PendingWorldLayerChanges>(
+                StateClass::DeferredFold,
+                "world-layer-runtime-state",
+            )
+            .declare_state::<crate::world::server::WorldEventBuffer>(
+                StateClass::DeferredFold,
+                "world-event-buffer-state",
+            )
+            .declare_state::<crate::world::server::WorldLayerMap>(
+                StateClass::DeferredFold,
+                "world-layer-runtime-state",
+            );
+    }
+
     app.add_message::<AsteroidDestroyedVfx>()
         // Balance telemetry. Registered here (not behind `headless`) so the
         // chokepoints can emit unconditionally — only the *collection* is

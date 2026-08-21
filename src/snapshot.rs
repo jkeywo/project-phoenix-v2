@@ -586,6 +586,33 @@ pub struct EntityState {
     /// long before this field is read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operations: Option<crate::operations::OperationsSaveState>,
+    /// The ship's tractor-beam state (issue #1156) — whether the beam is engaged
+    /// and what it is holding.
+    ///
+    /// A **projection**, not the whole [`crate::tractor::TractorBeam`] component,
+    /// for `operations`' reason: the authored `[tractor]` coupling terms and the
+    /// resolved power group ride the component too and are re-derived from the
+    /// template on spawn, so writing them into a save would put content into the
+    /// one artefact `content_digest` is answerable for. What travels is the pair
+    /// the fold cannot recover — the engage state and the coupled target — which
+    /// [`fold_tractor_namespace`](crate::sim_digest) folds and which a resume
+    /// would otherwise drop, restoring a hulk as adrift when the crew had it
+    /// under tow.
+    ///
+    /// The variant-order hazard does not apply: every field on
+    /// `TractorSaveState` is a `bool`, a `String` or an `Option` of one.
+    ///
+    /// # Why this did not bump [`SNAPSHOT_FORMAT`]
+    ///
+    /// `scan`'s argument above, unchanged. A save written without this field
+    /// restores a ship as holding nothing when the mission had it towing —
+    /// silently wrong — but it cannot happen: a world gains a tractor by its hull
+    /// TOML gaining a `[tractor]` table and a `kind = "tractor"` `[[system]]`,
+    /// and `EntityConfig` sets `deny_unknown_fields`, so a build that predates
+    /// this vocabulary refuses the template outright rather than loading it and
+    /// writing a same-content-digest save to disagree with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tractor: Option<crate::tractor::TractorSaveState>,
     /// The ship's scan record (issue #1032) — the last reading its sensor suite
     /// took, or why the last scan returned nothing.
     ///
@@ -2601,6 +2628,26 @@ fn capture_operations(world: &World) -> Vec<(String, crate::operations::Operatio
         .collect()
 }
 
+/// The tractor-beam states, in a query of their own, joined by uuid — see
+/// [`EntityState::tractor`]. Only hulls that authored `[tractor]` carry one, so
+/// most worlds capture an empty list.
+///
+/// A beam that authored a tractor and is engaging nothing captures nothing — the
+/// same reading `fold_tractor_namespace` takes: an idle beam is byte-for-byte the
+/// state of a hull built before tractors existed, so writing it would charge
+/// every world fielding a tractor-capable hull for a feature its crew never used.
+fn capture_tractors(world: &World) -> Vec<(String, crate::tractor::TractorSaveState)> {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::tractor::TractorBeam)>() else {
+        return Vec::new();
+    };
+    let idle = crate::tractor::TractorSaveState::default();
+    query
+        .iter(world)
+        .map(|(uuid, beam)| (uuid.0.clone(), beam.save_state()))
+        .filter(|(_, state)| *state != idle)
+        .collect()
+}
+
 /// The scan records, in a query of their own, joined by uuid — see
 /// [`EntityState::scan`]. Only hulls that authored `[scan]` carry one, so most
 /// worlds capture an empty list.
@@ -2659,6 +2706,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let pass_surfaces = capture_pass_surfaces(world);
     let infrastructure = capture_infrastructure(world);
     let operations = capture_operations(world);
+    let tractors = capture_tractors(world);
     let scans = capture_scans(world);
     let civilians = capture_civilians(world);
     let spawn_origins = capture_spawn_origins(world);
@@ -2711,6 +2759,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
             operations: operations
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            tractor: tractors
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
@@ -4000,6 +4052,11 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(operations) = &row.operations {
             if let Some(mut ops) = entity_mut.get_mut::<crate::operations::ShipOperations>() {
                 ops.restore(operations);
+            }
+        }
+        if let Some(tractor) = &row.tractor {
+            if let Some(mut beam) = entity_mut.get_mut::<crate::tractor::TractorBeam>() {
+                beam.restore(tractor);
             }
         }
         if let Some(scan) = &row.scan {

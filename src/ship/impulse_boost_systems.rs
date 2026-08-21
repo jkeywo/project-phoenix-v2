@@ -426,6 +426,7 @@ mod tests {
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

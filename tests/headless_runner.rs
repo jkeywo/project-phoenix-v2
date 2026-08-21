@@ -3497,13 +3497,13 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
     // The scheduled writers named by the policy table: the helm integrator
     // (`integrate_ship_physics`), the low-LOD substitute
     // (`simulate_low_lod_ships`), the collision responder (`handle_collisions`),
-    // blaster recoil (`tick_blaster_system`) and the tow rig
-    // (`move_towed_targets`, issue #1027). The table's remaining entry,
-    // `handle_slow_zone_speed_clamp`, is an observer and so is in no schedule —
-    // see `ship_physics_writers`.
+    // blaster recoil (`tick_blaster_system`), the tow rig (`move_towed_targets`,
+    // issue #1027) and the tractor rig (`move_coupled_target`, issue #1156). The
+    // table's remaining entry, `handle_slow_zone_speed_clamp`, is an observer and
+    // so is in no schedule — see `ship_physics_writers`.
     assert_eq!(
         writers.len(),
-        5,
+        6,
         "the number of scheduled systems writing ShipPhysics changed. Every writer \
          beyond the helm integrator has to be a correction layered on top of it rather \
          than a competing integrator, and has to be documented in the writer-policy \
@@ -3515,23 +3515,23 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
          found:\n{inventory}"
     );
 
-    // Exactly three of them are unfiltered corrections (collision response,
-    // blaster recoil, and the tow rig): they deliberately apply to every ship,
-    // high-LOD and low-LOD alike, and their safety argument is that they are
-    // one-shot corrections rather than integrators — not filter disjointness.
-    // The tow is unfiltered on purpose: a demoted freighter under tow is
-    // exactly the case that has to keep working, and dead reckoning it away
-    // from the rig would drag it out of the tug's wake.
+    // Exactly four of them are unfiltered corrections (collision response,
+    // blaster recoil, the tow rig and the tractor rig): they deliberately apply
+    // to every ship, high-LOD and low-LOD alike, and their safety argument is
+    // that they are one-shot corrections rather than integrators — not filter
+    // disjointness. The tow and the tractor are unfiltered on purpose: a demoted
+    // freighter under tow is exactly the case that has to keep working, and dead
+    // reckoning it away from the rig would drag it out of the operator's wake.
     let unfiltered = (0..writers.len())
         .filter(|i| high_fi.contains(i) && low_lod.contains(i))
         .count();
     assert_eq!(
-        unfiltered, 3,
-        "expected exactly three unfiltered ShipPhysics correction writers (collision \
-         response, blaster recoil and the tow rig). A change here means a correction \
-         grew an `AiHighFidelity` filter, or an integrator lost one — either way the \
-         set of ships that get moved twice per tick has changed. Reconcile with the \
-         writer-policy table on `ShipPhysics` (src/ship/state.rs). ShipPhysics writers \
+        unfiltered, 4,
+        "expected exactly four unfiltered ShipPhysics correction writers (collision \
+         response, blaster recoil, the tow rig and the tractor rig). A change here means \
+         a correction grew an `AiHighFidelity` filter, or an integrator lost one — either \
+         way the set of ships that get moved twice per tick has changed. Reconcile with \
+         the writer-policy table on `ShipPhysics` (src/ship/state.rs). ShipPhysics writers \
          found:\n{inventory}"
     );
 }
@@ -15104,5 +15104,355 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
     assert_eq!(
         ron::from_str::<project_phoenix::campaign::CampaignFacts>(&text).expect("parses back"),
         facts
+    );
+}
+
+// ── #1156: the tractor beam, end to end ──────────────────────────────────────
+//
+// `assets/worlds/probe_tractor.toml` fields a backfilled player TUG (the
+// dedicated `tractor_tug` hull — the shipped destroyer is deliberately not
+// touched) and a DERELICT 80 units off. The test drives the beam through the
+// ordinary admitted `EngageTractor`/`ReleaseTractor` path, sets the ship's one
+// Tactical lock the way `SetTarget` would, and moves the operator by hand —
+// proving a derelict is held on the rig and released by each interruption.
+
+const DERELICT: &str = "world.probe_tractor.entity.derelict.name";
+/// An `ai:` token: admission authorises it iff the target system is
+/// AI-controlled, which the tug's engineering-owned tractor is while nobody is
+/// at its console — the same seam #1162's tractor AI will use, and the same one
+/// a human tenure token uses from the other side (AGENTS.md rule 6).
+const TRACTOR_TOKEN: &str = "ai:tractor-probe";
+
+fn tractor_args(dt: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_tractor.toml".into(),
+        // The player ship IS the tug: the game-start spawn swaps the world's
+        // `player-ship` placeholder for the lobby-SELECTED hull, so the selection
+        // has to be the tug or its tractor never spawns.
+        ship_path: "assets/entities/tractor_tug.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(60.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+fn tractor_operator(app: &mut App) -> Entity {
+    app.world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the probe world spawns a local tug")
+}
+
+fn tractor_beam_of(app: &mut App) -> project_phoenix::tractor::TractorBeam {
+    let op = tractor_operator(app);
+    app.world()
+        .get::<project_phoenix::tractor::TractorBeam>(op)
+        .expect("the tug carries a TractorBeam")
+        .clone()
+}
+
+fn operator_pos(app: &mut App) -> Vec3 {
+    let op = tractor_operator(app);
+    app.world()
+        .get::<Transform>(op)
+        .expect("the tug has a transform")
+        .translation
+}
+
+/// Place the operator by writing its `ShipPhysics`, which `sync_ship_position`
+/// projects into the transform the coupling reads.
+fn place_operator(app: &mut App, position: Vec3) {
+    let op = tractor_operator(app);
+    let mut physics = app
+        .world_mut()
+        .get_mut::<ShipPhysics>(op)
+        .expect("the tug is a ship");
+    physics.x = position.x;
+    physics.y = position.y;
+    physics.z = position.z;
+}
+
+/// Set (or clear) the ship's one Tactical lock, the way a `SetTarget` would.
+fn set_tractor_lock(app: &mut App, uuid: Option<String>) {
+    let op = tractor_operator(app);
+    app.world_mut()
+        .entity_mut(op)
+        .insert(project_phoenix::console::weapons::beam::TacticalRadarSelection(uuid));
+}
+
+/// Send an engage/release through the real admission path and give it the ticks
+/// to arrive (drained in `PreUpdate`, admitted before `SimSet::Input`, consumed
+/// and evaluated in `SimSet::Modifiers` of the same tick).
+fn send_tractor(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemId};
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: TRACTOR_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId(project_phoenix::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+                payload,
+            },
+        });
+    run(app, 2);
+}
+
+/// Reset the operator to the origin and the derelict 80 units off, then engage
+/// against it — the clean holding state each interruption starts from.
+fn reengage_holding(app: &mut App, derelict_uuid: &str) {
+    use project_phoenix::messages::SystemControlPayload;
+    send_tractor(app, SystemControlPayload::ReleaseTractor);
+    place_operator(app, Vec3::ZERO);
+    move_named_to(app, DERELICT, Vec3::new(80.0, 0.0, 0.0));
+    run(app, 1);
+    set_tractor_lock(app, Some(derelict_uuid.to_string()));
+    send_tractor(app, SystemControlPayload::EngageTractor);
+    let beam = tractor_beam_of(app);
+    assert!(
+        beam.coupled_target.as_deref() == Some(derelict_uuid) && beam.engaged,
+        "precondition: the beam should be holding the derelict, got {beam:?}"
+    );
+}
+
+/// Drop the tractor power group below its authored `min_power_level` (2).
+fn cut_tractor_power(app: &mut App) {
+    let op = tractor_operator(app);
+    let mut ps = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
+        .expect("the tug has a power system");
+    let _ = ps.0.set_group_allocation(
+        &project_phoenix::messages::PowerGroupId("tractor".into()),
+        1,
+    );
+}
+
+/// Restore the tractor power group to its nominal level.
+fn restore_tractor_power(app: &mut App) {
+    let op = tractor_operator(app);
+    let mut ps = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
+        .expect("the tug has a power system");
+    let _ = ps.0.set_group_allocation(
+        &project_phoenix::messages::PowerGroupId("tractor".into()),
+        2,
+    );
+}
+
+/// Knock the tractor system's HP below its authored disabled threshold.
+fn disable_tractor(app: &mut App) {
+    let op = tractor_operator(app);
+    let mut hull = app
+        .world_mut()
+        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .expect("the tug has a hull");
+    hull.0
+        .set_hp(&project_phoenix::messages::SystemId("tractor".into()), 1.0);
+}
+
+/// Restore the tractor system to full HP (a Disabled system stops accepting AI
+/// control, so it must be operable again before it can be re-engaged).
+fn repair_tractor(app: &mut App) {
+    let op = tractor_operator(app);
+    let mut hull = app
+        .world_mut()
+        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .expect("the tug has a hull");
+    hull.0
+        .set_hp(&project_phoenix::messages::SystemId("tractor".into()), 30.0);
+}
+
+/// AC: a derelict is moved by an engaged tractor and released by EACH
+/// interruption (lock lost / release / out of range / power lost / disabled).
+#[test]
+fn a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it() {
+    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::tractor::TractorRefusal;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&tractor_args(dt)).expect("app should build");
+    // Far enough in that the game is InProgress and the tug is backfilled, so its
+    // engineering-owned tractor is AI-controlled and the `ai:` token is admitted.
+    run(&mut app, 60);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+    let derelict = scan_uuid_named(&mut app, DERELICT);
+
+    // ── The hold forms and the derelict rides the rig ────────────────────────
+    place_operator(&mut app, Vec3::ZERO);
+    move_named_to(&mut app, DERELICT, Vec3::new(80.0, 0.0, 0.0));
+    run(&mut app, 1);
+    set_tractor_lock(&mut app, Some(derelict.clone()));
+    send_tractor(&mut app, SystemControlPayload::EngageTractor);
+
+    let beam = tractor_beam_of(&mut app);
+    assert!(beam.engaged, "the beam engaged");
+    assert_eq!(beam.coupled_target.as_deref(), Some(derelict.as_str()));
+    assert!(
+        beam.last_refusal.is_none(),
+        "a clean hold carries no refusal"
+    );
+
+    // The rig, not the derelict's own last position: it spawned 80 units to
+    // starboard and is now 120 astern of the tug (the authored offset).
+    let offset = position_of(&mut app, DERELICT) - operator_pos(&mut app);
+    assert!(
+        (offset.length() - 120.0).abs() < 1.0,
+        "the derelict rides the authored 120-unit coupling offset, got a separation of {}",
+        offset.length()
+    );
+
+    // The tug flies a course; the derelict rides the rig the whole way. Steps
+    // stay inside the authored 600-unit range (the derelict is only ~120 behind
+    // each time), which is what a tug under power does — a single teleport past
+    // the range would correctly part the towline, which the out-of-range case
+    // below proves on purpose.
+    for step in [
+        Vec3::new(200.0, 0.0, 0.0),
+        Vec3::new(400.0, 0.0, -150.0),
+        Vec3::new(650.0, 0.0, -350.0),
+    ] {
+        place_operator(&mut app, step);
+        run(&mut app, 2);
+        let carried = position_of(&mut app, DERELICT) - operator_pos(&mut app);
+        assert!(
+            (carried.length() - 120.0).abs() < 1.0,
+            "the derelict goes on riding the rig as the tug flies, which is the whole of what \
+             the coupling is. Got a separation of {}",
+            carried.length()
+        );
+    }
+    assert!(
+        position_of(&mut app, DERELICT).distance(Vec3::new(80.0, 0.0, 0.0)) > 400.0,
+        "the derelict really travelled — a test comparing only the two positions would pass \
+         with both sitting at the origin"
+    );
+
+    // ── Interruption 1: the lock is dropped ──────────────────────────────────
+    reengage_holding(&mut app, &derelict);
+    let parted = position_of(&mut app, DERELICT);
+    set_tractor_lock(&mut app, None);
+    run(&mut app, 2);
+    let beam = tractor_beam_of(&mut app);
+    assert!(
+        !beam.engaged && beam.coupled_target.is_none(),
+        "dropping the lock ended the hold"
+    );
+    assert_eq!(beam.last_refusal, Some(TractorRefusal::NoLock));
+    place_operator(&mut app, Vec3::new(2000.0, 0.0, 0.0));
+    run(&mut app, 3);
+    assert!(
+        position_of(&mut app, DERELICT).distance(parted) < 50.0,
+        "a released derelict stays where the towline parted rather than following the tug"
+    );
+
+    // ── Interruption 2: the operator releases ────────────────────────────────
+    reengage_holding(&mut app, &derelict);
+    let parted = position_of(&mut app, DERELICT);
+    send_tractor(&mut app, SystemControlPayload::ReleaseTractor);
+    let beam = tractor_beam_of(&mut app);
+    assert!(
+        !beam.engaged && beam.coupled_target.is_none(),
+        "release ended the hold"
+    );
+    assert!(
+        beam.last_refusal.is_none(),
+        "a deliberate release is not a refusal"
+    );
+    place_operator(&mut app, Vec3::new(3000.0, 0.0, 0.0));
+    run(&mut app, 3);
+    assert!(
+        position_of(&mut app, DERELICT).distance(parted) < 50.0,
+        "a released derelict stays put"
+    );
+
+    // ── Interruption 3: the tug flies out of the authored range ──────────────
+    reengage_holding(&mut app, &derelict);
+    let parted = position_of(&mut app, DERELICT);
+    place_operator(&mut app, Vec3::new(90_000.0, 0.0, 90_000.0));
+    run(&mut app, 3);
+    let beam = tractor_beam_of(&mut app);
+    assert!(
+        !beam.engaged && beam.coupled_target.is_none(),
+        "leaving range ended the hold"
+    );
+    assert_eq!(beam.last_refusal, Some(TractorRefusal::OutOfRange));
+    assert!(
+        position_of(&mut app, DERELICT).distance(parted) < 50.0,
+        "a derelict left out of range stays where the towline parted rather than being yanked \
+         ninety kilometres across the map"
+    );
+
+    // ── Interruption 4: the power allocation is lost ─────────────────────────
+    reengage_holding(&mut app, &derelict);
+    let parted = position_of(&mut app, DERELICT);
+    cut_tractor_power(&mut app);
+    run(&mut app, 2);
+    let beam = tractor_beam_of(&mut app);
+    assert!(
+        !beam.engaged && beam.coupled_target.is_none(),
+        "losing power ended the hold"
+    );
+    assert_eq!(beam.last_refusal, Some(TractorRefusal::Unpowered));
+    place_operator(&mut app, Vec3::new(4000.0, 0.0, 0.0));
+    run(&mut app, 3);
+    assert!(
+        position_of(&mut app, DERELICT).distance(parted) < 50.0,
+        "an unpowered beam has let go"
+    );
+
+    // ── Interruption 5: the tractor is knocked out to Disabled ───────────────
+    // Restore power first so the disable is the ONLY failing condition.
+    restore_tractor_power(&mut app);
+    reengage_holding(&mut app, &derelict);
+    let parted = position_of(&mut app, DERELICT);
+    disable_tractor(&mut app);
+    run(&mut app, 2);
+    let beam = tractor_beam_of(&mut app);
+    assert!(
+        !beam.engaged && beam.coupled_target.is_none(),
+        "a disabled tractor ended the hold"
+    );
+    assert_eq!(beam.last_refusal, Some(TractorRefusal::Disabled));
+    place_operator(&mut app, Vec3::new(5000.0, 0.0, 0.0));
+    run(&mut app, 3);
+    assert!(
+        position_of(&mut app, DERELICT).distance(parted) < 50.0,
+        "a knocked-out tractor has let go"
+    );
+
+    // ── The hold survives a snapshot resume ──────────────────────────────────
+    // Repair the tractor first — interruption 5 left it Disabled, which stops it
+    // accepting control at all — then capture with a live grip, release it, and
+    // restore: the engage state and the coupled target come back, which is the
+    // half the digest folds and a resume would otherwise drop.
+    repair_tractor(&mut app);
+    run(&mut app, 1);
+    reengage_holding(&mut app, &derelict);
+    let digest_holding = project_phoenix::sim_digest::state_digest(&app);
+    let snap = project_phoenix::snapshot::capture(app.world());
+    send_tractor(&mut app, SystemControlPayload::ReleaseTractor);
+    assert!(
+        !tractor_beam_of(&mut app).engaged,
+        "precondition: the beam is released before the restore"
+    );
+    project_phoenix::snapshot::restore(app.world_mut(), &snap);
+    let beam = tractor_beam_of(&mut app);
+    assert!(
+        beam.engaged && beam.coupled_target.as_deref() == Some(derelict.as_str()),
+        "the engage state and the coupled target survived the snapshot resume, got {beam:?}"
+    );
+    assert_eq!(
+        project_phoenix::sim_digest::state_digest(&app),
+        digest_holding,
+        "…and the restored world folds to the same digest the captured one did"
     );
 }

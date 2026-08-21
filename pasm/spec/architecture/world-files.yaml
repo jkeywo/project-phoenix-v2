@@ -393,6 +393,94 @@ entities:
         - CapabilityOffer
       tests: [cargo test, npx vitest run]
 
+  - component: tractor-beam-coupler
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Tractor Beam Coupler
+      summary: Runs the engineering-owned tractor beam - the linchpin of PRD #1143's coupling family. Takes the engage/release commands, decides each tick whether the coupling holds from the ship's Tactical lock, the separation to the locked target, the tractor power group's level and the tractor system's damage tier, holds the coupled derelict on the operator's rig from the authored offset, and publishes the beam's blackboard. The umbilical, dock and external repair-dispatch slices copy this shape.
+      rationale:
+        - "[ai] A NEW SYSTEM BESIDE THE TOW, NOT A CHANGE TO IT. The operations tow (external-operation-runner) stays live and untouched; the tractor lifts and GENERALISES the tow's rig geometry into a pure Bevy-free module both could call, and shares nothing else. The tractor is a first-class engineering `[[system]]` where an operation is not a system at all: it declares its own power group, carries a damage entry, is admission-gated, registers as an admitted consumer and publishes under its own system id."
+        - "[ai] THE COUPLING-POSITION MODULE TAKES TRANSFORMS AND THE AUTHORED OFFSET ONLY. Given the operator's translation, its rotation and the coupling offset in the operator's OWN frame, it answers where the held target sits - the offset is rotated by the operator's rotation, so a tug that turns swings its load round with it. Mass is deliberately NOT in this signature: a heavier tow is a helm-penalty concern that reads the #1154 entity mass in a later slice (#1157), never the geometry of where the load rides."
+        - "[ai] THE HOLD VERDICT IS PURE. The adapter reads the live world into scalars - the lock, the separation, the range, the power level and its minimum, the disabled flag - and the pure `hold_status` answers Ok or the one refusal the console shows. Checks run most-actionable-first: a knocked-out or unpowered beam is reported before target acquisition, and there is no range to a target that was never locked, so NoLock precedes OutOfRange. The same function decides engage-time refusal and every tick's re-evaluation, so an engage that cannot hold is refused within its own tick and each interruption drops the hold the same way."
+        - "[ai] EACH INTERRUPTION ENDS THE HOLD. Releasing, losing the lock, drifting past the authored range, dropping below the authored min_power_level, or damaging the tractor to Disabled all clear the engage intent and the coupled target together, and the crew watch the hulk stop following them. Engage is the operator's standing INTENT; the coupled target is what is actually held this tick, present only while the hold is eligible, so the two agree by construction."
+        - "[ai] HUMAN AND AI ISSUE THE SAME COMMANDS. EngageTractor and ReleaseTractor target the real, station-owned tractor system, so they take the ordinary station-tenure admission path - the engineering holder from the network gate, the tractor AI (#1162) through the same validate_and_admit seam - and admission strips source identity before the handler sees it. Nothing downstream asks who sent them. This slice makes the commands admissible from the engineering console; the AI policy host that drives them is #1162."
+        - "[ai] THE RIG WRITES THE TARGET'S POSITION DIRECTLY, a sixth row in the ShipPhysics writer-policy table and the exact shape of the tow rig: a correction layered on top of the helm integration in SimSet::Modifiers, after sync_ship_position, not a second integrator. It writes ShipPhysics where the target has one (a demoted craft) and the Transform too so the two agree within the tick; a derelict with no ShipPhysics is moved by the transform write alone. The three speed fields are zeroed for the tow's reason turned around - a craft released from the rig must not shoot off at a velocity its helm accumulated against a position it was never allowed to reach. Operators are walked in UUID order so two hosts place the load identically."
+        - "[ai] EVERYTHING IS AUTHORED (rule 11). The range, the coupling offset and the minimum power level are the hull's `[tractor]` table; the power group, station and damage entry are the tractor `[[system]]` block, validated as a pair at load. A hull that authors neither carries no TractorBeam component and is unchanged in every way, which is why the demo destroyer is untouched by this slice and the probe fields a dedicated tug."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [tractor-beam-state]
+      reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/tractor/coupling.rs
+        - src/tractor/server.rs
+      symbols:
+        - TractorConfig
+        - TractorRefusal
+        - coupled_position
+        - hold_status
+        - TractorBeam
+        - TractorSaveState
+        - TractorPlugin
+        - handle_tractor_commands
+        - tick_tractor
+        - move_coupled_target
+        - publish_tractor_blackboard
+      messages: [EngageTractor, ReleaseTractor]
+      tests: [cargo test]
+
+  - state: tractor-beam-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Tractor Beam State
+      summary: "Per-ship: the authored coupling terms (range, rig offset, minimum power level) and resolved power group, and the live half - whether the beam is engaged, which target it is holding, and why the last engage or hold could not form. Authoritative - a host that thought a derelict was under tow disagrees about where that hulk is."
+      rationale:
+        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own keyed on the minted entity id: the ship's engaged flag and the coupled target's uuid, for every ship actually holding. This is the divergence signal a resume must survive and nothing else catches: a held target is a DERELICT, which carries no ShipPhysics, so the entity namespace never folds its position - the tractor namespace is the only place a host records that a hulk is being dragged. The authored terms are content, which content_digest is answerable for, and the last refusal is a projection the next tick re-derives, so neither is folded."
+        - "[ai] A ship holding NOTHING folds NOTHING - not even a row, the operations namespace's empty-walk affordance. That is what lets a shipped hull gain a `[tractor]` table later without moving any committed world's digest, and it is why the demo destroyer stays byte-identical while the probe tug carries the beam."
+        - "[ai] Snapshotted as a PROJECTION rather than whole: the engage state and the coupled target travel (TractorSaveState), while the authored config and resolved power group ride the template and are re-derived on spawn - writing them into a save would put content into the one artefact content_digest is answerable for. The last refusal is not persisted: a resumed beam that comes back out of range refuses again on its first tick, so a stored reason would only ever be stale. EntityConfig sets deny_unknown_fields, so a build predating the `[tractor]` table refuses the template outright rather than writing a same-content-digest save to disagree with - which is why this did not bump SNAPSHOT_FORMAT."
+        - "[ai] The refusal and the engaged/holding state are separate fields on purpose, the way the operation's refusal and hold are: a refusal means the beam formed no grip at all, which the crew act on differently from a grip they can see holding."
+    architecture:
+      classification: authoritative
+      owner: tractor-beam-coupler
+      writers: [tractor-beam-coupler]
+      replicas: [tractor-beam-published-state]
+    implementation:
+      status: declared
+      paths: [src/tractor/server.rs]
+      symbols:
+        - TractorBeam
+        - TractorSaveState
+      tests: [cargo test]
+
+  - state: tractor-beam-published-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Published Tractor Beam State
+      summary: The client-visible projection of a ship's tractor beam - the authored reach, whether the beam is engaged, the coupled target's uuid and name id, and why the last engage or hold was refused. Published every tick under the tractor's own system id by ships that carry a tractor, and by nobody else.
+      rationale:
+        - "[ai] A SystemBlackboard variant keyed by the REAL tractor system id, not a reserved channel like operations or scan, because unlike an operation the tractor IS a thing aboard the ship: it declares a power group, carries a damage entry, and is commanded and refused through the engineering console. The engineering console reads it under `systems['tractor']` like any other engineering-owned fine system."
+        - "[ai] Additive on the wire in both directions - the adjacently-tagged enum's other variants are untouched by adding Tractor, and every field is serde-default, so a payload predating one decodes rather than being refused whole."
+        - "[ai] NO ENGLISH CROSSES THE WIRE. The coupled target's name is a world entity name id and every refusal is a strings.csv id (`tractor.refused.*`) the console resolves through t(); the refusal is a match in Rust rather than a composed `tractor.refused.{...}`, so check-strings can see every id a new variant needs a row for. The console shows the reason a refused engage carries, which is the AC an out-of-range, unlocked or unpowered engage is proved against."
+    architecture:
+      classification: client-projection
+      owner: tractor-beam-coupler
+      writers: [tractor-beam-coupler]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs]
+      symbols:
+        - TractorBlackboard
+      tests: [cargo test, npx vitest run]
+
   - component: dossier-projection
     core:
       status: implemented

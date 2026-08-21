@@ -159,6 +159,12 @@ pub mod snapshot;
 /// Bevy-free attention stream (one-off unread events vs continuing critical
 /// conditions), held strictly apart from health.
 pub mod station_importance;
+/// The tractor beam (issue #1156), linchpin of PRD #1143's coupling family: the
+/// pure, Bevy-free coupling-position module and refusal vocabulary, and its Bevy
+/// adapter — the engineering-owned `[[system]]` that couples the ship to
+/// Tactical's current lock and holds the derelict on the operator's rig. The
+/// umbilical, dock and external repair-dispatch slices copy this shape.
+pub mod tractor;
 pub mod world;
 /// Deterministic tick-scoped world-id minting (issue #907) — the single
 /// chokepoint every simulation entity, message and projectile id comes from.

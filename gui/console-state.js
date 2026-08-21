@@ -1833,7 +1833,30 @@ export function consoleForSystemId(id) {
   if (id === 'shields-system' || id.startsWith('shield-arc-')) return 'shields';
   if (id === 'power-reactor' || id === 'power-battery') return 'power';
   if (id === 'repair') return 'repair';
+  if (id === 'tractor') return 'tractor';
   return null;
+}
+
+/**
+ * Tractor console family (issue #1156). Reads the raw tractor blackboard the
+ * engineering-owned `tractor` system publishes under its own system id and
+ * returns JSON of the small view the engineering console's tractor control
+ * renders: the authored reach, whether the beam is engaged, the coupled
+ * target's uuid/name id, and the `strings.csv` id of the last refusal (which the
+ * console resolves through `t()` — no English crosses the wire). A hull with no
+ * tractor publishes no such blackboard, so this returns the idle shape and the
+ * control renders its own "no beam" state.
+ * @param {{ blackboards }} state
+ */
+export function buildTractorConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['tractor']) || {};
+  return JSON.stringify({
+    range: bb.range ?? 0,
+    engaged: !!bb.engaged,
+    coupled_target: bb.coupled_target ?? null,
+    coupled_target_name: bb.coupled_target_name ?? null,
+    refusal: bb.refusal ?? null,
+  });
 }
 
 /**
@@ -1921,6 +1944,8 @@ export function buildSystemStationConsoleState(stationId, state) {
     (view) => { view.power_auto = controlSources['power-reactor'] === 'Ai'; });
   add('repair', buildRepairConsoleState,
     (view) => { view.repair_auto = controlSources['repair'] === 'Ai'; });
+  add('tractor', buildTractorConsoleState,
+    (view) => { view.tractor_auto = controlSources['tractor'] === 'Ai'; });
 
   // Dossiers (issue #1030) ride this top-level key rather than under
   // `systems['comms']`. That used to be enough because the destroyer's Intel

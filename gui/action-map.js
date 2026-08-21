@@ -35,6 +35,22 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /** Engage the tractor beam against the ship's current lock (issue #1156). */
+  engage_tractor: (_a, send) => {
+    send('ControlSystem', {
+      target: 'tractor',
+      payload: { type: 'EngageTractor' },
+    });
+  },
+
+  /** Release the tractor beam, dropping any coupling (issue #1156). */
+  release_tractor: (_a, send) => {
+    send('ControlSystem', {
+      target: 'tractor',
+      payload: { type: 'ReleaseTractor' },
+    });
+  },
+
   /** Fire a specific blaster bank (issue #631). */
   fire_blaster: (a, send) => {
     if (!a.bank) return;

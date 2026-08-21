@@ -2182,6 +2182,96 @@ mod tests {
         );
     }
 
+    /// The tractor engage/release commands (issue #1156).
+    ///
+    /// Both target the real, station-owned `tractor` system rather than a
+    /// channel of their own — the tractor IS a thing aboard the ship that can be
+    /// damaged and commanded — so the wire shapes pinned here are what give them
+    /// the ordinary station-tenure admission check the engineering seat holds.
+    /// Fieldless: the beam couples to whatever Tactical has locked, read
+    /// server-side, and release needs no argument.
+    #[test]
+    fn tractor_engage_and_release_control_system_round_trip() {
+        let engage = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+            payload: SystemControlPayload::EngageTractor,
+        };
+        assert_client_roundtrip(&JsonCodec, engage.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, engage.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&engage).unwrap(),
+            r#"{"type":"ControlSystem","data":{"target":"tractor","payload":{"type":"EngageTractor"}}}"#,
+            "EngageTractor wire shape must stay pinned"
+        );
+
+        let release = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+            payload: SystemControlPayload::ReleaseTractor,
+        };
+        assert_client_roundtrip(&JsonCodec, release.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, release.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&release).unwrap(),
+            r#"{"type":"ControlSystem","data":{"target":"tractor","payload":{"type":"ReleaseTractor"}}}"#,
+            "ReleaseTractor wire shape must stay pinned"
+        );
+    }
+
+    /// The tractor blackboard (issue #1156): the `SystemBlackboard::Tractor`
+    /// variant round-trips, is additive on the wire, and an idle beam carries no
+    /// absent-field noise.
+    #[test]
+    fn system_blackboard_tractor_round_trips_and_is_additive() {
+        use crate::messages::TractorBlackboard;
+
+        let held = SystemBlackboard::Tractor(TractorBlackboard {
+            range: 600.0,
+            engaged: true,
+            coupled_target: Some("00000000-0000-8000-8000-000000000042".into()),
+            coupled_target_name: Some("world.probe_tractor.entity.derelict.name".into()),
+            refusal: None,
+        });
+        assert_server_roundtrip(
+            &JsonCodec,
+            ServerMessage::BlackboardUpdate {
+                updates: vec![(
+                    SystemId(crate::ship::system_registry::TRACTOR_SYSTEM_ID.into()),
+                    held.clone(),
+                )],
+            },
+        );
+        let json = serde_json::to_string(&held).unwrap();
+        assert!(json.contains(r#""kind":"Tractor""#), "got: {json}");
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+            held
+        );
+
+        // An idle beam holding nothing pays for none of the optional fields.
+        let idle = SystemBlackboard::Tractor(TractorBlackboard {
+            range: 600.0,
+            ..Default::default()
+        });
+        let json = serde_json::to_string(&idle).unwrap();
+        assert!(
+            !json.contains("coupled_target") && !json.contains("refusal"),
+            "an idle tractor blackboard must carry no absent-field noise: {json}"
+        );
+
+        // Additive on the wire: a payload minted before this variant existed
+        // still decodes, because the enum's other variants are untouched.
+        let legacy = r#"{"kind":"Captain","data":{"red_alert":false,"view_direction":"fore","hull_integrity_pct":100.0}}"#;
+        assert!(matches!(
+            serde_json::from_str::<SystemBlackboard>(legacy).unwrap(),
+            SystemBlackboard::Captain(_)
+        ));
+        // …and every field on the payload is serde-default, so a bare one decodes.
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Tractor","data":{}}"#).unwrap(),
+            SystemBlackboard::Tractor(TractorBlackboard::default())
+        );
+    }
+
     /// The scan blackboard (issue #1032), and the derivation-purity guarantee
     /// stated where the payload is actually made: **as the reading's whole key
     /// set**.

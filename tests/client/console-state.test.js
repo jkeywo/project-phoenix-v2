@@ -1935,6 +1935,58 @@ describe('buildSensorsConsoleState', () => {
 
 // ── science station (generic system-id-keyed payload, issue #825) ─────────────
 
+describe('tractor via buildSystemStationConsoleState (issue #1156)', () => {
+  // An engineering station that owns a tractor system, as the probe tug and any
+  // future tractor-fitted hull declare it.
+  const ENG_SYSTEMS = { engineering: ['repair', 'tractor'] };
+
+  it('exposes a tractor view under the tractor id, keyed off the tractor blackboard', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: ENG_SYSTEMS,
+      blackboards: {
+        tractor: {
+          range: 600,
+          engaged: true,
+          coupled_target: 'derelict-1',
+          coupled_target_name: 'world.probe_tractor.entity.derelict.name',
+          refusal: null,
+        },
+      },
+    }));
+    expect(s.systems['tractor']).toBeTruthy();
+    expect(s.systems['tractor'].engaged).toBe(true);
+    expect(s.systems['tractor'].range).toBe(600);
+    expect(s.systems['tractor'].coupled_target).toBe('derelict-1');
+    expect(s.systems['tractor'].coupled_target_name).toBe('world.probe_tractor.entity.derelict.name');
+  });
+
+  it('surfaces the refusal string id the console shows', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: ENG_SYSTEMS,
+      blackboards: { tractor: { engaged: false, refusal: 'tractor.refused.out_of_range' } },
+    }));
+    // A machine string id, resolved by the console through t() — never English.
+    expect(s.systems['tractor'].refusal).toBe('tractor.refused.out_of_range');
+  });
+
+  it('a station that owns no tractor system gets no tractor view — a hull without one is unchanged', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: { engineering: ['repair'] },
+      blackboards: { tractor: { engaged: true } },
+    }));
+    expect(s.systems).not.toHaveProperty('tractor');
+  });
+
+  it('the tractor auto flag comes from controlSources', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: ENG_SYSTEMS,
+      controlSources: { tractor: 'Ai' },
+      blackboards: { tractor: {} },
+    }));
+    expect(s.systems['tractor'].tractor_auto).toBe(true);
+  });
+});
+
 describe('science station via buildSystemStationConsoleState', () => {
   // Cruiser science station as declared in assets/entities/alliance_cruiser.toml.
   const SCIENCE_SYSTEMS = { science: ['sensors', 'sensor-radar', 'shields-system'] };

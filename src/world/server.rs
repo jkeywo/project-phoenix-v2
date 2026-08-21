@@ -600,6 +600,11 @@ impl Plugin for WorldPlugin {
         app.add_plugins(crate::comms::CommsWorldPlugin)
             .add_plugins(crate::infrastructure::InfrastructurePlugin)
             .add_plugins(crate::operations::OperationsPlugin)
+            // The tractor beam (issue #1156) is a NEW system standing beside the
+            // operations tow, not a change to it. Added here alongside its sibling
+            // because a coupled target is moved through the same after-integration
+            // `SimSet::Modifiers` window the tow uses.
+            .add_plugins(crate::tractor::server::TractorPlugin)
             .add_plugins(crate::civilian::CivilianPlugin)
             // Dossiers (issue #1030) join them for the same reason: the
             // commitments a fact sheet lists are a field on
@@ -9258,6 +9263,7 @@ seed = 1
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -9556,6 +9562,7 @@ seed = 1
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,

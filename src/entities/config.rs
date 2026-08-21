@@ -4482,6 +4482,15 @@ pub struct EntityConfig {
     /// says what an entity can *read*.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan: Option<crate::science::ScanConfig>,
+    /// The tractor beam's coupling terms (issue #1156) — range, rig offset and
+    /// minimum power level. Present on a hull whose engineering seat can take a
+    /// derelict under tow; absent for everything else, which carries no
+    /// `TractorBeam` component and is unchanged in every way. The `[[system]]
+    /// kind = "tractor"` block declares the system's identity (power group,
+    /// station, damage entry); this table carries what the coupling itself is,
+    /// and a hull that authors one without the other is refused by name at load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tractor: Option<crate::tractor::TractorConfig>,
     /// The faint world-locked lattice drawn under this hull on the viewscreen.
     /// Present only on a hull meant to be FLOWN — the grid is a motion cue for
     /// the crew looking out of their own ship, and it is only ever read off the
@@ -4885,6 +4894,38 @@ impl EntityConfig {
         // for the rest of the mission.
         if let Some(ref scan) = config.scan {
             scan.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Validation: a [tractor] table has to describe a beam that can hold
+        // (issue #1156), and it has to be paired with the system that gives it
+        // its identity. A zero range or zero minimum power is caught by
+        // `TractorConfig::validate`; the pairing is checked here because the
+        // coupling terms live in a table and the power group, station and damage
+        // entry live on a `[[system]] kind = "tractor"` block — a hull that
+        // authored one without the other would carry a control the crew can press
+        // that grips nothing, or a system with terms nobody reads.
+        if let Some(ref tractor) = config.tractor {
+            tractor.validate().map_err(SerdeError::custom)?;
+            let system = config
+                .ship_config
+                .as_ref()
+                .and_then(|sc| {
+                    sc.systems
+                        .iter()
+                        .find(|s| s.kind == crate::system_registry::TRACTOR_KIND)
+                })
+                .ok_or_else(|| {
+                    SerdeError::custom(
+                        "a [tractor] table needs a matching [[system]] kind = \"tractor\" block \
+                         to declare its power group, station and damage entry",
+                    )
+                })?;
+            if system.power_group.is_none() {
+                return Err(SerdeError::custom(
+                    "the [[system]] kind = \"tractor\" block must declare a power_group — the \
+                     tractor's power allocation is what an interruption checks",
+                ));
+            }
         }
 
         // Validation: a [reference_grid] table has to describe a lattice that

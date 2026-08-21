@@ -1996,6 +1996,25 @@ pub enum SystemControlPayload {
         /// carries, and the one the client already holds from its radar blips.
         uuid: String,
     },
+    /// Engage the tractor beam against the ship's current lock (issue #1156).
+    ///
+    /// Targets the engineering-owned `tractor` system
+    /// (`system_registry::TRACTOR_SYSTEM_ID`), a real station-owned system, so
+    /// it takes the ordinary station-tenure admission path — the Engineering
+    /// holder may send it, an AI operating that system may emit it (#1162), and
+    /// nobody else is admitted.
+    ///
+    /// No fields: the beam couples to whatever Tactical currently has locked
+    /// (the ship's one `WeaponsTarget`), which the handler reads server-side
+    /// rather than the command naming a target — a command that carried a uuid
+    /// the console read a tick ago could grab something the crew never pointed
+    /// at. Explicit intent, not a toggle: `ReleaseTractor` is its own command, so
+    /// a retried or stale-UI engage is idempotent.
+    EngageTractor,
+    /// Release the tractor beam, dropping any coupling (issue #1156). Targets the
+    /// `tractor` system, the sibling of `EngageTractor` above. No fields — a ship
+    /// runs one tractor, so there is nothing to disambiguate.
+    ReleaseTractor,
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -3618,6 +3637,13 @@ pub enum SystemBlackboard {
     /// *result* — a reading taken at a tick, which outlives the tick that took
     /// it and is not a live gauge of anything.
     Scan(ScanBlackboard),
+    /// The tractor beam's readout (issue #1156). One per ship carrying a
+    /// `tractor` system, keyed by `system_registry::tractor_system_id` — a REAL
+    /// system id, not a reserved channel like `Operations`/`Scan`, because unlike
+    /// an operation the tractor IS a thing aboard the ship: it declares a power
+    /// group, carries a damage entry and is commanded and refused through the
+    /// engineering console.
+    Tractor(TractorBlackboard),
 }
 
 /// One verb a hull can perform, as the console offers it (issue #1026).
@@ -3695,6 +3721,39 @@ pub struct OperationsBlackboard {
     /// `strings.csv` id for why the most recent *start* was refused. Distinct
     /// from `active.reason`: a refusal means no operation was opened at all,
     /// which the crew act on differently from one that opened and stalled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+}
+
+/// Raw sim truth for a ship's tractor beam, published each tick under its system
+/// id (issue #1156).
+///
+/// Additive on the wire in both directions, the way `OperationsBlackboard` is:
+/// the adjacently-tagged `SystemBlackboard` enum's other variants are untouched
+/// by adding `Tractor`, and every field here is `#[serde(default)]`, so a
+/// payload predating one decodes rather than being refused whole. No English
+/// crosses: `coupled_target_name` is a world entity name id and `refusal` a
+/// `strings.csv` id the console resolves.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct TractorBlackboard {
+    /// The authored coupling range, so the console can show the crew how far the
+    /// beam reaches. Authored content, not live state — a static fact of the
+    /// hull the console renders alongside the live engage state.
+    #[serde(default)]
+    pub range: f32,
+    /// Whether the beam is engaged and holding this tick.
+    #[serde(default)]
+    pub engaged: bool,
+    /// The UUID of the target currently held, or `None` when nothing is held.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coupled_target: Option<String>,
+    /// The held target's authored world entity name id, resolved for display, or
+    /// `None` when nothing is held or the target has no authored name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coupled_target_name: Option<String>,
+    /// `strings.csv` id for why the last engage or hold could not form —
+    /// `tractor.refused.*`. Retained until the operator engages or releases
+    /// again; `None` while the beam is idle or holding cleanly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
 }

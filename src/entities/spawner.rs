@@ -1236,6 +1236,28 @@ pub fn spawn_entity(
         });
     }
 
+    // The tractor beam (issue #1156) — attach the beam when `[tractor]` is
+    // present, on the same argument again. The power group is read from the
+    // tractor `[[system]]` block (its single authored source), so the component
+    // is self-contained after spawn and the tick never re-walks the systems
+    // list. `EntityConfig` validation already guaranteed the paired system with a
+    // power group exists, so the resolve below cannot silently drop the beam on a
+    // hull that authored it; the belt-and-braces `if let` only guards a
+    // component-less spawn path.
+    if let Some(tractor) = &config.tractor {
+        if let Some(power_group) = config.ship_config.as_ref().and_then(|sc| {
+            sc.systems
+                .iter()
+                .find(|s| s.kind == crate::system_registry::TRACTOR_KIND)
+                .and_then(|s| s.power_group.clone())
+        }) {
+            entity_commands.insert(crate::tractor::TractorBeam::new(
+                tractor.clone(),
+                power_group,
+            ));
+        }
+    }
+
     // The science scan (issue #1032) — attach the record when `[scan]` is
     // present, on the same argument again. The record carries the authored
     // fidelity ladder AND the last reading: a hull that can scan starts able to
@@ -1731,6 +1753,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1818,6 +1841,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1875,6 +1899,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -1937,6 +1962,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2004,6 +2030,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2154,6 +2181,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2237,6 +2265,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2303,6 +2332,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2453,6 +2483,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
         };
 
@@ -2518,6 +2549,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2565,6 +2597,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: Some(faction_id),
             hull: None,
@@ -2679,6 +2712,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -2899,6 +2933,7 @@ regen_per_sec = 0.0
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             behaviour: None,

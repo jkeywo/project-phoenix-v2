@@ -95,6 +95,15 @@
 //! namespace rule as above, and see [`fold_weapons_hold_namespace`] for why the
 //! released ships are left out rather than folded as zeroes.
 //!
+//! **Folded (tractor namespace, in `FoldKey` order — issue #1156):** every ship
+//! whose tractor beam is holding a target — its id, its engaged flag and the
+//! coupled target's uuid. A held target is a derelict, which carries no
+//! `ShipPhysics`, so the entity namespace never folds its position: this
+//! namespace is the only place a host records that a hulk is under tow, and two
+//! hosts that disagreed about the grip disagree about where the hulk is. Empty-
+//! namespace rule as above — a hull that authored a tractor and is holding
+//! nothing folds nothing — see [`fold_tractor_namespace`].
+//!
 //! **Folded (`AsteroidUuid` namespace, in `FoldKey` order):** every asteroid's
 //! id, its `Transform` translation as bit patterns (a rock's position is
 //! authoritative — it is what a collision resolves against), and its
@@ -186,6 +195,7 @@ use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
 use crate::ship::state::{ShipPhysics, ShipRedAlert, ShipWeaponsHold};
 use crate::sim_rng::SimRng;
 use crate::sim_tick::SimTick;
+use crate::tractor::TractorBeam;
 
 /// The declared namespace sequence. **Append only** — see the module docs.
 ///
@@ -323,6 +333,7 @@ pub fn world_digest(world: &World) -> u64 {
     acc = fold_civilian_namespace(world, acc);
     acc = fold_weapons_hold_namespace(world, acc);
     acc = fold_station_stances_namespace(world, acc);
+    acc = fold_tractor_namespace(world, acc);
     acc = fold_asteroid_namespace(world, acc);
     fold_collisions(world, acc)
 }
@@ -689,6 +700,62 @@ fn fold_station_stances_namespace(world: &World, mut acc: u64) -> u64 {
             acc = fold_str(acc, &station);
             acc = fold_str(acc, &stance);
         }
+    }
+    acc
+}
+
+/// Every ship whose tractor beam is holding a target (issue #1156), in
+/// [`FoldKey`] order, in its own namespace.
+///
+/// # What is folded, and why it has to be
+///
+/// A ship's engaged state and its coupled target, and nothing else. This is the
+/// authoritative divergence signal a resume has to survive: a held target is a
+/// *derelict*, and a derelict carries no `ShipPhysics`, so its position is NOT
+/// folded by the entity namespace at all — the only place a host records that a
+/// hulk is being dragged across the map is right here. Two hosts that disagreed
+/// about whether a tractor still has a grip disagree about where that hulk is,
+/// with nothing else to catch it.
+///
+/// The authored coupling terms are content, which `snapshot::content_digest` is
+/// answerable for, so `range`, `coupling_offset` and `min_power_level` are not
+/// folded; the last refusal is a projection the next tick re-derives and is left
+/// out for the same reason the tow leaves its stall reason's derivations out.
+///
+/// The empty-walk affordance is [`fold_operations_namespace`]'s, and it does the
+/// same real work: a hull that authored a `[tractor]` table and is holding
+/// nothing folds NOTHING — not even a row — so a shipped hull can gain a tractor
+/// without moving any committed world's digest.
+fn fold_tractor_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &TractorBeam)>() else {
+        // A world that never registered the component runs no tractor — the
+        // empty case, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, bool, String)> = query
+        .iter(world)
+        .filter_map(|(entity, uuid, beam)| {
+            beam.coupled_target.as_ref().map(|target| {
+                (
+                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                    entity.index(),
+                    beam.engaged,
+                    target.clone(),
+                )
+            })
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "tractor-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, engaged, target) in rows {
+        acc = fold_str(acc, &key.id);
+        acc = fold_u64(acc, engaged as u64);
+        acc = fold_str(acc, &target);
     }
     acc
 }
@@ -1223,6 +1290,7 @@ mod tests {
         world.register_component::<InfrastructureCondition>();
         world.register_component::<ShipOperations>();
         world.register_component::<CivilianTraffic>();
+        world.register_component::<TractorBeam>();
         world
     }
 
@@ -1340,6 +1408,66 @@ mod tests {
             world_digest(&late),
             "…and a host that thinks the crew are four seconds further through stabilising a \
              skyhook than they are must not fold to the same number"
+        );
+    }
+
+    /// A tug, optionally holding a named derelict on its tractor.
+    fn spawn_tug(world: &mut World, uuid: &str, holding: Option<&str>) {
+        let mut beam = TractorBeam::new(
+            crate::tractor::TractorConfig {
+                range: 600.0,
+                coupling_offset: [0.0, 0.0, -120.0],
+                min_power_level: 2,
+            },
+            crate::messages::PowerGroupId("tractor".into()),
+        );
+        if let Some(target) = holding {
+            beam.engaged = true;
+            beam.coupled_target = Some(target.to_string());
+        }
+        world.spawn((EntityUuid(uuid.to_string()), beam));
+    }
+
+    /// **Issue #1156.** A world with no tractor holding folds to exactly the
+    /// number it did before the namespace existed — and so does a hull that
+    /// authored a tractor and is holding nothing. Only an ACTIVE grip moves it,
+    /// and the coupled target is what moves it, because a held derelict carries
+    /// no `ShipPhysics` and nothing else folds its position.
+    #[test]
+    fn only_a_held_tractor_moves_the_digest_and_the_target_is_what_moves_it() {
+        let id = "00000000-0000-8000-8000-000000000001";
+
+        let mut idle = fold_world();
+        spawn_tug(&mut idle, id, None);
+        assert_eq!(
+            fold_tractor_namespace(&idle, FOLD_SEED),
+            FOLD_SEED,
+            "a tractor holding nothing folds nothing — a folded row here would have moved every \
+             committed world's digest for state none of them carry"
+        );
+
+        let mut holding_a = fold_world();
+        spawn_tug(&mut holding_a, id, Some("derelict-A"));
+        let mut holding_a_again = fold_world();
+        spawn_tug(&mut holding_a_again, id, Some("derelict-A"));
+        let mut holding_b = fold_world();
+        spawn_tug(&mut holding_b, id, Some("derelict-B"));
+
+        assert_ne!(
+            world_digest(&idle),
+            world_digest(&holding_a),
+            "engaging the tractor and taking a derelict under tow must move the digest — nothing \
+             else records that the hulk is being dragged"
+        );
+        assert_eq!(
+            world_digest(&holding_a),
+            world_digest(&holding_a_again),
+            "two hosts holding the same derelict must agree"
+        );
+        assert_ne!(
+            world_digest(&holding_a),
+            world_digest(&holding_b),
+            "…and a host that thinks the beam has a different hulk must fold to a different number"
         );
     }
 

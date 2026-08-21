@@ -136,6 +136,21 @@ pub const REPAIR_KIND: &str = "repair";
 pub const COMMAND_SYSTEM_ID: &str = "command";
 pub const COMMAND_KIND: &str = "command";
 
+/// Wire `SystemId` for the tractor-beam system (issue #1156).
+///
+/// The linchpin of PRD #1143's coupling family: a first-class,
+/// engineering-owned `[[system]]` that declares its own power group, carries a
+/// damage entry, is admission-gated (`EngageTractor` / `ReleaseTractor`), and
+/// publishes its own blackboard. Engaging it couples the ship to whatever
+/// Tactical currently has locked; the pure sibling `crate::tractor::coupling`
+/// owns the geometry. Its coupling terms — range, offset, minimum power level —
+/// are authored in a hull's `[tractor]` table, never hardcoded, so a hull that
+/// declares neither the system nor the table is unchanged in every way. The
+/// umbilical (#1160), dock (#1159) and external repair-dispatch (#1161) copy
+/// this shape.
+pub const TRACTOR_SYSTEM_ID: &str = "tractor";
+pub const TRACTOR_KIND: &str = "tractor";
+
 // ── Fine-grained Helm systems (issue #511) ────────────────────────────────────
 
 /// Wire `SystemId` for the Helm Joystick fine system.
@@ -360,6 +375,8 @@ impl SystemKindRegistry {
         registry.register(REPAIR_KIND)?;
         // Command capability system (issue #1107).
         registry.register(COMMAND_KIND)?;
+        // Tractor-beam system (issue #1156).
+        registry.register(TRACTOR_KIND)?;
         // Fine-grained Helm systems (issue #511)
         registry.register(HELM_JOYSTICK_KIND)?;
         registry.register(HELM_ENGINE_KIND)?;
@@ -478,6 +495,13 @@ pub fn repair_system_id() -> SystemId {
 
 pub fn command_system_id() -> SystemId {
     SystemId(COMMAND_SYSTEM_ID.to_string())
+}
+
+/// The tractor-beam system's wire `SystemId` (issue #1156). The admitted target
+/// for `EngageTractor` / `ReleaseTractor` and the key its blackboard publishes
+/// under.
+pub fn tractor_system_id() -> SystemId {
+    SystemId(TRACTOR_SYSTEM_ID.to_string())
 }
 
 // ── Fine Helm system id helpers (issue #511) ──────────────────────────────────

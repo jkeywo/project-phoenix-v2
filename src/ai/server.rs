@@ -3173,6 +3173,7 @@ verb = "fire_blaster"
             infrastructure: None,
             operations: None,
             scan: None,
+            tractor: None,
             civilian: None,
             faction: None,
             hull: None,

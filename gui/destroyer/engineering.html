@@ -33,6 +33,14 @@
     .console-footer .sep { color: var(--line-soft); }
     .console-footer .spacer { flex: 1; }
     .hero-controls { display: flex; align-items: center; gap: 8px; }
+    /* Tractor beam control (issue #1156). */
+    .tractor-panel { flex-shrink: 0; border-top: 1px solid var(--edge); padding-top: 6px; margin-top: 8px; }
+    .tractor-panel h2 { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); font-weight: 600; letter-spacing: 0.3em; color: var(--ink-dim); text-transform: uppercase; margin: 0 0 8px; }
+    .tractor-row { display: flex; align-items: center; gap: 10px; }
+    .tractor-btn { font-family: "Chakra Petch", sans-serif; font-size: var(--text-sm); letter-spacing: 0.14em; padding: 6px 14px; background: rgba(var(--rgb-panel), 0.8); color: var(--ink); border: 1px solid var(--edge); cursor: pointer; min-height: var(--control-hit-min); }
+    .tractor-btn.engaged { background: var(--loaded); color: var(--surface-void); border-color: var(--loaded); }
+    .tractor-status { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--ink-faint); }
+    .tractor-refusal { font-family: "JetBrains Mono", monospace; font-size: var(--text-xs); color: var(--reloading); margin-top: 6px; }
     @media (orientation: portrait) { .panel-inner { padding: 10px 12px; gap: 8px; } .hero h1 { font-size: var(--text-xl); } .hero h1 .sub { font-size: var(--text-xs); } .console-body { grid-template-columns: 1fr; gap: 8px; } .console-body .col { padding: 8px; } }
   </style>
 </head>
@@ -64,6 +72,16 @@
           <ph-hull-integrity id="hull-integrity"></ph-hull-integrity>
           <ph-station-damage id="core-damage" label="Core" data-i18n-attr="label:console.repair.core"></ph-station-damage>
           <ph-repair-teams id="repair-teams"></ph-repair-teams>
+          <!-- Tractor beam (issue #1156): shown only on a hull that authors a
+               tractor system, so a hull without one is unchanged. -->
+          <div class="tractor-panel" id="tractor-panel" hidden>
+            <h2 data-i18n="console.engineering.tractor" style="margin-top:10px">Tractor</h2>
+            <div class="tractor-row">
+              <button id="tractor-btn" class="tractor-btn" data-i18n="console.tractor.engage">Engage</button>
+              <span id="tractor-status" class="tractor-status">—</span>
+            </div>
+            <div id="tractor-refusal" class="tractor-refusal" hidden></div>
+          </div>
         </div>
       </div>
       <footer class="console-footer footer-bar">
@@ -89,7 +107,11 @@
     // Generic system-id-keyed payload (issue #825): resolve each panel's view
     // from the fine system ids this station owns.
     function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
-    initConsole({
+    // Tractor engage state, tracked so the one button toggles engage/release
+    // (issue #1156). Human and AI issue the SAME EngageTractor/ReleaseTractor
+    // through the one admission path — this control just picks which.
+    var tractorEngaged = false;
+    var consoleHandle = initConsole({
       name: 'engineering',
       // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
       render: function(s) {
@@ -126,7 +148,39 @@
         // owned system AI-run — the conjunction of the resolved views' *_auto
         // flags (controlSources can lag a rating change by one tick).
         setAutoState(null, document.getElementById('engineering-auto-badge'), !!(sh.shields_auto && p.power_auto && r.repair_auto));
+
+        // Tractor beam (issue #1156). The panel shows only on a hull whose
+        // engineering station owns a `tractor` system — a hull without one has
+        // no `systems['tractor']` view, so the panel stays hidden and the
+        // console is unchanged.
+        var panel = document.getElementById('tractor-panel');
+        var tr = (s.systems && s.systems['tractor']) || null;
+        if (!tr) { panel.hidden = true; }
+        else {
+          panel.hidden = false;
+          tractorEngaged = !!tr.engaged;
+          var btn = document.getElementById('tractor-btn');
+          btn.classList.toggle('engaged', tractorEngaged);
+          btn.textContent = t(tractorEngaged ? 'console.tractor.release' : 'console.tractor.engage');
+          var status = document.getElementById('tractor-status');
+          if (tractorEngaged) {
+            status.textContent = t('console.tractor.holding')
+              + (tr.coupled_target_name ? ' · ' + t(tr.coupled_target_name) : '');
+          } else {
+            status.textContent = t('console.tractor.idle')
+              + ' · ' + t('console.tractor.range') + ' ' + Math.round(tr.range || 0);
+          }
+          var refusal = document.getElementById('tractor-refusal');
+          if (tr.refusal) { refusal.hidden = false; refusal.textContent = t(tr.refusal); }
+          else { refusal.hidden = true; refusal.textContent = ''; }
+        }
       }
+    });
+
+    // The one tractor button toggles engage/release through the action map,
+    // which sends the same admitted command a tractor AI would (issue #1156).
+    document.getElementById('tractor-btn').addEventListener('click', function() {
+      consoleHandle.sendAction(tractorEngaged ? 'release_tractor' : 'engage_tractor');
     });
   </script>
 </body>

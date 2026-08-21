@@ -1475,6 +1475,19 @@
        (issue #755). Publishes window.scenarioArbiter for the classic-script
        host logic below. -->
   <script type="module" src="gui/scenario-arbiter.js"></script>
+  <!-- Host scenario-catalog + mod-pack view-models (issue #1230): the pure
+       decision behind renderScenarioLockState() (which picker stage to show,
+       or the single-ship auto-resolve) and renderModPackList() (pack rows +
+       reorder eligibility + conflict rows) live in gui/host-scenarios.js so
+       vitest can exercise them directly. Sibling of gui/scenario-arbiter.js
+       above, not a merge into it: the arbiter decides whether a selection
+       request is ACCEPTED; this decides what the already-decided selection
+       RENDERS as. Publishes window.hostScenarios, same self-registering
+       pattern as window.scenarioArbiter — no queue/latch needed, since every
+       call site below fires from an async event (fetch resolving, a user
+       click, a Rust host-channel push) that only ever happens after this
+       module has finished loading. -->
+  <script type="module" src="gui/host-scenarios.js"></script>
   <!-- Host lobby view-model (issue #1229): the pure phase-transition, title/
        crew/ready-badge/countdown/station-card/reserved-chip/spectator-pill/
        hint computation behind __updateLobby's station-grid renderer lives in
@@ -1551,6 +1564,19 @@
     });
     window.__hostChannelReady(hostChannelDispatch);
   </script>
+
+  <!-- Host peer routing (issue #1230): the pure target ⇒ connection-list
+       resolution behind routeOutbound() (the `set_message_callback` Rust's
+       outbound flush calls) lives in gui/host-peer-routing.js so vitest can
+       exercise the 'all'/'token:'/'except:' targeting and the snapshot→
+       reliable per-token fallback with plain Map fixtures instead of real
+       PeerJS connections. Publishes window.hostPeerRouting; routeOutbound
+       itself, and the `tokenConns`/`tokenSnapshotConns` Maps it reads, stay
+       inline below — this module never touches either Map, only resolves
+       which entries of them to send on. No queue/latch needed: routeOutbound
+       is only ever invoked from an async WASM callback registered near the
+       bottom of this page, long after every module island here has loaded. -->
+  <script type="module" src="gui/host-peer-routing.js"></script>
 
   <!-- ICE/TURN config bridge (issue #1226): gui/connection-manager.js is the
        single source of truth for the STUN pair, the OpenRelay TURN fallback
@@ -2643,61 +2669,73 @@
       if (!_catalogBuilt) return;
       applyPreScenarioRestrictions();
 
-      if (_preSelection.scenario_id == null) {
-        // Scenario stage — one button per catalog scenario.
-        if (label) label.textContent = t('server.select_world');
+      // Pure stage decision (scenario stage / ship stage / single-ship
+      // auto-resolve / locked) lives in gui/host-scenarios.js (issue #1230);
+      // everything below is DOM writes plus the arbiterSelectShip/
+      // window.__sendAction side effects the decision asked for.
+      const vm = window.hostScenarios.scenarioCatalogView(_scenarioCatalog, _preSelection, _worldLoadStarted);
+
+      if (vm.stage === 'ship-auto') {
+        // A scenario curated (or authored) down to exactly one playable hull
+        // resolves straight to it — no picker click needed (issue #917).
+        arbiterSelectShip(vm.templatePath);
+        return;
+      }
+
+      if (vm.stage === 'scenario-empty') {
+        if (label) label.textContent = t(vm.labelId);
         clearScenarioEntries(worldList);
-        if (_scenarioCatalog.length === 0) {
-          const empty = document.createElement('div');
-          empty.id = 'scenario-loading';
-          empty.textContent = t('server.no_scenarios');
-          appendScenarioEntry(worldList, empty);
-          return;
-        }
-        _scenarioCatalog.forEach(function (sc) {
+        const empty = document.createElement('div');
+        empty.id = 'scenario-loading';
+        empty.textContent = t('server.no_scenarios');
+        appendScenarioEntry(worldList, empty);
+        return;
+      }
+
+      if (vm.stage === 'scenario-list') {
+        // Scenario stage — one button per catalog scenario.
+        if (label) label.textContent = t(vm.labelId);
+        clearScenarioEntries(worldList);
+        vm.entries.forEach(function (sc) {
           const btn = document.createElement('button');
           btn.className = 'world-btn ' + SCENARIO_ENTRY_CLASS;
           btn.dataset.path = sc.world;
-          btn.dataset.scenarioId = sc.id;
-          btn.textContent = tData(sc.label) || sc.id;
+          btn.dataset.scenarioId = sc.scenarioId;
+          btn.textContent = tData(sc.label) || sc.scenarioId;
           btn.addEventListener('click', function () {
             // Round 1 and every subsequent round after Game Over route through
             // the same arbiter (issue #756): the second round re-enters
             // select_scenario → arbiter → driveWorldLoad, reusing the loaded
             // world without a page reload.
-            window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: sc.id }));
+            window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: sc.scenarioId }));
           });
           appendScenarioEntry(worldList, btn);
         });
-      } else if (_preSelection.template_path == null) {
+        return;
+      }
+
+      if (vm.stage === 'ship-picker') {
         // Ship stage — the locked scenario's offered ships via ph-ship-picker.
-        const entry = window.scenarioArbiter.findScenario(_scenarioCatalog, _preSelection.scenario_id);
-        const ships = (entry && entry.ships) || [];
-        // A scenario curated (or authored) down to exactly one playable hull
-        // resolves straight to it — no picker click needed (issue #917). This
-        // is count-based, not keyed on any hull name: it fires for any
-        // single-ship catalog entry, curated or not.
-        if (ships.length === 1) {
-          arbiterSelectShip(ships[0].template_path);
-          return;
-        }
-        if (label) label.textContent = t('server.select_ship');
+        if (label) label.textContent = t(vm.labelId);
         clearScenarioEntries(worldList);
         import('./gui/components/ph-ship-picker.js').then(function () {
           if (_preSelection.template_path != null) return; // won meanwhile
           const picker = document.createElement('ph-ship-picker');
           appendScenarioEntry(worldList, picker);
-          picker.state = { ships: ships };
+          picker.state = { ships: vm.ships };
           picker.addEventListener('ship-selected', function (e) {
             window.__sendAction(JSON.stringify({ action: 'select_player_ship', template_path: e.detail.template_path }));
           });
         });
-      } else {
-        // Both locked — world load is starting. Only this render's own entries
-        // go; #mod-pack-upload stays put for the next round's scenario stage
-        // (Return to Lobby re-shows the panel without rebuilding it).
-        clearScenarioEntries(worldList);
+        return;
       }
+
+      // vm.stage === 'locked' — either _worldLoadStarted, or both scenario and
+      // ship are already locked and world load is about to start. Only this
+      // render's own entries go; #mod-pack-upload stays put for the next
+      // round's scenario stage (Return to Lobby re-shows the panel without
+      // rebuilding it).
+      clearScenarioEntries(worldList);
     }
 
     // Which scenario manifest to load: the base catalog (assets/scenarios.toml)
@@ -2767,38 +2805,42 @@
       conflictsEl.textContent = '';
       let report;
       try { report = wasmBindings.wasm_active_pack_manifest(); } catch (e) { return; }
-      const packs = (report && report.packs) ? Array.from(report.packs) : [];
-      if (packs.length === 0) return;
+
+      // Pure row/conflict computation lives in gui/host-scenarios.js (issue
+      // #1230); everything below is DOM writes plus the reorderModPack/
+      // removeModPack click wiring.
+      const vm = window.hostScenarios.modPackListView(report);
+      if (!vm.visible) return;
 
       const heading = document.createElement('div');
       heading.className = 'mod-pack-heading';
       heading.textContent = t('server.mod_pack_applied_packs');
       listEl.appendChild(heading);
 
-      packs.forEach(function (pack, idx) {
+      vm.packs.forEach(function (pack, idx) {
         const row = document.createElement('div');
         row.className = 'mod-pack-row';
 
         const label = document.createElement('span');
         label.className = 'mod-pack-name';
         label.textContent = t('server.mod_pack_row', {
-          name: pack.name || pack.id || '',
-          version: pack.version || '',
-          count: (pack.file_count != null ? pack.file_count : 0),
+          name: pack.name,
+          version: pack.version,
+          count: pack.fileCount,
         });
         row.appendChild(label);
 
         const up = document.createElement('button');
         up.className = 'mod-pack-ctl';
         up.textContent = t('server.mod_pack_move_up');
-        up.disabled = idx === 0;
+        up.disabled = !pack.canMoveUp;
         up.addEventListener('click', function () { reorderModPack(idx, idx - 1); });
         row.appendChild(up);
 
         const down = document.createElement('button');
         down.className = 'mod-pack-ctl';
         down.textContent = t('server.mod_pack_move_down');
-        down.disabled = idx === packs.length - 1;
+        down.disabled = !pack.canMoveDown;
         down.addEventListener('click', function () { reorderModPack(idx, idx + 1); });
         row.appendChild(down);
 
@@ -2811,20 +2853,18 @@
         listEl.appendChild(row);
       });
 
-      const conflicts = (report && report.conflicts) ? Array.from(report.conflicts) : [];
-      if (conflicts.length > 0) {
+      if (vm.conflicts.length > 0) {
         const ch = document.createElement('div');
         ch.className = 'mod-pack-heading';
         ch.textContent = t('server.mod_pack_conflicts');
         conflictsEl.appendChild(ch);
-        conflicts.forEach(function (c) {
+        vm.conflicts.forEach(function (c) {
           const line = document.createElement('div');
           line.className = 'mod-pack-conflict';
-          const losers = c.losers ? Array.from(c.losers).join(', ') : '';
           line.textContent = t('server.mod_pack_conflict_entry', {
             path: c.path,
             winner: c.winner,
-            losers: losers,
+            losers: c.losers.join(', '),
           });
           conflictsEl.appendChild(line);
         });
@@ -3057,41 +3097,11 @@
     // island assigns the window.__audioConfig/etc. globals directly.
 
     function routeOutbound(target, payload, deliveryClass) {
-      const useSnapshot = deliveryClass === 'snapshot';
-      const primary = useSnapshot ? tokenSnapshotConns : tokenConns;
-      const fallback = useSnapshot ? tokenConns : null;
-      if (target === 'all') {
-        const sent = new Set();
-        for (const [t, c] of primary) {
-          if (c.open || c.readyState === 'open') { c.send(payload); sent.add(t); }
-        }
-        // Fallback: send via reliable for tokens missing a snapshot channel
-        if (useSnapshot && fallback) {
-          for (const [t, c] of fallback) {
-            if (!sent.has(t) && (c.open || c.readyState === 'open')) c.send(payload);
-          }
-        }
-      } else if (target.startsWith('token:')) {
-        const t = target.slice(6);
-        const c = primary.get(t);
-        if (c && (c.open || c.readyState === 'open')) { c.send(payload); return; }
-        // Fallback to reliable
-        if (useSnapshot && fallback) {
-          const fc = fallback.get(t);
-          if (fc && (fc.open || fc.readyState === 'open')) fc.send(payload);
-        }
-      } else if (target.startsWith('except:')) {
-        const exc = target.slice(7);
-        const sent = new Set();
-        for (const [t, c] of primary) {
-          if (t !== exc && (c.open || c.readyState === 'open')) { c.send(payload); sent.add(t); }
-        }
-        if (useSnapshot && fallback) {
-          for (const [t, c] of fallback) {
-            if (!sent.has(t) && t !== exc && (c.open || c.readyState === 'open')) c.send(payload);
-          }
-        }
-      }
+      // Pure target ⇒ connection-list resolution lives in
+      // gui/host-peer-routing.js (issue #1230); this is now purely the
+      // `.send(payload)` glue over the live tokenConns/tokenSnapshotConns Maps.
+      const conns = window.hostPeerRouting.outboundTargets(target, deliveryClass, { tokenConns, tokenSnapshotConns });
+      for (const c of conns) c.send(payload);
     }
 
 // ── Config Preload ──────────────────────────────────────────────────────

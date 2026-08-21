@@ -53,26 +53,12 @@
     import '../components/ph-torpedo-controls.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    import { setAutoState } from '../console-ui.js';
-    initConsole({
-      name: 'tactical',
-      family: 'tactical',
-      // s is a WeaponsConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        var r = document.getElementById('tactical-radar');
-        var p = document.getElementById('phasers-controls');
-        var t = document.getElementById('torpedo-controls');
-        r.state = { blips: s.blips || [], x: s.ship_x || 0, z: s.ship_z || 0, speed: s.ship_speed || 0, ship_heading: s.ship_heading || 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null };
-        p.state = { banks: s.banks || [], target_valid: !!s.target_uuid, mode: s.phaser_mode || 'Auto' };
-        t.state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 }, target_uuid: s.target_uuid || null };
-        var tn = s.target_name ? s.target_name : (s.target_uuid ? t('console.common.locked') : t('console.common.no_target'));
-        document.getElementById('footer-target').textContent = tn;
-        document.getElementById('footer-target').style.color = s.target_uuid ? 'var(--fire-bright)' : 'var(--ink-faint)';
-        setAutoState(null, document.getElementById('tactical-auto-badge'), !!(s.tactical_auto || false));
-        document.getElementById('station-damage').state = s.own_hull || null;
-      }
-    });
+    // The render lives in gui/cruiser/tactical.console.js (issue #1234): the
+    // shared Tactical renderer + this hull's variant. The old inline render's
+    // `var t = getElementById('torpedo-controls')` shadowed the String Table
+    // `t()` and threw on an unnamed lock — the shared footer uses the real `t`.
+    import { renderStation } from './tactical.console.js';
+    initConsole({ name: 'tactical', family: 'tactical', render: renderStation });
   </script>
 </body>
 </html>

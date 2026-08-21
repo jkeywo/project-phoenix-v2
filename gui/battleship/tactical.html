@@ -51,30 +51,11 @@
     import '../components/ph-torpedo-controls.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    import { setAutoState } from '../console-ui.js';
-    initConsole({
-      name: 'tactical',
-      family: 'tactical',
-      // s is a WeaponsConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        document.getElementById('tactical-radar').state = { blips: s.blips || [], x: s.ship_x || 0, z: s.ship_z || 0, speed: s.ship_speed || 0, ship_heading: s.ship_heading || 0, phaser_arcs: s.phaser_arcs || [], torpedo_arcs: s.torpedo_arcs || [], selected_target_uuid: s.target_uuid || null, target_uuid: s.target_uuid || null };
-        document.getElementById('phasers-controls').state = { banks: s.banks || [], target_valid: !!s.target_uuid, mode: s.phaser_mode || 'Auto' };
-        // Blasters (issue #925): the battleship mounts no blaster bank, so this
-        // stays hidden for it; a reused hull whose Tactical seat owns blaster
-        // banks (e.g. the Harrow destroyer/warhawk) gets its real blaster state
-        // from the same flat WeaponsConsolePayload. Hidden-when-empty keeps every
-        // hull without blasters visually unchanged.
-        var blastersEl = document.getElementById('blasters-controls');
-        var blasterBanks = s.blasters || [];
-        blastersEl.hidden = blasterBanks.length === 0;
-        blastersEl.state = { banks: blasterBanks };
-        document.getElementById('torpedo-controls').state = { tubes: s.tubes || [], magazine: { current: s.torpedo_count || 0, max: s.torpedo_max || s.torpedo_count || 20 }, target_uuid: s.target_uuid || null };
-        document.getElementById('station-damage').state = s.own_hull || null;
-        document.getElementById('footer-target').textContent = s.target_name || (s.target_uuid ? t('console.common.locked') : t('console.common.no_target'));
-        setAutoState(null, document.getElementById('tactical-auto-badge'), !!s.tactical_auto);
-      }
-    });
+    // The render lives in gui/battleship/tactical.console.js (issue #1234): one
+    // shared Tactical renderer, this hull's variant. The vitest suite imports
+    // the same `renderStation`. `s` is a flat WeaponsConsolePayload.
+    import { renderStation } from './tactical.console.js';
+    initConsole({ name: 'tactical', family: 'tactical', render: renderStation });
   </script>
 </body>
 </html>

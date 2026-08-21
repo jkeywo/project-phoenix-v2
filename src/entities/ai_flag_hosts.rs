@@ -146,13 +146,13 @@ pub struct AiHost {
 
 /// The three secondary helm axes collapse their channel to a bare "actuate this
 /// tick?" through one shared helper.
-const HELM_ACTUATOR_SITES: &[EvalSite] = &[site("src/ship/helm_ai.rs", "helm_policy_actuates")];
+const HELM_ACTUATOR_SITES: &[EvalSite] = &[site("src/ship/helm_ai/mod.rs", "helm_policy_actuates")];
 /// The three helm axes that may author a #882 state machine resolve their
 /// channel on either policy path, and their TRANSITIONS through the shared
 /// machine tick — three call sites, all of which must agree.
 const HELM_MACHINE_SITES: &[EvalSite] = &[
-    site("src/ship/helm_ai.rs", "resolve_helm_channel"),
-    site("src/ship/helm_ai.rs", "tick_policy_machine"),
+    site("src/ship/helm_ai/mod.rs", "resolve_helm_channel"),
+    site("src/ship/helm_ai/mod.rs", "tick_policy_machine"),
 ];
 
 /// The three helm axes that may author a #882 state machine are the only hosts
@@ -165,7 +165,7 @@ const HELM_MACHINE_SITES: &[EvalSite] = &[
 /// readable in both authorable positions on these three, and folded in neither
 /// of them.
 const HELM_HISTORY_FOLD: Option<EvalSite> =
-    Some(site("src/ship/helm_ai.rs", "tick_policy_machine"));
+    Some(site("src/ship/helm_ai/mod.rs", "tick_policy_machine"));
 
 pub const CAPTAIN_RED_ALERT: AiHost = AiHost {
     system: "Captain",

@@ -35,7 +35,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/core/balance.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/server_app.rs, src/regions/server.rs, src/ship/damage_sync.rs, src/console/captain/server.rs, src/console/repair/server.rs, src/world/server.rs, src/ship/helm_ai.rs]
+      paths: [src/core/balance.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/server_app.rs, src/regions/server.rs, src/ship/damage_sync.rs, src/console/captain/server.rs, src/console/repair/server.rs, src/world/server.rs, src/ship/helm_ai/mod.rs]
       symbols: [BalanceEvent, VictimKind, Outcome]
       tests: [cargo test]
 

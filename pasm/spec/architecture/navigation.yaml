@@ -116,7 +116,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/helm_ai.rs, src/ship/helm_planner.rs]
+      paths: [src/ship/helm_ai/surfaces.rs, src/ship/helm_planner.rs]
       symbols:
         - cleared_nav_waypoint
         - build_helm_ai_surfaces_frame

@@ -477,7 +477,7 @@ entities:
         - src/core/codec.rs
         - src/ship/components.rs
         - src/ship/coordination_systems.rs
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/surfaces.rs
         - gui/coordination-popup.js
       symbols:
         - tick_weapons_arc_request

@@ -290,7 +290,7 @@ entities:
       paths:
         - src/ship/helm_planner.rs
         - src/ai/core.rs
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/facts.rs
       symbols:
         - HazardAssessment
         - HazardAssessmentRaw
@@ -355,7 +355,8 @@ entities:
       status: observed
       paths:
         - src/entities/config.rs
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/impulse.rs
+        - src/ship/helm_ai/boost.rs
       symbols:
         - HelmImpulseAiPolicy
         - HelmBoostAiPolicy
@@ -742,7 +743,7 @@ entities:
       paths:
         - src/ship/components.rs
         - src/ship_plugin.rs
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/surfaces.rs
         - src/ship/coordination_systems.rs
       symbols:
         - PendingArcBearingRequest
@@ -770,7 +771,7 @@ entities:
       status: observed
       paths:
         - src/ship/helm_planner.rs
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/lateral.rs
         - src/ai/core.rs
       symbols:
         # DockingMotionIntent (the component carrying the dock uuid) is defined
@@ -803,7 +804,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/surfaces.rs
       symbols:
         - HelmAiSurfacesFrame
         - HelmAiShipFrame
@@ -845,7 +846,11 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/engines.rs
+        - src/ship/helm_ai/steering.rs
+        - src/ship/helm_ai/impulse.rs
+        - src/ship/helm_ai/surfaces.rs
+        - src/ship/helm_ai/mod.rs
         - src/ship/helm_ai_emit.rs
         - src/ai/core.rs
       symbols:
@@ -891,7 +896,8 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/lateral.rs
+        - src/ship/helm_ai/facts.rs
         - src/ship/helm_lateral_emit.rs
         - src/ai/core.rs
         - src/ai/policy.rs
@@ -936,7 +942,7 @@ entities:
       paths:
         - src/ai/cadence.rs
         - src/ai/server.rs
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/mod.rs
         - src/ship_plugin.rs
         - src/console_ai/server.rs
         - src/console/weapons/mod.rs
@@ -1024,7 +1030,10 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/engines.rs
+        - src/ship/helm_ai/surfaces.rs
+        - src/ship/helm_ai/facts.rs
+        - src/ship/helm_ai/mod.rs
         - src/ship/physics_systems.rs
         - src/ai/core.rs
         - src/ai/policy.rs
@@ -1077,7 +1086,10 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/steering.rs
+        - src/ship/helm_ai/surfaces.rs
+        - src/ship/helm_ai/facts.rs
+        - src/ship/helm_ai/mod.rs
         - src/ship/physics_systems.rs
         - src/ai/core.rs
         - src/ai/policy.rs
@@ -1158,7 +1170,8 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/vertical.rs
+        - src/ship/helm_ai/facts.rs
         - src/ship/helm_planner.rs
         - src/ai/policy.rs
         - src/entities/config.rs
@@ -1200,7 +1213,8 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/impulse.rs
+        - src/ship/helm_ai/facts.rs
         - src/ship/helm_ai_emit.rs
         - src/ai/core.rs
         - src/ai/policy.rs
@@ -1244,7 +1258,9 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/ship/helm_ai.rs
+        - src/ship/helm_ai/boost.rs
+        - src/ship/helm_ai/facts.rs
+        - src/ship/helm_ai/mod.rs
         - src/ship/helm_ai_emit.rs
         - src/ship/helm_admission.rs
         - src/ai/policy.rs

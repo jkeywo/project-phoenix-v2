@@ -82,6 +82,16 @@ pub struct CommsRuntime {
     /// ([`update_comms_range_flags`], which keeps the set from growing
     /// monotonically across world-layer cycles).
     pub open_hails: std::collections::BTreeSet<String>,
+    /// The session token `broadcast_comms_state` last addressed a `CommsState`
+    /// to, so a change of Comms host forces a fresh broadcast even when nothing
+    /// in the inbox, contacts or objectives is dirty. Without this a host that
+    /// becomes the resolved Comms seat AFTER the last content change — a visiting
+    /// seat relocating on a disconnect, or the original holder reconnecting and
+    /// reclaiming it — would never receive the current comms snapshot, because
+    /// the targeted `CommsState` only goes to the resolved host and only on a
+    /// dirty tick. `None` until the first broadcast (or after a tick with no
+    /// resolvable host).
+    pub last_broadcast_host: Option<String>,
 }
 
 /// Bevy resource wrapping the server-side comms inbox.
@@ -501,11 +511,12 @@ pub(crate) fn broadcast_comms_state(
     objectives: Res<ObjectiveManagerRes>,
     mut outbox: ResMut<SimOutbox>,
 ) {
-    let dirty = inbox.0.is_dirty() || comms.needs_broadcast || objectives.0.is_dirty();
-    if !dirty {
-        return;
-    }
-
+    // Resolve the current Comms host BEFORE the dirty gate: a change of host is
+    // itself a reason to broadcast. A seat that becomes the resolved Comms host
+    // on an otherwise-clean tick — a visiting host relocating after a disconnect,
+    // or the original holder reconnecting and reclaiming the seat — must still
+    // receive the current snapshot, and the targeted `CommsState` only ever goes
+    // to the resolved host and only on a dirty tick.
     let Some((ship_config, seeking_hosts)) = ship_query.iter().next() else {
         return;
     };
@@ -520,9 +531,22 @@ pub(crate) fn broadcast_comms_state(
             )
         })
         .unwrap_or_else(|| StationId(crate::system_registry::COMMS_SYSTEM_ID.into()));
-    let Some(comms_token) = sessions.0.holder_for_station(&comms_station) else {
+    let comms_token = sessions
+        .0
+        .holder_for_station(&comms_station)
+        .map(|t| t.to_string());
+
+    let host_changed = comms.last_broadcast_host.as_deref() != comms_token.as_deref();
+    let dirty =
+        inbox.0.is_dirty() || comms.needs_broadcast || objectives.0.is_dirty() || host_changed;
+    if !dirty {
+        return;
+    }
+
+    let Some(comms_token) = comms_token else {
         inbox.0.mark_clean();
         comms.needs_broadcast = false;
+        comms.last_broadcast_host = None;
         return;
     };
 
@@ -568,6 +592,7 @@ pub(crate) fn broadcast_comms_state(
 
     inbox.0.mark_clean();
     comms.needs_broadcast = false;
+    comms.last_broadcast_host = Some(comms_token);
 }
 
 #[cfg(test)]

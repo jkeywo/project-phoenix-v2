@@ -79,6 +79,12 @@ pub mod server_app;
 // Backward-compat alias: all `crate::simulation::*` imports continue to resolve.
 pub use server_app as simulation;
 pub mod audio_config;
+/// The authoritative-state declaration registry (issue #1220, Track 3 step C8):
+/// `App::declare_state::<T>(class, pasm)` for an owning plugin to record, at the
+/// site that owns a type, how it relates to the #894 digest boundary. Adds only
+/// the mechanism — no plugin declares yet, and nothing in the digest/snapshot
+/// reads the census, so the registry is inert to `sim_digest::world_digest`.
+pub mod authoritative;
 /// Fixed-capacity history window (issue #788). Pure, Bevy-free, domain-neutral.
 pub mod bounded_history;
 /// Compile-time build flags readable at runtime (issue #939) — currently just

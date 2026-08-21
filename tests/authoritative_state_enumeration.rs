@@ -408,39 +408,134 @@ const EXCLUSIONS: &[(&str, &str)] = &[
 /// intentional.
 #[rustfmt::skip]
 const UNCLASSIFIED_BASELINE: &[&str] = &[
-    "AdmittedCommands", "AdmittedConsumerRegistry", "AiHighFidelity",
-    "AiPolicyTickClock", "AiProfile", "AiTokenRegistry", "Asteroid", "AsteroidFieldSection",
-    "AsteroidShieldPierce", "BankConfigResource", "BeamContext", "BehaviourSection",
-    "BlasterBankAiPolicies", "BlasterSystemResource", "BoostConfigResource", "CaptainAiPolicy",
-    "CinematicCameraSection", "ColliderSection", "CollisionCooldown", "CommandDelay",
-    "CommandLog", "CommsResponseAiCadence", "CommsResponseAiPolicy", "CommsTargetSelector",
-    "CountdownTimer", "DockingMotionIntent", "EntityShipArcHull", "EntitySystemHull",
-    "EntityTagsSection", "EntityTarget", "FactionComponent", "FactionRegistryResource",
-    "GameStateCache", "HelmBoostAiPolicyState", "HelmConsoleSection", "HelmEnginesAiPolicy",
-    "HelmEnginesAiPolicyState", "HelmLateralAiPolicy", "HelmMotionPlan", "HelmPassSurface",
-    "HelmPhysicsFrame", "HelmPhysicsWriteGuard", "HelmRecoveryHistory", "HelmSteeringAiPolicy",
-    "HelmSteeringAiPolicyState", "HelmVerticalAiPolicy", "HelmWaypointClearance",
-    "ImpulseConfigResource", "LastShipAttacker", "LastSystemTiers", "LastVisibleRepairBlackboard",
-    "LobbyOutbox", "LocalShip", "LodTransitionTimer", "LogFilterConfig", "MeshSection",
-    "NavClearanceIssueState", "NavigationTargetSelector", "NpcFrequencyMatchStates",
-    "ObjectiveCursors", "ObjectiveManagerRes", "OnScreenMessage", "PendingCommands",
-    "PendingScenarioLoad", "PendingShieldsThreatBearing", "PendingShipConfig",
-    "PendingTacticalFrequencyHint", "PhaserBankAiPolicies", "PhaserCombatConfigResource",
-    "PhaserRenderConfig", "PowerAiCadence", "PowerAiPolicy", "PowerBrownoutState",
-    "PowerConfigResource", "PowerMultiplierResource", "RadarAppearanceSection",
-    "RegionEffectsSection", "RegionMembership", "RegionShapeSection", "RepairHumanAlerted",
-    "RepairRequestQueue", "RepairTargetSelector", "RunTelemetry",
-    "SelectedShipResource", "SensorsAiConfigResource", "SensorsFrequencyState",
-    "SensorsTargetSelector", "SensorsThreatState", "Sessions", "ShakeState",
-    "ShieldsAiConfigResource", "ShieldsCoordinationState", "ShieldsFocusAiPolicy", "Ship",
-    "ShipAttackedThisTick", "ShipAudioSection", "ShipClientConfigResource", "ShipConfigComponent",
-    "ShipFrequencyHintState", "ShipManualResource", "ShipPhaserFrequency",
-    "ShipPhysicsConfigResource", "ShipPowerSystem", "ShipRepairTeams", "ShipShields",
-    "ShipStations", "ShipSystemBlackboards", "ShipSystemControlSources", "ShipViewMode",
-    "TacticalTargetSelector", "TorpedoMagazineAiPolicy", "TorpedoSystemResource",
-    "TorpedoTargetSnapshot", "TorpedoTubeAiPolicies", "TrackedEntities", "VerticalThrustInput",
-    "WeaponFiredThisTick", "WeaponsArcRequestState", "WeaponsConsoleSection",
-    "WeaponsUpdateFirstTick", "WorldContentRuntime", "WorldSetupBroadcast",
+    // Full module paths, not short names (issue #1220): the census key is the
+    // full type path so two distinct generic instantiations cannot collapse to
+    // one entry. The two superset lists above stay short names; only this
+    // exhaustive remainder is keyed on the full path. Regenerate mechanically
+    // from a real run — see `every_registered_type_maps_to_the_digest_record`'s
+    // failure message — never hand-edit.
+    "project_phoenix::ai::server::AiHighFidelity",
+    "project_phoenix::ai::server::AiProfile",
+    "project_phoenix::ai::server::AiTokenRegistry",
+    "project_phoenix::ai::server::LodTransitionTimer",
+    "project_phoenix::ai::server::ObjectiveCursors",
+    "project_phoenix::command_admission::log::CommandDelay",
+    "project_phoenix::command_admission::log::CommandLog",
+    "project_phoenix::command_admission::log::PendingCommands",
+    "project_phoenix::command_admission::router::AdmittedConsumerRegistry",
+    "project_phoenix::comms::server::OnScreenMessage",
+    "project_phoenix::console::captain::server::CaptainAiPolicy",
+    "project_phoenix::console::comms::server::CommsResponseAiCadence",
+    "project_phoenix::console::comms::server::CommsResponseAiPolicy",
+    "project_phoenix::console::comms::server::CommsTargetSelector",
+    "project_phoenix::console::navigation::NavClearanceIssueState",
+    "project_phoenix::console::navigation::NavigationTargetSelector",
+    "project_phoenix::console::repair::server::RepairRequestQueue",
+    "project_phoenix::console::repair::server::RepairTargetSelector",
+    "project_phoenix::console::repair::server::ShipRepairTeams",
+    "project_phoenix::console::repair::visibility::LastVisibleRepairBlackboard",
+    "project_phoenix::console::weapons::NpcFrequencyMatchStates",
+    "project_phoenix::console::weapons::PhaserRenderConfig",
+    "project_phoenix::console::weapons::WeaponsArcRequestState",
+    "project_phoenix::console::weapons::beam::LastShipAttacker",
+    "project_phoenix::console::weapons::beam::PhaserBankAiPolicies",
+    "project_phoenix::console::weapons::beam::PhaserCombatConfigResource",
+    "project_phoenix::console::weapons::beam::TacticalTargetSelector",
+    "project_phoenix::console::weapons::blackboard::WeaponsUpdateFirstTick",
+    "project_phoenix::console::weapons::blaster::BlasterBankAiPolicies",
+    "project_phoenix::console::weapons::blaster::BlasterSystemResource",
+    "project_phoenix::console::weapons::shared::BeamContext",
+    "project_phoenix::console::weapons::shared::TorpedoTargetSnapshot",
+    "project_phoenix::console::weapons::torpedo::TorpedoMagazineAiPolicy",
+    "project_phoenix::console::weapons::torpedo::TorpedoSystemResource",
+    "project_phoenix::console::weapons::torpedo::TorpedoTubeAiPolicies",
+    "project_phoenix::console_ai::server::ShipFrequencyHintState",
+    "project_phoenix::core::messages::AdmittedCommands",
+    "project_phoenix::core::telemetry::RunTelemetry",
+    "project_phoenix::entities::config_cache::FactionRegistryResource",
+    "project_phoenix::entities::spawner::AsteroidFieldSection",
+    "project_phoenix::entities::spawner::BehaviourSection",
+    "project_phoenix::entities::spawner::CinematicCameraSection",
+    "project_phoenix::entities::spawner::ColliderSection",
+    "project_phoenix::entities::spawner::EntityShipArcHull",
+    "project_phoenix::entities::spawner::EntitySystemHull",
+    "project_phoenix::entities::spawner::EntityTagsSection",
+    "project_phoenix::entities::spawner::EntityTarget",
+    "project_phoenix::entities::spawner::FactionComponent",
+    "project_phoenix::entities::spawner::HelmConsoleSection",
+    "project_phoenix::entities::spawner::MeshSection",
+    "project_phoenix::entities::spawner::RadarAppearanceSection",
+    "project_phoenix::entities::spawner::RegionEffectsSection",
+    "project_phoenix::entities::spawner::RegionShapeSection",
+    "project_phoenix::entities::spawner::ShipAudioSection",
+    "project_phoenix::entities::spawner::WeaponsConsoleSection",
+    "project_phoenix::lobby::server::CountdownTimer",
+    "project_phoenix::lobby::server::GameStateCache",
+    "project_phoenix::lobby::server::LobbyOutbox",
+    "project_phoenix::lobby::server::SelectedShipResource",
+    "project_phoenix::lobby::server::Sessions",
+    "project_phoenix::lobby::server::ShipClientConfigResource",
+    "project_phoenix::lobby::server::ShipManualResource",
+    "project_phoenix::lobby::stations_config::ShipStations",
+    "project_phoenix::logging::filter::LogFilterConfig",
+    "project_phoenix::regions::server::RegionMembership",
+    "project_phoenix::server::viewscreen_border::ShakeState",
+    "project_phoenix::server_app::Asteroid",
+    "project_phoenix::server_app::AsteroidShieldPierce",
+    "project_phoenix::server_app::CollisionCooldown",
+    "project_phoenix::server_app::LocalShip",
+    "project_phoenix::server_app::Ship",
+    "project_phoenix::server_app::ShipAttackedThisTick",
+    "project_phoenix::server_app::ShipSystemBlackboards",
+    "project_phoenix::server_app::TrackedEntities",
+    "project_phoenix::server_app::WeaponFiredThisTick",
+    "project_phoenix::server_app::WorldSetupBroadcast",
+    "project_phoenix::ship::components::BankConfigResource",
+    "project_phoenix::ship::components::BoostConfigResource",
+    "project_phoenix::ship::components::DockingMotionIntent",
+    "project_phoenix::ship::components::HelmWaypointClearance",
+    "project_phoenix::ship::components::ImpulseConfigResource",
+    "project_phoenix::ship::components::LastSystemTiers",
+    "project_phoenix::ship::components::PendingShipConfig",
+    "project_phoenix::ship::components::PendingTacticalFrequencyHint",
+    "project_phoenix::ship::components::RepairHumanAlerted",
+    "project_phoenix::ship::components::ShipConfigComponent",
+    "project_phoenix::ship::components::ShipPhysicsConfigResource",
+    "project_phoenix::ship::components::ShipSystemControlSources",
+    "project_phoenix::ship::helm::HelmPhysicsFrame",
+    "project_phoenix::ship::helm::HelmPhysicsWriteGuard",
+    "project_phoenix::ship::helm::VerticalThrustInput",
+    "project_phoenix::ship::helm_ai::AiPolicyTickClock",
+    "project_phoenix::ship::helm_ai::HelmBoostAiPolicyState",
+    "project_phoenix::ship::helm_ai::HelmEnginesAiPolicy",
+    "project_phoenix::ship::helm_ai::HelmEnginesAiPolicyState",
+    "project_phoenix::ship::helm_ai::HelmLateralAiPolicy",
+    "project_phoenix::ship::helm_ai::HelmPassSurface",
+    "project_phoenix::ship::helm_ai::HelmRecoveryHistory",
+    "project_phoenix::ship::helm_ai::HelmSteeringAiPolicy",
+    "project_phoenix::ship::helm_ai::HelmSteeringAiPolicyState",
+    "project_phoenix::ship::helm_ai::HelmVerticalAiPolicy",
+    "project_phoenix::ship::helm_planner::HelmMotionPlan",
+    "project_phoenix::ship::power::PowerAiCadence",
+    "project_phoenix::ship::power::PowerAiPolicy",
+    "project_phoenix::ship::power::PowerBrownoutState",
+    "project_phoenix::ship::power::PowerConfigResource",
+    "project_phoenix::ship::power::PowerMultiplierResource",
+    "project_phoenix::ship::power::ShipPowerSystem",
+    "project_phoenix::ship::sensors::SensorsAiConfigResource",
+    "project_phoenix::ship::sensors::SensorsFrequencyState",
+    "project_phoenix::ship::sensors::SensorsTargetSelector",
+    "project_phoenix::ship::sensors::SensorsThreatState",
+    "project_phoenix::ship::shields::PendingShieldsThreatBearing",
+    "project_phoenix::ship::shields::ShieldsAiConfigResource",
+    "project_phoenix::ship::shields::ShieldsCoordinationState",
+    "project_phoenix::ship::shields::ShieldsFocusAiPolicy",
+    "project_phoenix::ship::shields::ShipShields",
+    "project_phoenix::ship::state::ShipPhaserFrequency",
+    "project_phoenix::ship::state::ShipViewMode",
+    "project_phoenix::world::server::ObjectiveManagerRes",
+    "project_phoenix::world::server::PendingScenarioLoad",
+    "project_phoenix::world::server::WorldContentRuntime",
     // The Rhai scripting seam (issue #984, Rhai M6 phase 2a/2b). Both are
     // authoritative-but-deferred, exactly like `WorldContentRuntime` above:
     // `RawWorldSource` is the world TOML the script loader reads at `Startup`
@@ -580,7 +675,8 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // family, always written) and the Rust types that hold it. The slice adds no
     // Rust at all, so it moved no `SNAPSHOT_FORMAT`: the names land in a map
     // `ScenarioState` already saves.
-    "RawWorldSource", "WorldScriptRuntime",
+    "project_phoenix::world::server::RawWorldSource",
+    "project_phoenix::world::server::WorldScriptRuntime",
 ];
 
 fn build_and_run() -> App {
@@ -606,7 +702,22 @@ const CRATE_PREFIX: &str = "project_phoenix::";
 /// The short type name Bevy's `type_name::<T>()`-derived `DebugName` reports
 /// (e.g. `project_phoenix::ship::state::ShipRedAlert`), stripped to its last
 /// path segment and truncated before any generic parameter list so
-/// `Foo<Bar>` and `Foo` are the same lookup key.
+/// `Foo<Bar>` and `Foo` share a short name.
+///
+/// # No longer the census key
+///
+/// This USED to be the census key — the string every registered type was
+/// reduced to and every list compared against. That was wrong for exactly the
+/// reason the truncation exists: two distinct generic instantiations
+/// (`EffectQueue<A>` and `EffectQueue<B>`, or `BroadcastRegistry<Sim>` and a
+/// hypothetical `BroadcastRegistry<Other>`) collapse to one key and one can
+/// silently hide the other from the unclassified ratchet. The census key is now
+/// the FULL path ([`registered_crate_local_type_names`]); this short name
+/// survives only as the lookup into the two SHORT-NAME superset lists
+/// ([`AUTHORITATIVE_SYMBOLS`] and [`EXCLUSIONS`]), which are transcribed from
+/// PASM `implementation.symbols` / reason classes as short names on purpose and
+/// stay that way. Only [`UNCLASSIFIED_BASELINE`] — the exhaustive remainder
+/// that must distinguish collapsing generics — keys on the full path.
 fn short_name(full: &str) -> String {
     // Strip the OUTER generic parameter list FIRST, by truncating at the
     // first '<' in the whole path — not the last "::" segment. A naive
@@ -625,8 +736,14 @@ fn short_name(full: &str) -> String {
         .to_string()
 }
 
-/// Every crate-local component/resource name Bevy actually registered,
-/// short-named and de-duplicated, sorted for a stable diff.
+/// Every crate-local component/resource name Bevy actually registered, as its
+/// FULL type path (the census key), de-duplicated and sorted for a stable diff.
+///
+/// The full path — not [`short_name`] — is the key precisely so two distinct
+/// generic instantiations do not collapse to one entry and hide each other from
+/// the unclassified ratchet. The two superset lists are still consulted by short
+/// name (see [`short_name`]); only this key and [`UNCLASSIFIED_BASELINE`] are
+/// full paths.
 fn registered_crate_local_type_names(app: &App) -> Vec<String> {
     let mut names: Vec<String> = app
         .world()
@@ -634,7 +751,6 @@ fn registered_crate_local_type_names(app: &App) -> Vec<String> {
         .iter_registered()
         .map(|info| info.name().to_string())
         .filter(|full| full.starts_with(CRATE_PREFIX))
-        .map(|full| short_name(&full))
         .collect();
     names.sort();
     names.dedup();
@@ -664,8 +780,14 @@ fn every_registered_type_maps_to_the_digest_record() {
     let mut newly_unclassified: Vec<&str> = registered
         .iter()
         .map(String::as_str)
-        .filter(|name| {
-            !authoritative.contains(name) && !excluded.contains(name) && !baseline.contains(name)
+        .filter(|full| {
+            // The two superset lists are consulted by SHORT name (transcribed
+            // from PASM as short names); the exhaustive baseline is consulted by
+            // the FULL path, so collapsing generics can never hide one another.
+            let short = short_name(full);
+            !authoritative.contains(short.as_str())
+                && !excluded.contains(short.as_str())
+                && !baseline.contains(*full)
         })
         .collect();
     newly_unclassified.sort();
@@ -711,8 +833,15 @@ fn the_committed_baseline_names_only_types_still_registered_and_unclassified() {
     let mut stale: Vec<&str> = UNCLASSIFIED_BASELINE
         .iter()
         .copied()
-        .filter(|name| {
-            !registered.contains(*name) || authoritative.contains(name) || excluded.contains(name)
+        .filter(|full| {
+            // Baseline entries are FULL paths now, so `registered` (also full
+            // paths) is checked directly; the two short-name superset lists are
+            // checked against the entry's short name, preserving the exact
+            // "is it now classified elsewhere" semantics.
+            let short = short_name(full);
+            !registered.contains(*full)
+                || authoritative.contains(short.as_str())
+                || excluded.contains(short.as_str())
         })
         .collect();
     stale.sort();

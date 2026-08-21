@@ -748,13 +748,11 @@ fn station_damage_readings(
 /// seam), not a regression.
 pub fn operate_repair_ai(
     sessions: Res<crate::lobby::Sessions>,
-    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
-    // bare-`App` fixtures still pass parameter validation.
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     mut ships: Query<
         (
             Entity,
@@ -995,11 +993,7 @@ pub fn operate_repair_ai(
 
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
 
         // ── Greedy sequential selection, one authored `select` per free team ──
         for team_idx in free_teams {
@@ -1102,6 +1096,7 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         // `FixedUpdate`, where `RepairPlugin` and `AdmissionPlugin` register
         // since issue #895 — configured on `Update` this chain would order
         // nothing, leaving admission unordered against the repair handlers.
@@ -1929,6 +1924,7 @@ mod tests {
     /// consults it (the `ai:` path only needs the resource to exist).
     fn npc_repair_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.add_plugins(bevy::time::TimePlugin);
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(1000),

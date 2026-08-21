@@ -163,6 +163,7 @@ fn seed_viewscreen_from_selection(
 
 fn test_app() -> App {
     let mut app = App::new();
+    crate::ai::host::register_ai_host_env(&mut app);
     app.configure_sets(
         FixedUpdate,
         (
@@ -8112,6 +8113,7 @@ fn human_set_target_survives_the_tick_on_a_mixed_rating_ship() {
 fn skipped_ship_keeps_its_weapons_target_and_gains_no_blackboard_entry() {
     use crate::ship::control_source::{ControlSource, ControlSourceResolver};
     let mut app = App::new();
+    crate::ai::host::register_ai_host_env(&mut app);
     // `ai_target_selection` emits its decision through the admission seam
     // (issue #887), which asks `Sessions` about station tenure.
     app.insert_resource(crate::lobby::Sessions(
@@ -12561,6 +12563,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
 fn los_test_app() -> App {
     use bevy_rapier3d::prelude::RapierPhysicsPlugin;
     let mut app = App::new();
+    crate::ai::host::register_ai_host_env(&mut app);
     app.add_plugins(MinimalPlugins)
         .add_plugins(bevy::transform::TransformPlugin)
         .add_plugins(bevy::asset::AssetPlugin::default())

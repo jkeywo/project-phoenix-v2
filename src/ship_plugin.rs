@@ -75,6 +75,13 @@ impl Plugin for ShipPlugin {
             )
             .declare_state::<ScenarioDetailFloor>(StateClass::Derived, "visiting-station-resolver");
         }
+        // The AI host spine's read-only world context (issue #1207): the six
+        // per-axis helm systems and `ai_policy_state_tick` in this plugin now
+        // consume `AiHostEnv`, a bare-`Res` param, so every app that runs them
+        // must register the same resources production does. Idempotent and
+        // mirrored by `ConsoleAiPlugin` / `ship::test_support` — an app carrying
+        // both plugins registers once.
+        crate::ai::host::register_ai_host_env(app);
         app
             // The shared helm decision surface (issue #824): rebuilt once per
             // AI-helm sim tick by `build_helm_ai_surfaces_frame` and consumed

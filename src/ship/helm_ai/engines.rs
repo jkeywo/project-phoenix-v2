@@ -39,13 +39,11 @@ pub struct HelmEnginesAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState)
 /// module note).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_thrust(
-    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
-    // bare-`App` fixtures still pass parameter validation.
-    world_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
     sessions: Res<crate::lobby::Sessions>,
@@ -150,11 +148,7 @@ pub(crate) fn ai_helm_thrust(
         );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(entity).ok(),
-            world_runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(entity);
         if resolve_helm_channel(
             policy,
             engines_state.map(|s| &s.0),

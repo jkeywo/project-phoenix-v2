@@ -216,14 +216,11 @@ pub(crate) fn ai_shield_focus(
     time: Res<Time>,
     world_snapshot: Res<crate::ai_plugin::WorldSnapshot>,
     sessions: Res<crate::lobby::Sessions>,
-    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
-    // bare-`App` fixtures still pass parameter validation; absent, the chain is
-    // empty and flag-guards read false.
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     mut ships: Query<
         (
             Entity,
@@ -423,11 +420,7 @@ pub(crate) fn ai_shield_focus(
         );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
         let acts = policy.resolve_channel(
             crate::entities::config::SHIELD_FOCUS_CHANNEL,
             &facts,
@@ -554,19 +547,14 @@ fn ai_power_allocation(
     time: Res<Time>,
     sessions: Res<crate::lobby::Sessions>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
-    // Read-only scenario flag/counter store (AC3). `Option<Res<_>>` so bare-`App`
-    // fixtures that never insert `WorldContentRuntime` still pass parameter
-    // validation; absent, the flag chain is empty and flag-guards read false.
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    // Loaded sub-world layers (issue #891 stage 2): the chain is anchored at
-    // the layer that spawned each ship, `parent:`-walkable to the base store.
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     // Global objective pool for the OBJECTIVE fact. `Option<Res<_>>` for the same
     // bare-`App` reason. Scored once per tick, outside the per-ship loop.
     objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     // The shared AI base cadence's raw tick + interval (issue #889's
     // evaluate_every_ticks, wired at runtime). `Option<Res<_>>` for the usual
     // bare-`App` reason: `power_test_app` below never calls
@@ -681,11 +669,7 @@ fn ai_power_allocation(
         // spawned THIS ship (issue #891 stage 2) — correctly layered, so
         // `parent:` prefixes climb toward the base store exactly as a trigger
         // authored in that layer would.
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
 
         let red_alert = red_alert_comp.map(|ra| ra.0).unwrap_or(false);
         let thrust = thrust_comp.map(|t| t.0).unwrap_or(0.0);
@@ -890,16 +874,14 @@ fn most_recent_combat(a: &crate::ship::combat_activity::RecentCombatActivity) ->
 ///   test asserts on.
 pub(crate) fn ai_torpedo_auto_fire(
     sessions: Res<crate::lobby::Sessions>,
-    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
-    // bare-`App` fixtures still pass parameter validation.
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     // Objective-contributed Command stances (issue #1110). `Option<Res<_>>` so a
     // bare-`App` weapons fixture with no world plugin reads no contributions.
     active_objective_stances: Option<Res<crate::console::command::server::ActiveObjectiveStances>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ships: Query<
         (
             Entity,
@@ -981,11 +963,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
         let policy = control_sources.0.policy_for(&policy_sid);
         if !policy.operate_ai {
             continue;
@@ -1215,12 +1193,11 @@ pub(crate) fn ai_torpedo_load(
     sessions: Res<crate::lobby::Sessions>,
     // `Option<Res<_>>`, never bare — bare-`App` fixtures never insert it.
     log: Option<Res<crate::logging::LogFilterConfig>>,
-    // Read-only scenario flag/counter chain (issue #891 stage 2).
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     mut ships: Query<
         (
             Entity,
@@ -1252,11 +1229,7 @@ pub(crate) fn ai_torpedo_load(
 
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
 
         let tubes: Vec<crate::console_ai::TubeLoadSummary> = torpedo_sys
             .0
@@ -1530,6 +1503,7 @@ mod tests {
             offline_duration: 10.0,
         };
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.add_plugins(bevy::time::TimePlugin)
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
@@ -2261,6 +2235,7 @@ mod tests {
 
     fn freq_hint_test_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         // Manual `Time::advance_by` (mirroring `ai::server`'s LOD tests)
         // rather than `TimePlugin` + `TimeUpdateStrategy`: the latter reports
         // a zero delta on the frame it's added, which would otherwise force
@@ -2656,6 +2631,7 @@ station = "sensors"
     /// reserve guards) unless the caller overrides it.
     fn power_test_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
             .insert_resource(crate::lobby::Sessions(
@@ -2781,6 +2757,7 @@ station = "sensors"
         );
 
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
             .insert_resource(crate::lobby::Sessions(
@@ -3038,6 +3015,7 @@ station = "sensors"
         ];
 
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
             .insert_resource(crate::lobby::Sessions(
@@ -3958,6 +3936,7 @@ default_level = 2
         // `SetPowerGroupAllocation` targeting the reactor, and a saturated no-op
         // (target == current) is NOT re-admitted every tick.
         let mut emit_app = App::new();
+        crate::ai::host::register_ai_host_env(&mut emit_app);
         emit_app
             .insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
@@ -4093,6 +4072,7 @@ default_level = 2
         // thrust. Under identical thrust each nudges only its own authored group,
         // proving the channels are per-ship data, not a shared catalogue.
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
             .insert_resource(crate::lobby::Sessions(
@@ -4246,6 +4226,7 @@ default_level = 2
         // baseline until a world flag is set; once the `WorldContentRuntime`
         // flag chain carries it, the same tick elevates weapons.
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
             .init_resource::<crate::world::server::WorldContentRuntime>()
@@ -4312,6 +4293,7 @@ default_level = 2
     #[test]
     fn scenario_flag_chain_is_anchored_at_the_ships_spawning_layer() {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(Time::<()>::default())
             .init_resource::<crate::ship::power::PowerConfigResource>()
             .init_resource::<crate::world::server::WorldContentRuntime>()
@@ -4450,6 +4432,7 @@ default_level = 2
     /// `ai_target_count` is `volley_max`.
     fn torpedo_load_app(tube_source: ControlSource) -> (App, Entity) {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         // `Sessions` because the emit goes through the admission seam
         // (`emit_ai_command`), which asks it about station tenure.
         app.insert_resource(crate::lobby::Sessions(

@@ -78,6 +78,12 @@ pub struct WeaponsPlugin;
 impl Plugin for WeaponsPlugin {
     fn build(&self, app: &mut App) {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
+        // The AI host spine's read-only world context (issue #1207): the phaser,
+        // blaster, torpedo, doctrine and tactical-selector hosts in this plugin
+        // now consume `AiHostEnv`, a bare-`Res` param, so every app that runs
+        // them must register the same resources production does. Idempotent and
+        // mirrored by `ConsoleAiPlugin` / `ship::test_support`.
+        crate::ai::host::register_ai_host_env(app);
         // Admitted-command consumers (issue #833, expanded by #846): every
         // weapons command — fire, load, unload, target selection, phaser
         // control — now travels as a `ControlSystem` envelope through the
@@ -743,13 +749,11 @@ pub fn longest_usable_direct_fire_range(emitters: &[DirectFireEmitter]) -> f32 {
 /// OR the usable arc set changes, not on every tick the same miss persists.
 #[allow(clippy::too_many_arguments)]
 fn tick_weapons_arc_request(
-    // Read-only scenario flag/counter chain (issue #891 stage 2), so authored
-    // `flag(...)` / `counter(...)` guards on the weapons doctrine read live
-    // world state. `Option` so bare-`App` fixtures still pass parameter
-    // validation.
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     mut ship_q: Query<
         (
             Entity,
@@ -942,11 +946,7 @@ fn tick_weapons_arc_request(
             target_facing_shields,
             WeaponsAlertPosture::from_components(red_alert_opt, weapons_hold_opt),
         );
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
         let order = doctrine_opt
             .map(|d| resolve_arc_bearing_order(&d.0, &doctrine_facts, &flag_chain))
             .unwrap_or_default();
@@ -1308,13 +1308,11 @@ fn ai_target_selection(
         With<crate::server_app::Ship>,
     >,
     asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    // Loaded sub-world layers (issue #891 stage 2): the selector's flag chain
-    // is anchored at the layer that spawned each ship.
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     // `Option` so test apps without the entity-config cache still run; an
     // absent registry behaves as an empty one, i.e. nobody is hostile.
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
@@ -1497,9 +1495,11 @@ fn ai_target_selection(
         let destroy_is_untargeted = matches!(top_destroy, Some(""));
         let objective_target: Option<String> = match top_destroy {
             Some("") => None,
-            Some(target_name) => {
-                resolve_objective_target_uuid(target_name, runtime.as_deref(), &other_ships_q)
-            }
+            Some(target_name) => resolve_objective_target_uuid(
+                target_name,
+                Some(ai_env.content_runtime()),
+                &other_ships_q,
+            ),
             None => None,
         };
         // The operate directive's named target (issue #1162), resolved to a live
@@ -1508,7 +1508,7 @@ fn ai_target_selection(
         // `source_operate` candidate inert in ordinary combat.
         let operate_target: Option<String> = top_operate_objective_target(Some(&*blackboards))
             .and_then(|name| {
-                resolve_objective_target_uuid(name, runtime.as_deref(), &other_ships_q)
+                resolve_objective_target_uuid(name, Some(ai_env.content_runtime()), &other_ships_q)
             });
 
         // The advisory Sensors designation (AC2), read from the FROZEN
@@ -1674,11 +1674,7 @@ fn ai_target_selection(
         // from the candidates and is replaced this same tick (AC5). The
         // scenario flag chain is anchored at the layer that spawned this ship
         // (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
         let selected = selector_comp.selector.select(
             &self_ctx,
             &candidates,

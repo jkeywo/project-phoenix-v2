@@ -558,12 +558,11 @@ pub(crate) fn handle_fire_torpedo(
     // reason as the blaster's projectile ids: an id that is a function of
     // draw order made two instances diverge even on the same seed.
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
-    // Read-only scenario flag/counter chain (issue #943, same shape as
-    // `handle_torpedo_magazine_inter_system`). `Option` so bare-`App` fixtures
-    // still pass parameter validation — absent, the chain is empty and the
-    // mission counter reads 0, i.e. no conservation pressure.
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
 ) {
     for (
         control_sources,
@@ -614,11 +613,7 @@ pub(crate) fn handle_fire_torpedo(
         // deliberate: the volley caps (issue #942) decide how much a single
         // opportunity may spend, conservation decides whether the ship can
         // afford to take the opportunity at all.
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_layer_opt,
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain_from(origin_layer_opt);
         let conservation_facts = seed_torpedo_conservation_facts(
             torpedo_sys.rounds_aboard(),
             crate::world::flags::counter_in_chain(
@@ -832,14 +827,11 @@ pub(crate) fn handle_fire_torpedo(
 /// magazine — the tube handler (`handle_load_tube`) only *sends* the claim.
 pub fn handle_torpedo_magazine_inter_system(
     queue: Res<InterSystemQueue>,
-    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
-    // bare-`App` fixtures still pass parameter validation.
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`
-    // — this call site is per-claim (worst case in the crate).
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     mut ship_q: Query<
         (
             Entity,
@@ -920,11 +912,7 @@ pub fn handle_torpedo_magazine_inter_system(
                 );
                 // The scenario flag chain, anchored at the layer that spawned
                 // this ship (issue #891 stage 2).
-                let flag_chain = crate::world::server::entity_flag_chain(
-                    origin_q.get(target).ok(),
-                    runtime.as_deref(),
-                    layers.as_deref(),
-                );
+                let flag_chain = ai_env.flag_chain(target);
                 if !torpedo_magazine_grant_policy_fires(mag_policy, &facts, &flag_chain) {
                     continue; // authored policy refuses this claim.
                 }

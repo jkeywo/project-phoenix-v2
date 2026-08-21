@@ -1314,16 +1314,11 @@ fn has_unread_from_sender_with(
 #[allow(clippy::too_many_arguments)]
 pub fn operate_comms_ai(
     objectives: Option<Res<ObjectiveManagerRes>>,
-    // Read-only scenario flag/counter store (AC4). `Option<Res<_>>` so bare-`App`
-    // fixtures that never insert it still pass parameter validation; absent, the
-    // flag chain is empty and flag guards read false.
-    runtime: Option<Res<WorldContentRuntime>>,
-    // Loaded sub-world layers (issue #891 stage 2): the chain is anchored at
-    // the layer that spawned each ship, `parent:`-walkable to the base store.
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     // `ResMut` for ONE reason: retiring the `open_hails` latch for targets that
     // stopped being candidates (the AC5 re-arm). Every other comms read here is
     // a plain read.
@@ -1375,11 +1370,7 @@ pub fn operate_comms_ai(
         // The read-only scenario flag chain (AC4), anchored at the layer that
         // spawned THIS ship (issue #891 stage 2) — correctly layered, so
         // `parent:` prefixes climb toward the base store.
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(entity);
 
         // Score the objective pool against the same conditions
         // `publish_comms_blackboard` uses (red alert + hull fraction).
@@ -1435,7 +1426,8 @@ pub fn operate_comms_ai(
                     // directive's target is still a candidate every tick.
                     continue;
                 }
-                let Some(uuid) = resolve_hail_target(target, runtime.as_deref(), comms.as_deref())
+                let Some(uuid) =
+                    resolve_hail_target(target, Some(ai_env.content_runtime()), comms.as_deref())
                 else {
                     // Unresolvable name: no candidate, so no hail (unchanged).
                     continue;
@@ -1648,13 +1640,11 @@ pub fn operate_comms_ai(
 pub fn operate_comms_response_ai(
     comms: Option<Res<CommsRuntime>>,
     inbox: Option<Res<CommsInboxRes>>,
-    // Read-only scenario flag/counter store (AC4).
-    runtime: Option<Res<WorldContentRuntime>>,
-    // Loaded sub-world layers (issue #891 stage 2).
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     sessions: Res<crate::lobby::Sessions>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
     // The shared AI base cadence's raw tick + interval (issue #889's
@@ -1736,11 +1726,7 @@ pub fn operate_comms_response_ai(
         }
         // The read-only scenario flag chain (AC4), anchored at the layer that
         // spawned THIS ship (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(entity);
         let red_alert = red_alert.map(|r| r.0).unwrap_or(false);
         let comms_available = comms_system_available(hull);
         let power_rating = selector_comp.and_then(|s| s.power_rating);
@@ -1906,6 +1892,7 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(CommsInboxRes(crate::console::comms::CommsInbox::new()))
             .insert_resource(CommsRuntime::default())
             .add_systems(Update, publish_comms_blackboard);
@@ -2077,6 +2064,7 @@ mod tests {
     /// whose Comms system carries `comms_source`.
     fn comms_ai_app(comms_source: ControlSource) -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(crate::lobby::Sessions(
             crate::lobby::session::SessionManager::new(),
         ))
@@ -3372,6 +3360,7 @@ mod tests {
 
     fn comms_ai_response_app_with(comms_source: ControlSource) -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(crate::lobby::Sessions(
             crate::lobby::session::SessionManager::new(),
         ))

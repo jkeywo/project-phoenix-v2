@@ -603,13 +603,11 @@ pub fn operate_navigation_ai(
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
     )>,
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    // Loaded sub-world layers (issue #891 stage 2): the selector's flag chain
-    // is anchored at the layer that spawned each ship.
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
     let all_entities: Vec<(String, Option<String>, [f32; 3])> = entities
@@ -704,9 +702,11 @@ pub fn operate_navigation_ai(
                 | crate::messages::AiDirective::Dock { target }
                     if !target.is_empty() =>
                 {
-                    if let Some((uuid, pos)) =
-                        resolve_destroy_target(&all_entities, runtime.as_deref(), target)
-                    {
+                    if let Some((uuid, pos)) = resolve_destroy_target(
+                        &all_entities,
+                        Some(ai_env.content_runtime()),
+                        target,
+                    ) {
                         modes.insert(
                             uuid.clone(),
                             WaypointMode::Anchored {
@@ -815,11 +815,7 @@ pub fn operate_navigation_ai(
         // the waypoint variant via the side-table. No eligible winner ⇒ clear.
         // The scenario flag chain is anchored at the layer that spawned this
         // ship (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
         let desired: Option<WaypointMode> = selector_comp
             .selector
             .select(&self_ctx, &candidates, current_key.as_deref(), &flag_chain)
@@ -995,6 +991,7 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)

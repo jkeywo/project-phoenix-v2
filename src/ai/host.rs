@@ -187,9 +187,11 @@ pub fn decide<'p>(
 /// a bare `App` could skip them silently; consolidating here ends that.
 ///
 /// The env exposes behaviour, not fields: [`flag_chain`](Self::flag_chain)
-/// resolves a ship's layered flag store, and [`emitter`](Self::emitter) hands
-/// back the admission [`AiEmitter`]. Nothing outside this module reads the
-/// resources directly.
+/// resolves a ship's layered flag store, [`emitter`](Self::emitter) hands back
+/// the admission [`AiEmitter`], and [`content_runtime`](Self::content_runtime)
+/// serves the raw base-world store for the name-resolution reads that live
+/// outside the flag chain. Nothing outside this module borrows the resource
+/// handles themselves.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct AiHostEnv<'w, 's> {
     /// The base-world scenario flag/counter store and trigger runtime.
@@ -220,6 +222,37 @@ impl AiHostEnv<'_, '_> {
             Some(&self.runtime),
             Some(&self.layers),
         )
+    }
+
+    /// [`flag_chain`](Self::flag_chain) for a host that already holds the ship's
+    /// origin stamp from its OWN query, rather than looking it up by entity.
+    ///
+    /// A handful of hosts read `Option<&EntityOriginLayer>` as a member of their
+    /// per-ship query tuple (it rides alongside the other components they iterate)
+    /// instead of taking the env's [`origins`](Self::origins) lookup. They pass
+    /// that borrow straight through here, so the chain is anchored at exactly the
+    /// same layer `flag_chain` would resolve — the env still supplies the runtime
+    /// and layer stores the walk terminates against.
+    pub fn flag_chain_from(
+        &self,
+        origin: Option<&crate::world::server::EntityOriginLayer>,
+    ) -> Vec<&FlagStore> {
+        crate::world::server::entity_flag_chain(origin, Some(&self.runtime), Some(&self.layers))
+    }
+
+    /// The base-world content runtime, for the few reads a host makes of it
+    /// OUTSIDE the layered flag chain — chiefly the `name_to_uuid` map a target
+    /// selector resolves an authored objective/hail target name through.
+    ///
+    /// This is deliberately the raw store, not another `flag_chain`-style walk:
+    /// the entity name table is a single base-world map with no per-layer twin,
+    /// so a host resolving a name reads it here directly. Under production the
+    /// store is fully loaded; under a bare-`App` fixture that ran
+    /// [`register_ai_host_env`] it is the empty default, which every name lookup
+    /// misses exactly as an absent `Option<Res<..>>` used to — behaviour the
+    /// callers already fall through on.
+    pub fn content_runtime(&self) -> &crate::world::server::WorldContentRuntime {
+        &self.runtime
     }
 
     /// The admission emitter bound to this env's session table.
@@ -291,10 +324,7 @@ impl AiEmitter<'_> {
 pub fn register_ai_host_env(app: &mut App) {
     app.init_resource::<crate::world::server::WorldContentRuntime>();
     app.init_resource::<crate::world::server::WorldLayerMap>();
-    if !app
-        .world()
-        .contains_resource::<crate::lobby::Sessions>()
-    {
+    if !app.world().contains_resource::<crate::lobby::Sessions>() {
         app.insert_resource(crate::lobby::Sessions(
             crate::lobby::session::SessionManager::new(),
         ));
@@ -506,5 +536,56 @@ mod tests {
             ..armed.clone()
         };
         assert_eq!(decide(&sources, Some(&policy), &calm), HostOutcome::Held);
+    }
+
+    /// The point of the whole slice (issue #1207): a fixture that runs a host
+    /// through [`AiHostEnv`] but forgot [`register_ai_host_env`] fails LOUDLY,
+    /// so a bare `App` cannot silently take a different code path than the
+    /// shipped app. The env's fields are bare [`Res`], and Bevy validates a
+    /// missing required resource by panicking (`Res` is a required param, unlike
+    /// `Option<Res<..>>`), so the same system that runs in production panics at
+    /// the first schedule run in an unregistered fixture — and runs cleanly once
+    /// the one registration call every real app makes has been made.
+    #[test]
+    fn a_host_reading_the_env_panics_in_a_bare_app_that_skipped_registration() {
+        use bevy::prelude::*;
+
+        // Stand-in for every converted host: it consumes `AiHostEnv` and nothing
+        // else, so the only resources its validation can trip over are the ones
+        // `register_ai_host_env` installs.
+        fn reads_the_env(env: AiHostEnv) {
+            // Touch a behaviour so the borrow of the bare `Res` fields is real.
+            let _ = env.content_runtime();
+        }
+
+        let run = |register: bool| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut app = App::new();
+                if register {
+                    register_ai_host_env(&mut app);
+                }
+                app.add_systems(Update, reads_the_env);
+                app.update();
+            }))
+        };
+
+        // Swallow the deliberate panic's backtrace so the passing test is quiet.
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let unregistered = run(false);
+        let registered = run(true);
+        std::panic::set_hook(prev);
+
+        assert!(
+            unregistered.is_err(),
+            "a host consuming AiHostEnv in a bare App that never called \
+             register_ai_host_env must panic at schedule run — the guarantee \
+             that a fixture cannot diverge from production"
+        );
+        assert!(
+            registered.is_ok(),
+            "the identical host runs cleanly once register_ai_host_env has \
+             installed the env's resources"
+        );
     }
 }

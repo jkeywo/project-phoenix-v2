@@ -501,10 +501,7 @@ mod tests {
     /// so there is nothing for a host-table row to pin. The seeding and the
     /// `flag_chain` plumbing this table polices stay in each host that will call
     /// the spine, and are pinned there.
-    const NON_HOST_FILES: &[&str] = &[
-        "src/entities/authored_ai_pins.rs",
-        "src/ai/host.rs",
-    ];
+    const NON_HOST_FILES: &[&str] = &["src/entities/authored_ai_pins.rs", "src/ai/host.rs"];
 
     fn crate_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -616,6 +616,9 @@ pub(crate) mod tests {
 
     pub(crate) fn comms_test_app() -> App {
         let mut app = App::new();
+        // The Comms AI hosts read `AiHostEnv` (issue #1207); a fixture that runs
+        // one must register its bare-`Res` context or panic at schedule build.
+        crate::ai::host::register_ai_host_env(&mut app);
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(crate::server_app::AdmissionPlugin)

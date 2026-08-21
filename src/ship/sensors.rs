@@ -746,13 +746,11 @@ pub fn operate_sensors_ai(
     // It remains the *fallback* of the per-entity preference order inside
     // `effective_sensor_range` — the legitimate local-player/profile-less arm.
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    // Loaded sub-world layers (issue #891 stage 2): the selector's flag chain
-    // is anchored at the layer that spawned each ship.
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     entity_q: Query<(
         &crate::entity_spawner::EntityUuid,
         Option<&crate::entities::spawner::EntityName>,
@@ -875,8 +873,7 @@ pub fn operate_sensors_ai(
                     if target.is_empty() {
                         continue;
                     }
-                    let uuid = runtime
-                        .as_ref()
+                    let uuid = Some(ai_env.content_runtime())
                         .and_then(|rt| rt.name_to_uuid.get(target).cloned())
                         .or_else(|| {
                             entity_q.iter().find_map(|(u, name, _)| {
@@ -945,11 +942,7 @@ pub fn operate_sensors_ai(
         // an invalid current target fails eligibility and is replaced this same
         // tick (AC4). The scenario flag chain is anchored at the layer that
         // spawned this ship (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
         let decided = selector_comp.selector.select(
             &self_ctx,
             &candidates,
@@ -1043,6 +1036,7 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         // The applier (`handle_sensors_messages`) moved to SimSet::Physics
         // (issue #828), so the harness needs the production set chain for
         // AdmissionSet → Input → Physics ordering to hold.
@@ -1669,6 +1663,7 @@ mod tests {
 
     fn sensors_ai_test_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.insert_resource(bevy::time::Time::<()>::default())
             .init_resource::<crate::world::server::WorldContentRuntime>()
             // Always present in production (LobbyPlugin inserts it); the
@@ -2742,6 +2737,7 @@ mod tests {
     /// scanning ship's `Entity` so the caller can read back its blackboard.
     fn alert_publisher_app() -> (App, Entity) {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.add_systems(Update, publish_sensor_radar_blackboard);
         let scanner = app
             .world_mut()

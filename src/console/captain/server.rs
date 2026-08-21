@@ -482,14 +482,11 @@ fn operate_captain_ai(
     // is the safe reading (see `nearest_hostile_range`).
     world_snapshot: Option<Res<crate::ai::server::WorldSnapshot>>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
-    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
-    // bare-`App` fixtures still pass parameter validation; absent, the chain is
-    // empty and flag-guards read false.
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     mut ship_query: Query<(
         Entity,
         &mut AdmittedCommands,
@@ -570,11 +567,7 @@ fn operate_captain_ai(
         // Resolve the `red_alert` output channel over the snapshot, with the
         // scenario flag chain anchored at the layer that spawned this ship
         // (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
         let active_policy = &ship_policy.0;
         let should_be_red_alert = active_policy
             .resolve_channel(
@@ -993,6 +986,7 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(LobbyPlugin)
             .add_plugins(CaptainPlugin)
@@ -2403,6 +2397,7 @@ mod tests {
     /// Minimal app: just publish_captain_blackboard + per-entity components.
     fn bb_test_app() -> App {
         let mut app = App::new();
+        crate::ai::host::register_ai_host_env(&mut app);
         // `publish_captain_blackboard` now takes a plain `Res<CaptainPriorityBoost>`
         // (issue #830); this harness does not add `CaptainPlugin`, so init it here.
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();

@@ -247,16 +247,14 @@ pub(crate) fn handle_fire_blaster(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tick_blaster_auto_fire(
     sessions: Res<Sessions>,
-    // Read-only scenario flag/counter chain (issue #891 stage 2). `Option` so
-    // bare-`App` fixtures still pass parameter validation.
-    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
-    layers: Option<Res<crate::world::server::WorldLayerMap>>,
+    // The read-only AI-host world context — flag chain, sessions, and origin
+    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
+    // runs this host must register it (`register_ai_host_env`) or fail loudly at
+    // schedule build, so a bare `App` cannot silently diverge from production.
+    ai_env: crate::ai::host::AiHostEnv,
     // Objective-contributed Command stances (issue #1110). `Option<Res<_>>` so a
     // bare-`App` weapons fixture with no world plugin reads no contributions.
     active_objective_stances: Option<Res<crate::console::command::server::ActiveObjectiveStances>>,
-    // The per-ship origin-layer stamp (issue #891 review finding 1): an O(1)
-    // read replacing the old `WorldLayerMap` scan inside `entity_flag_chain`.
-    origin_q: Query<&crate::world::server::EntityOriginLayer>,
     mut ship_q: Query<
         (
             Entity,
@@ -330,11 +328,7 @@ pub(crate) fn tick_blaster_auto_fire(
         );
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
-        let flag_chain = crate::world::server::entity_flag_chain(
-            origin_q.get(ship_entity).ok(),
-            runtime.as_deref(),
-            layers.as_deref(),
-        );
+        let flag_chain = ai_env.flag_chain(ship_entity);
         // Gate: only run when at least one blaster bank is AI-controlled.
         let ai_controlled = match ship_config_opt {
             Some(cfg) => any_blaster_bank_operates_ai(control_sources, &cfg.0),

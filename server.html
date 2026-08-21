@@ -1475,6 +1475,46 @@
        (issue #755). Publishes window.scenarioArbiter for the classic-script
        host logic below. -->
   <script type="module" src="gui/scenario-arbiter.js"></script>
+  <!-- Host audio engine (issue #1228): the data-driven audio graph
+       (clampVol/applyMaster/setChannelVolume/mkLoop/initBlasterAudio/
+       startGameAudio/startMenuMusic/stopMenuMusic/applyHudAudio, the
+       master-volume localStorage key) that used to live inline in the
+       classic script below now lives in gui/host-audio.js so vitest can
+       import it directly with a stubbed Audio constructor (jsdom's own
+       HTMLMediaElement.play() is "Not implemented"). Mounted BEFORE the
+       host-channel island just below so its audio_config/audio_cue/
+       audio_level handlers — window.__audioConfig/__audioCue/__audioLevel —
+       are already the real, extracted functions the moment that island's
+       `handlers` table is built; window.__audioDebug and
+       window.__setMasterVolume/__getMasterVolume are assigned here too, for
+       gui/server-settings.js's volume slider and tests/smoke/audio.spec.js.
+       Everything else (startGameAudio/startMenuMusic/stopMenuMusic/
+       applyHudAudio, called from the classic script's __updateLobby/
+       __updateHud) goes through the window.__hostAudioReady queue/latch
+       defined near that script's own #1224-style latch block, the same
+       classic-script-can't-`import`-a-module bridge #1225/#1227 use. -->
+  <script type="module">
+    import { createHostAudio } from './gui/host-audio.js';
+    // window.localStorage access itself can throw in some private-mode /
+    // sandboxed-iframe configurations — guarded here exactly like the old
+    // inline code guarded window.localStorage.getItem, so a denial degrades
+    // to "master volume stays at its default" rather than breaking the page.
+    let masterVolumeStorage = null;
+    try { masterVolumeStorage = window.localStorage; }
+    catch (_) { /* private mode / storage disabled — stay at the default */ }
+    const hostAudio = createHostAudio({
+      doc: document,
+      storage: masterVolumeStorage,
+      AudioCtor: window.Audio,
+    });
+    window.__audioConfig = hostAudio.audioConfig;
+    window.__audioCue = hostAudio.audioCue;
+    window.__audioLevel = hostAudio.audioLevel;
+    window.__audioDebug = hostAudio.debug;
+    window.__setMasterVolume = hostAudio.setMasterVolume;
+    window.__getMasterVolume = hostAudio.getMasterVolume;
+    window.__hostAudioReady(hostAudio);
+  </script>
   <!-- Host Channel dispatcher (issue #1225): the handler table and the
        localisation boundary that used to live inline in the classic script
        below now live in gui/host-channel.js so vitest can import them
@@ -1561,6 +1601,42 @@
       window.__pageChromeQueue.splice(0).forEach(function(c) { chrome[c[0]](c[1]); });
     };
 
+    // ── Host audio bridge (issue #1228) ─────────────────────────────────────
+    // startGameAudio/startMenuMusic/stopMenuMusic (called from __updateLobby's
+    // phase handling below) and applyHudAudio (called from __updateHud) now
+    // live in gui/host-audio.js. This classic script can't `import` a module
+    // directly, so calls made before the host-audio island below has mounted
+    // are queued and replayed in order once it calls
+    // window.__hostAudioReady(audio) — same shape as the window.__pageChrome
+    // queue just above. The audio_config/audio_cue/audio_level host-channel
+    // handlers (window.__audioConfig/__audioCue/__audioLevel), __audioDebug
+    // and __setMasterVolume/__getMasterVolume don't need queuing here: the
+    // host-audio island assigns those window globals directly as soon as it
+    // mounts, and nothing calls them before WASM loads (see that island's own
+    // comment for why).
+    window.__hostAudioQueue = [];
+    let _hostAudio = null;
+    function startGameAudio() {
+      if (_hostAudio) _hostAudio.startGameAudio();
+      else window.__hostAudioQueue.push(['startGameAudio', undefined]);
+    }
+    function startMenuMusic() {
+      if (_hostAudio) _hostAudio.startMenuMusic();
+      else window.__hostAudioQueue.push(['startMenuMusic', undefined]);
+    }
+    function stopMenuMusic() {
+      if (_hostAudio) _hostAudio.stopMenuMusic();
+      else window.__hostAudioQueue.push(['stopMenuMusic', undefined]);
+    }
+    function applyHudAudio(s) {
+      if (_hostAudio) _hostAudio.applyHudAudio(s);
+      else window.__hostAudioQueue.push(['applyHudAudio', s]);
+    }
+    window.__hostAudioReady = function(audio) {
+      _hostAudio = audio;
+      window.__hostAudioQueue.splice(0).forEach(function(c) { audio[c[0]](c[1]); });
+    };
+
     // Resolve a string id via the module bridge; falls back to the raw id
     // before modules load. Render loops re-resolve on every state message.
     function t(id, params) {
@@ -1638,38 +1714,11 @@
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
     const overlay   = document.getElementById('hud-overlay');
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
-    // ── Red alert: siren one-shot on the edge, music loops underneath ───────
-    if (s.red_alert && !_prevRedAlert && _els.siren) {
-      _els.siren.currentTime = 0;
-      _els.siren.play().catch(() => {});
-    }
-    if (_els.music) {
-      if (s.red_alert && _els.music.paused) {
-        _els.music.play().catch(() => {});
-      } else if (!s.red_alert && !_els.music.paused) {
-        _els.music.pause();
-        _els.music.currentTime = 0;
-      }
-    }
-    _prevRedAlert = !!s.red_alert;
-    // ── Engine volume from thrust (coefficients from the ship's TOML) ───────
-    if (_els.engine && _audioCfg && _audioCfg.engine && typeof s.engine_thrust === 'number') {
-      const e = _audioCfg.engine;
-      // setChannelVolume, not a direct assignment: the ride is the authored
-      // level, and master scales whatever it lands on (issue #939).
-      setChannelVolume('engine', e.idle_volume + s.engine_thrust * e.volume_at_full_thrust);
-    }
-    // ── Phaser loop follows the change-detected firing flag ────────────────
-    if (_els.phaser && _audioCfg && _audioCfg.phaser_loop) {
-      if (s.phaser_firing && !_prevPhaser) {
-        setChannelVolume('phaser', _audioCfg.phaser_loop.volume);
-        _els.phaser.currentTime = 0;
-        _els.phaser.play().catch(() => {});
-      } else if (!s.phaser_firing && _prevPhaser) {
-        _els.phaser.pause();
-      }
-    }
-    _prevPhaser = !!s.phaser_firing;
+    // Red-alert siren/music, engine volume from thrust, and the phaser loop's
+    // firing edge all live in gui/host-audio.js now (issue #1228) — this is
+    // the classic-script bridge into it (see the "Host audio bridge" latch
+    // block near the top of this script).
+    applyHudAudio(s);
     // ── 4-slot viewscreen status strip ──────────────────────────────────────
     const vNav = document.getElementById('v-nav');
     const vTac = document.getElementById('v-tac');
@@ -3036,245 +3085,15 @@
 
     // ── Outbound routing ───────────────────────────────────────────────────
 
-    // ── Data-driven audio ──────────────────────────────────────────────────
-    //
-    // Rust owns the config (ship [audio] + world [audio.red_alert]), the
-    // forcefield envelope, and the blaster's listener-relative geometry. This
-    // side only plays sounds. Nothing here hardcodes a filename or a volume.
-    //
-    // Looping beds and the siren use <audio> elements. The blaster uses Web
-    // Audio instead: one-shots overlap, and <audio> cannot pan.
-
-    let _audioCfg = null;      // payload from the "audio_config" host channel
-    let _audioUnlocked = false; // user gesture / game start has happened
-    let _audioStarted = false;
-    let _els = {};             // key -> HTMLAudioElement
-    let _actx = null;          // AudioContext (blaster only)
-    let _blasterBuf = null;    // decoded AudioBuffer
-    let _prevRedAlert = false;
-    let _prevPhaser = false;
-    let _menuMusic = null;
-
-    // HTMLMediaElement.volume throws IndexSizeError outside 0..1.
-    function clampVol(v) {
-      const n = Number(v);
-      if (!isFinite(n)) return 0;
-      return Math.min(1, Math.max(0, n));
-    }
-
-    // ── Master volume (issue #939) ─────────────────────────────────────────
-    //
-    // A SCALE FACTOR over the authored volumes, never a replacement for them.
-    // Every per-sound level on this page is designed data — ship [audio],
-    // world [audio.red_alert], the blaster spec, the engine's idle/full-thrust
-    // coefficients — and the host's slider must not overwrite the mix the
-    // designer authored, only turn the whole thing up or down. So each channel
-    // keeps its authored level in `_authoredVol` and what reaches the element
-    // is always `authored × master`. 1 is the identity (unattenuated), which
-    // is why it is the default rather than a tunable.
-    const MASTER_VOLUME_KEY = 'phoenix-server-master-volume';
-    const MASTER_VOLUME_DEFAULT = 1;
-    // The menu bed predates the audio config and has no TOML entry to read;
-    // named here so it composes with master like every other channel.
-    const MENU_MUSIC_VOLUME = 0.5;
-    const _authoredVol = {};   // channel key -> authored (pre-master) volume
-    let _masterVolume = MASTER_VOLUME_DEFAULT;
-    try {
-      const stored = window.localStorage.getItem(MASTER_VOLUME_KEY);
-      if (stored !== null && isFinite(Number(stored))) _masterVolume = clampVol(stored);
-    } catch (_) { /* private mode / storage disabled — stay at the default */ }
-
-    function applyMaster(authored) {
-      return clampVol(clampVol(authored) * _masterVolume);
-    }
-
-    /** Set an element's live volume from an authored level, remembering it. */
-    function setChannelVolume(key, authored) {
-      _authoredVol[key] = clampVol(authored);
-      if (_els[key]) _els[key].volume = applyMaster(authored);
-    }
-
-    window.__getMasterVolume = function() { return _masterVolume; };
-
-    // Live: re-derives every channel from its authored level, so dragging the
-    // slider is audible immediately rather than at the next config push.
-    window.__setMasterVolume = function(v) {
-      _masterVolume = clampVol(v);
-      try { window.localStorage.setItem(MASTER_VOLUME_KEY, String(_masterVolume)); }
-      catch (_) { /* not worth failing the drag over */ }
-      Object.keys(_els).forEach(function(k) {
-        if (k in _authoredVol) _els[k].volume = applyMaster(_authoredVol[k]);
-      });
-      if (_menuMusic) _menuMusic.volume = applyMaster(MENU_MUSIC_VOLUME);
-    };
-
-    function startMenuMusic() {
-      if (_menuMusic) return;
-      _menuMusic = new Audio('assets/sounds/exploration.mp3');
-      _menuMusic.loop = true;
-      _menuMusic.volume = applyMaster(MENU_MUSIC_VOLUME);
-      _menuMusic.play().catch(function() {});
-    }
-
-    function stopMenuMusic() {
-      if (_menuMusic) {
-        _menuMusic.pause();
-        _menuMusic.currentTime = 0;
-        _menuMusic = null;
-      }
-    }
-
-    function mkLoop(key, spec, volume) {
-      if (!spec || !spec.file) return;
-      const el = new Audio(spec.file);
-      el.loop = true;
-      el.preload = 'auto';
-      _els[key] = el;
-      setChannelVolume(key, volume);
-    }
-
-    window.__audioConfig = function(json) {
-      let c;
-      try { c = JSON.parse(json); }
-      catch (e) { console.warn('[Phoenix] bad audio config', e); return; }
-      _audioCfg = c;
-
-      mkLoop('ambient', c.ambient, c.ambient && c.ambient.volume);
-      // Engine starts at idle and is ridden by thrust in __updateHud.
-      mkLoop('engine', c.engine, c.engine && c.engine.idle_volume);
-      // Phaser and forcefield start silent: the phaser is gated on the firing
-      // flag, and the forcefield's level is pushed from Rust each frame.
-      mkLoop('phaser', c.phaser_loop, 0);
-      mkLoop('forcefield', c.forcefield, 0);
-
-      if (c.red_alert && c.red_alert.music_file) {
-        const m = new Audio(c.red_alert.music_file);
-        m.loop = true;
-        m.preload = 'auto';
-        _els.music = m;
-        setChannelVolume('music', c.red_alert.music_volume);
-      }
-      if (c.red_alert && c.red_alert.siren_file) {
-        const s = new Audio(c.red_alert.siren_file);
-        s.preload = 'auto';
-        _els.siren = s;
-        setChannelVolume('siren', c.red_alert.siren_volume);
-      }
-
-      initBlasterAudio(c.blaster);
-      maybeStartAudio();
-    };
-
-    function initBlasterAudio(spec) {
-      if (!spec || !spec.file) return;
-      try {
-        const Ctor = window.AudioContext || window.webkitAudioContext;
-        if (!Ctor) return;
-        _actx = _actx || new Ctor();
-      } catch (e) {
-        console.warn('[Phoenix] no AudioContext; blaster audio disabled', e);
-        return;
-      }
-      // Must not reject: a bubbling rejection fails the smoke test's
-      // pageerror assertion. Headless Chromium may refuse to decode at all,
-      // and "no blaster SFX" is an acceptable degradation.
-      fetch(spec.file)
-        .then(function(r) { return r.arrayBuffer(); })
-        .then(function(b) { return _actx.decodeAudioData(b); })
-        .then(function(buf) { _blasterBuf = buf; })
-        .catch(function(e) { console.warn('[Phoenix] blaster decode failed', e); });
-    }
-
-    // Called on the Loading → InProgress edge, which is also the autoplay
-    // unlock. The config push and this edge can land in the same frame, and
-    // although a single flush (`flush_host_channels`, issue #818) now walks
-    // the host channels in a fixed order, cross-channel ordering remains an
-    // implementation detail JS must not rely on — whichever arrives second
-    // starts the audio.
-    function startGameAudio() {
-      _audioUnlocked = true;
-      maybeStartAudio();
-    }
-
-    function maybeStartAudio() {
-      if (_audioStarted || !_audioUnlocked || !_audioCfg) return;
-      _audioStarted = true;
-      ['ambient', 'engine', 'phaser', 'forcefield'].forEach(function(k) {
-        if (_els[k]) _els[k].play().catch(function() {});
-      });
-      if (_actx && _actx.state === 'suspended') {
-        _actx.resume().catch(function() {});
-      }
-    }
-
-    // One-shot positional cue. Coordinates are already listener-relative, so
-    // the Web Audio listener stays at the origin facing -Z.
-    window.__audioCue = function(json) {
-      let c;
-      try { c = JSON.parse(json); } catch (e) { return; }
-      if (c.kind !== 'blaster' || !_blasterBuf || !_actx) return;
-      const spec = _audioCfg && _audioCfg.blaster;
-      if (!spec) return;
-      try {
-        const src = _actx.createBufferSource();
-        src.buffer = _blasterBuf;
-        const pan = _actx.createPanner();
-        pan.panningModel  = spec.panning_model;
-        pan.distanceModel = spec.distance_model;
-        pan.refDistance   = spec.ref_distance;
-        pan.maxDistance   = spec.max_distance;
-        pan.rolloffFactor = spec.rolloff_factor;
-        if (pan.positionX) {
-          pan.positionX.value = c.x;
-          pan.positionY.value = c.y;
-          pan.positionZ.value = c.z;
-        } else {
-          pan.setPosition(c.x, c.y, c.z); // older Safari
-        }
-        const g = _actx.createGain();
-        // Web Audio, so this one is scaled at the cue rather than carried on
-        // an element — same authored × master composition.
-        g.gain.value = applyMaster(spec.volume);
-        src.connect(pan).connect(g).connect(_actx.destination);
-        src.start();
-      } catch (e) {
-        console.warn('[Phoenix] blaster cue failed', e);
-      }
-    };
-
-    // Forcefield SFX level, computed and clamped in Rust. Rust's number is the
-    // authored level; master scales it like every other channel.
-    window.__audioLevel = function(level) {
-      if (_els.forcefield) setChannelVolume('forcefield', level);
-    };
-
-    // Smoke-test hook — lets Playwright assert on audio state without
-    // needing to hear anything.
-    //
-    // The elements are deliberately exposed here rather than looked up via
-    // document.querySelectorAll('audio'): `new Audio()` builds *detached*
-    // elements that never enter the DOM, so a querySelectorAll sweep finds
-    // nothing and any assertion over it passes vacuously.
-    window.__audioDebug = function() {
-      const vols = {};
-      Object.keys(_els).forEach(function(k) { vols[k] = _els[k].volume; });
-      const paused = {};
-      Object.keys(_els).forEach(function(k) { paused[k] = _els[k].paused; });
-      return {
-        cfg: _audioCfg,
-        els: Object.keys(_els),
-        started: _audioStarted,
-        volumes: vols,
-        // Authored (pre-master) levels and the scale factor over them, so a
-        // test can assert the composition rather than just the product.
-        authoredVolumes: Object.assign({}, _authoredVol),
-        master: _masterVolume,
-        paused: paused,
-        musicPlaying: !!(_els.music && !_els.music.paused),
-        phaserPlaying: !!(_els.phaser && !_els.phaser.paused),
-        blasterReady: !!_blasterBuf
-      };
-    };
+    // ── Data-driven audio (issue #1228) ─────────────────────────────────────
+    // clampVol/applyMaster/setChannelVolume/mkLoop/initBlasterAudio, the
+    // master-volume localStorage key, and window.__audioConfig/__audioCue/
+    // __audioLevel/__audioDebug/__setMasterVolume/__getMasterVolume/
+    // startGameAudio/startMenuMusic/stopMenuMusic/applyHudAudio moved to
+    // gui/host-audio.js. The "Host audio bridge" latch block near the top of
+    // this script queues startGameAudio/startMenuMusic/stopMenuMusic/
+    // applyHudAudio calls until the host-audio island mounts; that same
+    // island assigns the window.__audioConfig/etc. globals directly.
 
     function routeOutbound(target, payload, deliveryClass) {
       const useSnapshot = deliveryClass === 'snapshot';

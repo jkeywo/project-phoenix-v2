@@ -1068,6 +1068,9 @@ world.probe_dock.entity.berth.name,assets/worlds/probe_dock.toml -> [[entity]] n
 entity.dock_probe.power_groups.dock.label,"Dock probe power-group label for the dock group (issue #1159)","[Dock]"
 entity.dock_probe.station.helm.description,"Dock probe Helm station description (issue #1159)","[Helm — flies the ship and works the dock.]"
 world.probe_umbilical.entity.depot.name,assets/worlds/probe_umbilical.toml -> [[entity]] name,[Supply Depot]
+world.probe_operations.entity.derelict.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Derelict Hulk]
+world.probe_operations.entity.depot.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Supply Depot]
+world.probe_operations.entity.ally.name,assets/worlds/probe_operations.toml -> [[entity]] name,[Allied Depot]
 entity.umbilical_probe.power_groups.dock.label,"Umbilical probe power-group label for the dock group (issue #1160)","[Dock]"
 entity.umbilical_probe.power_groups.umbilical.label,"Umbilical probe power-group label for the umbilical group (issue #1160)","[Umbilical]"
 entity.umbilical_probe.station.helm.description,"Umbilical probe Helm station description (issue #1160)","[Helm — flies the ship and works the dock.]"

@@ -1,0 +1,77 @@
+# Probe world for issue #1167 (S13) — a silent crew completes the ship's external work.
+#
+# The cross-cutting marquee for PRD #1143. ONE hull — the shipped Alliance
+# Destroyer, the only crew ship that carries all four external-work systems (a
+# TRACTOR, a DOCK, a transfer UMBILICAL and external repair-team DISPATCH, added
+# by #1164 S11a) — backfilled entirely by AI with NOBODY connected, completes a
+# TOW, a TRANSFER and a FIELD REPAIR against three named targets. Every engage,
+# dock, flow and dispatch is issued by the #1162 backfill hosts off authored
+# operate directives on the shared admission seam; the test never sends a system
+# command. Progress is read on the TARGETS' own state — the derelict held on the
+# rig, the depot's ledger filled, the ally's condition raised.
+#
+# The name `probe_operations` is the one #1164 S11a freed when it retired the old
+# `[operations]`-path world of the same name — this is its replacement, authored
+# entirely on the NEW systems (the old operations path is deleted by #1166).
+#
+# THE CREW SHIP — the shipped destroyer, spawned as the backfilled player ship at
+# game start. Three overrides, each the WORLD's own intent re-applied onto the
+# picked hull (`server_app::player_hull_config`), never a change to the shipped
+# destroyer's committed template:
+#
+#   * a `reserve_fuel` capacity ledger, so the transfer umbilical has a source to
+#     draw from. The destroyer authors NO `[infrastructure]` of its own by design
+#     (a ledger would fold into every combat world it flies); this is the same
+#     ledger `umbilical_probe.toml` carries, added on this instance only.
+#   * a wide tactical-radar horizon, so the weapons `objective-operate` selector
+#     (issue #1162) can acquire the non-hostile tow and field-repair targets
+#     across the tractor's 500-unit reach and the dispatch's 400 — the shipped
+#     50-unit horizon is a close-combat range, not an operations one. The dock and
+#     the umbilical need no lock, so only the two lock-driven verbs want this.
+#   * a brisk external-dispatch rate, so the field repair reads on the ally's own
+#     condition track inside a short deterministic run — the shipped 0.5/s is a
+#     thirty-second mission rate. Only the rate is nudged; the 400-unit reach the
+#     dispatch host gates on is the destroyer's own.
+[global]
+seed = 1167
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_destroyer.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+overrides = { weapons_console = { radar = { range = 700.0 } }, repair = { external_dispatch = { repair_rate = 20.0 } }, infrastructure = { condition_max = 100.0, decay_per_sec = 0.0, hull_damage_share = 0.0, capacity = [{ id = "reserve_fuel", amount = 100, ceiling = 100 }] } }
+
+# THE TOW TARGET — a laden derelict hauler within the destroyer's 500-unit tractor
+# reach. A heavy authored mass (a hulk, well past the tug curve's knee, issue
+# #1157) so the coupling is real work; the crew's tractor holds it on the rig 90
+# units astern (the destroyer's authored `coupling_offset`). It is a neutral
+# civilian, so nothing but the `objective-operate` source ever locks it.
+[[entity]]
+template_path = "assets/entities/ship_civilian_hauler.toml"
+name = "world.probe_operations.entity.derelict.name"
+transform = { position = [0.0, 0.0, -160.0] }
+overrides = { mass = 240000.0 }
+
+# THE TRANSFER TARGET — a passive umbilical berth to starboard, within the
+# destroyer's 200-unit dock range, its `reserve_fuel` ledger empty with headroom.
+# The crew docks (Helm) and flows its own reserve_fuel across (Engineering); the
+# depot's ledger fills, unit for unit, from the ship's own.
+[[entity]]
+template_path = "assets/entities/umbilical_berth.toml"
+name = "world.probe_operations.entity.depot.name"
+transform = { position = [140.0, 0.0, 0.0] }
+
+# THE FIELD-REPAIR TARGET — an ally depot to port, within the destroyer's 400-unit
+# dispatch reach, opened low and declining at ZERO on its own so its condition only
+# moves by the dispatched team's work. A crisp target-side readout: nothing but the
+# team abroad raises it.
+[[entity]]
+template_path = "assets/entities/depot_transfer.toml"
+name = "world.probe_operations.entity.ally.name"
+transform = { position = [-160.0, 0.0, 0.0] }
+overrides = { infrastructure = { condition = 40.0, decay_per_sec = 0.0 } }

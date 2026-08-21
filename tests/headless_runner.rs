@@ -16151,3 +16151,438 @@ fn a_tug_towing_a_prize_does_not_make_a_fight_a_foregone_conclusion() {
         "the tug must still haul its prize off while the fight runs, moved only {prize_hauled}"
     );
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Issue #1167 (S13) — a silent crew completes the ship's external work.
+//
+// The cross-cutting marquee for PRD #1143. `assets/worlds/probe_operations.toml`
+// fields ONE crew ship — the shipped Alliance Destroyer, the only hull that
+// carries all four external-work systems (a TRACTOR, a DOCK, a transfer UMBILICAL
+// and external repair-team DISPATCH, #1164 S11a) — backfilled entirely by AI with
+// NOBODY connected, and three named targets. Off three authored operate directives
+// alone (a `Tow`, a `Transfer`, a `FieldRepair`), the crew completes all three
+// procedures with NO system command ever sent by the test: the #1162 backfill
+// hosts issue every engage, dock, flow and dispatch on the shared admission seam,
+// and the widened weapons `objective-operate` selector reaches each non-hostile
+// lock. Progress is read on the TARGETS' own state — the derelict held on the rig,
+// the depot's ledger filled, the ally's condition raised.
+//
+// These additions are PURELY ADDITIVE (issue #1166, running in parallel, deletes
+// `src/operations/`): nothing here reads the operations path — the whole marquee
+// is authored on the NEW systems.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const OPS_DERELICT: &str = "world.probe_operations.entity.derelict.name";
+const OPS_DEPOT: &str = "world.probe_operations.entity.depot.name";
+const OPS_ALLY: &str = "world.probe_operations.entity.ally.name";
+
+fn operations_args(dt: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_operations.toml".into(),
+        // The player ship IS the destroyer: game-start swaps the world's
+        // `player-ship` placeholder for the lobby-SELECTED hull and re-applies the
+        // row's overrides onto it (`server_app::player_hull_config`), so the
+        // selection has to be the destroyer or its four external systems — and the
+        // world's radar/ledger/rate overrides — never land.
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(240.0, dt),
+        deterministic: true,
+        seed: Some(1167),
+        ..test_args()
+    }
+}
+
+/// Mark an `Active` objective `Completed`, dropping it from the scored pool the
+/// backfill hosts read — the crew "completing" one external job so the ship's one
+/// combat lock is free for the next. The same transition a scenario's own
+/// completion predicate makes, reached here directly so the test needs no Rhai.
+fn complete_operations_objective(app: &mut App, id: &str) {
+    let mut mgr = app
+        .world_mut()
+        .resource_mut::<project_phoenix::world::server::ObjectiveManagerRes>();
+    mgr.0.complete(id);
+}
+
+/// Run `total` ticks in `chunk`-sized steps, sampling the world digest after each
+/// step into `out` — a divergence between two same-seed runs then surfaces at the
+/// checkpoint (hence the tick) it first happens on.
+fn run_sampling_digest(app: &mut App, total: u64, chunk: u64, out: &mut Vec<u64>) {
+    let mut done = 0;
+    while done < total {
+        let step = chunk.min(total - done);
+        run(app, step);
+        done += step;
+        out.push(project_phoenix::sim_digest::state_digest(app));
+    }
+}
+
+/// Everything one silent-crew run of `probe_operations.toml` observed, so the
+/// marquee test can assert on target-side state and the determinism test can
+/// assert the `digests` sequence matches a second same-seed run — from the ONE
+/// shared driver, so the two tests exercise the identical world the identical way.
+struct SilentCrewRun {
+    /// The world digest sampled at a fixed cadence across the whole run.
+    digests: Vec<u64>,
+    // ── Tow (target-side) ────────────────────────────────────────────────────
+    tow_engaged: bool,
+    tow_coupled: Option<String>,
+    tow_offset_len: f32,
+    derelict_uuid: String,
+    // ── Transfer (target-side) ───────────────────────────────────────────────
+    docked: bool,
+    umbilical_running: bool,
+    depot_fuel_start: i64,
+    depot_fuel_end: i64,
+    // ── Field repair (target-side) ───────────────────────────────────────────
+    dispatched: Option<String>,
+    ally_uuid: String,
+    ally_condition_start: f32,
+    ally_condition_end: f32,
+}
+
+/// Drive the whole silent-crew procedure over `probe_operations.toml`: reach
+/// InProgress (the destroyer backfills, its four external systems go
+/// AI-controlled), then run each of the three external jobs off an authored
+/// operate directive, resetting the ship to rest between them so each is a clean
+/// start. NO system command (`EngageTractor`/`Dock`/`StartTransfer`/
+/// `DispatchExternalRepair`) is EVER sent — the #1162 hosts issue every one, and
+/// the widened selector locks each non-hostile target. The ship's single combat
+/// lock is shared by the tow and the field repair, so the jobs are SEQUENCED: each
+/// objective is completed (dropped from the scored pool) before the next, freeing
+/// the lock — the crew finishing one external job before starting the next.
+fn run_silent_crew(app: &mut App) -> SilentCrewRun {
+    use project_phoenix::messages::AiDirective;
+
+    let mut digests = Vec::new();
+    run(app, 60);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+    digests.push(project_phoenix::sim_digest::state_digest(app));
+
+    let derelict_uuid = scan_uuid_named(app, OPS_DERELICT);
+    let ally_uuid = scan_uuid_named(app, OPS_ALLY);
+
+    // ── Job 1: TOW ────────────────────────────────────────────────────────────
+    reset_operator_to_rest(app);
+    add_operate_objective(
+        app,
+        "obj-op-tow",
+        vec![OPS_DERELICT.into()],
+        AiDirective::Tow {
+            target: OPS_DERELICT.into(),
+        },
+    );
+    run_sampling_digest(app, 180, 30, &mut digests);
+    let beam = tractor_beam_of(app);
+    let tow_engaged = beam.engaged;
+    let tow_coupled = beam.coupled_target.clone();
+    let tow_offset_len = (position_of(app, OPS_DERELICT) - operator_pos(app)).length();
+    // The crew finishes the tow: complete the objective (the lock frees) and let
+    // the host release the beam before the next job.
+    complete_operations_objective(app, "obj-op-tow");
+    run_sampling_digest(app, 60, 30, &mut digests);
+
+    // ── Job 2: TRANSFER ───────────────────────────────────────────────────────
+    reset_operator_to_rest(app);
+    let depot_fuel_start = capacity_of(app, OPS_DEPOT, "reserve_fuel");
+    add_operate_objective(
+        app,
+        "obj-op-transfer",
+        vec![OPS_DEPOT.into()],
+        AiDirective::Transfer {
+            target: OPS_DEPOT.into(),
+        },
+    );
+    // Long enough for the backfilled Helm to fly the dock manoeuvre onto the mate
+    // and the backfilled Engineering to run the umbilical.
+    run_sampling_digest(app, 480, 30, &mut digests);
+    let dock = dock_control_of(app);
+    let docked = dock.docked;
+    let umbilical_running = umbilical_of(app).running;
+    let depot_fuel_end = capacity_of(app, OPS_DEPOT, "reserve_fuel");
+    complete_operations_objective(app, "obj-op-transfer");
+    run_sampling_digest(app, 120, 30, &mut digests);
+
+    // ── Job 3: FIELD REPAIR ───────────────────────────────────────────────────
+    reset_operator_to_rest(app);
+    let ally_condition_start = condition_of(app, OPS_ALLY);
+    add_operate_objective(
+        app,
+        "obj-op-field-repair",
+        vec![OPS_ALLY.into()],
+        AiDirective::FieldRepair {
+            target: OPS_ALLY.into(),
+        },
+    );
+    run_sampling_digest(app, 240, 30, &mut digests);
+    let dispatched = external_dispatch_of(app).dispatched_target.clone();
+    let ally_condition_end = condition_of(app, OPS_ALLY);
+
+    SilentCrewRun {
+        digests,
+        tow_engaged,
+        tow_coupled,
+        tow_offset_len,
+        derelict_uuid,
+        docked,
+        umbilical_running,
+        depot_fuel_start,
+        depot_fuel_end,
+        dispatched,
+        ally_uuid,
+        ally_condition_start,
+        ally_condition_end,
+    }
+}
+
+/// AC (issue #1167): a headless FULL-AI run over the re-authored operations world,
+/// NOBODY connected, completes a TOW, a TRANSFER and a FIELD REPAIR — asserted on
+/// the TARGETS' own state. The marquee "a silent crew completes the ship's external
+/// work" proof: one destroyer, three authored operate directives, no system command
+/// ever sent, and each target's own state is what proves the job landed.
+#[test]
+fn a_full_ai_crew_completes_a_tow_a_transfer_and_a_field_repair() {
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&operations_args(dt)).expect("app should build");
+    let r = run_silent_crew(&mut app);
+
+    // ── TOW: the derelict is held on the rig (target-side) ────────────────────
+    assert!(
+        r.tow_engaged && r.tow_coupled.as_deref() == Some(r.derelict_uuid.as_str()),
+        "the backfilled Engineering must have engaged the tractor on the named derelict off the \
+         Tow directive with NO human input, got engaged={} coupled={:?}",
+        r.tow_engaged,
+        r.tow_coupled
+    );
+    assert!(
+        (r.tow_offset_len - 90.0).abs() < 2.0,
+        "the towed derelict must ride the destroyer's authored 90-unit coupling offset \
+         (target-side state), got a separation of {}",
+        r.tow_offset_len
+    );
+
+    // ── TRANSFER: capacity crossed to the depot (target-side) ─────────────────
+    assert!(
+        r.docked,
+        "the backfilled Helm must have docked with the depot off the Transfer directive"
+    );
+    assert!(
+        r.umbilical_running,
+        "the backfilled Engineering must have run the umbilical once the dock was made"
+    );
+    assert!(
+        r.depot_fuel_end > r.depot_fuel_start,
+        "a full-AI transfer must raise the DEPOT's own reserve_fuel (target-side state): \
+         started at {}, ended at {}",
+        r.depot_fuel_start,
+        r.depot_fuel_end
+    );
+
+    // ── FIELD REPAIR: the ally's condition raised (target-side) ───────────────
+    assert_eq!(
+        r.dispatched.as_deref(),
+        Some(r.ally_uuid.as_str()),
+        "the backfilled Repair must have dispatched a team to the named ally off the FieldRepair \
+         directive with NO human input, got {:?}",
+        r.dispatched
+    );
+    assert!(
+        r.ally_condition_end > r.ally_condition_start,
+        "a full-AI field repair must raise the ALLY's own condition (target-side state): \
+         {} -> {}",
+        r.ally_condition_start,
+        r.ally_condition_end
+    );
+}
+
+/// AC (issue #1167): two same-seed headless runs of the operations world produce
+/// IDENTICAL digests — a divergent engage would be caught on the tick it happens.
+/// The digest is sampled at a fixed cadence across the WHOLE silent-crew run, so a
+/// mismatch names the checkpoint it first diverged on rather than only the end.
+#[test]
+fn two_same_seed_runs_of_the_operations_world_produce_identical_digests() {
+    let dt = 1.0 / 60.0;
+    let mut app_a = build_headless_app(&operations_args(dt)).expect("app should build");
+    let mut app_b = build_headless_app(&operations_args(dt)).expect("app should build");
+
+    let a = run_silent_crew(&mut app_a);
+    let b = run_silent_crew(&mut app_b);
+
+    assert_eq!(
+        a.digests.len(),
+        b.digests.len(),
+        "both same-seed runs must sample the same number of checkpoints"
+    );
+    for (i, (da, db)) in a.digests.iter().zip(b.digests.iter()).enumerate() {
+        assert_eq!(
+            da, db,
+            "two same-seed runs of the operations world DIVERGED at checkpoint {i} \
+             ({da:#018x} vs {db:#018x}) — a divergent engage is caught on the tick it happens"
+        );
+    }
+
+    // Guard against a vacuous pass: identical digests over an inert world would
+    // prove nothing, so anchor on the run having actually done the external work.
+    assert!(
+        a.docked && a.depot_fuel_end > a.depot_fuel_start && a.tow_engaged,
+        "precondition: the sampled run must actually have completed the external work, or the \
+         digest parity is vacuous"
+    );
+}
+
+/// AC (issue #1167): every new system's authoritative state is present in the
+/// digest, proven by mutating each one ALONE. From an all-idle baseline over the
+/// operations world, engaging the tractor, docking, running the umbilical and
+/// dispatching a repair team each MOVE the digest on their own; restoring each to
+/// idle returns to the baseline (a world with none active is unchanged); and the
+/// four moves are DISTINCT, so each system folds its own namespace rather than one
+/// standing in for all. This is the integration-level companion to the per-fold
+/// unit tests in `sim_digest`.
+#[test]
+fn every_new_operations_systems_state_is_present_in_the_digest() {
+    use project_phoenix::sim_digest::state_digest;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&operations_args(dt)).expect("app should build");
+    // InProgress and backfilled: the destroyer carries all four external systems,
+    // every one idle (nothing engaged, docked, flowing or dispatched).
+    run(&mut app, 60);
+    let derelict = scan_uuid_named(&mut app, OPS_DERELICT);
+    let depot = scan_uuid_named(&mut app, OPS_DEPOT);
+    let ally = scan_uuid_named(&mut app, OPS_ALLY);
+    let op = tractor_operator(&mut app);
+
+    let baseline = state_digest(&app);
+
+    // ── Tractor engage alone ──────────────────────────────────────────────────
+    {
+        let mut beam = app
+            .world_mut()
+            .get_mut::<project_phoenix::tractor::TractorBeam>(op)
+            .expect("the destroyer carries a TractorBeam");
+        beam.engaged = true;
+        beam.coupled_target = Some(derelict.clone());
+    }
+    let d_tractor = state_digest(&app);
+    assert_ne!(
+        d_tractor, baseline,
+        "an engaged tractor holding a target must move the digest — its authoritative state is \
+         folded (issue #1156)"
+    );
+    {
+        let mut beam = app
+            .world_mut()
+            .get_mut::<project_phoenix::tractor::TractorBeam>(op)
+            .unwrap();
+        beam.engaged = false;
+        beam.coupled_target = None;
+    }
+    assert_eq!(
+        state_digest(&app),
+        baseline,
+        "an idle tractor folds nothing — back to the all-idle baseline"
+    );
+
+    // ── Dock alone ────────────────────────────────────────────────────────────
+    {
+        let mut dock = app
+            .world_mut()
+            .get_mut::<project_phoenix::dock::DockControl>(op)
+            .expect("the destroyer carries a DockControl");
+        dock.docked = true;
+        dock.docking_target = Some(depot.clone());
+    }
+    let d_dock = state_digest(&app);
+    assert_ne!(
+        d_dock, baseline,
+        "a docked hull must move the digest — the docked relationship is folded (issue #1159)"
+    );
+    {
+        let mut dock = app
+            .world_mut()
+            .get_mut::<project_phoenix::dock::DockControl>(op)
+            .unwrap();
+        dock.docked = false;
+        dock.docking_target = None;
+    }
+    assert_eq!(
+        state_digest(&app),
+        baseline,
+        "an undocked hull is back to baseline"
+    );
+
+    // ── Umbilical flow alone ──────────────────────────────────────────────────
+    {
+        let mut umb = app
+            .world_mut()
+            .get_mut::<project_phoenix::umbilical::TransferUmbilical>(op)
+            .expect("the destroyer carries a TransferUmbilical");
+        umb.running = true;
+    }
+    let d_umbilical = state_digest(&app);
+    assert_ne!(
+        d_umbilical, baseline,
+        "a running umbilical must move the digest — the running flow is folded (issue #1160)"
+    );
+    {
+        let mut umb = app
+            .world_mut()
+            .get_mut::<project_phoenix::umbilical::TransferUmbilical>(op)
+            .unwrap();
+        umb.running = false;
+    }
+    assert_eq!(
+        state_digest(&app),
+        baseline,
+        "an idle umbilical is back to baseline"
+    );
+
+    // ── External dispatch alone ───────────────────────────────────────────────
+    {
+        let mut disp = app
+            .world_mut()
+            .get_mut::<project_phoenix::console::repair::ExternalRepairDispatch>(op)
+            .expect("the destroyer carries an ExternalRepairDispatch");
+        disp.dispatched_target = Some(ally.clone());
+    }
+    let d_dispatch = state_digest(&app);
+    assert_ne!(
+        d_dispatch, baseline,
+        "a live external repair dispatch must move the digest — the dispatched target is folded \
+         (issue #1161)"
+    );
+    {
+        let mut disp = app
+            .world_mut()
+            .get_mut::<project_phoenix::console::repair::ExternalRepairDispatch>(op)
+            .unwrap();
+        disp.dispatched_target = None;
+    }
+    assert_eq!(
+        state_digest(&app),
+        baseline,
+        "with all four external systems idle again the digest is unchanged — a world with none \
+         active folds exactly as before"
+    );
+
+    // The four moves are DISTINCT: each system folds its own namespace, so no one
+    // stands in for another (a single shared fold would collide two of these).
+    let moves = [
+        ("tractor", d_tractor),
+        ("dock", d_dock),
+        ("umbilical", d_umbilical),
+        ("dispatch", d_dispatch),
+    ];
+    for (i, (name_a, digest_a)) in moves.iter().enumerate() {
+        for (name_b, digest_b) in moves.iter().skip(i + 1) {
+            assert_ne!(
+                digest_a, digest_b,
+                "each external system must fold a DISTINCT namespace ({name_a} vs {name_b})"
+            );
+        }
+    }
+}

@@ -1475,6 +1475,15 @@
        (issue #755). Publishes window.scenarioArbiter for the classic-script
        host logic below. -->
   <script type="module" src="gui/scenario-arbiter.js"></script>
+  <!-- Host lobby view-model (issue #1229): the pure phase-transition, title/
+       crew/ready-badge/countdown/station-card/reserved-chip/spectator-pill/
+       hint computation behind __updateLobby's station-grid renderer lives in
+       gui/host-lobby-view.js so vitest can exercise it directly. Sibling of
+       gui/lobby-view.js (client.html), NOT a reuse — the host's roster is
+       Rust-built and already localised, with no myToken. Self-registers
+       window.hostLobbyViewModel, the same load-order-tolerant pattern
+       client.html uses for window.lobbyViewModel. -->
+  <script type="module" src="gui/host-lobby-view.js"></script>
   <!-- Host audio engine (issue #1228): the data-driven audio graph
        (clampVol/applyMaster/setChannelVolume/mkLoop/initBlasterAudio/
        startGameAudio/startMenuMusic/stopMenuMusic/applyHudAudio, the
@@ -1767,23 +1776,32 @@
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
 
+    // Pure phase-transition / title / crew / ready-badge / countdown /
+    // station-card / reserved-chip / spectator-pill / hint computation lives
+    // in gui/host-lobby-view.js (issue #1229) — this function only performs
+    // side effects (audio, the shared qrVisible flag) and DOM writes. Boot
+    // race: skip the paint until the module loads — the next lobby push
+    // re-renders (mirrors client.html's window.lobbyViewModel guard).
+    if (typeof window.hostLobbyViewModel !== 'function') return;
+    const vm = window.hostLobbyViewModel(s, _lobbyPrevPhase);
+    const tr = vm.transitions;
+
     // ── Loading overlay ────────────────────────────────────────────────
-    if (s.phase === 'Loading') {
+    if (tr.showLoadingOverlay) {
       const al = document.getElementById('asset-loading');
       if (al) al.style.display = 'flex';
-      if (typeof s.loading_progress === 'number') {
-        const pct = Math.round(s.loading_progress * 100) + '%';
+      if (tr.loadingPct != null) {
         const el1 = document.getElementById('asset-loading-pct');
         const el2 = document.getElementById('loading-progress-pct');
-        if (el1) el1.textContent = pct;
-        if (el2) el2.textContent = pct;
+        if (el1) el1.textContent = tr.loadingPct;
+        if (el2) el2.textContent = tr.loadingPct;
       }
     }
 
     // ── Game-start cue (Loading → InProgress transition) ───────────────
     // Only this edge dismisses the loading overlay — there's nothing to
     // dismiss if we never showed it.
-    if (s.phase === 'InProgress' && _lobbyPrevPhase === 'Loading') {
+    if (tr.dismissLoadingOverlay) {
       const al = document.getElementById('asset-loading');
       if (al) al.style.display = 'none';
       const qrOverlay = document.getElementById('overlay');
@@ -1794,37 +1812,37 @@
     // when the asset preload is already complete, drain_force_start /
     // StartGame set InProgress directly and the sim never passes through
     // Loading, so a Loading-only gate would leave the game silent.
-    if (s.phase === 'InProgress' && _lobbyPrevPhase !== 'InProgress') {
+    if (tr.unlockAudio) {
       startGameAudio();
     }
     // Menu music: loop during lobby, stop when game starts
-    if (s.phase === 'Lobby') {
+    if (tr.menuMusic === 'start') {
       startMenuMusic();
-    } else if (s.phase === 'InProgress' || s.phase === 'Loading') {
+    } else if (tr.menuMusic === 'stop') {
       stopMenuMusic();
     }
     _lobbyPrevPhase = s.phase;
 
     // ── Show/hide panel + canvas based on phase ───────────────────────
-    const isLobby = s.phase === 'Lobby';
     const panel = document.getElementById('lobby-panel');
     const qrOverlay = document.getElementById('overlay');
-    if (panel) panel.style.display = isLobby ? '' : 'none';
+    if (panel) panel.style.display = tr.showPanel ? '' : 'none';
     // NOTE: do NOT hide the Bevy canvas (#canvas) here. The lobby panel already
     // covers it completely (z-index:180, solid background). Hiding the canvas
     // with display:none causes Bevy to see a 0×0 window and throttle / suspend
     // its rAF loop, which delays SimState delivery after game start and breaks
     // the smoke tests. The canvas must stay in the render tree at all times.
-    if (qrOverlay) {
-      if (isLobby) { qrVisible = true; qrOverlay.style.display = 'block'; }
-      else if (s.phase === 'Loading' || s.phase === 'GameOver') { qrVisible = false; qrOverlay.style.display = 'none'; }
-      // During InProgress the settings menus are the sole controllers.
+    if (qrOverlay && tr.qrOverlayAction) {
+      if (tr.qrOverlayAction === 'show') { qrVisible = true; qrOverlay.style.display = 'block'; }
+      else { qrVisible = false; qrOverlay.style.display = 'none'; }
+      // During InProgress the settings menus are the sole controllers (no
+      // qrOverlayAction, so this branch is skipped entirely).
     }
 
     // ── Game-over overlay: force-hidden once the phase leaves GameOver ──
     // (the HUD push that normally drives this overlay only fires while
     // InProgress, so returning to Lobby needs its own hide here.)
-    if (s.phase !== 'GameOver') {
+    if (tr.hideGameOverOverlay) {
       const goOverlay = document.getElementById('game-over-overlay');
       if (goOverlay) goOverlay.style.display = 'none';
     }
@@ -1835,22 +1853,20 @@
     // channel crosses localiseHostPayload in __hostChannel (issue #949).
     const titleEl = document.getElementById('lobby-title');
     const subEl = document.getElementById('lobby-subtitle');
-    if (titleEl) titleEl.textContent = s.scenario_title || t('server.unknown_scenario');
-    if (subEl) subEl.textContent = s.scenario_body || '';
+    if (titleEl) titleEl.textContent = vm.title || t('server.unknown_scenario');
+    if (subEl) subEl.textContent = vm.subtitle;
 
     // ── Crew count ────────────────────────────────────────────────────
     const crewEl = document.getElementById('lobby-crew-count');
     const dotsEl = document.getElementById('lobby-crew-dots');
-    const maxP = s.max_players || 0;
-    const crewN = s.crew_count || 0;
-    if (crewEl) crewEl.textContent = crewN + '/' + maxP;
+    if (crewEl) crewEl.textContent = vm.crew.count + '/' + vm.crew.max;
 
     // Crew dot indicators
     if (dotsEl) {
       dotsEl.innerHTML = '';
-      for (let i = 0; i < maxP; i++) {
+      for (const filled of vm.crew.dots) {
         const dot = document.createElement('div');
-        dot.className = 'crew-dot' + (i < crewN ? ' filled' : '');
+        dot.className = 'crew-dot' + (filled ? ' filled' : '');
         dotsEl.appendChild(dot);
       }
     }
@@ -1858,31 +1874,22 @@
     // Spectator tag
     const specTag = document.getElementById('lobby-spectator-tag');
     if (specTag) {
-      const hasSpecs = s.spectators && s.spectators.length > 0;
-      specTag.style.display = hasSpecs ? 'inline' : 'none';
-      if (hasSpecs) specTag.textContent = '+' + s.spectators.length;
+      specTag.style.display = vm.crew.spectatorTag.visible ? 'inline' : 'none';
+      if (vm.crew.spectatorTag.visible) specTag.textContent = '+' + vm.crew.spectatorTag.count;
     }
 
     // ── Ready badge ───────────────────────────────────────────────────
     const badge = document.getElementById('lobby-ready-badge');
     if (badge) {
-      if (s.countdown_secs > 0) {
-        badge.textContent = t('server.launching_in', { secs: s.countdown_secs });
-        badge.className = 'go';
-      } else if (s.all_ready) {
-        badge.textContent = t('client.all_crew_ready');
-        badge.className = 'go';
-      } else {
-        badge.textContent = t('client.awaiting_crew');
-        badge.className = '';
-      }
+      badge.textContent = t(vm.readyBadge.id, vm.readyBadge.params);
+      badge.className = vm.readyBadge.className;
     }
 
     // ── Countdown display ─────────────────────────────────────────────
     const cdEl = document.getElementById('lobby-countdown');
     if (cdEl) {
-      if (s.countdown_secs > 0) {
-        cdEl.textContent = String(s.countdown_secs);
+      if (vm.countdown.visible) {
+        cdEl.textContent = String(vm.countdown.secs);
         cdEl.style.display = 'flex';
       } else {
         cdEl.style.display = 'none';
@@ -1894,77 +1901,55 @@
     if (!grid) return;
     grid.innerHTML = '';
 
-    const stations = s.stations || [];
-
-    // Fill grid: show exactly the number of defined stations (the ship TOML
-    // defines its roster — no padding to a fixed count).
-    const MAX_SLOTS = stations.length;
-    for (let i = 0; i < MAX_SLOTS; i++) {
-      const st = i < stations.length ? stations[i] : null;
+    for (const c of vm.cards) {
       const card = document.createElement('div');
+      card.className = 'station-card' + (c.claimed ? ' claimed' : '');
 
-      if (st) {
-        card.className = 'station-card' + (st.holder_name ? ' claimed' : '');
+      // Header row: avatar + name + rank
+      const header = document.createElement('div');
+      header.className = 'card-header';
+      const nameInfo = document.createElement('div');
+      nameInfo.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+      const name = document.createElement('div');
+      name.className = 'card-name';
+      name.textContent = c.name;
+      const rank = document.createElement('div');
+      rank.className = 'card-rank';
+      rank.textContent = c.rank;
+      nameInfo.appendChild(name);
+      nameInfo.appendChild(rank);
+      header.appendChild(nameInfo);
 
-        // Header row: avatar + name + rank
-        const header = document.createElement('div');
-        header.className = 'card-header';
-        const nameInfo = document.createElement('div');
-        nameInfo.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
-        const name = document.createElement('div');
-        name.className = 'card-name';
-        name.textContent = st.name || st.short_code || '';
-        const rank = document.createElement('div');
-        rank.className = 'card-rank';
-        rank.textContent = st.rank || '';
-        nameInfo.appendChild(name);
-        nameInfo.appendChild(rank);
-        header.appendChild(nameInfo);
+      // Avatar initials
+      const avatar = document.createElement('div');
+      avatar.className = 'card-avatar';
+      avatar.textContent = c.avatar.text;
+      if (c.avatar.placeholder) avatar.style.color = '#556';
+      header.appendChild(avatar);
+      card.appendChild(header);
 
-        // Avatar initials
-        const avatar = document.createElement('div');
-        avatar.className = 'card-avatar';
-        if (st.holder_name) {
-          avatar.textContent = st.holder_name.substring(0, 2).toUpperCase();
-        } else {
-          avatar.textContent = st.short_code ? st.short_code.substring(0, 2).toUpperCase() : '--';
-          avatar.style.color = '#556';
+      // Console chips
+      const chips = document.createElement('div');
+      chips.className = 'card-consoles';
+      for (const chipLabel of c.consoles) {
+        const chip = document.createElement('span');
+        chip.className = 'console-chip';
+        chip.textContent = chipLabel;
+        chips.appendChild(chip);
+      }
+      card.appendChild(chips);
+
+      // Footer: complexity pill(s)
+      if (c.presetPills.length > 0) {
+        const footer = document.createElement('div');
+        footer.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:2px;';
+        for (const pill of c.presetPills) {
+          const pillEl = document.createElement('span');
+          pillEl.className = 'complexity-pill' + (pill.low ? ' low' : '');
+          pillEl.textContent = t(pill.id);
+          footer.appendChild(pillEl);
         }
-        header.appendChild(avatar);
-        card.appendChild(header);
-
-        // Console chips
-        const chips = document.createElement('div');
-        chips.className = 'card-consoles';
-        if (st.consoles && st.consoles.length > 0) {
-          for (const c of st.consoles) {
-            const chip = document.createElement('span');
-            chip.className = 'console-chip';
-            chip.textContent = c;
-            chips.appendChild(chip);
-          }
-        }
-        card.appendChild(chips);
-
-        // Footer: complexity pill(s)
-        if (st.preset_names && st.preset_names.length > 0) {
-          const footer = document.createElement('div');
-          footer.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:2px;';
-          for (const pn of st.preset_names) {
-            const pill = document.createElement('span');
-            pill.className = 'complexity-pill' + (pn === 'Low' ? ' low' : '');
-            pill.textContent = pn === 'Low' ? t('server.complexity_low') : t('server.complexity_normal');
-            footer.appendChild(pill);
-          }
-          card.appendChild(footer);
-        }
-      } else {
-        // Empty slot — visible in wide mode, hidden in compact (CSS)
-        card.className = 'station-card empty per-slot';
-        const label = document.createElement('div');
-        label.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;font-size:0.75rem;color:#556;letter-spacing:.06em;';
-        label.textContent = t('server.reserved');
-        card.appendChild(label);
+        card.appendChild(footer);
       }
 
       grid.appendChild(card);
@@ -1973,14 +1958,11 @@
     // Aggregate RESERVED chip (visible only in compact mode via CSS)
     const aggregate = document.getElementById('reserved-aggregate');
     if (aggregate) {
-      const reservedCount = MAX_SLOTS - stations.length;
-      if (reservedCount > 0) {
+      if (vm.reservedChip.active) {
         aggregate.classList.add('active');
         // Two ids, not one with a JS-side `s`: a language whose plural rule is
         // not English's cannot be served by suffixing a letter.
-        aggregate.textContent = reservedCount === 1
-          ? t('server.slots_reserved.one', { n: reservedCount, max: MAX_SLOTS })
-          : t('server.slots_reserved.other', { n: reservedCount, max: MAX_SLOTS });
+        aggregate.textContent = t(vm.reservedChip.id, vm.reservedChip.params);
       } else {
         aggregate.classList.remove('active');
         aggregate.textContent = '';
@@ -1992,54 +1974,33 @@
     if (specList) {
       specList.innerHTML = '';
       specList.style.color = '';
-      const allPlayers = s.stations
-        ? s.stations.filter(st => st.holder_name).map(st => ({ name: st.holder_name, station: st.name }))
-        : [];
-      for (const p of allPlayers) {
+      for (const p of vm.spectatorPills) {
         const pill = document.createElement('span');
-        pill.className = 'spectator-pill';
-        pill.textContent = `${p.name} \u00b7 ${p.station}`;
-        specList.appendChild(pill);
-      }
-      if (s.spectators && s.spectators.length > 0) {
-        for (const sp of s.spectators) {
-          const pill = document.createElement('span');
+        if (p.kind === 'crew') {
+          pill.className = 'spectator-pill';
+          pill.textContent = p.text;
+        } else if (p.kind === 'waiting') {
           pill.className = 'spectator-pill waiting';
-          pill.textContent = t('server.spectator_waiting', { name: sp });
-          specList.appendChild(pill);
+          pill.textContent = t(p.id, p.params);
+        } else {
+          pill.className = 'spectator-empty';
+          pill.textContent = t(p.id);
         }
-      }
-      if (allPlayers.length === 0 && (!s.spectators || s.spectators.length === 0)) {
-        const empty = document.createElement('span');
-        empty.className = 'spectator-empty';
-        empty.textContent = t('server.no_players');
-        specList.appendChild(empty);
+        specList.appendChild(pill);
       }
     }
 
     // ── Status hint ───────────────────────────────────────────────────
-    const hint = document.getElementById('lobby-status-hint');
-    if (hint) {
-      if (s.countdown_secs > 0) {
-        hint.textContent = t('server.hint_launching', { secs: s.countdown_secs });
-        hint.style.color = '#5fd8e8';
-      } else if (crewN === 0) {
-        hint.textContent = t('server.waiting_players');
-        hint.style.color = '#667';
-      } else if (s.all_ready) {
-        hint.textContent = t('client.status_all_ready');
-        hint.style.color = '#5fd8e8';
-      } else {
-        hint.textContent = t('server.waiting_ready');
-        hint.style.color = '#889';
-      }
+    const hintEl = document.getElementById('lobby-status-hint');
+    if (hintEl) {
+      hintEl.textContent = t(vm.hint.id, vm.hint.params);
+      hintEl.style.color = vm.hint.color;
     }
 
     // ── AI-only launch button ─────────────────────────────────────────
     const aiBtn = document.getElementById('ai-launch-btn');
     if (aiBtn) {
-      const noPlayers = crewN === 0 && (!s.spectators || s.spectators.length === 0);
-      aiBtn.style.display = noPlayers ? '' : 'none';
+      aiBtn.style.display = vm.aiLaunchVisible ? '' : 'none';
     }
   };
 

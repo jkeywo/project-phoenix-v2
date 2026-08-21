@@ -1453,6 +1453,20 @@
   <script type="module" src="gui/scenario-arbiter.js"></script>
 
   <script>
+    // ── Host Channel latch (issue #1224) ────────────────────────────────────
+    // window.__hostChannel exists here, first thing this script parses, so
+    // set_host_channel_callback (below, once WASM has loaded) always hands
+    // Rust a real function, never `undefined`. A later `gui/` extraction
+    // (issue #1225) can call window.__hostChannelReady(dispatch) once its own
+    // module has loaded — however that races the WASM load — and whatever
+    // queued in between flushes to it in order.
+    window.__hostChannelQueue = [];
+    window.__hostChannel = function(n, p) { window.__hostChannelQueue.push([n, p]); };
+    window.__hostChannelReady = function(dispatch) {
+      window.__hostChannel = dispatch;
+      window.__hostChannelQueue.splice(0).forEach(function(c) { dispatch(c[0], c[1]); });
+    };
+
     // Resolve a string id via the module bridge; falls back to the raw id
     // before modules load. Render loops re-resolve on every state message.
     function t(id, params) {

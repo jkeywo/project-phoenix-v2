@@ -81,6 +81,7 @@
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
+    import { systemView } from '../console-payload.js';
 
     function closeAllOverlays() {
       ['nav-overlay'].forEach(function(oid) {
@@ -105,9 +106,6 @@
       }
     }
 
-    // Generic system-id-keyed payload (issue #825): resolve each panel's view
-    // from the fine system ids this station owns.
-    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'comms',
       // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
@@ -117,8 +115,8 @@
         var cm = document.getElementById('comms-current-message');
         var nm = document.getElementById('navigation-map');
         var nmOv = document.getElementById('nav-overlay-map');
-        var comms = system(s, 'comms');
-        var nav = system(s, 'navigation');
+        var comms = systemView(s, 'comms');
+        var nav = systemView(s, 'navigation');
         cl.state = { contacts: comms.contacts || [] };
         hl.state = comms;
         var msgs = comms.messages || [];

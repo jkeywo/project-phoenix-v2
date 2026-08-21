@@ -41,12 +41,12 @@
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
-    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
+    import { systemView } from '../console-payload.js';
     // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
     initConsole({ name: 'tactical', render(s) {
-      const weapons = system(s, 'tactical-radar', 'blaster-fore');
-      const sensors = system(s, 'sensors', 'sensor-radar');
-      const helm = system(s, 'helm-thrust', 'helm-joystick', 'helm-steering');
+      const weapons = systemView(s, 'tactical-radar', 'blaster-fore');
+      const sensors = systemView(s, 'sensors', 'sensor-radar');
+      const helm = systemView(s, 'helm-thrust', 'helm-joystick', 'helm-steering');
       document.getElementById('tactical-radar').state = { blips: weapons.blips || [], x: weapons.ship_x || 0, z: weapons.ship_z || 0, speed: weapons.ship_speed || 0, ship_heading: weapons.ship_heading || 0, phaser_arcs: weapons.phaser_arcs || [], torpedo_arcs: weapons.torpedo_arcs || [], selected_target_uuid: weapons.target_uuid || null };
       document.getElementById('blasters').state = { banks: weapons.blasters || [] };
       document.getElementById('sensor-radar').state = sensors;

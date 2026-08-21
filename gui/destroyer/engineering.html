@@ -127,10 +127,8 @@
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
+    import { systemView } from '../console-payload.js';
 
-    // Generic system-id-keyed payload (issue #825): resolve each panel's view
-    // from the fine system ids this station owns.
-    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     // Tractor engage state, tracked so the one button toggles engage/release
     // (issue #1156). Human and AI issue the SAME EngageTractor/ReleaseTractor
     // through the one admission path — this control just picks which.
@@ -152,9 +150,9 @@
         var batteryEl = document.getElementById('battery-bar');
         var repairTeamsEl = document.getElementById('repair-teams');
         var hullEl = document.getElementById('hull-integrity');
-        var sh = system(s, 'shields-system');
-        var p = system(s, 'power-reactor', 'power-battery');
-        var r = system(s, 'repair');
+        var sh = systemView(s, 'shields-system');
+        var p = systemView(s, 'power-reactor', 'power-battery');
+        var r = systemView(s, 'repair');
         shieldEl.state = { facings: sh.facings || [], focused_facing: sh.focused_facing || null, auto: !!sh.shields_auto };
         var threatRow = document.getElementById('threat-row');
         if (sh.threat_bearing != null) {

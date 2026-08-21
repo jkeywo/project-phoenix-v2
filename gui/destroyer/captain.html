@@ -95,11 +95,8 @@
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
+    import { systemView } from '../console-payload.js';
 
-    // Generic system-id-keyed payload (issue #825): resolve each panel's view
-    // from the fine system ids this station owns, falling back through the
-    // ids each hull may declare for the same console family.
-    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'captain',
       // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
@@ -109,8 +106,8 @@
         var objectiveEl = document.getElementById('objective-list');
         var sensorRadarEl = document.getElementById('sensor-radar');
         var sensorEl = document.getElementById('sensor-panel');
-        var cap = system(s, 'captain', 'red-alert', 'viewscreen');
-        var sensors = system(s, 'sensors', 'sensor-radar');
+        var cap = systemView(s, 'captain', 'red-alert', 'viewscreen');
+        var sensors = systemView(s, 'sensors', 'sensor-radar');
         cameraEl.state = { views: cap.camera_views || [], current_view: cap.view_direction || '', auto: cap.viewscreen_auto || false };
         redAlertEl.state = { active: !!cap.red_alert, hold: !!cap.weapons_hold, auto: cap.red_alert_auto || false };
         objectiveEl.state = { objectives: cap.objectives || [], boosted_objective_id: cap.boosted_objective_id ?? null };

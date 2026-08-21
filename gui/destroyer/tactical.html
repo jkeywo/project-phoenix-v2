@@ -104,6 +104,7 @@
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
     import { initConsoleOverlays } from '../console-overlays.js';
+    import { systemView } from '../console-payload.js';
 
     // One delegated listener drives every `data-overlay` toggle and every
     // `data-overlay-back` button on the page (gui/console-overlays.js). Only
@@ -111,10 +112,6 @@
     // complete hero-bar Stations (issues #1097, #1098).
     initConsoleOverlays();
 
-    // Generic system-id-keyed payload (issue #825): resolve each panel's view
-    // from the fine system ids this station owns, falling back through the
-    // weapon system ids the destroyer's TOML declares for the tactical family.
-    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
     initConsole({
       name: 'tactical',
       // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
@@ -124,7 +121,7 @@
         var blastersEl = document.getElementById('blasters-controls');
         var torpedoEl = document.getElementById('torpedo-controls');
         var dossierEl = document.getElementById('dossier-panel');
-        var w = system(s, 'tactical-radar', 'phaser-control', 'phaser-omni', 'blaster-port', 'blaster-starboard');
+        var w = systemView(s, 'tactical-radar', 'phaser-control', 'phaser-omni', 'blaster-port', 'blaster-starboard');
         radarEl.state = { blips: w.blips || [], x: w.ship_x || 0, z: w.ship_z || 0, speed: w.ship_speed || 0, ship_heading: w.ship_heading || 0, phaser_arcs: w.phaser_arcs || [], torpedo_arcs: w.torpedo_arcs || [], selected_target_uuid: w.target_uuid || null };
         phasersEl.state = { banks: w.banks || [], target_valid: !!w.target_uuid, mode: w.phaser_mode || 'Auto' };
         blastersEl.state = { banks: w.blasters || [] };

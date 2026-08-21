@@ -64,9 +64,7 @@
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
     import { setAutoState } from '../console-ui.js';
-    // Generic system-id-keyed payload (issue #825): resolve each panel's view
-    // from the fine system ids this station owns.
-    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
+    import { systemView } from '../console-payload.js';
     initConsole({
       name: 'engineering',
       // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
@@ -75,8 +73,8 @@
         var bat = document.getElementById('battery-bar');
         var rep = document.getElementById('repair-teams');
         var hul = document.getElementById('hull-integrity');
-        var p = system(s, 'power-reactor', 'power-battery');
-        var r = system(s, 'repair');
+        var p = systemView(s, 'power-reactor', 'power-battery');
+        var r = systemView(s, 'repair');
         pwr.state = { groups: p.consoles || [], auto: !!p.power_auto };
         bat.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !!p.charging, emergency_threshold_pct: 20 };
         // Overall ship-wide hull (every damageable system), not just this

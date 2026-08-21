@@ -80,11 +80,8 @@
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
     import { t } from '../strings.js';
+    import { systemView } from '../console-payload.js';
 
-    function system(s, ...ids) {
-      for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id];
-      return {};
-    }
     function close() {
       document.querySelectorAll('.overlay').forEach(el => el.classList.remove('open'));
       document.querySelectorAll('.hero button').forEach(el => el.classList.remove('active'));
@@ -97,12 +94,12 @@
     }
     // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
     initConsole({ name: 'captain', render(s) {
-      const command = system(s, 'captain', 'viewscreen', 'red-alert');
-      const shields = system(s, 'shields-system', 'shield-arc-fore', 'shield-arc-aft');
-      const power = system(s, 'power-reactor', 'power-battery');
-      const repair = system(s, 'repair');
-      const nav = system(s, 'navigation');
-      const comms = system(s, 'comms');
+      const command = systemView(s, 'captain', 'viewscreen', 'red-alert');
+      const shields = systemView(s, 'shields-system', 'shield-arc-fore', 'shield-arc-aft');
+      const power = systemView(s, 'power-reactor', 'power-battery');
+      const repair = systemView(s, 'repair');
+      const nav = systemView(s, 'navigation');
+      const comms = systemView(s, 'comms');
       // The Courier's compact bridge exposes only its Fore hull view and the
       // authored Cinematic view, even if the model carries extra markers.
       const courierViews = (command.camera_views || []).filter(view => view === 'camera_fore' || view === 'cinematic');

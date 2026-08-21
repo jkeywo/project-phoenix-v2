@@ -334,6 +334,8 @@ component.torpedoes.title,Torpedo controls panel heading,TORPEDOES
 component.torpedoes.empty,Torpedo controls when the ship has no torpedo tubes,[NO TORPEDO TUBES]
 component.torpedoes.pattern_step,Torpedo patterned-attack step indicator (step number of total),STEP {step}/{total}
 component.torpedoes.barrels,Torpedo patterned-attack active-barrel indicator listing firing barrel indices,BARRELS {barrels}
+component.torpedoes.volley_decrease,Accessible name for the torpedo volley minus stepper (issue #1170) — lowers the torpedoes loaded for the next volley,Fewer torpedoes in the volley
+component.torpedoes.volley_increase,Accessible name for the torpedo volley plus stepper (issue #1170) — raises the torpedoes loaded for the next volley,More torpedoes in the volley
 component.boost.binding,Boost control key-binding hint (Shift key or gamepad A),[HOLD SHIFT · A]
 component.impulse.binding,Impulse control key-binding hint (Ctrl key or gamepad B),[CTRL · B]
 console.stance.friendly,Contact stance badge on the comms contact list,FRIENDLY
@@ -524,6 +526,7 @@ console.repair.footer_status,repair console footer — hull percent and repair-t
 console.radar.science_target,Radar blip label for the science-locked target,SCIENCE TARGET
 console.radar.tactical_target,Radar blip label for the tactical-locked target,TACTICAL TARGET
 console.radar.torpedo_armed,"Tactical radar badge drawn beside a hostile contact whose hull carries torpedo tubes. A capability warning shown before that contact fires, not a launch warning. Sits next to a blip, so keep it very short",[TORP]
+component.tactical_radar.label,Accessible name (aria-label) for the Tactical console's radar target scope — the keyboard/pointer target picker (issue #1170),Tactical radar
 station.captain.name,Captain station display name (station ids stay English in TOML),Captain
 station.helm.name,Helm station display name,Helm
 station.tactical.name,Tactical station display name,Tactical

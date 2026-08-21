@@ -272,4 +272,30 @@
   --cham-panel:        0.875rem;
   --cham-panel-inner:  0.8125rem;
   --cham-inset:        1.125rem;
+
+  /* ── Focus (issue #1170) ────────────────────────────────────────
+     The keyboard focus indicator, defined ONCE and as a PAIR so the whole
+     fleet's focus ring is retinted from here, the same way every other colour
+     is. Before this token there was no visible focus styling anywhere in the
+     client — thirty-eight consoles' worth of controls with nothing to say
+     which one the keyboard was on.
+
+     The pair is the point. `--focus-ring` is the standard ring; a player who
+     sets contrast to "more" (accessibility profile → `data-contrast="more"`
+     on the root, gui/accessibility-profile.js) gets `--focus-ring-contrast`
+     swapped in for it. Issue #1170 defines and adopts the standard half;
+     issue #1171 wires the `data-contrast` swap to the contrast half — which is
+     why the contrast value lands here now, defined and usable, rather than a
+     file later.
+
+     Both are quoted against --surface-base, the reference background the
+     consoles actually paint on, so a focused control is unmistakable on every
+     panel. The shared control family (gui/components/ph-console-styles.js) is
+     the ONE place that reads these — it draws every control's `:focus-visible`
+     from them. Nothing else hard-codes an outline; a per-component focus
+     colour would be exactly the drift this vocabulary exists to end. */
+  --focus-ring:          var(--signal);   /* 11.16:1 on --surface-base — standard ring (see --signal) */
+  --focus-ring-contrast: #ffffff;         /* 18.79:1 on --surface-base — the data-contrast="more" ring (issue #1171) */
+  --focus-ring-width:    2px;             /* ring thickness; a token so the family reads it, not a literal */
+  --focus-ring-offset:   2px;             /* gap between control edge and ring, for the un-clipped outline path */
 }

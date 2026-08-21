@@ -17,10 +17,12 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
+import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 
 export class PhTorpedoControls extends HTMLElement {
   #state = null;
   #tubeEls = {};
+  #roving = null;
 
   constructor() {
     super();
@@ -75,6 +77,28 @@ export class PhTorpedoControls extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
+    // Role + accessible name (issue #1170): a toolbar whose controls are the
+    // per-tube volley steppers and FIRE buttons, named by its visible heading.
+    this.setAttribute('role', 'toolbar');
+    this.setAttribute('aria-orientation', 'vertical');
+    this.setAttribute('aria-label', t('component.torpedoes.title'));
+    // Roving tabindex across every tube's −/＋/FIRE button in DOM order (issue
+    // #1170): one Tab stop for the whole tube bank, arrows between its controls.
+    this.#roving ??= installRovingTabindex(this, {
+      getItems: () => this.#rovingItems(),
+      orientation: 'vertical',
+    });
+    this.#syncRoving();
+  }
+
+  /** Every tube's controls (−, ＋, FIRE) in DOM order — the rovable set. */
+  #rovingItems() {
+    return Array.from(this.shadowRoot.querySelectorAll('#tubes button')).filter(Boolean);
+  }
+
+  /** Re-establish the single tab stop after a render adds/removes tubes. */
+  #syncRoving() {
+    syncRovingTabindex(this.#rovingItems());
   }
 
   set state(val) {
@@ -104,6 +128,10 @@ export class PhTorpedoControls extends HTMLElement {
     minusBtn.type = 'button';
     minusBtn.className = 'mini-btn';
     minusBtn.innerHTML = '<span class="mini-bg"></span><span class="lbl">−</span>';
+    // Accessible name for a glyph-only stepper (issue #1170): "−" is not an
+    // identifiable name, so the control says what it does. Player-visible text,
+    // so it rides the string catalogue like every other label.
+    minusBtn.setAttribute('aria-label', t('component.torpedoes.volley_decrease'));
     minusBtn.addEventListener('click', () => {
       const tube = (this.#state && this.#state.tubes || []).find((x) => x.id === tubeId);
       const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
@@ -114,6 +142,7 @@ export class PhTorpedoControls extends HTMLElement {
     plusBtn.type = 'button';
     plusBtn.className = 'mini-btn';
     plusBtn.innerHTML = '<span class="mini-bg"></span><span class="lbl">+</span>';
+    plusBtn.setAttribute('aria-label', t('component.torpedoes.volley_increase'));
     plusBtn.addEventListener('click', () => {
       const tube = (this.#state && this.#state.tubes || []).find((x) => x.id === tubeId);
       const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
@@ -220,6 +249,7 @@ export class PhTorpedoControls extends HTMLElement {
     if (tubes.length === 0) {
       container.innerHTML = '<div class="empty">' + t('component.torpedoes.empty') + '</div>';
       this.#tubeEls = {};
+      this.#syncRoving();
       return;
     }
     if (container.querySelector('.empty')) container.innerHTML = '';
@@ -298,6 +328,9 @@ export class PhTorpedoControls extends HTMLElement {
         patternRow.querySelector('.pattern-barrels').textContent = '';
       }
     });
+
+    // Keep the toolbar's single tab stop over the reconciled control set (#1170).
+    this.#syncRoving();
   }
 }
 

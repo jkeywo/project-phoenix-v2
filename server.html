@@ -1447,6 +1447,30 @@
        ClientMessage path the phone clients use. The module publishes
        window.dispatchConsoleAction for the classic-script __sendAction shim. -->
   <script type="module" src="gui/action-map.js"></script>
+  <!-- Page chrome (issue #1227): connection-status dot, Screen Wake Lock,
+       fullscreen toggle, and the mechanical half of the #conn-diag
+       renderer — gui/page-chrome.js is the single source server.html and
+       client.html both used to carry as verbatim copies. The classic
+       script below can't `import` a module directly (same constraint as
+       every other island on this page); early calls made before this
+       island has mounted go through the window.__pageChromeReady queue
+       defined near that script's own #1224-style latch block. Mounted
+       FIRST among the new islands (before the ICE-config island below) so
+       initPeerJS's post-ICE-await diagnostics setup — which only resumes
+       once that later island runs — always finds this script's `_pageChrome`
+       already populated, with no queue needed for that call. -->
+  <script type="module">
+    import { mountPageChrome } from './gui/page-chrome.js';
+    import { t } from './gui/strings.js';
+    const chrome = mountPageChrome({
+      doc: document,
+      t,
+      statusColors: { active: '#4c4', trouble: '#f44' },
+      statusLabels: { disconnected: 'client.reconnecting', error: 'server.conn_error_refresh' },
+      releaseWakeLockOnUnload: true,
+    });
+    window.__pageChromeReady(chrome);
+  </script>
   <!-- Pure host-runtime arbiter for the QR-first pre-scenario selection flow
        (issue #755). Publishes window.scenarioArbiter for the classic-script
        host logic below. -->
@@ -1507,6 +1531,34 @@
     window.__hostChannelReady = function(dispatch) {
       window.__hostChannel = dispatch;
       window.__hostChannelQueue.splice(0).forEach(function(c) { dispatch(c[0], c[1]); });
+    };
+
+    // ── Page chrome bridge (issue #1227) ────────────────────────────────────
+    // setConnectionStatus/acquireWakeLock/releaseWakeLock, the fullscreen
+    // toggle and the wake-lock visibilitychange wiring now live in
+    // gui/page-chrome.js (shared with client.html). This classic script
+    // can't `import` a module directly, so calls made before the page-chrome
+    // island below has mounted are queued and replayed in order once it
+    // calls window.__pageChromeReady(chrome) — same shape as the
+    // window.__hostChannel queue just above, generalised from one channel
+    // dispatcher to a handful of method names.
+    window.__pageChromeQueue = [];
+    let _pageChrome = null;
+    function setConnectionStatus(state) {
+      if (_pageChrome) _pageChrome.setConnectionStatus(state);
+      else window.__pageChromeQueue.push(['setConnectionStatus', state]);
+    }
+    function acquireWakeLock() {
+      if (_pageChrome) return _pageChrome.acquireWakeLock();
+      window.__pageChromeQueue.push(['acquireWakeLock', undefined]);
+    }
+    function releaseWakeLock() {
+      if (_pageChrome) _pageChrome.releaseWakeLock();
+      else window.__pageChromeQueue.push(['releaseWakeLock', undefined]);
+    }
+    window.__pageChromeReady = function(chrome) {
+      _pageChrome = chrome;
+      window.__pageChromeQueue.splice(0).forEach(function(c) { chrome[c[0]](c[1]); });
     };
 
     // Resolve a string id via the module bridge; falls back to the raw id
@@ -2022,57 +2074,10 @@
       }
     })();
 
-    // ── Connection status ──────────────────────────────────────────────────
-
-    function setConnectionStatus(state) {
-      const dot = document.getElementById('conn-dot');
-      const label = document.getElementById('conn-label');
-      if (state === 'disconnected') {
-        dot.style.background = '#f44';
-        label.textContent = t('client.reconnecting');
-      } else if (state === 'error') {
-        dot.style.background = '#f44';
-        label.textContent = t('server.conn_error_refresh');
-      } else {
-        dot.style.background = '#4c4';
-        label.textContent = '';
-      }
-    }
-
-    // ── Fullscreen controller ──────────────────────────────────────────────
-
-    (function initFullscreen() {
-      const btn = document.getElementById('fullscreen-btn');
-      function syncIcon() { btn.textContent = document.fullscreenElement ? '✕' : '⛶'; }
-      btn.addEventListener('click', () => {
-        const p = document.fullscreenElement
-          ? document.exitFullscreen()
-          : document.documentElement.requestFullscreen();
-        p && p.catch(() => {});
-      });
-      document.addEventListener('fullscreenchange', syncIcon);
-    })();
-
-    // ── Screen Wake Lock (keep screen on when active) ─────────────────
-    let wakeLockSentinel = null;
-
-    async function acquireWakeLock() {
-      try {
-        if (wakeLockSentinel) return;
-        wakeLockSentinel = await navigator.wakeLock.request('screen');
-        wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
-      } catch (_) {}
-    }
-
-    function releaseWakeLock() {
-      if (wakeLockSentinel) { wakeLockSentinel.release(); wakeLockSentinel = null; }
-    }
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') acquireWakeLock();
-    });
-
-    window.addEventListener('beforeunload', () => releaseWakeLock());
+    // Connection status, wake lock and fullscreen now live in
+    // gui/page-chrome.js (issue #1227) — setConnectionStatus/acquireWakeLock/
+    // releaseWakeLock above are the classic-script bridge into it (see the
+    // #1227 latch block near the top of this script).
 
     // ── PeerJS host peer ───────────────────────────────────────────────────
 
@@ -2121,17 +2126,22 @@
       // stage of any inbound client that is struggling to complete. When ICE
       // fails, PeerJS's 'open' never fires — this is the only place the host
       // operator learns a phone is trying and failing to get through.
-      const connDiagEl = document.getElementById('conn-diag');
+      //
+      // writeDiagLines is the shared mechanical half from gui/page-chrome.js
+      // (issue #1227) — guard for a missing #conn-diag, join, set
+      // textContent. The line-building logic here (multi-client ICE stages)
+      // is host-specific and stays local; see that module's doc comment for
+      // why it isn't unified with client.html's own renderDiag.
+      const writeDiagLines = _pageChrome.mountConnDiag('conn-diag');
       const clientIceStages = new Map(); // shortId → troubled ICE state
       function renderConnDiag() {
-        if (!connDiagEl) return;
         const lines = [];
         if (!relayAvailable) lines.push(t('server.no_relay_warning'));
         else if (relaySource === 'openrelay') lines.push(t('server.relay_fallback_notice'));
         for (const [id, state] of clientIceStages) {
           lines.push(t('server.client_ice_state', { id, state }));
         }
-        connDiagEl.textContent = lines.join('\n');
+        writeDiagLines(lines);
       }
       renderConnDiag();
 

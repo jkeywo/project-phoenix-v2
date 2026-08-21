@@ -1182,12 +1182,63 @@
     applyToDom(document);
   </script>
 
+  <!-- Page chrome (issue #1227): connection-status dot, Screen Wake Lock,
+       fullscreen toggle, and the mechanical half of the #conn-diag
+       renderer — gui/page-chrome.js is the single source server.html and
+       client.html both used to carry as verbatim copies. The classic
+       script below can't `import` a module directly; early calls made
+       before this island has mounted go through the
+       window.__pageChromeReady queue defined near that script's own
+       #1227 bridge block. -->
+  <script type="module">
+    import { mountPageChrome } from './gui/page-chrome.js';
+    import { t } from './gui/strings.js';
+    const chrome = mountPageChrome({
+      doc: document,
+      t,
+      statusColors: { active: 'var(--loaded)', trouble: 'var(--fire-hot)' },
+      statusLabels: { disconnected: 'client.reconnecting', error: 'client.conn_error' },
+    });
+    window.__pageChromeReady(chrome);
+  </script>
+
   <script>
     // Resolve a string id via the module bridge. Safe before modules load —
     // falls back to the raw id, and every call site re-resolves on render.
     function t(id, params) {
       return window.phStrings ? window.phStrings.t(id, params) : id;
     }
+
+    // ── Page chrome bridge (issue #1227) ────────────────────────────────────
+    // The status dot/label/retry-button, the Screen Wake Lock and the
+    // fullscreen toggle now live in gui/page-chrome.js (shared with
+    // server.html). This classic script can't `import` a module directly
+    // (this page's bulk logic is a classic script too, despite the
+    // `type="module"` islands elsewhere on it), so calls made before the
+    // page-chrome island below has mounted — setConnectionStatus('connecting')
+    // runs synchronously at the bottom of this same script, well before any
+    // deferred module — are queued and replayed in order once it calls
+    // window.__pageChromeReady(chrome). Same shape as server.html's #1227
+    // bridge (itself modelled on the #1224 host-channel queue).
+    window.__pageChromeQueue = [];
+    let _pageChrome = null;
+    function chromeSetConnectionStatus(state) {
+      if (_pageChrome) _pageChrome.setConnectionStatus(state);
+      else window.__pageChromeQueue.push(['setConnectionStatus', state]);
+    }
+    function acquireWakeLock() {
+      if (_pageChrome) return _pageChrome.acquireWakeLock();
+      window.__pageChromeQueue.push(['acquireWakeLock', undefined]);
+    }
+    function releaseWakeLock() {
+      if (_pageChrome) _pageChrome.releaseWakeLock();
+      else window.__pageChromeQueue.push(['releaseWakeLock', undefined]);
+    }
+    window.__pageChromeReady = function(chrome) {
+      _pageChrome = chrome;
+      window.__pageChromeQueue.splice(0).forEach(function(c) { chrome[c[0]](c[1]); });
+    };
+
     // Station names in ShipStations are lookup identifiers; display them via
     // the derived station.<id>.name string when the table has one.
     function stationLabel(st) {
@@ -1274,6 +1325,14 @@
       }
     }
 
+    // Status dot/label/retry-button, the Screen Wake Lock and the
+    // fullscreen toggle now live in gui/page-chrome.js (issue #1227),
+    // shared with server.html. chromeSetConnectionStatus/acquireWakeLock/
+    // releaseWakeLock (defined near the top of this script, by the
+    // window.__pageChromeReady bridge) are this script's calls into it.
+    // setConnectionStatus keeps the link-state bookkeeping that is genuinely
+    // this page's own concern — page-chrome has no notion of "has the
+    // console rendered live data yet".
     function setConnectionStatus(state) {
       linkStatus = state;
       // A link that dropped has to re-earn "has data": whatever the console is
@@ -1286,60 +1345,8 @@
       // the whole inline script in a temporal dead zone. The onStatus callback
       // that drives every LATER transition repaints instead.
       if (state !== 'ready') linkHasData = false;
-      const dot = document.getElementById('conn-dot');
-      const label = document.getElementById('conn-label');
-      const retryBtn = document.getElementById('retry-now-btn');
-      if (state === 'disconnected') {
-        dot.style.background = 'var(--fire-hot)';
-        label.textContent = t('client.reconnecting'); // — reconnecting…';
-        if (retryBtn) retryBtn.classList.add('visible');
-      } else if (state === 'error') {
-        // No permanent give-up state anymore — connection-manager keeps
-        // retrying with backoff even after an 'error' signal, so this still
-        // shows the retry-now affordance rather than telling the user to
-        // refresh the page.
-        dot.style.background = 'var(--fire-hot)';
-        label.textContent = t('client.conn_error'); // — reconnecting…';
-        if (retryBtn) retryBtn.classList.add('visible');
-      } else {
-        dot.style.background = 'var(--loaded)';
-        label.textContent = '';
-        if (retryBtn) retryBtn.classList.remove('visible');
-      }
+      chromeSetConnectionStatus(state);
     }
-
-    // -- Screen Wake Lock (keep screen on when active) -----------------
-    let wakeLockSentinel = null;
-
-    async function acquireWakeLock() {
-      try {
-        if (wakeLockSentinel) return;
-        wakeLockSentinel = await navigator.wakeLock.request('screen');
-        wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
-      } catch (_) {}
-    }
-
-    function releaseWakeLock() {
-      if (wakeLockSentinel) { wakeLockSentinel.release(); wakeLockSentinel = null; }
-    }
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') acquireWakeLock();
-    });
-
-    // -- Fullscreen controller ----------------------------------------------
-
-    (function initFullscreen() {
-      const btn = document.getElementById('fullscreen-btn');
-      function syncIcon() { btn.textContent = document.fullscreenElement ? '✕' : '⛶'; }
-      btn.addEventListener('click', () => {
-        const p = document.fullscreenElement
-          ? document.exitFullscreen()
-          : document.documentElement.requestFullscreen();
-        p && p.catch(() => {});
-      });
-      document.addEventListener('fullscreenchange', syncIcon);
-    })();
 
     // -- Return to Lobby (GameOver overlay button) ---------------------------
     (function initReturnToLobby() {
@@ -2844,10 +2851,19 @@
         // Connection diagnostics readout (#conn-diag). A phone stuck behind
         // CGNAT shows "connecting…" forever with the real story buried in an
         // unreachable console — this mirrors the relay + ICE stage on screen.
+        //
+        // writeDiagLines is the shared mechanical half from gui/page-chrome.js
+        // (issue #1227) — guard for a missing #conn-diag, join, set
+        // textContent. The line-building logic here (this device's own relay
+        // probe + ICE attempt history) is client-specific and stays local;
+        // see that module's doc comment for why it isn't unified with
+        // server.html's own renderConnDiag. diagEl itself is still looked up
+        // directly below for the show/hide toggle, which isn't part of the
+        // shared renderer's job.
         const diagEl = document.getElementById('conn-diag');
+        const writeDiagLines = _pageChrome.mountConnDiag('conn-diag');
         const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable, relaySource };
         function renderDiag() {
-          if (!diagEl) return;
           const lines = [];
           if (!diag.relayAvailable) lines.push(t('client.diag_no_relay'));
           else if (diag.probe === 'unreachable') lines.push(t('client.diag_relay_fail'));
@@ -2864,7 +2880,7 @@
               types: diag.types.length ? diag.types.join(', ') : t('client.diag_none'),
             }));
           }
-          diagEl.textContent = lines.join('\n');
+          writeDiagLines(lines);
         }
         renderDiag();
         if (relayAvailable && typeof window.probeTurnRelay === 'function') {

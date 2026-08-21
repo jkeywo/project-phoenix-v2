@@ -40,6 +40,9 @@ const repoFile = (rel) =>
 const CLIENT_HTML = repoFile('client.html');
 /** The consoles' shared stylesheet, which reserves the cog's corner for it. */
 const CONSOLE_CSS = repoFile('gui/console.css');
+/** Shared page chrome (issue #1227) — client.html mounts it rather than
+ *  inlining the fullscreen icon-sync logic itself. */
+const PAGE_CHROME_JS = repoFile('gui/page-chrome.js');
 
 // ── Minimal DOM stub (same pattern as help-panel.test.js) ───────────────────
 
@@ -532,7 +535,9 @@ describe('client.html', () => {
 
   it('uses fullscreen and exit glyphs rather than a help glyph', () => {
     expect(CLIENT_HTML).toMatch(/id="fullscreen-btn"[^>]*>⛶<\/button>/);
-    expect(CLIENT_HTML).toMatch(/document\.fullscreenElement \? '✕' : '⛶'/);
+    // The icon-sync logic itself now lives in gui/page-chrome.js (issue
+    // #1227), shared with server.html — client.html only mounts it.
+    expect(PAGE_CHROME_JS).toMatch(/doc\.fullscreenElement \? '✕' : '⛶'/);
   });
 
   const zIndexOf = (pattern) => {

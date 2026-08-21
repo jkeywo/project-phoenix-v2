@@ -115,12 +115,18 @@ fn permuting_declaration_order_leaves_the_authoritative_digest_identical() {
     // orders: an explicit flip of the two probes (guaranteed to change the
     // order the four declarations arrive in) plus two deterministic shuffles
     // that also move the probes among the 13 SimSet-chain plugins.
-    let (d_ab, c_ab) =
-        digest_and_census(RegistrationOrder::Canonical, Some((declare_probe_a, declare_probe_b)));
-    let (d_ba, c_ba) =
-        digest_and_census(RegistrationOrder::Canonical, Some((declare_probe_b, declare_probe_a)));
-    let (d_s1, c_s1) =
-        digest_and_census(RegistrationOrder::Shuffled(1), Some((declare_probe_a, declare_probe_b)));
+    let (d_ab, c_ab) = digest_and_census(
+        RegistrationOrder::Canonical,
+        Some((declare_probe_a, declare_probe_b)),
+    );
+    let (d_ba, c_ba) = digest_and_census(
+        RegistrationOrder::Canonical,
+        Some((declare_probe_b, declare_probe_a)),
+    );
+    let (d_s1, c_s1) = digest_and_census(
+        RegistrationOrder::Shuffled(1),
+        Some((declare_probe_a, declare_probe_b)),
+    );
     let (d_s2, c_s2) = digest_and_census(
         RegistrationOrder::Shuffled(0xC0FFEE),
         Some((declare_probe_a, declare_probe_b)),

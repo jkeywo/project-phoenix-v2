@@ -193,7 +193,11 @@ mod tests {
         // Two DISTINCT keys — the whole reason the census keys on the full path
         // rather than a short name truncated at the first `<`.
         let census = app.world().resource::<StateCensus>();
-        assert_eq!(census.len(), 2, "generic instantiations collapsed: {census:?}");
+        assert_eq!(
+            census.len(),
+            2,
+            "generic instantiations collapsed: {census:?}"
+        );
     }
 
     #[test]

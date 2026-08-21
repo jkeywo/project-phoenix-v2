@@ -163,7 +163,10 @@ impl<M: BroadcastKind> Plugin for Broadcaster<M> {
         // `tests/authoritative_state_enumeration.rs`; inert to the digest.
         {
             use crate::authoritative::{DeclareState, StateClass};
-            app.declare_state::<BroadcastRegistry<M>>(StateClass::Cache, "digest-exclusion-classes");
+            app.declare_state::<BroadcastRegistry<M>>(
+                StateClass::Cache,
+                "digest-exclusion-classes",
+            );
         }
         let mut registry = app.world_mut().resource_mut::<BroadcastRegistry<M>>();
         for reg in &self.pending {

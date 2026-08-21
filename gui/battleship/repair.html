@@ -70,62 +70,20 @@
     import '../components/ph-station-damage.js';
     import '../components/ph-repair-teams.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    import { setAutoState } from '../console-ui.js';
-    // External-dispatch working state, tracked so the one button toggles
-    // dispatch/recall (issue #1161). Human and AI issue the SAME
-    // DispatchExternalRepair/RecallExternalRepair through the one admission path
-    // — this control just picks which.
-    var dispatchWorking = false;
-    var consoleHandle = initConsole({
-      name: 'repair',
-      family: 'repair',
-      // s is a RepairConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        var oh = s.overall_hull || {};
-        document.getElementById('hull-integrity').state = { total_pct: oh.pct != null ? oh.pct : 1, destroyed_pct: oh.destroyed_pct };
-        document.getElementById('core-damage').state = { entries: s.core_systems || [] };
-        document.getElementById('repair-teams').state = { teams: s.teams || [], auto: !!s.repair_auto, targets: s.dispatch_targets || [], damaged: s.damaged_systems || [] };
-        document.getElementById('station-damage').state = s.own_hull || null;
-        var active = (s.teams || []).filter(function(t) { return t && t.status && t.status !== 'idle'; }).length;
-        var total = (s.teams || []).length;
-        document.getElementById('footer-right').textContent = t('console.repair.footer_status', {
-          pct: Math.round((oh.pct != null ? oh.pct : 1) * 100), active: active, total: total,
-        });
-        setAutoState(null, document.getElementById('repair-auto-badge'), !!s.repair_auto);
+    // The render lives in gui/battleship/repair.console.js (issue #1235): one
+    // shared Repair renderer, this hull's variant. The vitest suite imports the
+    // same `renderStation`. `s` is a flat RepairConsolePayload.
+    import { renderStation } from './repair.console.js';
 
-        // External repair-team dispatch (issue #1161). The panel shows only on a
-        // hull that authored `[repair.external_dispatch]` — a hull without one
-        // carries no `external_dispatch` view, so the panel stays hidden and the
-        // console is unchanged.
-        var panel = document.getElementById('dispatch-panel');
-        var ed = s.external_dispatch || null;
-        if (!ed) { panel.hidden = true; }
-        else {
-          panel.hidden = false;
-          dispatchWorking = ed.target != null;
-          var btn = document.getElementById('dispatch-btn');
-          btn.classList.toggle('working', dispatchWorking);
-          btn.textContent = t(dispatchWorking ? 'console.repair.dispatch.recall' : 'console.repair.dispatch.send');
-          var status = document.getElementById('dispatch-status');
-          if (dispatchWorking) {
-            status.textContent = t('console.repair.dispatch.working')
-              + (ed.target_name ? ' · ' + t(ed.target_name) : '');
-          } else {
-            status.textContent = t('console.repair.dispatch.idle')
-              + ' · ' + t('console.repair.dispatch.range') + ' ' + Math.round(ed.range || 0);
-          }
-          var refusal = document.getElementById('dispatch-refusal');
-          if (ed.refusal) { refusal.hidden = false; refusal.textContent = t(ed.refusal); }
-          else { refusal.hidden = true; refusal.textContent = ''; }
-        }
-      }
-    });
+    var consoleHandle = initConsole({ name: 'repair', family: 'repair', render: renderStation });
 
     // The one dispatch button toggles dispatch/recall through the action map,
     // which sends the same admitted command a repair AI would (issue #1161).
+    // "Which one" is read off the button's own `.working` class —
+    // renderStation sets it fresh on every push, so it is never stale.
     document.getElementById('dispatch-btn').addEventListener('click', function() {
-      consoleHandle.sendAction(dispatchWorking ? 'recall_external_repair' : 'dispatch_external_repair');
+      var working = document.getElementById('dispatch-btn').classList.contains('working');
+      consoleHandle.sendAction(working ? 'recall_external_repair' : 'dispatch_external_repair');
     });
   </script>
 </body>

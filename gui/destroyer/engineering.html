@@ -125,159 +125,36 @@
     import '../components/ph-hull-integrity.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    import { setAutoState } from '../console-ui.js';
-    import { systemView } from '../console-payload.js';
+    // The render lives in gui/destroyer/engineering.console.js (issue #1235):
+    // the shared Engineering renderer + this hull's variant (Shields + Power +
+    // Repair, plus a Tractor/Umbilical/Field-Repair-dispatch tail). s is a
+    // system-id-keyed SystemStationConsolePayload. The vitest suite imports the
+    // same renderStation.
+    import { renderStation } from './engineering.console.js';
 
-    // Tractor engage state, tracked so the one button toggles engage/release
-    // (issue #1156). Human and AI issue the SAME EngageTractor/ReleaseTractor
-    // through the one admission path — this control just picks which.
-    var tractorEngaged = false;
-    // Umbilical run state, tracked so the one button toggles start/stop (issue
-    // #1160). Human and AI issue the SAME StartTransfer/StopTransfer through the
-    // one admission path — this control just picks which.
-    var umbilicalRunning = false;
-    // External-dispatch working state, tracked so the one button toggles
-    // dispatch/recall (issue #1161). Human and AI issue the SAME
-    // DispatchExternalRepair/RecallExternalRepair through the one admission path.
-    var dispatchWorking = false;
-    var consoleHandle = initConsole({
-      name: 'engineering',
-      // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        var shieldEl = document.getElementById('shield-facings');
-        var powerEl = document.getElementById('power-controls');
-        var batteryEl = document.getElementById('battery-bar');
-        var repairTeamsEl = document.getElementById('repair-teams');
-        var hullEl = document.getElementById('hull-integrity');
-        var sh = systemView(s, 'shields-system');
-        var p = systemView(s, 'power-reactor', 'power-battery');
-        var r = systemView(s, 'repair');
-        shieldEl.state = { facings: sh.facings || [], focused_facing: sh.focused_facing || null, auto: !!sh.shields_auto };
-        var threatRow = document.getElementById('threat-row');
-        if (sh.threat_bearing != null) {
-          threatRow.classList.add('active');
-          document.getElementById('threat-bearing').textContent = Math.round(sh.threat_bearing) + '°M';
-        } else {
-          threatRow.classList.remove('active');
-          document.getElementById('threat-bearing').textContent = '—';
-        }
-        powerEl.state = { groups: p.consoles || [], auto: !!p.power_auto };
-        batteryEl.state = { level_pct: (p.battery_max > 0 ? (p.battery_charge / p.battery_max * 100) : 0), charging: !!p.battery_online && !!p.charging, emergency_threshold_pct: 20 };
-        // Overall ship-wide hull (every damageable system), not just this
-        // station's own systems.
-        var oh = r.overall_hull || {};
-        hullEl.state = { total_pct: oh.pct != null ? oh.pct : 1, destroyed_pct: oh.destroyed_pct };
-        // Ownerless "core" systems get their own click-to-expand bar that
-        // hides itself entirely when there are none (issue #12).
-        document.getElementById('core-damage').state = { entries: r.core_systems || [] };
-        repairTeamsEl.state = { teams: r.teams || [], auto: !!r.repair_auto, targets: r.dispatch_targets || [], damaged: r.damaged_systems || [] };
-        document.getElementById('station-damage').state = s.own_hull || null;
-        // Station badge: the retired composite's engineering_auto meant
-        // "station is Backfill-rated". The per-system equivalent is every
-        // owned system AI-run — the conjunction of the resolved views' *_auto
-        // flags (controlSources can lag a rating change by one tick).
-        setAutoState(null, document.getElementById('engineering-auto-badge'), !!(sh.shields_auto && p.power_auto && r.repair_auto));
-
-        // Tractor beam (issue #1156). The panel shows only on a hull whose
-        // engineering station owns a `tractor` system — a hull without one has
-        // no `systems['tractor']` view, so the panel stays hidden and the
-        // console is unchanged.
-        var panel = document.getElementById('tractor-panel');
-        var tr = (s.systems && s.systems['tractor']) || null;
-        if (!tr) { panel.hidden = true; }
-        else {
-          panel.hidden = false;
-          tractorEngaged = !!tr.engaged;
-          var btn = document.getElementById('tractor-btn');
-          btn.classList.toggle('engaged', tractorEngaged);
-          btn.textContent = t(tractorEngaged ? 'console.tractor.release' : 'console.tractor.engage');
-          var status = document.getElementById('tractor-status');
-          if (tractorEngaged) {
-            status.textContent = t('console.tractor.holding')
-              + (tr.coupled_target_name ? ' · ' + t(tr.coupled_target_name) : '');
-          } else {
-            status.textContent = t('console.tractor.idle')
-              + ' · ' + t('console.tractor.range') + ' ' + Math.round(tr.range || 0);
-          }
-          var refusal = document.getElementById('tractor-refusal');
-          if (tr.refusal) { refusal.hidden = false; refusal.textContent = t(tr.refusal); }
-          else { refusal.hidden = true; refusal.textContent = ''; }
-        }
-
-        // Transfer umbilical (issue #1160). The panel shows only on a hull whose
-        // engineering station owns an `umbilical` system — a hull without one has
-        // no `systems['umbilical']` view, so the panel stays hidden and the
-        // console is unchanged. It shows the authored rate and both docked ends'
-        // levels, and the one button starts/stops the flow.
-        var uPanel = document.getElementById('umbilical-panel');
-        var um = (s.systems && s.systems['umbilical']) || null;
-        if (!um) { uPanel.hidden = true; }
-        else {
-          uPanel.hidden = false;
-          umbilicalRunning = !!um.running;
-          var uBtn = document.getElementById('umbilical-btn');
-          uBtn.classList.toggle('engaged', umbilicalRunning);
-          uBtn.textContent = t(umbilicalRunning ? 'console.umbilical.stop' : 'console.umbilical.start');
-          // Both ends' levels — operator then partner — with a '—' where a ledger
-          // is absent (undocked, or a partner that carries no such capacity).
-          var lvl = function(v) { return (v == null) ? '—' : Math.round(v); };
-          var uStatus = document.getElementById('umbilical-status');
-          uStatus.textContent = t(umbilicalRunning ? 'console.umbilical.flowing' : 'console.umbilical.idle')
-            + ' · ' + t('console.umbilical.rate') + ' ' + Math.round(um.rate || 0)
-            + ' · ' + t('console.umbilical.levels') + ' ' + lvl(um.operator_level) + ' → ' + lvl(um.partner_level);
-          var uRefusal = document.getElementById('umbilical-refusal');
-          if (um.refusal) { uRefusal.hidden = false; uRefusal.textContent = t(um.refusal); }
-          else { uRefusal.hidden = true; uRefusal.textContent = ''; }
-        }
-
-        // External repair-team dispatch (issue #1161). The panel shows only on a
-        // hull that authored [repair.external_dispatch] — a hull without one
-        // carries no external_dispatch view on its repair system, so the panel
-        // stays hidden and the console is unchanged. On this hull the repair
-        // system is engineering-owned, so the dispatch view rides `r` (the
-        // repair system) resolved above, the same payload the battleship's
-        // dedicated Repair console reads.
-        var dPanel = document.getElementById('dispatch-panel');
-        var ed = r.external_dispatch || null;
-        if (!ed) { dPanel.hidden = true; }
-        else {
-          dPanel.hidden = false;
-          dispatchWorking = ed.target != null;
-          var dBtn = document.getElementById('dispatch-btn');
-          dBtn.classList.toggle('engaged', dispatchWorking);
-          dBtn.textContent = t(dispatchWorking ? 'console.repair.dispatch.recall' : 'console.repair.dispatch.send');
-          var dStatus = document.getElementById('dispatch-status');
-          if (dispatchWorking) {
-            dStatus.textContent = t('console.repair.dispatch.working')
-              + (ed.target_name ? ' · ' + t(ed.target_name) : '');
-          } else {
-            dStatus.textContent = t('console.repair.dispatch.idle')
-              + ' · ' + t('console.repair.dispatch.range') + ' ' + Math.round(ed.range || 0);
-          }
-          var dRefusal = document.getElementById('dispatch-refusal');
-          if (ed.refusal) { dRefusal.hidden = false; dRefusal.textContent = t(ed.refusal); }
-          else { dRefusal.hidden = true; dRefusal.textContent = ''; }
-        }
-      }
-    });
+    var consoleHandle = initConsole({ name: 'engineering', render: renderStation });
 
     // The one tractor button toggles engage/release through the action map,
     // which sends the same admitted command a tractor AI would (issue #1156).
+    // "Which one" is read off the button's own `.engaged` class — renderStation
+    // sets it fresh on every push, so it is never stale.
     document.getElementById('tractor-btn').addEventListener('click', function() {
-      consoleHandle.sendAction(tractorEngaged ? 'release_tractor' : 'engage_tractor');
+      var engaged = document.getElementById('tractor-btn').classList.contains('engaged');
+      consoleHandle.sendAction(engaged ? 'release_tractor' : 'engage_tractor');
     });
 
     // The one umbilical button toggles start/stop through the action map, which
     // sends the same admitted command an umbilical AI would (issue #1160).
     document.getElementById('umbilical-btn').addEventListener('click', function() {
-      consoleHandle.sendAction(umbilicalRunning ? 'stop_transfer' : 'start_transfer');
+      var running = document.getElementById('umbilical-btn').classList.contains('engaged');
+      consoleHandle.sendAction(running ? 'stop_transfer' : 'start_transfer');
     });
 
     // The one dispatch button toggles dispatch/recall through the action map,
     // which sends the same admitted command a repair AI would (issue #1161).
     document.getElementById('dispatch-btn').addEventListener('click', function() {
-      consoleHandle.sendAction(dispatchWorking ? 'recall_external_repair' : 'dispatch_external_repair');
+      var working = document.getElementById('dispatch-btn').classList.contains('engaged');
+      consoleHandle.sendAction(working ? 'recall_external_repair' : 'dispatch_external_repair');
     });
   </script>
 </body>

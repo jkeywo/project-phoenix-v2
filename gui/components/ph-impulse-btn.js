@@ -5,20 +5,13 @@ import { observeGamepadButton, GAMEPAD_BUTTON } from '../gamepad-button.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhImpulseBtn extends HTMLElement {
-  #state = null;
+export class PhImpulseBtn extends PhElement {
   #stopGamepad = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -39,11 +32,10 @@ export class PhImpulseBtn extends HTMLElement {
   </div>
   <button class="btn ready" id="btn">${t('component.impulse.ready')}</button>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     this.shadowRoot.getElementById('btn').addEventListener('click', this.#press);
     // Ctrl and gamepad B fire the same press as the on-screen button, so the
     // helm keeps impulse under thumb while the other hand flies the stick.
@@ -72,7 +64,7 @@ export class PhImpulseBtn extends HTMLElement {
   #press = () => {
     const btn = this.shadowRoot.getElementById('btn');
     if (!this.sendAction || btn.disabled) return;
-    const s = this.#state || {};
+    const s = this.state || {};
     const st = s.state || 'ready';
     // Pressing IMPULSE again while it is charging cancels the charge.
     if (st === 'charging') {
@@ -82,15 +74,8 @@ export class PhImpulseBtn extends HTMLElement {
     }
   };
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const st = s.state || 'ready';
     const chargePct = s.charge_pct != null ? Math.max(0, Math.min(100, Number(s.charge_pct))) : 0;
     const auto = !!s.auto;
@@ -123,6 +108,4 @@ export class PhImpulseBtn extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-impulse-btn')) {
-  customElements.define('ph-impulse-btn', PhImpulseBtn);
-}
+phDefine('ph-impulse-btn', PhImpulseBtn);

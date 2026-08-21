@@ -18,7 +18,7 @@
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * Format whole seconds as `M:SS`, or `H:MM:SS` past an hour.
@@ -37,19 +37,12 @@ export function formatCountdown(secs) {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-export class PhDeadlineList extends HTMLElement {
-  #state = null;
+export class PhDeadlineList extends PhElement {
   #rowCache = new Map();
   #emptyEl = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -67,19 +60,14 @@ export class PhDeadlineList extends HTMLElement {
   <div class="heading" id="heading"></div>
   <div class="list" id="list"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    this.shadowRoot.getElementById('heading').textContent = t('component.deadlines.heading');
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
+  onTemplate() {
+    this.$('heading').textContent = t('component.deadlines.heading');
   }
 
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const raw = Array.isArray(s.deadlines) ? s.deadlines : [];
     const list = this.shadowRoot.getElementById('list');
 
@@ -123,6 +111,4 @@ export class PhDeadlineList extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-deadline-list')) {
-  customElements.define('ph-deadline-list', PhDeadlineList);
-}
+phDefine('ph-deadline-list', PhDeadlineList);

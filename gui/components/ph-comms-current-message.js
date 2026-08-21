@@ -4,7 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * Normalise a wire response into `{ text, important, available }`.
@@ -23,8 +23,7 @@ function normalizeResponse(r) {
   };
 }
 
-export class PhCommsCurrentMessage extends HTMLElement {
-  #state = null;
+export class PhCommsCurrentMessage extends PhElement {
   #respCache = new Map();
   #prevThreadId = null;
   #placeholderEl = null;
@@ -39,14 +38,8 @@ export class PhCommsCurrentMessage extends HTMLElement {
   // rejection for the same button re-triggers the animation.
   #lastRejectionTs = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -81,23 +74,11 @@ export class PhCommsCurrentMessage extends HTMLElement {
     </div>
   </div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
-  connectedCallback() {
-    this.sendAction ??= window.sendAction;
-  }
-
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
+  render(state) {
     const root = this.shadowRoot;
-    const s = this.#state || {};
+    const s = state || {};
     const thread = s.thread;
 
     if (!this.#placeholderEl) this.#placeholderEl = root.getElementById('placeholder');
@@ -220,7 +201,7 @@ export class PhCommsCurrentMessage extends HTMLElement {
       // First click on an important response: arm and re-render to show the
       // confirm prompt. Nothing is sent yet.
       this.#armedIdx = idx;
-      this.#render();
+      this.render(this.state);
       return;
     }
     // Non-important, or a confirmed important response: submit and disarm.
@@ -231,6 +212,4 @@ export class PhCommsCurrentMessage extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-comms-current-message')) {
-  customElements.define('ph-comms-current-message', PhCommsCurrentMessage);
-}
+phDefine('ph-comms-current-message', PhCommsCurrentMessage);

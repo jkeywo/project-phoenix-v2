@@ -4,19 +4,11 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhRedAlert extends HTMLElement {
-  #state = null;
-
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+export class PhRedAlert extends PhElement {
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -44,18 +36,17 @@ export class PhRedAlert extends HTMLElement {
   <button class="alert-btn standby" id="alert-btn">${t('component.red_alert.standby')}</button>
   <button class="hold-btn free" id="hold-btn">${t('component.weapons_hold.free')}</button>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     const btn = this.shadowRoot.getElementById('alert-btn');
     btn.addEventListener('click', () => {
       if (this.sendAction && !btn.disabled) {
         // Send the explicit desired state (issue #748): the opposite of what
         // is currently displayed. Assigning (not toggling) on the host makes a
         // stale / duplicated / retried command idempotent.
-        const currentlyActive = !!(this.#state && this.#state.active);
+        const currentlyActive = !!(this.state && this.state.active);
         this.sendAction('set_red_alert', { active: !currentlyActive });
       }
     });
@@ -65,21 +56,14 @@ export class PhRedAlert extends HTMLElement {
     const holdBtn = this.shadowRoot.getElementById('hold-btn');
     holdBtn.addEventListener('click', () => {
       if (this.sendAction && !holdBtn.disabled) {
-        const currentlyHeld = !!(this.#state && this.#state.hold);
+        const currentlyHeld = !!(this.state && this.state.hold);
         this.sendAction('set_weapons_hold', { held: !currentlyHeld });
       }
     });
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const active = !!s.active;
     const auto = !!s.auto;
     const root = this.shadowRoot;
@@ -103,6 +87,4 @@ export class PhRedAlert extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-red-alert')) {
-  customElements.define('ph-red-alert', PhRedAlert);
-}
+phDefine('ph-red-alert', PhRedAlert);

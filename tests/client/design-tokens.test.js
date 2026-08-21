@@ -248,7 +248,12 @@ describe('every component adopts the shared control family', () => {
   // exemption list, so a third fragment does not have to remember to add
   // itself here.
   const components = componentFiles()
-    .filter((f) => /customElements\.define/.test(fs.readFileSync(f, 'utf8')));
+    // Registers a custom element either the old way (customElements.define)
+    // or, since #1236's PhElement migration, via a phDefine('tag', Ctor) call
+    // — both mark a file as a component rather than a shared fragment. The
+    // quote after the paren is what distinguishes an actual call from
+    // ph-element.js's own `export function phDefine(tag, ctor) {` declaration.
+    .filter((f) => /customElements\.define|phDefine\(['"]/.test(fs.readFileSync(f, 'utf8')));
 
   it('finds the components to check', () => {
     expect(components.length).toBeGreaterThanOrEqual(30);

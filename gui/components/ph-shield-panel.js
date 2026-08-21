@@ -4,21 +4,14 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhShieldPanel extends HTMLElement {
-  #state = null;
+export class PhShieldPanel extends PhElement {
   #facingCache = new Map();
   #emptyEl = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -63,18 +56,10 @@ export class PhShieldPanel extends HTMLElement {
   <div class="facings" id="facings-container"></div>
   <div class="status" id="panel-focus-display">${t('component.shield_panel.focus', { name: t('console.common.omni') })}</div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const root = this.shadowRoot;
 
     const hullPct = s.hull_integrity_pct != null ? s.hull_integrity_pct : 100;
@@ -134,6 +119,4 @@ export class PhShieldPanel extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-shield-panel')) {
-  customElements.define('ph-shield-panel', PhShieldPanel);
-}
+phDefine('ph-shield-panel', PhShieldPanel);

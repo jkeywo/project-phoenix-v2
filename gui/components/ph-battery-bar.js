@@ -4,19 +4,11 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhBatteryBar extends HTMLElement {
-  #state = null;
-
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+export class PhBatteryBar extends PhElement {
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -69,28 +61,18 @@ export class PhBatteryBar extends HTMLElement {
     <span class="charging-indicator" id="charging-indicator">${t('component.battery_bar.charging')}</span>
   </div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
-
-  connectedCallback() {}
 
   static get observedAttributes() {
     return ['orientation'];
   }
 
   attributeChangedCallback(name) {
-    if (name === 'orientation') this.#render();
+    if (name === 'orientation') this.render(this.state);
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const d = this.#state || {};
+  render(state) {
+    const d = state || {};
 
     let levelPct;
     if (d.level_pct != null) {
@@ -140,6 +122,4 @@ export class PhBatteryBar extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-battery-bar')) {
-  customElements.define('ph-battery-bar', PhBatteryBar);
-}
+phDefine('ph-battery-bar', PhBatteryBar);

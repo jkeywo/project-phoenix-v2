@@ -5,7 +5,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import './ph-damage-detail.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * ph-station-damage — compact per-station hull bar for a console footer.
@@ -28,20 +28,13 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
  */
 const defaultLabel = () => t('component.station_damage.default_label');
 
-export class PhStationDamage extends HTMLElement {
-  #state = null;
+export class PhStationDamage extends PhElement {
   #open = false;
   #onDocClick = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
+  template() {
     const label = defaultLabel();
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+    return `
   <style>
     :host { display: inline-flex; position: relative; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host([hidden]) { display: none; }
@@ -77,7 +70,6 @@ export class PhStationDamage extends HTMLElement {
     <ph-damage-detail id="detail"></ph-damage-detail>
   </div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   static get observedAttributes() { return ['label']; }
@@ -94,6 +86,7 @@ export class PhStationDamage extends HTMLElement {
   }
 
   connectedCallback() {
+    super.connectedCallback();
     const bar = this.shadowRoot.getElementById('bar');
     bar.addEventListener('click', (e) => { e.stopPropagation(); this.#toggle(); });
     // Close when clicking anywhere outside the popup.
@@ -106,13 +99,6 @@ export class PhStationDamage extends HTMLElement {
     if (this.#onDocClick) { document.removeEventListener('click', this.#onDocClick); this.#onDocClick = null; }
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
   #toggle(force) {
     this.#open = force === undefined ? !this.#open : !!force;
     const popup = this.shadowRoot.getElementById('popup');
@@ -121,8 +107,8 @@ export class PhStationDamage extends HTMLElement {
     bar.setAttribute('aria-expanded', String(this.#open));
   }
 
-  #render() {
-    const d = this.#state || {};
+  render(state) {
+    const d = state || {};
     const entries = Array.isArray(d.entries) ? d.entries : [];
 
     // No damageable systems on this station → nothing to show.
@@ -150,6 +136,4 @@ export class PhStationDamage extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-station-damage')) {
-  customElements.define('ph-station-damage', PhStationDamage);
-}
+phDefine('ph-station-damage', PhStationDamage);

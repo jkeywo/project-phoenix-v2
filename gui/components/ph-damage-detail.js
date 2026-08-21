@@ -4,20 +4,13 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhDamageDetail extends HTMLElement {
-  #state = null;
+export class PhDamageDetail extends PhElement {
   #rowCache = new Map();
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -35,18 +28,10 @@ export class PhDamageDetail extends HTMLElement {
   </style>
   <div class="list" id="list"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const d = this.#state || {};
+  render(state) {
+    const d = state || {};
     const entries = Array.isArray(d.entries) ? d.entries : [];
     const list = this.shadowRoot.getElementById('list');
 
@@ -95,6 +80,4 @@ export class PhDamageDetail extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-damage-detail')) {
-  customElements.define('ph-damage-detail', PhDamageDetail);
-}
+phDefine('ph-damage-detail', PhDamageDetail);

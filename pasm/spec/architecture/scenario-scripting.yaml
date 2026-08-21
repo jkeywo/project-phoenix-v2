@@ -148,8 +148,9 @@ entities:
         - src/world/script/engine.rs
         - src/world/script/effects.rs
         - src/world/script/flags.rs
+        - src/world/script/registry.rs
         - src/bin/phoenix_headless.rs
-      symbols: [init_hashing_seed, HASHING_SEED, MAX_OPS_PER_CALL, MAX_OPS_PER_TICK, MAX_CALLS_PER_TICK, loading_engine, runtime_engine, RuntimeHost, BuilderState, EffectSink, register_effects, Flags, register_flags]
+      symbols: [init_hashing_seed, HASHING_SEED, MAX_OPS_PER_CALL, MAX_OPS_PER_TICK, MAX_CALLS_PER_TICK, loading_engine, runtime_engine, RuntimeHost, BuilderState, EffectSink, register_effects, Flags, register_flags, HostRegistry, collect_host_fn_descriptors]
       tests: [cargo test]
     evidence:
       - kind: test
@@ -342,7 +343,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Scenario-Script Editor Authoring Host (M5)
-      summary: "Issue #983. `authoring.rs` enumerates the author-callable vocabulary once — the `HOST_FNS` registry (`HostFn` records with signatures) and `script_diagnostics`, which compiles a `.rhai` source under the SAME loading-engine compile + top-level run the activation gate uses, so a source clean in the editor is clean at load. `bridge.rs` exports `wasm_get_script_host_fns` and `wasm_script_diagnostics` to the editor; issue #995 serves the wasm-bindgen module to the editor (the editor-side consumer is recorded in design/editor-authoring.yaml and architecture/editor-authoring.yaml)."
+      summary: "Issue #983, with the registry DERIVED as of issue #1238. `authoring.rs` exposes the author-callable vocabulary as `host_fns()` — a list of `HostFn` records with signatures — and `script_diagnostics`, which compiles a `.rhai` source under the SAME loading-engine compile + top-level run the activation gate uses, so a source clean in the editor is clean at load. `host_fns()` is no longer a hand-maintained `HOST_FNS` mirror: each editor-exposed verb is declared with the `host_fn!` macro (src/world/script/registry.rs), which emits both the engine registration and its `HostFn` descriptor from one site, and `host_fns()` runs the same registration the two engines run (`collect_host_fn_descriptors`) and returns the descriptors it collected — so a descriptor cannot name a verb the engine never registered, and an exposed verb cannot be registered without being described. `bridge.rs` exports `wasm_get_script_host_fns` and `wasm_script_diagnostics` to the editor; issue #995 serves the wasm-bindgen module to the editor (the editor-side consumer is recorded in design/editor-authoring.yaml and architecture/editor-authoring.yaml)."
     architecture:
       kind: authoring-support
       authority: authoritative
@@ -352,7 +353,7 @@ entities:
       paths:
         - src/world/script/authoring.rs
         - src/server/bridge.rs
-      symbols: [HostFn, HOST_FNS, host_fns, ScriptDiagnostic, script_diagnostics, wasm_get_script_host_fns, wasm_script_diagnostics]
+      symbols: [HostFn, host_fns, ScriptDiagnostic, script_diagnostics, wasm_get_script_host_fns, wasm_script_diagnostics]
       tests: [cargo test]
 
   - component: scenario-script-activation-obligations

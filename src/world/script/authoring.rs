@@ -8,12 +8,18 @@
 //!   call. It is the *same* vocabulary [`engine::loading_engine`] and
 //!   [`engine::runtime_engine`] register (the trigger builders, `on(..)`, the
 //!   `ctx.effects` / `ctx.flags` / `ctx.schedule` methods, and the delay-builder
-//!   verbs), enumerated once here so the editor's autocomplete stays in step with
-//!   what actually resolves at load and runtime. Rhai's own `gen_fn_signatures`
-//!   needs the `metadata` feature, which phoenix's `rhai` build deliberately does
-//!   not enable (it would bloat the wasm and break vellum's single-`rhai`
-//!   unification), so this is a hand-maintained mirror with a test that pins it
-//!   against the registration sites.
+//!   verbs), so the editor's autocomplete stays in step with what actually
+//!   resolves at load and runtime. Rhai's own `gen_fn_signatures` needs the
+//!   `metadata` feature, which phoenix's `rhai` build deliberately does not
+//!   enable (it would bloat the wasm and break vellum's single-`rhai`
+//!   unification). Rather than a hand-maintained mirror, [`host_fns`] is now
+//!   DERIVED: each editor-exposed verb is declared with the
+//!   [`host_fn!`](super::registry::host_fn) macro, which emits both the engine
+//!   registration and its [`HostFn`] descriptor from one site, and
+//!   [`host_fns`] runs the same registration the engines run and returns the
+//!   descriptors it collected (issue #1238). A descriptor therefore cannot name
+//!   a verb the engine never registered, and an exposed verb cannot be
+//!   registered without being described.
 //!
 //! * **A diagnostics pass** — compile a `.rhai` source (a sibling file's whole
 //!   text, or a lifted inline `[script.*]` block) on the *loading* engine (so the
@@ -33,9 +39,9 @@
 //! [`load`]: super::load
 //! [`load::compile_scripts`]: super::load::compile_scripts
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::world::script::engine::{loading_engine, BuilderState};
+use crate::world::script::engine::{collect_host_fn_descriptors, loading_engine, BuilderState};
 
 /// One entry in the host-fn signature registry.
 ///
@@ -43,9 +49,11 @@ use crate::world::script::engine::{loading_engine, BuilderState};
 /// `"flags"`, `"schedule"`), `"delay"` for the delay-builder verbs reached via
 /// `ctx.schedule.in_seconds(n).<verb>(…)`, `"trigger"` for a modifier chained
 /// onto a registration's own handle (`on_timer(…).when(…)`), or `""` for a
-/// top-level call (`on_destroyed(…)`, `on(…)`). Everything is `&'static` — the
-/// registry is a compile-time constant list.
-#[derive(Clone, Copy, Debug)]
+/// top-level call (`on_destroyed(…)`, `on(…)`). Everything is `&'static` — a
+/// descriptor is emitted by the [`host_fn!`](super::registry::host_fn)
+/// registration that defines the verb, so the registry is derived, not
+/// hand-mirrored (issue #1238).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct HostFn {
     /// The callable name, exactly as it is registered on the engine.
     pub name: &'static str,
@@ -73,306 +81,21 @@ impl HostFn {
     }
 }
 
-/// The host-fn vocabulary the editor offers for autocomplete.
+/// The host-fn vocabulary the editor offers for autocomplete, DERIVED from the
+/// registration sites rather than hand-mirrored (issue #1238).
 ///
-/// Kept in step with the registration sites by the
-/// `registry_covers_every_registration_site` test below: the `""`-receiver
-/// entries come from [`super::engine::loading_engine`] and [`super::triggers`];
-/// the receiver entries come from [`super::effects`], [`super::flags`], and
-/// [`super::schedule`].
-pub const HOST_FNS: &[HostFn] = &[
-    // ── top-level registration + trigger builders (loading engine) ───────────
-    HostFn {
-        name: "on",
-        receiver: "",
-        params: &["event", "handler"],
-        category: "register",
-        summary: "Register a named handler fn for a generic event string.",
-    },
-    HostFn {
-        name: "on_destroyed",
-        receiver: "",
-        params: &["entity", "handler"],
-        category: "trigger",
-        summary: "Fire when the named entity is destroyed.",
-    },
-    HostFn {
-        name: "on_all_destroyed",
-        receiver: "",
-        params: &["group", "handler"],
-        category: "trigger",
-        summary: "Fire when every entity in a group is destroyed. Optional \
-                  middle arg `after_secs` gates the fire.",
-    },
-    HostFn {
-        name: "on_attacked",
-        receiver: "",
-        params: &["entity", "handler"],
-        category: "trigger",
-        summary: "Fire when the named entity is attacked.",
-    },
-    HostFn {
-        name: "on_timer",
-        receiver: "",
-        params: &["after_secs", "handler"],
-        category: "trigger",
-        summary: "Fire once, `after_secs` seconds after the world loads.",
-    },
-    HostFn {
-        name: "on_hailed",
-        receiver: "",
-        params: &["entity", "handler"],
-        category: "trigger",
-        summary: "Fire when the named entity is hailed over comms.",
-    },
-    HostFn {
-        name: "on_flag_set",
-        receiver: "",
-        params: &["name", "handler"],
-        category: "trigger",
-        summary: "Fire when the named flag transitions to set.",
-    },
-    HostFn {
-        name: "on_flag_cleared",
-        receiver: "",
-        params: &["name", "handler"],
-        category: "trigger",
-        summary: "Fire when the named flag transitions to cleared.",
-    },
-    HostFn {
-        name: "on_world_loaded",
-        receiver: "",
-        params: &["handler"],
-        category: "trigger",
-        summary: "Fire once when this world finishes loading.",
-    },
-    HostFn {
-        name: "on_entered_region",
-        receiver: "",
-        params: &["entity", "handler"],
-        category: "trigger",
-        summary: "Fire when the named entity enters a region.",
-    },
-    HostFn {
-        name: "on_exited_region",
-        receiver: "",
-        params: &["entity", "handler"],
-        category: "trigger",
-        summary: "Fire when the named entity exits a region.",
-    },
-    HostFn {
-        name: "on_waypoint_reached",
-        receiver: "",
-        params: &["entity", "handler"],
-        category: "trigger",
-        summary: "Fire when the named entity reaches a waypoint. Optional middle \
-                  arg `waypoint` pins a specific anchor.",
-    },
-    HostFn {
-        name: "on_hull_below",
-        receiver: "",
-        params: &["entity", "threshold", "handler"],
-        category: "trigger",
-        summary: "Fire when the named entity's hull fraction crosses DOWN through \
-                  `threshold`, a fraction in (0, 1] written `flt(\"0.75\")`.",
-    },
-    // ── chained onto a registration's handle (loading engine) ────────────────
-    HostFn {
-        name: "when",
-        receiver: "trigger",
-        params: &["predicate"],
-        category: "trigger",
-        summary: "Gate the registration just authored on a flag predicate: \
-                  `on_all_destroyed(g, h).when(\"counter(x) >= 8\")`. A false \
-                  reading suppresses the firing WITHOUT consuming the trigger.",
-    },
-    // ── ctx.effects.* (runtime engine) ───────────────────────────────────────
-    HostFn {
-        name: "complete_objective",
-        receiver: "effects",
-        params: &["id"],
-        category: "effect",
-        summary: "Mark the objective complete.",
-    },
-    HostFn {
-        name: "fail_objective",
-        receiver: "effects",
-        params: &["id"],
-        category: "effect",
-        summary: "Mark the objective failed.",
-    },
-    HostFn {
-        name: "reset_trigger",
-        receiver: "effects",
-        params: &["id"],
-        category: "effect",
-        summary: "Re-arm a fired trigger by id.",
-    },
-    HostFn {
-        name: "load_world",
-        receiver: "effects",
-        params: &["path"],
-        category: "effect",
-        summary: "Load the world layer at `path`.",
-    },
-    HostFn {
-        name: "unload_world",
-        receiver: "effects",
-        params: &["path"],
-        category: "effect",
-        summary: "Unload the world layer at `path`.",
-    },
-    HostFn {
-        name: "game_over",
-        receiver: "effects",
-        params: &["reason"],
-        category: "effect",
-        summary: "End the game with a reason string.",
-    },
-    HostFn {
-        name: "open_comms",
-        receiver: "effects",
-        params: &["spec"],
-        category: "effect",
-        summary: "Open a scripted comms thread: `#{from, node_fn, display_name?, \
-                  thread_id?, urgent?}`. No delayed form — defer it with \
-                  `schedule.after`.",
-    },
-    HostFn {
-        name: "repair_infrastructure",
-        receiver: "effects",
-        params: &["entity", "points"],
-        category: "effect",
-        summary: "Raise the named structure's infrastructure condition by whole \
-                  points, or by a `flt(\"…\")` slice. No delayed form — a timed \
-                  repair applies a slice per tick.",
-    },
-    HostFn {
-        name: "damage_infrastructure",
-        receiver: "effects",
-        params: &["entity", "points"],
-        category: "effect",
-        summary: "Lower the named structure's infrastructure condition by whole \
-                  points, or by a `flt(\"…\")` slice.",
-    },
-    HostFn {
-        name: "order_hold",
-        receiver: "effects",
-        params: &["entity"],
-        category: "effect",
-        summary: "Order the named civilian to stop where it is. A request, not a \
-                  remote control: it is answered after the hull's authored \
-                  acknowledgement delay and may be refused.",
-    },
-    HostFn {
-        name: "order_divert_route",
-        receiver: "effects",
-        params: &["entity", "route"],
-        category: "effect",
-        summary: "Order the named civilian onto another authored `[[route]]`, by \
-                  route id. Refusable.",
-    },
-    HostFn {
-        name: "order_divert_anchor",
-        receiver: "effects",
-        params: &["entity", "anchor"],
-        category: "effect",
-        summary: "Order the named civilian to make for a single world anchor, by \
-                  anchor name. Refusable.",
-    },
-    HostFn {
-        name: "order_dock",
-        receiver: "effects",
-        params: &["entity", "structure"],
-        category: "effect",
-        summary: "Order the named civilian to proceed to and berth at the named \
-                  structure. Refusable, and lands in `non_compliant` if the \
-                  structure is not there.",
-    },
-    // ── ctx.dossier.* (runtime engine, issue #1031) ──────────────────────────
-    HostFn {
-        name: "append",
-        receiver: "dossier",
-        params: &["spec"],
-        category: "effect",
-        summary: "Write one finding onto a subject's dossier: \
-                  `#{ subject, text, provenance }`, where `subject` is an \
-                  `[[entity]] id`, `text` is a strings.csv id and `provenance` is \
-                  one of scan / dialogue / records / briefing. Appending the same \
-                  finding twice keeps the first stamp; an unknown subject is a \
-                  warned no-op.",
-    },
-    // ── ctx.flags.* (runtime engine) ─────────────────────────────────────────
-    HostFn {
-        name: "increment",
-        receiver: "flags",
-        params: &["name", "by"],
-        category: "flag",
-        summary: "Composably add `by` to a counter flag. Use over `flags.x += n`.",
-    },
-    // ── ctx.schedule.* (runtime engine) ──────────────────────────────────────
-    HostFn {
-        name: "in_seconds",
-        receiver: "schedule",
-        params: &["secs"],
-        category: "schedule",
-        summary: "Start a delayed effect: `in_seconds(n).<verb>(…)`.",
-    },
-    HostFn {
-        name: "after",
-        receiver: "schedule",
-        params: &["secs", "callback"],
-        category: "schedule",
-        summary: "Defer a `|ctx| { … }` callback by `secs` seconds.",
-    },
-    // ── ctx.schedule.in_seconds(n).* delay-builder verbs (runtime engine) ────
-    HostFn {
-        name: "complete_objective",
-        receiver: "delay",
-        params: &["id"],
-        category: "delay",
-        summary: "Delayed: mark the objective complete.",
-    },
-    HostFn {
-        name: "fail_objective",
-        receiver: "delay",
-        params: &["id"],
-        category: "delay",
-        summary: "Delayed: mark the objective failed.",
-    },
-    HostFn {
-        name: "reset_trigger",
-        receiver: "delay",
-        params: &["id"],
-        category: "delay",
-        summary: "Delayed: re-arm a fired trigger by id.",
-    },
-    HostFn {
-        name: "load_world",
-        receiver: "delay",
-        params: &["path"],
-        category: "delay",
-        summary: "Delayed: load the world layer at `path`.",
-    },
-    HostFn {
-        name: "unload_world",
-        receiver: "delay",
-        params: &["path"],
-        category: "delay",
-        summary: "Delayed: unload the world layer at `path`.",
-    },
-    HostFn {
-        name: "game_over",
-        receiver: "delay",
-        params: &["reason"],
-        category: "delay",
-        summary: "Delayed: end the game with a reason string.",
-    },
-];
-
-/// The host-fn registry (a `&'static` slice — no allocation).
+/// Every entry is produced by the [`host_fn!`](super::registry::host_fn) call
+/// that registers its verb on one of the two engines, harvested by
+/// [`collect_host_fn_descriptors`]: the loading-engine builders (`on`, the
+/// trigger builders, and the `when` modifier) come first, then the runtime verbs
+/// (`ctx.flags` / `ctx.effects` / `ctx.schedule` and the `in_seconds(n).<verb>`
+/// delay builder, plus `ctx.dossier.append`), grouped as the engines register
+/// them. Memoised: the descriptors are collected once and kept for the process
+/// lifetime, so the returned slice is `&'static` and callers keep the borrow the
+/// old `HOST_FNS` const gave them.
 pub fn host_fns() -> &'static [HostFn] {
-    HOST_FNS
+    static REGISTRY: OnceLock<Vec<HostFn>> = OnceLock::new();
+    REGISTRY.get_or_init(collect_host_fn_descriptors).as_slice()
 }
 
 /// One editor diagnostic: a message pinned to a 1-based line and column.
@@ -471,134 +194,80 @@ fn strip_position_suffix(msg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::flags::FlagStore;
-    use crate::world::script::engine::RuntimeHost;
-    use crate::world::script::schedule::SchedClock;
-    use rhai::{Engine, Map};
     use std::collections::BTreeSet;
 
-    /// A syntactically valid, correctly-*typed* argument list for a top-level
-    /// builder, so a call that resolves never trips on arity/type — only a
-    /// genuinely missing (phantom) fn yields "Function not found".
-    fn top_level_args(name: &str) -> &'static str {
-        match name {
-            "on" => "\"evt\", \"h\"",     // on(event, handler)
-            "on_timer" => "0, \"h\"",     // on_timer(after_secs: INT, handler)
-            "on_world_loaded" => "\"h\"", // on_world_loaded(handler)
-            // The one fractional condition field: a `flt(…)` marker, not an INT.
-            "on_hull_below" => "\"e\", flt(\"0.5\"), \"h\"",
-            // Every other trigger builder is (name/entity/group, handler).
-            _ => "\"e\", \"h\"",
-        }
-    }
-
-    /// A top-level statement that exercises `hf` on the LOADING engine: a bare
-    /// registration for a `""` receiver, or a registration with the modifier
-    /// chained onto its handle for a `"trigger"` one.
-    fn top_level_probe(hf: &HostFn) -> String {
-        if hf.receiver == "trigger" {
-            return match hf.name {
-                "when" => "on_world_loaded(\"h\").when(\"flag(armed)\");".to_string(),
-                other => panic!("add a probe for the new trigger.{other}"),
-            };
-        }
-        format!("{}({});", hf.name, top_level_args(hf.name))
-    }
-
-    /// A `ctx.<receiver>.<name>(…)` expression that exercises `hf` correctly, so
-    /// a resolving method runs clean and only a phantom yields "Function not
-    /// found". Panics on an unrecognised receiver/verb so a NEW registration with
-    /// a different shape must extend this probe rather than silently mis-call.
-    fn receiver_expr(hf: &HostFn) -> String {
-        match hf.receiver {
-            // A map verb takes its spec map; every other effect verb takes a
-            // single string (id / path / reason).
-            "effects" => match hf.name {
-                "open_comms" => {
-                    "ctx.effects.open_comms(#{ from: \"a\", node_fn: \"f\" })".to_string()
-                }
-                // The infrastructure hooks take (entity, points).
-                "repair_infrastructure" | "damage_infrastructure" => {
-                    format!("ctx.effects.{}(\"x\", 1)", hf.name)
-                }
-                // The civilian order hooks take (entity, destination) — except
-                // `order_hold`, whose verb IS the whole instruction.
-                "order_divert_route" | "order_divert_anchor" | "order_dock" => {
-                    format!("ctx.effects.{}(\"x\", \"y\")", hf.name)
-                }
-                _ => format!("ctx.effects.{}(\"x\")", hf.name),
-            },
-            "delay" => format!("ctx.schedule.in_seconds(0).{}(\"x\")", hf.name),
-            "dossier" => match hf.name {
-                "append" => "ctx.dossier.append(#{ subject: \"x\", text: \"t\", \
-                             provenance: \"scan\" })"
-                    .to_string(),
-                other => panic!("add a probe for the new dossier.{other}"),
-            },
-            "flags" => match hf.name {
-                "increment" => "ctx.flags.increment(\"n\", 0)".to_string(),
-                other => panic!("add a probe for the new flags.{other}"),
-            },
-            "schedule" => match hf.name {
-                "in_seconds" => "ctx.schedule.in_seconds(0)".to_string(),
-                "after" => "ctx.schedule.after(0, |ctx| { })".to_string(),
-                other => panic!("add a probe for the new schedule.{other}"),
-            },
-            other => panic!("unhandled receiver {other:?} for {}", hf.name),
-        }
-    }
-
-    /// Probe that `hf` actually resolves on its engine. A resolving fn runs clean
-    /// (or fails for some *other* reason); only a phantom — a HOST_FNS entry the
-    /// engine never registered — answers "Function not found".
-    fn assert_hostfn_resolves(hf: &HostFn, loading: &Engine, host: &RuntimeHost) {
-        let is_not_found = |msg: &str| msg.contains("Function not found");
-        if hf.receiver.is_empty() || hf.receiver == "trigger" {
-            // Top-level builder / `on` / a handle modifier: run it on the loading
-            // engine's top level, exactly as the loader's `run_ast` does.
-            let src = top_level_probe(hf);
-            let ast = loading.compile(&src).expect("probe compiles");
-            if let Err(err) = loading.run_ast(&ast) {
-                assert!(
-                    !is_not_found(&err.to_string()),
-                    "HOST_FNS lists top-level `{}` but the loading engine never \
-                     registers it: {err}",
-                    hf.name
-                );
-            }
-        } else {
-            // Receiver method: run it through the runtime host, which injects
-            // ctx.effects / ctx.flags / ctx.schedule exactly as a real call does.
-            let src = format!("fn probe(ctx) {{ {}; }}", receiver_expr(hf));
-            let ast = host.engine().compile(&src).expect("probe compiles");
-            let res = host.try_call(
-                &SchedClock::ZERO,
-                &ast,
-                "probe.rhai",
-                "probe",
-                &FlagStore::new(),
-                &crate::world::deadlines::DeadlineTable::default(),
-                &crate::world::commitments::CommitmentLedger::default(),
-                &crate::dossier::evidence::EvidenceLog::default(),
-                Map::new(),
-            );
-            if let Err(err) = res {
-                assert!(
-                    !is_not_found(&err.to_string()),
-                    "HOST_FNS lists `{}.{}` but the runtime engine never registers \
-                     it: {err}",
-                    hf.receiver,
-                    hf.name
-                );
-            }
-        }
-    }
+    /// The `(receiver, name, params)` the editor autocomplete is meant to
+    /// expose — the curated subset of the registered vocabulary, with overloads
+    /// collapsed to one descriptor. A verb that is registered but deliberately
+    /// NOT offered (the `flt(…)` marker, the name-resolving `spawn_entity` /
+    /// `add_objective` family, the read/write `deadlines` / `commitments`
+    /// handles, `dossier.holds`, the delayed `destroy_entity` twin, …) is absent
+    /// here, exactly as it was absent from the former hand-maintained mirror.
+    ///
+    /// This is the repointed drift guard (issue #1238). The old test pinned a
+    /// HAND-MAINTAINED `HOST_FNS` slice against the registration sites and then
+    /// re-checked every entry for a "phantom" (a descriptor the engine never
+    /// registered). Both concerns are now structural: `host_fns()` is DERIVED by
+    /// running the same registration the engines run (see
+    /// [`collect_host_fn_descriptors`]) and taking the descriptors the `host_fn!`
+    /// sites emitted, so a phantom is impossible and an exposed verb cannot be
+    /// registered without its descriptor. What still deserves a test is that the
+    /// exposed SET is exactly this intended list, with the right arities:
+    /// exposing a currently-hidden verb, or dropping an exposed one, must be a
+    /// deliberate edit here rather than an accident. The tuples below are the
+    /// former mirror's `(receiver, name, params)`, so this doubles as the
+    /// "same set unchanged" proof the derivation had to preserve.
+    const EXPECTED_EXPOSED: &[(&str, &str, &[&str])] = &[
+        // Loading engine: `on` + one per TriggerCondition variant, then `when`.
+        ("", "on", &["event", "handler"]),
+        ("", "on_destroyed", &["entity", "handler"]),
+        ("", "on_all_destroyed", &["group", "handler"]),
+        ("", "on_attacked", &["entity", "handler"]),
+        ("", "on_timer", &["after_secs", "handler"]),
+        ("", "on_hailed", &["entity", "handler"]),
+        ("", "on_flag_set", &["name", "handler"]),
+        ("", "on_flag_cleared", &["name", "handler"]),
+        ("", "on_world_loaded", &["handler"]),
+        ("", "on_entered_region", &["entity", "handler"]),
+        ("", "on_exited_region", &["entity", "handler"]),
+        ("", "on_waypoint_reached", &["entity", "handler"]),
+        ("", "on_hull_below", &["entity", "threshold", "handler"]),
+        ("trigger", "when", &["predicate"]),
+        // ctx.flags.*
+        ("flags", "increment", &["name", "by"]),
+        // ctx.effects.*
+        ("effects", "complete_objective", &["id"]),
+        ("effects", "fail_objective", &["id"]),
+        ("effects", "reset_trigger", &["id"]),
+        ("effects", "load_world", &["path"]),
+        ("effects", "unload_world", &["path"]),
+        ("effects", "game_over", &["reason"]),
+        ("effects", "repair_infrastructure", &["entity", "points"]),
+        ("effects", "damage_infrastructure", &["entity", "points"]),
+        ("effects", "order_hold", &["entity"]),
+        ("effects", "order_divert_route", &["entity", "route"]),
+        ("effects", "order_divert_anchor", &["entity", "anchor"]),
+        ("effects", "order_dock", &["entity", "structure"]),
+        ("effects", "open_comms", &["spec"]),
+        // ctx.schedule.* and the in_seconds(n).<verb> delay builder.
+        ("schedule", "in_seconds", &["secs"]),
+        ("schedule", "after", &["secs", "callback"]),
+        ("delay", "complete_objective", &["id"]),
+        ("delay", "fail_objective", &["id"]),
+        ("delay", "reset_trigger", &["id"]),
+        ("delay", "load_world", &["path"]),
+        ("delay", "unload_world", &["path"]),
+        ("delay", "game_over", &["reason"]),
+        // ctx.dossier.*
+        ("dossier", "append", &["spec"]),
+    ];
 
     #[test]
     fn signature_formats_top_level_and_receiver_calls() {
-        let on_destroyed = HOST_FNS.iter().find(|h| h.name == "on_destroyed").unwrap();
+        let fns = host_fns();
+        let on_destroyed = fns.iter().find(|h| h.name == "on_destroyed").unwrap();
         assert_eq!(on_destroyed.signature(), "on_destroyed(entity, handler)");
-        let complete = HOST_FNS
+        let complete = fns
             .iter()
             .find(|h| h.name == "complete_objective" && h.receiver == "effects")
             .unwrap();
@@ -606,103 +275,56 @@ mod tests {
     }
 
     #[test]
-    fn registry_covers_every_registration_site() {
-        // Pins the hand-maintained registry against the actual registration
-        // sites, so adding a builder or effect without listing it here fails.
-        let names: BTreeSet<(&str, &str)> = HOST_FNS.iter().map(|h| (h.receiver, h.name)).collect();
+    fn derived_registry_exposes_exactly_the_intended_vocabulary() {
+        // The DERIVED list (from the `host_fn!` sites, harvested by
+        // `collect_host_fn_descriptors`) must expose exactly the curated set,
+        // with the same arities — no more (a hidden verb accidentally described),
+        // no less (an exposed verb whose `host_fn!` was dropped), and no changed
+        // parameter list.
+        let derived: BTreeSet<(&str, &str, Vec<&str>)> = host_fns()
+            .iter()
+            .map(|h| (h.receiver, h.name, h.params.to_vec()))
+            .collect();
+        let expected: BTreeSet<(&str, &str, Vec<&str>)> = EXPECTED_EXPOSED
+            .iter()
+            .map(|(receiver, name, params)| (*receiver, *name, params.to_vec()))
+            .collect();
+        assert_eq!(
+            derived, expected,
+            "the derived autocomplete vocabulary drifted from the intended set \
+             (receiver, name, params)"
+        );
+        // Overloads collapse to one descriptor (game_over, on_all_destroyed,
+        // repair_infrastructure, …), so the derived length is the pair-set length
+        // — a second descriptor for the same (receiver, name) would trip this.
+        assert_eq!(
+            host_fns().len(),
+            EXPECTED_EXPOSED.len(),
+            "an overloaded verb emitted more than one descriptor"
+        );
+    }
 
-        // Top-level: `on` + one per TriggerCondition variant (triggers.rs).
-        for expected in [
-            "on",
-            "on_destroyed",
-            "on_all_destroyed",
-            "on_attacked",
-            "on_timer",
-            "on_hailed",
-            "on_flag_set",
-            "on_flag_cleared",
-            "on_world_loaded",
-            "on_entered_region",
-            "on_exited_region",
-            "on_waypoint_reached",
-            "on_hull_below",
-        ] {
+    #[test]
+    fn every_derived_descriptor_carries_a_summary_and_named_params() {
+        // A shape check on the derived descriptors, so the wasm bridge never
+        // ships a blank completion: every entry has a summary, a name, and
+        // non-blank parameter names (`on_world_loaded` is the one no-arg entry).
+        for hf in host_fns() {
+            assert!(!hf.name.is_empty());
             assert!(
-                names.contains(&("", expected)),
-                "missing top-level {expected}"
+                !hf.summary.is_empty(),
+                "{}.{} has no summary",
+                hf.receiver,
+                hf.name
             );
-        }
-        // Chained onto a registration's handle (triggers.rs).
-        assert!(names.contains(&("trigger", "when")), "missing trigger.when");
-        // ctx.effects.* (effects.rs) and the same verbs as delay-builder methods
-        // (schedule.rs).
-        for verb in [
-            "complete_objective",
-            "fail_objective",
-            "reset_trigger",
-            "load_world",
-            "unload_world",
-            "game_over",
-        ] {
-            assert!(names.contains(&("effects", verb)), "missing effects.{verb}");
-            assert!(names.contains(&("delay", verb)), "missing delay.{verb}");
-        }
-        // `open_comms` is immediate-only: there is no delay-builder twin (a
-        // deferred open is authored as `schedule.after(n, |ctx| …open_comms…)`).
-        assert!(names.contains(&("effects", "open_comms")));
-        assert!(!names.contains(&("delay", "open_comms")));
-        // Likewise the #1025 infrastructure hooks: a repair that takes time is
-        // a timed operation applying a slice per tick, not one effect fired
-        // late, so neither verb has a delay-builder twin.
-        for verb in ["repair_infrastructure", "damage_infrastructure"] {
-            assert!(names.contains(&("effects", verb)), "missing effects.{verb}");
-            assert!(!names.contains(&("delay", verb)), "unexpected delay.{verb}");
-        }
-        // Likewise the #1028 civilian order hooks. An order that should arrive
-        // later is `schedule.after(n, |ctx| …)`; a delay-builder twin would put
-        // a second, silent gap in front of the authored acknowledgement delay
-        // the compliance machine already applies.
-        for verb in [
-            "order_hold",
-            "order_divert_route",
-            "order_divert_anchor",
-            "order_dock",
-        ] {
-            assert!(names.contains(&("effects", verb)), "missing effects.{verb}");
-            assert!(!names.contains(&("delay", verb)), "unexpected delay.{verb}");
-        }
-        // ctx.dossier.* (dossier.rs, issue #1031). Its own receiver rather than
-        // a fifth `effects` verb because an append is stamped with the call's
-        // tick, which a bare `EffectSink` has no clock for — see that module.
-        // Immediate-only for `open_comms`' reason turned around: a finding is a
-        // record of something that ALREADY happened, so "record it late" is not
-        // a thing a scenario can mean.
-        assert!(names.contains(&("dossier", "append")));
-        assert!(!names.contains(&("delay", "append")));
-        // ctx.flags.* (flags.rs) and ctx.schedule.* (schedule.rs).
-        assert!(names.contains(&("flags", "increment")));
-        assert!(names.contains(&("schedule", "in_seconds")));
-        assert!(names.contains(&("schedule", "after")));
-
-        // ── Phantom guard: every HOST_FN must actually resolve on its engine ──
-        // The membership check above pins the registry against a curated list,
-        // but a HOST_FNS entry naming a fn the engine never registers (a
-        // *phantom*) would still slip through — the list is duplicated, not
-        // derived. Rhai's `metadata` feature is off (see the module doc), so the
-        // engines are not enumerable and `gen_fn_signatures` is unavailable;
-        // instead we compile+call each entry correctly and assert the engine does
-        // NOT answer "Function not found". That catches every phantom.
-        //
-        // The *other* direction — an engine fn HOST_FNS omits — is still caught
-        // only by the curated membership check above: without metadata the engine
-        // cannot be walked, so a newly registered builder/effect that nobody adds
-        // to HOST_FNS is detected by its missing entry in the lists above, not by
-        // enumeration here.
-        let state = Arc::new(Mutex::new(BuilderState::default()));
-        let loading = loading_engine(state);
-        let host = RuntimeHost::new();
-        for hf in HOST_FNS {
-            assert_hostfn_resolves(hf, &loading, &host);
+            for param in hf.params {
+                assert!(
+                    !param.is_empty(),
+                    "{}.{} has a blank parameter name",
+                    hf.receiver,
+                    hf.name
+                );
+            }
         }
     }
 

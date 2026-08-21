@@ -42,12 +42,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use rhai::{Engine, EvalAltResult, FnPtr, ImmutableString};
+use rhai::{EvalAltResult, FnPtr, ImmutableString};
 use serde::{Deserialize, Serialize};
 
 use crate::world::config::TriggerAction;
 use crate::world::delayed::DelayedAction;
 use crate::world::script::effects::BufferedEffect;
+use crate::world::script::registry::{host_fn, HostRegistry};
 use crate::world::script::{MAX_CALLS_PER_TICK, MAX_OPS_PER_TICK};
 
 /// Everything one script call produced: its immediate effects and the deferred
@@ -427,23 +428,36 @@ impl Schedule {
 /// [`Schedule`] builder whose effect verbs mirror the immediate
 /// [`Effects`](super::effects) set one-for-one, and `ctx.schedule.after(n, fn)`
 /// records a callback by the function pointer's (generated) name.
-pub fn register_scheduling(engine: &mut Engine) {
+pub(crate) fn register_scheduling(engine: &mut HostRegistry) {
     engine.register_type_with_name::<ScheduleSink>("Schedule");
     engine.register_type_with_name::<Schedule>("DelayBuilder");
 
     // `ctx.schedule.in_seconds(5).complete_objective("obj")` — the delay builder.
-    engine.register_fn("in_seconds", |sink: &mut ScheduleSink, secs: i64| {
-        Schedule {
-            delay_secs: secs,
-            sink: sink.clone(),
-        }
-    });
+    host_fn!(
+        engine,
+        "in_seconds",
+        receiver = "schedule",
+        category = "schedule",
+        params = ["secs"],
+        summary = "Start a delayed effect: `in_seconds(n).<verb>(…)`.",
+        |sink: &mut ScheduleSink, secs: i64| {
+            Schedule {
+                delay_secs: secs,
+                sink: sink.clone(),
+            }
+        },
+    );
 
     // `ctx.schedule.after(5, |ctx| { … })` — a deferred callback by stable name.
     // The closure acquired its `anon$<hex>` name at load under the fixed seed, so
     // the name recorded here resolves against the same AST on every peer.
-    engine.register_fn(
+    host_fn!(
+        engine,
         "after",
+        receiver = "schedule",
+        category = "schedule",
+        params = ["secs", "callback"],
+        summary = "Defer a `|ctx| { … }` callback by `secs` seconds.",
         |sink: &mut ScheduleSink, secs: i64, callback: FnPtr| {
             sink.push(Deferred::Callback {
                 delay_secs: secs,
@@ -455,18 +469,39 @@ pub fn register_scheduling(engine: &mut Engine) {
     // The delayed-effect vocabulary: each verb maps to the exact `TriggerAction`
     // the declarative front-end builds, so the delayed dispatch path is the same
     // one a TOML `action_delays` entry takes.
-    engine.register_fn(
+    host_fn!(
+        engine,
         "complete_objective",
+        receiver = "delay",
+        category = "delay",
+        params = ["id"],
+        summary = "Delayed: mark the objective complete.",
         |b: &mut Schedule, id: ImmutableString| {
             b.defer(TriggerAction::CompleteObjective { id: id.to_string() });
         },
     );
-    engine.register_fn("fail_objective", |b: &mut Schedule, id: ImmutableString| {
-        b.defer(TriggerAction::FailObjective { id: id.to_string() });
-    });
-    engine.register_fn("reset_trigger", |b: &mut Schedule, id: ImmutableString| {
-        b.defer(TriggerAction::ResetTrigger { id: id.to_string() });
-    });
+    host_fn!(
+        engine,
+        "fail_objective",
+        receiver = "delay",
+        category = "delay",
+        params = ["id"],
+        summary = "Delayed: mark the objective failed.",
+        |b: &mut Schedule, id: ImmutableString| {
+            b.defer(TriggerAction::FailObjective { id: id.to_string() });
+        },
+    );
+    host_fn!(
+        engine,
+        "reset_trigger",
+        receiver = "delay",
+        category = "delay",
+        params = ["id"],
+        summary = "Delayed: re-arm a fired trigger by id.",
+        |b: &mut Schedule, id: ImmutableString| {
+            b.defer(TriggerAction::ResetTrigger { id: id.to_string() });
+        },
+    );
     // The deferred twin of `ctx.effects.destroy_entity` (issue #1033). It needed
     // no new machinery, which is the claim worth pinning: a `TriggerAction` is
     // already what this builder buffers, `tick_delayed_actions` already resolves
@@ -487,24 +522,50 @@ pub fn register_scheduling(engine: &mut Engine) {
             Ok(())
         },
     );
-    engine.register_fn("load_world", |b: &mut Schedule, path: ImmutableString| {
-        b.defer(TriggerAction::LoadWorld {
-            path: path.to_string(),
-        });
-    });
-    engine.register_fn("unload_world", |b: &mut Schedule, path: ImmutableString| {
-        b.defer(TriggerAction::UnloadWorld {
-            path: path.to_string(),
-        });
-    });
-    engine.register_fn("game_over", |b: &mut Schedule, reason: ImmutableString| {
-        // `outcome: None` — an undeclared scripted end, matching the immediate
-        // `game_over` effect and `TriggerAction::GameOver { outcome: None }`.
-        b.defer(TriggerAction::GameOver {
-            message: Some(reason.to_string()),
-            outcome: None,
-        });
-    });
+    host_fn!(
+        engine,
+        "load_world",
+        receiver = "delay",
+        category = "delay",
+        params = ["path"],
+        summary = "Delayed: load the world layer at `path`.",
+        |b: &mut Schedule, path: ImmutableString| {
+            b.defer(TriggerAction::LoadWorld {
+                path: path.to_string(),
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "unload_world",
+        receiver = "delay",
+        category = "delay",
+        params = ["path"],
+        summary = "Delayed: unload the world layer at `path`.",
+        |b: &mut Schedule, path: ImmutableString| {
+            b.defer(TriggerAction::UnloadWorld {
+                path: path.to_string(),
+            });
+        },
+    );
+    host_fn!(
+        engine,
+        "game_over",
+        receiver = "delay",
+        category = "delay",
+        params = ["reason"],
+        summary = "Delayed: end the game with a reason string.",
+        |b: &mut Schedule, reason: ImmutableString| {
+            // `outcome: None` — an undeclared scripted end, matching the immediate
+            // `game_over` effect and `TriggerAction::GameOver { outcome: None }`.
+            b.defer(TriggerAction::GameOver {
+                message: Some(reason.to_string()),
+                outcome: None,
+            });
+        },
+    );
+    // The outcome-DECLARING delayed overload shares the one editor entry above,
+    // so a bare registration.
     engine.register_fn(
         "game_over",
         |b: &mut Schedule,

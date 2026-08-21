@@ -49,10 +49,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use rhai::{Engine, ImmutableString};
+use rhai::ImmutableString;
 
 use crate::world::deadlines::{DeadlineChange, DeadlineHandler, DeadlineMutation, DeadlineTable};
 use crate::world::script::engine::BuilderState;
+use crate::world::script::registry::HostRegistry;
 
 /// The `deadlines` custom type handed to a script call.
 ///
@@ -139,7 +140,7 @@ impl Deadlines {
 /// [`register_flags`](super::flags::register_flags) uses) because a deadline has
 /// two readable properties, not one value: `remaining` and `state` answer
 /// different questions and an indexer could only serve one of them.
-pub fn register_deadlines(engine: &mut Engine) {
+pub(crate) fn register_deadlines(engine: &mut HostRegistry) {
     engine.register_type_with_name::<Deadlines>("Deadlines");
 
     engine.register_fn(
@@ -172,7 +173,10 @@ pub fn register_deadlines(engine: &mut Engine) {
 /// Unlike a trigger registration this returns nothing to chain onto: a
 /// deadline's *when* is authored in its `[[deadline]]` block, not here, and its
 /// `.when(…)`-style gating is ordinary control flow inside the handler.
-pub fn register_deadline_builders(engine: &mut Engine, state: Arc<Mutex<BuilderState>>) {
+pub(crate) fn register_deadline_builders(
+    engine: &mut HostRegistry,
+    state: Arc<Mutex<BuilderState>>,
+) {
     engine.register_fn(
         "on_deadline",
         move |deadline_id: ImmutableString, handler: ImmutableString| {

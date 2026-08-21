@@ -75,13 +75,14 @@
 
 use std::sync::{Arc, Mutex};
 
-use rhai::{Engine, EvalAltResult, ImmutableString, Map};
+use rhai::{EvalAltResult, ImmutableString, Map};
 
 use crate::world::commitments::{
     CommitmentChange, CommitmentLedger, CommitmentMutation, CommitmentOutcome,
 };
 use crate::world::dispatch::{ActionCmd, FlagMutation};
 use crate::world::script::effects::{map_str, raise, EffectSink};
+use crate::world::script::registry::HostRegistry;
 
 /// The `commitments` custom type handed to a script call.
 ///
@@ -214,7 +215,7 @@ impl Commitments {
 /// `ctx.effects.open_comms(#{…})`: the fields are named at the call site, which
 /// is what keeps `made_to` and `terms` from being silently swapped by an author
 /// who is reading their own scenario rather than this file.
-pub fn register_commitments(engine: &mut Engine) {
+pub(crate) fn register_commitments(engine: &mut HostRegistry) {
     engine.register_type_with_name::<Commitments>("Commitments");
 
     engine.register_fn(

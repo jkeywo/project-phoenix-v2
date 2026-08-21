@@ -64,6 +64,7 @@ use crate::world::config::{
     parse_action_entry, RawActionEntry, RawCommandStance, RawModifier, RawZeroGate, TriggerAction,
 };
 use crate::world::dispatch::{ActionCmd, FlagMutation};
+use crate::world::script::registry::{host_fn, HostRegistry};
 
 /// A fractional literal carried as OPAQUE DATA, the `no_float`-safe fractional-leaf
 /// marker (issue #984, Rhai M6 follow-on).
@@ -218,31 +219,52 @@ pub fn register_real_lit(engine: &mut Engine) {
     );
 }
 
-pub fn register_effects(engine: &mut Engine) {
+pub(crate) fn register_effects(engine: &mut HostRegistry) {
     engine.register_type_with_name::<EffectSink>("Effects");
 
-    register_real_lit(engine);
+    // The `flt(…)` marker is not editor-exposed, so a bare registration.
+    register_real_lit(engine.engine_mut());
 
-    engine.register_fn(
+    host_fn!(
+        engine,
         "complete_objective",
+        receiver = "effects",
+        category = "effect",
+        params = ["id"],
+        summary = "Mark the objective complete.",
         |sink: &mut EffectSink, id: ImmutableString| {
             sink.push(ActionCmd::CompleteObjective { id: id.to_string() });
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "fail_objective",
+        receiver = "effects",
+        category = "effect",
+        params = ["id"],
+        summary = "Mark the objective failed.",
         |sink: &mut EffectSink, id: ImmutableString| {
             sink.push(ActionCmd::FailObjective { id: id.to_string() });
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "reset_trigger",
+        receiver = "effects",
+        category = "effect",
+        params = ["id"],
+        summary = "Re-arm a fired trigger by id.",
         |sink: &mut EffectSink, id: ImmutableString| {
             sink.push(ActionCmd::ResetTrigger { id: id.to_string() });
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "load_world",
+        receiver = "effects",
+        category = "effect",
+        params = ["path"],
+        summary = "Load the world layer at `path`.",
         |sink: &mut EffectSink, path: ImmutableString| {
             // `loader_path` is `None` here: a script-issued load is authored at base
             // scope in M1 (no sub-world layer origin to thread yet). Mirrors
@@ -253,16 +275,26 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "unload_world",
+        receiver = "effects",
+        category = "effect",
+        params = ["path"],
+        summary = "Unload the world layer at `path`.",
         |sink: &mut EffectSink, path: ImmutableString| {
             sink.push(ActionCmd::UnloadWorld {
                 path: path.to_string(),
             });
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "game_over",
+        receiver = "effects",
+        category = "effect",
+        params = ["reason"],
+        summary = "End the game with a reason string.",
         |sink: &mut EffectSink, reason: ImmutableString| {
             // Reason first, then the transition — `OnEnter(GamePhase::GameOver)`
             // reads the reason, so the ordering is load-bearing. Mirrors
@@ -278,6 +310,8 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
+    // The outcome-DECLARING overload is not a separate editor entry — one
+    // descriptor per callable name — so a bare registration.
     engine.register_fn(
         "game_over",
         |sink: &mut EffectSink,
@@ -314,8 +348,15 @@ pub fn register_effects(engine: &mut Engine) {
     // Both buffer a resolved `ActionCmd` carrying the entity NAME; the applier
     // resolves it and queues the delta for `tick_infrastructure_condition`,
     // which is where every operational-flag edge is detected and mirrored.
-    engine.register_fn(
+    host_fn!(
+        engine,
         "repair_infrastructure",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "points"],
+        summary = "Raise the named structure's infrastructure condition by whole \
+                  points, or by a `flt(\"…\")` slice. No delayed form — a timed \
+                  repair applies a slice per tick.",
         |sink: &mut EffectSink, entity: ImmutableString, points: i64| {
             sink.push(ActionCmd::AdjustInfrastructureCondition {
                 entity: entity.to_string(),
@@ -323,6 +364,7 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
+    // The fractional `flt(…)` overload shares the one editor entry above.
     engine.register_fn(
         "repair_infrastructure",
         |sink: &mut EffectSink, entity: ImmutableString, points: RealLit| {
@@ -332,8 +374,14 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "damage_infrastructure",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "points"],
+        summary = "Lower the named structure's infrastructure condition by whole \
+                  points, or by a `flt(\"…\")` slice.",
         |sink: &mut EffectSink, entity: ImmutableString, points: i64| {
             sink.push(ActionCmd::AdjustInfrastructureCondition {
                 entity: entity.to_string(),
@@ -341,6 +389,7 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
+    // The fractional `flt(…)` overload shares the one editor entry above.
     engine.register_fn(
         "damage_infrastructure",
         |sink: &mut EffectSink, entity: ImmutableString, points: RealLit| {
@@ -389,8 +438,15 @@ pub fn register_effects(engine: &mut Engine) {
     // which is where the acknowledgement delay and the authored disposition are
     // applied. A scripted order is a request, not a remote control: a civilian
     // whose disposition refuses `divert` refuses a scripted divert too.
-    engine.register_fn(
+    host_fn!(
+        engine,
         "order_hold",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity"],
+        summary = "Order the named civilian to stop where it is. A request, not a \
+                  remote control: it is answered after the hull's authored \
+                  acknowledgement delay and may be refused.",
         |sink: &mut EffectSink, entity: ImmutableString| {
             sink.push(ActionCmd::OrderCivilian {
                 entity: entity.to_string(),
@@ -398,8 +454,14 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "order_divert_route",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "route"],
+        summary = "Order the named civilian onto another authored `[[route]]`, by \
+                  route id. Refusable.",
         |sink: &mut EffectSink, entity: ImmutableString, route: ImmutableString| {
             sink.push(ActionCmd::OrderCivilian {
                 entity: entity.to_string(),
@@ -407,8 +469,14 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "order_divert_anchor",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "anchor"],
+        summary = "Order the named civilian to make for a single world anchor, by \
+                  anchor name. Refusable.",
         |sink: &mut EffectSink, entity: ImmutableString, anchor: ImmutableString| {
             sink.push(ActionCmd::OrderCivilian {
                 entity: entity.to_string(),
@@ -416,8 +484,15 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "order_dock",
+        receiver = "effects",
+        category = "effect",
+        params = ["entity", "structure"],
+        summary = "Order the named civilian to proceed to and berth at the named \
+                  structure. Refusable, and lands in `non_compliant` if the \
+                  structure is not there.",
         |sink: &mut EffectSink, entity: ImmutableString, structure: ImmutableString| {
             sink.push(ActionCmd::OrderCivilian {
                 entity: entity.to_string(),
@@ -558,8 +633,15 @@ pub fn register_effects(engine: &mut Engine) {
             Ok(())
         },
     );
-    engine.register_fn(
+    host_fn!(
+        engine,
         "open_comms",
+        receiver = "effects",
+        category = "effect",
+        params = ["spec"],
+        summary = "Open a scripted comms thread: `#{from, node_fn, display_name?, \
+                  thread_id?, urgent?}`. No delayed form — defer it with \
+                  `schedule.after`.",
         |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
             // Comms vocabulary, so it buffers onto the sink's SECOND buffer
             // rather than the ordered `ActionCmd`/`TriggerAction` one (see

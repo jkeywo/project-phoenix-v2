@@ -32,11 +32,12 @@
 
 use std::sync::{Arc, Mutex};
 
-use rhai::{Engine, EvalAltResult, ImmutableString, Position};
+use rhai::{EvalAltResult, ImmutableString, Position};
 
 use crate::world::config::{reject_world_history, scripted_trigger, TriggerCondition};
 use crate::world::script::effects::RealLit;
 use crate::world::script::engine::{BuilderState, ScriptTrigger};
+use crate::world::script::registry::{host_fn, HostRegistry};
 
 /// A handle to the trigger a registration fn just authored, returned so
 /// TRIGGER-LEVEL fields — the ones that are neither the condition nor the
@@ -84,11 +85,19 @@ fn raise(message: String) -> Box<EvalAltResult> {
 /// Called once from [`super::engine::loading_engine`]. Every closure captures a
 /// clone of the shared [`BuilderState`] handle, so a top-level call attributes
 /// its trigger to whichever unit the loader is currently running.
-pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderState>>) {
+pub(crate) fn register_trigger_builders(
+    engine: &mut HostRegistry,
+    state: Arc<Mutex<BuilderState>>,
+) {
     // 1. OnDestroyed { entity_name }
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_destroyed",
+        receiver = "",
+        category = "trigger",
+        params = ["entity", "handler"],
+        summary = "Fire when the named entity is destroyed.",
         move |entity: ImmutableString, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -102,8 +111,14 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
     // 2. OnAllDestroyed { group, after_secs } — no-gate (after_secs = 0.0) …
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_all_destroyed",
+        receiver = "",
+        category = "trigger",
+        params = ["group", "handler"],
+        summary = "Fire when every entity in a group is destroyed. Optional \
+                  middle arg `after_secs` gates the fire.",
         move |group: ImmutableString, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -133,8 +148,13 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
     // 3. OnAttacked { entity_name }
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_attacked",
+        receiver = "",
+        category = "trigger",
+        params = ["entity", "handler"],
+        summary = "Fire when the named entity is attacked.",
         move |entity: ImmutableString, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -148,8 +168,13 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
     // 4. OnTimer { after_secs } — integer seconds → f32 at the boundary.
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_timer",
+        receiver = "",
+        category = "trigger",
+        params = ["after_secs", "handler"],
+        summary = "Fire once, `after_secs` seconds after the world loads.",
         move |after_secs: i64, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -163,8 +188,13 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
     // 5. OnHailed { entity_name }
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_hailed",
+        receiver = "",
+        category = "trigger",
+        params = ["entity", "handler"],
+        summary = "Fire when the named entity is hailed over comms.",
         move |entity: ImmutableString, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -178,8 +208,13 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
     // 6. OnFlagSet { name }
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_flag_set",
+        receiver = "",
+        category = "trigger",
+        params = ["name", "handler"],
+        summary = "Fire when the named flag transitions to set.",
         move |name: ImmutableString, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -193,8 +228,13 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
     // 7. OnFlagCleared { name }
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_flag_cleared",
+        receiver = "",
+        category = "trigger",
+        params = ["name", "handler"],
+        summary = "Fire when the named flag transitions to cleared.",
         move |name: ImmutableString, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -208,14 +248,27 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
     // 8. OnWorldLoaded (no condition params)
     let s = state.clone();
-    engine.register_fn("on_world_loaded", move |handler: ImmutableString| {
-        push_trigger(&s, TriggerCondition::OnWorldLoaded, &handler)
-    });
+    host_fn!(
+        engine,
+        "on_world_loaded",
+        receiver = "",
+        category = "trigger",
+        params = ["handler"],
+        summary = "Fire once when this world finishes loading.",
+        move |handler: ImmutableString| {
+            push_trigger(&s, TriggerCondition::OnWorldLoaded, &handler)
+        },
+    );
 
     // 9. OnEnteredRegion { entity_name }
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_entered_region",
+        receiver = "",
+        category = "trigger",
+        params = ["entity", "handler"],
+        summary = "Fire when the named entity enters a region.",
         move |entity: ImmutableString, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -229,8 +282,13 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
     // 10. OnExitedRegion { entity_name }
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_exited_region",
+        receiver = "",
+        category = "trigger",
+        params = ["entity", "handler"],
+        summary = "Fire when the named entity exits a region.",
         move |entity: ImmutableString, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -244,8 +302,14 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
 
     // 11. OnWaypointReached { entity_name, waypoint } — any-waypoint form …
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_waypoint_reached",
+        receiver = "",
+        category = "trigger",
+        params = ["entity", "handler"],
+        summary = "Fire when the named entity reaches a waypoint. Optional middle \
+                  arg `waypoint` pins a specific anchor.",
         move |entity: ImmutableString, handler: ImmutableString| {
             push_trigger(
                 &s,
@@ -282,8 +346,14 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
     // Range validation mirrors the declarative front-end's, and a rejection is a
     // load-time finding exactly as a bad `threshold = …` fails the world parse.
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on_hull_below",
+        receiver = "",
+        category = "trigger",
+        params = ["entity", "threshold", "handler"],
+        summary = "Fire when the named entity's hull fraction crosses DOWN through \
+                  `threshold`, a fraction in (0, 1] written `flt(\"0.75\")`.",
         move |entity: ImmutableString,
               threshold: RealLit,
               handler: ImmutableString|
@@ -324,8 +394,15 @@ pub fn register_trigger_builders(engine: &mut Engine, state: Arc<Mutex<BuilderSt
     // uses, and refused the same bounded-history atoms, so the two front-ends
     // build the identical `Predicate`.
     let s = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "when",
+        receiver = "trigger",
+        category = "trigger",
+        params = ["predicate"],
+        summary = "Gate the registration just authored on a flag predicate: \
+                  `on_all_destroyed(g, h).when(\"counter(x) >= 8\")`. A false \
+                  reading suppresses the firing WITHOUT consuming the trigger.",
         move |handle: &mut TriggerHandle,
               predicate: ImmutableString|
               -> Result<(), Box<EvalAltResult>> {

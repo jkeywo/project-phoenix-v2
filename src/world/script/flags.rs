@@ -60,11 +60,12 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use rhai::{Engine, ImmutableString};
+use rhai::ImmutableString;
 
 use crate::world::dispatch::{ActionCmd, FlagMutation};
 use crate::world::flags::FlagStore;
 use crate::world::script::effects::EffectSink;
+use crate::world::script::registry::{host_fn, HostRegistry};
 
 /// The per-call flag view: a snapshot of the live store plus a scratch overlay
 /// giving read-after-write.
@@ -161,15 +162,20 @@ impl Flags {
 /// The indexer serves reads (`flags.name` / `flags["name"]`) and absolute writes
 /// (`flags.name = v`); `flags.increment(name, by)` is the composable-increment
 /// verb (issue #981 hazard 1).
-pub fn register_flags(engine: &mut Engine) {
+pub(crate) fn register_flags(engine: &mut HostRegistry) {
     engine.register_type_with_name::<Flags>("Flags");
     engine
         .register_indexer_get(|flags: &mut Flags, key: ImmutableString| -> i64 { flags.get(&key) });
     engine.register_indexer_set(|flags: &mut Flags, key: ImmutableString, value: i64| {
         flags.set(&key, value);
     });
-    engine.register_fn(
+    host_fn!(
+        engine,
         "increment",
+        receiver = "flags",
+        category = "flag",
+        params = ["name", "by"],
+        summary = "Composably add `by` to a counter flag. Use over `flags.x += n`.",
         |flags: &mut Flags, name: ImmutableString, by: i64| {
             flags.increment(&name, by);
         },

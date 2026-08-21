@@ -28,6 +28,7 @@ use crate::dossier::evidence::EvidenceLog;
 use crate::world::commitments::CommitmentLedger;
 use crate::world::deadlines::DeadlineTable;
 use crate::world::flags::FlagStore;
+use crate::world::script::authoring::HostFn;
 use crate::world::script::commitments::{register_commitments, Commitments};
 use crate::world::script::deadlines::{register_deadlines, Deadlines};
 use crate::world::script::dossier::{register_dossier, Dossier};
@@ -35,6 +36,7 @@ use crate::world::script::effects::{
     register_effects, register_real_lit, BufferedEffect, EffectSink,
 };
 use crate::world::script::flags::{register_flags, Flags};
+use crate::world::script::registry::{host_fn, HostRegistry};
 use crate::world::script::schedule::{
     register_scheduling, CallEffects, SchedClock, ScheduleSink, TickBudget,
 };
@@ -136,14 +138,32 @@ pub struct BuilderState {
 /// `state`.
 pub fn loading_engine(state: Arc<Mutex<BuilderState>>) -> Engine {
     init_hashing_seed();
-    let mut engine = vellum_script::sandbox();
+    let mut engine = HostRegistry::new(vellum_script::sandbox());
     engine.set_max_operations(MAX_OPS_PER_CALL);
+    register_loading_vocabulary(&mut engine, state);
+    engine.into_engine()
+}
 
+/// Register the builder vocabulary against `state` on a loading registry.
+///
+/// Factored out of [`loading_engine`] so the descriptor harvest
+/// ([`collect_host_fn_descriptors`]) runs the *same* registration the real
+/// engine does — the editor's autocomplete list is derived from these
+/// [`host_fn!`] sites, not from a second hand-maintained copy (issue #1238).
+pub(crate) fn register_loading_vocabulary(
+    engine: &mut HostRegistry,
+    state: Arc<Mutex<BuilderState>>,
+) {
     // `on("event", "handler")` — records that `handler` handles `event`,
     // attributed to the unit currently running.
     let on_state = state.clone();
-    engine.register_fn(
+    host_fn!(
+        engine,
         "on",
+        receiver = "",
+        category = "register",
+        params = ["event", "handler"],
+        summary = "Register a named handler fn for a generic event string.",
         move |event: rhai::ImmutableString, handler: rhai::ImmutableString| {
             let mut s = on_state.lock().expect("builder state lock");
             let source_path = s.current_path.clone();
@@ -158,34 +178,65 @@ pub fn loading_engine(state: Arc<Mutex<BuilderState>>) -> Engine {
     // The fractional-leaf marker (issue #984). Needed HERE as well as on the
     // runtime engine because `on_hull_below(entity, flt("0.75"), handler)` is a
     // top-level registration, and a unit's top level only ever runs on this one.
-    register_real_lit(&mut engine);
+    // Not editor-exposed, so a bare registration with no descriptor.
+    register_real_lit(engine.engine_mut());
 
     // The typed trigger-builder vocabulary (issue #980, M2): one registration fn
     // per `TriggerCondition` variant, each building a `Trigger` into `state`.
-    super::triggers::register_trigger_builders(&mut engine, state.clone());
+    super::triggers::register_trigger_builders(engine, state.clone());
 
     // `on_deadline("id", "handler")` (issue #1024): names the fn a `[[deadline]]`
     // block runs when it expires, attributed to the unit that declared it.
-    super::deadlines::register_deadline_builders(&mut engine, state);
-
-    engine
+    super::deadlines::register_deadline_builders(engine, state);
 }
 
 /// Build the runtime engine with the full runtime vocabulary.
 pub fn runtime_engine() -> Engine {
     init_hashing_seed();
-    let mut engine = vellum_script::quiet_sandbox();
+    let mut engine = HostRegistry::new(vellum_script::quiet_sandbox());
     engine.set_max_operations(MAX_OPS_PER_CALL);
-    register_flags(&mut engine);
-    register_effects(&mut engine);
-    register_scheduling(&mut engine);
+    register_runtime_vocabulary(&mut engine);
+    engine.into_engine()
+}
+
+/// Register the full runtime vocabulary on a runtime registry.
+///
+/// Factored out of [`runtime_engine`] for [`register_loading_vocabulary`]'s
+/// reason: the descriptor harvest reuses it, so the editor list stays in step
+/// with what the runtime engine actually resolves (issue #1238).
+pub(crate) fn register_runtime_vocabulary(engine: &mut HostRegistry) {
+    register_flags(engine);
+    register_effects(engine);
+    register_scheduling(engine);
     // The `deadlines` read/write vocabulary (issue #1024).
-    register_deadlines(&mut engine);
+    register_deadlines(engine);
     // The `commitments` read/write vocabulary (issue #1029).
-    register_commitments(&mut engine);
+    register_commitments(engine);
     // The `dossier` write vocabulary (issue #1031).
-    register_dossier(&mut engine);
-    engine
+    register_dossier(engine);
+}
+
+/// Collect the editor host-fn descriptors by running the SAME registration the
+/// two engine builders run and taking the descriptors it emitted (issue #1238).
+///
+/// This is what makes [`authoring::host_fns`](super::authoring::host_fns) a
+/// DERIVED list rather than a hand-maintained mirror: every descriptor comes
+/// from the `host_fn!` site that registers its verb, so a descriptor cannot name
+/// a verb the engine never registered (a phantom), and an exposed verb cannot be
+/// registered without being described. The throwaway engines are discarded; the
+/// loading vocabulary's descriptors come first, then the runtime vocabulary's,
+/// grouped as the two engines register them.
+pub(crate) fn collect_host_fn_descriptors() -> Vec<HostFn> {
+    let state = Arc::new(Mutex::new(BuilderState::default()));
+    let mut loading = HostRegistry::new(vellum_script::sandbox());
+    register_loading_vocabulary(&mut loading, state);
+
+    let mut runtime = HostRegistry::new(vellum_script::quiet_sandbox());
+    register_runtime_vocabulary(&mut runtime);
+
+    let mut descriptors = loading.into_descriptors();
+    descriptors.extend(runtime.into_descriptors());
+    descriptors
 }
 
 /// The runtime script host: owns the runtime engine and runs retained functions.

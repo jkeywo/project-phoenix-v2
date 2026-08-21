@@ -114,11 +114,12 @@
 
 use std::sync::Arc;
 
-use rhai::{Engine, EvalAltResult, Map};
+use rhai::{EvalAltResult, Map};
 
 use crate::dossier::evidence::{EvidenceLog, EvidenceProvenance};
 use crate::world::dispatch::ActionCmd;
 use crate::world::script::effects::{map_str, raise, EffectSink};
+use crate::world::script::registry::{host_fn, HostRegistry};
 
 /// The `dossier` custom type handed to a script call.
 ///
@@ -229,10 +230,20 @@ impl Dossier {
 /// `ctx.commitments.record(…)`: the fields are named at the call site, which is
 /// what keeps `subject` and `text` from being silently swapped by an author who
 /// is reading their own scenario rather than this file.
-pub fn register_dossier(engine: &mut Engine) {
+pub(crate) fn register_dossier(engine: &mut HostRegistry) {
     engine.register_type_with_name::<Dossier>("Dossier");
-    engine.register_fn(
+    host_fn!(
+        engine,
         "append",
+        receiver = "dossier",
+        category = "effect",
+        params = ["spec"],
+        summary = "Write one finding onto a subject's dossier: \
+                  `#{ subject, text, provenance }`, where `subject` is an \
+                  `[[entity]] id`, `text` is a strings.csv id and `provenance` is \
+                  one of scan / dialogue / records / briefing. Appending the same \
+                  finding twice keeps the first stamp; an unknown subject is a \
+                  warned no-op.",
         |d: &mut Dossier, spec: Map| -> Result<(), Box<EvalAltResult>> { d.append(&spec) },
     );
     // The read (issue #1036), a map for `append`'s reason: the one required key

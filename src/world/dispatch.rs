@@ -1238,6 +1238,7 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
 mod tests {
     use super::*;
     use crate::faction::FactionConfig;
+    use crate::world::load::MemoryTemplateLoader;
 
     /// Deterministic stand-in for `entity_loader::assign_uuid()`.
     const STUB_UUID: &str = "stub-uuid-0001";
@@ -1248,26 +1249,6 @@ mod tests {
 
     /// Template path the `spawn()` helper names.
     const DESTROYER_TEMPLATE: &str = "assets/entities/destroyer.toml";
-
-    /// Hand-written `TemplateLoader` fake serving `EntityConfig`s out of a
-    /// map. The dispatch tests need their own local fake (test modules don't
-    /// share the one in `entities::loader::tests`). The `Default` — an empty
-    /// map, i.e. every template missing — is what non-spawn tests carry.
-    #[derive(Default)]
-    struct FakeTemplateLoader {
-        templates: HashMap<String, EntityConfig>,
-    }
-
-    impl TemplateLoader for FakeTemplateLoader {
-        fn load_template(&self, path: &str) -> Option<EntityConfig> {
-            self.templates.get(path).cloned()
-        }
-
-        /// A fixture map holds everything it will ever hold.
-        fn absence_is_final(&self) -> bool {
-            true
-        }
-    }
 
     /// A minimal template config with a display name, so tests can observe
     /// the trigger `name` overwriting it (or not, for an empty trigger name).
@@ -1309,7 +1290,7 @@ mod tests {
         layers: HashMap<String, LayerView>,
         base_anchors: HashMap<String, [f32; 3]>,
         factions: Option<FactionRegistry>,
-        loader: FakeTemplateLoader,
+        loader: MemoryTemplateLoader,
     }
 
     impl Fixture {
@@ -1339,9 +1320,9 @@ mod tests {
         /// Pre-load the destroyer template that `spawn()` names, so the
         /// spawn arm's template load succeeds.
         fn with_destroyer(mut self) -> Self {
-            self.loader
-                .templates
-                .insert(DESTROYER_TEMPLATE.to_string(), destroyer_template());
+            self.loader = self
+                .loader
+                .with_template(DESTROYER_TEMPLATE, destroyer_template());
             self
         }
     }

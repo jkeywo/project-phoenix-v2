@@ -1655,6 +1655,7 @@ pub fn validate_composition_with_fragments(
 mod tests {
     use super::*;
     use crate::world::config::parse_world;
+    use crate::world::load::MemoryTemplateLoader;
 
     fn cfg(toml: &str) -> WorldConfig {
         parse_world(toml).expect("fixture parses")
@@ -1783,31 +1784,11 @@ name = "outpost"
 
     /// Entity-template source for the doctrine-anchor fixtures: a fixed
     /// path → TOML map, so they never reach the filesystem or the process-wide
-    /// config cache.
-    struct FakeTemplates(HashMap<String, String>);
-
-    impl FakeTemplates {
-        fn new(entries: &[(&str, &str)]) -> Self {
-            FakeTemplates(
-                entries
-                    .iter()
-                    .map(|(p, t)| (p.to_string(), t.to_string()))
-                    .collect(),
-            )
-        }
-    }
-
-    impl TemplateLoader for FakeTemplates {
-        fn load_template(&self, path: &str) -> Option<crate::entity_config::EntityConfig> {
-            crate::entity_config::EntityConfig::from_toml(self.0.get(path)?).ok()
-        }
-
-        /// A fixture map holds everything it will ever hold, so it is
-        /// authoritative about absence (issue #973) — the same answer the
-        /// `HashMap` [`FragmentSource`] gives one layer down.
-        fn absence_is_final(&self) -> bool {
-            true
-        }
+    /// config cache. Authoritative about absence (issue #973) — the map holds
+    /// everything it will ever hold, the same answer the `HashMap`
+    /// [`FragmentSource`] gives one layer down.
+    fn fake_templates(entries: &[(&str, &str)]) -> MemoryTemplateLoader {
+        MemoryTemplateLoader::from_toml(entries.iter().copied())
     }
 
     /// A loader that has DELIVERED its templates but is still filling — the
@@ -1818,16 +1799,11 @@ name = "outpost"
     /// [`validate_template_resolution_in`] apart: absence is *not* final here,
     /// so the presence check stays silent, but the merge check must not, since
     /// a template in hand decides its own merge on any target.
-    struct StillFilling(FakeTemplates);
-
-    impl TemplateLoader for StillFilling {
-        fn load_template(&self, path: &str) -> Option<crate::entity_config::EntityConfig> {
-            self.0.load_template(path)
-        }
-
-        fn absence_is_final(&self) -> bool {
-            false
-        }
+    fn still_filling(entries: &[(&str, &str)]) -> MemoryTemplateLoader {
+        entries.iter().fold(
+            MemoryTemplateLoader::still_filling(),
+            |loader, (path, toml)| loader.with_toml(*path, toml),
+        )
     }
 
     /// A loader that can serve nothing AND knows it cannot: the browser's
@@ -1837,16 +1813,8 @@ name = "outpost"
     /// worlds name templates no source in the test holds. Before #973 every
     /// loader was implicitly blind in this way, which is why those fixtures
     /// were written with paths that resolve nowhere.
-    struct BlindTemplates;
-
-    impl TemplateLoader for BlindTemplates {
-        fn load_template(&self, _path: &str) -> Option<crate::entity_config::EntityConfig> {
-            None
-        }
-
-        fn absence_is_final(&self) -> bool {
-            false
-        }
+    fn blind_templates() -> MemoryTemplateLoader {
+        MemoryTemplateLoader::blind()
     }
 
     /// The ship-level AI declarations an AI-bearing hull owes, appended to the
@@ -1896,15 +1864,16 @@ directive_loop    = true
 base_priority     = 20.0
 "#;
 
-    fn patroller_templates() -> FakeTemplates {
-        FakeTemplates::new(&[(
-            "assets/entities/patroller.toml",
-            &format!(
-                "{PATROLLER}
-{CAPTAIN_AI}
-{BASELINE_AI}"
-            ),
-        )])
+    /// The patroller hull's authored `[behaviour]` document, shared by
+    /// [`patroller_templates`] (authoritative) and the
+    /// `an_unmergeable_override_is_reported_even_where_absence_is_not_final`
+    /// test below (same content, non-final absence).
+    fn patroller_toml() -> String {
+        format!("{PATROLLER}\n{CAPTAIN_AI}\n{BASELINE_AI}")
+    }
+
+    fn patroller_templates() -> MemoryTemplateLoader {
+        fake_templates(&[("assets/entities/patroller.toml", &patroller_toml())])
     }
 
     #[test]
@@ -2130,7 +2099,7 @@ anchor = "depot_north"
     /// whole mission with no diagnostic anywhere.
     #[test]
     fn a_civilian_assigned_an_undeclared_route_is_rejected() {
-        let templates = FakeTemplates::new(&[(
+        let templates = fake_templates(&[(
             "assets/entities/hauler.toml",
             &format!(
                 "{PATROLLER}
@@ -2576,7 +2545,7 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
     /// A template the fragment source cannot see is NOT a composition error —
     /// a validator must not manufacture one out of its own blindness.
     ///
-    /// The template loader is [`BlindTemplates`] rather than the fixture map
+    /// The template loader is [`blind_templates`] rather than the fixture map
     /// so the claim stays about *composition*: an authoritative loader would
     /// (correctly, since #973) report the same world as
     /// `unresolvable-template`, and this test would then be asserting two
@@ -2588,7 +2557,7 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
         let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
         let source = fragments(&[]);
 
-        let findings = validate_composition_with_fragments(&src, &[], &BlindTemplates, &source);
+        let findings = validate_composition_with_fragments(&src, &[], &blind_templates(), &source);
         assert!(!findings.iter().any(|f| f.category.starts_with("include-")));
         assert!(!has_error(&findings), "{findings:?}");
     }
@@ -2608,7 +2577,7 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
 
         // Blind loader for the same reason as the test above: `good.toml` is a
         // fragment-source fixture, not a template the loader holds.
-        let findings = validate_composition_with_fragments(&src, &[], &BlindTemplates, &source);
+        let findings = validate_composition_with_fragments(&src, &[], &blind_templates(), &source);
         assert!(!findings.iter().any(|f| f.category.starts_with("include-")));
         assert!(!has_error(&findings), "{findings:?}");
     }
@@ -2675,9 +2644,9 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
         let config = cfg(&world_toml);
         let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
 
-        assert!(!BlindTemplates.absence_is_final(), "precondition");
+        assert!(!blind_templates().absence_is_final(), "precondition");
 
-        let findings = validate_composition_with(&src, &[], &BlindTemplates);
+        let findings = validate_composition_with(&src, &[], &blind_templates());
         assert!(
             !findings
                 .iter()
@@ -2738,7 +2707,7 @@ name = "ghost"
         let findings = activation_findings(
             &config,
             &crate::entity_includes::HostFragmentSource,
-            &BlindTemplates,
+            &blind_templates(),
         );
         assert!(
             !findings
@@ -2838,7 +2807,7 @@ name = "ghost"
         let config = cfg(&world_toml);
         let src = WorldSource::new("assets/worlds/w.toml", &world_toml, &config);
 
-        let loader = StillFilling(patroller_templates());
+        let loader = still_filling(&[("assets/entities/patroller.toml", &patroller_toml())]);
         assert!(!loader.absence_is_final(), "precondition");
         assert!(
             loader

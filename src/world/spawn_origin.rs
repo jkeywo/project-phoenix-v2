@@ -159,24 +159,9 @@ impl SpawnOrigin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use crate::world::load::MemoryTemplateLoader;
 
-    #[derive(Default)]
-    struct FakeLoader {
-        templates: HashMap<String, EntityConfig>,
-    }
-
-    impl TemplateLoader for FakeLoader {
-        fn load_template(&self, path: &str) -> Option<EntityConfig> {
-            self.templates.get(path).cloned()
-        }
-        fn absence_is_final(&self) -> bool {
-            true
-        }
-    }
-
-    fn loader() -> FakeLoader {
-        let mut templates = HashMap::new();
+    fn loader() -> MemoryTemplateLoader {
         // `mass` is set explicitly to what a real `from_toml` parse of an
         // unauthored-mass template would produce (issue #1154): the bare
         // `#[derive(Default)]` on `EntityConfig` gives `mass` its type
@@ -186,16 +171,15 @@ mod tests {
         // would fail `validate_mass` the moment `resolve()` round-trips it
         // through `apply_overrides`, unlike any template a real loader would
         // ever hand back.
-        templates.insert(
-            "harrow.toml".to_string(),
+        MemoryTemplateLoader::new([(
+            "harrow.toml",
             EntityConfig {
                 name: Some("Harrow Destroyer".to_string()),
                 tags: vec!["npc".to_string()],
                 mass: crate::entity_config::DEFAULT_ENTITY_MASS,
                 ..Default::default()
             },
-        );
-        FakeLoader { templates }
+        )])
     }
 
     fn origin() -> SpawnOrigin {

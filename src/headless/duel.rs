@@ -591,6 +591,7 @@ impl crate::entity_loader::TemplateLoader for DuelTemplateLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::load::MemoryTemplateLoader;
 
     /// A `duel.toml`-shaped world in script form: the full `[anchors]` staging
     /// block, the authored `spawn_slot` body and `on_world_loaded` prelude, the
@@ -656,15 +657,8 @@ fn spawn_side_a_2(ctx) { spawn_slot(ctx, "side_a_2", "assets/entities/placeholde
     /// A loader that finds nothing: the fixture's hulls do not exist on disk,
     /// and a template that cannot be loaded contributes no anchors — so every
     /// test but the doctrine ones below is unaffected by the #888 guard.
-    struct NoTemplates;
-
-    impl crate::entity_loader::TemplateLoader for NoTemplates {
-        fn load_template(&self, _path: &str) -> Option<crate::entity_config::EntityConfig> {
-            None
-        }
-        fn absence_is_final(&self) -> bool {
-            true
-        }
+    fn no_templates() -> MemoryTemplateLoader {
+        MemoryTemplateLoader::authoritative_empty()
     }
 
     /// A loader over authored `[behaviour]` TOML, keyed by template path — for
@@ -675,19 +669,19 @@ fn spawn_side_a_2(ctx) { spawn_slot(ctx, "side_a_2", "assets/entities/placeholde
     /// `EntityConfig::from_toml`, whose strict AI-declaration gate (PRD #774
     /// US7) would demand a fully crewed hull — fifteen policy blocks — from a
     /// fixture that is only ever asked about its doctrine.
-    struct FakeTemplates(&'static [(&'static str, &'static str)]);
-
-    impl crate::entity_loader::TemplateLoader for FakeTemplates {
-        fn load_template(&self, path: &str) -> Option<crate::entity_config::EntityConfig> {
-            let (_, behaviour) = self.0.iter().find(|(p, _)| *p == path)?;
-            Some(crate::entity_config::EntityConfig {
-                behaviour: Some(toml::from_str(behaviour).expect("fixture parses")),
-                ..Default::default()
-            })
-        }
-        fn absence_is_final(&self) -> bool {
-            true
-        }
+    fn fake_templates(entries: &'static [(&'static str, &'static str)]) -> MemoryTemplateLoader {
+        entries.iter().fold(
+            MemoryTemplateLoader::authoritative_empty(),
+            |loader, (path, behaviour)| {
+                loader.with_template(
+                    *path,
+                    crate::entity_config::EntityConfig {
+                        behaviour: Some(toml::from_str(behaviour).expect("fixture parses")),
+                        ..Default::default()
+                    },
+                )
+            },
+        )
     }
 
     /// A fake resolver: `<name>` → `assets/entities/<name>.toml`, and a
@@ -776,7 +770,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect_err("a marker-free world must be rejected");
         assert_eq!(err, DuelError::NoDuelSlots);
@@ -792,8 +786,14 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
     fn a_script_free_world_is_rejected() {
         let world = toml::from_str("[global]\nseed = 1\n").expect("parses");
         assert_eq!(
-            apply_duel_sides(world, &["cruiser".into()], &[], &fake_resolve, &NoTemplates)
-                .unwrap_err(),
+            apply_duel_sides(
+                world,
+                &["cruiser".into()],
+                &[],
+                &fake_resolve,
+                &no_templates()
+            )
+            .unwrap_err(),
             DuelError::NoDuelSlots
         );
     }
@@ -804,8 +804,14 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
     fn a_sibling_script_file_is_rejected() {
         let world = toml::from_str("script = \"duel.rhai\"\n").expect("parses");
         assert_eq!(
-            apply_duel_sides(world, &["cruiser".into()], &[], &fake_resolve, &NoTemplates)
-                .unwrap_err(),
+            apply_duel_sides(
+                world,
+                &["cruiser".into()],
+                &[],
+                &fake_resolve,
+                &no_templates()
+            )
+            .unwrap_err(),
             DuelError::NoDuelSlots
         );
     }
@@ -817,7 +823,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into(), "courier".into()], // player + 1 escort
             &["destroyer".into(), "battleship".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies");
 
@@ -857,7 +863,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies");
         assert_eq!(
@@ -933,7 +939,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             "d".into(),
             "e".into(),
         ];
-        let world = apply_duel_sides(fixture(), &five, &five, &fake_resolve, &NoTemplates)
+        let world = apply_duel_sides(fixture(), &five, &five, &fake_resolve, &no_templates())
             .expect("5v5 applies");
         assert_eq!(
             registrations(&world),
@@ -960,7 +966,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies");
         let names: Vec<String> = drivers(&world).into_iter().map(|(n, ..)| n).collect();
@@ -979,7 +985,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &[],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies");
         assert!(
@@ -1003,7 +1009,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             "d".into(),
             "e".into(),
         ];
-        let world = apply_duel_sides(fixture(), &five, &five, &fake_resolve, &NoTemplates)
+        let world = apply_duel_sides(fixture(), &five, &five, &fake_resolve, &no_templates())
             .expect("5v5 applies");
         let names: Vec<String> = drivers(&world).into_iter().map(|(n, ..)| n).collect();
         assert_eq!(
@@ -1030,7 +1036,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies");
         let src = source(&world);
@@ -1055,7 +1061,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies");
         let twice = apply_duel_sides(
@@ -1063,7 +1069,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies again");
         assert_eq!(once, twice);
@@ -1073,15 +1079,21 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
     fn rejects_a_side_longer_than_five() {
         let six: Vec<String> = (0..6).map(|i| i.to_string()).collect();
         assert_eq!(
-            apply_duel_sides(fixture(), &six, &[], &fake_resolve, &NoTemplates).unwrap_err(),
+            apply_duel_sides(fixture(), &six, &[], &fake_resolve, &no_templates()).unwrap_err(),
             DuelError::TooManyShips {
                 side: "a",
                 count: 6
             }
         );
         assert_eq!(
-            apply_duel_sides(fixture(), &["x".into()], &six, &fake_resolve, &NoTemplates)
-                .unwrap_err(),
+            apply_duel_sides(
+                fixture(),
+                &["x".into()],
+                &six,
+                &fake_resolve,
+                &no_templates()
+            )
+            .unwrap_err(),
             DuelError::TooManyShips {
                 side: "b",
                 count: 6
@@ -1096,7 +1108,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["unknown".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .unwrap_err();
         assert!(matches!(err, DuelError::Unresolved { name, .. } if name == "unknown"));
@@ -1113,7 +1125,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into(), "battleship".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect_err("an undeclared slot anchor must be rejected");
         assert_eq!(
@@ -1138,7 +1150,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &[r"assets\entities\x.toml".into()],
             &resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies");
         assert!(
@@ -1173,7 +1185,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["a\nb.toml".into()],
             &resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies");
         let gen = generated(&world);
@@ -1199,7 +1211,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect_err("a world without spawn_slot must be rejected");
         assert_eq!(
@@ -1226,7 +1238,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect_err("a filled side B needs the victory handler");
         assert_eq!(
@@ -1243,7 +1255,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &[],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("an empty side B needs no victory handler");
     }
@@ -1262,7 +1274,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect_err("two markers must be rejected");
         assert_eq!(
@@ -1289,7 +1301,7 @@ fn on_load(ctx) { ctx.effects.add_faction_enemy("Federation", "Harrow"); }
                 &["cruiser".into()],
                 &["destroyer".into()],
                 &fake_resolve,
-                &NoTemplates,
+                &no_templates(),
             )
             .unwrap_err(),
             DuelError::NoDuelSlots
@@ -1314,7 +1326,7 @@ setup = "fn spawn_slot(ctx, n, t, f, g) {}\nfn on_side_b_destroyed(ctx) {}\n// d
             &["cruiser".into()],
             &["destroyer".into()],
             &fake_resolve,
-            &NoTemplates,
+            &no_templates(),
         )
         .expect("applies");
         assert!(
@@ -1358,7 +1370,7 @@ base_priority = 20.0
             &["cruiser".into()],
             &["warhawk".into()],
             &fake_resolve,
-            &FakeTemplates(ROUTED_HULL),
+            &fake_templates(ROUTED_HULL),
         )
         .expect_err("an undeclared doctrine anchor must be rejected");
         assert_eq!(
@@ -1389,7 +1401,7 @@ base_priority = 20.0
             &["cruiser".into()],
             &["warhawk".into()],
             &fake_resolve,
-            &FakeTemplates(ROUTED_HULL),
+            &fake_templates(ROUTED_HULL),
         )
         .expect("a declared route applies");
     }

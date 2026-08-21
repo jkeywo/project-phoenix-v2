@@ -787,6 +787,7 @@ fn validate_pack_scripts(files: &BTreeMap<String, String>) -> Vec<WorldFinding> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::load::MemoryTemplateLoader;
 
     // ── Store ZIP writer (test-only twin of createStoreZip) ──────────────────
 
@@ -897,28 +898,20 @@ mod tests {
         None
     }
 
-    /// A host that serves no parsed entity templates at all.
+    /// A host that serves no parsed entity templates at all, and is NOT
+    /// authoritative about that absence (issue #973). A loader that serves
+    /// nothing knows nothing; claiming authority here would have it reject
+    /// every hull a pack carries as `unresolvable-template`, which is
+    /// precisely the blindness that check is gated to avoid. See the note on
+    /// [`validate_mod_pack`].
     ///
     /// The reference checks that consult a `TemplateLoader` (doctrine anchors)
     /// read it as "unknown template", which is what these packs' worlds mean:
     /// they declare no entities. Injecting it — rather than letting the module
     /// reach for the host loader — is what keeps these tests independent of the
     /// filesystem and the wasm thread-locals.
-    struct NoTemplates;
-
-    impl TemplateLoader for NoTemplates {
-        fn load_template(&self, _path: &str) -> Option<crate::entity_config::EntityConfig> {
-            None
-        }
-
-        /// NOT authoritative (issue #973). A loader that serves nothing knows
-        /// nothing; claiming authority here would have it reject every hull a
-        /// pack carries as `unresolvable-template`, which is precisely the
-        /// blindness that check is gated to avoid. See the note on
-        /// [`validate_mod_pack`].
-        fn absence_is_final(&self) -> bool {
-            false
-        }
+    fn no_templates() -> MemoryTemplateLoader {
+        MemoryTemplateLoader::blind()
     }
 
     // ── store ZIP reader ─────────────────────────────────────────────────────
@@ -1055,7 +1048,7 @@ mod tests {
                 "fn on_alarm(ctx) { let n = 2 + 2; n }\n",
             ),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
         // The script rides the overlay alongside the world.
         assert!(result.files.contains_key("assets/worlds/s.rhai"));
@@ -1068,7 +1061,7 @@ mod tests {
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
             ("assets/worlds/broken.rhai", "fn oops(ctx) { let x = ; }\n"),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(
             has_category(&result, "unparseable-script"),
@@ -1084,7 +1077,7 @@ mod tests {
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
             ("assets/worlds/clock.rhai", "let now = timestamp();\n"),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(
             has_category(&result, "denied-script-capability"),
@@ -1100,7 +1093,7 @@ mod tests {
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
             ("assets/worlds/evil.rhai", "let x = eval(\"1 + 1\");\n"),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(
             has_category(&result, "denied-script-capability"),
@@ -1116,7 +1109,7 @@ mod tests {
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
             ("assets/worlds/reach.rhai", "import \"secret\" as s;\n"),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(
             has_category(&result, "denied-script-capability"),
@@ -1135,7 +1128,7 @@ mod tests {
             ("scenarios.toml", &manifest_for("s", "assets/worlds/s.toml")),
             ("assets/worlds/s.toml", world),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(
             has_category(&result, "denied-script-capability"),
@@ -1152,7 +1145,7 @@ mod tests {
             ("scenarios.toml", &manifest_for("s", "assets/worlds/s.toml")),
             ("assets/worlds/s.toml", world),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
     }
 
@@ -1167,7 +1160,7 @@ mod tests {
             ),
             ("assets/worlds/modx.toml", &simple_world("world.modx.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(
             result.is_accepted(),
             "unexpected findings: {:?}",
@@ -1189,7 +1182,7 @@ mod tests {
         // nothing (AC1).
         let mut zip = create_store_zip(&[("scenarios.toml", "manifest")]);
         zip.truncate(20); // cut off inside the first local header
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(result.files.is_empty());
         assert_eq!(result.findings[0].category, "invalid-archive");
@@ -1204,7 +1197,7 @@ mod tests {
             b"not a zip at all",
             &base_identity(),
             no_base,
-            &NoTemplates,
+            &no_templates(),
             &[],
         );
         assert!(!result.is_accepted());
@@ -1218,7 +1211,7 @@ mod tests {
     #[test]
     fn missing_manifest_rejects_whole_pack() {
         let zip = create_store_zip(&[("assets/worlds/x.toml", &simple_world("t"))]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -1234,7 +1227,7 @@ mod tests {
             ("assets/worlds/m.toml", &simple_world("t")),
             ("assets/secret/keys.toml", "danger = true"),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -1249,7 +1242,7 @@ mod tests {
             "scenarios.toml",
             &manifest_for("ghost", "assets/worlds/ghost.toml"),
         )]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -1264,7 +1257,7 @@ mod tests {
             ("assets/worlds/m.toml", &simple_world("t")),
             ("assets/entities/broken.toml", "not valid ["),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(result
             .findings
@@ -1301,7 +1294,7 @@ entity = "raider"
             ),
             ("assets/worlds/bad.toml", bad_world),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         let finding = result
             .findings
@@ -1330,7 +1323,7 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), base, &no_templates(), &[]);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
     }
 
@@ -1387,7 +1380,7 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), base, &no_templates(), &[]);
         assert!(
             result.is_accepted(),
             "a pack's hull must compose against the fragment the pack itself \
@@ -1414,7 +1407,7 @@ entity = "raider"
                 "includes = [\"pack_core.toml\"]\nname = \"Pack Hull\"\n",
             ),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted(), "findings: {:?}", result.findings);
         assert!(
             result
@@ -1452,7 +1445,7 @@ entity = "raider"
                 None
             }
         };
-        let result = validate_mod_pack(&zip, &base_identity(), base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), base, &no_templates(), &[]);
         assert!(result.is_accepted(), "findings: {:?}", result.findings);
     }
 
@@ -1466,16 +1459,8 @@ entity = "raider"
     /// it is the obvious thing to write and answers `true` on native. Every
     /// other fixture in this module answers `false`, which is why the dangerous
     /// arm went unexercised while the constraint lived in a doc comment.
-    struct AuthoritativeNoTemplates;
-
-    impl TemplateLoader for AuthoritativeNoTemplates {
-        fn load_template(&self, _path: &str) -> Option<crate::entity_config::EntityConfig> {
-            None
-        }
-
-        fn absence_is_final(&self) -> bool {
-            true
-        }
+    fn authoritative_no_templates() -> MemoryTemplateLoader {
+        MemoryTemplateLoader::authoritative_empty()
     }
 
     /// A pack's own hulls are served in front of the caller's loader, so an
@@ -1485,7 +1470,10 @@ entity = "raider"
     /// `unresolvable-template` per hull.
     #[test]
     fn a_pack_carrying_its_own_hull_is_accepted_by_an_authoritative_loader() {
-        assert!(AuthoritativeNoTemplates.absence_is_final(), "precondition");
+        assert!(
+            authoritative_no_templates().absence_is_final(),
+            "precondition"
+        );
         let zip = create_store_zip(&[
             (
                 "scenarios.toml",
@@ -1501,7 +1489,7 @@ entity = "raider"
             &zip,
             &base_identity(),
             no_base,
-            &AuthoritativeNoTemplates,
+            &authoritative_no_templates(),
             &[],
         );
         assert!(
@@ -1530,7 +1518,7 @@ entity = "raider"
             &zip,
             &base_identity(),
             no_base,
-            &AuthoritativeNoTemplates,
+            &authoritative_no_templates(),
             &[],
         );
         assert!(!result.is_accepted(), "findings: {:?}", result.findings);
@@ -1561,7 +1549,7 @@ entity = "raider"
             ),
             ("assets/worlds/m.toml", &simple_world("world.m.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "missing-pack-header"));
         assert!(result.files.is_empty());
@@ -1580,7 +1568,7 @@ entity = "raider"
             SUPPORTED_PACK_FORMAT + 1,
         );
         let zip = create_store_zip(&[("scenarios.toml", &manifest)]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "unsupported-pack-format"));
         // No wall of content errors: the missing world is never reached.
@@ -1609,7 +1597,7 @@ entity = "raider"
             ("scenarios.toml", &manifest),
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "invalid-pack-id"));
     }
@@ -1625,7 +1613,7 @@ entity = "raider"
             ("scenarios.toml", manifest),
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "pack-content-mismatch"));
     }
@@ -1644,7 +1632,7 @@ entity = "raider"
             ("scenarios.toml", &manifest),
             ("assets/worlds/s.toml", &simple_world("world.s.title")),
         ]);
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &[]);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "pack-content-mismatch"));
     }
@@ -1668,7 +1656,13 @@ entity = "raider"
     #[test]
     fn fixture_valid_v1_is_accepted() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/valid-v1.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(
             result.is_accepted(),
             "valid-v1.zip must be accepted: {:?}",
@@ -1679,7 +1673,13 @@ entity = "raider"
     #[test]
     fn fixture_format_too_new_is_rejected() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/format-too-new.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(!result.is_accepted());
         assert!(has_category(&result, "unsupported-pack-format"));
     }
@@ -1687,7 +1687,13 @@ entity = "raider"
     #[test]
     fn fixture_content_epoch_mismatch_is_rejected() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/content-epoch-mismatch.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(!result.is_accepted());
         assert!(has_category(&result, "pack-content-mismatch"));
     }
@@ -1698,7 +1704,13 @@ entity = "raider"
     #[test]
     fn fixture_script_valid_is_accepted() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/script-valid.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(
             result.is_accepted(),
             "script-valid.zip must be accepted: {:?}",
@@ -1711,7 +1723,13 @@ entity = "raider"
     #[test]
     fn fixture_script_denied_capability_is_rejected() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/script-denied-capability.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(!result.is_accepted());
         assert!(has_category(&result, "denied-script-capability"));
     }
@@ -1727,7 +1745,13 @@ entity = "raider"
     #[test]
     fn fixture_disallowed_path_is_rejected() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/disallowed-path.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(!result.is_accepted());
         assert!(
             has_category(&result, "disallowed-path"),
@@ -1745,7 +1769,13 @@ entity = "raider"
     #[test]
     fn fixture_corrupt_crc_is_rejected() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/corrupt-crc.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(!result.is_accepted());
         assert_eq!(
             result.findings[0].category, "invalid-archive",
@@ -1761,7 +1791,13 @@ entity = "raider"
     #[test]
     fn fixture_schema_invalid_world_is_rejected() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/schema-invalid-world.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(!result.is_accepted());
         assert!(
             has_category(&result, "unparseable-scenario-world"),
@@ -1775,7 +1811,13 @@ entity = "raider"
     #[test]
     fn fixture_unresolved_manifest_world_is_rejected() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/unresolved-manifest-world.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(!result.is_accepted());
         assert!(
             has_category(&result, "missing-scenario-world"),
@@ -1791,7 +1833,13 @@ entity = "raider"
     #[test]
     fn fixture_editor_round_trip_is_accepted() {
         let bytes = include_bytes!("../../tests/fixtures/mod-packs/editor-round-trip.zip");
-        let result = validate_mod_pack(bytes, &fixture_base_identity(), no_base, &NoTemplates, &[]);
+        let result = validate_mod_pack(
+            bytes,
+            &fixture_base_identity(),
+            no_base,
+            &no_templates(),
+            &[],
+        );
         assert!(
             result.is_accepted(),
             "editor-round-trip.zip must be accepted: {:?}",
@@ -1830,7 +1878,7 @@ entity = "raider"
             ("assets/worlds/modx.toml", &simple_world("world.modx.title")),
         ]);
         let active = [active_pack("test-pack", &[])];
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &active);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &active);
         assert!(!result.is_accepted());
         assert!(has_category(&result, "duplicate-pack-id"));
     }
@@ -1855,7 +1903,7 @@ entity = "raider"
                 "[global]\ntitle = \"world.other.title\"\n",
             )],
         )];
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &active);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &active);
         assert!(
             result.is_accepted(),
             "an overlap is a warning, not a rejection: {:?}",
@@ -1897,7 +1945,7 @@ entity = "raider"
             "base-layer",
             &[("assets/entities/layer_core.toml", "class = \"escort\"\n")],
         )];
-        let result = validate_mod_pack(&zip, &base_identity(), no_base, &NoTemplates, &active);
+        let result = validate_mod_pack(&zip, &base_identity(), no_base, &no_templates(), &active);
         assert!(
             result.is_accepted(),
             "a pack hull must compose against a fragment an earlier active pack \
@@ -1919,7 +1967,7 @@ entity = "raider"
             a_bytes,
             &fixture_base_identity(),
             no_base,
-            &NoTemplates,
+            &no_templates(),
             &[],
         );
         assert!(
@@ -1940,7 +1988,7 @@ entity = "raider"
             b_bytes,
             &fixture_base_identity(),
             no_base,
-            &NoTemplates,
+            &no_templates(),
             &[active_a],
         );
         assert!(

@@ -323,6 +323,7 @@ mod tests {
     use super::*;
     use crate::config_cache::ConfigCache;
     use crate::entity_config::EntityConfig;
+    use crate::world::load::MemoryTemplateLoader;
     use std::collections::HashMap;
 
     fn make_cache(path: &str, toml: &str) -> ConfigCache {
@@ -348,19 +349,11 @@ mod tests {
     /// (issue #973 review, F5). Using it rather than `WasmTemplateLoader` keeps
     /// these fixtures off the filesystem, which is what they were written
     /// against; using `resolve_entity_via` rather than a second resolver keeps
-    /// them pinning the function production actually calls.
-    struct NoHost;
-
-    impl TemplateLoader for NoHost {
-        fn load_template(&self, _path: &str) -> Option<EntityConfig> {
-            None
-        }
-
-        /// Irrelevant to `resolve_entity_via`, which never asks — pinned to the
-        /// browser's answer so nothing here can accidentally depend on it.
-        fn absence_is_final(&self) -> bool {
-            false
-        }
+    /// them pinning the function production actually calls. `absence_is_final`
+    /// is irrelevant to `resolve_entity_via`, which never asks — pinned to the
+    /// browser's `blind` answer so nothing here can accidentally depend on it.
+    fn no_host() -> MemoryTemplateLoader {
+        MemoryTemplateLoader::blind()
     }
 
     #[test]
@@ -370,7 +363,7 @@ mod tests {
             template_path: "assets/entities/missing.toml".to_string(),
             ..Default::default()
         };
-        let result = resolve_entity_via(&inst, &cache, &NoHost);
+        let result = resolve_entity_via(&inst, &cache, &no_host());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found in cache"));
     }
@@ -383,7 +376,7 @@ mod tests {
             overrides: None,
             ..Default::default()
         };
-        let config = resolve_entity_via(&inst, &cache, &NoHost).unwrap();
+        let config = resolve_entity_via(&inst, &cache, &no_host()).unwrap();
         assert_eq!(config.tags, vec!["asteroid"]);
     }
 
@@ -409,7 +402,7 @@ waypoint_arrival_radius = 99.0
             overrides: Some(override_value),
             ..Default::default()
         };
-        let config = resolve_entity_via(&inst, &cache, &NoHost).unwrap();
+        let config = resolve_entity_via(&inst, &cache, &no_host()).unwrap();
         let beh = config
             .behaviour
             .expect("raider must keep [behaviour] section");
@@ -451,7 +444,7 @@ overrides     = { behaviour = { waypoint_arrival_radius = 42.0 } }
             "overrides must round-trip through parse_world"
         );
 
-        let config = resolve_entity_via(inst, &cache, &NoHost).unwrap();
+        let config = resolve_entity_via(inst, &cache, &no_host()).unwrap();
         let beh = config
             .behaviour
             .expect("raider keeps behaviour section after merge");
@@ -506,7 +499,7 @@ base_priority = 80.0
             overrides: Some(override_value),
             ..Default::default()
         };
-        let config = resolve_entity_via(&inst, &cache, &NoHost).expect("override must resolve");
+        let config = resolve_entity_via(&inst, &cache, &no_host()).expect("override must resolve");
 
         // Faction scalar overridden.
         assert_eq!(config.faction, Some(harrow), "faction override must apply");
@@ -611,37 +604,16 @@ size_max = 2.0
         );
     }
 
-    /// A hand-written fake proves the trait is object-safe and injectable —
-    /// the entire reason this is a trait rather than a cfg-split free fn.
-    /// #715's dispatch context will hold exactly this `&dyn TemplateLoader`.
-    struct FakeTemplateLoader {
-        templates: HashMap<String, String>,
-    }
-
-    impl TemplateLoader for FakeTemplateLoader {
-        fn load_template(&self, path: &str) -> Option<EntityConfig> {
-            EntityConfig::from_toml(self.templates.get(path)?).ok()
-        }
-
-        /// A fixture map holds everything it will ever hold.
-        fn absence_is_final(&self) -> bool {
-            true
-        }
-    }
-
-    /// Stand-in for #715's applier: takes the loader as a trait object.
+    /// Stand-in for #715's applier: takes the loader as a trait object. Proves
+    /// the trait is object-safe and injectable — the entire reason this is a
+    /// trait rather than a cfg-split free fn.
     fn resolve_template_via(loader: &dyn TemplateLoader, path: &str) -> Option<EntityConfig> {
         loader.load_template(path)
     }
 
     #[test]
     fn dyn_template_loader_injection_resolves_via_fake() {
-        let mut templates = HashMap::new();
-        templates.insert(
-            "assets/entities/fake.toml".to_string(),
-            VALID_TEMPLATE.to_string(),
-        );
-        let fake = FakeTemplateLoader { templates };
+        let fake = MemoryTemplateLoader::from_toml([("assets/entities/fake.toml", VALID_TEMPLATE)]);
 
         let config = resolve_template_via(&fake, "assets/entities/fake.toml")
             .expect("injected fake must serve its template");
@@ -732,7 +704,7 @@ size_max = 2.0
             ),
             ..Default::default()
         };
-        let config = resolve_entity_via(&inst, &cache, &NoHost).expect("override must resolve");
+        let config = resolve_entity_via(&inst, &cache, &no_host()).expect("override must resolve");
         let beh = config.behaviour.expect("composed hull keeps [behaviour]");
         assert!(
             (beh.waypoint_arrival_radius - 77.0).abs() < 1e-6,
@@ -807,7 +779,7 @@ size_max = 2.0
         };
 
         assert!(
-            resolve_entity_via(&inst, &empty, &NoHost).is_err(),
+            resolve_entity_via(&inst, &empty, &no_host()).is_err(),
             "precondition: the cache-only lookup cannot see it"
         );
         let config = resolve_entity_via(&inst, &empty, &WasmTemplateLoader)
@@ -835,20 +807,11 @@ size_max = 2.0
     /// the one a native suite cannot otherwise reach.
     #[test]
     fn the_spawn_loader_inherits_the_hosts_authority() {
-        struct StillFilling;
-        impl TemplateLoader for StillFilling {
-            fn load_template(&self, _path: &str) -> Option<EntityConfig> {
-                None
-            }
-            fn absence_is_final(&self) -> bool {
-                false
-            }
-        }
-
         let cache = make_cache("assets/entities/rock.toml", r#"tags = ["asteroid"]"#);
+        let still_filling = MemoryTemplateLoader::still_filling();
         let loader = SpawnTemplateLoader {
             cache: &cache,
-            host: &StillFilling,
+            host: &still_filling,
         };
         assert!(
             !loader.absence_is_final(),

@@ -46,6 +46,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use crate::entity_config::EntityConfig;
+use crate::entity_loader::TemplateLoader;
 use crate::world::config::{parse_world, WorldConfig};
 use crate::world::script::load::{load_world_scripts, CompiledScripts, ScriptResolver};
 use crate::world::validate::{validate_composition, WorldFinding, WorldSource};
@@ -125,6 +127,138 @@ impl MemoryReader {
 impl WorldReader for MemoryReader {
     fn read(&self, path: &str) -> Option<String> {
         self.0.get(path).cloned()
+    }
+}
+
+/// Test loader: an in-memory `path -> EntityConfig` map, standing in for
+/// [`crate::entities::loader::TemplateLoader`] the way [`MemoryReader`] stands
+/// in for [`WorldReader`] (issue #1216).
+///
+/// Collapses twelve hand-rolled `impl TemplateLoader` fakes that had
+/// accumulated across `entities::loader`, `headless::duel`,
+/// `world::{mod_pack, validate, dispatch, spawn_origin}`'s test modules — most
+/// of them the same "map of fixtures, authoritative about absence" shape, plus
+/// three that instead pinned a *host's authority over absence*
+/// ([`TemplateLoader::absence_is_final`], issue #973): a host still filling
+/// (delivered some templates, but more may still arrive), a host that is
+/// blind (delivers nothing and knows it), and a host that is empty yet
+/// wrongly claims authority anyway. Those three are constructors here
+/// ([`still_filling`](Self::still_filling), [`blind`](Self::blind),
+/// [`authoritative_empty`](Self::authoritative_empty)) rather than separate
+/// types, matched to the struct names the fakes they replace already used.
+///
+/// [`new`](Self::new) and [`from_toml`](Self::from_toml) are the plain
+/// fixture-map constructors, answering `true` from `absence_is_final` — "the
+/// map holds everything it will ever hold" — which is what most callers of
+/// the fakes above wanted. Chain [`with_template`](Self::with_template) or
+/// [`with_toml`](Self::with_toml) onto any constructor, including the
+/// authority-pinning ones, to seed further entries.
+#[derive(Debug, Clone)]
+pub struct MemoryTemplateLoader {
+    templates: BTreeMap<String, EntityConfig>,
+    absence_is_final: bool,
+}
+
+/// An empty, authoritative loader — the same values [`new`](Self::new) gives
+/// an empty entry list. NOT [`bool::default`]'s `false`: a fixture that
+/// mentions no behaviour at all (e.g. `Fixture` structs elsewhere that
+/// `#[derive(Default)]`) means "the map holds everything it will ever hold
+/// (which is nothing)", not "still filling".
+impl Default for MemoryTemplateLoader {
+    fn default() -> Self {
+        Self::empty(true)
+    }
+}
+
+impl MemoryTemplateLoader {
+    /// The shared empty base every constructor below builds on.
+    fn empty(absence_is_final: bool) -> Self {
+        MemoryTemplateLoader {
+            templates: BTreeMap::new(),
+            absence_is_final,
+        }
+    }
+
+    /// Build a loader from `(path, EntityConfig)` pairs, authoritative about
+    /// absence.
+    pub fn new<I, K>(entries: I) -> Self
+    where
+        I: IntoIterator<Item = (K, EntityConfig)>,
+        K: Into<String>,
+    {
+        MemoryTemplateLoader {
+            templates: entries.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+            absence_is_final: true,
+        }
+    }
+
+    /// Build a loader from `(path, toml)` pairs, parsed eagerly and
+    /// authoritative about absence like [`new`](Self::new). Panics if an
+    /// entry does not parse — a bug in the fixture authoring it, not the
+    /// thing under test.
+    pub fn from_toml<I, K, V>(entries: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: AsRef<str>,
+    {
+        entries
+            .into_iter()
+            .fold(Self::empty(true), |loader, (path, toml)| {
+                loader.with_toml(path, toml.as_ref())
+            })
+    }
+
+    /// Delivered nothing yet, and not authoritative about it: a host still
+    /// mid-preload, holding no hull in hand while other paths are in flight
+    /// (issue #973 review, F6). Chain [`with_template`](Self::with_template)
+    /// or [`with_toml`](Self::with_toml) to give it something it HAS
+    /// delivered while it stays non-final.
+    pub fn still_filling() -> Self {
+        Self::empty(false)
+    }
+
+    /// Serves nothing, and knows it can serve nothing: the browser's blind
+    /// answer (issue #973), for fixtures whose point is some *other* check
+    /// and simply need a host that resolves no templates.
+    pub fn blind() -> Self {
+        Self::empty(false)
+    }
+
+    /// Serves nothing yet claims authority over absence anyway — what a
+    /// native [`WasmTemplateLoader`](crate::entities::loader::WasmTemplateLoader)
+    /// answers with an empty cache and nothing on disk (issue #973 review,
+    /// F3).
+    pub fn authoritative_empty() -> Self {
+        Self::empty(true)
+    }
+
+    /// Insert one more pre-built template, builder-style.
+    pub fn with_template(mut self, path: impl Into<String>, config: EntityConfig) -> Self {
+        self.templates.insert(path.into(), config);
+        self
+    }
+
+    /// Insert one more template parsed from raw TOML, builder-style. Panics
+    /// if it does not parse.
+    pub fn with_toml(self, path: impl Into<String>, toml: &str) -> Self {
+        let path = path.into();
+        let config = EntityConfig::from_toml(toml).unwrap_or_else(|e| {
+            panic!("MemoryTemplateLoader fixture at {path:?} must parse: {e:?}")
+        });
+        self.with_template(path, config)
+    }
+}
+
+impl TemplateLoader for MemoryTemplateLoader {
+    fn load_template(&self, path: &str) -> Option<EntityConfig> {
+        self.templates.get(path).cloned()
+    }
+
+    /// The map holds everything it will ever hold: whatever was pinned at
+    /// construction (see the constructors above).
+    fn absence_is_final(&self) -> bool {
+        self.absence_is_final
     }
 }
 

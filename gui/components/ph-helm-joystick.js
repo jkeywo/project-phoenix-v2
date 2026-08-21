@@ -4,7 +4,7 @@
 // table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /** Half-width of the gamepad stick's centre deadzone, in axis units. */
 export const GAMEPAD_DEADZONE = 0.1;
@@ -25,8 +25,7 @@ export function softenAxis(v) {
   return Math.sign(v) * ((a - GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE));
 }
 
-export class PhHelmJoystick extends HTMLElement {
-  #state = null;
+export class PhHelmJoystick extends PhElement {
   #px = 0;
   #py = 0;
   #pointerId = null;
@@ -37,14 +36,8 @@ export class PhHelmJoystick extends HTMLElement {
   #inputRaf = null;
   #lastKbSend = 0;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -110,15 +103,10 @@ export class PhHelmJoystick extends HTMLElement {
     <span id="yaw-readout">+0.00</span>
   </div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
-    if (!this.sendAction) {
-      if (typeof window !== 'undefined' && typeof window.sendAction === 'function') {
-        this.sendAction = window.sendAction;
-      }
-    }
+    super.connectedCallback();
     this.#bindEvents();
     // Focusable, named group (issue #1176). The drag well was a bare <div>: a
     // pointer control the keyboard could not land on, name, or reach. The host
@@ -164,15 +152,8 @@ export class PhHelmJoystick extends HTMLElement {
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const auto = this.#state ? !!this.#state.auto : false;
+  render(state) {
+    const auto = state ? !!state.auto : false;
     const root = this.shadowRoot;
     const badge = root.getElementById('auto-badge');
     const well = root.getElementById('well');
@@ -199,7 +180,7 @@ export class PhHelmJoystick extends HTMLElement {
   }
 
   #onDown = (e) => {
-    const auto = this.#state ? !!this.#state.auto : false;
+    const auto = this.state ? !!this.state.auto : false;
     if (auto) return;
     if (this.#pointerId !== null) return;
     this.#pointerId = e.pointerId;
@@ -343,7 +324,7 @@ export class PhHelmJoystick extends HTMLElement {
 
   #inputLoop = () => {
     this.#inputRaf = null;
-    const auto = this.#state ? !!this.#state.auto : false;
+    const auto = this.state ? !!this.state.auto : false;
     const keepPolling = Object.keys(this.#keys).length > 0 || this.#hasGamepad();
 
     // The on-screen thumbstick (pointer drag) and AUTO both take priority.
@@ -395,6 +376,4 @@ export class PhHelmJoystick extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-helm-joystick')) {
-  customElements.define('ph-helm-joystick', PhHelmJoystick);
-}
+phDefine('ph-helm-joystick', PhHelmJoystick);

@@ -25,7 +25,7 @@
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * Provenance code → the strings.csv id for how the crew learned something.
@@ -63,19 +63,12 @@ export function formatValue(value) {
   }
 }
 
-export class PhDossierPanel extends HTMLElement {
-  #state = null;
+export class PhDossierPanel extends PhElement {
   /** UUID of the open fact sheet, or null while the list is showing. */
   #openUuid = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; min-height: 0; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -104,20 +97,15 @@ export class PhDossierPanel extends HTMLElement {
   <div class="heading" id="heading"></div>
   <div id="body"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    this.shadowRoot.getElementById('heading').textContent = t('component.dossier.heading');
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
+  onTemplate() {
+    this.$('heading').textContent = t('component.dossier.heading');
   }
-
-  get state() { return this.#state; }
 
   /** The subject list as it arrived, always an array. */
   get #dossiers() {
-    const s = this.#state || {};
+    const s = this.state || {};
     return Array.isArray(s.dossiers) ? s.dossiers : [];
   }
 
@@ -137,10 +125,10 @@ export class PhDossierPanel extends HTMLElement {
   /** Open a subject's fact sheet by UUID; `null` returns to the list. */
   select(uuid) {
     this.#openUuid = uuid || null;
-    this.#render();
+    this.render();
   }
 
-  #render() {
+  render() {
     const body = this.shadowRoot.getElementById('body');
     body.innerHTML = '';
     const open = this.open;
@@ -263,6 +251,4 @@ export class PhDossierPanel extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-dossier-panel')) {
-  customElements.define('ph-dossier-panel', PhDossierPanel);
-}
+phDefine('ph-dossier-panel', PhDossierPanel);

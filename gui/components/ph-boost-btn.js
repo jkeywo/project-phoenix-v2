@@ -5,10 +5,9 @@ import { observeGamepadButton, GAMEPAD_BUTTON } from '../gamepad-button.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhBoostBtn extends HTMLElement {
-  #state = null;
+export class PhBoostBtn extends PhElement {
   // Boost is a hold, and pointer / Shift / gamepad A can hold it at the same
   // time. Tracking the live sources means `set_boost` is sent once when the
   // first one engages and once when the last one lets go — releasing one
@@ -16,14 +15,8 @@ export class PhBoostBtn extends HTMLElement {
   #holds = new Set();
   #stopGamepad = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -50,13 +43,12 @@ export class PhBoostBtn extends HTMLElement {
   </div>
   <button class="btn available" id="btn">${t('component.boost.ready')}</button>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   #pointerId = null;
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     const btn = this.shadowRoot.getElementById('btn');
     btn.addEventListener('pointerdown', (e) => {
       if (this.#pointerId !== null) return;
@@ -158,15 +150,8 @@ export class PhBoostBtn extends HTMLElement {
     if (this.#holds.size === 0 && this.sendAction) this.sendAction('set_boost', { active: false });
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const available = s.available !== false;
     const active = !!s.active;
     const batteryPct = s.recharge_pct != null ? Math.max(0, Math.min(100, Number(s.recharge_pct))) : 100;
@@ -210,6 +195,4 @@ export class PhBoostBtn extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-boost-btn')) {
-  customElements.define('ph-boost-btn', PhBoostBtn);
-}
+phDefine('ph-boost-btn', PhBoostBtn);

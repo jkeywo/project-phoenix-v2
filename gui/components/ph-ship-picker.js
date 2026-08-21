@@ -39,8 +39,8 @@
 // under vitest, where setup-strings.js owns the table.
 import '../strings-boot.js';
 import { t, has } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * Resolve `value` when it is a known string id; pass anything else through.
@@ -112,18 +112,15 @@ export function shipArtStyle(card) {
     + `background-position-x:${x.toFixed(4)}%;`;
 }
 
-export class PhShipPicker extends HTMLElement {
+export class PhShipPicker extends PhElement {
+  // Own state accessors kept (not the base's): `set state` compares the stored
+  // value by identity when the art index resolves on a later paint, which the
+  // base setter (it coerces null→{}) would break.
   #state = null;
   #roving = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; }
     :host * { box-sizing: border-box; }
@@ -190,11 +187,10 @@ export class PhShipPicker extends HTMLElement {
   </style>
   <div class="ship-grid" id="grid"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Role + accessible name + keyboard operation (issue #1178). The cards were
     // clickable <div>s; the grid is now a listbox — one Tab stop, arrows roving
     // over the option cards — with the pending pick marked selected.
@@ -298,4 +294,4 @@ export class PhShipPicker extends HTMLElement {
   }
 }
 
-customElements.define('ph-ship-picker', PhShipPicker);
+phDefine('ph-ship-picker', PhShipPicker);

@@ -18,17 +18,14 @@ import '../strings-boot.js';
 import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhTorpedoControls extends HTMLElement {
-  #state = null;
+export class PhTorpedoControls extends PhElement {
   #tubeEls = {};
   #roving = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -71,12 +68,10 @@ export class PhTorpedoControls extends HTMLElement {
   </div>
   <div id="tubes"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Role + accessible name (issue #1170): a toolbar whose controls are the
     // per-tube volley steppers and FIRE buttons, named by its visible heading.
     this.setAttribute('role', 'toolbar');
@@ -101,12 +96,6 @@ export class PhTorpedoControls extends HTMLElement {
     syncRovingTabindex(this.#rovingItems());
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
 
   #buildTubeRow(tubeId) {
     const row = document.createElement('div');
@@ -133,7 +122,7 @@ export class PhTorpedoControls extends HTMLElement {
     // so it rides the string catalogue like every other label.
     minusBtn.setAttribute('aria-label', t('component.torpedoes.volley_decrease'));
     minusBtn.addEventListener('click', () => {
-      const tube = (this.#state && this.#state.tubes || []).find((x) => x.id === tubeId);
+      const tube = (this.state && this.state.tubes || []).find((x) => x.id === tubeId);
       const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
       if (cur > 0 && this.sendAction) this.sendAction('set_torpedo_volley_target', { tube: tubeId, count: cur - 1 });
     });
@@ -144,7 +133,7 @@ export class PhTorpedoControls extends HTMLElement {
     plusBtn.innerHTML = '<span class="mini-bg"></span><span class="lbl">+</span>';
     plusBtn.setAttribute('aria-label', t('component.torpedoes.volley_increase'));
     plusBtn.addEventListener('click', () => {
-      const tube = (this.#state && this.#state.tubes || []).find((x) => x.id === tubeId);
+      const tube = (this.state && this.state.tubes || []).find((x) => x.id === tubeId);
       const cur = tube && typeof tube.target_count === 'number' ? tube.target_count : 0;
       const max = tube && typeof tube.volley_max === 'number' ? tube.volley_max : 1;
       if (cur < max && this.sendAction) this.sendAction('set_torpedo_volley_target', { tube: tubeId, count: cur + 1 });
@@ -156,7 +145,7 @@ export class PhTorpedoControls extends HTMLElement {
     fireBtn.innerHTML = '<span class="btn-bg"></span><span class="led"></span><span class="label">' + t('console.common.fire') + '</span>';
     fireBtn.addEventListener('click', () => {
       if (fireBtn.disabled || !this.sendAction) return;
-      const targetUuid = this.#state && this.#state.target_uuid ? this.#state.target_uuid : null;
+      const targetUuid = this.state && this.state.target_uuid ? this.state.target_uuid : null;
       this.sendAction('fire_torpedo', { tube: tubeId, target_uuid: targetUuid });
     });
 
@@ -235,8 +224,8 @@ export class PhTorpedoControls extends HTMLElement {
     return slots;
   }
 
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const tubes = Array.isArray(s.tubes) ? s.tubes : [];
     const mag = s.magazine || {};
     const magCurrent = mag.current != null ? mag.current : 0;
@@ -334,6 +323,4 @@ export class PhTorpedoControls extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-torpedo-controls')) {
-  customElements.define('ph-torpedo-controls', PhTorpedoControls);
-}
+phDefine('ph-torpedo-controls', PhTorpedoControls);

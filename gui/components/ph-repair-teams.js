@@ -1,22 +1,21 @@
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
 // strings-boot first: its top-level await delays this module's evaluation —
 // and therefore this element's registration and upgrade — until the string
 // table is loaded, so the constructor's template t() calls never see an
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhRepairTeams extends HTMLElement {
+export class PhRepairTeams extends PhElement {
+  // Own state accessors kept (not the base's): `set state` also kicks the
+  // progress-bar animation loop, which the base setter has no hook for.
   #state = null;
   #animFrame = null;
   #displayProgress = new Map();
   #emptyEl = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -70,12 +69,10 @@ export class PhRepairTeams extends HTMLElement {
     <div class="damaged-list" id="damaged-list"></div>
   </div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
   }
 
   disconnectedCallback() {
@@ -316,6 +313,4 @@ export class PhRepairTeams extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-repair-teams')) {
-  customElements.define('ph-repair-teams', PhRepairTeams);
-}
+phDefine('ph-repair-teams', PhRepairTeams);

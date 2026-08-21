@@ -3,10 +3,11 @@
 // table is loaded, so the scale readout never draws against an empty table.
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
-import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import { phColor } from './ph-console-styles.js';
 import {
   ringPlan, scaleReadout, phPx, TEXT_MIN_FALLBACK_PX,
 } from './ph-scope-chrome.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * How far a label sits from its blip, and how far apart two labels must stay.
@@ -17,24 +18,21 @@ import {
 const LABEL_GAP_CSS = 4;
 const LABEL_HALO_CSS = 3;
 
-export class PhRadar extends HTMLElement {
+export class PhRadar extends PhElement {
+  // The state backing stays PRIVATE: `set state` is overridden below to flag a
+  // redraw rather than paint synchronously (the base default paints on assign),
+  // and nothing touches `#state` during `onTemplate()` — the first draw is
+  // deferred to a rAF, so this field is always installed before it is read.
   #state = null;
-  #canvas = null;
-  #ctx = null;
   #offscreen = null;
-  #rafId = null;
-  #resizeObserver = null;
-  #needsRender = true;
   #icons = {};
-  #backgroundImage = null;
-  #surroundImage = null;
   #projectedBlips = [];
 
   // Buffer pixels per CSS pixel — `canvas.width / rect.width`, i.e. the device
   // pixel ratio in practice.
   //
   // The backing store is deliberately sized rect × devicePixelRatio so the
-  // scope rasterises crisply on a phone (see #initResize). Everything the
+  // scope rasterises crisply on a phone (see initResize). Everything the
   // scope DRAWS was then authored as a bare number — an 11px label font, a
   // 6px minimum blip radius, a 14px tap radius — and a bare number in a
   // buffer-space context is a DEVICE pixel. On a 3× phone that renders the
@@ -47,75 +45,84 @@ export class PhRadar extends HTMLElement {
   // the same conclusion independently for its label fonts.
   #px = 1;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = [
+  template() {
+    return [
       '<style>',
       ':host { display: block; }',
       'canvas { display: block; width: 100%; height: 100%; }',
       '</style>',
       '<canvas></canvas>',
     ].join('\n');
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    this.#canvas = this.shadowRoot.querySelector('canvas');
-    this.#ctx = this.#canvas.getContext('2d', { alpha: false });
-    this.#backgroundImage = this.#loadImage('../../assets/helm_console/radar-bg.png');
-    this.#surroundImage = this.#loadImage('../../assets/helm_console/radar-surround.png');
-    this.#initResize();
-    this.#rafLoop();
+  }
+
+  onTemplate() {
+    // Canvas refs and the render bookkeeping live as PLAIN properties: this runs
+    // inside the base constructor, BEFORE this subclass's field-init and private
+    // methods are installed, so anything the setup or first draw touches must be
+    // a plain property, never a declared #field (see ph-element.js's field-init
+    // note). The state backing and the pure draw-scratch fields above stay
+    // private because nothing reads them until the deferred first frame.
+    this.canvas = this.shadowRoot.querySelector('canvas');
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
+    this.needsRender = true;
+    this.rafId = null;
+    this.resizeObserver = null;
+    this.backgroundImage = this.loadImage('../../assets/helm_console/radar-bg.png');
+    this.surroundImage = this.loadImage('../../assets/helm_console/radar-surround.png');
+    this.initResize();
+    // Defer the first frame: the arrow's `this.#rafLoop` is resolved when the
+    // rAF fires (after construction, once the private method exists), not now.
+    // The synchronous first tick the constructor used to run was a no-op anyway
+    // — the canvas is 0×0 until laid out — so scheduling it loses nothing.
+    this.rafId = requestAnimationFrame(() => this.#rafLoop());
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
-    this.#canvas.addEventListener('click', this.#boundTap);
-    this.#canvas.addEventListener('touchstart', this.#boundTap, { passive: false });
+    super.connectedCallback();
+    this.canvas.addEventListener('click', this.#boundTap);
+    this.canvas.addEventListener('touchstart', this.#boundTap, { passive: false });
   }
 
   disconnectedCallback() {
-    if (this.#rafId != null) {
-      cancelAnimationFrame(this.#rafId);
-      this.#rafId = null;
+    if (this.rafId != null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
     }
-    if (this.#resizeObserver) {
-      this.#resizeObserver.disconnect();
-      this.#resizeObserver = null;
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
     }
-    this.#canvas.removeEventListener('click', this.#boundTap);
-    this.#canvas.removeEventListener('touchstart', this.#boundTap);
+    this.canvas.removeEventListener('click', this.#boundTap);
+    this.canvas.removeEventListener('touchstart', this.#boundTap);
   }
 
   set state(val) {
     this.#state = val;
-    this.#needsRender = true;
+    this.needsRender = true;
   }
 
   get state() { return this.#state; }
 
-  #initResize() {
+  initResize() {
     const updateSize = () => {
       const dpr = window.devicePixelRatio || 1;
       const rect = this.getBoundingClientRect();
       const newW = Math.round(rect.width * dpr);
       const newH = Math.round(rect.height * dpr);
-      if (newW > 0 && newH > 0 && (this.#canvas.width !== newW || this.#canvas.height !== newH)) {
-        this.#canvas.width = newW;
-        this.#canvas.height = newH;
-        this.#needsRender = true;
+      if (newW > 0 && newH > 0 && (this.canvas.width !== newW || this.canvas.height !== newH)) {
+        this.canvas.width = newW;
+        this.canvas.height = newH;
+        this.needsRender = true;
       }
     };
     updateSize();
-    this.#resizeObserver = new ResizeObserver(() => updateSize());
-    this.#resizeObserver.observe(this);
+    this.resizeObserver = new ResizeObserver(() => updateSize());
+    this.resizeObserver.observe(this);
   }
 
   #rafLoop() {
-    if (this.#needsRender) this.#render();
-    this.#rafId = requestAnimationFrame(() => this.#rafLoop());
+    if (this.needsRender) this.#render();
+    this.rafId = requestAnimationFrame(() => this.#rafLoop());
   }
 
   #iconStemFromName(name) {
@@ -128,17 +135,17 @@ export class PhRadar extends HTMLElement {
     if (this.#icons[name]) return this.#icons[name];
     if (typeof Image === 'undefined') return null;
     const img = new Image();
-    img.onload = () => { this.#needsRender = true; };
+    img.onload = () => { this.needsRender = true; };
     const stem = name === 'player' ? 'PlayerShip' : this.#iconStemFromName(name);
     img.src = '../../assets/radar_icons/Icon-' + stem + '.png';
     this.#icons[name] = img;
     return img;
   }
 
-  #loadImage(src) {
+  loadImage(src) {
     if (typeof Image === 'undefined') return null;
     const img = new Image();
-    img.onload = () => { this.#needsRender = true; };
+    img.onload = () => { this.needsRender = true; };
     img.src = src;
     return img;
   }
@@ -148,7 +155,7 @@ export class PhRadar extends HTMLElement {
   }
 
   #render() {
-    const canvas = this.#canvas;
+    const canvas = this.canvas;
     if (!canvas) return;
     const W = canvas.width, H = canvas.height;
     if (W === 0 || H === 0) return;
@@ -162,7 +169,7 @@ export class PhRadar extends HTMLElement {
     this.#px = (rect && rect.width > 0) ? (W / rect.width) : 1;
     const px = this.#px;
 
-    let octx = this.#ctx;
+    let octx = this.ctx;
     if (typeof document !== 'undefined') {
       if (!this.#offscreen || this.#offscreen.width !== W || this.#offscreen.height !== H) {
         this.#offscreen = document.createElement('canvas');
@@ -177,16 +184,16 @@ export class PhRadar extends HTMLElement {
 
     // The surround is fixed console chrome. The radar screen is the rotating,
     // ship-relative backdrop; blips remain above both layers.
-    if (this.#imageIsLoaded(this.#surroundImage)) {
-      octx.drawImage(this.#surroundImage, 0, 0, W, H);
+    if (this.#imageIsLoaded(this.surroundImage)) {
+      octx.drawImage(this.surroundImage, 0, 0, W, H);
     }
 
-    if (this.#imageIsLoaded(this.#backgroundImage)) {
+    if (this.#imageIsLoaded(this.backgroundImage)) {
       const heading = state.ship_heading || 0;
       octx.save();
       octx.translate(cx, cy);
       octx.rotate(-heading * Math.PI / 180);
-      octx.drawImage(this.#backgroundImage, -R, -R, R * 2, R * 2);
+      octx.drawImage(this.backgroundImage, -R, -R, R * 2, R * 2);
       octx.restore();
     } else {
       octx.fillStyle = phColor(this, 'rgba(var(--rgb-deep), 0.52)');
@@ -199,11 +206,11 @@ export class PhRadar extends HTMLElement {
     this.#drawRangeRings(octx, cx, cy, R, px, state.range);
 
     if (this.#offscreen) {
-      this.#ctx.drawImage(this.#offscreen, 0, 0);
+      this.ctx.drawImage(this.#offscreen, 0, 0);
     }
 
     const blips = state.blips || [];
-    if (blips.length === 0) { this.#needsRender = false; return; }
+    if (blips.length === 0) { this.needsRender = false; return; }
 
     this.#projectedBlips = [];
     const labels = [];
@@ -259,10 +266,10 @@ export class PhRadar extends HTMLElement {
     this.#drawLabels(octx, labels, px);
 
     if (this.#offscreen) {
-      this.#ctx.drawImage(this.#offscreen, 0, 0);
+      this.ctx.drawImage(this.#offscreen, 0, 0);
     }
 
-    this.#needsRender = false;
+    this.needsRender = false;
   }
 
   /** The type floor in BUFFER pixels — `--text-min`, scaled for the backing store. */
@@ -488,13 +495,13 @@ export class PhRadar extends HTMLElement {
   }
 
   #onPointerTap(e) {
-    if (!this.#canvas) return;
-    const rect = this.#canvas.getBoundingClientRect();
+    if (!this.canvas) return;
+    const rect = this.canvas.getBoundingClientRect();
     const touch = e.touches ? e.touches[0] : e;
     const x = touch.clientX - rect.left;
     const y = touch.clientY - rect.top;
-    const scaleX = this.#canvas.width / rect.width;
-    const scaleY = this.#canvas.height / rect.height;
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
     const blip = this.#getBlipAt(x * scaleX, y * scaleY);
     if (blip && this.sendAction) {
       this.sendAction('set_target', { uuid: blip.uuid });
@@ -504,6 +511,4 @@ export class PhRadar extends HTMLElement {
   #boundTap = (e) => this.#onPointerTap(e);
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-radar')) {
-  customElements.define('ph-radar', PhRadar);
-}
+phDefine('ph-radar', PhRadar);

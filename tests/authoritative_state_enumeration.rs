@@ -190,6 +190,22 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     // is caught on the tick it happens. Backed by the `world-id-mint-state`
     // entity in deterministic-simulation.yaml.
     "WorldIdMint", "WorldId", "IdNamespace",
+    // PRD #1143's operations systems. Each of these four carries MUTABLE runtime
+    // engagement state that FOLDS into the sim digest — the engaged tractor and
+    // its held target (`fold_tractor_namespace`), the docked FACT joining two
+    // hulls (`fold_dock_namespace`), whether a transfer umbilical is running
+    // (`fold_umbilical_namespace`) and which target a repair team is working
+    // abroad (`fold_external_repair_namespace`), all in `src/sim_digest.rs` — and
+    // is captured/restored as a projection in `src/snapshot.rs` (`capture_tractors`
+    // / `capture_docks` / `capture_umbilicals` / `capture_external_repair` and the
+    // matching restore arm). Each namespace folds NOTHING while idle, so a world
+    // fielding a capable hull that never engages stays byte-identical. Authoritative
+    // and folded, exactly like `ShipWeaponsHold` / `ShipStationStances` above.
+    // Transcribed from `tractor-beam-state` (#1156), `dock-relationship-state`
+    // (#1159), `umbilical-flow-state` (#1160) and `external-repair-dispatch-state`
+    // (#1161) in pasm/spec/architecture/world-files.yaml, whose
+    // `implementation.symbols` name each of these types.
+    "TractorBeam", "DockControl", "TransferUmbilical", "ExternalRepairDispatch",
     // Function/accessor names transcribed for traceability even though they
     // never match a registered component/resource (see the doc comment
     // above) — harmless in a superset check.
@@ -321,6 +337,26 @@ const EXCLUSIONS: &[(&str, &str)] = &[
     // `project_active_objective_stances` from `ObjectiveManagerRes` (which the
     // objective-namespace fold already covers), never folded itself.
     ("ActiveObjectiveStances", "derived"),
+    // Derived — PRD #1143's three static spawn-set operations components. None is
+    // mutated after spawn, none rides the per-tick sim digest, and each is
+    // re-derived from digest-free authored inputs on any fresh boot or resume, so
+    // by the "does it change what the sim computes" line above they are derived,
+    // not authoritative:
+    //   * `EntityMass` (#1154) — inserted once at spawn from `EntityConfig.mass`
+    //     (`src/entities/spawner.rs`) and only ever read (`Query<&EntityMass>` in
+    //     the tractor tow penalty and the science mass reading); no `get_mut`
+    //     anywhere. It rides `content_digest`, not the sim digest.
+    //   * `HeldResponseSection` (#1158) — attached at spawn from the target's
+    //     authored `[held_response]` (`src/entities/spawner.rs`) and read-only
+    //     thereafter (`Query<&HeldResponseSection>`); never mutated.
+    //   * `DockMarkers` (#1159) — resolved at spawn by `resolve_dock_markers` from
+    //     the model rig sidecar (`src/dock/server.rs`) and read-only thereafter
+    //     (`Query<&DockMarkers>`); it is what makes a hull DOCKABLE, static rig
+    //     geometry, never runtime state. The live docking it gates lives in
+    //     `DockControl`, which IS folded above.
+    ("EntityMass", "derived"),
+    ("HeldResponseSection", "derived"),
+    ("DockMarkers", "derived"),
 
     // Cleared-at-fold (the one new classification term this issue adds,
     // deterministic-simulation.yaml's `digest-exclusion-classes`):

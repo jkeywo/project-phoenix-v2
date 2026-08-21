@@ -501,14 +501,17 @@ body .frame { height: 100dvh; }
   border-radius: 2px;
   animation: tutorial-pulse 1.6s ease-in-out infinite;
 }
-/* Reduced motion (PRD #1023 module 3). The highlight exists to say WHICH
-   control the tutorial tip is about; the pulse only draws the eye to it.
-   Held at the lit outline, the answer to "which one" survives intact. */
-@media (prefers-reduced-motion: reduce) {
-  .tutorial-highlight {
-    animation: none;
-    outline-color: var(--cyan);
-  }
+/* Reduced motion (PRD #1023 module 3; global layer issue #1172). The highlight
+   exists to say WHICH control the tutorial tip is about; the pulse only draws
+   the eye to it. Held at the lit outline, the answer to "which one" survives.
+   The global layer in tokens.css collapses the pulse off both the OS media
+   query and the stamped attribute; this attribute-driven rule holds the lit
+   outline and resolves the tri-state both ways — landing on an explicit ON and
+   stepping aside for an explicit OFF. Its attribute selector outweighs the loop
+   rule above, so it wins in the console iframe wherever it sits. */
+:root[data-reduced-motion="reduce"] .tutorial-highlight {
+  animation: none;
+  outline-color: var(--cyan);
 }
 
 @keyframes tutorial-pulse {

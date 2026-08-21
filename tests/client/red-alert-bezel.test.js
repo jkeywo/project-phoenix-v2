@@ -30,21 +30,23 @@ function ruleBody(source, selector) {
   return source.slice(open + 1, close);
 }
 
-/** The contents of the `prefers-reduced-motion: reduce` media block. */
-function reducedMotionBlock(source) {
-  const index = source.indexOf('@media (prefers-reduced-motion: reduce)');
+/**
+ * The bezel's reduced-motion held-frame, as `{selector, body}`.
+ *
+ * Since #1172 the shell no longer stills the bezel with a bare `@media`
+ * block — the global layer in gui/tokens.css collapses the motion off both the
+ * OS query and the stamped attribute, and this rule only HOLDS the peak. It is
+ * attribute-driven (`:root[data-reduced-motion="reduce"] #phone-bezel.alert-on`)
+ * so an explicit choice resolves both ways, which a bare `@media` cannot do.
+ */
+function reducedMotionBezelRule(source) {
+  const selector = ':root[data-reduced-motion="reduce"] #phone-bezel.alert-on';
+  const index = source.indexOf(selector + ' {');
   if (index === -1) return null;
-  // Balance braces from the media query's own opening brace.
   const open = source.indexOf('{', index);
-  let depth = 0;
-  for (let i = open; i < source.length; i += 1) {
-    if (source[i] === '{') depth += 1;
-    else if (source[i] === '}') {
-      depth -= 1;
-      if (depth === 0) return source.slice(open + 1, i);
-    }
-  }
-  return null;
+  const close = source.indexOf('}', open);
+  if (open === -1 || close === -1) return null;
+  return { selector, body: source.slice(open + 1, close) };
 }
 
 describe('red-alert bezel', () => {
@@ -74,19 +76,22 @@ describe('red-alert bezel', () => {
 
 describe('reduced motion', () => {
   it('stills the bezel pulse when the player asks for reduced motion', () => {
-    const block = reducedMotionBlock(CLIENT_HTML);
-    expect(block).not.toBeNull();
-    expect(block).toContain('#phone-bezel.alert-on');
-    expect(block).toMatch(/animation:\s*none/);
+    const rule = reducedMotionBezelRule(CLIENT_HTML);
+    expect(rule).not.toBeNull();
+    expect(rule.selector).toContain('#phone-bezel.alert-on');
+    expect(rule.body).toMatch(/animation:\s*none/);
+    // #1172: driven by the stamped attribute, not a bare @media — so an
+    // explicit "allow motion" resolves the tri-state and this steps aside.
+    expect(rule.selector).toContain('data-reduced-motion="reduce"');
   });
 
   it('stills the pulse without hiding the alert', () => {
     // The accessibility answer is to stop the motion, not to drop the
     // information: a player on reduced motion must still be able to tell that
     // the ship is at red alert, so the bezel holds at the pulse's peak.
-    const block = reducedMotionBlock(CLIENT_HTML);
-    expect(block).toMatch(/border-color:\s*var\(--fire-hot\)/);
-    expect(block).toContain('box-shadow');
-    expect(block).not.toMatch(/display:\s*none/);
+    const rule = reducedMotionBezelRule(CLIENT_HTML);
+    expect(rule.body).toMatch(/border-color:\s*var\(--fire-hot\)/);
+    expect(rule.body).toContain('box-shadow');
+    expect(rule.body).not.toMatch(/display:\s*none/);
   });
 });

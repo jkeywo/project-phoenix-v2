@@ -284,30 +284,49 @@ function loopingAnimations(file) {
 }
 
 /**
- * Where each selector is stilled inside a `prefers-reduced-motion` block, as
- * `selector -> {order, important}`.
+ * The two tri-state reduced-motion prefixes the #1172 layer introduced. A
+ * held-frame override keys on the bare TARGET it stills, so these come off
+ * first — `:root[data-reduced-motion="reduce"] #ready-pill.go` and
+ * `#ready-pill.go` are the same answer for the same loop.
+ */
+const MOTION_PREFIX = /^:root\[data-reduced-motion="reduce"\]\s+|^:root:not\(\[data-reduced-motion="no-preference"\]\)\s+/;
+function bareMotionTarget(selector) {
+  return selector.trim().replace(MOTION_PREFIX, '').trim();
+}
+
+/**
+ * Where each selector is stilled by a reduced-motion override, as
+ * `target -> {order, important}`.
  *
- * The ORDER matters as much as the existence, and this is the part that is easy
- * to get wrong: a media query adds NO specificity. `@media (prefers-reduced-
- * motion) { #ready-pill.go { animation: none } }` and the `#ready-pill.go` that
- * starts the pulse weigh exactly the same, so whichever is written later wins.
- * Four of the lobby's overrides were first written beside the red-alert bezel,
- * near the top of the stylesheet, above every loop but the bezel's own — and
- * every one of them silently lost. The page went on pulsing at a player who had
- * asked it not to, with a correct-looking reduced-motion block sitting in the
- * file. A rule that loses the cascade is indistinguishable from one nobody
- * wrote, which is exactly the kind of failure a test has to catch because
- * reading the source will not.
+ * Since #1172 an override reaches a loop two ways, and both count:
+ *   - the ORIGINAL `@media (prefers-reduced-motion)` block, still valid and
+ *     still what the viewscreen and the shadow-DOM battery use, and
+ *   - an ATTRIBUTE-DRIVEN rule, `:root[data-reduced-motion="reduce"] <sel>`,
+ *     which the shell and console iframes now use so an explicit choice resolves
+ *     both ways (the bare `@media` form ignores an explicit "allow motion").
+ *
+ * The ORDER still matters for the bare `@media` form, and this is the part that
+ * is easy to get wrong: a media query adds NO specificity, so `@media
+ * (prefers-reduced-motion) { #ready-pill.go { animation: none } }` and the
+ * `#ready-pill.go` that starts the pulse weigh exactly the same, and whichever
+ * is written later wins. A rule that loses the cascade is indistinguishable from
+ * one nobody wrote. The attribute-driven form escapes that trap — its prefix
+ * carries specificity — but it is recorded here at its own order so the WINS
+ * check below can still catch a bare `@media` override placed too high.
  */
 function stilledSelectors(file) {
   const source = readStripped(file);
   const out = new Map();
   cssRules(source).forEach((rule, order) => {
-    if (!rule.at || !/prefers-reduced-motion/.test(rule.at)) return;
+    const inMedia = rule.at && /prefers-reduced-motion/.test(rule.at);
+    const attrDriven = /\[data-reduced-motion="reduce"\]/.test(rule.selector);
+    if (!inMedia && !attrDriven) return;
     const m = rule.body.match(/animation\s*:\s*none([^;]*)/);
     if (!m) return;
     for (const part of rule.selector.split(',')) {
-      out.set(part.trim(), { order, important: /!important/.test(m[1]) });
+      // Specificity, not order, wins for the attribute-driven form.
+      const important = /!important/.test(m[1]) || attrDriven;
+      out.set(bareMotionTarget(part), { order, important });
     }
   });
   return out;
@@ -350,13 +369,63 @@ describe('every looping animation respects reduced motion', () => {
     // The accessibility answer is to stop the movement, not to hide what the
     // movement was telling the crew. The red-alert bezel is the case that
     // makes this concrete: a player on reduced motion must still be able to
-    // tell, from across the room, that the ship is at red alert.
+    // tell, from across the room, that the ship is at red alert. Both the old
+    // `@media` blocks and the new attribute-driven held-frames are held to it.
     const lobby = readStripped(path.join(REPO_ROOT, 'client.html'));
+    let checked = 0;
     for (const rule of cssRules(lobby)) {
-      if (!rule.at || !/prefers-reduced-motion/.test(rule.at)) continue;
+      const inMedia = rule.at && /prefers-reduced-motion/.test(rule.at);
+      const attrDriven = /\[data-reduced-motion="reduce"\]/.test(rule.selector);
+      if (!inMedia && !attrDriven) continue;
+      checked += 1;
       expect(rule.body).not.toMatch(/display\s*:\s*none/);
       expect(rule.body).not.toMatch(/visibility\s*:\s*hidden/);
       expect(rule.body).not.toMatch(/opacity\s*:\s*0\s*(;|$)/);
     }
+    // The held-frame overrides exist to be checked — a silent zero would let a
+    // future refactor delete them and still pass.
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('is one global layer in tokens.css, driven by BOTH the OS query and the attribute', () => {
+    // #1172: the suppression itself lives once, in the shared vocabulary file,
+    // so it reaches the shell and every console iframe (tokens.css is linked by
+    // the lobby and @imported by console.css). The per-loop overrides above only
+    // hold a brighter frame; THIS is what actually stops the motion.
+    const tokens = fs.readFileSync(TOKENS_CSS, 'utf8');
+    // The attribute path — the resolved tri-state, authoritative once JS stamps.
+    expect(tokens).toMatch(/:root\[data-reduced-motion="reduce"\]\s*\*/);
+    // The OS-default path, gated so an explicit "allow motion" lifts it.
+    expect(tokens).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/);
+    expect(tokens).toMatch(/:root:not\(\[data-reduced-motion="no-preference"\]\)\s*\*/);
+    // A universal reset that COLLAPSES the loop rather than deleting it, so a
+    // one-shot `forwards` entrance still reaches its end frame.
+    expect(tokens).toMatch(/animation-iteration-count:\s*1\s*!important/);
+    expect(tokens).toMatch(/animation-duration:\s*0\.001ms\s*!important/);
+    // The inherited play-state token that carries the setting across a shadow
+    // boundary the universal selector cannot.
+    expect(tokens).toMatch(/--a11y-anim-play:\s*running/);
+    expect(tokens).toMatch(/--a11y-anim-play:\s*paused/);
+  });
+
+  it('a shadow-DOM loop still respects the setting the universal selector cannot reach it with', () => {
+    // The global layer is a descendant selector; it stops at a shadow root. A
+    // component that loops inside its own shadow DOM must inherit the pause via
+    // --a11y-anim-play (so an explicit ON reaches it), or the setting never
+    // arrives. It may ALSO keep an in-shadow @media block for the OS default.
+    const offenders = [];
+    for (const file of componentFiles()) {
+      const loops = loopingAnimations(file);
+      if (loops.length === 0) continue;
+      const source = readStripped(file);
+      const readsToken = /animation-play-state\s*:\s*var\(\s*--a11y-anim-play/.test(source);
+      const stilled = stilledSelectors(file);
+      for (const loop of loops) {
+        if (!readsToken && !stilled.has(bareMotionTarget(loop.selector))) {
+          offenders.push(`${rel(file)}: ${loop.selector} (${loop.name})`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });

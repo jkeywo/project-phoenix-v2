@@ -400,3 +400,73 @@
   --rgb-science:       102, 170, 255;
   --rgb-violet:        180, 140, 232;
 }
+
+/* ── Reduced motion (issue #1172) ────────────────────────────
+   The accessibility profile (gui/accessibility-profile.js) resolves the
+   tri-state motion preference — OS `prefers-reduced-motion: reduce` by default,
+   an explicit on/off overriding it both ways — and STAMPS the result as
+   `data-reduced-motion="reduce"` (or `"no-preference"`) on every root it
+   reaches: the shell `:root` AND each same-origin console iframe `:root`.
+   Before this block that attribute changed nothing — only the OS media query
+   drove suppression, so an explicit ON with the OS silent did nothing, and an
+   explicit OFF under an OS that asked for reduce was ignored. This is the ONE
+   global layer that makes the setting real, and it drives off BOTH signals.
+
+   tokens.css is `@import`ed by console.css and `<link>`ed by the lobby, so this
+   layer applies inside every console iframe and the shell alike — the same
+   reach the high-contrast palette above rides.
+
+   Two drivers, so an explicit choice overrides the OS both ways:
+     - `:root[data-reduced-motion="reduce"]` — the resolved decision, and the
+       authoritative one once JS has stamped it (explicit ON, or OS-reduce
+       folded through the resolver).
+     - `@media (prefers-reduced-motion: reduce)` gated by
+       `:root:not([data-reduced-motion="no-preference"])` — the OS default for
+       the pre-JS window and a JS-off client, which YIELDS the moment the
+       profile stamps `no-preference` for an explicit OFF.
+
+   The reset collapses DURATION rather than writing `animation: none`. A one-shot
+   entrance that ends on a `forwards` frame (server.html's chatter bubble starts
+   at opacity 0 and animates up) must still REACH that frame; a near-zero
+   duration runs it there instantly, where `none` would strand it at opacity 0.
+   Looping animations take iteration-count 1 as well, so a spinner or pulse
+   settles on its first frame and stops. Functional feedback survives — the end
+   state is reached — only the travel to it is removed. Individual loops that
+   want to hold a BRIGHTER frame than their base (the red-alert bezel, the ready
+   glows) layer a more-specific `data-reduced-motion="reduce"` override on top,
+   in the file that declares them. */
+
+/* Shadow-DOM reach. A universal descendant selector cannot cross a shadow
+   boundary, but a custom property inherits THROUGH one. A component with a
+   looping animation reads `animation-play-state: var(--a11y-anim-play)` so the
+   stamped attribute reaches inside its shadow root — gui/components/
+   ph-battery-bar.js is the one loop that needs it. */
+:root { --a11y-anim-play: running; }
+
+:root[data-reduced-motion="reduce"] { --a11y-anim-play: paused; }
+
+:root[data-reduced-motion="reduce"] *,
+:root[data-reduced-motion="reduce"] *::before,
+:root[data-reduced-motion="reduce"] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.001ms !important;
+  transition-delay: 0ms !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduced-motion="no-preference"]) { --a11y-anim-play: paused; }
+
+  :root:not([data-reduced-motion="no-preference"]) *,
+  :root:not([data-reduced-motion="no-preference"]) *::before,
+  :root:not([data-reduced-motion="no-preference"]) *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

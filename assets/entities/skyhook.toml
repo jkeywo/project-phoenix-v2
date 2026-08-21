@@ -54,6 +54,11 @@
 
 name = "entity.skyhook.name"
 tags = ["station", "infrastructure"]
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the structure's other stats. [ai] Unratified — a tethered
+# orbital structure, far heavier than any hull that could work it.
+mass = 250000.0
 
 [target]
 tags = ["station"]

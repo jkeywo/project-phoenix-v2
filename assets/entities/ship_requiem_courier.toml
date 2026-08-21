@@ -3,6 +3,11 @@ display_name = "entity.ship_requiem_courier.display_name"
 class = "courier"  # [ai] picker badge / scan subtitle
 tags = ["ship", "npc", "comms_contact"]
 faction = "dddddddd-4444-4444-8444-dddddddddddd"
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the hull's other stats. [ai] Unratified — a light courier
+# weight, close to the Alliance courier's.
+mass = 3200.0
 
 [target]
 tags = ["ship"]

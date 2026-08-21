@@ -3755,6 +3755,13 @@ pub struct ScanReadingSnapshot {
     /// The step it was rounded to, so the console can show how precise the
     /// reading is rather than implying a precision the band never had.
     pub condition_step: f32,
+    /// The subject's authored mass (issue #1154), in the game's own mass
+    /// unit, verbatim — content identity, not a live measurement, so it does
+    /// not coarsen with the band the way `condition_fraction` does.
+    /// `#[serde(default)]` so a payload written before this field existed
+    /// still decodes, at `0.0`.
+    #[serde(default)]
+    pub mass: f32,
     /// `(label id, held)` per operational flag the subject authored a label
     /// for. Empty when the answering band does not resolve flags.
     #[serde(default)]
@@ -3781,6 +3788,7 @@ impl ScanReadingSnapshot {
             taken_at_tick: reading.taken_at_tick,
             condition_fraction: reading.condition_fraction,
             condition_step: reading.condition_step,
+            mass: reading.mass,
             flags: reading.flags.clone(),
             capacities: reading.capacities.clone(),
         }

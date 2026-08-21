@@ -184,6 +184,11 @@ display_name = "entity.ship_harrow_warhawk.display_name"
 class = "battleship"
 tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the hull's other stats. [ai] Unratified — a capital-ship
+# weight, close to the Alliance battleship's.
+mass = 52000.0
 
 [target]
 tags = ["ship"]

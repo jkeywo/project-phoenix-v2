@@ -417,6 +417,7 @@ mod tests {
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             target: None,
             cinematic_camera: None,

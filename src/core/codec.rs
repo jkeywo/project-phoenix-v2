@@ -2189,11 +2189,12 @@ mod tests {
     /// `pasm/spec/design/simulation-differentiation.yaml` says a sensor readout
     /// must not be "scripted exposition dressed as sensor output". In a language
     /// with no reflection, the enforceable form of that is the assertion below:
-    /// a reading has exactly these nine keys, every one of them a quantity read
-    /// off the subject's condition track or a `strings.csv` id an author wrote
-    /// against a quantity — and none of them a result, a summary, a narration or
-    /// a description. A `scan_text` field would have to be added here, in a diff,
-    /// moving this test.
+    /// a reading has exactly these ten keys, every one of them a quantity read
+    /// off the subject's condition track (or its content identity, for `mass` —
+    /// issue #1154) or a `strings.csv` id an author wrote against a quantity —
+    /// and none of them a result, a summary, a narration or a description. A
+    /// `scan_text` field would have to be added here, in a diff, moving this
+    /// test.
     #[test]
     fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() {
         use crate::messages::{ScanBlackboard, ScanReadingSnapshot};
@@ -2207,6 +2208,7 @@ mod tests {
             taken_at_tick: 900,
             condition_fraction: 0.31,
             condition_step: 0.01,
+            mass: 250_000.0,
             flags: vec![("world.skyhook.transfer.label".into(), false)],
             capacities: vec![("world.skyhook.berths.label".into(), 4)],
         };
@@ -2228,12 +2230,13 @@ mod tests {
                 "taken_at_tick",
                 "condition_fraction",
                 "condition_step",
+                "mass",
                 "flags",
                 "capacities",
             ]),
-            "the reading's whole surface — every key is a measured quantity or a \
-             label an author wrote against one, and there is nowhere for a \
-             written-out scan result to ride"
+            "the reading's whole surface — every key is a measured quantity, its \
+             content identity, or a label an author wrote against one, and there \
+             is nowhere for a written-out scan result to ride"
         );
 
         let bb = SystemBlackboard::Scan(ScanBlackboard {

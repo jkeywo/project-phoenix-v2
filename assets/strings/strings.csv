@@ -976,6 +976,7 @@ component.scan.none,"Science scan readout when the hull carries no survey suite 
 component.scan.idle,"Science scan readout when the suite is fitted and nothing has been read yet (issue #1032)","[NOTHING SCANNED]"
 component.scan.take,"Science scan readout — button that reads the selected contact (issue #1032)","[TAKE READING]"
 component.scan.condition,"Science scan readout — row label for the subject's structural condition, derived from its condition track (issue #1032)","[Structural condition]"
+component.scan.mass,"Science scan readout — row label for the subject's authored mass, content identity rather than a live measurement (issue #1154)","[Mass]"
 component.scan.flag.held,"Science scan readout — value shown for an operational flag the subject is still holding (issue #1032)","[Nominal]"
 component.scan.flag.down,"Science scan readout — value shown for an operational flag the subject has dropped (issue #1032)","[Failed]"
 scan.refusal.not_capable,"Scan refusal — this hull authored no survey suite (issue #1032)","[This hull carries no survey suite.]"

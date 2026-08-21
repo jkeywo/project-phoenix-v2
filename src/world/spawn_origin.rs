@@ -177,11 +177,21 @@ mod tests {
 
     fn loader() -> FakeLoader {
         let mut templates = HashMap::new();
+        // `mass` is set explicitly to what a real `from_toml` parse of an
+        // unauthored-mass template would produce (issue #1154): the bare
+        // `#[derive(Default)]` on `EntityConfig` gives `mass` its type
+        // default (`0.0`), not `default_mass()`'s `DEFAULT_ENTITY_MASS` —
+        // only serde deserialisation runs the field-level
+        // `#[serde(default = ...)]`. Left at `0.0`, this stand-in template
+        // would fail `validate_mass` the moment `resolve()` round-trips it
+        // through `apply_overrides`, unlike any template a real loader would
+        // ever hand back.
         templates.insert(
             "harrow.toml".to_string(),
             EntityConfig {
                 name: Some("Harrow Destroyer".to_string()),
                 tags: vec!["npc".to_string()],
+                mass: crate::entity_config::DEFAULT_ENTITY_MASS,
                 ..Default::default()
             },
         );

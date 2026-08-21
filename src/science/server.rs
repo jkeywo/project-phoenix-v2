@@ -228,6 +228,13 @@ pub fn tick_scans(
         // keyed on, because a scenario can type it and a minted UUID is not
         // something any author has ever seen. See `scanned_flag`.
         Option<&crate::entities::spawner::EntityId>,
+        // Authored mass (issue #1154). `Option` rather than required: every
+        // entity `spawn_entity` produces carries this unconditionally, but a
+        // handful of test fixtures build a subject entity by hand without
+        // going through the real spawner, and `subject_mass` below falls
+        // those back to the same documented default a bare TOML gets — never
+        // to zero.
+        Option<&crate::entities::spawner::EntityMass>,
     )>,
     region_effects: Query<&crate::entities::spawner::RegionEffectsSection>,
     mut commands: Commands,
@@ -273,7 +280,7 @@ pub fn tick_scans(
 
         for target_uuid in requested {
             let found = subjects.iter().find(|(uuid, ..)| uuid.0 == target_uuid);
-            let Some((_, subject_transform, name, condition, authored_id)) = found else {
+            let Some((_, subject_transform, name, condition, authored_id, mass)) = found else {
                 record.last = None;
                 record.refusal = Some(ScanRefusal::NoSuchTarget);
                 crate::pwarn!(
@@ -288,6 +295,7 @@ pub fn tick_scans(
                 uuid: target_uuid.clone(),
                 name: name.map(|n| n.0.clone()).unwrap_or_default(),
                 condition: subject_condition(condition),
+                mass: subject_mass(mass),
             };
             let conditions = ScanConditions {
                 distance: ship_pos.distance(subject_transform.translation),
@@ -405,6 +413,19 @@ fn subject_condition(condition: Option<&InfrastructureCondition>) -> Option<Subj
     ))
 }
 
+/// The subject's authored mass (issue #1154), off its `EntityMass` component.
+///
+/// Falls back to [`crate::entity_config::DEFAULT_ENTITY_MASS`] — never to
+/// `0.0` — for the handful of test fixtures that build a subject entity by
+/// hand rather than through [`crate::entities::spawner::spawn_entity`], the
+/// only path that inserts the component. Every entity the real spawner
+/// produces carries `EntityMass` unconditionally, so this arm is untaken in
+/// production.
+fn subject_mass(mass: Option<&crate::entities::spawner::EntityMass>) -> f32 {
+    mass.map(|m| m.0)
+        .unwrap_or(crate::entity_config::DEFAULT_ENTITY_MASS)
+}
+
 /// Which authored region effects the scanning hull is standing in,
 /// deduplicated and in a fixed order.
 ///
@@ -480,6 +501,10 @@ mod tests {
     /// mirror-flag tests below fail if the key ever slips back onto the UUID no
     /// scenario author can type.
     const DEPOT_ID: &str = "skyway_depot";
+    /// The depot's authored mass (issue #1154) — a distinctive number so a test
+    /// asserting on it cannot pass by accident against
+    /// `entity_config::DEFAULT_ENTITY_MASS`.
+    const DEPOT_MASS: f32 = 180_000.0;
 
     fn suite() -> ScanConfig {
         ScanConfig {
@@ -561,6 +586,7 @@ mod tests {
             Transform::from_xyz(depot_x, 0.0, 0.0),
             EntityName("world.probe.entity.depot.name".to_string()),
             depot_condition(condition),
+            crate::entities::spawner::EntityMass(DEPOT_MASS),
         ));
         (app, ship)
     }
@@ -611,6 +637,58 @@ mod tests {
             reading.capacities,
             vec![("world.probe.capacity.berths.label".to_string(), 4)]
         );
+    }
+
+    /// Issue #1154: the reading carries the subject's authored mass, off its
+    /// `EntityMass` component — end to end, from the spawned entity through
+    /// `AdmittedCommands` to the stored `ShipScanRecord`.
+    #[test]
+    fn a_scan_reading_reports_the_subjects_authored_mass() {
+        let (mut app, ship) = app_with(suite(), 62.0, 200.0);
+        ask_for_scan(&mut app, ship, DEPOT);
+        app.update();
+
+        let reading = record(&app, ship).last.expect("a reading came back");
+        assert_eq!(reading.mass, DEPOT_MASS);
+    }
+
+    /// A subject spawned without an `EntityMass` component (every real hull has
+    /// one — this only happens to a hand-built test fixture) still reads out a
+    /// real, positive mass rather than zero: [`subject_mass`] falls back to the
+    /// same documented default an unauthored TOML gets.
+    #[test]
+    fn a_subject_with_no_entity_mass_component_falls_back_to_the_documented_default() {
+        let mut app = App::new();
+        app.add_systems(Update, (tick_scans, publish_scan_blackboard).chain());
+        app.insert_resource(WorldContentRuntime::default());
+        let ship = app
+            .world_mut()
+            .spawn((
+                crate::server_app::Ship,
+                EntityUuid(SHIP.to_string()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                AdmittedCommands::default(),
+                ShipScanRecord {
+                    config: suite(),
+                    ..Default::default()
+                },
+                crate::server_app::ShipSystemBlackboards::default(),
+            ))
+            .id();
+        // No EntityMass component — the case the fallback in `subject_mass`
+        // exists for.
+        app.world_mut().spawn((
+            EntityUuid(DEPOT.to_string()),
+            Transform::from_xyz(200.0, 0.0, 0.0),
+            EntityName("world.probe.entity.depot.name".to_string()),
+            depot_condition(62.0),
+        ));
+        ask_for_scan(&mut app, ship, DEPOT);
+        app.update();
+
+        let reading = record(&app, ship).last.expect("a reading came back");
+        assert_eq!(reading.mass, crate::entity_config::DEFAULT_ENTITY_MASS);
+        assert!(reading.mass > 0.0, "the fallback must never be zero");
     }
 
     /// **AC2 through the ECS.** The SAME command, on a depot whose condition

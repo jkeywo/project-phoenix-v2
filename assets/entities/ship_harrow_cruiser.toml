@@ -180,6 +180,11 @@ display_name = "entity.ship_harrow_cruiser.display_name"
 class = "cruiser"  # [ai] picker badge / scan subtitle
 tags = ["ship", "npc", "enemy"]
 faction = "cccccccc-3333-4333-8333-cccccccccccc"
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the hull's other stats. [ai] Unratified — a cruiser-class
+# weight, close to the Alliance cruiser's.
+mass = 22000.0
 
 [target]
 tags = ["ship"]

@@ -12,6 +12,17 @@ use crate::region_shape::RegionShape;
 #[derive(Component, Clone, Debug)]
 pub struct EntityUuid(pub String);
 
+/// Every entity spawned by the generic spawner carries its authored mass
+/// (issue #1154), in the game's own mass unit — [`EntityConfig::mass`]
+/// verbatim, already defaulted at parse time, so this is NEVER absent and
+/// NEVER zero. Unconditional like [`EntityUuid`] rather than optional like
+/// [`EntityName`]: every entity has a weight, whether an author chose one or
+/// not, so there is no "no mass" case for an `Option` to represent. Nothing
+/// mutates this after spawn — it is content identity, not simulation state,
+/// exactly as [`EntityUuid`] is.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct EntityMass(pub f32);
+
 /// Optional human-readable identifier for the entity instance.
 #[derive(Component, Clone, Debug)]
 pub struct EntityId(pub String);
@@ -189,6 +200,7 @@ pub fn spawn_entity(
         Transform::from_translation(position),
         Visibility::default(),
         EntityUuid(uuid.clone()),
+        EntityMass(config.mass),
     ));
 
     // Insert optional human-readable ID
@@ -1686,6 +1698,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -1776,6 +1789,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -1832,6 +1846,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -1893,6 +1908,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -1953,6 +1969,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2104,6 +2121,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: vec![LightConfig {
                 kind: LightKind::Point,
@@ -2174,6 +2192,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2251,6 +2270,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2340,6 +2360,46 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         );
     }
 
+    /// Issue #1154: the authored `mass` — already defaulted at parse time —
+    /// carries straight onto the spawned entity, unconditionally, exactly as
+    /// [`EntityUuid`] does.
+    #[test]
+    fn spawn_entity_carries_authored_mass_onto_entity_mass_component() {
+        let mut app = test_app();
+        let config = EntityConfig::from_toml("mass = 45000.0\n").unwrap();
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+
+        let world = app.world_mut();
+        let mass = world
+            .get::<EntityMass>(spawned)
+            .expect("every spawned entity must carry EntityMass");
+        assert_eq!(mass.0, 45_000.0);
+    }
+
+    /// An entity that authors no `mass` still gets a real, non-zero weight on
+    /// the spawned entity — the documented default rides through the spawner
+    /// exactly as an authored value does, never falling back to a bare zero.
+    #[test]
+    fn spawn_entity_without_authored_mass_carries_the_documented_default() {
+        let mut app = test_app();
+        let config = EntityConfig::from_toml("").unwrap();
+
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let spawned = spawn_and_flush(&mut app, &config, Vec3::ZERO, uuid, None);
+
+        let world = app.world_mut();
+        let mass = world
+            .get::<EntityMass>(spawned)
+            .expect("every spawned entity must carry EntityMass");
+        assert_eq!(mass.0, crate::entity_config::DEFAULT_ENTITY_MASS);
+        assert!(
+            mass.0 > 0.0,
+            "an unauthored entity must never spawn at zero mass"
+        );
+    }
+
     #[test]
     fn spawn_entity_with_region_shape_and_effects() {
         let mut app = test_app();
@@ -2352,6 +2412,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2428,6 +2489,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2494,6 +2556,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2584,6 +2647,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2803,6 +2867,7 @@ regen_per_sec = 0.0
             class: None,
             hull_id: None,
             power_rating: None,
+            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,

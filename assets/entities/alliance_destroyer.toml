@@ -4,6 +4,12 @@ class = "destroyer"
 hull_id = "NCC-0741"
 power_rating = 70
 css = "gui/themes/cruiser.css"
+# Authored mass (issue #1154), the game's own mass unit. Surfaced on a
+# Sensors scan and the deterministic input a mass-driven mechanic (the
+# tow/tractor helm penalty) reads instead of guessing from the hull's other
+# stats. [ai] Unratified — a destroyer-class weight, mid-ladder between the
+# courier and the battleship.
+mass = 14000.0
 # Player identity (the `player` tag + `playerShip` radar icon) is NOT authored
 # here — it is injected onto the selected hull at the player game-start spawn
 # (see `player_ship_identity` in `src/server_app.rs`). A world-spawned copy of

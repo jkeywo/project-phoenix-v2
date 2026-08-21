@@ -4544,6 +4544,17 @@ pub struct EntityConfig {
     /// TOML `css` field.
     #[serde(default)]
     pub css: Option<String>,
+    /// Authored mass, in the game's own mass unit (issue #1154). Every entity
+    /// a crew could act on — a hull, a derelict, a structure — carries a real
+    /// weight rather than a zero-weight tow: this is the property mass-driven
+    /// mechanics (the tractor/tow helm penalty is the first of them) are a
+    /// DETERMINISTIC FUNCTION of, so it has to be authored content rather than
+    /// guessed from a hull's other stats, and it has to be the same number on
+    /// every host. An entity that authors nothing takes [`default_mass`]
+    /// rather than `0.0` — see that function for why, and
+    /// [`validate_mass`] for what an authored value is refused for.
+    #[serde(default = "default_mass")]
+    pub mass: f32,
     /// Renderer light sources attached to this entity.
     #[serde(default)]
     pub light: Vec<LightConfig>,
@@ -4678,6 +4689,7 @@ impl EntityConfig {
         if let Some(collider) = config.collider.as_ref() {
             validate_collider_config(collider).map_err(SerdeError::custom)?;
         }
+        validate_mass(config.mass).map_err(SerdeError::custom)?;
 
         // Parse the ship_config sub-block via the shared ShipConfig code path.
         // If the ship declares `[[shield_arc]]` blocks, they auto-generate
@@ -5426,6 +5438,42 @@ fn validate_collider_config(collider: &ColliderConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// Documented parse-time default for [`EntityConfig::mass`] (issue #1154): the
+/// weight an entity that authors no `mass` is given, rather than `0.0`.
+///
+/// A zero-mass tow is a physics-defeating exploit dressed as an unauthored
+/// field, not an empty one — so the fallback has to be a real weight, and it
+/// has to be a NUMBER, chosen once here, rather than a per-caller guess that
+/// could disagree with itself between the spawner and a scan readout. `10_000`
+/// sits mid-ladder between the lightest shipped hull (a courier) and the
+/// heaviest (a battleship), so a template nobody has tuned yet behaves like an
+/// ordinary mid-weight hull under a mass-driven mechanic rather than like
+/// nothing (too light) or like a battleship (too heavy).
+pub const DEFAULT_ENTITY_MASS: f32 = 10_000.0;
+
+fn default_mass() -> f32 {
+    DEFAULT_ENTITY_MASS
+}
+
+/// Reject an authored `mass` that could never be a real weight.
+///
+/// Non-positive and non-finite are the same author mistake wearing different
+/// faces — a stray `0`, a typo'd negative, a `nan`/`inf` TOML can spell out
+/// directly — and every one of them would hand a mass-driven mechanic (the
+/// tow/tractor helm penalty divides by this number) either a divide-by-zero or
+/// a constant that always wins or always loses, rather than an authored
+/// weight. Caught here, at load, in the same style as
+/// [`validate_collider_config`], so the failure names the file rather than
+/// surfacing as a silent NaN three systems downstream.
+fn validate_mass(mass: f32) -> Result<(), String> {
+    if !mass.is_finite() || mass <= 0.0 {
+        return Err(format!(
+            "mass = {mass} is not a valid weight — mass must be a positive, finite number"
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::field_reassign_with_default)]
@@ -5810,6 +5858,82 @@ length = 4.0
             let config = EntityConfig::from_toml(&toml_str)
                 .unwrap_or_else(|e| panic!("a {shape} with no half_height must parse: {e}"));
             assert_eq!(config.collider.as_ref().unwrap().half_height, None);
+        }
+    }
+
+    /// Issue #1154: an authored `mass` parses straight through onto the
+    /// config, not into some intermediate representation the spawner then has
+    /// to reinterpret.
+    #[test]
+    fn mass_authored_value_is_parsed() {
+        let config = EntityConfig::from_toml("mass = 45000.0\n").expect("parse must succeed");
+        assert_eq!(config.mass, 45_000.0);
+    }
+
+    /// Issue #1154, AC1: an entity that authors no `mass` at all takes the
+    /// documented parse-time default, never a bare `0.0` — a zero-weight tow
+    /// is an exploit, not an empty field.
+    #[test]
+    fn mass_defaults_when_unauthored() {
+        let config = EntityConfig::from_toml("").expect("parse must succeed");
+        assert_eq!(
+            config.mass, DEFAULT_ENTITY_MASS,
+            "an unauthored entity must get a real weight, not zero"
+        );
+        assert!(
+            config.mass > 0.0,
+            "the default itself must be a positive weight"
+        );
+    }
+
+    /// Issue #1154, AC5: a non-positive or non-finite `mass` is refused at
+    /// load, naming the field, rather than shipping a NaN or a zero into a
+    /// mass-driven mechanic three systems downstream.
+    #[test]
+    fn non_positive_or_non_finite_mass_is_rejected() {
+        for bad in ["0", "0.0", "-1500.0", "nan", "inf", "-inf"] {
+            let toml_str = format!("mass = {bad}\n");
+            let err = EntityConfig::from_toml(&toml_str)
+                .err()
+                .unwrap_or_else(|| panic!("mass = {bad} must not load"));
+            assert!(
+                err.to_string().contains("mass"),
+                "the error must name the offending field, got: {err}"
+            );
+        }
+    }
+
+    /// Issue #1154, AC2: every shipped hull an operation could Tow, and every
+    /// shipped structure an operation could Stabilise/Transfer/repair, carries
+    /// an EXPLICIT, class-appropriate mass rather than leaning on the shared
+    /// default — a battleship and a courier that both silently fell back to
+    /// the same number would make the tow penalty read identically for either.
+    #[test]
+    fn shipped_hulls_and_operable_structures_author_an_explicit_mass() {
+        for (path, expected) in [
+            ("assets/entities/alliance_battleship.toml", 55_000.0),
+            ("assets/entities/alliance_cruiser.toml", 24_000.0),
+            ("assets/entities/alliance_destroyer.toml", 14_000.0),
+            ("assets/entities/alliance_courier.toml", 3_500.0),
+            ("assets/entities/ship_civilian_hauler.toml", 9_000.0),
+            ("assets/entities/ship_harrow_warhawk.toml", 52_000.0),
+            ("assets/entities/ship_harrow_cruiser.toml", 22_000.0),
+            ("assets/entities/ship_harrow_destroyer.toml", 13_000.0),
+            ("assets/entities/ship_harrow_patrol.toml", 18_000.0),
+            ("assets/entities/ship_requiem_courier.toml", 3_200.0),
+            ("assets/entities/skyhook.toml", 250_000.0),
+            ("assets/entities/depot_transfer.toml", 180_000.0),
+        ] {
+            let config =
+                crate::entity_includes::load_entity_config(path).expect("hull TOML must parse");
+            assert_eq!(
+                config.mass, expected,
+                "{path} must author mass = {expected}"
+            );
+            assert_ne!(
+                config.mass, DEFAULT_ENTITY_MASS,
+                "{path} must author its OWN mass rather than coasting on the shared default"
+            );
         }
     }
 

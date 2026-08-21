@@ -4,6 +4,11 @@ class = "battleship"
 hull_id = "NCC-2001"
 power_rating = 120
 css = "gui/themes/battleship.css"
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the hull's other stats. [ai] Unratified — the heaviest shipped
+# hull.
+mass = 55000.0
 # Player identity (the `player` tag + `playerShip` radar icon) is NOT authored
 # here — it is injected onto the selected hull at the player game-start spawn
 # (see `player_ship_identity` in `src/server_app.rs`). A world-spawned copy of

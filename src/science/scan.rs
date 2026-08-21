@@ -274,8 +274,12 @@ impl ScanConfig {
 /// Everything the derivation may see about the thing being scanned — **the
 /// whole input port**.
 ///
-/// Two fields, and the shortness is the point: see the module docs. There is no
-/// field for authored result text because there is no authored result text.
+/// The shortness is the point: see the module docs. There is no field for
+/// authored result text because there is no authored result text. `mass`
+/// (issue #1154) does not bend that rule — it is not a result either, it is a
+/// number [`EntityConfig::mass`](crate::entity_config::EntityConfig::mass)
+/// already carries on every entity, unconditionally, before anyone scans
+/// anything.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ScanSubject {
     /// The subject entity's UUID.
@@ -293,6 +297,11 @@ pub struct ScanSubject {
     /// whose input is `InfrastructureSnapshot::from_state`'s `Option`. A
     /// withheld track cannot reach this field, so a scan cannot report one.
     pub condition: Option<SubjectCondition>,
+    /// The subject's authored mass (issue #1154), in the game's own mass
+    /// unit — carried straight off its `EntityMass` component. Never `None`
+    /// and never zero: every entity has one, whether an author chose it or it
+    /// took the documented parse-time default.
+    pub mass: f32,
 }
 
 /// This tick's real conditions, as the adapter reads them off the world.
@@ -401,6 +410,15 @@ pub struct ScanReading {
     /// The step it was rounded to, so the console can say how precise this is
     /// rather than implying a precision the band never had.
     pub condition_step: f32,
+    /// The subject's authored mass (issue #1154), in the game's own mass
+    /// unit, verbatim — the fidelity ladder never coarsens it, unlike
+    /// `condition_fraction`, because it is content identity rather than a
+    /// live measurement: the same number regardless of which band answered.
+    /// `#[serde(default)]` so a save written before this field existed still
+    /// deserialises (at `0.0`, on a reading taken before #1154) rather than
+    /// refusing to load.
+    #[serde(default)]
+    pub mass: f32,
     /// `(label id, held)` for each operational flag the subject authored a
     /// label for. Empty when the answering band does not resolve flags.
     #[serde(default)]
@@ -528,6 +546,7 @@ pub fn derive(
         taken_at_tick: now_tick,
         condition_fraction: quantise(condition.condition_fraction, band.condition_step),
         condition_step: band.condition_step,
+        mass: subject.mass,
         flags: if band.report_thresholds {
             condition.flags.clone()
         } else {
@@ -597,6 +616,7 @@ mod tests {
                 flags: vec![("world.probe.threshold.transfer.label".into(), false)],
                 capacities: vec![("world.probe.capacity.berths.label".into(), 4)],
             }),
+            mass: 180_000.0,
         }
     }
 
@@ -664,6 +684,23 @@ mod tests {
         assert_eq!(far.condition_step, 0.25, "and it says how precise it is");
     }
 
+    /// Issue #1154: mass is content identity, not a live measurement, so
+    /// unlike `condition_fraction` the fidelity ladder never touches it — a
+    /// coarse reading from 2,400 units out reports the exact same mass as a
+    /// detailed one from 400.
+    #[test]
+    fn mass_rides_through_the_reading_unrounded_at_every_fidelity() {
+        let config = suite();
+        let close = derive(&config, &depot(0.37), &at(400.0), 1).expect("a reading");
+        let far = derive(&config, &depot(0.37), &at(2_400.0), 1).expect("a reading");
+
+        assert_eq!(close.mass, 180_000.0);
+        assert_eq!(
+            far.mass, 180_000.0,
+            "mass does not get coarser with range the way condition_fraction does"
+        );
+    }
+
     /// Past the coarsest band there is no reading at all — the ladder has an
     /// end, and it is the authored one.
     #[test]
@@ -686,6 +723,7 @@ mod tests {
             uuid: "rock-7".into(),
             name: String::new(),
             condition: None,
+            mass: 500.0,
         };
         assert_eq!(
             derive(&suite(), &rock, &at(100.0), 1),
@@ -721,6 +759,7 @@ mod tests {
             condition: InfrastructureSnapshot::from_state(&hidden)
                 .as_ref()
                 .map(|published| SubjectCondition::from_published(published, |_| None, |_| None)),
+            mass: 90_000.0,
         };
         let refusal = derive(&suite(), &sealed, &at(100.0), 1).expect_err("no reading");
         assert_eq!(

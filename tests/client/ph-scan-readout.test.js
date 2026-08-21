@@ -17,6 +17,7 @@ const DETAILED = {
   taken_at_tick: 900,
   condition_fraction: 0.31,
   condition_step: 0.01,
+  mass: 250000,
   flags: [['world.skyhook.transfer.label', false]],
   capacities: [['world.skyhook.berths.label', 4]],
 };
@@ -95,6 +96,7 @@ describe('PhScanReadout', () => {
       .toBe(t('entity.alliance_destroyer.scan.band.detailed.label'));
     expect(rows(el)).toEqual([
       [t('component.scan.condition'), '31%'],
+      [t('component.scan.mass'), '250000'],
       [t('world.skyhook.transfer.label'), t('component.scan.flag.down')],
       [t('world.skyhook.berths.label'), '4'],
     ]);
@@ -117,6 +119,7 @@ describe('PhScanReadout', () => {
     });
     expect(rows(el)).toEqual([
       [t('component.scan.condition'), '31%'],
+      [t('component.scan.mass'), '250000'],
       [t('world.invented.pylon_intact.label'), t('component.scan.flag.held')],
       [t('world.invented.souls.label'), '120'],
     ]);
@@ -129,7 +132,17 @@ describe('PhScanReadout', () => {
     el.state = panelState({ scan: { capable: true, reading: COARSE, refusal: null } });
     const condition = rows(el)[0];
     expect(condition[1]).toBe('25%±13%');
-    expect(rows(el)).toHaveLength(2, 'condition and the flag; no capacity row');
+    expect(rows(el)).toHaveLength(3, 'condition, mass and the flag; no capacity row');
+  });
+
+  // Mass (issue #1154) is content identity, not a live measurement: a coarse
+  // band still reports the exact same number a detailed one would, with no
+  // rounding and no tolerance beside it.
+  it('reports mass unrounded and without a tolerance even at a coarse band', () => {
+    const el = setup();
+    el.state = panelState({ scan: { capable: true, reading: COARSE, refusal: null } });
+    const mass = rows(el)[1];
+    expect(mass).toEqual([t('component.scan.mass'), '250000']);
   });
 
   it('shows the refusal reason and no stale reading', () => {

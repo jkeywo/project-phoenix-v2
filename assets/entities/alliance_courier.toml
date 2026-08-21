@@ -12,6 +12,11 @@ hull_id = "NCC-0912"
 # combat_test's ship_power counter. Low enough to stay under that scenario's
 # >=90 / >=100 bonus-spawn gates, which is the point of flying solo.
 power_rating = 25
+# Authored mass (issue #1154), the game's own mass unit — the deterministic
+# input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
+# guessing from the hull's other stats. [ai] Unratified — the lightest shipped
+# combat hull.
+mass = 3500.0
 # Player identity (the `player` tag + `playerShip` radar icon) is NOT authored
 # here — it is injected onto the selected hull at the player game-start spawn
 # (see `player_ship_identity` in `src/server_app.rs`). A world-spawned copy of

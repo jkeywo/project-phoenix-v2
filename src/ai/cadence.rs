@@ -177,6 +177,18 @@ pub fn register_ai_cadence(app: &mut App) {
             FixedLast,
             tick_ai_cadence.after(crate::sim_tick::advance_sim_tick),
         );
+    // Authoritative-state exclusion declarations (issue #1221, Track 3 step C9).
+    // The three cadence latches are DERIVED — pure functions of the tick counter
+    // (`sim_tick_hz / ai_tick_hz`), whose source `SimTick` is already folded — so
+    // they are declared here at their owning site, replacing the `EXCLUSIONS`
+    // const in `tests/authoritative_state_enumeration.rs`. Reached under the
+    // idempotency guard above, so declared exactly once; inert to the digest.
+    {
+        use crate::authoritative::{DeclareState, StateClass};
+        app.declare_state::<AiTickReady>(StateClass::Derived, "ai-policy-tick-scheduler")
+            .declare_state::<AiSnapshotReady>(StateClass::Derived, "ai-policy-tick-scheduler")
+            .declare_state::<AiBaseInterval>(StateClass::Derived, "ai-policy-tick-scheduler");
+    }
 }
 
 /// Re-arm both latches so the next `app.update()` is an AI decision tick.

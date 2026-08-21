@@ -78,6 +78,22 @@ pub struct RendererPlugin;
 
 impl Plugin for RendererPlugin {
     fn build(&self, app: &mut App) {
+        // Authoritative-state exclusion declaration (issue #1221, Track 3 step C9).
+        // `RenderInterp` is PRESENTATION — frame-time interpolated transforms that
+        // live directly on the simulation entity but never feed the fixed tick
+        // (`FixedFirst` restores the exact authoritative transform before any sim
+        // system can read it). Declared here at its owning site, replacing the
+        // `EXCLUSIONS` const in `tests/authoritative_state_enumeration.rs`. This
+        // render plugin is absent from a headless run, so the declaration never
+        // reaches that census — which is correct: `RenderInterp` never registers
+        // there either. Inert to the digest.
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<RenderInterp>(
+                StateClass::Presentation,
+                "digest-render-interp-fold-point",
+            );
+        }
         app.add_plugins(PfxPlugin)
             .add_plugins(SpaceSkyboxPlugin)
             .init_resource::<RenderTuning>()

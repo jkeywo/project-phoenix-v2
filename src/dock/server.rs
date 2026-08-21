@@ -189,6 +189,20 @@ impl Plugin for DockPlugin {
         // commands into every ship's `AdmittedCommands` each tick.
         // Gated AI decider (issue #1162); `register_ai_cadence` is idempotent.
         crate::ai::cadence::register_ai_cadence(app);
+        // Authoritative-state exclusion declarations (issue #1221, Track 3 step
+        // C9). `DockMarkers` is DERIVED spawn-time rig geometry — resolved at spawn
+        // from the model rig sidecar and read-only thereafter (it is what makes a
+        // hull dockable, static geometry, never runtime state; the live docking it
+        // gates lives in the folded `DockControl`). `DockAiEngaged` is the DERIVED
+        // "I am driving this dock" marker, re-derived every AI tick from the folded
+        // directive and dock state, never a second copy of either. Both are
+        // declared here at their owning site, replacing the `EXCLUSIONS` const in
+        // `tests/authoritative_state_enumeration.rs`; inert to the digest.
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<DockMarkers>(StateClass::Derived, "dock-controller")
+                .declare_state::<DockAiEngaged>(StateClass::Derived, "dock-relationship-state");
+        }
         app.register_admitted_consumer(ConsumerMatcher::exact(DOCK_SYSTEM_ID));
         app.add_systems(
             FixedUpdate,

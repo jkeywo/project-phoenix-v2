@@ -724,6 +724,96 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     // the order they register in — see `register_sim_set_plugins`.
     register_sim_set_plugins(app, opts);
 
+    // Authoritative-state EXCLUSION declarations (issue #1221, Track 3 step C9).
+    // Every type below is non-authoritative state this function OWNS — it
+    // `init_resource`s / `insert_resource`s each of them further down (or, for the
+    // debug-overlay flags, causes each to enter the component registry via the
+    // `resource_exists::<..>` run conditions on the settings-route systems below,
+    // even though the `DebugOverlayPlugin` that *inserts* them is absent from a
+    // headless run). Each is declared at this owning site via `App::declare_state`,
+    // replacing the hand-maintained `EXCLUSIONS` const that used to live in
+    // `tests/authoritative_state_enumeration.rs`; the enumeration guard now reads
+    // the exclusion set back out of `StateCensus`. The declaration is inert to the
+    // digest (see `src/authoritative.rs`), so nothing here moves a byte of the
+    // authoritative-state digest — the determinism guard proves that directly.
+    {
+        use crate::authoritative::{DeclareState, StateClass};
+        app
+            // Timers / outboxes: wall-clock / transport bookkeeping, not sim state.
+            .declare_state::<SimOutbox>(StateClass::Timer, "digest-exclusion-classes")
+            .declare_state::<SimBroadcastTimer>(StateClass::Timer, "digest-exclusion-classes")
+            .declare_state::<crate::debug_overlay::DamageLog>(
+                StateClass::Timer,
+                "digest-exclusion-classes",
+            )
+            // Broadcast caches: one-directional delta-suppression mirrors of
+            // already-authoritative state (`src/core/broadcast/cache_registry.rs`).
+            .declare_state::<LastBroadcastEntityPositions>(
+                StateClass::Cache,
+                "digest-exclusion-classes",
+            )
+            .declare_state::<LastBroadcastEntityHealth>(
+                StateClass::Cache,
+                "digest-exclusion-classes",
+            )
+            .declare_state::<LastBroadcastHull>(StateClass::Cache, "digest-exclusion-classes")
+            .declare_state::<LastBroadcastShields>(StateClass::Cache, "digest-exclusion-classes")
+            .declare_state::<LastBroadcastBlackboards>(
+                StateClass::Cache,
+                "digest-exclusion-classes",
+            )
+            // Cache of the presentation-only debug flags (issue #940):
+            // `report_debug_state` compares against it to skip re-announcing.
+            .declare_state::<crate::debug_overlay::LastReportedDebugState>(
+                StateClass::Cache,
+                "debug-overlay-flags-state",
+            )
+            // Cleared-at-fold: real inter-system-message state, but structurally
+            // empty by the `RenderInterp` fold point on every correct instance.
+            .declare_state::<crate::messages::InterSystemQueue>(
+                StateClass::ClearedAtFold,
+                "inter-system-message-state",
+            )
+            // Presentation: the host per-Station attention surface (issue #1101);
+            // it drives which tab asks for attention, never what the tick computes.
+            .declare_state::<StationImportanceRes>(
+                StateClass::Presentation,
+                "station-importance-state",
+            )
+            // Presentation debug-overlay flags (issue #940). Their inserting
+            // `DebugOverlayPlugin` is absent headless, but the settings-route
+            // systems below name them in `resource_exists` run conditions, so they
+            // enter the headless registry here — this is the site that owns their
+            // presence in the census the enumeration guard scans.
+            .declare_state::<crate::debug_overlay::DebugRegionsEnabled>(
+                StateClass::Presentation,
+                "debug-overlay-flags-state",
+            )
+            .declare_state::<crate::debug_overlay::DebugOverlayEnabled>(
+                StateClass::Presentation,
+                "debug-overlay-flags-state",
+            )
+            .declare_state::<crate::debug_overlay::DebugDamageEnabled>(
+                StateClass::Presentation,
+                "debug-overlay-flags-state",
+            )
+            .declare_state::<crate::debug_overlay::DebugEntitiesEnabled>(
+                StateClass::Presentation,
+                "debug-overlay-flags-state",
+            )
+            .declare_state::<crate::debug_overlay::DebugEntityInspectorEnabled>(
+                StateClass::Presentation,
+                "debug-overlay-flags-state",
+            )
+            // Derived: mass is inserted once at spawn from `EntityConfig.mass`
+            // (`src/entities/spawner.rs`) and only ever read — it rides the content
+            // digest, not the sim digest.
+            .declare_state::<crate::entities::spawner::EntityMass>(
+                StateClass::Derived,
+                "entity-mass-state",
+            );
+    }
+
     app.add_message::<AsteroidDestroyedVfx>()
         // Balance telemetry. Registered here (not behind `headless`) so the
         // chokepoints can emit unconditionally — only the *collection* is

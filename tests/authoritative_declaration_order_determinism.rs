@@ -91,13 +91,24 @@ fn digest_and_census(
 /// leaves `world_digest` byte-identical, because the census is digest-inert.
 #[test]
 fn permuting_declaration_order_leaves_the_authoritative_digest_identical() {
-    // No declarations at all: since this issue wires none into any production
-    // plugin, StateCensus is never even initialised in a real run.
+    // Since issue #1221 the production plugins DO declare their non-authoritative
+    // state (the exclusion set the enumeration guard reads back out of the
+    // census), so a real headless run populates StateCensus even with no probe
+    // injected. Capture that production baseline count so the probe precondition
+    // below is measured relative to it.
     let (baseline_digest, baseline_census) = digest_and_census(RegistrationOrder::Canonical, None);
+    let baseline_count = baseline_census
+        .as_ref()
+        .expect(
+            "since issue #1221 the production plugins declare their exclusion \
+             state at their owning build() sites, so StateCensus must exist even \
+             with no probe injected",
+        )
+        .len();
     assert!(
-        baseline_census.is_none(),
-        "no production plugin declares yet, so StateCensus must be absent when \
-         no probe declares — got {baseline_census:?}"
+        baseline_count > 0,
+        "expected the production plugins to declare at least one exclusion state \
+         into StateCensus; got an empty census"
     );
 
     // The same world, now with four states declared during build, in permuted
@@ -120,13 +131,14 @@ fn permuting_declaration_order_leaves_the_authoritative_digest_identical() {
     let c_s1 = c_s1.expect("the probes declare, so StateCensus must exist");
     let c_s2 = c_s2.expect("the probes declare, so StateCensus must exist");
 
-    // Precondition: all four declarations landed, and the two generic
-    // instantiations did NOT collapse to one entry (the full-path census key).
+    // Precondition: all four PROBE declarations landed on top of the production
+    // baseline, and the two generic instantiations did NOT collapse to one entry
+    // (the full-path census key keeps them distinct).
     assert_eq!(
         c_ab.len(),
-        4,
-        "expected four declared probe states (two of them distinct generic \
-         instantiations); got {:?}",
+        baseline_count + 4,
+        "expected the production baseline ({baseline_count}) plus four declared \
+         probe states (two of them distinct generic instantiations); got {:?}",
         c_ab.entries()
     );
 
@@ -146,9 +158,9 @@ fn permuting_declaration_order_leaves_the_authoritative_digest_identical() {
     // no-declaration baseline, and across every permutation.
     assert_eq!(
         baseline_digest, d_ab,
-        "declaring authoritative state at all moved world_digest — the census \
-         registry is NOT inert to the digest; something in sim_digest.rs or \
-         snapshot.rs is reading StateCensus"
+        "declaring the four probe states on top of the production baseline moved \
+         world_digest — the census registry is NOT inert to the digest; something \
+         in sim_digest.rs or snapshot.rs is reading StateCensus"
     );
     assert_eq!(
         d_ab, d_ba,

@@ -153,6 +153,17 @@ impl Plugin for UmbilicalPlugin {
         // unrouted.
         // Gated AI decider (issue #1162); `register_ai_cadence` is idempotent.
         crate::ai::cadence::register_ai_cadence(app);
+        // Authoritative-state exclusion declaration (issue #1221, Track 3 step C9).
+        // `UmbilicalAiRunning` is the DERIVED "I am driving this umbilical" marker —
+        // re-derived every AI tick from the still-folded directive plus the folded
+        // umbilical-flow state, never a second copy of either, so a lost marker
+        // self-heals within one AI tick. Declared here at its owning site,
+        // replacing the `EXCLUSIONS` const in
+        // `tests/authoritative_state_enumeration.rs`; inert to the digest.
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<UmbilicalAiRunning>(StateClass::Derived, "umbilical-flow-state");
+        }
         app.register_admitted_consumer(ConsumerMatcher::exact(UMBILICAL_SYSTEM_ID));
         app.add_systems(
             FixedUpdate,

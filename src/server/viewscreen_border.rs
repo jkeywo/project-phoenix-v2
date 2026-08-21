@@ -182,6 +182,22 @@ pub struct ViewscreenBorderPlugin;
 
 impl Plugin for ViewscreenBorderPlugin {
     fn build(&self, app: &mut App) {
+        // Authoritative-state exclusion declaration (issue #1221, Track 3 step C9).
+        // `ViewscreenMotion` is PRESENTATION — the reduced-motion comfort profile
+        // and shake-intensity scale that only decide how the hull-damage shake and
+        // shield flash are DRAWN; nothing in the fixed tick reads it. Declared here
+        // at its owning site, replacing the `EXCLUSIONS` const in
+        // `tests/authoritative_state_enumeration.rs`. This server-only plugin is
+        // absent from a headless run, so the declaration never reaches that census
+        // — correct, because `ViewscreenMotion` never registers there either. Inert
+        // to the digest.
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<ViewscreenMotion>(
+                StateClass::Presentation,
+                "viewscreen-motion-state",
+            );
+        }
         app.add_plugins(UiMaterialPlugin::<RedAlertVignetteMaterial>::default())
             .add_message::<HudStateChanged>()
             .add_message::<LobbyStateChanged>()

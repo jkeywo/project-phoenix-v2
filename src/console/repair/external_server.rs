@@ -573,6 +573,20 @@ pub fn register_external_repair(app: &mut App) {
     // Gated AI decider (issue #1162); `register_ai_cadence` is idempotent, and
     // `RepairPlugin` (this fn's caller) already installs it for `operate_repair_ai`.
     crate::ai::cadence::register_ai_cadence(app);
+    // Authoritative-state exclusion declaration (issue #1221, Track 3 step C9).
+    // `ExternalRepairAiDispatched` is the DERIVED "I am driving this external
+    // repair" marker — re-derived every AI tick from the still-folded operate
+    // directive plus the folded external-repair-dispatch state, never a second
+    // copy of either, so a lost marker self-heals within one AI tick. Declared
+    // here at its owning site, replacing the `EXCLUSIONS` const in
+    // `tests/authoritative_state_enumeration.rs`; inert to the digest.
+    {
+        use crate::authoritative::{DeclareState, StateClass};
+        app.declare_state::<ExternalRepairAiDispatched>(
+            StateClass::Derived,
+            "external-repair-dispatch-state",
+        );
+    }
     app.add_systems(
         FixedUpdate,
         (

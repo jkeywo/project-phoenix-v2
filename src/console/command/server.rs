@@ -109,6 +109,26 @@ impl Plugin for CommandPlugin {
         // calls it.
         crate::ai::cadence::register_ai_cadence(app);
         app.init_resource::<ActiveObjectiveStances>();
+        // Authoritative-state exclusion declarations (issue #1221, Track 3 step
+        // C9). Both are DERIVED scratch around the folded `ShipStationStances`:
+        // `LastDirectedControl` remembers each directed Station's last-observed
+        // control so the Human->AI handoff fires once on the edge, and
+        // `ActiveObjectiveStances` is the per-tick projection of the active
+        // objective-contributed stances rebuilt from the (folded) objective
+        // manager. Neither is folded; declared here at their owning site,
+        // replacing the `EXCLUSIONS` const in
+        // `tests/authoritative_state_enumeration.rs`. Inert to the digest.
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<LastDirectedControl>(
+                StateClass::Derived,
+                "command-station-authority",
+            )
+            .declare_state::<ActiveObjectiveStances>(
+                StateClass::Derived,
+                "command-stance-selection-state",
+            );
+        }
         app.add_systems(
             FixedUpdate,
             (

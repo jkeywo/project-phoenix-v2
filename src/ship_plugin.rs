@@ -56,6 +56,25 @@ impl Plugin for ShipPlugin {
         // `FixedLast`, so it is always consumed by the `FixedUpdate` systems
         // it gates before it is re-armed for the next step.
         crate::ai::cadence::register_ai_cadence(app);
+        // Authoritative-state exclusion declarations (issue #1221, Track 3 step
+        // C9). These three ship components are DERIVED — recomputed every tick as
+        // pure functions of ShipConfig + sessions + control sources (all
+        // digest-free), and spawn-required on LocalShip so they never cause a
+        // mid-run archetype move. Declared here at their owning site, replacing the
+        // `EXCLUSIONS` const in `tests/authoritative_state_enumeration.rs`; inert
+        // to the digest.
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<HumanSeekingHosts>(
+                StateClass::Derived,
+                "visiting-station-placement-state",
+            )
+            .declare_state::<VisitingStationHosts>(
+                StateClass::Derived,
+                "visiting-station-placement-state",
+            )
+            .declare_state::<ScenarioDetailFloor>(StateClass::Derived, "visiting-station-resolver");
+        }
         app
             // The shared helm decision surface (issue #824): rebuilt once per
             // AI-helm sim tick by `build_helm_ai_surfaces_frame` and consumed

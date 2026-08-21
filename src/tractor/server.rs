@@ -169,6 +169,20 @@ impl Plugin for TractorPlugin {
         // just guarantees the latch exists even in a fixture that adds only this
         // plugin (the convention every gated-system plugin follows).
         crate::ai::cadence::register_ai_cadence(app);
+        // Authoritative-state exclusion declarations (issue #1221, Track 3 step
+        // C9). `TractorAiEngaged` is the DERIVED "I am driving this tractor" marker
+        // — re-derived every AI tick from the still-folded engage directive plus
+        // the folded tractor state, never a second copy of either, so a lost marker
+        // self-heals within one tick. `HeldResponseSection` is DERIVED spawn-time
+        // content: attached from the target's authored `[held_response]` and
+        // read-only thereafter, riding the content digest, not the sim digest. Both
+        // are declared here at their owning site, replacing the `EXCLUSIONS` const
+        // in `tests/authoritative_state_enumeration.rs`; inert to the digest.
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<TractorAiEngaged>(StateClass::Derived, "tractor-beam-state")
+                .declare_state::<HeldResponseSection>(StateClass::Derived, "tractor-beam-coupler");
+        }
         app.register_admitted_consumer(ConsumerMatcher::exact(TRACTOR_SYSTEM_ID));
         app.add_systems(
             FixedUpdate,

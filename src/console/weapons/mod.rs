@@ -103,6 +103,16 @@ impl Plugin for WeaponsPlugin {
         // `ai_target_selection`, `tick_blaster_auto_fire`) were ungated, i.e.
         // deciding once per rendered frame.
         crate::ai::cadence::register_ai_cadence(app);
+        // Authoritative-state exclusion declaration (issue #1221, Track 3 step C9).
+        // `LastWeaponsUpdate` is a CACHE — a delta-suppression mirror of what the
+        // weapons blackboard last SENT over the wire, compared against to skip
+        // identical ticks, never a second copy of simulation truth. Declared at its
+        // owning site, replacing the `EXCLUSIONS` const in
+        // `tests/authoritative_state_enumeration.rs`; inert to the digest.
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<LastWeaponsUpdate>(StateClass::Cache, "digest-exclusion-classes");
+        }
         app.init_resource::<LastWeaponsUpdate>()
             .init_resource::<CurrentPhaserMode>()
             .init_resource::<PhaserRenderConfig>()

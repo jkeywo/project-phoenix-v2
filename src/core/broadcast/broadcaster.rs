@@ -154,6 +154,17 @@ impl<M: BroadcastKind> Plugin for Broadcaster<M> {
             app.insert_resource(BroadcastRegistry::<M>::new());
             M::add_dispatch(app);
         }
+        // Authoritative-state exclusion declaration (issue #1221, Track 3 step C9).
+        // The per-phase broadcast registry is a CACHE — the broadcaster's own live
+        // delivery bookkeeping, never a second copy of simulation truth. Declared
+        // per-instantiation at this owning site (each `BroadcastRegistry<M>` keys
+        // distinctly by full path yet all share the short name `BroadcastRegistry`
+        // the guard consults), replacing the `EXCLUSIONS` const in
+        // `tests/authoritative_state_enumeration.rs`; inert to the digest.
+        {
+            use crate::authoritative::{DeclareState, StateClass};
+            app.declare_state::<BroadcastRegistry<M>>(StateClass::Cache, "digest-exclusion-classes");
+        }
         let mut registry = app.world_mut().resource_mut::<BroadcastRegistry<M>>();
         for reg in &self.pending {
             registry.add(Registration {

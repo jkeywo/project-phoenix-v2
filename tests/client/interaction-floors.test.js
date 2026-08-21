@@ -62,14 +62,11 @@ const TRACER = [
  * is a work item, not just a silence.
  */
 const DEBT = {
-  '#1176 — helm family and navigation composites': {
-    'gui/components/ph-helm-joystick.js':
-      'the drag well takes pointerdown/up but is not focusable, and the host declares no '
-      + 'role, tabindex or accessible name; #1176 makes it an arrow-steppable named group.',
-    'gui/components/ph-lateral-thrust-joystick.js':
-      'as the helm joystick — a bare drag well with no focusable control, role or name; '
-      + '#1176 gives it the same keyboard treatment.',
-  },
+  // #1176 (helm family and navigation composites) is CONVERTED — its block was
+  // struck off here when ph-helm-joystick, ph-lateral-thrust-joystick and the
+  // navigation composites gained focusable, named, keyboard-operable controls.
+  // The family now passes every floor with no allow-list entry, proved by
+  // tests/client/helm-nav-keyboard.test.js and tests/smoke/helm-nav-keyboard.spec.js.
   '#1177 — combat family': {
     'gui/components/ph-power-controls.js':
       'the −/+ group steppers are glyph-only with no aria-label, and the power pips are '

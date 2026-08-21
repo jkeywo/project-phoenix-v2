@@ -5,6 +5,7 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import { rovingKeyTarget } from '../roving-tabindex.js';
 
 export class PhNavigationMap extends HTMLElement {
   #state = null;
@@ -112,6 +113,17 @@ export class PhNavigationMap extends HTMLElement {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
+    // Focusable, named group + keyboard operation (issue #1176). The chart was
+    // a bare <canvas> the keyboard could not land on: pan/zoom/tap lived only
+    // on the pointer, and the coarse structural floor let it pass because the
+    // three waypoint buttons are focusable. The host becomes the one Tab stop —
+    // `role="group"` is the honest role for a scope a screen reader cannot
+    // enumerate — and `#onKeyDown` cycles the selection over contacts and
+    // commits a waypoint through the SAME named action the bar button does.
+    this.setAttribute('role', 'group');
+    this.setAttribute('aria-label', t('component.navigation_map.label'));
+    if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
+    this.addEventListener('keydown', this.#boundKeyDown);
     this.#canvas.addEventListener('mousedown', this.#boundMouseDown);
     this.#canvas.addEventListener('mousemove', this.#boundMouseMove);
     this.#canvas.addEventListener('mouseup', this.#boundMouseUp);
@@ -132,6 +144,7 @@ export class PhNavigationMap extends HTMLElement {
       this.#resizeObserver.disconnect();
       this.#resizeObserver = null;
     }
+    this.removeEventListener('keydown', this.#boundKeyDown);
     this.#canvas.removeEventListener('mousedown', this.#boundMouseDown);
     this.#canvas.removeEventListener('mousemove', this.#boundMouseMove);
     this.#canvas.removeEventListener('mouseup', this.#boundMouseUp);
@@ -662,6 +675,60 @@ export class PhNavigationMap extends HTMLElement {
   #clearWaypoint() {
     if (this.sendAction) this.sendAction('clear_navigation_waypoint', {});
   }
+
+  /**
+   * Operate the chart from the keyboard (issue #1176).
+   *
+   * The host is the one Tab stop; the arrow keys cycle the selection over the
+   * contacts exactly as a tap selects one — the same overlay, the same
+   * `navselect` event, mirroring `#handleTap`'s blip branch onto the SAME state
+   * — and Enter/Space commits the selected contact as the waypoint through the
+   * SAME `set_navigation_waypoint` action the SET AS WAYPOINT bar button emits
+   * (via `#setToSelected`). One command path, no pointer, no behaviour fork.
+   *
+   * The handler lives on the host, not on `document`, so it fires only while
+   * the chart is focused; it never competes with the helm consoles' key-relay
+   * flight bindings, which are a different console entirely.
+   */
+  #boundKeyDown = (event) => {
+    const key = event.key;
+    if (key === 'Enter' || key === ' ' || key === 'Spacebar') {
+      // Only the HOST's own Enter/Space commits the selection as a waypoint.
+      // The bar buttons (SET AS WAYPOINT, CLEAR WAYPOINT) are focusable
+      // descendants, and their keydown composes and bubbles up to this host
+      // handler. Without this guard, pressing Enter/Space while CLEAR is the
+      // focused Tab stop would run #setToSelected() (a SET) AND preventDefault
+      // the native button — turning a CLEAR into a SET. Ignore the key here
+      // when the focused target is a descendant control; the button runs its
+      // own action, unimpeded, and the host stays out of it.
+      if (event.composedPath()[0] !== this) return;
+      if (this.#selectedBlip) {
+        event.preventDefault();
+        this.#setToSelected();
+      }
+      return;
+    }
+    const contacts = ((this.#state && this.#state.blips) || []).filter((b) => b && b.uuid);
+    if (contacts.length === 0) return;
+    const uuids = contacts.map((b) => b.uuid);
+    const current = this.#selectedBlip ? uuids.indexOf(this.#selectedBlip.uuid) : -1;
+    let next;
+    if (current < 0) {
+      // No selection yet: the first navigation key lands on an end of the ring
+      // rather than skipping the contact under it (matching the radar cursor).
+      if (key === 'ArrowUp' || key === 'ArrowLeft' || key === 'End') next = uuids.length - 1;
+      else if (key === 'ArrowDown' || key === 'ArrowRight' || key === 'Home') next = 0;
+      else return;
+    } else {
+      next = rovingKeyTarget(uuids.length, current, key, 'both');
+    }
+    if (next < 0) return;
+    event.preventDefault();
+    this.#selectedBlip = contacts[next];
+    this.#showOverlay(this.#selectedBlip);
+    this.#updateBar();
+    this.#dispatch('navselect', this.#selectedBlip);
+  };
 
   #updateBar() {
     const state = this.#state || {};

@@ -284,8 +284,10 @@ component.comms_message.confirm_important,"Comms response button prompt asking t
 component.comms_message.unavailable,Comms response button tooltip shown when the sender is out of comms range and the response cannot be sent,[OUT OF RANGE]
 component.comms_message.rejected,Comms response button tooltip shown when the host rejected the attempted submission,REJECTED
 component.helm_joystick.title,Helm joystick panel heading,HELM
+component.helm_joystick.label,Accessible name (aria-label) for the helm thrust/yaw joystick — the keyboard/pointer flight control (issue #1176),Helm thrust and yaw control
 component.helm_joystick.fwd,Joystick axis label: forward,FWD
 component.helm_joystick.rev,Joystick axis label: reverse,REV
+component.helm_radar.label,Accessible name (aria-label) for the helm radar scope — the pilot's contact display (issue #1176),Helm radar
 component.hull_integrity.title,Hull integrity panel heading,HULL INTEGRITY
 component.hull_integrity.no_data,Hull integrity panel when no hull telemetry is available,[NO HULL DATA]
 component.hull_integrity.systems,Hull integrity panel: per-system breakdown heading,SYSTEMS
@@ -293,6 +295,8 @@ component.impulse.title,Impulse drive control panel heading,IMPULSE DRIVE
 component.impulse.ready,Impulse button in its ready state,IMPULSE
 component.impulse.cancel,Impulse button while charging. {pct} is charge percent; pressing cancels,CANCEL {pct}%
 component.lateral.title,Lateral thruster joystick heading,LATERAL
+component.lateral.label,Accessible name (aria-label) for the lateral thruster control — the keyboard/pointer strafe control (issue #1176),Lateral thrust control
+component.navigation_map.label,Accessible name (aria-label) for the navigation chart — the keyboard/pointer contact-and-waypoint map (issue #1176),Navigation chart
 component.objectives.empty,Objective list when the mission has no objectives yet,NO OBJECTIVES
 component.tutorial.heading,Contextual tutorial overlay card (issue #916): eyebrow label above the tip title,TUTORIAL
 component.tutorial.dismiss,Contextual tutorial overlay card: dismiss button — marks the tip as read forever,GOT IT

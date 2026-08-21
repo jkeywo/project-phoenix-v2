@@ -76,6 +76,26 @@ export class PhBoostBtn extends HTMLElement {
     // Safety net: a silently revoked pointer capture must not latch boost on.
     btn.addEventListener('lostpointercapture', release);
 
+    // Keyboard hold on the FOCUSED button (issue #1176): boost is a hold, not a
+    // click, so a native <button> under focus would do nothing on Enter/Space.
+    // A keydown/keyup pair mirrors the pointer hold onto the SAME set_boost
+    // action (its own hold source, so it composes with Shift / pointer / pad
+    // rather than fighting them), exactly as the blaster's hold-to-fire does.
+    // `repeat` is ignored so autorepeat does not re-engage every tick, and a
+    // blur releases a held key that would otherwise latch boost on.
+    btn.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+      e.preventDefault();
+      if (e.repeat) return;
+      this.#hold('enter');
+    });
+    btn.addEventListener('keyup', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+      e.preventDefault();
+      this.#release('enter');
+    });
+    btn.addEventListener('blur', () => this.#release('enter'));
+
     // Hold Shift or gamepad A to boost, mirroring the on-screen hold.
     if (typeof document !== 'undefined') {
       document.addEventListener('keydown', this.#onKeyDown);
@@ -100,6 +120,7 @@ export class PhBoostBtn extends HTMLElement {
     if (this.#stopGamepad) { this.#stopGamepad(); this.#stopGamepad = null; }
     this.#release('pointer');
     this.#release('key');
+    this.#release('enter');
   }
 
   #onKeyDown = (e) => {

@@ -1,0 +1,53 @@
+# Probe world for issue #1160 — the transfer umbilical, end to end.
+#
+# One umbilical-fitted probe hull and one passive depot berth, drawn up close
+# enough that the probe's helm dock control is in range. There is no combat and no
+# scripted transfer: the probe is a backfilled player ship, so the headless test
+# drives the dock through the ordinary admitted Dock/Undock path (Helm's seat) and
+# the flow through the ordinary admitted StartTransfer/StopTransfer path
+# (Engineering's seat) — the only way to prove the umbilical gates on a dock Helm
+# actually achieved, and that the commands ride the same admission the consoles' own
+# controls would.
+#
+# WHAT THIS WORLD PROVES:
+#
+#   1. CAPACITY MOVES BETWEEN TWO DOCKED HULLS. With the depot in range, the dock
+#      mated and the flow started, the operator's `reserve_fuel` drains and the
+#      depot's fills, unit for unit, at the authored rate — clamped so neither
+#      overshoots.
+#
+#   2. THE FLOW STOPS ON UNDOCK. Undock ends the docked relationship and the flow
+#      stops that tick; what has already moved stays moved.
+#
+#   3. POWER LOSS AND DAMAGE STOP IT TOO. Cutting the umbilical's power group or
+#      knocking the system out to Disabled stops a running flow and keeps what has
+#      moved.
+#
+# Nothing this world exercises is authored anywhere but the probe's own `[dock]` /
+# `[umbilical]` tables, its `[[system]]` blocks, its `[infrastructure]` ledger, and
+# the dock markers in the shared `dock_probe` rig sidecar. A hull that authored none
+# is unchanged, which is why the shipped destroyer is deliberately NOT the operator
+# here.
+
+[global]
+seed = 1160
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+# The probe — the backfilled player ship, spawned at game start, facing -Z.
+[[entity]]
+template_path = "assets/entities/umbilical_probe.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"
+
+# The depot — a passive dockable structure 100 units to starboard, well inside the
+# probe's 200-unit dock range. It carries dock markers (from the shared dock_probe
+# sidecar), a name the blackboard can report, and an empty `reserve_fuel` ledger the
+# operator delivers into.
+[[entity]]
+template_path = "assets/entities/umbilical_berth.toml"
+name = "world.probe_umbilical.entity.depot.name"
+transform = { position = [100.0, 0.0, 0.0] }

@@ -165,6 +165,20 @@ pub const TRACTOR_KIND: &str = "tractor";
 pub const DOCK_SYSTEM_ID: &str = "dock";
 pub const DOCK_KIND: &str = "dock";
 
+/// Wire `SystemId` for the transfer umbilical (issue #1160).
+///
+/// The third slice of PRD #1143's coupling family: an engineering-owned
+/// `[[system]]` that declares its own power group, carries a damage entry, is
+/// admission-gated (`StartTransfer` / `StopTransfer`), and publishes its own
+/// blackboard. Running it moves an authored capacity per second between the two
+/// DOCKED hulls' capacity ledgers (the pure `crate::umbilical::flow` owns the
+/// arithmetic). Its terms — capacity id, rate, direction, minimum power level —
+/// are authored in a hull's `[umbilical]` table, so a hull that declares neither
+/// the system nor the table is unchanged in every way. It gates on the dock
+/// (#1159): a flow runs only while the umbilical's own hull is docked.
+pub const UMBILICAL_SYSTEM_ID: &str = "umbilical";
+pub const UMBILICAL_KIND: &str = "umbilical";
+
 // ── Fine-grained Helm systems (issue #511) ────────────────────────────────────
 
 /// Wire `SystemId` for the Helm Joystick fine system.
@@ -393,6 +407,8 @@ impl SystemKindRegistry {
         registry.register(TRACTOR_KIND)?;
         // Docking system (issue #1159).
         registry.register(DOCK_KIND)?;
+        // Transfer umbilical (issue #1160).
+        registry.register(UMBILICAL_KIND)?;
         // Fine-grained Helm systems (issue #511)
         registry.register(HELM_JOYSTICK_KIND)?;
         registry.register(HELM_ENGINE_KIND)?;
@@ -524,6 +540,13 @@ pub fn tractor_system_id() -> SystemId {
 /// `Dock` / `Undock` and the key its blackboard publishes under.
 pub fn dock_system_id() -> SystemId {
     SystemId(DOCK_SYSTEM_ID.to_string())
+}
+
+/// The transfer umbilical's wire `SystemId` (issue #1160). The admitted target
+/// for `StartTransfer` / `StopTransfer` and the key its blackboard publishes
+/// under.
+pub fn umbilical_system_id() -> SystemId {
+    SystemId(UMBILICAL_SYSTEM_ID.to_string())
 }
 
 // ── Fine Helm system id helpers (issue #511) ──────────────────────────────────

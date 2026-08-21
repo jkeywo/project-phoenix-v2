@@ -2353,6 +2353,88 @@ mod tests {
         );
     }
 
+    /// The start/stop transfer commands (issue #1160).
+    ///
+    /// Both target the real, engineering-owned `umbilical` system rather than a
+    /// channel of their own — the umbilical IS a thing aboard the ship that can be
+    /// damaged and commanded — so the wire shapes pinned here give them the
+    /// ordinary station-tenure admission check the engineering seat holds.
+    /// Fieldless: what moves, how fast and which way are the hull's authored
+    /// `[umbilical]` terms, resolved server-side, and stop needs no argument.
+    #[test]
+    fn start_and_stop_transfer_control_system_round_trip() {
+        let start = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::UMBILICAL_SYSTEM_ID.into()),
+            payload: SystemControlPayload::StartTransfer,
+        };
+        assert_client_roundtrip(&JsonCodec, start.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, start.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&start).unwrap(),
+            r#"{"type":"ControlSystem","data":{"target":"umbilical","payload":{"type":"StartTransfer"}}}"#,
+            "StartTransfer wire shape must stay pinned"
+        );
+
+        let stop = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::UMBILICAL_SYSTEM_ID.into()),
+            payload: SystemControlPayload::StopTransfer,
+        };
+        assert_client_roundtrip(&JsonCodec, stop.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, stop.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&stop).unwrap(),
+            r#"{"type":"ControlSystem","data":{"target":"umbilical","payload":{"type":"StopTransfer"}}}"#,
+            "StopTransfer wire shape must stay pinned"
+        );
+    }
+
+    /// The umbilical blackboard (issue #1160): the `SystemBlackboard::Umbilical`
+    /// variant round-trips, is additive on the wire, and an idle umbilical carries
+    /// no absent-field noise.
+    #[test]
+    fn system_blackboard_umbilical_round_trips_and_is_additive() {
+        use crate::messages::{SystemBlackboard, UmbilicalBlackboard};
+
+        // A running umbilical carries both ends' levels the console shows.
+        let running = SystemBlackboard::Umbilical(UmbilicalBlackboard {
+            capacity: "reserve_fuel".into(),
+            rate: 5.0,
+            direction: "deliver".into(),
+            running: true,
+            operator_level: Some(80),
+            partner_level: Some(20),
+            refusal: None,
+        });
+        let encoded = serde_json::to_string(&running).unwrap();
+        assert!(encoded.contains(r#""kind":"Umbilical""#), "got: {encoded}");
+        let decoded: SystemBlackboard = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, running);
+
+        // An idle umbilical writes no absent-field noise: the optional fields are
+        // skipped, so a bare payload decodes to defaults.
+        let idle = SystemBlackboard::Umbilical(UmbilicalBlackboard {
+            capacity: "reserve_fuel".into(),
+            rate: 5.0,
+            direction: "deliver".into(),
+            ..Default::default()
+        });
+        let idle_json = serde_json::to_string(&idle).unwrap();
+        assert!(
+            !idle_json.contains("operator_level")
+                && !idle_json.contains("partner_level")
+                && !idle_json.contains("refusal"),
+            "an idle umbilical blackboard omits its optional fields, got {idle_json}"
+        );
+        let idle_decoded: SystemBlackboard = serde_json::from_str(&idle_json).unwrap();
+        assert_eq!(idle_decoded, idle);
+
+        // …and every field is serde-default, so a bare payload decodes whole.
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(r#"{"kind":"Umbilical","data":{}}"#).unwrap(),
+            SystemBlackboard::Umbilical(UmbilicalBlackboard::default())
+        );
+    }
+
     /// The tractor blackboard (issue #1156): the `SystemBlackboard::Tractor`
     /// variant round-trips, is additive on the wire, and an idle beam carries no
     /// absent-field noise.

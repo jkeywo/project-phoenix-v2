@@ -648,6 +648,24 @@ pub struct EntityState {
     /// not bump [`SNAPSHOT_FORMAT`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_repair: Option<crate::console::repair::ExternalRepairSaveState>,
+    /// The ship's transfer-umbilical state (issue #1160) — whether the flow is
+    /// running.
+    ///
+    /// A **projection**, not the whole [`crate::umbilical::TransferUmbilical`]
+    /// component, for `dock`'s reason: the authored `[umbilical]` terms and the
+    /// resolved power group ride the component and are re-derived from the template
+    /// on spawn. What travels is the one thing the fold cannot otherwise recover —
+    /// the running intent, which [`fold_umbilical_namespace`](crate::sim_digest)
+    /// folds and which a resume would otherwise drop, restoring a live resupply as
+    /// stopped. The carry and the last refusal are not persisted: both are
+    /// projections the next tick re-derives from the resumed world.
+    ///
+    /// Did not bump [`SNAPSHOT_FORMAT`] for `dock`'s reason: a world gains an
+    /// umbilical by its hull TOML gaining an `[umbilical]` table (and a `kind =
+    /// "umbilical"` system), and `EntityConfig` sets `deny_unknown_fields`, so a
+    /// build that predates this vocabulary refuses the template outright.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub umbilical: Option<crate::umbilical::UmbilicalSaveState>,
     /// The ship's scan record (issue #1032) — the last reading its sensor suite
     /// took, or why the last scan returned nothing.
     ///
@@ -2725,6 +2743,23 @@ fn capture_external_repair(
         .collect()
 }
 
+/// The transfer-umbilical states, in a query of their own, joined by uuid — see
+/// [`EntityState::umbilical`]. Only hulls that authored a `kind = "umbilical"`
+/// system carry one, so most worlds capture an empty list. An idle umbilical (not
+/// running) captures nothing, the same reading `fold_umbilical_namespace` takes.
+fn capture_umbilicals(world: &World) -> Vec<(String, crate::umbilical::UmbilicalSaveState)> {
+    let Some(mut query) = world.try_query::<(&EntityUuid, &crate::umbilical::TransferUmbilical)>()
+    else {
+        return Vec::new();
+    };
+    let idle = crate::umbilical::UmbilicalSaveState::default();
+    query
+        .iter(world)
+        .map(|(uuid, umbilical)| (uuid.0.clone(), umbilical.save_state()))
+        .filter(|(_, state)| *state != idle)
+        .collect()
+}
+
 /// The scan records, in a query of their own, joined by uuid — see
 /// [`EntityState::scan`]. Only hulls that authored `[scan]` carry one, so most
 /// worlds capture an empty list.
@@ -2786,6 +2821,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let tractors = capture_tractors(world);
     let docks = capture_docks(world);
     let external_repair = capture_external_repair(world);
+    let umbilicals = capture_umbilicals(world);
     let scans = capture_scans(world);
     let civilians = capture_civilians(world);
     let spawn_origins = capture_spawn_origins(world);
@@ -2850,6 +2886,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
             external_repair: external_repair
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            umbilical: umbilicals
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
@@ -4156,6 +4196,11 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
                 entity_mut.get_mut::<crate::console::repair::ExternalRepairDispatch>()
             {
                 dispatch.restore(external_repair);
+            }
+        }
+        if let Some(umbilical) = &row.umbilical {
+            if let Some(mut control) = entity_mut.get_mut::<crate::umbilical::TransferUmbilical>() {
+                control.restore(umbilical);
             }
         }
         if let Some(scan) = &row.scan {

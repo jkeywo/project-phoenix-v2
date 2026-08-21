@@ -16141,3 +16141,364 @@ fn dispatching_with_no_target_or_out_of_range_is_refused_with_a_shown_reason() {
     assert!(d.dispatched_target.is_none(), "out of range — nobody sent");
     assert_eq!(d.last_refusal, Some(ExternalRepairRefusal::OutOfRange));
 }
+
+// ── #1160: the transfer umbilical, end to end ────────────────────────────────
+//
+// `assets/worlds/probe_umbilical.toml` fields a backfilled player UMBILICAL PROBE
+// (the dedicated `umbilical_probe` hull — the shipped destroyer is deliberately
+// not touched) and a passive DEPOT 100 units to starboard. The probe carries two
+// seats on one ship: Helm owns the dock (#1159), Engineering owns the umbilical.
+// The test drives the dock through the ordinary admitted `Dock` path and the flow
+// through the ordinary admitted `StartTransfer`/`StopTransfer` path — proving the
+// authored `reserve_fuel` capacity moves between the two DOCKED hulls' ledgers,
+// and that undock, power loss and umbilical damage each stop the flow where it
+// stands while keeping what has already moved.
+
+const DEPOT_NAME: &str = "world.probe_umbilical.entity.depot.name";
+/// `ai:` tokens: admission authorises each iff its target system is AI-controlled,
+/// which the probe's helm-owned dock and engineering-owned umbilical both are while
+/// nobody is at their consoles — the same seam #1162's AI will use.
+const UMBILICAL_DOCK_TOKEN: &str = "ai:umbilical-dock";
+const UMBILICAL_FLOW_TOKEN: &str = "ai:umbilical-flow";
+
+fn umbilical_args(dt: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_umbilical.toml".into(),
+        ship_path: "assets/entities/umbilical_probe.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(120.0, dt),
+        deterministic: true,
+        seed: Some(1160),
+        ..test_args()
+    }
+}
+
+fn umbilical_operator(app: &mut App) -> Entity {
+    app.world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the probe world spawns a local umbilical probe")
+}
+
+fn umbilical_of(app: &mut App) -> project_phoenix::umbilical::TransferUmbilical {
+    let op = umbilical_operator(app);
+    app.world()
+        .get::<project_phoenix::umbilical::TransferUmbilical>(op)
+        .expect("the probe carries a TransferUmbilical")
+        .clone()
+}
+
+fn umbilical_dock_of(app: &mut App) -> project_phoenix::dock::DockControl {
+    let op = umbilical_operator(app);
+    app.world()
+        .get::<project_phoenix::dock::DockControl>(op)
+        .expect("the probe carries a DockControl")
+        .clone()
+}
+
+/// Place the operator by writing its `ShipPhysics`, which `sync_ship_position`
+/// projects into the transform the dock manoeuvre reads.
+fn place_umbilical_operator(app: &mut App, position: Vec3) {
+    let op = umbilical_operator(app);
+    let mut physics = app
+        .world_mut()
+        .get_mut::<ShipPhysics>(op)
+        .expect("the probe is a ship");
+    physics.x = position.x;
+    physics.y = position.y;
+    physics.z = position.z;
+}
+
+fn depot_entity(app: &mut App) -> Entity {
+    use project_phoenix::entities::spawner::EntityName;
+    app.world_mut()
+        .query::<(Entity, &EntityName)>()
+        .iter(app.world())
+        .find(|(_, n)| n.0 == DEPOT_NAME)
+        .map(|(e, _)| e)
+        .expect("the probe world spawns a depot")
+}
+
+fn move_depot(app: &mut App, position: Vec3) {
+    let depot = depot_entity(app);
+    app.world_mut()
+        .get_mut::<Transform>(depot)
+        .expect("the depot has a transform")
+        .translation = position;
+}
+
+/// Read a hull's `reserve_fuel` level off its infrastructure ledger.
+fn fuel_of(app: &mut App, entity: Entity) -> i64 {
+    app.world()
+        .get::<project_phoenix::infrastructure::InfrastructureCondition>(entity)
+        .expect("the hull carries an infrastructure ledger")
+        .0
+        .capacity("reserve_fuel")
+        .expect("the ledger declares reserve_fuel")
+}
+
+/// Send a dock/undock through the real admission path (Helm's seat).
+fn send_umbilical_dock(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemId};
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: UMBILICAL_DOCK_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId(project_phoenix::ship::system_registry::DOCK_SYSTEM_ID.into()),
+                payload,
+            },
+        });
+    run(app, 2);
+}
+
+/// Send a start/stop through the real admission path (Engineering's seat).
+fn send_umbilical_flow(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemId};
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: UMBILICAL_FLOW_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId(
+                    project_phoenix::ship::system_registry::UMBILICAL_SYSTEM_ID.into(),
+                ),
+                payload,
+            },
+        });
+    run(app, 2);
+}
+
+fn cut_umbilical_power(app: &mut App) {
+    let op = umbilical_operator(app);
+    let mut ps = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
+        .expect("the probe has a power system");
+    let _ = ps.0.set_group_allocation(
+        &project_phoenix::messages::PowerGroupId("umbilical".into()),
+        1,
+    );
+}
+
+fn restore_umbilical_power(app: &mut App) {
+    let op = umbilical_operator(app);
+    let mut ps = app
+        .world_mut()
+        .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
+        .expect("the probe has a power system");
+    let _ = ps.0.set_group_allocation(
+        &project_phoenix::messages::PowerGroupId("umbilical".into()),
+        2,
+    );
+}
+
+fn disable_umbilical(app: &mut App) {
+    let op = umbilical_operator(app);
+    let mut hull = app
+        .world_mut()
+        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .expect("the probe has a hull");
+    hull.0.set_hp(
+        &project_phoenix::messages::SystemId("umbilical".into()),
+        1.0,
+    );
+}
+
+fn repair_umbilical(app: &mut App) {
+    let op = umbilical_operator(app);
+    let mut hull = app
+        .world_mut()
+        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .expect("the probe has a hull");
+    hull.0.set_hp(
+        &project_phoenix::messages::SystemId("umbilical".into()),
+        30.0,
+    );
+}
+
+/// Reset the probe to the origin and the depot 100 units to starboard, engage the
+/// dock, and fly the manoeuvre to completion — the clean docked state each
+/// interruption starts from.
+fn umbilical_redock(app: &mut App) {
+    use project_phoenix::messages::SystemControlPayload;
+    // Stop the flow and undock, then run long enough for the ship to back fully
+    // clear so any in-progress `undock_target` clears — a lingering one would
+    // steer the ship away from the berth the moment we re-issue Dock.
+    send_umbilical_flow(app, SystemControlPayload::StopTransfer);
+    send_umbilical_dock(app, SystemControlPayload::Undock);
+    run(app, 200);
+    // Settle the two hulls back into their start pose and re-dock.
+    place_umbilical_operator(app, Vec3::ZERO);
+    move_depot(app, Vec3::new(100.0, 0.0, 0.0));
+    run(app, 2);
+    send_umbilical_dock(app, SystemControlPayload::Dock);
+    run(app, 160);
+    let dock = umbilical_dock_of(app);
+    assert!(
+        dock.docked && dock.docking_target.is_some(),
+        "precondition: the two hulls should be mated, got {dock:?}"
+    );
+}
+
+/// AC: capacity moves between two docked hulls while the umbilical runs, and
+/// undock, power loss and umbilical damage each stop it while keeping what has
+/// moved. Also: the running flag folds and survives a snapshot resume.
+#[test]
+fn capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_damage() {
+    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::umbilical::UmbilicalRefusal;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&umbilical_args(dt)).expect("app should build");
+    // Far enough in that the game is InProgress and the probe is backfilled, so
+    // its helm dock and engineering umbilical are AI-controlled and the `ai:`
+    // tokens are admitted.
+    run(&mut app, 60);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+    let depot = depot_entity(&mut app);
+    let operator = umbilical_operator(&mut app);
+
+    // ── Dock the two hulls ───────────────────────────────────────────────────
+    place_umbilical_operator(&mut app, Vec3::ZERO);
+    move_depot(&mut app, Vec3::new(100.0, 0.0, 0.0));
+    run(&mut app, 2);
+    send_umbilical_dock(&mut app, SystemControlPayload::Dock);
+    run(&mut app, 140);
+    assert!(
+        umbilical_dock_of(&mut app).docked,
+        "precondition: the two hulls should mate before the flow runs"
+    );
+
+    // The authored start levels: the operator full, the depot empty.
+    let op_start = fuel_of(&mut app, operator);
+    let depot_start = fuel_of(&mut app, depot);
+    assert_eq!(op_start, 100, "the operator starts full");
+    assert_eq!(depot_start, 0, "the depot starts empty");
+
+    // ── Start the flow: capacity crosses the umbilical ───────────────────────
+    send_umbilical_flow(&mut app, SystemControlPayload::StartTransfer);
+    run(&mut app, 90); // ~1.5s at rate 20/s → ~30 units, still partial
+    let op_mid = fuel_of(&mut app, operator);
+    let depot_mid = fuel_of(&mut app, depot);
+    assert!(
+        op_mid < op_start,
+        "the operator's ledger drained, got {op_mid} from {op_start}"
+    );
+    assert!(
+        depot_mid > depot_start,
+        "the depot's ledger filled, got {depot_mid} from {depot_start}"
+    );
+    assert_eq!(
+        op_start - op_mid,
+        depot_mid - depot_start,
+        "unit for unit — nothing is created or lost across the dock"
+    );
+    assert_eq!(
+        op_mid + depot_mid,
+        100,
+        "the total across the two ledgers is conserved"
+    );
+    assert!(
+        umbilical_of(&mut app).running,
+        "the flow is still running mid-transfer"
+    );
+
+    // ── Undock: the flow stops and keeps what has moved ──────────────────────
+    send_umbilical_dock(&mut app, SystemControlPayload::Undock);
+    run(&mut app, 3);
+    let u = umbilical_of(&mut app);
+    assert!(!u.running, "undocking stopped the flow");
+    assert_eq!(u.last_refusal, Some(UmbilicalRefusal::Undocked));
+    let op_after_undock = fuel_of(&mut app, operator);
+    let depot_after_undock = fuel_of(&mut app, depot);
+    run(&mut app, 30);
+    assert_eq!(
+        fuel_of(&mut app, operator),
+        op_after_undock,
+        "what moved stays moved — the operator's ledger is frozen after undock"
+    );
+    assert_eq!(
+        fuel_of(&mut app, depot),
+        depot_after_undock,
+        "…and the depot's is too"
+    );
+
+    // ── Power loss stops a running flow ──────────────────────────────────────
+    umbilical_redock(&mut app);
+    send_umbilical_flow(&mut app, SystemControlPayload::StartTransfer);
+    run(&mut app, 20);
+    assert!(
+        umbilical_of(&mut app).running,
+        "the flow runs before power is cut"
+    );
+    cut_umbilical_power(&mut app);
+    run(&mut app, 3);
+    let u = umbilical_of(&mut app);
+    assert!(!u.running, "losing power stopped the flow");
+    assert_eq!(u.last_refusal, Some(UmbilicalRefusal::Unpowered));
+    let op_after_power = fuel_of(&mut app, operator);
+    run(&mut app, 20);
+    assert_eq!(
+        fuel_of(&mut app, operator),
+        op_after_power,
+        "what moved stays moved after a power loss"
+    );
+
+    // ── Umbilical damage stops a running flow ────────────────────────────────
+    restore_umbilical_power(&mut app);
+    umbilical_redock(&mut app);
+    send_umbilical_flow(&mut app, SystemControlPayload::StartTransfer);
+    run(&mut app, 20);
+    assert!(
+        umbilical_of(&mut app).running,
+        "the flow runs before it is damaged"
+    );
+    disable_umbilical(&mut app);
+    run(&mut app, 3);
+    let u = umbilical_of(&mut app);
+    assert!(!u.running, "a disabled umbilical stopped the flow");
+    assert_eq!(u.last_refusal, Some(UmbilicalRefusal::Disabled));
+    let op_after_damage = fuel_of(&mut app, operator);
+    run(&mut app, 20);
+    assert_eq!(
+        fuel_of(&mut app, operator),
+        op_after_damage,
+        "what moved stays moved after umbilical damage"
+    );
+
+    // ── The running flag folds and survives a snapshot resume ────────────────
+    repair_umbilical(&mut app);
+    umbilical_redock(&mut app);
+    send_umbilical_flow(&mut app, SystemControlPayload::StartTransfer);
+    run(&mut app, 5);
+    assert!(
+        umbilical_of(&mut app).running,
+        "precondition: a running flow to capture"
+    );
+    let digest_running = project_phoenix::sim_digest::state_digest(&app);
+    let snap = project_phoenix::snapshot::capture(app.world());
+    send_umbilical_flow(&mut app, SystemControlPayload::StopTransfer);
+    run(&mut app, 3);
+    assert!(
+        !umbilical_of(&mut app).running,
+        "precondition: the flow is stopped before the restore"
+    );
+    project_phoenix::snapshot::restore(app.world_mut(), &snap);
+    assert!(
+        umbilical_of(&mut app).running,
+        "the running flow survived the snapshot resume"
+    );
+    assert_eq!(
+        project_phoenix::sim_digest::state_digest(&app),
+        digest_running,
+        "…and the restored world folds to the same digest the captured one did"
+    );
+}

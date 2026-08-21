@@ -170,6 +170,12 @@ pub mod station_importance;
 /// Tactical's current lock and holds the derelict on the operator's rig. The
 /// umbilical, dock and external repair-dispatch slices copy this shape.
 pub mod tractor;
+/// The transfer umbilical (issue #1160), third slice of PRD #1143's coupling
+/// family: the pure, Bevy-free flow-arithmetic module and refusal vocabulary, and
+/// its Bevy adapter — the engineering-owned `[[system]]` that moves an authored
+/// capacity per second between two DOCKED hulls' capacity ledgers, gating on the
+/// dock slice (#1159) so a flow runs only while docked.
+pub mod umbilical;
 pub mod world;
 /// Deterministic tick-scoped world-id minting (issue #907) — the single
 /// chokepoint every simulation entity, message and projectile id comes from.

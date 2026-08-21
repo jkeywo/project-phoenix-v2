@@ -429,6 +429,7 @@ mod tests {
             tractor: None,
             held_response: None,
             dock: None,
+            umbilical: None,
             civilian: None,
         };
         let uuid = uuid::Uuid::new_v4().to_string();

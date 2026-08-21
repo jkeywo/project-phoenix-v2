@@ -88,6 +88,24 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /** Start the transfer umbilical's flow (issue #1160). The server resolves the
+   * two ledgers from the hull's own `[umbilical]` terms and its docked partner;
+   * the command carries no argument. */
+  start_transfer: (_a, send) => {
+    send('ControlSystem', {
+      target: 'umbilical',
+      payload: { type: 'StartTransfer' },
+    });
+  },
+
+  /** Stop the transfer umbilical's flow (issue #1160). What has moved has moved. */
+  stop_transfer: (_a, send) => {
+    send('ControlSystem', {
+      target: 'umbilical',
+      payload: { type: 'StopTransfer' },
+    });
+  },
+
   /** Fire a specific blaster bank (issue #631). */
   fire_blaster: (a, send) => {
     if (!a.bank) return;

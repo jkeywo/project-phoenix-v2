@@ -1,0 +1,49 @@
+# Umbilical berth — the passive docked partner for issue #1160.
+#
+# The far end of the transfer umbilical: a hull that can be DOCKED WITH (it authors
+# a `[dock]` table, whose presence opts it in and reads its dock markers from the
+# `dock_probe` rig variant sidecar) and carries an `[infrastructure]` ledger with
+# the same `reserve_fuel` capacity the operator delivers into — starting empty, with
+# headroom up to its ceiling. It runs no dock and no umbilical of its own: only the
+# operator docks, and only the operator's umbilical moves the capacity. It never
+# moves under its own power.
+
+tags = ["structure"]
+faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
+
+[mesh]
+model = "assets/models/alliance_courier.glb"
+variant = "dock_probe"
+shape = "sphere"
+colour = []
+
+[radar_appearance]
+colour = [0.9, 0.6, 0.3]
+size = 5.0
+icon = "ship"
+
+# ── The receiving ledger ─────────────────────────────────────────────────────
+# Starts empty with room up to the ceiling, so the operator's DELIVER has headroom
+# to fill. An inert condition track (no decay, no hull share) — the berth is a
+# capacity ledger for this probe, not a degrading structure.
+[infrastructure]
+condition_max = 100.0
+decay_per_sec = 0.0
+hull_damage_share = 0.0
+
+[[infrastructure.capacity]]
+id = "reserve_fuel"
+amount = 0
+ceiling = 100
+
+# ── The dock opt-in ──────────────────────────────────────────────────────────
+# A passive berth runs no manoeuvre, so these numbers are inert; they are authored
+# because the `[dock]` table's presence is what reads the sidecar for this hull's
+# dock markers.
+[dock]
+range = 200.0
+engage_distance = 400.0
+approach_speed = 60.0
+mate_tolerance = 4.0
+undock_clear_distance = 120.0
+min_power_level = 2

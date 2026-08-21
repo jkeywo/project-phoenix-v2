@@ -82,6 +82,17 @@
             </div>
             <div id="tractor-refusal" class="tractor-refusal" hidden></div>
           </div>
+          <!-- Transfer umbilical (issue #1160): shown only on a hull that authors
+               an umbilical system, so a hull without one is unchanged. Reuses the
+               tractor panel's styling. -->
+          <div class="tractor-panel" id="umbilical-panel" hidden>
+            <h2 data-i18n="console.engineering.umbilical" style="margin-top:10px">Umbilical</h2>
+            <div class="tractor-row">
+              <button id="umbilical-btn" class="tractor-btn" data-i18n="console.umbilical.start">Start</button>
+              <span id="umbilical-status" class="tractor-status">—</span>
+            </div>
+            <div id="umbilical-refusal" class="tractor-refusal" hidden></div>
+          </div>
         </div>
       </div>
       <footer class="console-footer footer-bar">
@@ -111,6 +122,10 @@
     // (issue #1156). Human and AI issue the SAME EngageTractor/ReleaseTractor
     // through the one admission path — this control just picks which.
     var tractorEngaged = false;
+    // Umbilical run state, tracked so the one button toggles start/stop (issue
+    // #1160). Human and AI issue the SAME StartTransfer/StopTransfer through the
+    // one admission path — this control just picks which.
+    var umbilicalRunning = false;
     var consoleHandle = initConsole({
       name: 'engineering',
       // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
@@ -174,6 +189,32 @@
           if (tr.refusal) { refusal.hidden = false; refusal.textContent = t(tr.refusal); }
           else { refusal.hidden = true; refusal.textContent = ''; }
         }
+
+        // Transfer umbilical (issue #1160). The panel shows only on a hull whose
+        // engineering station owns an `umbilical` system — a hull without one has
+        // no `systems['umbilical']` view, so the panel stays hidden and the
+        // console is unchanged. It shows the authored rate and both docked ends'
+        // levels, and the one button starts/stops the flow.
+        var uPanel = document.getElementById('umbilical-panel');
+        var um = (s.systems && s.systems['umbilical']) || null;
+        if (!um) { uPanel.hidden = true; }
+        else {
+          uPanel.hidden = false;
+          umbilicalRunning = !!um.running;
+          var uBtn = document.getElementById('umbilical-btn');
+          uBtn.classList.toggle('engaged', umbilicalRunning);
+          uBtn.textContent = t(umbilicalRunning ? 'console.umbilical.stop' : 'console.umbilical.start');
+          // Both ends' levels — operator then partner — with a '—' where a ledger
+          // is absent (undocked, or a partner that carries no such capacity).
+          var lvl = function(v) { return (v == null) ? '—' : Math.round(v); };
+          var uStatus = document.getElementById('umbilical-status');
+          uStatus.textContent = t(umbilicalRunning ? 'console.umbilical.flowing' : 'console.umbilical.idle')
+            + ' · ' + t('console.umbilical.rate') + ' ' + Math.round(um.rate || 0)
+            + ' · ' + t('console.umbilical.levels') + ' ' + lvl(um.operator_level) + ' → ' + lvl(um.partner_level);
+          var uRefusal = document.getElementById('umbilical-refusal');
+          if (um.refusal) { uRefusal.hidden = false; uRefusal.textContent = t(um.refusal); }
+          else { uRefusal.hidden = true; uRefusal.textContent = ''; }
+        }
       }
     });
 
@@ -181,6 +222,12 @@
     // which sends the same admitted command a tractor AI would (issue #1156).
     document.getElementById('tractor-btn').addEventListener('click', function() {
       consoleHandle.sendAction(tractorEngaged ? 'release_tractor' : 'engage_tractor');
+    });
+
+    // The one umbilical button toggles start/stop through the action map, which
+    // sends the same admitted command an umbilical AI would (issue #1160).
+    document.getElementById('umbilical-btn').addEventListener('click', function() {
+      consoleHandle.sendAction(umbilicalRunning ? 'stop_transfer' : 'start_transfer');
     });
   </script>
 </body>

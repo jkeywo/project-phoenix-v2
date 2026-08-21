@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 51 expected action keys', () => {
+  it('contains exactly the 53 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'abort_operation',
       'cancel_impulse',
@@ -58,6 +58,8 @@ describe('ACTION_MAP', () => {
       'show_on_screen',
       'start_impulse_charge',
       'start_operation',
+      'start_transfer',
+      'stop_transfer',
       'toggle_boost',
       'undock',
       'unload_tube',

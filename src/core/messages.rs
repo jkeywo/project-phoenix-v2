@@ -2051,6 +2051,26 @@ pub enum SystemControlPayload {
     /// `repair` system, the sibling of `DispatchExternalRepair`. No fields — a
     /// ship dispatches one team abroad at a time.
     RecallExternalRepair,
+    /// Start the transfer umbilical's flow (issue #1160).
+    ///
+    /// Targets the engineering-owned `umbilical` system
+    /// (`system_registry::UMBILICAL_SYSTEM_ID`), a real station-owned system, so
+    /// it takes the ordinary station-tenure admission path — the Engineering
+    /// holder may send it, an AI operating the umbilical may emit it (#1162), and
+    /// nobody else is admitted.
+    ///
+    /// No fields: what moves, how fast and which way are the hull's authored
+    /// `[umbilical]` terms, and the two ledgers are the umbilical's own hull and
+    /// whatever it is DOCKED to, resolved server-side — a start that names an
+    /// amount a stale UI read would move goods the crew never metered. Explicit
+    /// intent, not a toggle: `StopTransfer` is its own command, so a retried or
+    /// stale-UI start is idempotent.
+    StartTransfer,
+    /// Stop the transfer umbilical's flow (issue #1160). Targets the `umbilical`
+    /// system, the sibling of `StartTransfer` above. No fields — a ship runs one
+    /// umbilical, so there is nothing to disambiguate. What has already moved has
+    /// moved.
+    StopTransfer,
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -3686,6 +3706,12 @@ pub enum SystemBlackboard {
     /// the ship: it declares a power group, carries a damage entry and is
     /// commanded and refused through the helm console.
     Dock(DockBlackboard),
+    /// The transfer umbilical's readout (issue #1160). One per ship carrying an
+    /// `umbilical` system, keyed by `system_registry::umbilical_system_id` — a
+    /// REAL system id, not a reserved channel, because unlike an operation the
+    /// umbilical IS a thing aboard the ship: it declares a power group, carries a
+    /// damage entry and is commanded and refused through the engineering console.
+    Umbilical(UmbilicalBlackboard),
 }
 
 /// One verb a hull can perform, as the console offers it (issue #1026).
@@ -3849,6 +3875,54 @@ pub struct DockBlackboard {
     /// `strings.csv` id for why the last dock could not form or was ended —
     /// `dock.refused.*`. Retained until the operator acts again; `None` while the
     /// control is idle, forming cleanly, or docked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+}
+
+/// Raw sim truth for a ship's transfer umbilical, published each tick under its
+/// system id (issue #1160).
+///
+/// Additive on the wire in both directions, the way `TractorBlackboard` and
+/// `DockBlackboard` are: the adjacently-tagged `SystemBlackboard` enum's other
+/// variants are untouched by adding `Umbilical`, and every field here is
+/// `#[serde(default)]`, so a payload predating one decodes rather than being
+/// refused whole. No English crosses: `capacity` and `direction` are authored
+/// machine ids and `refusal` a `strings.csv` id the console resolves.
+///
+/// The engineering console's umbilical control reads this under
+/// `systems['umbilical']` like any other engineering-owned fine system: it shows
+/// the authored `rate` and both ends' levels (`operator_level`, `partner_level`),
+/// the start/stop control keyed off `running`, and the refusal when the flow
+/// could not start or was stopped.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct UmbilicalBlackboard {
+    /// The authored capacity id the umbilical moves — a machine id, never shown
+    /// as prose, the console renders the levels beside it.
+    #[serde(default)]
+    pub capacity: String,
+    /// The authored flow rate in capacity units per second, so the console can
+    /// show the crew how fast the umbilical moves. Authored content, not live
+    /// state.
+    #[serde(default)]
+    pub rate: f32,
+    /// The authored direction from the operator's point of view, `"deliver"` or
+    /// `"collect"` — an authored machine id the console maps to a label.
+    #[serde(default)]
+    pub direction: String,
+    /// Whether the flow is running this tick.
+    #[serde(default)]
+    pub running: bool,
+    /// The operator end's current level, or `None` when the operator carries no
+    /// such capacity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_level: Option<i64>,
+    /// The docked partner's current level, or `None` when there is no docked
+    /// partner or it carries no such capacity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partner_level: Option<i64>,
+    /// `strings.csv` id for why the last flow could not start or was stopped —
+    /// `umbilical.refused.*`. Retained until the operator acts again; `None` while
+    /// the flow is idle or running cleanly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
 }

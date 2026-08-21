@@ -611,6 +611,11 @@ impl Plugin for WorldPlugin {
             // and it is ordered after that rig so a hull that is both a docking
             // ship and a tractor target has a deterministic last writer.
             .add_plugins(crate::dock::server::DockPlugin)
+            // The transfer umbilical (issue #1160) stands beside the dock it gates
+            // on: its flow tick runs after the dock tick (so it reads the fresh
+            // docked state) and before the infrastructure tick (so the capacity it
+            // queues moves the same tick), the ordering the tractor's arrest keeps.
+            .add_plugins(crate::umbilical::server::UmbilicalPlugin)
             .add_plugins(crate::civilian::CivilianPlugin)
             // Dossiers (issue #1030) join them for the same reason: the
             // commitments a fact sheet lists are a field on
@@ -9272,6 +9277,7 @@ seed = 1
             tractor: None,
             held_response: None,
             dock: None,
+            umbilical: None,
             civilian: None,
             faction: None,
             behaviour: None,
@@ -9573,6 +9579,7 @@ seed = 1
             tractor: None,
             held_response: None,
             dock: None,
+            umbilical: None,
             civilian: None,
             faction: None,
             behaviour: None,

@@ -2065,6 +2065,60 @@ describe('tractor via buildSystemStationConsoleState (issue #1156)', () => {
   });
 });
 
+describe('umbilical via buildSystemStationConsoleState (issue #1160)', () => {
+  // An engineering station that owns an umbilical system, as the umbilical probe
+  // and any future umbilical-fitted hull declare it.
+  const ENG_SYSTEMS = { engineering: ['repair', 'umbilical'] };
+
+  it('exposes an umbilical view with the rate and both ends levels', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: ENG_SYSTEMS,
+      blackboards: {
+        umbilical: {
+          capacity: 'reserve_fuel',
+          rate: 20,
+          direction: 'deliver',
+          running: true,
+          operator_level: 80,
+          partner_level: 20,
+          refusal: null,
+        },
+      },
+    }));
+    expect(s.systems['umbilical']).toBeTruthy();
+    expect(s.systems['umbilical'].running).toBe(true);
+    expect(s.systems['umbilical'].rate).toBe(20);
+    expect(s.systems['umbilical'].operator_level).toBe(80);
+    expect(s.systems['umbilical'].partner_level).toBe(20);
+  });
+
+  it('surfaces the refusal string id the console shows', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: ENG_SYSTEMS,
+      blackboards: { umbilical: { running: false, refusal: 'umbilical.refused.undocked' } },
+    }));
+    // A machine string id, resolved by the console through t() — never English.
+    expect(s.systems['umbilical'].refusal).toBe('umbilical.refused.undocked');
+  });
+
+  it('a station that owns no umbilical system gets no umbilical view — a hull without one is unchanged', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: { engineering: ['repair'] },
+      blackboards: { umbilical: { running: true } },
+    }));
+    expect(s.systems).not.toHaveProperty('umbilical');
+  });
+
+  it('the umbilical auto flag comes from controlSources', () => {
+    const s = parse(buildSystemStationConsoleState('engineering', {
+      stationSystems: ENG_SYSTEMS,
+      controlSources: { umbilical: 'Ai' },
+      blackboards: { umbilical: {} },
+    }));
+    expect(s.systems['umbilical'].umbilical_auto).toBe(true);
+  });
+});
+
 describe('science station via buildSystemStationConsoleState', () => {
   // Cruiser science station as declared in assets/entities/alliance_cruiser.toml.
   const SCIENCE_SYSTEMS = { science: ['sensors', 'sensor-radar', 'shields-system'] };

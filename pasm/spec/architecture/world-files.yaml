@@ -682,6 +682,92 @@ entities:
         - DockBlackboard
       tests: [cargo test, npx vitest run]
 
+  - component: umbilical-flow-controller
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Umbilical Flow Controller
+      summary: Runs the engineering-owned transfer umbilical - the third slice of PRD #1143's coupling family. Takes the start/stop commands, gates the flow on the ship's docked relationship (#1159), reads both docked ends' capacity ledgers, hands them plus the authored rate and direction and the stored carry to the pure flow-arithmetic module, and queues the resulting capacity move on each end through the infrastructure adjustment queue. Publishes the umbilical's blackboard. It gates on the dock the way the dock gates on Helm's manoeuvre.
+      rationale:
+        - "[ai] IT COPIES THE TRACTOR'S AND DOCK'S SHAPE (rule 10). A pure Bevy-free `flow` module owns the arithmetic - how much of the authored capacity crosses this tick, clamped by source depletion and destination headroom in both directions with no over/undershoot, metering a per-second rate onto a whole-number ledger through a carry - unit-tested in isolation. A `server` adapter gathers the live world, calls in, and applies what comes back. The umbilical is a first-class engineering `[[system]]`: it declares a power group, carries a damage entry, is admission-gated, registers as an admitted consumer and publishes under its own system id."
+        - "[ai] IT FLOWS ONLY WHILE DOCKED. The whole slice gates on #1159's docked relationship: the flow tick runs after the dock tick (reading the fresh docked_partner) and refuses `Undocked` the moment the two hulls part, so resupply requires Helm to have achieved the dock first - two seats on two ships, or two seats on one. The capacity moves through the SAME queue the arrest (#1158) and the operations transfer use - a CapacityAdjustment on each end drained by tick_infrastructure_condition, ordered before it so the move lands the same tick - so the goods cross the docked partner's own authored ceiling and re-publish onto the counter a scenario predicate reads."
+        - "[ai] THE ARITHMETIC IS PURE AND CLAMPS BOTH WAYS. Direction resolves which docked end is source and which destination (deliver = operator -> partner, collect the reverse), and the move is clamped by the source's level and the destination's headroom so it can neither drain past empty nor fill past the ceiling. The carry keeps only the sub-unit remainder, never a whole-unit backlog the clamp discarded, so a source that runs dry and later refills does not dump a hoard (no overshoot) and a freed-up destination resumes at the authored rate (no undershoot)."
+        - "[ai] EACH INTERRUPTION STOPS THE FLOW AND KEEPS WHAT HAS MOVED. Stopping, undocking, dropping below the authored min_power_level, damaging the umbilical to Disabled, or a partner that carries no such capacity all clear the running intent and record the one refusal the console shows, checked most-actionable-first like the tractor's and dock's verdicts. What has already crossed the umbilical has crossed - the ledgers are not rewound."
+        - "[ai] HUMAN AND AI ISSUE THE SAME COMMANDS. StartTransfer and StopTransfer target the real, station-owned umbilical system, so they take the ordinary station-tenure admission path - the engineering holder from the network gate, the umbilical AI (#1162) through the same validate_and_admit seam - and admission strips source identity before the handler sees it. This slice makes the commands admissible from the engineering console; the AI policy host that drives them is #1162."
+        - "[ai] EVERYTHING IS AUTHORED (rule 11). The capacity id, the rate, the direction and the minimum power level are the hull's `[umbilical]` table; the power group, station and damage entry are the umbilical `[[system]]` block, validated as a pair at load; both docked ends' ledgers are their own `[[infrastructure.capacity]]` blocks. A hull that authors none carries no TransferUmbilical component and is unchanged, which is why the demo destroyer is untouched by this slice and the probe fields dedicated hulls."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [umbilical-flow-state]
+      reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state, dock-relationship-state, infrastructure-condition-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/umbilical/flow.rs
+        - src/umbilical/server.rs
+      symbols:
+        - UmbilicalConfig
+        - UmbilicalDirection
+        - UmbilicalRefusal
+        - plan_flow
+        - FlowVerdict
+        - TransferUmbilical
+        - UmbilicalSaveState
+        - UmbilicalPlugin
+        - handle_umbilical_commands
+        - tick_umbilical
+        - publish_umbilical_blackboard
+      messages: [StartTransfer, StopTransfer]
+      tests: [cargo test]
+
+  - state: umbilical-flow-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Umbilical Flow State
+      summary: "Per-ship: the authored flow terms (capacity id, rate, direction, minimum power level) and resolved power group, and the live half - whether the flow is running, the sub-unit carry, why it last stopped, and both docked ends' levels for the console. Authoritative - a host that thought the flow was running disagrees about how much capacity moves next tick."
+      rationale:
+        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own keyed on the minted entity id: the running intent, for every ship whose umbilical is actively flowing. The moved capacity lands on the two hulls' infrastructure ledgers (which fold through their own path), but WHETHER the flow runs - the state that decides whether more capacity moves next tick - is authoritative and folded nowhere else, exactly as the dock folds the docked FACT and the tractor the engaged FACT. The authored terms are content, which content_digest answers for; the carry and the last refusal are projections the next tick re-derives, so none of them is folded."
+        - "[ai] A flow running NOTHING folds NOTHING - not even a row, the dock namespace's empty-walk affordance. That is what lets a shipped hull gain an `[umbilical]` table later without moving any committed world's digest, and it is why the demo destroyer stays byte-identical while the probe hulls carry the umbilical."
+        - "[ai] Snapshotted as a PROJECTION rather than whole: the running intent travels (UmbilicalSaveState), while the authored config and resolved power group ride the template and are re-derived on spawn. The carry, the last refusal and the level projections are not persisted: all are re-derived on the first resumed tick, so a stored carry would only forgive a sub-tick debt and a stored refusal would only ever be stale. EntityConfig sets deny_unknown_fields, so a build predating the `[umbilical]` table refuses the template outright - which is why this did not bump SNAPSHOT_FORMAT."
+    architecture:
+      classification: authoritative
+      owner: umbilical-flow-controller
+      writers: [umbilical-flow-controller]
+      replicas: [umbilical-published-state]
+    implementation:
+      status: declared
+      paths: [src/umbilical/server.rs]
+      symbols:
+        - TransferUmbilical
+        - UmbilicalSaveState
+      tests: [cargo test]
+
+  - state: umbilical-published-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Published Umbilical State
+      summary: The client-visible projection of a ship's transfer umbilical - the authored capacity id, rate and direction, whether the flow is running, both docked ends' current levels, and why the last flow was refused. Published every tick under the umbilical's own system id by ships that carry an umbilical, and by nobody else.
+      rationale:
+        - "[ai] A SystemBlackboard variant keyed by the REAL umbilical system id, not a reserved channel, because unlike an operation the umbilical IS a thing aboard the ship: it declares a power group, carries a damage entry, and is commanded and refused through the engineering console. The engineering console reads it under `systems['umbilical']` like any other engineering-owned fine system, and shows the authored rate and both ends' levels beside the start/stop control - the AC the console shows the rate and both ends' levels is proved against."
+        - "[ai] Additive on the wire in both directions - the adjacently-tagged enum's other variants are untouched by adding Umbilical, and every field is serde-default, so a payload predating one decodes rather than being refused whole."
+        - "[ai] NO ENGLISH CROSSES THE WIRE. The capacity id and direction are authored machine ids and every refusal is a strings.csv id (`umbilical.refused.*`) the console resolves through t(); the refusal is a match in Rust rather than a composed id, so check-strings can see every id a new variant needs a row for."
+    architecture:
+      classification: client-projection
+      owner: umbilical-flow-controller
+      writers: [umbilical-flow-controller]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs]
+      symbols:
+        - UmbilicalBlackboard
+      tests: [cargo test, npx vitest run]
+
   - component: dossier-projection
     core:
       status: implemented

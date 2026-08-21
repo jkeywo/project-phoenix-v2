@@ -198,6 +198,7 @@ use crate::ship::state::{ShipPhysics, ShipRedAlert, ShipWeaponsHold};
 use crate::sim_rng::SimRng;
 use crate::sim_tick::SimTick;
 use crate::tractor::TractorBeam;
+use crate::umbilical::TransferUmbilical;
 
 /// The declared namespace sequence. **Append only** — see the module docs.
 ///
@@ -338,6 +339,7 @@ pub fn world_digest(world: &World) -> u64 {
     acc = fold_tractor_namespace(world, acc);
     acc = fold_dock_namespace(world, acc);
     acc = fold_external_repair_namespace(world, acc);
+    acc = fold_umbilical_namespace(world, acc);
     acc = fold_asteroid_namespace(world, acc);
     fold_collisions(world, acc)
 }
@@ -865,6 +867,55 @@ fn fold_external_repair_namespace(world: &World, mut acc: u64) -> u64 {
     for (key, _, target) in rows {
         acc = fold_str(acc, &key.id);
         acc = fold_str(acc, &target);
+    }
+    acc
+}
+
+/// Every ship whose transfer umbilical is RUNNING (issue #1160), in [`FoldKey`]
+/// order, in its own namespace.
+///
+/// # What is folded, and why it has to be
+///
+/// The running intent, for every ship whose umbilical is actively flowing. This
+/// is the authoritative divergence signal a resume must survive that nothing else
+/// catches: the capacity the flow moves lands on the two hulls' infrastructure
+/// ledgers (which fold through their own path), but WHETHER the flow is running —
+/// the state that decides whether more capacity moves next tick — is authoritative
+/// state two hosts must agree on, exactly as the dock folds the docked FACT and
+/// the tractor the engaged FACT. The authored terms are content, which
+/// `content_digest` answers for; the carry and the last refusal are projections
+/// the next tick re-derives, so none of them is folded.
+///
+/// The empty-walk affordance is [`fold_dock_namespace`]'s, and does the same real
+/// work: a hull that authored an `[umbilical]` table and is NOT running folds
+/// NOTHING — not even a row — so a shipped hull can gain an umbilical without
+/// moving any committed world's digest. The moment one umbilical runs the row
+/// count is in the accumulator like everyone else's.
+fn fold_umbilical_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &TransferUmbilical)>() else {
+        // A world that never registered the component runs no umbilicals — the
+        // empty case, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex)> = query
+        .iter(world)
+        .filter(|(_, _, umbilical)| umbilical.running)
+        .map(|(entity, uuid, _)| {
+            (
+                FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                entity.index(),
+            )
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "umbilical-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _) in rows {
+        acc = fold_str(acc, &key.id);
     }
     acc
 }
@@ -1400,6 +1451,7 @@ mod tests {
         world.register_component::<ShipOperations>();
         world.register_component::<CivilianTraffic>();
         world.register_component::<TractorBeam>();
+        world.register_component::<TransferUmbilical>();
         world
     }
 
@@ -1640,6 +1692,72 @@ mod tests {
             world_digest(&docked_b),
             "…and a host that thinks the ship is docked to a different hull must fold to a \
              different number"
+        );
+    }
+
+    /// An umbilical-carrying hull, optionally running.
+    fn spawn_umbilical(world: &mut World, uuid: &str, running: bool) {
+        let mut umbilical = TransferUmbilical::new(
+            crate::umbilical::UmbilicalConfig {
+                capacity: "reserve_fuel".into(),
+                rate: 5.0,
+                direction: crate::umbilical::UmbilicalDirection::Deliver,
+                min_power_level: 2,
+            },
+            crate::messages::PowerGroupId("umbilical".into()),
+        );
+        umbilical.running = running;
+        // The carry and the level projections are live state the fold must
+        // ignore: two otherwise-identical running umbilicals mid-flow fold the
+        // same, whatever their sub-tick carry.
+        umbilical.carry = if running { 0.37 } else { 0.0 };
+        umbilical.operator_level = Some(42);
+        world.spawn((EntityUuid(uuid.to_string()), umbilical));
+    }
+
+    /// **Issue #1160.** A world with no umbilical running folds to exactly the
+    /// number it did before the namespace existed — and so does a hull that
+    /// authored an umbilical and is not running. Only a RUNNING flow moves it, and
+    /// the carry/level projections never do, because they are re-derived every
+    /// tick and a resume forgives the sub-tick debt.
+    #[test]
+    fn only_a_running_umbilical_moves_the_digest_and_the_carry_does_not() {
+        let id = "00000000-0000-8000-8000-000000000001";
+
+        let mut idle = fold_world();
+        spawn_umbilical(&mut idle, id, false);
+        assert_eq!(
+            fold_umbilical_namespace(&idle, FOLD_SEED),
+            FOLD_SEED,
+            "an umbilical running nothing folds nothing — a folded row here would have moved \
+             every committed world's digest for state none of them carry"
+        );
+
+        let mut running = fold_world();
+        spawn_umbilical(&mut running, id, true);
+        assert_ne!(
+            world_digest(&idle),
+            world_digest(&running),
+            "starting the flow must move the digest — whether it runs is what decides the next \
+             tick's capacity move, folded nowhere else"
+        );
+
+        // Two hosts mid-flow with different sub-tick carries still agree: the
+        // carry is a projection the fold ignores.
+        let mut running_again = fold_world();
+        spawn_umbilical(&mut running_again, id, true);
+        if let Some(mut u) = running_again
+            .query::<&mut TransferUmbilical>()
+            .iter_mut(&mut running_again)
+            .next()
+        {
+            u.carry = 0.91;
+            u.operator_level = Some(7);
+        }
+        assert_eq!(
+            world_digest(&running),
+            world_digest(&running_again),
+            "two hosts running the same flow with different carries must fold the same"
         );
     }
 

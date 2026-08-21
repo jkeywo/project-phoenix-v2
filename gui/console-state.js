@@ -1883,6 +1883,7 @@ export function consoleForSystemId(id) {
   if (id === 'power-reactor' || id === 'power-battery') return 'power';
   if (id === 'repair') return 'repair';
   if (id === 'tractor') return 'tractor';
+  if (id === 'umbilical') return 'umbilical';
   return null;
 }
 
@@ -1904,6 +1905,30 @@ export function buildTractorConsoleState(state) {
     engaged: !!bb.engaged,
     coupled_target: bb.coupled_target ?? null,
     coupled_target_name: bb.coupled_target_name ?? null,
+    refusal: bb.refusal ?? null,
+  });
+}
+
+/**
+ * Umbilical console family (issue #1160). Reads the raw umbilical blackboard the
+ * engineering-owned `umbilical` system publishes under its own system id and
+ * returns JSON of the small view the engineering console's umbilical control
+ * renders: the authored capacity id, rate and direction, whether the flow is
+ * running, both docked ends' current levels, and the `strings.csv` id of the last
+ * refusal (which the console resolves through `t()` — no English crosses the
+ * wire). A hull with no umbilical publishes no such blackboard, so this returns
+ * the idle shape and the control renders its own "no umbilical" state.
+ * @param {{ blackboards }} state
+ */
+export function buildUmbilicalConsoleState(state) {
+  const bb = (state.blackboards && state.blackboards['umbilical']) || {};
+  return JSON.stringify({
+    capacity: bb.capacity ?? null,
+    rate: bb.rate ?? 0,
+    direction: bb.direction ?? null,
+    running: !!bb.running,
+    operator_level: bb.operator_level ?? null,
+    partner_level: bb.partner_level ?? null,
     refusal: bb.refusal ?? null,
   });
 }
@@ -1995,6 +2020,8 @@ export function buildSystemStationConsoleState(stationId, state) {
     (view) => { view.repair_auto = controlSources['repair'] === 'Ai'; });
   add('tractor', buildTractorConsoleState,
     (view) => { view.tractor_auto = controlSources['tractor'] === 'Ai'; });
+  add('umbilical', buildUmbilicalConsoleState,
+    (view) => { view.umbilical_auto = controlSources['umbilical'] === 'Ai'; });
 
   // Dossiers (issue #1030) ride this top-level key rather than under
   // `systems['comms']`. That used to be enough because the destroyer's Intel

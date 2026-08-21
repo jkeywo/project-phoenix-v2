@@ -4521,6 +4521,17 @@ pub struct EntityConfig {
     /// dedicated hulls.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dock: Option<crate::dock::DockConfig>,
+    /// The transfer-umbilical terms (issue #1160) — the capacity id it moves, the
+    /// rate, the direction and the minimum power level. Present on a hull whose
+    /// engineering seat can pass a capacity across a dock; absent for everything
+    /// else, which carries no `TransferUmbilical` component and is unchanged in
+    /// every way. The `[[system]] kind = "umbilical"` block declares the system's
+    /// identity (power group, station, damage entry); this table carries what the
+    /// flow itself is, and a hull that authors one without the other is refused by
+    /// name at load. Both docked ends must carry an `[[infrastructure.capacity]]`
+    /// under the umbilical's `capacity` id for anything to move.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub umbilical: Option<crate::umbilical::UmbilicalConfig>,
     /// The faint world-locked lattice drawn under this hull on the viewscreen.
     /// Present only on a hull meant to be FLOWN — the grid is a motion cue for
     /// the crew looking out of their own ship, and it is only ever read off the
@@ -5008,6 +5019,39 @@ impl EntityConfig {
             .and_then(|rc| rc.external_dispatch.as_ref())
         {
             external.validate().map_err(SerdeError::custom)?;
+        }
+
+        // Validation: an [umbilical] table has to describe a flow that can run
+        // (issue #1160), and it has to be paired with the system that gives it
+        // its identity. A blank capacity, a non-positive rate or a zero minimum
+        // power is caught by `UmbilicalConfig::validate`; the pairing is checked
+        // here for the tractor's reason — the flow terms live in a table and the
+        // power group, station and damage entry live on a `[[system]] kind =
+        // "umbilical"` block, so a hull that authored one without the other would
+        // carry a control the crew can start that moves nothing, or a system with
+        // terms nobody reads.
+        if let Some(ref umbilical) = config.umbilical {
+            umbilical.validate().map_err(SerdeError::custom)?;
+            let system = config
+                .ship_config
+                .as_ref()
+                .and_then(|sc| {
+                    sc.systems
+                        .iter()
+                        .find(|s| s.kind == crate::system_registry::UMBILICAL_KIND)
+                })
+                .ok_or_else(|| {
+                    SerdeError::custom(
+                        "an [umbilical] table needs a matching [[system]] kind = \"umbilical\" \
+                         block to declare its power group, station and damage entry",
+                    )
+                })?;
+            if system.power_group.is_none() {
+                return Err(SerdeError::custom(
+                    "the [[system]] kind = \"umbilical\" block must declare a power_group — the \
+                     umbilical's power allocation is what an interruption checks",
+                ));
+            }
         }
 
         // Validation: a [reference_grid] table has to describe a lattice that

@@ -78,7 +78,7 @@ test('Tactical console: every principal action fires from the keyboard, with no 
   expect(await activeId(page)).toBe('#intel-toggle');
 
   await page.keyboard.press('Tab');
-  expect(await activeId(page)).toBe('PH-TACTICAL-RADAR');
+  expect(await activeId(page)).toBe('#tactical-radar');
 
   // ── Arrow keys move within the radar composite; Enter locks a target ────────
   await page.keyboard.press('ArrowDown');            // cursor → first contact
@@ -88,18 +88,18 @@ test('Tactical console: every principal action fires from the keyboard, with no 
 
   // ── Phasers toolbar: arrow to a FIRE button, Enter fires it ─────────────────
   await page.keyboard.press('Tab');
-  expect(await activeId(page)).toBe('PH-PHASERS-CONTROLS');
+  expect(await activeId(page)).toBe('#phasers-controls');
   await page.keyboard.press('ArrowDown');            // mode toggle → FIRE button
   await page.keyboard.press('Enter');                // fire_phaser
 
   // ── Blasters toolbar: Space is the hold-to-fire the pointer does ────────────
   await page.keyboard.press('Tab');
-  expect(await activeId(page)).toBe('PH-BLASTERS-CONTROLS');
+  expect(await activeId(page)).toBe('#blasters-controls');
   await page.keyboard.press('Space');                // charge_blaster_start + fire_blaster
 
   // ── Torpedoes toolbar: End jumps to the tube's FIRE button, Enter fires ─────
   await page.keyboard.press('Tab');
-  expect(await activeId(page)).toBe('PH-TORPEDO-CONTROLS');
+  expect(await activeId(page)).toBe('#torpedo-controls');
   await page.keyboard.press('End');                  // − → FIRE (last control in the tube)
   await page.keyboard.press('Enter');                // fire_torpedo
 

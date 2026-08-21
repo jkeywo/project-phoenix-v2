@@ -9,9 +9,9 @@
 //!
 //! A world declares its sides in `[[workforce]]` blocks; a structure names the
 //! side that staffs it on its own `[infrastructure] workforce = "…"`; and the
-//! external-operations module asks one question of the pair — *are the people
-//! who work this place out?* — through
-//! [`OperationConditions::work_stopped`](crate::operations::OperationConditions::work_stopped).
+//! register answers one question of the pair — *are the people who work this
+//! place out?* — which a scripted settlement moves and a mirror flag exposes to
+//! the scenario's own triggers.
 //!
 //! # THIS IS NOT A FACTION, AND IT IS NOT A SECOND ONE
 //!

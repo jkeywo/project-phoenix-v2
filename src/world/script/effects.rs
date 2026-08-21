@@ -376,45 +376,6 @@ pub fn register_effects(engine: &mut Engine) {
             });
         },
     );
-    // External operations (issues #1026, #1027). One host fn per VERB rather
-    // than one taking a verb string, on the same reasoning the two
-    // infrastructure hooks share: the verb lives in the name, so a misspelling
-    // is a load-time "unknown function" instead of a runtime shrug, and the
-    // buffered command carries a typed `OperationVerb` no applier has to
-    // re-parse.
-    //
-    // Both names are the world's authored entity names; the applier resolves
-    // them and queues the start for `tick_operations`, which is the only thing
-    // that can see whether the ship is capable, powered and in position.
-    //
-    // #1026's prediction that "adding `tow` is one more register_fn and no new
-    // plumbing" held: the four verbs below differ ONLY in the constant they
-    // push. Everything that separates a tow from a field-repair — what it pays,
-    // what it consumes, how far it may stray, what interrupts it — is authored
-    // on the hull's `[[operations.capability]]` block, so none of it is here
-    // and none of it needed a fifth code path. The loop says so structurally:
-    // if any verb needed its own body, it could not be written this way.
-    for (name, verb) in [
-        ("stabilise", crate::operations::OperationVerb::Stabilise),
-        ("tow", crate::operations::OperationVerb::Tow),
-        ("escort", crate::operations::OperationVerb::Escort),
-        ("transfer", crate::operations::OperationVerb::Transfer),
-        (
-            "field_repair",
-            crate::operations::OperationVerb::FieldRepair,
-        ),
-    ] {
-        engine.register_fn(
-            name,
-            move |sink: &mut EffectSink, ship: ImmutableString, target: ImmutableString| {
-                sink.push(ActionCmd::StartOperation {
-                    ship: ship.to_string(),
-                    verb,
-                    target: target.to_string(),
-                });
-            },
-        );
-    }
     // Civilian order hooks (issue #1028). Four verbs rather than one taking a
     // verb string, for the reason the two infrastructure verbs are two: the
     // vocabulary lives in the name, so a scenario cannot divert a hauler onto a

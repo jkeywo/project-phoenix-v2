@@ -1962,31 +1962,6 @@ pub enum SystemControlPayload {
     /// explicit `active` flag: the host page has exactly one button and no
     /// retry path, so there is no idempotency hazard to design against.
     ToggleGodMode,
-    /// Begin an external operation against a named target (issue #1026).
-    ///
-    /// Targets `captain` (`system_registry::CAPTAIN_SYSTEM_ID`), a real
-    /// station-owned system, so ordering an operation takes the same admission
-    /// path and the same station-tenure check as red alert. Operations
-    /// themselves are not ship systems and have no system id of their own —
-    /// they publish under a reserved *blackboard channel* key instead
-    /// (`operations::OPERATIONS_BLACKBOARD_KEY`).
-    ///
-    /// A start is refused only for a capability the hull does not have; range
-    /// and power are re-tested every tick, so a start from out of position
-    /// simply opens stalled and the crew fly to it.
-    StartOperation {
-        /// Which verb to perform.
-        verb: crate::operations::OperationVerb,
-        /// The target entity's UUID — the same identifier `SetTarget` carries,
-        /// and the one the client already holds from its radar blips.
-        target_uuid: String,
-    },
-    /// Stand the running external operation down (issue #1026).
-    ///
-    /// No payload: a ship runs at most one operation, so there is nothing to
-    /// disambiguate, and an abort naming an id the console read a tick ago
-    /// could only ever be stale.
-    AbortOperation,
     /// Take a sensor reading of a named external structure (issue #1032).
     ///
     /// Targets `sensors` (`system_registry::SENSORS_SYSTEM_ID`), a real
@@ -1996,10 +1971,10 @@ pub enum SystemControlPayload {
     /// publishes under a reserved blackboard channel instead
     /// (`science::SCAN_BLACKBOARD_KEY`).
     ///
-    /// The uuid is carried rather than implied from the current science target,
-    /// for `StartOperation`'s reason: a console must be able to say what it
-    /// meant, and a command that read a selection the server updated in between
-    /// would scan something the crew never pointed at.
+    /// The uuid is carried rather than implied from the current science target:
+    /// a console must be able to say what it meant, and a command that read a
+    /// selection the server updated in between would scan something the crew
+    /// never pointed at.
     ScanTarget {
         /// The subject entity's UUID — the same identifier `SetScienceTarget`
         /// carries, and the one the client already holds from its radar blips.
@@ -3673,21 +3648,11 @@ pub enum SystemBlackboard {
     /// Sensor radar blackboard (issue #829). Carries the Science Target,
     /// keyed by `sensor_radar_system_id`.
     SensorRadar(SensorRadarBlackboard),
-    /// External-operation blackboard (issue #1026). One per ship whose hull
-    /// authored an `[operations]` table, keyed by
-    /// `operations::OPERATIONS_BLACKBOARD_KEY`.
-    ///
-    /// A variant of its own rather than a field on an existing blackboard
-    /// because an operation is not a ship system: nothing owns it, nothing
-    /// repairs it, and it outlives the console that ordered it. The key it is
-    /// carried under is a reserved *channel*, in the same not-a-system-id
-    /// bucket as `"helm"` and `"tactical"`.
-    Operations(OperationsBlackboard),
     /// The crew's intelligence picture (issue #1030), keyed by
     /// `dossier::DOSSIER_BLACKBOARD_KEY`, on the LOCAL ship only — an NPC's own
     /// dossiers have no console to render them on.
     ///
-    /// A channel rather than a system id, for `Operations`' reason: a dossier is
+    /// A channel rather than a system id: a dossier is
     /// something the crew *knows*, not a thing aboard the ship that can be
     /// damaged, repaired or commanded. It is also the only blackboard that is
     /// wholly DERIVED — every field on it is a projection of state some other
@@ -3696,7 +3661,7 @@ pub enum SystemBlackboard {
     /// The last sensor reading this ship took (issue #1032), keyed by
     /// `science::SCAN_BLACKBOARD_KEY`.
     ///
-    /// A channel rather than a system id, for `Operations`' reason: the thing
+    /// A channel rather than a system id: the thing
     /// aboard the ship that can be commanded and damaged is `sensors`, and that
     /// is what the `ScanTarget` command targets. What rides here is the
     /// *result* — a reading taken at a tick, which outlives the tick that took
@@ -3704,7 +3669,7 @@ pub enum SystemBlackboard {
     Scan(ScanBlackboard),
     /// The tractor beam's readout (issue #1156). One per ship carrying a
     /// `tractor` system, keyed by `system_registry::tractor_system_id` — a REAL
-    /// system id, not a reserved channel like `Operations`/`Scan`, because unlike
+    /// system id, not a reserved channel like `Scan`, because unlike
     /// an operation the tractor IS a thing aboard the ship: it declares a power
     /// group, carries a damage entry and is commanded and refused through the
     /// engineering console.
@@ -3723,90 +3688,11 @@ pub enum SystemBlackboard {
     Umbilical(UmbilicalBlackboard),
 }
 
-/// One verb a hull can perform, as the console offers it (issue #1026).
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct CapabilityOffer {
-    /// The verb's machine code — what a `StartOperation` command carries back.
-    pub verb: String,
-    /// `strings.csv` id for the crew-facing name. The client looks it up; no
-    /// English crosses the wire (AGENTS.md rule 11).
-    pub label: String,
-}
-
-/// The operation a ship is running, as its console reads it (issue #1026).
-///
-/// `progress` is computed **server-side** off eligible ticks and re-published
-/// every tick, for `DeadlineSnapshot`'s reason: a client that interpolated its
-/// own bar would drift away from the tick the operation actually completes on
-/// and would show two players different numbers off the same hold. A *stalled*
-/// operation's bar is meant to sit visibly still, which an interpolating client
-/// could not render at all.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct ActiveOperationSnapshot {
-    /// The operation's id, unique within this ship's run — the panel's stable
-    /// row key across a start, a settle and the next start.
-    pub id: u64,
-    /// The verb's machine code (`"stabilise"`).
-    pub verb: String,
-    /// `strings.csv` id for the verb's crew-facing name.
-    pub verb_label: String,
-    /// The target entity's UUID.
-    pub target_uuid: String,
-    /// `strings.csv` id for the target's display name, when it has one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_name: Option<String>,
-    /// Progress through the hold, `0.0..=1.0`, off eligible ticks only.
-    pub progress: f32,
-    /// `"holding"` / `"stalled"` / `"completed"` / `"aborted"` / `"failed"`.
-    pub state: String,
-    /// `strings.csv` id for why the operation is stalled or how it failed.
-    /// `None` while it is holding, and once it has completed or been stood down
-    /// — those states are their own explanation.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-    /// The rate the hold is banking at, as whole percent of normal
-    /// (issue #1027). `100` unless an authored `slow` interrupt is firing — a
-    /// hazard band stretching the work rather than stopping it.
-    ///
-    /// Published because a bar that crawls with no number beside it reads as a
-    /// bug rather than as the storm. Defaulted rather than optional so a
-    /// payload written before this existed decodes as "normal speed", which is
-    /// what it meant.
-    #[serde(default = "full_progress_rate")]
-    pub rate_percent: u16,
-}
-
-/// Serde default for [`ActiveOperationSnapshot::rate_percent`]: the normal,
-/// uninterrupted rate.
-fn full_progress_rate() -> u16 {
-    crate::operations::ProgressRate::FULL.as_percent()
-}
-
-/// Raw sim truth for a ship's external operations, published each tick
-/// (issue #1026).
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-pub struct OperationsBlackboard {
-    /// The verbs this hull authored, in authored order. Empty is possible and
-    /// meaningful: a hull that declared an `[operations]` table and then no
-    /// capability in it can be asked and refused.
-    #[serde(default)]
-    pub capabilities: Vec<CapabilityOffer>,
-    /// The live operation, or the last one to settle. Retained past settlement
-    /// so the console reports how it ended instead of the panel emptying.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active: Option<ActiveOperationSnapshot>,
-    /// `strings.csv` id for why the most recent *start* was refused. Distinct
-    /// from `active.reason`: a refusal means no operation was opened at all,
-    /// which the crew act on differently from one that opened and stalled.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refusal: Option<String>,
-}
-
 /// Raw sim truth for a ship's tractor beam, published each tick under its system
 /// id (issue #1156).
 ///
-/// Additive on the wire in both directions, the way `OperationsBlackboard` is:
-/// the adjacently-tagged `SystemBlackboard` enum's other variants are untouched
+/// Additive on the wire in both directions: the adjacently-tagged
+/// `SystemBlackboard` enum's other variants are untouched
 /// by adding `Tractor`, and every field here is `#[serde(default)]`, so a
 /// payload predating one decodes rather than being refused whole. No English
 /// crosses: `coupled_target_name` is a world entity name id and `refusal` a

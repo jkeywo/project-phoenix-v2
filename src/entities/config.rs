@@ -4510,19 +4510,11 @@ pub struct EntityConfig {
     /// section existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub infrastructure: Option<crate::infrastructure::InfrastructureConfig>,
-    /// External operations this hull can perform (issue #1026). Present on the
-    /// hulls a scenario expects to stabilise, tow or escort with; absent for
-    /// everything else, which can start no operation and is refused by name if
-    /// asked to. The mirror image of `infrastructure`: that table says what can
-    /// be done *to* an entity, this one says what an entity can do.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub operations: Option<crate::operations::OperationsConfig>,
     /// The sensor suite's scan capability (issue #1032). Present on a hull whose
     /// science station can take a reading of an external structure; absent for
     /// everything else, which can scan nothing and is refused by name if asked.
-    /// The mirror image of `infrastructure` in the other direction from
-    /// `operations`: that table says what can be *done to* an entity, this one
-    /// says what an entity can *read*.
+    /// The mirror image of `infrastructure`: that table says what can be *done
+    /// to* an entity, this one says what an entity can *read*.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scan: Option<crate::science::ScanConfig>,
     /// The tractor beam's coupling terms (issue #1156) — range, rig offset and
@@ -4948,15 +4940,6 @@ impl EntityConfig {
         // anything.
         if let Some(ref infrastructure) = config.infrastructure {
             infrastructure.validate().map_err(SerdeError::custom)?;
-        }
-
-        // Validation: an [operations] table has to describe an operation that
-        // can actually run (issue #1026). A zero range, a zero duration, a
-        // nameless power group or two blocks claiming the same verb are all
-        // author mistakes whose only other symptom would be a capability the
-        // crew can start and never finish.
-        if let Some(ref operations) = config.operations {
-            operations.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [scan] table has to describe a fidelity ladder that can

@@ -250,9 +250,125 @@ impl RegionEffectsConfig {
     }
 }
 
+/// The authorable name of a region effect (issue #1026, relocated here in
+/// #1166 when the operations coordinator that first defined it was dissolved).
+///
+/// The spellings mirror [`RegionEffectKind`]'s variants, and
+/// [`region_effect_name`] maps one to the other. An enum rather than a raw
+/// string so a misspelt band is a load error instead of a rule that silently
+/// never fires. The science scan reports which of these a structure is standing
+/// in; [`region_effect_name`]'s test proves every kind has a name here, so a new
+/// hazard cannot ship unauthorable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RegionEffectName {
+    DamageZone,
+    SlowZone,
+    BlocksImpulse,
+    RadarDampening,
+    CommsJam,
+    SensorBlind,
+    NebulaFog,
+}
+
+impl RegionEffectName {
+    /// Every effect name, in declaration order.
+    pub const ALL: &'static [RegionEffectName] = &[
+        RegionEffectName::DamageZone,
+        RegionEffectName::SlowZone,
+        RegionEffectName::BlocksImpulse,
+        RegionEffectName::RadarDampening,
+        RegionEffectName::CommsJam,
+        RegionEffectName::SensorBlind,
+        RegionEffectName::NebulaFog,
+    ];
+
+    /// The authored spelling.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RegionEffectName::DamageZone => "damage_zone",
+            RegionEffectName::SlowZone => "slow_zone",
+            RegionEffectName::BlocksImpulse => "blocks_impulse",
+            RegionEffectName::RadarDampening => "radar_dampening",
+            RegionEffectName::CommsJam => "comms_jam",
+            RegionEffectName::SensorBlind => "sensor_blind",
+            RegionEffectName::NebulaFog => "nebula_fog",
+        }
+    }
+}
+
+/// The authorable name of a live region effect (issue #1026, relocated in
+/// #1166).
+///
+/// Total by construction — a new [`RegionEffectKind`] variant will not compile
+/// until it has a name, which is the point. A hazard band nobody can name is a
+/// hazard nothing can be told about.
+pub fn region_effect_name(kind: &RegionEffectKind) -> RegionEffectName {
+    match kind {
+        RegionEffectKind::DamageZone { .. } => RegionEffectName::DamageZone,
+        RegionEffectKind::SlowZone { .. } => RegionEffectName::SlowZone,
+        RegionEffectKind::BlocksImpulse => RegionEffectName::BlocksImpulse,
+        RegionEffectKind::RadarDampening { .. } => RegionEffectName::RadarDampening,
+        RegionEffectKind::CommsJam => RegionEffectName::CommsJam,
+        RegionEffectKind::SensorBlind => RegionEffectName::SensorBlind,
+        RegionEffectKind::NebulaFog { .. } => RegionEffectName::NebulaFog,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every live region effect kind maps onto an authorable name, and the map
+    /// is one-to-one (issue #1026, relocated with the vocabulary in #1166). A
+    /// `match` on `RegionEffectKind`, so a new hazard will not compile until it
+    /// is authorable; the pinned pairs stop the map being made total by
+    /// pointing two kinds at one name.
+    #[test]
+    fn every_live_region_effect_maps_onto_an_authorable_name() {
+        let pairs = [
+            (
+                RegionEffectKind::DamageZone {
+                    dps: 1.0,
+                    shield_pierce: 0.0,
+                },
+                RegionEffectName::DamageZone,
+            ),
+            (
+                RegionEffectKind::SlowZone {
+                    thrust_modifier: None,
+                    yaw_rate_modifier: None,
+                },
+                RegionEffectName::SlowZone,
+            ),
+            (
+                RegionEffectKind::BlocksImpulse,
+                RegionEffectName::BlocksImpulse,
+            ),
+            (
+                RegionEffectKind::RadarDampening { multiplier: 0.5 },
+                RegionEffectName::RadarDampening,
+            ),
+            (RegionEffectKind::CommsJam, RegionEffectName::CommsJam),
+            (RegionEffectKind::SensorBlind, RegionEffectName::SensorBlind),
+            (
+                RegionEffectKind::NebulaFog {
+                    color: [0.0; 3],
+                    density: 0.01,
+                },
+                RegionEffectName::NebulaFog,
+            ),
+        ];
+        assert_eq!(
+            pairs.len(),
+            RegionEffectName::ALL.len(),
+            "every authorable name is reachable from a live region effect, and vice versa — a \
+             hazard band nobody can name is a hazard nothing can be told about"
+        );
+        for (kind, name) in pairs {
+            assert_eq!(region_effect_name(&kind), name);
+        }
+    }
 
     // ── RegionEffectKind serde round-trips live in src/core/codec.rs ──────
     // (moved there as part of issue #524 to enforce the codec-only JSON rule)

@@ -3171,7 +3171,6 @@ verb = "fire_blaster"
             ship_config: None,
             shield_arcs: Vec::new(),
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,

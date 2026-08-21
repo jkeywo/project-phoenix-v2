@@ -122,13 +122,13 @@ entities:
   - verb: fs-order-the-tow
     core: {status: proposed, confidence: provisional, origin: ai, title: Order the Tow, summary: "[ai] Tow the stricken Lyra clear of the lane before the second band arrives."}
     game_design:
-      architecture_links: [external-operation-runner]
+      architecture_links: [tractor-beam-coupler]
       owner_role: fs-operations
       produces_facts: [lyra-under-control]
   - verb: fs-order-the-stabilise
     core: {status: proposed, confidence: provisional, origin: ai, title: Order the Stabilise, summary: "[ai] Stabilise the head at any of the three warnings — including the last."}
     game_design:
-      architecture_links: [external-operation-runner]
+      architecture_links: [tractor-beam-coupler]
       owner_role: fs-operations
       produces_facts: [skyhook-stabilised]
   - verb: fs-order-the-traffic

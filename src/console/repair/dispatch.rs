@@ -75,14 +75,11 @@ pub fn handle_dispatch_repair_team(
             &crate::ship_plugin::ShipConfigComponent,
             &mut ShipRepairTeams,
             Option<&crate::entity_spawner::EntitySystemHull>,
-            // Issue #1027: how many teams an external field-repair is holding.
+            // Issue #1161: teams held abroad by an external repair dispatch.
             // Read here as well as in the AI dispatcher, because humans and AI
             // issue the same command and so have to meet the same constraint —
             // a commitment one path honoured and the other did not would be a
-            // capacity-as-cost trade a player could opt out of.
-            Option<&crate::operations::ShipOperations>,
-            // Issue #1161: teams held abroad by an external repair dispatch,
-            // added on the same terms and for the same reason — a team sent to
+            // capacity-as-cost trade a player could opt out of. A team sent to
             // an ally is unavailable to this hull's own damage-control sweep, in
             // the console readout and to the repair AI alike.
             Option<&super::external_server::ExternalRepairDispatch>,
@@ -90,17 +87,10 @@ pub fn handle_dispatch_repair_team(
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (admitted, ship_config, mut teams, hull_opt, operations, external_dispatch) in
-        ship_query.iter_mut()
-    {
-        let committed = operations
-            .map(|ops| ops.committed_repair_teams())
-            .unwrap_or(0)
-            .saturating_add(
-                external_dispatch
-                    .map(|e| e.committed_repair_teams())
-                    .unwrap_or(0),
-            );
+    for (admitted, ship_config, mut teams, hull_opt, external_dispatch) in ship_query.iter_mut() {
+        let committed = external_dispatch
+            .map(|e| e.committed_repair_teams())
+            .unwrap_or(0);
         // Look up a human-readable display name for a SystemId. Prefer the
         // ship's `EntitySystemHull` entry (populated from TOML with the
         // designer-authored display name), and fall back to the raw SystemId
@@ -130,9 +120,10 @@ pub fn handle_dispatch_repair_team(
                 let Some(sid) = resolve_repair_target(repair_target, ship_config, hull_ref) else {
                     continue;
                 };
-                // A team held by a field-repair is not dispatchable, however
-                // the order was issued. Same nothing-happens as a dispatch to
-                // an undamaged station: the slot is left exactly as it was.
+                // A team held abroad by an external repair dispatch is not
+                // dispatchable, however the order was issued. Same nothing-
+                // happens as a dispatch to an undamaged station: the slot is
+                // left exactly as it was.
                 if teams
                     .0
                     .is_committed_to_operation(*team_idx as usize, committed)

@@ -424,7 +424,6 @@ mod tests {
             ai_profile: None,
             lod_bubble: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,

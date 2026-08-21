@@ -5,18 +5,18 @@
 //! [`TractorBeam`] component, the fixed-tick systems that take the engage/release
 //! commands, decide whether the coupling holds, move the held target onto the
 //! operator's rig, and publish the blackboard. Nothing here decides geometry or
-//! eligibility itself: rule 10, the same split `operations::server` keeps with
-//! `operations::hold`.
+//! eligibility itself: rule 10, the split between the pure `coupling` sibling and
+//! this adapter.
 //!
-//! # The parallel-to-operations decision
+//! # An engineering coupling system
 //!
-//! This is a NEW system standing beside the live `operations` tow path, not a
-//! change to it (the issue is explicit). The tow is a scripted operation verb; a
-//! tractor is an admission-gated engineering `[[system]]` the crew engage
-//! against the ship's own lock. They share the writer-policy shape — a
-//! correction that writes the held target's position after integration — and the
-//! coupling-position maths, now lifted into the pure module both could call, but
-//! nothing else.
+//! A tractor is an admission-gated engineering `[[system]]` the crew engage
+//! against the ship's own lock. It writes the held target's position after
+//! integration through the `ShipPhysics` writer-policy shape, and the
+//! coupling-position maths lives in the pure `coupling` module. It generalised
+//! the rig geometry of the scripted-operation tow that the operations
+//! coordinator once ran; #1166 (S12) dissolved that coordinator, and the tractor
+//! is now the only path that takes a target under tow.
 
 use bevy::prelude::*;
 
@@ -91,8 +91,7 @@ impl TractorBeam {
     /// The persistable half — the engage state and the coupled target — for the
     /// snapshot payload (issue #1156). The authored config and power group ride
     /// the template and are re-derived on spawn, so they are deliberately not
-    /// here, exactly as the tow's `OperationsSaveState` leaves the capability
-    /// table out.
+    /// here — a save leaves re-derivable authored content out.
     pub fn save_state(&self) -> TractorSaveState {
         TractorSaveState {
             engaged: self.engaged,
@@ -156,7 +155,7 @@ pub struct TractorAiEngaged;
 pub struct HeldResponseSection(pub HeldResponseConfig);
 
 /// Registers the tractor systems and its admitted-command consumer (issue
-/// #1156). Added by `WorldPlugin` alongside `OperationsPlugin`.
+/// #1156). Added by `WorldPlugin` alongside `InfrastructurePlugin`.
 pub struct TractorPlugin;
 
 impl Plugin for TractorPlugin {
@@ -188,7 +187,7 @@ impl Plugin for TractorPlugin {
                 tick_tractor.in_set(crate::sim_sets::SimSet::Modifiers),
                 // Then place the held target — after the tick that decided the
                 // hold, so a beam that dropped this tick moves nothing, exactly
-                // as the tow rig is ordered after `tick_operations`.
+                // as any after-integration correction is ordered after the tick that decided it.
                 move_coupled_target
                     .in_set(crate::sim_sets::SimSet::Modifiers)
                     .after(tick_tractor),
@@ -204,7 +203,7 @@ impl Plugin for TractorPlugin {
                 // Bank an arrest-decline target's condition (issue #1158) —
                 // after the hold is decided, and BEFORE the infrastructure tick
                 // that applies the decline this arrests and drains the queue,
-                // the same ordering `tick_operations` keeps so its payoff lands
+                // the same ordering the infrastructure tick keeps so its payoff lands
                 // the same tick.
                 arrest_held_declines
                     .in_set(crate::sim_sets::SimSet::Modifiers)
@@ -493,9 +492,9 @@ pub fn tick_tractor(
 ///
 /// # Why this writes the target's position directly
 ///
-/// This is a sixth row in the `ShipPhysics` writer-policy table
-/// ([`crate::ship::state::ShipPhysics`]) — the exact shape the tow rig
-/// (`operations::server::move_towed_targets`) is, and for the same reason:
+/// This is a row in the `ShipPhysics` writer-policy table
+/// ([`crate::ship::state::ShipPhysics`]) — the exact shape a position-correction
+/// layer takes, and for the same reason:
 /// nothing in this codebase attaches one entity to another, and the only
 /// sanctioned way to override a hull's authoritative position is a correction
 /// layered on top of the helm integration, applied in `SimSet::Modifiers` after
@@ -698,7 +697,7 @@ pub fn arrest_held_declines(
         return;
     }
     // UUID order so two hosts queue identically — the walk-order rule the
-    // infrastructure and operations ticks both keep.
+    // infrastructure tick keeps.
     adjustments.sort_by(|a, b| a.uuid.cmp(&b.uuid));
     let Some(mut runtime) = runtime else {
         return;
@@ -742,7 +741,7 @@ pub fn publish_tractor_blackboard(
 
 /// The tractor's published blackboard channel key — its system id (issue #1156).
 /// A convenience mirror of [`tractor_system_id`] for readers that key off a
-/// function, matching `operations::operations_blackboard_key`.
+/// function.
 pub fn tractor_blackboard_key() -> SystemId {
     tractor_system_id()
 }

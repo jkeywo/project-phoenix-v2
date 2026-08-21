@@ -140,10 +140,8 @@ pub struct WorldContentRuntime {
     /// [`crate::world::workforce`] before adding anything to it. Armed once by
     /// [`arm_mission_workforces`] from the world's `[[workforce]]` blocks, on
     /// the same tick the deadline table is armed and for the same reason;
-    /// after that it moves only when a script says so. Nothing scans it, and
-    /// the one system that reads it per tick ([`crate::operations::
-    /// tick_operations`]) asks it a single yes/no question about the structure
-    /// an operation is being worked on.
+    /// after that it moves only when a script says so, and its state is
+    /// mirrored to a world flag that triggers read. Nothing scans it per tick.
     ///
     /// It sits on this resource beside `deadlines` and `commitments`, and for
     /// their reason: every site that already borrows the content runtime to
@@ -174,17 +172,6 @@ pub struct WorldContentRuntime {
     /// leave every `counter(depot_transfer_throughput)` test reading the figure
     /// the depot was authored with.
     pub pending_capacity_adjustments: Vec<crate::infrastructure::CapacityAdjustment>,
-    /// External operations a scripted effect asked to start this tick (issue
-    /// #1026), already resolved to the performing ship's and the target's UUIDs.
-    ///
-    /// Drained every tick by [`crate::operations::tick_operations`] in
-    /// `SimSet::Modifiers`, so it is empty at every tick boundary — including
-    /// the one a snapshot is taken at. Queued rather than applied where it is
-    /// authored for `pending_condition_adjustments`' reason turned around:
-    /// the applier holds `name_to_uuid` and nothing else, while opening a hold
-    /// needs the ship's capability table, its power grid and the target's
-    /// position.
-    pub pending_operation_starts: Vec<crate::operations::PendingOperationStart>,
     /// Civilian orders queued this tick by a scripted `order_civilian_*` effect
     /// (issue #1028), already resolved to the target's UUID.
     ///
@@ -599,11 +586,9 @@ impl Plugin for WorldPlugin {
         // table — none of which exist in an app with no world.
         app.add_plugins(crate::comms::CommsWorldPlugin)
             .add_plugins(crate::infrastructure::InfrastructurePlugin)
-            .add_plugins(crate::operations::OperationsPlugin)
-            // The tractor beam (issue #1156) is a NEW system standing beside the
-            // operations tow, not a change to it. Added here alongside its sibling
+            // The tractor beam (issue #1156). Added here alongside its sibling
             // because a coupled target is moved through the same after-integration
-            // `SimSet::Modifiers` window the tow uses.
+            // `SimSet::Modifiers` window the rig uses.
             .add_plugins(crate::tractor::server::TractorPlugin)
             // Helm docking (issue #1159) stands beside the tractor for the same
             // reason: the own ship is flown onto its mate through the same
@@ -2658,34 +2643,6 @@ pub(crate) fn apply_dispatch_result(
                         delta,
                     },
                 );
-            }
-
-            // Issue #1026, on exactly the same terms: the applier resolves the
-            // two names, and `tick_operations` — which can see the capability
-            // table, the power grid and the target's position — decides whether
-            // the hold opens.
-            ActionCmd::StartOperation { ship, verb, target } => {
-                let Some(ship_uuid) = runtime.name_to_uuid.get(&ship).cloned() else {
-                    bevy::log::warn!(
-                        "{log_ctx}: StartOperation: no entity named '{ship}' in this world — \
-                         ignoring"
-                    );
-                    continue;
-                };
-                let Some(target_uuid) = runtime.name_to_uuid.get(&target).cloned() else {
-                    bevy::log::warn!(
-                        "{log_ctx}: StartOperation: no target named '{target}' in this world — \
-                         ignoring"
-                    );
-                    continue;
-                };
-                runtime
-                    .pending_operation_starts
-                    .push(crate::operations::PendingOperationStart {
-                        ship_uuid,
-                        verb,
-                        target_uuid,
-                    });
             }
 
             // Issue #1035. Nothing to resolve and nothing to queue: a
@@ -9272,7 +9229,6 @@ seed = 1
             comms: None,
             asteroid_field: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -9574,7 +9530,6 @@ seed = 1
             comms: None,
             asteroid_field: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,

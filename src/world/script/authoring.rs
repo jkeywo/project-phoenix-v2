@@ -256,58 +256,6 @@ pub const HOST_FNS: &[HostFn] = &[
                   points, or by a `flt(\"…\")` slice.",
     },
     HostFn {
-        name: "stabilise",
-        receiver: "effects",
-        params: &["ship", "target"],
-        category: "effect",
-        summary: "Order the named ship to begin a stabilise operation on the \
-                  named target. The hold opens whatever the ship's position — \
-                  range and power are re-tested every tick — so a start from \
-                  out of position simply opens stalled. No delayed form: defer \
-                  it with `schedule.after`.",
-    },
-    HostFn {
-        name: "tow",
-        receiver: "effects",
-        params: &["ship", "target"],
-        category: "effect",
-        summary: "Order the named ship to take the named target under tow. \
-                  While the hold is running the target rides at the hull's \
-                  authored `tow_offset` and its own motion is held at zero; a \
-                  tow that stalls lets go.",
-    },
-    HostFn {
-        name: "escort",
-        receiver: "effects",
-        params: &["ship", "target"],
-        category: "effect",
-        summary: "Order the named ship to escort the named target. Progress \
-                  runs while the escortee is inside the authored range as it \
-                  travels, and the hold FAILS if it gets past the authored \
-                  `separation_limit`.",
-    },
-    HostFn {
-        name: "transfer",
-        receiver: "effects",
-        params: &["ship", "target"],
-        category: "effect",
-        summary: "Order the named ship to run its authored transfer against the \
-                  named target. Both ends' `[[infrastructure.capacity]]` levels \
-                  are checked every tick and the load moves once, on \
-                  completion.",
-    },
-    HostFn {
-        name: "field_repair",
-        receiver: "effects",
-        params: &["ship", "target"],
-        category: "effect",
-        summary: "Order the named ship to field-repair the named structure. \
-                  Pays the hull's authored `condition_per_second` for every \
-                  second held — a crew pulled off early keeps what they did — \
-                  and commits `repair_teams` of the ship's own teams for the \
-                  duration.",
-    },
-    HostFn {
         name: "order_hold",
         receiver: "effects",
         params: &["entity"],
@@ -573,10 +521,6 @@ mod tests {
                 "repair_infrastructure" | "damage_infrastructure" => {
                     format!("ctx.effects.{}(\"x\", 1)", hf.name)
                 }
-                // The five operation verbs take (ship, target).
-                "stabilise" | "tow" | "escort" | "transfer" | "field_repair" => {
-                    format!("ctx.effects.{}(\"x\", \"y\")", hf.name)
-                }
                 // The civilian order hooks take (entity, destination) — except
                 // `order_hold`, whose verb IS the whole instruction.
                 "order_divert_route" | "order_divert_anchor" | "order_dock" => {
@@ -713,23 +657,6 @@ mod tests {
         for verb in ["repair_infrastructure", "damage_infrastructure"] {
             assert!(names.contains(&("effects", verb)), "missing effects.{verb}");
             assert!(!names.contains(&("delay", verb)), "unexpected delay.{verb}");
-        }
-        // And the #1026 operation verbs, for a third variation on the same
-        // reason: an operation IS the timed thing, so "fire it late" is
-        // `schedule.after`, not a delay-builder twin. Every verb in the pure
-        // module's own list has to be registered, so a new one cannot ship with
-        // no script surface.
-        for verb in crate::operations::OperationVerb::ALL {
-            assert!(
-                names.contains(&("effects", verb.as_str())),
-                "missing effects.{} — every operation verb needs a script surface",
-                verb.as_str()
-            );
-            assert!(
-                !names.contains(&("delay", verb.as_str())),
-                "unexpected delay.{}",
-                verb.as_str()
-            );
         }
         // Likewise the #1028 civilian order hooks. An order that should arrive
         // later is `schedule.after(n, |ctx| …)`; a delay-builder twin would put

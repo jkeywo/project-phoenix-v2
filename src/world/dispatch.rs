@@ -236,20 +236,6 @@ pub enum ActionCmd {
         capacity: String,
         delta: i64,
     },
-    /// Start an external operation: `ship` performs `verb` on `target`
-    /// (issue #1026).
-    ///
-    /// Both are the world's authored entity NAMES, not UUIDs — the applier
-    /// resolves them against `WorldContentRuntime::name_to_uuid` and *queues*
-    /// the start rather than opening the hold on the spot, because opening one
-    /// needs the ship's capability table, its power grid and the target's
-    /// position, none of which the applier has. `tick_operations` drains the
-    /// queue in `SimSet::Modifiers` and advances the hold the same tick.
-    StartOperation {
-        ship: String,
-        verb: crate::operations::OperationVerb,
-        target: String,
-    },
     /// Call out, settle, or re-price one side of a labour dispute
     /// (issue #1035).
     ///

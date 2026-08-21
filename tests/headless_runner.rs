@@ -3426,14 +3426,13 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
     // The scheduled writers named by the policy table: the helm integrator
     // (`integrate_ship_physics`), the low-LOD substitute
     // (`simulate_low_lod_ships`), the collision responder (`handle_collisions`),
-    // blaster recoil (`tick_blaster_system`), the tow rig (`move_towed_targets`,
-    // issue #1027), the tractor rig (`move_coupled_target`, issue #1156) and the
-    // dock controller (`tick_dock`, issue #1159). The table's remaining entry,
-    // `handle_slow_zone_speed_clamp`, is an observer and so is in no schedule —
-    // see `ship_physics_writers`.
+    // blaster recoil (`tick_blaster_system`), the tractor rig
+    // (`move_coupled_target`, issue #1156) and the dock controller (`tick_dock`,
+    // issue #1159). The table's remaining entry, `handle_slow_zone_speed_clamp`,
+    // is an observer and so is in no schedule — see `ship_physics_writers`.
     assert_eq!(
         writers.len(),
-        7,
+        6,
         "the number of scheduled systems writing ShipPhysics changed. Every writer \
          beyond the helm integrator has to be a correction layered on top of it rather \
          than a competing integrator, and has to be documented in the writer-policy \
@@ -3445,11 +3444,11 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
          found:\n{inventory}"
     );
 
-    // Exactly five of them are unfiltered corrections (collision response,
-    // blaster recoil, the tow rig, the tractor rig and the dock controller): they
+    // Exactly four of them are unfiltered corrections (collision response,
+    // blaster recoil, the tractor rig and the dock controller): they
     // deliberately apply to every ship, high-LOD and low-LOD alike, and their
     // safety argument is that they are one-shot corrections rather than
-    // integrators — not filter disjointness. The tow, the tractor and the dock are
+    // integrators — not filter disjointness. The tractor and the dock are
     // unfiltered on purpose: a demoted freighter under tow is exactly the case
     // that has to keep working, and dead reckoning it away from the rig would drag
     // it out of the operator's wake; the dock likewise places only its own hull
@@ -3458,9 +3457,9 @@ fn ship_physics_writer_inventory_matches_the_policy_table() {
         .filter(|i| high_fi.contains(i) && low_lod.contains(i))
         .count();
     assert_eq!(
-        unfiltered, 5,
-        "expected exactly five unfiltered ShipPhysics correction writers (collision \
-         response, blaster recoil, the tow rig, the tractor rig and the dock controller). \
+        unfiltered, 4,
+        "expected exactly four unfiltered ShipPhysics correction writers (collision \
+         response, blaster recoil, the tractor rig and the dock controller). \
          A change here means a correction grew an `AiHighFidelity` filter, or an integrator \
          lost one — either way the set of ships that get moved twice per tick has changed. \
          Reconcile with the writer-policy table on `ShipPhysics` (src/ship/state.rs). \
@@ -9138,10 +9137,9 @@ fn falling_skyway_act_2_sweeps_the_corridor_and_fails_the_rescue_nobody_ran() {
 /// the weather arrives: the rescue is COMPLETABLE, the storm makes it cost more,
 /// and the craft is still there when the band that would have taken her passes.
 ///
-/// The tow is opened through the same queue a console's `StartOperation` and a
-/// scripted `ctx.effects.tow(…)` both land in — the applier resolves the names
-/// and `tick_operations` decides, which is the only place range, power and
-/// capability are tested.
+/// The tow is opened by engaging the crew's tractor beam against the Lyra's
+/// lock, exactly as a console would — the engineering-owned tractor system is
+/// where range, power and the coupling are tested (issues #1156, #1165).
 #[test]
 fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     use project_phoenix::core::messages::ObjectiveStatus;

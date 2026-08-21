@@ -1225,17 +1225,6 @@ pub fn spawn_entity(
         ));
     }
 
-    // External operations (issue #1026) — attach the record when `[operations]`
-    // is present, placed here for the same reason. The record carries the
-    // authored capability table AND the live hold: a hull that can stabilise
-    // starts able to and running nothing.
-    if let Some(operations) = &config.operations {
-        entity_commands.insert(crate::operations::ShipOperations {
-            capabilities: operations.clone(),
-            ..Default::default()
-        });
-    }
-
     // The tractor beam (issue #1156) — attach the beam when `[tractor]` is
     // present, on the same argument again. The power group is read from the
     // tractor `[[system]]` block (its single authored source), so the component
@@ -1661,127 +1650,6 @@ fails_below = 0.4
         );
     }
 
-    // ── Issue #1026: `[operations]`, on both authoring paths ──
-
-    /// A hull that authors a stabilise capability, trimmed to the block under
-    /// test.
-    const TENDER_TOML: &str = r#"
-[hull]
-hull_integrity = 300.0
-
-[[operations.capability]]
-verb = "stabilise"
-range = 500.0
-duration_secs = 12
-power_group = "helm"
-min_power_level = 2
-condition_on_complete = 20.0
-"#;
-
-    /// **AC1.** A hull that authors `[operations]` spawns able to perform them;
-    /// one that does not spawns exactly as it did before the section existed.
-    ///
-    /// This is the TEMPLATE authoring path — the half `probe_stabilise_resume.toml`
-    /// cannot cover, because a world entity's `overrides` block is the other
-    /// one. Both directions, because a gate that only ever reads true would pass
-    /// the first half alone, and the second half is the whole "omitting it
-    /// changes nothing" claim: every hull in the repository is in that arm.
-    #[test]
-    fn an_authored_operations_table_attaches_a_capability_record_and_omitting_it_attaches_none() {
-        let mut app = test_app();
-        let e = spawn_and_flush(
-            &mut app,
-            &lenient(TENDER_TOML),
-            Vec3::ZERO,
-            "tender".into(),
-            None,
-        );
-        let ops = app
-            .world()
-            .get::<crate::operations::ShipOperations>(e)
-            .expect("an authored [operations] table must attach the record");
-        let capability = ops
-            .capabilities
-            .capability(crate::operations::OperationVerb::Stabilise)
-            .expect("the authored verb travels onto the entity");
-        assert_eq!(capability.range, 500.0);
-        assert_eq!(capability.duration_secs, 12);
-        assert_eq!(capability.condition_on_complete, 20.0);
-        assert!(
-            ops.active.is_none() && ops.last_refusal.is_none() && ops.next_id == 0,
-            "a hull that can stabilise starts able to and running nothing"
-        );
-
-        let mut app = test_app();
-        let e = spawn_and_flush(
-            &mut app,
-            &lenient("[hull]\nhull_integrity = 300.0\n"),
-            Vec3::ZERO,
-            "plain".into(),
-            None,
-        );
-        assert!(
-            app.world()
-                .get::<crate::operations::ShipOperations>(e)
-                .is_none(),
-            "a hull that authors no [operations] must carry no record — every hull in the \
-             repository is in this arm"
-        );
-        assert!(
-            app.world().get::<EntitySystemHull>(e).is_some(),
-            "…and is otherwise spawned exactly as before, hull and all"
-        );
-    }
-
-    /// **AC1.** The world's `[[entity]].overrides` path reaches the same table
-    /// — the path `probe_stabilise_resume.toml` actually authors through.
-    #[test]
-    fn a_world_entity_override_can_grant_a_hull_an_operation_capability() {
-        let overrides: toml::Value = toml::from_str(
-            "[operations]\ncapability = [{ verb = \"stabilise\", range = 2000.0 }]\n",
-        )
-        .expect("the override document parses");
-        let merged = crate::entity_loader::apply_overrides(
-            &lenient("[hull]\nhull_integrity = 300.0\n"),
-            &overrides,
-        )
-        .expect("the override merges onto the template");
-        let mut app = test_app();
-        let e = spawn_and_flush(&mut app, &merged, Vec3::ZERO, "tender".into(), None);
-        let ops = app
-            .world()
-            .get::<crate::operations::ShipOperations>(e)
-            .expect("a world can grant a capability the template never authored");
-        let capability = ops
-            .capabilities
-            .capability(crate::operations::OperationVerb::Stabilise)
-            .expect("the overridden verb resolves");
-        assert_eq!(capability.range, 2000.0, "the world's range wins");
-        assert_eq!(
-            capability.duration_secs, 20,
-            "…while everything the override was silent about takes its authored default rather \
-             than zero"
-        );
-    }
-
-    /// **AC1.** An `[operations]` table that cannot mean anything is a load
-    /// error naming the field, not a capability the crew can start and never
-    /// finish.
-    #[test]
-    fn an_unauthorable_operations_table_fails_the_entity_load() {
-        let source = "[hull]\nhull_integrity = 300.0\n\n[[operations.capability]]\n\
-                      verb = \"stabilise\"\nduration_secs = 0\n";
-        let err = EntityConfig::from_toml_in_mode(
-            source,
-            crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
-        )
-        .expect_err("an operation that takes no time must be refused");
-        assert!(
-            err.to_string().contains("duration_secs"),
-            "the refusal must name the field the author got wrong, got {err}"
-        );
-    }
-
     /// **AC1.** An `[infrastructure]` table that cannot mean anything is a load
     /// error naming the field, not a structure that silently never degrades.
     #[test]
@@ -1922,7 +1790,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2013,7 +1880,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2074,7 +1940,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2140,7 +2005,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2211,7 +2075,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2365,7 +2228,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2452,7 +2314,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2522,7 +2383,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2676,7 +2536,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             ai_profile: None,
             lod_bubble: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2745,7 +2604,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             comms: None,
             asteroid_field: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2796,7 +2654,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shield_arcs: Vec::new(),
             tags: vec![],
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -2914,7 +2771,6 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,
@@ -3138,7 +2994,6 @@ regen_per_sec = 0.0
             shape: None,
             effects: None,
             infrastructure: None,
-            operations: None,
             scan: None,
             tractor: None,
             held_response: None,

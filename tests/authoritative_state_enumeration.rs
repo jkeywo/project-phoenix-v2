@@ -112,18 +112,15 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     "ImpulseState", "InfrastructureCondition", "InfrastructureState",
     "LastHelmInput", "LateralThrustInput", "LodBubble", "Manifest", "MergeStep",
     "ModelMarkers", "ModelRig", "NavigationWaypoint", "ObjectiveManager",
-    "OperationHold", "OperationsSaveState", "ShipOperations", "ProgressRate",
     // Issue #1027. `ResolvedCapacity` is the live half of a structure's named
     // capacity (a level and a ceiling, resolved at load the way a threshold is)
     // and `CapacityAdjustment` is one queued move of it — both transcribed from
     // `infrastructure-condition-state` and `infrastructure-condition-tracker`.
     //
     // This slice registered NO new Bevy component or resource, which is why the
-    // guard's own computed set is unchanged: the four verbs are authored fields
-    // on a component #1026 already registered, and the tow deliberately does
-    // NOT carry an "under tow" marker — the rig is derived from the live hold
-    // every tick, so there was nothing to register and nothing extra to
-    // classify.
+    // guard's own computed set is unchanged: both are value types carried on a
+    // component already registered, so there was nothing to register and nothing
+    // extra to classify.
     "ResolvedCapacity", "CapacityAdjustment",
     // Issue #1032, the science scan. `ShipScanRecord` is the one new Bevy
     // COMPONENT — the per-ship survey suite and the last reading it took — and
@@ -131,7 +128,7 @@ const AUTHORITATIVE_SYMBOLS: &[&str] = &[
     // they looked, at the fidelity that moment bought them, and the structure
     // has moved on since (#1031's evidence log is stored for the same reason).
     // `ScanReading`, `ScanRefusal` and `ScanSaveState` are the value types
-    // behind it, listed for traceability the way `OperationHold` is; `ScanConfig`
+    // behind it, listed for traceability; `ScanConfig`
     // is the authored ladder, which is content re-derived at spawn rather than
     // saved. Transcribed from `science-scan-state` in
     // pasm/spec/architecture/world-files.yaml.

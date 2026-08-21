@@ -571,15 +571,15 @@ entities:
       status: implemented
       confidence: confirmed
       title: The Workforce — Who Staffs a Structure, and What a Stoppage Does to the Work
-      summary: "Issue #1035 (parent #852, Falling Skyway). A skyhook is not a machine that runs itself: somebody authorises the pump and somebody rides the climber down with a torch. A world declares the sides of a labour dispute in `[[workforce]]` blocks (id, `strings.csv` label, `on_strike`, `disposition` on an authored 0..=100 scale); a structure names the side that staffs it on its own `[infrastructure] workforce = \"…\"`; and script moves a side through `ctx.effects.call_strike(id)` / `settle_strike(id)` / `set_workforce_disposition(id, n)`. What a stoppage DOES to a piece of work is authored per verb on the operating hull's `[[operations.capability.interrupt]]` with `cause = \"work_stoppage\"` — `response = \"fail\"` refuses a transfer nobody will sign off, `response = \"slow\"` with a `rate_percent` stretches a repair the local crews have walked away from — so the same authored cause produces a refusal for one verb and a slower job for another with neither meaning anywhere in Rust."
+      summary: "Issue #1035 (parent #852, Falling Skyway). A skyhook is not a machine that runs itself: somebody authorises the pump and somebody rides the climber down with a torch. A world declares the sides of a labour dispute in `[[workforce]]` blocks (id, `strings.csv` label, `on_strike`, `disposition` on an authored 0..=100 scale); a structure names the side that staffs it on its own `[infrastructure] workforce = \"…\"`; and script moves a side through `ctx.effects.call_strike(id)` / `settle_strike(id)` / `set_workforce_disposition(id, n)`. What a stoppage DOES to a piece of work is a per-system consequence now (the operations coordinator that once carried it was dissolved in #1166): the register holds the fact — are the people who staff this place out? — and its state is mirrored to a world flag the scenario's own triggers read."
       rationale:
         - "IT IS NOT A FACTION AND IT IS NOT A SECOND ONE. `FactionConfig` answers who shoots whom; a workforce answers who turns up for work. The Skyway workers and the operator that employs them are both Federation, neither will ever fire on the other, and the whole crisis is between them — folding a strike into the enemies list would have made 'the line is down' mean 'the depot is hostile' on every console that reads a faction. A party that is both (the strike committee is a hull with a faction AND a side in the dispute) carries one of each."
-        - "THE STOPPAGE JOINS THE #1027 INTERRUPT VOCABULARY RATHER THAN THE ELIGIBILITY LADDER, and that is the whole reason both bites are authorable. Eligibility is uniform across verbs: a stoppage placed there would have forced ONE answer on transfers and repairs alike. As an `InterruptCause` it is the first that is a fact about the far end rather than about the operator, and the capability says what it means — which is a designer's judgement about the fiction, not a property of the word strike."
-        - "REVERSIBILITY IS FREE BECAUSE NOTHING LATCHES. Settling a side stops the rule firing on the next tick: the repair rate returns to full and the depot takes a delivery, with no restoration path anywhere to write, to test, or to forget. The register holds the fact; the capability holds the consequence; and there is no third place holding a memory of the consequence."
+        - "THE STOPPAGE IS A FACT ABOUT THE FAR END, NOT ABOUT THE OPERATOR — a property of who staffs the work rather than of the hull doing it, which is why what it means is a designer's judgement about the fiction and not a property of the word strike. The register records the fact; the per-system slices decide the consequence and a mirror flag exposes it to the scenario's triggers."
+        - "REVERSIBILITY IS FREE BECAUSE NOTHING LATCHES. Settling a side stops the consequence firing on the next tick, with no restoration path anywhere to write, to test, or to forget. The register holds the fact; the per-system slice applies the consequence; and there is no third place holding a memory of the consequence."
         - "Three verbs rather than one setter, for the reason `repair_infrastructure`/`damage_infrastructure` are two: the direction lives in the name, so a scenario cannot end a strike by getting a boolean the wrong way round. Each pushes TWO commands on the call's shared ordered buffer — the register move, then the mirror flag — so the flag gets its `FlagSet`/`FlagCleared` transition from the one path that emits them and an `on_flag_cleared` trigger chains off a settlement without this vocabulary knowing triggers exist."
         - "A settlement is an ordinary `ActionCmd` (`SetWorkforceState`) rather than a seventh `CallEffects` field, which is where it differs from `commitment_changes`. The applier already holds the runtime the register lives on and a workforce is a PARTY rather than an entity, so there is nothing to resolve and nothing to queue — no buffered-change plumbing was needed and none was added."
         - "The `workforce` a structure names is deliberately NOT cross-checked against the world's `[[workforce]]` table at load. The same depot template ships in five scenarios and only one of them has a strike, so 'this world has never heard of those people' honestly means work there carries on — and a template that could not name a side it might one day be in dispute with would have to be forked per mission."
-        - "The refusal reaches the crew as `operation.refused.work_stopped` on the operations blackboard — the SAME field a `TargetGone` or a `CapacityUnavailable` travels on, resolved through `t()` by the panel that already existed. No parallel channel, no new wire field, and the console renders it because it renders every refusal."
+        - "The stoppage is exposed through the world flag store the register mirrors into — no parallel channel and no new wire field — so the scenario's own triggers read it exactly as they read any other authored flag."
     architecture:
       kind: domain-model
       authority: authoritative
@@ -594,8 +594,6 @@ entities:
         - src/world/server.rs
         - src/world/script/effects.rs
         - src/infrastructure/condition.rs
-        - src/operations/hold.rs
-        - src/operations/server.rs
         - assets/worlds/probe_strike_min.toml
         - assets/worlds/falling_skyway.toml
         - assets/entities/alliance_destroyer.toml
@@ -606,9 +604,6 @@ entities:
         - strike_flag
         - disposition_flag
         - arm_mission_workforces
-        - InterruptCause
-        - Ineligibility
-        - OperationConditions
         - InfrastructureConfig
       tests: [cargo test, "cargo test --features headless --test snapshot_resume a_settled_strike_stays_settled"]
     evidence:

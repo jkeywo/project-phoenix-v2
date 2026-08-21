@@ -26,7 +26,7 @@
 //! on the next — and every input it takes is a *this tick* reading:
 //!
 //! * the ship's `Transform`, which `sync_ship_position` mirrors out of
-//!   `ShipPhysics` back in `SimSet::Physics`, exactly as the operations tick
+//!   `ShipPhysics` back in `SimSet::Physics`, exactly as the tractor tick
 //!   reads it;
 //! * `RegionMembership`, recomputed in `SimSet::Physics`;
 //! * and the subject's condition track, which
@@ -73,7 +73,7 @@ use crate::messages::{
     AdmittedCommands, InfrastructureSnapshot, PowerGroupId, ScanBlackboard, ScanReadingSnapshot,
     SystemBlackboard, SystemControlPayload, SystemId,
 };
-use crate::operations::RegionEffectName;
+use crate::regions::effects::RegionEffectName;
 use crate::science::scan::{
     derive, scanned_flag, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject,
 };
@@ -119,10 +119,8 @@ pub struct ShipScanRecord {
     /// The hull's authored `[scan]` table, as spawned.
     pub config: ScanConfig,
     /// The last reading this ship took, retained until the next one replaces
-    /// it. Retained past the moment of the scan for
-    /// [`ShipOperations::active`](crate::operations::ShipOperations)'s reason:
-    /// a console that emptied the instant the sweep finished would be a console
-    /// nobody could read.
+    /// it. Retained past the moment of the scan because a console that emptied
+    /// the instant the sweep finished would be a console nobody could read.
     pub last: Option<ScanReading>,
     /// Why the most recent scan returned nothing, if it did. Cleared by the
     /// next scan that succeeds, so a refusal and a reading are never both
@@ -132,9 +130,8 @@ pub struct ShipScanRecord {
 
 /// The mutable part of a ship's scan record, as a save carries it.
 ///
-/// The authored `config` is deliberately **not** in here, on
-/// [`OperationsSaveState`](crate::operations::OperationsSaveState)'s argument:
-/// it is re-derived from the hull's template on the tick the ship spawns, and a
+/// The authored `config` is deliberately **not** in here: it is re-derived
+/// from the hull's template on the tick the ship spawns, and a
 /// save whose hull's `[scan]` table has since changed is refused as
 /// content-moved long before this is read — so writing it would put content
 /// into a save that `content_digest` is the thing answerable for.
@@ -170,8 +167,7 @@ impl ShipScanRecord {
 }
 
 /// Registers the scan systems. Added by `WorldPlugin` alongside
-/// `InfrastructurePlugin` and `OperationsPlugin`, because what it reads is
-/// their state.
+/// `InfrastructurePlugin`, because what it reads is its state.
 pub struct SciencePlugin;
 
 impl Plugin for SciencePlugin {
@@ -430,9 +426,8 @@ fn subject_mass(mass: Option<&crate::entities::spawner::EntityMass>) -> f32 {
 /// deduplicated and in a fixed order.
 ///
 /// Sorted by declaration order rather than by whichever region entity the
-/// membership set happened to yield first, for
-/// [`operations`](crate::operations)' reason: two hosts that spawned the same
-/// bands in different orders must hand the pure module the same list.
+/// membership set happened to yield first, so that two hosts that spawned the
+/// same bands in different orders hand the pure module the same list.
 fn operator_region_effects(
     membership: Option<&crate::regions::server::RegionMembership>,
     region_effects: &Query<&crate::entities::spawner::RegionEffectsSection>,
@@ -448,7 +443,7 @@ fn operator_region_effects(
             effects
                 .0
                 .iter()
-                .map(crate::operations::server::region_effect_name)
+                .map(crate::regions::effects::region_effect_name)
         })
         .collect();
     names.sort_by_key(|name| {

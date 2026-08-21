@@ -766,14 +766,10 @@ pub fn operate_repair_ai(
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&RepairTargetSelector>,
             Option<&crate::ship_state::ShipRedAlert>,
-            // The external-operation record (issue #1027), read for the one
-            // question it answers here: how many of this ship's teams a
-            // field-repair is holding.
-            Option<&crate::operations::ShipOperations>,
             // The external repair-dispatch record (issue #1161), read for the
-            // SAME question: how many teams are held abroad against a designated
-            // target. Added to the operations commitment so the AI dispatcher and
-            // the human console read one availability answer (AGENTS.md rule 6).
+            // one question it answers here: how many of this ship's teams are
+            // held abroad against a designated target, and so unavailable to the
+            // hull's own damage-control sweep (AGENTS.md rule 6).
             Option<&super::external_server::ExternalRepairDispatch>,
             &mut crate::messages::AdmittedCommands,
         ),
@@ -790,7 +786,6 @@ pub fn operate_repair_ai(
         config_comp,
         target_selector,
         red_alert_comp,
-        operations,
         external_dispatch,
         mut admitted,
     ) in ships.iter_mut()
@@ -868,27 +863,18 @@ pub fn operate_repair_ai(
         // Physics), so `lowest_free_team()` would return the same idx every
         // time; we draw from a locally-consumed list instead.
         //
-        // Minus whatever an external field-repair is holding (issue #1027).
-        // This is the capacity-as-cost trade the PRD decided: a captain
-        // field-repairing a skyhook with every team committed is a captain
-        // whose own damaged systems go unswept, and this line is what makes
-        // that true rather than a claim in a design note. The teams never leave
-        // the hull — they are still `Idle` in every readout — they are just not
-        // available to be sent anywhere.
-        // The one availability answer (AGENTS.md rule 6): the operations
-        // field-repair commitment PLUS any team held abroad by an external
-        // dispatch (issue #1161). Both are additive external claims on the same
-        // idle pool, and the human dispatch router adds the same pair, so a
-        // team sent to an ally cannot be undercut by whichever path did not know
-        // about it.
-        let committed = operations
-            .map(|ops| ops.committed_repair_teams())
-            .unwrap_or(0)
-            .saturating_add(
-                external_dispatch
-                    .map(|e| e.committed_repair_teams())
-                    .unwrap_or(0),
-            );
+        // Minus whatever an external repair dispatch is holding abroad (issue
+        // #1161). This is the capacity-as-cost trade the PRD decided: a crew
+        // sending teams to an ally with every team committed is a crew whose own
+        // damaged systems go unswept, and this line is what makes that true
+        // rather than a claim in a design note. The teams never leave the hull —
+        // they are still `Idle` in every readout — they are just not available
+        // to be sent anywhere. The human dispatch router reads the same source,
+        // so a team sent to an ally cannot be undercut by whichever path did not
+        // know about it (AGENTS.md rule 6).
+        let committed = external_dispatch
+            .map(|e| e.committed_repair_teams())
+            .unwrap_or(0);
         let free_teams: Vec<usize> = teams.0.free_team_indices(committed);
         if free_teams.is_empty() {
             continue;
@@ -3485,173 +3471,5 @@ mod tests {
             "the team must sweep both helm engines in one visit, worst first"
         );
         assert!(returned, "and only then head home");
-    }
-
-    // ── Issue #1027: capacity-as-cost, through the real dispatcher ──
-
-    /// **Issue #1027, AC5.** A ship holding a field-repair with every team
-    /// committed does not also sweep its own damaged systems with those teams.
-    ///
-    /// The whole trade in one test: the NPC has two teams and a badly damaged
-    /// helm, its repair AI is running, and it would ordinarily dispatch on the
-    /// first tick. Because an external field-repair has both teams, nothing
-    /// goes anywhere and the hull does not heal.
-    #[test]
-    fn a_field_repair_holding_every_team_starves_the_ships_own_repair_sweep() {
-        use crate::operations::{CapabilityConfig, OperationVerb, OperationsConfig};
-
-        fn run(committed: u8) -> (Vec<TeamSlot>, f32) {
-            let mut app = npc_repair_app();
-            let npc = spawn_npc_repair(
-                &mut app,
-                crate::ship::control_source::ControlSource::Ai,
-                80.0,
-            );
-            let capability = CapabilityConfig {
-                verb: OperationVerb::FieldRepair,
-                duration_secs: 600,
-                repair_teams: committed,
-                ..Default::default()
-            };
-            let mut ops = crate::operations::ShipOperations {
-                capabilities: OperationsConfig {
-                    capabilities: vec![capability.clone()],
-                },
-                ..Default::default()
-            };
-            ops.active = Some(crate::operations::OperationHold::start(
-                0,
-                "skyhook",
-                &capability,
-                60.0,
-            ));
-            app.world_mut().entity_mut(npc).insert(ops);
-            for _ in 0..4 {
-                app.update();
-            }
-            let slots = app
-                .world()
-                .get::<ShipRepairTeams>(npc)
-                .expect("the NPC carries teams")
-                .0
-                .slots()
-                .to_vec();
-            let hp = app
-                .world()
-                .get::<crate::entity_spawner::EntitySystemHull>(npc)
-                .unwrap()
-                .0
-                .total_current();
-            (slots, hp)
-        }
-
-        // The control: the same ship, the same damage, an operation that
-        // commits nothing. Without this, "no team moved" would pass on a
-        // fixture whose AI never dispatches at all.
-        let (free_slots, free_hp) = run(0);
-        assert!(
-            free_slots
-                .iter()
-                .any(|slot| !matches!(slot, TeamSlot::Idle)),
-            "precondition: with nothing committed this ship DOES send teams to its own damage,              got {free_slots:?}"
-        );
-
-        let (committed_slots, committed_hp) = run(2);
-        assert!(
-            committed_slots
-                .iter()
-                .all(|slot| matches!(slot, TeamSlot::Idle)),
-            "a ship field-repairing a skyhook with both teams committed must not also sweep its              own damaged systems with those teams. They are still Idle — they never left the              hull — but they are spoken for. Got {committed_slots:?}"
-        );
-        assert!(
-            committed_hp <= free_hp,
-            "…and its own hull is no better off for it: {committed_hp} against {free_hp} for the              ship that kept its teams. That is the capacity-as-cost trade the PRD decided, made              mechanical."
-        );
-    }
-
-    /// **Issue #1027.** A human at the repair console meets the same
-    /// commitment the AI does — humans and AI issue the same command, so they
-    /// cannot have different constraints.
-    #[test]
-    fn a_console_dispatch_of_a_committed_team_is_refused_like_any_other_no_op() {
-        use crate::operations::{CapabilityConfig, OperationVerb, OperationsConfig};
-
-        let mut app = App::new();
-        app.add_systems(
-            Update,
-            crate::console::repair::dispatch::handle_dispatch_repair_team,
-        );
-        let capability = CapabilityConfig {
-            verb: OperationVerb::FieldRepair,
-            duration_secs: 600,
-            repair_teams: 1,
-            ..Default::default()
-        };
-        let mut ops = crate::operations::ShipOperations {
-            capabilities: OperationsConfig {
-                capabilities: vec![capability.clone()],
-            },
-            ..Default::default()
-        };
-        ops.active = Some(crate::operations::OperationHold::start(
-            0,
-            "skyhook",
-            &capability,
-            60.0,
-        ));
-
-        let mut hull =
-            crate::damage::SystemHull::from_config(&[(SystemId("helm".into()), 100.0_f32)]);
-        let mut rng = crate::sim_rng::unseeded_test_rng();
-        hull.apply_damage(80.0, &mut rng);
-        let ship = app
-            .world_mut()
-            .spawn((
-                crate::server_app::Ship,
-                npc_repair_config(),
-                ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)),
-                crate::entity_spawner::EntitySystemHull(hull),
-                crate::messages::AdmittedCommands::default(),
-                ops,
-            ))
-            .id();
-
-        let dispatch = |app: &mut App, team_idx: u8| {
-            let mut admitted = app
-                .world_mut()
-                .get_mut::<crate::messages::AdmittedCommands>(ship)
-                .unwrap();
-            admitted.0.clear();
-            admitted.0.push(crate::messages::AdmittedCommand {
-                target: SystemId(REPAIR_SYSTEM_ID.into()),
-                payload: SystemControlPayload::DispatchRepairTeam {
-                    team_idx,
-                    target: crate::messages::RepairTarget::Station(crate::messages::StationId(
-                        "helm".into(),
-                    )),
-                },
-                response_token: None,
-            });
-            app.update();
-            app.world()
-                .get::<ShipRepairTeams>(ship)
-                .unwrap()
-                .0
-                .slots()
-                .to_vec()
-        };
-
-        let after_free = dispatch(&mut app, 0);
-        assert!(
-            matches!(after_free[0], TeamSlot::Travelling { .. }),
-            "precondition: the team that is NOT committed still goes where it is sent, got {:?}",
-            after_free[0]
-        );
-        let after_committed = dispatch(&mut app, 1);
-        assert!(
-            matches!(after_committed[1], TeamSlot::Idle),
-            "the committed team stays where it is: a commitment one path honoured and the other              did not would be a capacity-as-cost trade a player could opt out of by tapping the              console instead of letting the AI run. Got {:?}",
-            after_committed[1]
-        );
     }
 }

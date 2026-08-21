@@ -8,17 +8,15 @@
 //! track while a team works there. Nothing here decides eligibility itself:
 //! rule 10, the same split the tractor keeps between `coupling` and `server`.
 //!
-//! # The parallel-to-operations decision (keep the old path live)
+//! # The one external-commitment source
 //!
-//! An external field-repair *operation* (#1026/#1027) still holds teams back as
-//! a count against a scripted verb; this slice adds a SECOND external-commitment
-//! source that holds a team against a NAMED target the crew designate from the
-//! repair console, and works that target's condition directly. Both sources are
-//! ADDITIVE: the human dispatch router and the repair AI each add
-//! [`ExternalRepairDispatch::committed_repair_teams`] to the operations
-//! commitment, so a hull can be running a scripted stabilise AND have sent a
-//! team to an ally at once, and both eat from the same idle pool. The operations
-//! path is untouched — #1166 (S12) retires it, not this slice.
+//! A team held against a NAMED target the crew designate from the repair
+//! console is unavailable to the hull's own damage-control sweep: the human
+//! dispatch router and the repair AI both read
+//! [`ExternalRepairDispatch::committed_repair_teams`] off the same idle pool, so
+//! a team sent to an ally cannot be undercut by whichever path did not know
+//! about it. This was one of two external-commitment sources until #1166 (S12)
+//! dissolved the operations coordinator; it is now the only one.
 
 use bevy::prelude::*;
 
@@ -83,8 +81,7 @@ impl ExternalRepairDispatch {
     /// what makes "returned on recall or drift" true by construction: a team
     /// brought home commits nothing, so there is no release step to forget. The
     /// team never moves in the [`crate::repair_teams::RepairTeams`] readout — it
-    /// is still `Idle`, simply spoken for — exactly as the operations commitment
-    /// holds one.
+    /// is still `Idle`, simply spoken for.
     pub fn committed_repair_teams(&self) -> u8 {
         u8::from(self.dispatched_target.is_some())
     }
@@ -155,7 +152,6 @@ pub fn handle_external_repair_commands(
             Option<&TacticalRadarSelection>,
             &Transform,
             Option<&ShipRepairTeams>,
-            Option<&crate::operations::ShipOperations>,
         )>,
         // Every entity's position, to resolve the designated target's separation.
         Query<(&EntityUuid, &Transform)>,
@@ -179,20 +175,16 @@ pub fn handle_external_repair_commands(
         .p0()
         .iter()
         .filter_map(
-            |(entity, admitted, dispatch, selection, transform, teams, operations)| {
+            |(entity, admitted, dispatch, selection, transform, teams)| {
                 let mut request = None;
                 for cmd in admitted.for_target(REPAIR_SYSTEM_ID) {
                     match &cmd.payload {
                         SystemControlPayload::DispatchExternalRepair => {
-                            // The team-availability answer, EXCLUDING this
-                            // component's own would-be dispatch: the operations
-                            // commitment is the only other external source today, so
-                            // "is a team free beyond what a scripted operation
-                            // holds" is exactly `free_team_indices(ops_committed)`.
-                            let ops_committed =
-                                operations.map(|o| o.committed_repair_teams()).unwrap_or(0);
+                            // The team-availability answer: this dispatch is now
+                            // the only external claim on the idle pool, so "is a
+                            // team free" is exactly `free_team_indices(0)`.
                             let has_free_team = teams
-                                .map(|t| !t.0.free_team_indices(ops_committed).is_empty())
+                                .map(|t| !t.0.free_team_indices(0).is_empty())
                                 .unwrap_or(false);
                             request = Some(Request::Dispatch {
                                 lock: selection.and_then(|s| s.0.clone()),
@@ -392,7 +384,7 @@ pub fn apply_external_repair(
         return;
     }
     // UUID order so two hosts queue identically — the walk-order rule the
-    // infrastructure, operations and tractor ticks all keep.
+    // infrastructure and tractor ticks all keep.
     adjustments.sort_by(|a, b| a.uuid.cmp(&b.uuid));
     let Some(mut runtime) = runtime else {
         return;
@@ -409,23 +401,16 @@ pub fn apply_external_repair(
 pub struct ExternalRepairAiDispatched;
 
 /// Teams to hold back from a backfill field-repair dispatch (issue #1162): the
-/// operations + standing-dispatch commitments PLUS one reserved per outstanding
-/// CRITICAL (Disabled/Destroyed) local repair. Pure (AGENTS.md rule 10) so the
-/// "without starving critical repairs" policy is unit-testable Bevy-free.
+/// standing-dispatch commitment PLUS one reserved per outstanding CRITICAL
+/// (Disabled/Destroyed) local repair. Pure (AGENTS.md rule 10) so the "without
+/// starving critical repairs" policy is unit-testable Bevy-free.
 ///
 /// Folded into the SAME [`crate::modifiers::repair_teams::RepairTeams::free_team_indices`]
-/// availability answer the operations commitment and any standing external
-/// dispatch already eat from — it only makes the host MORE conservative than the
-/// applier's own `has_free_team` gate, so an AI decision to dispatch is always
-/// one the applier admits.
-fn dispatch_committed_teams(
-    ops_committed: u8,
-    external_committed: u8,
-    critical_local_repairs: u8,
-) -> u8 {
-    ops_committed
-        .saturating_add(external_committed)
-        .saturating_add(critical_local_repairs)
+/// availability answer the standing external dispatch already eats from — it
+/// only makes the host MORE conservative than the applier's own `has_free_team`
+/// gate, so an AI decision to dispatch is always one the applier admits.
+fn dispatch_committed_teams(external_committed: u8, critical_local_repairs: u8) -> u8 {
+    external_committed.saturating_add(critical_local_repairs)
 }
 
 /// The count of outstanding CRITICAL (Disabled/Destroyed) local repair requests
@@ -488,7 +473,6 @@ pub fn operate_external_repair_ai(
         Option<&TacticalRadarSelection>,
         Option<&ShipRepairTeams>,
         Option<&RepairRequestQueue>,
-        Option<&crate::operations::ShipOperations>,
         &crate::server_app::ShipSystemBlackboards,
         Has<ExternalRepairAiDispatched>,
         &mut AdmittedCommands,
@@ -503,7 +487,6 @@ pub fn operate_external_repair_ai(
         lock,
         teams,
         repair_queue,
-        operations,
         blackboards,
         host_dispatched,
         mut admitted,
@@ -532,13 +515,11 @@ pub fn operate_external_repair_ai(
                 let locked_on_target = lock
                     .and_then(|l| l.0.as_deref())
                     .is_some_and(|locked| locked == resolved);
-                // The one availability answer (AGENTS.md rule 6): the operations
-                // commitment plus any standing external dispatch, PLUS this
-                // host's own reserve of one team per outstanding critical local
-                // repair — so helping an ally never leaves a knocked-out system
-                // of our own unswept.
+                // The one availability answer (AGENTS.md rule 6): the standing
+                // external dispatch commitment, PLUS this host's own reserve of
+                // one team per outstanding critical local repair — so helping an
+                // ally never leaves a knocked-out system of our own unswept.
                 let committed = dispatch_committed_teams(
-                    operations.map(|o| o.committed_repair_teams()).unwrap_or(0),
                     dispatch.committed_repair_teams(),
                     critical_local_repairs(repair_queue),
                 );
@@ -680,14 +661,14 @@ mod tests {
         let teams = RepairTeams::new(1);
 
         // A critical local repair reserves the one team → none free to dispatch.
-        let committed = dispatch_committed_teams(0, 0, 1);
+        let committed = dispatch_committed_teams(0, 1);
         assert!(
             teams.free_team_indices(committed).is_empty(),
             "the last team must be reserved for a critical local repair"
         );
 
         // With no critical local repair, the one team is dispatchable.
-        let committed = dispatch_committed_teams(0, 0, 0);
+        let committed = dispatch_committed_teams(0, 0);
         assert!(
             !teams.free_team_indices(committed).is_empty(),
             "with the local sweep clear the free team is available to help the ally"

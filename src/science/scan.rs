@@ -83,7 +83,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::dossier::SubjectCondition;
-use crate::operations::RegionEffectName;
+use crate::regions::effects::RegionEffectName;
 
 // ── Authored TOML shape ──────────────────────────────────────────────────────
 

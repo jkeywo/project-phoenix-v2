@@ -274,32 +274,6 @@ export const ACTION_MAP = Object.freeze({
   },
 
   /**
-   * Order an external operation on a named target (issue #1026).
-   *
-   * Targets the `captain` system, not an operations system of its own: an
-   * operation is something the ship does, not a thing aboard it, so the command
-   * rides the captain's ordinary station-tenure admission.
-   */
-  start_operation: (a, send) => {
-    if (!a.verb || !a.target_uuid) return;
-    send('ControlSystem', {
-      target: 'captain',
-      payload: {
-        type: 'StartOperation',
-        data: { verb: a.verb, target_uuid: a.target_uuid },
-      },
-    });
-  },
-
-  /** Stand the running external operation down (issue #1026). */
-  abort_operation: (a, send) => {
-    send('ControlSystem', {
-      target: 'captain',
-      payload: { type: 'AbortOperation' },
-    });
-  },
-
-  /**
    * Take a sensor reading of a named external structure (issue #1032).
    *
    * Targets the `sensors` system — the one the science target selection already

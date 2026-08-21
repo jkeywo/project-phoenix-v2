@@ -583,15 +583,13 @@ impl InfrastructureState {
     ///
     /// Returns the level it actually landed on, or `None` when this structure
     /// declares no such capacity. Clamping rather than refusing, because the
-    /// caller has already asked whether the move fits — [`transfer_possible`]
-    /// in the operations module — and this is the backstop that keeps a
-    /// depot's published number honest if two moves ever land in one tick.
+    /// caller has already asked whether the move fits, and this is the backstop
+    /// that keeps a depot's published number honest if two moves ever land in
+    /// one tick.
     ///
     /// Unlike a condition move this returns no [`FlagChange`]s: a capacity is a
     /// published quantity rather than an operational state, and "the depot has
     /// twelve fewer berths" is not an event a threshold can be crossed by.
-    ///
-    /// [`transfer_possible`]: crate::operations
     pub fn adjust_capacity(&mut self, id: &str, delta: i64) -> Option<i64> {
         let capacity = self.capacities.iter_mut().find(|c| c.id == id)?;
         capacity.level = capacity

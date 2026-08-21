@@ -25,7 +25,7 @@
 //! against `RepairTeams::free_team_indices`. This module owns the eligibility of
 //! *sending* one; the count it contributes is owned by the adapter's
 //! `ExternalRepairDispatch::committed_repair_teams`, which both the human repair
-//! console and the repair AI add to the operations commitment so neither can
+//! console and the repair AI read off the one idle pool so neither can
 //! undercut the other (AGENTS.md rule 6).
 
 use serde::{Deserialize, Serialize};
@@ -205,7 +205,7 @@ mod tests {
     fn a_dispatched_team_is_withdrawn_from_the_internal_sweep() {
         // Three idle teams, one committed abroad: `free_team_indices` eats one
         // from the TOP, so the internal sweep sees two — the same "one place
-        // which teams are available is answered" the operations commitment uses.
+        // which teams are available is answered".
         // This is what makes helping an ally a real trade against fixing your own
         // shields: the console and the repair AI both read this number.
         let teams = RepairTeams::new(3);

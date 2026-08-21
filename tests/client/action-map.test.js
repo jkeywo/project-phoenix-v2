@@ -8,9 +8,8 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 53 expected action keys', () => {
+  it('contains exactly the 51 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
-      'abort_operation',
       'cancel_impulse',
       'charge_blaster_cancel',
       'charge_blaster_start',
@@ -57,7 +56,6 @@ describe('ACTION_MAP', () => {
       'set_weapons_hold',
       'show_on_screen',
       'start_impulse_charge',
-      'start_operation',
       'start_transfer',
       'stop_transfer',
       'toggle_boost',
@@ -917,44 +915,6 @@ describe('select_player_ship', () => {
     const send = mkSend();
     ACTION_MAP.select_player_ship({ action: 'select_player_ship' }, send);
     expect(send).not.toHaveBeenCalled();
-  });
-});
-
-// ── External operations (issue #1026) ─────────────────────────────────────────
-
-describe('start_operation / abort_operation', () => {
-  it('sends StartOperation at the captain system with the verb and target', () => {
-    // The captain system, not an operations one: an operation is something the
-    // ship does, so it rides the captain's ordinary station-tenure admission.
-    const send = mkSend();
-    ACTION_MAP.start_operation(
-      { action: 'start_operation', verb: 'stabilise', target_uuid: 'depot-1' },
-      send,
-    );
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'captain',
-      payload: { type: 'StartOperation', data: { verb: 'stabilise', target_uuid: 'depot-1' } },
-    });
-  });
-
-  it('sends nothing for a start with no verb or no target', () => {
-    for (const action of [
-      { action: 'start_operation', target_uuid: 'depot-1' },
-      { action: 'start_operation', verb: 'stabilise' },
-    ]) {
-      const send = mkSend();
-      ACTION_MAP.start_operation(action, send);
-      expect(send).not.toHaveBeenCalled();
-    }
-  });
-
-  it('sends AbortOperation with no payload — a ship runs at most one', () => {
-    const send = mkSend();
-    ACTION_MAP.abort_operation({ action: 'abort_operation' }, send);
-    expect(send).toHaveBeenCalledWith('ControlSystem', {
-      target: 'captain',
-      payload: { type: 'AbortOperation' },
-    });
   });
 });
 

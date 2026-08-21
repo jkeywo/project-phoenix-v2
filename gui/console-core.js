@@ -129,8 +129,11 @@ export function initConsole({ name, family, render }) {
     if (!_tutorialEl) {
       if (!s || !s.tutorial) return; // nothing to show yet — don't mount
       _tutorialEl = document.createElement('ph-tutorial-overlay');
-      // Mounted after _wireComponents ran at init, so repair the sendAction
-      // reference by hand like _wireComponents would have.
+      // Belt-and-suspenders: PhElement's connectedCallback (run by the
+      // appendChild below) already wires this via its live-reading
+      // `sendAction` accessor, since `window.sendAction` is published long
+      // before this lazy mount ever happens. Assigning it directly here too
+      // costs nothing and keeps this call site self-contained.
       _tutorialEl.sendAction = sendAction;
       var host = document.querySelector('.frame') || document.body || document.documentElement;
       host.appendChild(_tutorialEl);
@@ -184,35 +187,17 @@ export function initConsole({ name, family, render }) {
 
   // ── Expose sendAction to web-component controls ────────────────────────
   // The `gui/components/ph-*.js` custom elements dispatch user actions by
-  // calling `this.sendAction(...)`, falling back to `window.sendAction` in
-  // their `connectedCallback`. Because the console HTML imports the component
-  // modules *before* calling initConsole, each element's connectedCallback has
-  // already run (and captured an undefined `window.sendAction`) by the time we
-  // get here. So we must both (a) publish `window.sendAction` for any element
-  // that reads it lazily or upgrades later, and (b) assign `.sendAction`
-  // directly onto every custom element already in the DOM so their captured
-  // reference is repaired. Without this every control in the new per-ship
-  // consoles is inert (see the missing wiring vs. the old *-console.html files
-  // which captured `initConsole(...).sendAction` and assigned it by hand).
+  // calling `this.sendAction(...)`. Every one of them extends `PhElement`
+  // (issue #1236), whose `sendAction` accessor reads `window.sendAction`
+  // live on every call rather than snapshotting it once — so publishing it
+  // here is the whole job. (Earlier, elements captured `window.sendAction`
+  // once in `connectedCallback`, which ran too early to see it — the console
+  // HTML imports component modules, upgrading any already-parsed elements,
+  // *before* this line runs — so a second pass re-assigning `.sendAction`
+  // onto every hyphenated element already in the DOM was needed to repair
+  // that stale capture. PhElement's live-reads accessor (see its own doc
+  // comment) made that repair pass unnecessary; see issue #1237.)
   _root.sendAction = sendAction;
-  function _wireComponents() {
-    if (typeof document === 'undefined') return;
-    var all = document.querySelectorAll('*');
-    for (var i = 0; i < all.length; i++) {
-      var el = all[i];
-      // Custom elements always contain a hyphen in their tag name.
-      if (el.tagName && el.tagName.indexOf('-') !== -1) {
-        el.sendAction = sendAction;
-      }
-    }
-  }
-  if (typeof document !== 'undefined') {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', _wireComponents);
-    } else {
-      _wireComponents();
-    }
-  }
 
   // ── Static text (localisation) ─────────────────────────────────────────
   // Substitute every data-i18n / data-i18n-attr node in the page. Console

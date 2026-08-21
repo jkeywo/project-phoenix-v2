@@ -168,13 +168,22 @@ describe('PhElement', () => {
 
   // ── sendAction wiring ───────────────────────────────────────────────────
 
-  it('wires sendAction from window.sendAction on connect', () => {
+  it('reads window.sendAction live, not just once at connect (issue #1237)', () => {
+    // `sendAction` is a get/set accessor, not a plain property snapshotted in
+    // connectedCallback: it reads window.sendAction fresh on every access.
+    // That is what makes console-core.js's `_root.sendAction = sendAction`
+    // sufficient wiring on its own, with no whole-DOM repair pass needed —
+    // even elements upgraded (and thus connected) before window.sendAction
+    // exists yet still see it correctly once it is set, pre- or post-connect.
     const winSend = vi.fn();
     window.sendAction = winSend;
     const el = document.createElement('ph-element-probe');
-    expect(el.sendAction).toBeUndefined();
+    expect(el.sendAction).toBe(winSend); // resolves live even before connect
     document.body.appendChild(el); // fires connectedCallback
     expect(el.sendAction).toBe(winSend);
+    const laterSend = vi.fn();
+    window.sendAction = laterSend;
+    expect(el.sendAction).toBe(laterSend); // still live after connect
   });
 
   it('does not clobber an explicitly assigned sendAction on a later connect (??=, not =)', () => {

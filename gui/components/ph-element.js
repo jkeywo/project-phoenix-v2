@@ -72,6 +72,7 @@ export class PhElement extends Base {
 
   #state = null;
   #rafId = null;
+  #sendAction = null;
 
   constructor() {
     super();
@@ -92,6 +93,33 @@ export class PhElement extends Base {
 
   connectedCallback() {
     this.sendAction ??= window.sendAction;
+  }
+
+  /**
+   * `sendAction` resolves live against `window.sendAction` rather than
+   * snapshotting it once. A console page's static markup (e.g.
+   * `<ph-tactical-radar>` in gui/battleship/tactical.html) is parsed and
+   * connected to the document — running `connectedCallback` synchronously,
+   * per the custom-element-upgrade spec — as a side effect of importing this
+   * element's defining module, and that import always runs BEFORE the same
+   * script's later `initConsole(...)` call, which is what actually assigns
+   * `window.sendAction` (console-core.js). So `connectedCallback`'s own
+   * `this.sendAction ??= window.sendAction` captures `undefined` on every
+   * element present in the initial HTML — reliably, not as an edge case.
+   * A getter that re-reads `window.sendAction` on every call (instead of
+   * freezing whatever it saw at connect time) is what makes that ordering
+   * harmless: whichever transport `initConsole` installs afterward is what
+   * every subsequent `this.sendAction(...)` call sees, with no separate
+   * repair pass required. An explicit assignment (subclass override, test
+   * fixture, or connectedCallback's own `??=`) still wins over the live
+   * fallback once one has actually been set.
+   */
+  get sendAction() {
+    return this.#sendAction ?? (typeof window !== 'undefined' ? window.sendAction : undefined);
+  }
+
+  set sendAction(fn) {
+    this.#sendAction = fn;
   }
 
   /**

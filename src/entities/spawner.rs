@@ -1258,6 +1258,25 @@ pub fn spawn_entity(
         }
     }
 
+    // External repair-team dispatch (issue #1161) — attach the record when
+    // `[repair.external_dispatch]` is authored, so the repair console can send a
+    // team to a nearby ally or structure. Placed HERE, outside the `[behaviour]`
+    // gate above, on the tractor's argument: the capability belongs to any hull
+    // that authors it, player or NPC, and a behaviour-less player hull would miss
+    // it inside that gate (the same footgun `server_app` re-spells `ShipRepairTeams`
+    // for). A hull that authors no dispatch table carries no component and cannot
+    // dispatch abroad — unchanged in every way. `EntityConfig` validation already
+    // rejected a non-positive reach or rate, so the clone below is usable.
+    if let Some(external) = config
+        .repair
+        .as_ref()
+        .and_then(|rc| rc.external_dispatch.as_ref())
+    {
+        entity_commands.insert(
+            crate::console::repair::external_server::ExternalRepairDispatch::new(external.clone()),
+        );
+    }
+
     // The held-response (issue #1158) — attach when `[held_response]` is
     // present, on a TARGET entity. It says what being held DOES to this thing;
     // the tractor server reads it off whatever it is holding. An entity that

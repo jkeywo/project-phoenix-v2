@@ -487,6 +487,88 @@ entities:
         - TractorBlackboard
       tests: [cargo test, npx vitest run]
 
+  - component: external-repair-dispatcher
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: External Repair-Team Dispatcher
+      summary: Runs the repair console's external field-repair — field-repair as people crossing over, not a beam (PRD #1143). Takes the dispatch/recall commands, decides at dispatch time whether a team may be sent to the ship's designated target from the authored reach and the team-availability answer, brings a team home when it drifts out of range, and pays the target's own condition track at the authored rate while a team works there. Sits beside the operations field-repair (external-operation-runner), which stays live and untouched until #1166.
+      rationale:
+        - "[ai] A SECOND EXTERNAL-COMMITMENT SOURCE, ADDED ADDITIVELY. #1027 already modelled a team held back for an external operation as a COUNT the repair console and the repair AI both read through free_team_indices. This slice turns that count into a real EXTERNAL commitment against a NAMED target: ExternalRepairDispatch::committed_repair_teams is added to the operations commitment in BOTH the human dispatch router (handle_dispatch_repair_team) and the repair AI (operate_repair_ai), so a hull can be running a scripted stabilise AND have sent a team to an ally at once, both eating the same idle pool. The operations path is not re-pointed or broken — #1166 (S12) retires it, not this slice."
+        - "[ai] THE ELIGIBILITY VERDICT IS PURE (rule 10). The adapter reads the live world into scalars — whether a team is free (free_team_indices minus the operations commitment), the ship's designated target (its one Tactical lock), the separation to it — and the pure dispatch_status answers Ok or the one refusal the console shows: no free team, no designated target, or out of range, checked tool-state-before-acquisition like the tractor's hold_status. Everything is authored (rule 11): the reach and the repair rate are the hull's `[repair.external_dispatch]` table, validated at load, and a hull that authors none carries no ExternalRepairDispatch component and cannot dispatch abroad — unchanged in every way, which is why the demo destroyer is untouched and the probe fields a dedicated tender."
+        - "[ai] THE ONE AVAILABILITY ANSWER (rule 6). A dispatched team is unavailable to this hull's internal damage-control sweep, in the console readout and to the repair AI alike, because both add the SAME committed_repair_teams to the same free_team_indices — neither can undercut the other. Dispatch and recall are the ordinary station-tenure admitted commands (DispatchExternalRepair / RecallExternalRepair targeting the real engineering-owned repair system): the engineering holder may send them, an AI operating repair may emit them (#1162 is the policy host proper), and admission strips source identity before the handler sees it. This slice makes them admissible and reads the availability answer the AI dispatcher does."
+        - "[ai] THE WORK GOES THROUGH #1025's CONDITION QUEUE. A dispatched team raises the target's OWN infrastructure condition track at the authored rate by queuing a ConditionAdjustment, ordered before tick_infrastructure_condition so the adjustment lands the same tick it is earned — the exact ordering arrest_held_declines keeps. The delta is purely additive (the team is repairing, not arresting a decline), so it COMPOSES with a tractor's arrest on the same target: both push onto the one queue and the infra tick sums them. Going through the queue rather than onto the component is what keeps the repaired condition crossing the target's own authored thresholds, by the one system that owns the flag edges."
+        - "[ai] RECALL, OR DRIFTING OUT OF RANGE, BRINGS THE TEAM HOME AND STOPS THE WORK. The free-team gate is a dispatch-time check — once a team is over there it is a resource claim, not re-evaluated against the hull's other jobs — so the per-tick maintenance re-runs only the range check and drops the dispatch when the target drifts past the authored reach or vanishes. Recall clears the dispatched target the instant it is issued, and the condition the team already banked stays on the target, so helping an ally is a real, reversible trade against fixing your own shields."
+    architecture:
+      kind: subsystem
+      authority: authoritative
+      owns: [external-repair-dispatch-state]
+      reads: [ship-station-system-topology-state, system-control-source-state, world-configuration-state, repair-team-state, tactical-radar-blackboard-state, infrastructure-condition-state]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/console/repair/external.rs
+        - src/console/repair/external_server.rs
+      symbols:
+        - ExternalRepairConfig
+        - ExternalRepairRefusal
+        - dispatch_status
+        - ExternalRepairDispatch
+        - ExternalRepairSaveState
+        - handle_external_repair_commands
+        - tick_external_repair
+        - apply_external_repair
+        - register_external_repair
+      messages: [DispatchExternalRepair, RecallExternalRepair]
+      tests: [cargo test]
+
+  - state: external-repair-dispatch-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: External Repair-Dispatch State
+      summary: "Per-ship: the authored dispatch reach and repair rate, and the live half — which ally or structure a repair team is working abroad, if any, and why the last dispatch could not form. Authoritative — a host that thought a team was still over there disagrees about whether the ally's condition is climbing and whether this hull has a team free for its own sweep."
+      rationale:
+        - "[ai] FOLDED into the authoritative-state digest, in a namespace of its own keyed on the minted entity id: the uuid of the target a team is working abroad, for every ship actually dispatching one. This is the divergence signal a resume must survive with the tractor's reason turned to repair: two hosts that disagreed would disagree both about whether the ally's condition is rising and about whether this hull has a team free. The authored reach and rate are content, which content_digest is answerable for, and the last refusal is a projection the next tick re-derives, so neither is folded."
+        - "[ai] A ship dispatching NOBODY folds NOTHING — not even a row, the operations namespace's empty-walk affordance, exactly as the tractor namespace takes it. That is what lets a shipped hull gain a `[repair.external_dispatch]` table later without moving any committed world's digest, and it is why the demo destroyer stays byte-identical while the probe tender carries the capability."
+        - "[ai] Snapshotted as a PROJECTION rather than whole: the dispatched target travels (ExternalRepairSaveState), while the authored reach and rate ride the template and are re-derived on spawn — writing them into a save would put content into the one artefact content_digest is answerable for. The last refusal is not persisted: a resumed dispatch that comes back out of range refuses again on its first tick. The repair table sets deny_unknown_fields, so a build predating `[repair.external_dispatch]` refuses the template outright rather than writing a same-content-digest save to disagree with — which is why this did not bump SNAPSHOT_FORMAT."
+    architecture:
+      classification: authoritative
+      owner: external-repair-dispatcher
+      writers: [external-repair-dispatcher]
+      replicas: [external-repair-published-state]
+    implementation:
+      status: declared
+      paths: [src/console/repair/external_server.rs]
+      symbols:
+        - ExternalRepairDispatch
+        - ExternalRepairSaveState
+      tests: [cargo test]
+
+  - state: external-repair-published-state
+    core:
+      status: implemented
+      confidence: confirmed
+      origin: ai
+      title: Published External Repair-Dispatch State
+      summary: The client-visible projection of a ship's external repair dispatch — the authored reach, the target a team is working abroad and its name id, and why the last dispatch was refused. Carried on the repair blackboard the repair console already reads, populated only by a hull that can dispatch, and by nobody else.
+      rationale:
+        - "[ai] Carried as fields on the existing RepairBlackboard, not a new SystemBlackboard variant, because external dispatch is a repair-CONSOLE capability rather than a `[[system]]` of its own — the console reads it under the same `repair` blackboard it already renders teams and hull from. Every field is serde-default and skipped when absent, so a hull that authored no `[repair.external_dispatch]` puts exactly the payload on the wire it did before this existed, and a payload predating the fields decodes rather than being refused whole."
+        - "[ai] NO ENGLISH CROSSES THE WIRE. The target's name is a world entity name id and every refusal is a strings.csv id (`repair.dispatch.refused.*`) the console resolves through t(); the refusal is a match in Rust rather than a composed `repair.dispatch.refused.{...}`, so check-strings can see every id a new variant needs a row for. The console shows the reason a refused dispatch carries, which is the AC a no-team / no-target / out-of-range dispatch is proved against. The fields are whole-ship scalars/ids revealing no per-system detail, so the #737 visibility projection passes them through to the engineering holder and withholds them from everyone else with the rest of the working state."
+    architecture:
+      classification: client-projection
+      owner: external-repair-dispatcher
+      writers: [external-repair-dispatcher]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs]
+      symbols:
+        - RepairBlackboard
+      tests: [cargo test, npx vitest run]
+
   - state: held-response-state
     core:
       status: implemented

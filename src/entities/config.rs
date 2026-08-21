@@ -4119,6 +4119,16 @@ pub struct RepairConfig {
     /// rather than inventing a `[repair_console]` table the wire never uses.
     #[serde(default)]
     pub selector: Option<FineSystemAiSelectorToml>,
+    /// External repair-team dispatch (issue #1161). Loaded from
+    /// `[repair.external_dispatch]`; present on a hull whose repair console can
+    /// send a team to a nearby ally or structure, absent for everything else —
+    /// which carries no `ExternalRepairDispatch` component and cannot dispatch a
+    /// team abroad. It joins the other repair tunables under `[repair]` for
+    /// `selector`'s reason: a team crossing over is a repair-console capability,
+    /// not a `[[system]]` of its own. The reach and the repair rate are its two
+    /// authored numbers (AGENTS.md rule 11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_dispatch: Option<crate::console::repair::external::ExternalRepairConfig>,
 }
 
 fn default_repair_travel_duration_secs() -> f32 {
@@ -4135,6 +4145,7 @@ impl Default for RepairConfig {
             travel_duration_secs: default_repair_travel_duration_secs(),
             repair_rate_hp_per_sec: default_repair_rate_hp_per_sec(),
             selector: None,
+            external_dispatch: None,
         }
     }
 }
@@ -4984,6 +4995,19 @@ impl EntityConfig {
                      power allocation is what an interruption checks",
                 ));
             }
+        }
+
+        // Validation: a [repair.external_dispatch] table has to describe a
+        // dispatch that can do something (issue #1161). A non-positive reach or
+        // repair rate is an author mistake whose only other symptom would be a
+        // repair-console control the crew can press that sends a team nowhere or
+        // helps nobody.
+        if let Some(external) = config
+            .repair
+            .as_ref()
+            .and_then(|rc| rc.external_dispatch.as_ref())
+        {
+            external.validate().map_err(SerdeError::custom)?;
         }
 
         // Validation: a [reference_grid] table has to describe a lattice that

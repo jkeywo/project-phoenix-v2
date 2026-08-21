@@ -8,7 +8,7 @@ describe('ACTION_MAP', () => {
     expect(Object.isFrozen(ACTION_MAP)).toBe(true);
   });
 
-  it('contains exactly the 49 expected action keys', () => {
+  it('contains exactly the 51 expected action keys', () => {
     expect(Object.keys(ACTION_MAP).sort()).toEqual([
       'abort_operation',
       'cancel_impulse',
@@ -16,6 +16,7 @@ describe('ACTION_MAP', () => {
       'charge_blaster_start',
       'clear_comms',
       'clear_navigation_waypoint',
+      'dispatch_external_repair',
       'dispatch_repair_team',
       'dock',
       'engage_tractor',
@@ -26,6 +27,7 @@ describe('ACTION_MAP', () => {
       'helm_input',
       'load_tube',
       'order_civilian',
+      'recall_external_repair',
       'release_tractor',
       'respond_to_message',
       'return_to_lobby',

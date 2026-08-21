@@ -2034,6 +2034,23 @@ pub enum SystemControlPayload {
     /// Targets the `dock` system, the sibling of `Dock` above. No fields — a ship
     /// holds at most one dock, so there is nothing to disambiguate.
     Undock,
+    /// Dispatch a repair team to the ship's designated target — a nearby ally or
+    /// structure — where it works that target's own condition track (issue
+    /// #1161). Targets the `repair` system.
+    ///
+    /// No fields: the team crosses to whatever the ship currently has designated
+    /// (its one Tactical lock), which the handler reads server-side rather than
+    /// the command naming a target — the same reason `EngageTractor` carries no
+    /// uuid. Explicit intent, not a toggle: `RecallExternalRepair` is its own
+    /// command, so a retried or stale-UI dispatch is idempotent. A dispatch with
+    /// no free team, no designated target, or a target out of range is refused
+    /// with a reason the console shows.
+    DispatchExternalRepair,
+    /// Recall a dispatched repair team to the hull's own damage-control sweep
+    /// (issue #1161), leaving the work already done on the target. Targets the
+    /// `repair` system, the sibling of `DispatchExternalRepair`. No fields — a
+    /// ship dispatches one team abroad at a time.
+    RecallExternalRepair,
 }
 
 /// `ClientMessageDiscriminants` (from `strum::EnumDiscriminants`) is a
@@ -4321,6 +4338,29 @@ pub struct RepairBlackboard {
     /// copy before projection.
     #[serde(default)]
     pub destroyed_hull_fraction: Option<f32>,
+    /// The authored reach a repair team can be dispatched across to a nearby
+    /// ally or structure (issue #1161), in world units. `None` on a hull that
+    /// authored no `[repair.external_dispatch]` — its repair console shows no
+    /// dispatch control. Every field below is `Some`/populated only on a hull
+    /// that can dispatch, so a ship without the capability is byte-identical on
+    /// the wire to one built before this existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_dispatch_range: Option<f32>,
+    /// The target-uuid a repair team is currently working abroad (issue #1161),
+    /// or `None` when the team is home. Drives the dispatch/recall control's
+    /// engaged state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_dispatch_target: Option<String>,
+    /// The world entity-name id of the target a team is working abroad (issue
+    /// #1161) — a name id the console resolves through `t()`, never English.
+    /// `None` when no team is dispatched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_dispatch_target_name: Option<String>,
+    /// The `strings.csv` id of the last dispatch refusal (issue #1161) — no free
+    /// team, no designated target, or out of range — the console resolves
+    /// through `t()`. `None` when idle or working cleanly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_dispatch_refusal: Option<String>,
 }
 
 /// Raw sim truth for the Comms system, published each tick into the ship

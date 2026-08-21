@@ -631,6 +631,23 @@ pub struct EntityState {
     /// predates this vocabulary refuses the template outright.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dock: Option<crate::dock::DockSaveState>,
+    /// The ship's external repair-dispatch state (issue #1161) — which ally or
+    /// structure a repair team is working abroad, if any.
+    ///
+    /// A **projection**, not the whole
+    /// [`crate::console::repair::external_server::ExternalRepairDispatch`]
+    /// component, for `tractor`'s reason: the authored reach and rate ride the
+    /// template and are re-derived on spawn. What travels is the one thing the
+    /// fold cannot recover — the dispatched target — which
+    /// [`fold_external_repair_namespace`](crate::sim_digest) folds and which a
+    /// resume would otherwise drop, restoring a team as home when the crew had it
+    /// out helping an ally (and, with it, one more free team than the hull really
+    /// has). `deny_unknown_fields` on the repair table means a build predating
+    /// `[repair.external_dispatch]` refuses the template outright rather than
+    /// writing a same-content-digest save to disagree with, which is why this did
+    /// not bump [`SNAPSHOT_FORMAT`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_repair: Option<crate::console::repair::ExternalRepairSaveState>,
     /// The ship's scan record (issue #1032) — the last reading its sensor suite
     /// took, or why the last scan returned nothing.
     ///
@@ -2683,6 +2700,31 @@ fn capture_docks(world: &World) -> Vec<(String, crate::dock::DockSaveState)> {
         .collect()
 }
 
+/// The external repair-dispatch states, in a query of their own, joined by uuid
+/// — see [`EntityState::external_repair`]. Only hulls that authored
+/// `[repair.external_dispatch]` carry one, so most worlds capture an empty list.
+///
+/// A hull that CAN dispatch and has sent nobody captures nothing — the same
+/// reading `fold_external_repair_namespace` takes: no dispatched target is
+/// byte-for-byte the state of a hull built before external dispatch existed, so
+/// writing it would charge every world fielding a capable hull for a feature its
+/// crew never used.
+fn capture_external_repair(
+    world: &World,
+) -> Vec<(String, crate::console::repair::ExternalRepairSaveState)> {
+    let Some(mut query) =
+        world.try_query::<(&EntityUuid, &crate::console::repair::ExternalRepairDispatch)>()
+    else {
+        return Vec::new();
+    };
+    let idle = crate::console::repair::ExternalRepairSaveState::default();
+    query
+        .iter(world)
+        .map(|(uuid, dispatch)| (uuid.0.clone(), dispatch.save_state()))
+        .filter(|(_, state)| *state != idle)
+        .collect()
+}
+
 /// The scan records, in a query of their own, joined by uuid — see
 /// [`EntityState::scan`]. Only hulls that authored `[scan]` carry one, so most
 /// worlds capture an empty list.
@@ -2743,6 +2785,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let operations = capture_operations(world);
     let tractors = capture_tractors(world);
     let docks = capture_docks(world);
+    let external_repair = capture_external_repair(world);
     let scans = capture_scans(world);
     let civilians = capture_civilians(world);
     let spawn_origins = capture_spawn_origins(world);
@@ -2803,6 +2846,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
             dock: docks
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, state)| state.clone()),
+            external_repair: external_repair
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, state)| state.clone()),
@@ -4102,6 +4149,13 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         if let Some(dock) = &row.dock {
             if let Some(mut control) = entity_mut.get_mut::<crate::dock::DockControl>() {
                 control.restore(dock);
+            }
+        }
+        if let Some(external_repair) = &row.external_repair {
+            if let Some(mut dispatch) =
+                entity_mut.get_mut::<crate::console::repair::ExternalRepairDispatch>()
+            {
+                dispatch.restore(external_repair);
             }
         }
         if let Some(scan) = &row.scan {

@@ -15912,3 +15912,232 @@ fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_i
         "…and the restored world folds to the same digest the captured one did"
     );
 }
+
+// ── #1161: external repair-team dispatch, end to end ─────────────────────────
+//
+// `assets/worlds/probe_external_repair.toml` fields a backfilled player TENDER
+// (the dedicated `repair_tender` hull — no shipped hull is touched) carrying a
+// single repair team and, in its own `[repair.external_dispatch]` table, the
+// reach and rate a dispatched team works at, and an ALLY DEPOT 80 units off that
+// declines at zero on its own. The test drives the dispatch through the ordinary
+// admitted `DispatchExternalRepair`/`RecallExternalRepair` path, sets the ship's
+// one Tactical lock the way `SetTarget` would, and moves the operator by hand.
+
+const ALLY: &str = "world.probe_external_repair.entity.ally.name";
+/// An `ai:` token: admission authorises it iff the target system is
+/// AI-controlled, which the tender's engineering-owned `repair` system is while
+/// nobody is at its console — the same seam #1162's repair AI will use, and the
+/// same one a human tenure token uses from the other side (AGENTS.md rule 6).
+const REPAIR_DISPATCH_TOKEN: &str = "ai:external-repair-probe";
+
+fn external_repair_args(dt: f64) -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: "assets/worlds/probe_external_repair.toml".into(),
+        // The player ship IS the tender: the game-start spawn swaps the world's
+        // `player-ship` placeholder for the lobby-SELECTED hull, so the selection
+        // has to be the tender or its repair team never spawns.
+        ship_path: "assets/entities/repair_tender.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(60.0, dt),
+        deterministic: true,
+        seed: Some(42),
+        ..test_args()
+    }
+}
+
+fn external_dispatch_of(app: &mut App) -> project_phoenix::console::repair::ExternalRepairDispatch {
+    let op = tractor_operator(app);
+    app.world()
+        .get::<project_phoenix::console::repair::ExternalRepairDispatch>(op)
+        .expect("the tender carries an ExternalRepairDispatch")
+        .clone()
+}
+
+/// The one availability answer both the human console and the repair AI read:
+/// how many of the tender's teams are free for its OWN damage-control sweep,
+/// with any external commitment already withdrawn (issue #1161, rule 6).
+fn operator_free_team_count(app: &mut App) -> usize {
+    let op = tractor_operator(app);
+    let committed = app
+        .world()
+        .get::<project_phoenix::console::repair::ExternalRepairDispatch>(op)
+        .map(|d| d.committed_repair_teams())
+        .unwrap_or(0);
+    let teams = app
+        .world()
+        .get::<project_phoenix::console::repair::server::ShipRepairTeams>(op)
+        .expect("the tender carries repair teams");
+    teams.0.free_team_indices(committed).len()
+}
+
+/// Send a dispatch/recall through the real admission path and give it the ticks
+/// to arrive (drained in `PreUpdate`, admitted before `SimSet::Input`, consumed
+/// in `SimSet::Input` of the same tick).
+fn send_repair(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+    use project_phoenix::lobby::InboundMessage;
+    use project_phoenix::messages::{ClientMessage, SystemId};
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: REPAIR_DISPATCH_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: SystemId(project_phoenix::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+                payload,
+            },
+        });
+    run(app, 2);
+}
+
+/// AC: a dispatched team raises an ally's condition at the authored rate while
+/// the hull's own repairs slow (its one team is withdrawn from the sweep), and
+/// recall — or drifting out of range — brings the team home and stops the work,
+/// leaving what it already did on the ally.
+#[test]
+fn a_dispatched_team_raises_an_allys_condition_while_the_hulls_own_repairs_slow() {
+    use project_phoenix::console::repair::ExternalRepairRefusal;
+    use project_phoenix::messages::SystemControlPayload;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&external_repair_args(dt)).expect("app should build");
+    // Far enough in that the game is InProgress and the tender is backfilled, so
+    // its engineering-owned `repair` system is AI-controlled and the `ai:` token
+    // is admitted.
+    run(&mut app, 60);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::InProgress,
+        "precondition: admission only runs InProgress"
+    );
+    let ally = scan_uuid_named(&mut app, ALLY);
+
+    place_operator(&mut app, Vec3::ZERO);
+    run(&mut app, 1);
+
+    // Precondition: one team free for the tender's own sweep, none dispatched.
+    assert_eq!(
+        operator_free_team_count(&mut app),
+        1,
+        "the tender starts with its one team free for its own damage control"
+    );
+    assert!(external_dispatch_of(&mut app).dispatched_target.is_none());
+
+    // Designate the ally and dispatch a team to it.
+    set_tractor_lock(&mut app, Some(ally.clone()));
+    send_repair(&mut app, SystemControlPayload::DispatchExternalRepair);
+    let d = external_dispatch_of(&mut app);
+    assert_eq!(
+        d.dispatched_target.as_deref(),
+        Some(ally.as_str()),
+        "the team crossed to the designated ally"
+    );
+    assert!(
+        d.last_refusal.is_none(),
+        "a clean dispatch carries no refusal"
+    );
+
+    // ── The hull's own repairs slow: the one team is withdrawn from the sweep ─
+    assert_eq!(
+        operator_free_team_count(&mut app),
+        0,
+        "the dispatched team is unavailable to the tender's own damage-control sweep — the same \
+         availability answer the console readout and the repair AI both read"
+    );
+
+    // ── The ally's condition rises at the authored rate ──────────────────────
+    let before = condition_of(&mut app, ALLY);
+    run(&mut app, 120); // 2 sim-seconds working the ally
+    let after = condition_of(&mut app, ALLY);
+    let gain = after - before;
+    // Net +20/s (the ally declines at zero of its own) for two seconds is +40.
+    assert!(
+        gain > 35.0 && gain < 45.0,
+        "the dispatched team raises the ally at the authored +20/s (≈+40 over two seconds), got \
+         {gain} (from {before} to {after})"
+    );
+
+    // ── Recall returns the team to the sweep and leaves the work done ─────────
+    let banked = condition_of(&mut app, ALLY);
+    send_repair(&mut app, SystemControlPayload::RecallExternalRepair);
+    let d = external_dispatch_of(&mut app);
+    assert!(
+        d.dispatched_target.is_none(),
+        "recall brought the team home"
+    );
+    assert_eq!(
+        operator_free_team_count(&mut app),
+        1,
+        "the recalled team is back in the tender's own sweep"
+    );
+    run(&mut app, 120); // 2 sim-seconds home
+    let after_recall = condition_of(&mut app, ALLY);
+    assert!(
+        (after_recall - banked).abs() < 1.0,
+        "recall leaves the work already done on the ally and stops adding more: {banked} vs \
+         {after_recall}"
+    );
+
+    // ── Drifting out of range brings the team home the same way ──────────────
+    place_operator(&mut app, Vec3::ZERO);
+    run(&mut app, 1);
+    send_repair(&mut app, SystemControlPayload::DispatchExternalRepair);
+    assert_eq!(
+        external_dispatch_of(&mut app).dispatched_target.as_deref(),
+        Some(ally.as_str()),
+        "re-dispatched with the team free again"
+    );
+    let banked = condition_of(&mut app, ALLY);
+    place_operator(&mut app, Vec3::new(90_000.0, 0.0, 90_000.0));
+    run(&mut app, 3);
+    let d = external_dispatch_of(&mut app);
+    assert!(
+        d.dispatched_target.is_none(),
+        "drifting past the authored range brought the team home"
+    );
+    assert_eq!(
+        d.last_refusal,
+        Some(ExternalRepairRefusal::OutOfRange),
+        "…and the reason the console shows is out-of-range"
+    );
+    assert_eq!(
+        operator_free_team_count(&mut app),
+        1,
+        "the team dropped by range is back in the sweep"
+    );
+    run(&mut app, 60);
+    assert!(
+        (condition_of(&mut app, ALLY) - banked).abs() < 1.0,
+        "a team dropped out of range stops working the ally where it left off"
+    );
+}
+
+/// AC: dispatching with no designated target, or a target out of range, is
+/// refused with a reason the console shows — proved end to end through the same
+/// admitted command, distinct from the pure `dispatch_status` unit tests.
+#[test]
+fn dispatching_with_no_target_or_out_of_range_is_refused_with_a_shown_reason() {
+    use project_phoenix::console::repair::ExternalRepairRefusal;
+    use project_phoenix::messages::SystemControlPayload;
+
+    let dt = 1.0 / 60.0;
+    let mut app = build_headless_app(&external_repair_args(dt)).expect("app should build");
+    run(&mut app, 60);
+    let ally = scan_uuid_named(&mut app, ALLY);
+
+    // No designated target: refused NoTarget, nobody dispatched.
+    place_operator(&mut app, Vec3::ZERO);
+    set_tractor_lock(&mut app, None);
+    run(&mut app, 1);
+    send_repair(&mut app, SystemControlPayload::DispatchExternalRepair);
+    let d = external_dispatch_of(&mut app);
+    assert!(d.dispatched_target.is_none(), "no target — nobody sent");
+    assert_eq!(d.last_refusal, Some(ExternalRepairRefusal::NoTarget));
+
+    // Designated but out of range: refused OutOfRange, nobody dispatched.
+    place_operator(&mut app, Vec3::new(50_000.0, 0.0, 0.0));
+    run(&mut app, 1);
+    set_tractor_lock(&mut app, Some(ally.clone()));
+    send_repair(&mut app, SystemControlPayload::DispatchExternalRepair);
+    let d = external_dispatch_of(&mut app);
+    assert!(d.dispatched_target.is_none(), "out of range — nobody sent");
+    assert_eq!(d.last_refusal, Some(ExternalRepairRefusal::OutOfRange));
+}

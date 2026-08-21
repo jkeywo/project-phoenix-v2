@@ -81,14 +81,26 @@ pub fn handle_dispatch_repair_team(
             // a commitment one path honoured and the other did not would be a
             // capacity-as-cost trade a player could opt out of.
             Option<&crate::operations::ShipOperations>,
+            // Issue #1161: teams held abroad by an external repair dispatch,
+            // added on the same terms and for the same reason — a team sent to
+            // an ally is unavailable to this hull's own damage-control sweep, in
+            // the console readout and to the repair AI alike.
+            Option<&super::external_server::ExternalRepairDispatch>,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    for (admitted, ship_config, mut teams, hull_opt, operations) in ship_query.iter_mut() {
+    for (admitted, ship_config, mut teams, hull_opt, operations, external_dispatch) in
+        ship_query.iter_mut()
+    {
         let committed = operations
             .map(|ops| ops.committed_repair_teams())
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .saturating_add(
+                external_dispatch
+                    .map(|e| e.committed_repair_teams())
+                    .unwrap_or(0),
+            );
         // Look up a human-readable display name for a SystemId. Prefer the
         // ship's `EntitySystemHull` entry (populated from TOML with the
         // designer-authored display name), and fall back to the raw SystemId

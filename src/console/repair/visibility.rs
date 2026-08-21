@@ -446,6 +446,14 @@ impl HullVisibility {
             damageable_systems: bb.damageable_systems.clone(),
             teams: bb.teams.clone(),
             travel_duration_secs: bb.travel_duration_secs,
+            // External dispatch (issue #1161): whole-ship scalars/ids revealing
+            // no per-system detail, so the Engineering holder this projection is
+            // built for sees them unfiltered — the same passthrough
+            // `travel_duration_secs` gets.
+            external_dispatch_range: bb.external_dispatch_range,
+            external_dispatch_target: bb.external_dispatch_target.clone(),
+            external_dispatch_target_name: bb.external_dispatch_target_name.clone(),
+            external_dispatch_refusal: bb.external_dispatch_refusal.clone(),
         }
     }
 
@@ -479,6 +487,14 @@ fn withheld_repair_blackboard(bb: &RepairBlackboard) -> RepairBlackboard {
         queue_depth: vec![],
         aggregate_hull_fraction: None,
         destroyed_hull_fraction: None,
+        // A recipient not entitled to the repair blackboard is not the
+        // Engineering holder, so it renders no dispatch control (issue #1161);
+        // the dispatched target and refusal are Engineering's working state and
+        // are cleared with the rest.
+        external_dispatch_range: None,
+        external_dispatch_target: None,
+        external_dispatch_target_name: None,
+        external_dispatch_refusal: None,
     }
 }
 
@@ -1023,6 +1039,7 @@ mod tests {
             queue_depth: vec![],
             aggregate_hull_fraction: None,
             destroyed_hull_fraction: None,
+            ..Default::default()
         };
         let eng = StationId("engineering".into());
         let projected = v.project_repair_blackboard(Some(&eng), &bb);
@@ -1064,6 +1081,7 @@ mod tests {
             // passing vacuously because the input was already `None`.
             aggregate_hull_fraction: Some(0.25),
             destroyed_hull_fraction: Some(0.25),
+            ..Default::default()
         }
     }
 
@@ -1557,6 +1575,7 @@ station = "engineering"
             // rather than passing vacuously on an already-`None` input.
             aggregate_hull_fraction: Some(0.25),
             destroyed_hull_fraction: Some(0.25),
+            ..Default::default()
         });
         let viewers = vec![
             ("eng".to_string(), Some(StationId("engineering".into()))),

@@ -1330,6 +1330,17 @@ export function buildRepairConsoleState(state) {
       // dedicated Repair station vs. cruiser/destroyer's Engineering), so
       // this works uniformly across all ship classes.
       repair_auto:          state.controlSources?.['repair'] === 'Ai',
+      // External repair-team dispatch (issue #1161). Non-null only on a hull
+      // that authored `[repair.external_dispatch]` (its blackboard carries a
+      // `range`), so the console shows the dispatch control on exactly those
+      // hulls; a hull without it renders nothing new. The target/refusal are
+      // name/string ids the console resolves through `t()` — no English crosses.
+      external_dispatch:    bb.external_dispatch_range == null ? null : {
+        range:       bb.external_dispatch_range,
+        target:      bb.external_dispatch_target ?? null,
+        target_name: bb.external_dispatch_target_name ?? null,
+        refusal:     bb.external_dispatch_refusal ?? null,
+      },
     });
   }
   // Legacy fallback: derive damageable_systems from consoleHull (SystemId-keyed

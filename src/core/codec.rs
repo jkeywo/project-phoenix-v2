@@ -2288,6 +2288,71 @@ mod tests {
         assert_eq!(idle_decoded, idle);
     }
 
+    /// External repair dispatch (issue #1161): the fieldless
+    /// `DispatchExternalRepair` / `RecallExternalRepair` control payloads
+    /// round-trip and keep their pinned wire shape. They target the `repair`
+    /// system and take no argument — a team crosses to whatever the ship has
+    /// designated, read server-side, and recall needs nothing to disambiguate.
+    #[test]
+    fn external_repair_dispatch_and_recall_control_system_round_trip() {
+        let dispatch = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+            payload: SystemControlPayload::DispatchExternalRepair,
+        };
+        assert_client_roundtrip(&JsonCodec, dispatch.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, dispatch.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&dispatch).unwrap(),
+            r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"DispatchExternalRepair"}}}"#,
+            "DispatchExternalRepair wire shape must stay pinned"
+        );
+
+        let recall = ClientMessage::ControlSystem {
+            target: SystemId(crate::ship::system_registry::REPAIR_SYSTEM_ID.into()),
+            payload: SystemControlPayload::RecallExternalRepair,
+        };
+        assert_client_roundtrip(&JsonCodec, recall.clone());
+        assert_client_roundtrip(&PrettyJsonCodec, recall.clone());
+        assert_eq!(
+            JsonCodec.encode_client(&recall).unwrap(),
+            r#"{"type":"ControlSystem","data":{"target":"repair","payload":{"type":"RecallExternalRepair"}}}"#,
+            "RecallExternalRepair wire shape must stay pinned"
+        );
+    }
+
+    /// The external repair-dispatch fields on the repair blackboard (issue #1161)
+    /// round-trip, and a hull that authored no dispatch pays for none of the
+    /// optional fields — so its wire shape is byte-identical to one built before
+    /// this existed.
+    #[test]
+    fn repair_blackboard_external_dispatch_fields_round_trip_and_are_additive() {
+        use crate::messages::RepairBlackboard;
+
+        let dispatching = SystemBlackboard::Repair(RepairBlackboard {
+            external_dispatch_range: Some(800.0),
+            external_dispatch_target: Some("00000000-0000-8000-8000-000000000042".into()),
+            external_dispatch_target_name: Some(
+                "world.probe_external_repair.entity.ally.name".into(),
+            ),
+            external_dispatch_refusal: Some("repair.dispatch.refused.out_of_range".into()),
+            ..Default::default()
+        });
+        let json = serde_json::to_string(&dispatching).unwrap();
+        assert_eq!(
+            serde_json::from_str::<SystemBlackboard>(&json).unwrap(),
+            dispatching
+        );
+
+        // A hull that can dispatch nothing pays for none of the optional fields.
+        let idle = SystemBlackboard::Repair(RepairBlackboard::default());
+        let json = serde_json::to_string(&idle).unwrap();
+        assert!(
+            !json.contains("external_dispatch"),
+            "a repair blackboard with no dispatch capability must carry no absent-field noise: \
+             {json}"
+        );
+    }
+
     /// The tractor blackboard (issue #1156): the `SystemBlackboard::Tractor`
     /// variant round-trips, is additive on the wire, and an idle beam carries no
     /// absent-field noise.
@@ -3683,6 +3748,7 @@ mod tests {
             ],
             aggregate_hull_fraction: Some(0.75),
             destroyed_hull_fraction: Some(0.2),
+            ..Default::default()
         });
 
         let json = serde_json::to_string(&bb).unwrap();

@@ -68,6 +68,26 @@ export const ACTION_MAP = Object.freeze({
     });
   },
 
+  /**
+   * Dispatch a repair team to the ship's designated target — a nearby ally or
+   * structure (issue #1161). Targets the `repair` system; the team crosses to
+   * whatever the ship currently has locked, read server-side.
+   */
+  dispatch_external_repair: (_a, send) => {
+    send('ControlSystem', {
+      target: 'repair',
+      payload: { type: 'DispatchExternalRepair' },
+    });
+  },
+
+  /** Recall a dispatched repair team to the hull's own sweep (issue #1161). */
+  recall_external_repair: (_a, send) => {
+    send('ControlSystem', {
+      target: 'repair',
+      payload: { type: 'RecallExternalRepair' },
+    });
+  },
+
   /** Fire a specific blaster bank (issue #631). */
   fire_blaster: (a, send) => {
     if (!a.bank) return;

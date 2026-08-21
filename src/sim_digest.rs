@@ -184,6 +184,7 @@ use vellum_digest::{digest_postcard, fnv1a, fold_digest, FOLD_SEED};
 use crate::balance::BalanceEvent;
 use crate::civilian::{CivilianState, CivilianTraffic};
 use crate::command_plugin::ShipStationStances;
+use crate::console::repair::external_server::ExternalRepairDispatch;
 use crate::core::telemetry::RunTelemetry;
 use crate::damage::SystemHull;
 use crate::dock::DockControl;
@@ -336,6 +337,7 @@ pub fn world_digest(world: &World) -> u64 {
     acc = fold_station_stances_namespace(world, acc);
     acc = fold_tractor_namespace(world, acc);
     acc = fold_dock_namespace(world, acc);
+    acc = fold_external_repair_namespace(world, acc);
     acc = fold_asteroid_namespace(world, acc);
     fold_collisions(world, acc)
 }
@@ -806,6 +808,59 @@ fn fold_dock_namespace(world: &World, mut acc: u64) -> u64 {
     rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
     acc = fold_str(acc, "dock-namespace");
+    acc = fold_u64(acc, rows.len() as u64);
+    for (key, _, target) in rows {
+        acc = fold_str(acc, &key.id);
+        acc = fold_str(acc, &target);
+    }
+    acc
+}
+
+/// Every ship dispatching a repair team abroad (issue #1161), in [`FoldKey`]
+/// order, in its own namespace.
+///
+/// # What is folded, and why it has to be
+///
+/// The uuid of the target a team is working abroad, for every ship actually
+/// dispatching one. This is the authoritative divergence signal a resume has to
+/// survive with the tractor's own reason turned to repair: two hosts that
+/// disagreed about whether a team was still over there would disagree about
+/// whether the ally's condition is climbing and whether this hull has a team
+/// free for its own sweep. The authored reach and rate are content, which
+/// `snapshot::content_digest` is answerable for, so neither is folded; the last
+/// refusal is a projection the next tick re-derives and is left out for the same
+/// reason the tractor leaves its refusal out.
+///
+/// The empty-walk affordance is [`fold_operations_namespace`]'s, exactly as
+/// [`fold_tractor_namespace`] takes it: a hull that authored
+/// `[repair.external_dispatch]` and is dispatching nobody folds NOTHING — not
+/// even a row — so a shipped hull can gain the capability without moving any
+/// committed world's digest.
+fn fold_external_repair_namespace(world: &World, mut acc: u64) -> u64 {
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid, &ExternalRepairDispatch)>()
+    else {
+        // A world that never registered the component runs no external dispatch
+        // — the empty case, not a distinct one.
+        return acc;
+    };
+    let mut rows: Vec<(FoldKey, bevy::ecs::entity::EntityIndex, String)> = query
+        .iter(world)
+        .filter_map(|(entity, uuid, dispatch)| {
+            dispatch.dispatched_target.as_ref().map(|target| {
+                (
+                    FoldKey::from_world_id(Namespace::Entity, &uuid.0),
+                    entity.index(),
+                    target.clone(),
+                )
+            })
+        })
+        .collect();
+    if rows.is_empty() {
+        return acc;
+    }
+    rows.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    acc = fold_str(acc, "external-repair-namespace");
     acc = fold_u64(acc, rows.len() as u64);
     for (key, _, target) in rows {
         acc = fold_str(acc, &key.id);

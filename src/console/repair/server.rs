@@ -139,6 +139,12 @@ impl Plugin for RepairPlugin {
         // The dispatch router registers itself in Physics, pinning its own
         // `.after(operate_repair_ai)` ordering (issue #830). See `super::dispatch`.
         super::dispatch::register_repair_dispatch(app);
+        // External repair-team dispatch (issue #1161): the command handler in
+        // Input, the range-maintenance and condition-work systems in Modifiers.
+        // Registered here so a hull that authored `[repair.external_dispatch]`
+        // can send a team to a nearby ally; a hull without it carries no
+        // component and the systems are no-ops for it.
+        super::external_server::register_external_repair(app);
         app.add_systems(
             FixedUpdate,
             (
@@ -270,12 +276,25 @@ fn publish_repair_blackboard(
             Option<&ShipRepairTeams>,
             Option<&crate::entity_spawner::EntitySystemHull>,
             Option<&RepairRequestQueue>,
+            // External repair-team dispatch (issue #1161). Present only on a
+            // hull that authored `[repair.external_dispatch]`; a hull without it
+            // leaves every external-dispatch field `None` and is byte-identical
+            // on the wire to one built before this existed.
+            Option<&super::external_server::ExternalRepairDispatch>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
     >,
+    // Resolve a dispatched target's world entity-name id for the readout — no
+    // English crosses the wire, exactly as the tractor publisher reports its
+    // coupled target's name.
+    named: Query<(
+        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityName,
+    )>,
 ) {
-    for (teams_opt, hull_opt, repair_queue_ref, mut blackboards) in ship_q.iter_mut() {
+    for (teams_opt, hull_opt, repair_queue_ref, external_opt, mut blackboards) in ship_q.iter_mut()
+    {
         let default_teams;
         let teams: &ShipRepairTeams = match teams_opt {
             Some(t) => t,
@@ -330,6 +349,33 @@ fn publish_repair_blackboard(
 
         // Emit the new SystemId-keyed hull + damageable list only (legacy
         // `console_hull` / `damageable_consoles` wire fields were dropped in #619).
+        // External repair dispatch (issue #1161): the authored reach, the target
+        // a team is working abroad and its name id, and the last refusal's
+        // string id. All `None` on a hull that authored no dispatch capability.
+        let (
+            external_dispatch_range,
+            external_dispatch_target,
+            external_dispatch_target_name,
+            external_dispatch_refusal,
+        ) = match external_opt {
+            Some(external) => {
+                let target = external.dispatched_target.clone();
+                let target_name = target.as_ref().and_then(|uuid| {
+                    named
+                        .iter()
+                        .find(|(id, _)| &id.0 == uuid)
+                        .map(|(_, name)| name.0.clone())
+                });
+                (
+                    Some(external.config.range),
+                    target,
+                    target_name,
+                    external.last_refusal.map(|r| r.string_id().to_string()),
+                )
+            }
+            None => (None, None, None, None),
+        };
+
         let bb = RepairBlackboard {
             teams: team_slots,
             travel_duration_secs: teams.0.timings().travel_duration,
@@ -344,6 +390,10 @@ fn publish_repair_blackboard(
             queue_depth,
             aggregate_hull_fraction: None,
             destroyed_hull_fraction: None,
+            external_dispatch_range,
+            external_dispatch_target,
+            external_dispatch_target_name,
+            external_dispatch_refusal,
         };
 
         blackboards.0.insert(
@@ -720,6 +770,11 @@ pub fn operate_repair_ai(
             // question it answers here: how many of this ship's teams a
             // field-repair is holding.
             Option<&crate::operations::ShipOperations>,
+            // The external repair-dispatch record (issue #1161), read for the
+            // SAME question: how many teams are held abroad against a designated
+            // target. Added to the operations commitment so the AI dispatcher and
+            // the human console read one availability answer (AGENTS.md rule 6).
+            Option<&super::external_server::ExternalRepairDispatch>,
             &mut crate::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
@@ -736,6 +791,7 @@ pub fn operate_repair_ai(
         target_selector,
         red_alert_comp,
         operations,
+        external_dispatch,
         mut admitted,
     ) in ships.iter_mut()
     {
@@ -819,11 +875,21 @@ pub fn operate_repair_ai(
         // that true rather than a claim in a design note. The teams never leave
         // the hull — they are still `Idle` in every readout — they are just not
         // available to be sent anywhere.
-        let free_teams: Vec<usize> = teams.0.free_team_indices(
-            operations
-                .map(|ops| ops.committed_repair_teams())
-                .unwrap_or(0),
-        );
+        // The one availability answer (AGENTS.md rule 6): the operations
+        // field-repair commitment PLUS any team held abroad by an external
+        // dispatch (issue #1161). Both are additive external claims on the same
+        // idle pool, and the human dispatch router adds the same pair, so a
+        // team sent to an ally cannot be undercut by whichever path did not know
+        // about it.
+        let committed = operations
+            .map(|ops| ops.committed_repair_teams())
+            .unwrap_or(0)
+            .saturating_add(
+                external_dispatch
+                    .map(|e| e.committed_repair_teams())
+                    .unwrap_or(0),
+            );
+        let free_teams: Vec<usize> = teams.0.free_team_indices(committed);
         if free_teams.is_empty() {
             continue;
         }

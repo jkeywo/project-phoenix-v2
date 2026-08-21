@@ -376,9 +376,14 @@ describe('initConsole — payload shape normalisation (#925 regression)', () => 
   // payload — via `systemView`, never off top-level fields directly. Any
   // console migrated to read this way must render correctly no matter which
   // shape the wire payload used, once console-core normalises inbound state.
+  // Reads via the FINE system ids only — the exact ids a shipped power
+  // console's render passes to systemView (e.g. engineering-console.js:
+  // `systemView(s, 'power-reactor', 'power-battery')`). NOT the family name,
+  // which no shipped console queries: a normalisation that keyed a flat
+  // payload under `systems['power']` would leave this reader blank.
   function keyedStyleRender(calls) {
     return function render(s) {
-      calls.push(systemView(s, 'power', 'power-reactor', 'power-battery'));
+      calls.push(systemView(s, 'power-reactor', 'power-battery'));
     };
   }
 
@@ -422,6 +427,8 @@ describe('initConsole — payload shape normalisation (#925 regression)', () => 
     expect(render).toHaveBeenCalledTimes(1);
     const received = render.mock.calls[0][0];
     expect(received.battery_charge).toBe(42);
-    expect(received.systems.power).toEqual(flatPayload);
+    // Keyed by fine system id (matching buildSystemStationConsoleState), not
+    // by the family name — see normalizeConsolePayload / FAMILY_SYSTEM_IDS.
+    expect(received.systems['power-reactor']).toEqual(flatPayload);
   });
 });

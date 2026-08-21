@@ -20,8 +20,10 @@ authors them; 4 are derived policy state where no parity is owed; 2 render on
 the battleship only. Three findings filed: #925, #926, #927 — all now
 resolved.** That per-fact tally is for the four player hulls — on the NPC hulls
 the seat authored no console at all, the structural gap #925 (now resolved:
-every NPC-hull seat mounts a console chosen by its owned systems, enforced by
-`tests/client/npc-hull-console-coverage.test.js`); one sensors-family follow-up
+every NPC-hull seat mounts a console chosen by its owned systems — the per-console
+family coverage documented in the `CONSOLE_SPECS` map of
+`gui/console-families.js`, with `tests/client/mount-plan.test.js` asserting
+`planMounts` yields an iframe for every seat); one sensors-family follow-up
 noted under finding 1.
 
 The three candidates #880 names — threat bearing, safe-range ring, closest
@@ -291,13 +293,12 @@ follow-up filed.
    seats render their real banks (the battleship mounts no blaster bank, so it is
    visually unchanged). The two-seat `ship_requiem_courier` has two MULTI-family
    seats ({captain,power} and {helm,tactical}), so it reuses the KEYED
-   `gui/courier/{captain,tactical}.html`. Family coverage is not left to
-   chance: a console spec map (`gui/console-families.js`, `{ families }` per
-   console) plus a Vitest test (`tests/client/npc-hull-console-coverage.test.js`)
-   asserts, for every NPC hull's `ship_stations`, that `planMounts` yields an
-   iframe for every seat and that each seat's owned families are covered by
-   its console — a family gap fails CI loudly instead of mounting a blank
-   panel. The former second dimension (payload shape) is checked nowhere
+   `gui/courier/{captain,tactical}.html`. Family coverage is tracked by a
+   console spec map (`gui/console-families.js` — `CONSOLE_SPECS`, `{ families }`
+   per console, the ground truth verified by reading each console's HTML), and
+   `tests/client/mount-plan.test.js` asserts `planMounts` yields an iframe for
+   every seat of an NPC hull's `ship_stations`. The former second dimension
+   (payload shape) is checked nowhere
    because there is nothing left to check: console-core's normalisation makes
    every console's `render` shape-agnostic (see above).
 

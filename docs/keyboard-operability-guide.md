@@ -188,10 +188,57 @@ code path, no binding registry (that is T2).
    Enter/Space for free.
 6. Adopt the shared control family so the focus ring appears — never write an
    outline (§2).
+7. Once the family is converted, **delete its block from the #1175 allow-list**
+   (`DEBT` in `tests/client/interaction-floors.test.js`). That deletion *is* the
+   sweep's done-ness — and it is not optional: a converted component left in the
+   list fails the `allow-list is honest` test (§7).
 
-## 7. What proves it
+---
+
+## 7. The structural floors and the allow-list (#1175)
+
+The recipe above is enforced the #1023 way — **structural tests over source**,
+extending the control-floors mechanism, no external audit tooling. Issue #1175
+added four floors that enumerate the whole console surface — every
+`gui/components/ph-*.js` and every per-hull `gui/<hull>/*.html`, read live from
+disk — and assert, per control:
+
+| Floor | Asserts |
+| --- | --- |
+| **Focus-token adoption** | every component adopts the shared control family (directly, or by extending a sibling that does), so its controls get the §2 ring. |
+| **Focusability** | every interactive control is a focusable thing — a native control, or a bare element given a `tabindex`. A `pointerdown` on a plain `<div>` with neither fails. |
+| **Keyboard-reachability** | no control is stranded — `tabindex="-1"` with no roving to bring it back, or a surface with no focus target at all. |
+| **Accessible name + role** | every control exposes a name (its text, a `t()` string id, or an `aria-label`); every custom composite exposes a role **and** a name. |
+
+**What "a control" is** is decided structurally, from what the author wrote (as
+control-floors decides "a control" from `cursor: pointer` and `<button>`): a
+`document.createElement('button')`, a `<button>`/`<input>`/`<select>` in markup,
+or a `pointerdown`/`click` wired onto a bare element. A name is present when the
+control gets text — its own, a descendant's, or a runtime fill by `id` — or an
+`aria-label`. The scanner is in `tests/client/interaction-scan.js`, shared the
+way `css-scan.js` is; the coarse edge (a component that mixes a real `<button>`
+with a delegated `<div>` click reads as focusable, and that div escapes) is why
+the *sweep's* fine-grained conversion still carries its own jsdom + smoke tests.
+
+**The allow-list is the mechanism the sweeps run against.** `DEBT`, grouped by
+sweep (#1176/#1177/#1178), names every component that fails a floor today; the
+floors run green against it. A sweep converts its family, then deletes its
+block. Two tests keep that honest: a still-failing entry is acknowledged debt,
+but an entry that **no longer fails** breaks `the allow-list is honest` — so a
+fix cannot quietly leave a component listed. The tracer (the Tactical console)
+is on neither list and passes every floor clean. Structural non-controls take an
+`EXEMPT` entry with a reason instead (e.g. `ph-radar`, the base scope canvas
+that is always wrapped by a labelled group and so is never its own tab stop).
+
+## 8. What proves it
 
 - **`tests/client/roving-tabindex.test.js`** — the pure helper.
+- **`tests/client/interaction-scan.test.js`** — the shared floor scanner, with
+  the **negative fixtures** that prove each floor can fail (an unnamed button, a
+  glyph with no `aria-label`, an unreachable drag widget, a stranded control).
+- **`tests/client/interaction-floors.test.js`** — the four floors over the live
+  console surface, the debt allow-list, and the honesty check that forces a
+  sweep to strike off what it fixes.
 - **`tests/client/tactical-keyboard.test.js`** — roles, names, the single Tab
   stop, the glyph steppers' names, and the two key handlers (blaster
   hold-to-fire, radar cursor) in jsdom.

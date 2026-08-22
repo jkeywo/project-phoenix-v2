@@ -1019,6 +1019,15 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "host-debug-simulation-override-state",
             )
+            // Instagib (issue #1181): the sibling host-debug simulation override,
+            // read by `tick_beams_apply_damage` via `Option<Res<Instagib>>`, so it
+            // registers in the headless app the enumeration guard scans. Same
+            // classification as `GodMode` / `SimulationPaused` — a wasm-only host
+            // cheat, off and uninserted on native, that alters damage when on.
+            .declare_state::<crate::server::bridge::Instagib>(
+                StateClass::DeferredFold,
+                "host-debug-simulation-override-state",
+            )
             .declare_state::<ShipBoost>(StateClass::DeferredFold, "boost-drive-state")
             .declare_state::<ShipImpulse>(StateClass::DeferredFold, "impulse-drive-state")
             .declare_state::<crate::modifiers::cache::ShipModifiers>(

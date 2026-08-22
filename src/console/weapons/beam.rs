@@ -1562,6 +1562,12 @@ pub(crate) fn tick_beams_apply_damage(
     // bare-`App` weapons fixtures never insert it, and a bare `Res` would fail
     // parameter validation there rather than defaulting to "off".
     god_mode: Option<Res<crate::server_app::GodMode>>,
+    // Instagib (issue #1181): the former `is_instagib()` ambient thread-local
+    // read, now a scheduler-visible resource read. `Option<Res<_>>` for the same
+    // reason as `god_mode` — only the wasm host inserts it, so it is absent (off)
+    // on native and in bare-`App` fixtures, exactly as `is_instagib()` returned
+    // `false` there.
+    instagib: Option<Res<crate::server::bridge::Instagib>>,
 ) {
     // Uuids whose destruction has already been reported this tick (issue #790).
     //
@@ -1576,6 +1582,10 @@ pub(crate) fn tick_beams_apply_damage(
     // fire and both must still end.
     let mut destruction_reported: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    // Instagib: local ship deals 100x damage (issue #1181). Read once from the
+    // `Instagib` resource; absent/None means off, as on native and in bare-`App`
+    // fixtures — exactly what `is_instagib()` returned there before de-globalising.
+    let instagib_on = instagib.as_ref().map(|i| i.0).unwrap_or(false);
     for state in beam_context.0.iter_mut() {
         // When a friendly ship blocks the beam this tick, skip all damage and
         // attacker tracking — nobody takes damage.
@@ -1583,8 +1593,7 @@ pub(crate) fn tick_beams_apply_damage(
             continue;
         }
 
-        // Instagib: local ship deals 100x damage.
-        if state.is_local_shooter && crate::server::bridge::is_instagib() {
+        if state.is_local_shooter && instagib_on {
             state.damage_to_apply = state.damage_to_apply.saturating_mul(100);
         }
 

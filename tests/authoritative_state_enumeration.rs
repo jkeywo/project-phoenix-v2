@@ -533,6 +533,17 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "project_phoenix::world::server::PreCompiledScripts",
     "project_phoenix::world::server::RawWorldSource",
     "project_phoenix::world::server::WorldScriptRuntime",
+    // Issue #1181's `BridgeWorldSource` joins the same seam. It is the wasm
+    // bridge's hand-off of the loaded world's raw `(path, TOML)` into the World
+    // — the de-globalised replacement for the `get_raw_world_source()` free
+    // function `insert_raw_world_source_resource` used to read. It registers here
+    // because that `Startup` system now references it via `Option<Res>` on both
+    // targets (only the browser ever inserts it), exactly as `RawWorldSource`
+    // above registers via `compile_world_scripts`'s `Option<Res>` while only the
+    // browser/duel paths insert it. Authoritative-but-deferred for the same
+    // reason: it carries world content bound into the CONTENT digest (never the
+    // authoritative fold) and is consumed at `Startup` to build `RawWorldSource`.
+    "project_phoenix::server::bridge::BridgeWorldSource",
 ];
 
 fn build_and_run() -> App {

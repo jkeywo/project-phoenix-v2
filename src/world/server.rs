@@ -373,8 +373,9 @@ pub struct WorldEventBuffer(pub Vec<WorldEvent>);
 ///
 /// `WorldConfig` drops the raw `[script]` / `script` keys the Rhai loader needs,
 /// so this carries the whole TOML alongside its path. Since issue #1214 it is the
-/// **browser's** route only: `insert_raw_world_source_resource` reads
-/// `server::bridge::get_raw_world_source()` at `Startup` and inserts it, and
+/// **browser's** route only: `insert_raw_world_source_resource` reads the
+/// `server::bridge::BridgeWorldSource` Resource the wasm bridge inserts at
+/// `wasm_init` (issue #1181) at `Startup` and inserts it, and
 /// `compile_world_scripts` reads it once. Headless no longer inserts it — it
 /// compiles the world's scripts once in `world::load::load` and hands the result
 /// to `compile_world_scripts` as [`PreCompiledScripts`], so a headless run does
@@ -866,32 +867,37 @@ pub(crate) fn insert_world_config_resource(mut commands: Commands) {
 ///
 /// The script-loader's twin of [`insert_world_config_resource`]: `WorldConfig`
 /// has dropped the raw `[script]` / `script` keys, so the Rhai loader needs the
-/// untouched TOML text. On native `get_raw_world_source()` has no equivalent
-/// (headless compiles its scripts once in `world::load::load` and hands them to
-/// `compile_world_scripts` as [`PreCompiledScripts`] — issue #1214), so this
-/// system only ever inserts on wasm; on native it is a no-op.
-#[cfg_attr(
-    not(all(target_arch = "wasm32", feature = "server")),
-    allow(unused_mut, unused_variables)
-)]
-pub(crate) fn insert_raw_world_source_resource(mut commands: Commands) {
-    #[cfg(all(target_arch = "wasm32", feature = "server"))]
-    if let Some((path, toml_str)) = crate::server::bridge::get_raw_world_source() {
-        // `toml::Value`'s `FromStr` parses a single VALUE EXPRESSION (`1`,
-        // `"x"`, `[1, 2]`), not a document — so it rejects every world file
-        // ("unexpected content, expected nothing"). This wasm-only arm shipped
-        // with that misuse in #984 P2a and stayed invisible while every world
-        // was script-free: the error logged, and there were no scripts to
-        // lose. `toml::from_str` is the document parser the rest of the crate
-        // uses (and the same route `parse_world` takes, which is why the world
-        // itself loaded while its scripts vanished).
-        match toml::from_str::<toml::Value>(&toml_str) {
-            Ok(toml) => commands.insert_resource(RawWorldSource { path, toml }),
-            Err(e) => bevy::log::error!(
-                target: "world",
-                "insert_raw_world_source_resource: world TOML at {path} failed to re-parse: {e}"
-            ),
-        }
+/// untouched TOML text. Reads the [`crate::server::bridge::BridgeWorldSource`]
+/// Resource the wasm bridge inserts at `wasm_init` (issue #1181, replacing the
+/// former `get_raw_world_source()` ambient free-function read). On native that
+/// Resource is never inserted — headless compiles its scripts once in
+/// `world::load::load` and hands them to `compile_world_scripts` as
+/// [`PreCompiledScripts`] (issue #1214) — so `bridge` is `None` and this system
+/// is a no-op there, exactly as its wasm-gated body used to be.
+pub(crate) fn insert_raw_world_source_resource(
+    mut commands: Commands,
+    bridge: Option<Res<crate::server::bridge::BridgeWorldSource>>,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    // `toml::Value`'s `FromStr` parses a single VALUE EXPRESSION (`1`, `"x"`,
+    // `[1, 2]`), not a document — so it rejects every world file ("unexpected
+    // content, expected nothing"). This arm shipped with that misuse in #984 P2a
+    // and stayed invisible while every world was script-free: the error logged,
+    // and there were no scripts to lose. `toml::from_str` is the document parser
+    // the rest of the crate uses (and the same route `parse_world` takes, which
+    // is why the world itself loaded while its scripts vanished).
+    match toml::from_str::<toml::Value>(&bridge.toml) {
+        Ok(toml) => commands.insert_resource(RawWorldSource {
+            path: bridge.path.clone(),
+            toml,
+        }),
+        Err(e) => bevy::log::error!(
+            target: "world",
+            "insert_raw_world_source_resource: world TOML at {} failed to re-parse: {e}",
+            bridge.path
+        ),
     }
 }
 

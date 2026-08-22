@@ -152,6 +152,140 @@ pub fn apply_pending_toggles(
     pause_changed
 }
 
+// ── De-globalised bridge state (issue #1181) ────────────────────────────────
+//
+// These typed Bevy Resources hold the STATE that simulation systems read or
+// write, moved out of the thread-locals below so the access is visible to the
+// scheduler and the seam logic is unit-testable on native without a JS host.
+//
+// The wasm edge KEEPS a minimal thread-local inbox/outbox (see the big comment
+// on the `thread_local!` block): a JS call arrives synchronously, outside Bevy's
+// schedule and with no `World` handle, so the value it carries has nowhere to
+// live but a thread-local until a `PreUpdate` seam system can drain it into one
+// of these Resources; symmetrically a value the sim produced has to be mirrored
+// back into a thread-local for a JS getter that likewise has no `World`. What
+// moved here is the DURABLE, sim-visible state in between; what stayed at the
+// edge is only that transient transport.
+//
+// Every type here is defined UNGATED (native + wasm) even though most are
+// inserted only under `wasm_init`: `Instagib` is a `tick_beams_apply_damage`
+// system parameter on both targets, `BridgeWorldSource` is a
+// `world::server::insert_raw_world_source_resource` parameter on both, and the
+// restore types are exercised by the native unit tests at the bottom of this
+// file. Bevy's `Resource` derive is spelled with its full path so this stays
+// clear of the wasm-gated `use bevy::prelude::*` glob further down.
+
+/// Instagib cheat: the LocalShip deals 100× damage (issue #1181, formerly the
+/// `INSTAGIB` thread-local read ambiently by `console::weapons::beam`).
+///
+/// Toggled from the host settings cog's Debug/Cheat tab. On native it is never
+/// inserted — the toggle is a `#[wasm_bindgen]` export with no native caller —
+/// so `tick_beams_apply_damage`'s `Option<Res<Instagib>>` resolves to `None`
+/// (off), exactly as the old `is_instagib()` returned a hard-coded `false`
+/// there. A wasm-only host debug simulation override, the sibling of `GodMode`
+/// and `SimulationPaused`; it is declared into the `StateCensus` at that same
+/// site (`server_app`) so the enumeration guard accounts for it.
+#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Instagib(pub bool);
+
+/// The world this session loaded — `(path, TOML text)` — handed from the wasm
+/// edge into the `World` (issue #1181, replacing the `get_raw_world_source()`
+/// ambient read `world::server::insert_raw_world_source_resource` used).
+///
+/// `wasm_init` inserts this from the `SNAPSHOT_WORLD` edge stash before the app
+/// runs; the browser's `Startup` re-parse then reads it as an ordinary
+/// `Option<Res<BridgeWorldSource>>` instead of reaching back through a bridge
+/// free function. Never inserted on native (that path uses `PreCompiledScripts`),
+/// so the read is a no-op there exactly as the old wasm-gated body was.
+#[derive(bevy::prelude::Resource, Clone, Debug)]
+pub struct BridgeWorldSource {
+    /// The world TOML's path (`Run::scenario` / content-ledger key).
+    pub path: String,
+    /// The untouched world TOML text.
+    pub toml: String,
+}
+
+/// A save that passed the version gate and is waiting for the world to finish
+/// bootstrapping before `drain_snapshot_restore` writes it over the top (issue
+/// #1181, formerly the `PENDING_RESTORE` thread-local).
+///
+/// Staged at the wasm edge BEFORE `wasm_init` (a resume is a page reload, so
+/// `wasm_prepare_resume` runs before there is a `World`); `wasm_init` then hands
+/// the staged run off into this Resource, and the drain reads and clears it as
+/// an ordinary resource. `wasm_resume_pending()` reads the `RESUME_PENDING_MIRROR`
+/// edge cache this Resource's presence is mirrored into each frame.
+#[derive(bevy::prelude::Resource, Default)]
+pub struct PendingRestore(pub Option<crate::snapshot::StoredRun>);
+
+/// Frames `drain_snapshot_restore` has waited for `ready_to_restore` (issue
+/// #1181, formerly the `RESTORE_WAITED` thread-local). Reset to zero by
+/// `wasm_init`'s fresh insert when a save is staged; compared against
+/// `RESTORE_DEADLINE_FRAMES`.
+#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
+pub struct RestoreWaited(pub u32);
+
+/// What `drain_snapshot_restore` should do with a staged save this frame — the
+/// decision extracted from the drain so it is unit-testable on native without a
+/// `World`, a JS host, or a `StoredRun` (issue #1181).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreStep {
+    /// The staged run carries no captured state; clear it and report so.
+    NoSnapshot,
+    /// The world is far enough along (or the deadline passed and the payload can
+    /// rebuild what is still missing); run the restore now.
+    Apply,
+    /// Not ready and still inside the patience budget; leave it staged.
+    KeepWaiting,
+    /// The deadline passed and the payload cannot rebuild the gap; clear it and
+    /// report the abandoned resume.
+    Abandon,
+}
+
+/// Decide the next restore action from the observable inputs (issue #1181).
+///
+/// `waited` is the post-increment frame count (the drain bumps `RestoreWaited`
+/// before asking), so the deadline comparison matches the pre-refactor
+/// `waited < RESTORE_DEADLINE_FRAMES` check exactly. `ready_to_rebuild` is only
+/// consulted once the deadline is reached, so a caller may pass `false` for it
+/// while still waiting — see `drain_snapshot_restore`, which computes it lazily.
+pub fn next_restore_step(
+    has_snapshot: bool,
+    ready_to_restore: bool,
+    waited: u32,
+    deadline: u32,
+    ready_to_rebuild: bool,
+) -> RestoreStep {
+    if !has_snapshot {
+        return RestoreStep::NoSnapshot;
+    }
+    if ready_to_restore {
+        return RestoreStep::Apply;
+    }
+    if waited < deadline {
+        return RestoreStep::KeepWaiting;
+    }
+    // The deadline: everything the bootstrap was going to produce, it has.
+    if ready_to_rebuild {
+        RestoreStep::Apply
+    } else {
+        RestoreStep::Abandon
+    }
+}
+
+/// Apply a batch of queued instagib-toggle requests to the flag (issue #1181).
+///
+/// Pure, so the drain semantics are unit-testable on native. Each queued toggle
+/// flips the flag once, so the net effect is a parity of `count` — two clicks in
+/// one frame cancel, matching what two flips on two ticks would do. Mirrors the
+/// count-based God Mode drain (`PENDING_GOD_MODE_TOGGLES`), minus the command
+/// admission route instagib deliberately does not take (see the instagib
+/// helper below).
+pub fn apply_instagib_toggles(count: u32, current: &mut bool) {
+    if count % 2 == 1 {
+        *current = !*current;
+    }
+}
+
 // ── Host teleport-to-waypoint override (issue #770) ─────────────────────────
 //
 // A deliberate host-only simulation override: snap the LocalShip's
@@ -189,9 +323,44 @@ pub fn apply_teleport_to_waypoint(
     }
 }
 
-// ── Thread-local state ─────────────────────────────────────────────────────
+// ── The wasm edge: minimal thread-local inbox/outbox (issue #1181) ──────────
 //
-// WASM is single-threaded; RefCell is safe here.
+// WASM is single-threaded, so `RefCell` is safe here. Everything that remains a
+// thread-local is EDGE-ONLY by necessity, not by preference: a `#[wasm_bindgen]`
+// export is called synchronously by JS, outside Bevy's schedule and with no
+// `World` handle, so the value it carries (or is asked for) has nowhere to live
+// but a thread-local. The durable, simulation-visible state these used to also
+// hold moved into typed Resources above (`Instagib`, `BridgeWorldSource`,
+// `PendingRestore`, `RestoreWaited`), drained into / mirrored back from here by
+// the seam systems each frame. What is left falls into four edge categories, and
+// each MUST stay a thread-local for the stated reason:
+//
+//  1. INBOX queues — JS pushes, a `PreUpdate` seam system drains into the sim.
+//     `INBOUND_QUEUE`, `DISCONNECT_QUEUE`, `PENDING_SAVE`, `PENDING_TOGGLES`,
+//     `PENDING_FORCE_START`, `PENDING_TELEPORT_TO_WAYPOINT`,
+//     `PENDING_GOD_MODE_TOGGLES`, `PENDING_INSTAGIB_TOGGLES`. The JS caller has
+//     no `World`, so it cannot write a Resource; the drain does that a tick later.
+//
+//  2. OUTBOX mirrors — a `PostUpdate` seam system copies a Resource/query result
+//     out, a JS getter reads it back. `SIM_PAUSED`, `SIM_TICK_COUNT`,
+//     `HAS_NAVIGATION_WAYPOINT`, `GOD_MODE_MIRROR`, `INSTAGIB_MIRROR`,
+//     `RESUME_PENDING_MIRROR`, the seven debug-JSON strings, `EXPORTED_ARTIFACT`,
+//     `SNAPSHOT_STATUS`. The authoritative value is a Resource/query; this is
+//     only the frame-lagged cache a `World`-less getter can reach.
+//
+//  3. JS callbacks — `OUTBOUND_CB`, `HOST_CHANNEL_CB` are `js_sys::Function`,
+//     which is `!Send`, so they can never be a `Send + Sync` Bevy Resource.
+//
+//  4. PRE-INIT stashes — set by JS BEFORE `wasm_init` builds the app, consumed
+//     while it is built (there is no `World` yet). `SHIP_STATIONS`, `SHIP_CONFIG`,
+//     `LOG_SPEC`, `LOG_ENTITY`, `SELECTED_SHIP_TEMPLATE_PATH`,
+//     `DEBUG_REGIONS_ENABLED`, `REDUCED_MOTION`, `SNAPSHOT_WORLD`,
+//     `PENDING_RESTORE_STAGED`. Their durable half is a Resource `wasm_init`
+//     inserts from the stash; the stash is just the pre-`World` transport.
+//
+// `SHAKE_OFFSET` / `FORCEFIELD_LEVEL` / `LAST_SENT_FORCEFIELD` are per-frame
+// value taps a render/audio system writes for `flush_host_channels`; they are a
+// specialised outbox and stay edge-local for the same reason as category 2.
 
 #[cfg(target_arch = "wasm32")]
 thread_local! {
@@ -290,15 +459,19 @@ thread_local! {
     static SNAPSHOT_STATUS: RefCell<Option<(bool, String, String)>> =
         const { RefCell::new(None) };
 
-    /// A save that passed the version gate and is waiting for the world to
-    /// finish bootstrapping. Applied by `drain_snapshot_restore`.
-    static PENDING_RESTORE: RefCell<Option<crate::snapshot::StoredRun>> =
+    /// PRE-INIT stash for a save that passed the version gate, set by
+    /// `wasm_prepare_resume` / `wasm_prepare_import` BEFORE `wasm_init` (a resume
+    /// is a page reload, so it runs before there is a `World`). `wasm_init` hands
+    /// it off into the [`PendingRestore`] Resource, which `drain_snapshot_restore`
+    /// then reads and clears (issue #1181). Category 4 above.
+    static PENDING_RESTORE_STAGED: RefCell<Option<crate::snapshot::StoredRun>> =
         const { RefCell::new(None) };
 
-    /// Frames `drain_snapshot_restore` has been waiting for `ready_to_restore`.
-    /// Reset when a save is staged; compared against
-    /// [`RESTORE_DEADLINE_FRAMES`].
-    static RESTORE_WAITED: RefCell<u32> = const { RefCell::new(0) };
+    /// OUTBOX mirror of whether a restore is still staged, read back by
+    /// `wasm_resume_pending()` (issue #1181). Set `true` when a save is staged
+    /// pre-init; refreshed each frame by `drain_snapshot_restore` from the
+    /// [`PendingRestore`] Resource's presence. Category 2 above.
+    static RESUME_PENDING_MIRROR: RefCell<bool> = const { RefCell::new(false) };
 
     /// Modifier debug payload as JSON (issue #1150), written by
     /// `debug::modifiers::publish_modifier_debug` each `PostUpdate` frame when
@@ -404,8 +577,16 @@ thread_local! {
     static SELECTED_SHIP_TEMPLATE_PATH: RefCell<Option<String>> =
         const { RefCell::new(None) };
 
-    /// Instagib: local ship deals 100× damage.
-    static INSTAGIB: RefCell<bool> = const { RefCell::new(false) };
+    /// INBOX: instagib-toggle requests from `wasm_toggle_instagib()`, drained by
+    /// `drain_instagib_toggle` each `PreUpdate` into the [`Instagib`] Resource
+    /// (issue #1181). A count (not a bool) so two clicks in one frame flip twice,
+    /// matching the God Mode queue; parity is applied by `apply_instagib_toggles`.
+    static PENDING_INSTAGIB_TOGGLES: RefCell<u32> = const { RefCell::new(0) };
+
+    /// OUTBOX mirror of the [`Instagib`] Resource, refreshed each frame by
+    /// `publish_instagib` so `wasm_get_instagib()` can read it back without a
+    /// `World` handle (issue #1181). Same pattern as `GOD_MODE_MIRROR`.
+    static INSTAGIB_MIRROR: RefCell<bool> = const { RefCell::new(false) };
 
     /// Pending God Mode toggle requests from `wasm_toggle_god_mode()` (issue
     /// #900). Drained by `drain_god_mode_toggle` each `PreUpdate` frame, which
@@ -469,21 +650,13 @@ pub mod host_channels {
     ];
 }
 
-// ── Instagib helper ─────────────────────────────────────────────────────────
+// ── Instagib helper (issue #900 context, de-globalised in #1181) ────────────
 //
-// Unlike God Mode (issue #900), Instagib is not yet routed through command
-// admission — it stays a direct thread-local toggle, out of scope for #900.
-
-pub fn is_instagib() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        INSTAGIB.with(|v| *v.borrow())
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        false
-    }
-}
+// Unlike God Mode (issue #900), Instagib is not routed through command
+// admission — it flips the [`Instagib`] Resource directly. Since issue #1181 the
+// authoritative flag lives in that Resource (read by `tick_beams_apply_damage`)
+// rather than a thread-local `is_instagib()` reached ambiently; the wasm edge
+// keeps only the toggle inbox and the read-back mirror.
 
 /// Called by JS (host Debug panel God Mode button) to request a God Mode
 /// flip (issue #900). Unlike the old thread-local this does NOT flip
@@ -508,19 +681,27 @@ pub fn wasm_get_god_mode() -> bool {
     GOD_MODE_MIRROR.with(|v| *v.borrow())
 }
 
+/// Called by JS (settings cog Debug/Cheat tab) to request an instagib flip.
+///
+/// Queues a request that `drain_instagib_toggle` applies to the [`Instagib`]
+/// Resource on the next `PreUpdate` frame (issue #1181). The JS binding's
+/// signature is unchanged; only the state it targets moved from a thread-local
+/// into a Resource `tick_beams_apply_damage` reads through the scheduler.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_toggle_instagib() {
-    INSTAGIB.with(|v| {
-        let current = *v.borrow();
-        *v.borrow_mut() = !current;
-    });
+    PENDING_INSTAGIB_TOGGLES.with(|v| *v.borrow_mut() += 1);
 }
 
+/// Called by JS each frame to read back the instagib flag for the cog button
+/// (issue #1181). Reads the `INSTAGIB_MIRROR` maintained by `publish_instagib`,
+/// since the authoritative value now lives in the [`Instagib`] Resource this
+/// `World`-less function cannot touch directly (same pattern as
+/// `wasm_get_god_mode`).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_instagib() -> bool {
-    INSTAGIB.with(|v| *v.borrow())
+    INSTAGIB_MIRROR.with(|v| *v.borrow())
 }
 
 // ── Public WASM API ────────────────────────────────────────────────────────
@@ -695,7 +876,12 @@ pub fn wasm_init() {
         },
         world_ingest: WorldIngest::HostPreloaded,
         log_filter,
-        world_path: get_raw_world_source()
+        // The world path is read straight from the `SNAPSHOT_WORLD` edge stash
+        // here — this is `wasm_init` building the app, itself an edge call with
+        // no `World` yet. Systems that need it get the `BridgeWorldSource`
+        // Resource inserted below instead (issue #1181).
+        world_path: SNAPSHOT_WORLD
+            .with(|w| w.borrow().clone())
             .map(|(path, _)| path)
             .unwrap_or_default(),
         reader: Box::new(WasmReader),
@@ -761,6 +947,16 @@ pub fn wasm_init() {
         unfocused_mode: bevy::winit::UpdateMode::Continuous,
     })
     .init_resource::<PendingForceStart>()
+    // De-globalised bridge state (issue #1181): the durable, sim-visible half of
+    // the former thread-locals lives in these Resources. `Instagib` starts off;
+    // `PendingRestore` / `RestoreWaited` take the save staged pre-init by
+    // `wasm_prepare_resume` (empty when there is none). `BridgeWorldSource` is
+    // inserted just below, only when a world was loaded.
+    .init_resource::<Instagib>()
+    .insert_resource(PendingRestore(
+        PENDING_RESTORE_STAGED.with(|p| p.borrow_mut().take()),
+    ))
+    .init_resource::<RestoreWaited>()
     .add_systems(
         PreUpdate,
         (
@@ -770,6 +966,7 @@ pub fn wasm_init() {
             drain_force_start_input,
             drain_teleport_to_waypoint,
             drain_god_mode_toggle,
+            drain_instagib_toggle,
             publish_waypoint_existence,
         ),
     )
@@ -793,6 +990,7 @@ pub fn wasm_init() {
             flush_host_channels,
             publish_sim_tick,
             publish_god_mode,
+            publish_instagib,
             publish_debug_mirrors,
             // The snapshot seam (issue #862). `PostUpdate` for the same reason
             // the rest of this list is there — it runs *after* the frame's
@@ -809,6 +1007,16 @@ pub fn wasm_init() {
             app.insert_resource(stations);
         }
     });
+
+    // Hand the loaded world's raw `(path, TOML)` source into the World as a
+    // Resource (issue #1181), so `world::server::insert_raw_world_source_resource`
+    // reads it at `Startup` instead of reaching back through the bridge with a
+    // free function. Inserted only when a world was actually loaded — the
+    // browser always loads one before `wasm_init`, but the absent case leaves
+    // the resource off exactly as the old `get_raw_world_source() == None` did.
+    if let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) {
+        app.insert_resource(BridgeWorldSource { path, toml });
+    }
 
     // Frame sampling brackets each animation frame's schedule. These two
     // systems read and write nothing in the world — they move a thread-local
@@ -1160,8 +1368,12 @@ pub fn wasm_prepare_resume(slot: String) -> String {
     let versions = crate::snapshot::versions(&crate::content_ledger::frozen_or_live());
     match crate::snapshot::load_from(&store, &slot, &versions) {
         Ok(run) => {
-            PENDING_RESTORE.with(|p| *p.borrow_mut() = Some(run));
-            RESTORE_WAITED.with(|w| *w.borrow_mut() = 0);
+            // Stash pre-init; `wasm_init` hands this off into the `PendingRestore`
+            // Resource, `RestoreWaited` starts fresh at 0 there, and the mirror
+            // makes `wasm_resume_pending()` answer true until the drain clears it
+            // (issue #1181).
+            PENDING_RESTORE_STAGED.with(|p| *p.borrow_mut() = Some(run));
+            RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = true);
             SNAPSHOT_STATUS.with(|s| *s.borrow_mut() = None);
             String::new()
         }
@@ -1175,10 +1387,16 @@ pub fn wasm_prepare_resume(slot: String) -> String {
 }
 
 /// Whether a save is staged and waiting for the world to finish bootstrapping.
+///
+/// Reads the `RESUME_PENDING_MIRROR` edge cache (issue #1181): once `wasm_init`
+/// has handed the staged save into the `PendingRestore` Resource, this
+/// `World`-less getter can no longer read the Resource directly, so
+/// `drain_snapshot_restore` mirrors its presence out each frame — true while the
+/// save waits, false the moment it is applied or abandoned.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_resume_pending() -> bool {
-    PENDING_RESTORE.with(|p| p.borrow().is_some())
+    RESUME_PENDING_MIRROR.with(|m| *m.borrow())
 }
 
 /// Which scenario an imported file belongs to, BEFORE any world is loaded on its
@@ -1234,8 +1452,9 @@ pub fn wasm_prepare_import(text: String) -> String {
     let versions = crate::snapshot::versions(&crate::content_ledger::frozen_or_live());
     match crate::snapshot::import_artifact(&text, &versions) {
         Ok(run) => {
-            PENDING_RESTORE.with(|p| *p.borrow_mut() = Some(run));
-            RESTORE_WAITED.with(|w| *w.borrow_mut() = 0);
+            // Same pre-init hand-off as `wasm_prepare_resume` (issue #1181).
+            PENDING_RESTORE_STAGED.with(|p| *p.borrow_mut() = Some(run));
+            RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = true);
             SNAPSHOT_STATUS.with(|s| *s.borrow_mut() = None);
             String::new()
         }
@@ -1343,6 +1562,14 @@ fn drain_snapshot_save(world: &mut World) {
 #[cfg(target_arch = "wasm32")]
 const RESTORE_DEADLINE_FRAMES: u32 = 1_800;
 
+/// Clear the staged save and its read-back mirror once a restore has resolved —
+/// applied, abandoned, or found to carry no state (issue #1181).
+#[cfg(target_arch = "wasm32")]
+fn clear_pending_restore(world: &mut World) {
+    world.resource_mut::<PendingRestore>().0 = None;
+    RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = false);
+}
+
 /// Apply a staged save once the scenario's roster exists.
 ///
 /// Runs every frame while something is staged and does nothing until
@@ -1370,14 +1597,28 @@ const RESTORE_DEADLINE_FRAMES: u32 = 1_800;
 /// The deadline is what keeps those two apart, and it has to be time rather than
 /// a payload field: see `snapshot::ready_to_rebuild` for why a mid-run spawn is
 /// ambiguous until the bootstrap has had its chance.
+///
+/// # De-globalised (issue #1181)
+///
+/// The staged save and the wait counter now live in the [`PendingRestore`] and
+/// [`RestoreWaited`] Resources, handed off from the pre-init edge stash by
+/// `wasm_init`. The wait/deadline/rebuild decision is [`next_restore_step`], a
+/// pure function unit-tested on native; this system only supplies it the
+/// observable inputs and acts on the verdict. `RESUME_PENDING_MIRROR` tracks the
+/// Resource's presence for `wasm_resume_pending()`.
 #[cfg(target_arch = "wasm32")]
 fn drain_snapshot_restore(world: &mut World) {
-    let staged = PENDING_RESTORE.with(|p| p.borrow().clone());
+    // Clone the staged run out, releasing the resource borrow so the read-only
+    // `ready_to_*` probes below can borrow the world.
+    let staged = world
+        .get_resource::<PendingRestore>()
+        .and_then(|p| p.0.clone());
     let Some(run) = staged else {
+        RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = false);
         return;
     };
     let Some(snapshot) = run.snapshot.as_ref() else {
-        PENDING_RESTORE.with(|p| *p.borrow_mut() = None);
+        clear_pending_restore(world);
         set_snapshot_status(
             false,
             SNAPSHOT_RESUME,
@@ -1385,19 +1626,34 @@ fn drain_snapshot_restore(world: &mut World) {
         );
         return;
     };
-    if !crate::snapshot::ready_to_restore(world, &snapshot.state) {
-        let waited = RESTORE_WAITED.with(|w| {
-            let mut w = w.borrow_mut();
-            *w += 1;
-            *w
-        });
-        if waited < RESTORE_DEADLINE_FRAMES {
+
+    let ready = crate::snapshot::ready_to_restore(world, &snapshot.state);
+    // Bump the patience budget only while genuinely waiting — a restore that is
+    // ready applies on the frame it becomes ready, counting no frame against it.
+    let waited = if ready {
+        world.resource::<RestoreWaited>().0
+    } else {
+        let mut w = world.resource_mut::<RestoreWaited>();
+        w.0 += 1;
+        w.0
+    };
+    // `ready_to_rebuild` walks the roster, and it is only meaningful at the
+    // deadline, so compute it lazily — before then `next_restore_step` ignores it.
+    let rebuildable = if !ready && waited >= RESTORE_DEADLINE_FRAMES {
+        crate::snapshot::ready_to_rebuild(world, &snapshot.state)
+    } else {
+        false
+    };
+
+    match next_restore_step(true, ready, waited, RESTORE_DEADLINE_FRAMES, rebuildable) {
+        RestoreStep::KeepWaiting => {
+            RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = true);
             return;
         }
-        // The deadline. Everything the bootstrap was going to produce, it has;
-        // whatever is still missing is missing for good (issue #863).
-        if !crate::snapshot::ready_to_rebuild(world, &snapshot.state) {
-            PENDING_RESTORE.with(|p| *p.borrow_mut() = None);
+        // The deadline reached with an unrebuildable gap (issue #863): a stale
+        // `?resume=`, a different roster at boot, ships this world will never have.
+        RestoreStep::Abandon => {
+            clear_pending_restore(world);
             set_snapshot_status(
                 false,
                 SNAPSHOT_RESUME,
@@ -1411,11 +1667,15 @@ fn drain_snapshot_restore(world: &mut World) {
             );
             return;
         }
-        // …and it IS rebuildable, so fall through to the restore, which builds
-        // the mid-run spawns this session was never going to reach.
+        // `has_snapshot` is `true` here (the no-snapshot case returned above), so
+        // `NoSnapshot` cannot occur; both remaining verdicts fall through to the
+        // restore, which for `Apply`-at-deadline builds the mid-run spawns this
+        // session was never going to reach.
+        RestoreStep::NoSnapshot | RestoreStep::Apply => {}
     }
+
     let report = crate::snapshot::restore(world, &snapshot.state);
-    PENDING_RESTORE.with(|p| *p.borrow_mut() = None);
+    clear_pending_restore(world);
 
     let restored = crate::sim_digest::world_digest(world);
     if restored != snapshot.digest {
@@ -1839,18 +2099,6 @@ pub fn wasm_load_world(
         *slot.borrow_mut() = Some((path.clone(), toml_str.clone()));
     });
     crate::entities::config_cache::wasm_load_world(path, toml_str, curated_ships)
-}
-
-/// The raw `(path, TOML text)` of the world this session loaded, if any.
-///
-/// The script-loader's twin of `config_cache::get_world_config()` (issue #984,
-/// Rhai M6 phase 2a): `WorldConfig` drops the raw `[script]`/`script` keys, so
-/// the Rhai loader needs the untouched TOML text. Read at `Startup` by
-/// `world::server::insert_raw_world_source_resource` to populate the
-/// `RawWorldSource` resource. Not a `#[wasm_bindgen]` export — Rust-internal.
-#[cfg(target_arch = "wasm32")]
-pub fn get_raw_world_source() -> Option<(String, String)> {
-    SNAPSHOT_WORLD.with(|w| w.borrow().clone())
 }
 
 /// Register the JS callback used by Rust to request a runtime world TOML fetch.
@@ -2681,6 +2929,29 @@ fn publish_god_mode(god_mode: Option<Res<crate::server_app::GodMode>>) {
     GOD_MODE_MIRROR.with(|v| *v.borrow_mut() = active);
 }
 
+/// Drains the queued instagib toggles each frame into the [`Instagib`] Resource
+/// (issue #1181). Unlike `drain_god_mode_toggle` it flips the Resource directly
+/// rather than crossing command admission — instagib is a raw host cheat, not a
+/// replicated command. The parity logic is [`apply_instagib_toggles`], unit-
+/// tested on native.
+#[cfg(target_arch = "wasm32")]
+fn drain_instagib_toggle(mut instagib: ResMut<Instagib>) {
+    let count = PENDING_INSTAGIB_TOGGLES.with(|v| {
+        let n = *v.borrow();
+        *v.borrow_mut() = 0;
+        n
+    });
+    apply_instagib_toggles(count, &mut instagib.0);
+}
+
+/// Mirrors the authoritative [`Instagib`] Resource into a thread-local each
+/// frame so `wasm_get_instagib()` can read it back without a `World` handle
+/// (issue #1181). Pure read; the same pattern as `publish_god_mode`.
+#[cfg(target_arch = "wasm32")]
+fn publish_instagib(instagib: Res<Instagib>) {
+    INSTAGIB_MIRROR.with(|v| *v.borrow_mut() = instagib.0);
+}
+
 /// Mirrors the two debug resources that have `wasm_*` read-backs into their
 /// thread-locals each frame (issue #940).
 ///
@@ -2849,7 +3120,8 @@ fn flush_host_channels(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_pending_toggles, apply_teleport_to_waypoint, host_channels, DebugToggleKind,
+        apply_instagib_toggles, apply_pending_toggles, apply_teleport_to_waypoint, host_channels,
+        next_restore_step, DebugToggleKind, Instagib, PendingRestore, RestoreStep, RestoreWaited,
     };
     use crate::console::navigation::{NavigationWaypoint, WaypointMode};
     use crate::ship::state::ShipPhysics;
@@ -3096,5 +3368,156 @@ mod tests {
         );
 
         assert!(entities, "should have flipped once (false -> true)");
+    }
+
+    // ── Instagib queue-drain semantics (issue #1181) ────────────────────────
+
+    /// Draining an empty instagib queue leaves the flag untouched — the frame
+    /// after a drain, with nothing queued, must not re-flip.
+    #[test]
+    fn draining_no_instagib_toggles_leaves_the_flag() {
+        let mut on = false;
+        apply_instagib_toggles(0, &mut on);
+        assert!(!on, "no queued toggles must not flip");
+
+        let mut already_on = true;
+        apply_instagib_toggles(0, &mut already_on);
+        assert!(already_on, "no queued toggles must preserve an on flag");
+    }
+
+    /// One queued toggle flips the flag exactly once.
+    #[test]
+    fn one_instagib_toggle_flips_once() {
+        let mut on = false;
+        apply_instagib_toggles(1, &mut on);
+        assert!(on, "one toggle: false -> true");
+
+        apply_instagib_toggles(1, &mut on);
+        assert!(!on, "one toggle again: true -> false");
+    }
+
+    /// The queue is a COUNT, so its parity decides the net flip — two clicks in
+    /// one frame cancel, three land as one, matching what the same clicks spread
+    /// over separate ticks would do (the God Mode drain's contract).
+    #[test]
+    fn instagib_toggle_count_applies_by_parity() {
+        let mut on = false;
+        apply_instagib_toggles(2, &mut on);
+        assert!(!on, "two toggles in one frame cancel");
+
+        apply_instagib_toggles(3, &mut on);
+        assert!(on, "three toggles net to one flip");
+
+        apply_instagib_toggles(4, &mut on);
+        assert!(on, "four toggles net to no change");
+    }
+
+    /// The drain's shape end to end: the `Instagib` Resource starts off, a queued
+    /// batch flips it, and a mirror read reflects the Resource — the same round
+    /// trip `drain_instagib_toggle` + `publish_instagib` perform on wasm, minus
+    /// the thread-local edge.
+    #[test]
+    fn instagib_resource_round_trips_a_drained_batch() {
+        let mut instagib = Instagib::default();
+        assert!(!instagib.0, "starts off");
+
+        // One frame's queue of a single click.
+        apply_instagib_toggles(1, &mut instagib.0);
+        assert_eq!(instagib, Instagib(true), "a click turns it on");
+
+        // A frame that queued nothing must leave it on.
+        apply_instagib_toggles(0, &mut instagib.0);
+        assert_eq!(instagib, Instagib(true), "an empty frame preserves it");
+    }
+
+    // ── Pending-restore handoff (issue #1181) ───────────────────────────────
+
+    const DEADLINE: u32 = 1_800;
+
+    /// A staged run with no captured snapshot is reported and cleared, never
+    /// waited on.
+    #[test]
+    fn restore_step_reports_a_run_with_no_snapshot() {
+        assert_eq!(
+            next_restore_step(false, false, 0, DEADLINE, false),
+            RestoreStep::NoSnapshot
+        );
+    }
+
+    /// A world that is ready restores immediately, whatever the wait counter.
+    #[test]
+    fn restore_step_applies_the_moment_the_world_is_ready() {
+        assert_eq!(
+            next_restore_step(true, true, 0, DEADLINE, false),
+            RestoreStep::Apply
+        );
+        assert_eq!(
+            next_restore_step(true, true, DEADLINE + 5, DEADLINE, false),
+            RestoreStep::Apply,
+            "ready wins even past the deadline"
+        );
+    }
+
+    /// Not ready and still inside the patience budget: keep the save staged.
+    #[test]
+    fn restore_step_waits_inside_the_budget() {
+        assert_eq!(
+            next_restore_step(true, false, 1, DEADLINE, false),
+            RestoreStep::KeepWaiting
+        );
+        assert_eq!(
+            next_restore_step(true, false, DEADLINE - 1, DEADLINE, false),
+            RestoreStep::KeepWaiting,
+            "the last frame before the deadline still waits"
+        );
+    }
+
+    /// At the deadline the decision forks on `ready_to_rebuild`: rebuildable gaps
+    /// restore (and build the mid-run spawns), unrebuildable ones abandon.
+    #[test]
+    fn restore_step_forks_at_the_deadline_on_rebuildability() {
+        assert_eq!(
+            next_restore_step(true, false, DEADLINE, DEADLINE, true),
+            RestoreStep::Apply,
+            "deadline + rebuildable -> apply (issue #863's browser half)"
+        );
+        assert_eq!(
+            next_restore_step(true, false, DEADLINE, DEADLINE, false),
+            RestoreStep::Abandon,
+            "deadline + unrebuildable -> abandon"
+        );
+    }
+
+    /// The `PendingRestore` Resource's handoff semantics: default is not pending,
+    /// and clearing (as the drain does on apply/abandon) makes it not pending —
+    /// the state `RESUME_PENDING_MIRROR` mirrors for `wasm_resume_pending()`.
+    #[test]
+    fn pending_restore_resource_tracks_staged_state() {
+        let mut pending = PendingRestore::default();
+        assert!(pending.0.is_none(), "a fresh resource stages nothing");
+
+        // The drain clears by setting the inner Option to None (see
+        // `clear_pending_restore`). Modelled here without a `StoredRun`, which is
+        // the exclusive-system half the pure decision above deliberately factors
+        // out.
+        pending.0 = None;
+        assert!(pending.0.is_none(), "cleared stays not-pending");
+    }
+
+    /// `RestoreWaited` is the patience counter `drain_snapshot_restore` bumps
+    /// once per waiting frame and `wasm_init` resets to zero when a save is
+    /// staged.
+    #[test]
+    fn restore_waited_counts_and_resets() {
+        let mut waited = RestoreWaited::default();
+        assert_eq!(waited.0, 0, "starts at zero");
+
+        for _ in 0..3 {
+            waited.0 += 1;
+        }
+        assert_eq!(waited.0, 3, "bumps once per waiting frame");
+
+        waited = RestoreWaited::default();
+        assert_eq!(waited.0, 0, "a fresh stage resets the budget");
     }
 }

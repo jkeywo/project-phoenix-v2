@@ -15,7 +15,10 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
+mod common;
+
 use bevy::prelude::*;
+use common::SimFixture;
 use project_phoenix::ai_plugin::AiHighFidelity;
 use project_phoenix::balance::RunOutcome;
 use project_phoenix::headless::args::ticks_for_sim_seconds;
@@ -5562,10 +5565,9 @@ fn frame_pacing_end_state_with(
         max_ticks: 0, // driven by hand below
         seed: Some(42),
         deterministic: true,
-        physics_last,
         ..test_args()
     };
-    let mut app = build_headless_app(&args).expect("app should build");
+    let mut app = SimFixture::new(args).physics_last(physics_last).build();
     app.finish();
     app.cleanup();
     // Establish the time baseline (zero delta, no steps)…

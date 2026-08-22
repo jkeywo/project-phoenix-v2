@@ -30,9 +30,12 @@
 
 use std::marker::PhantomData;
 
+mod common;
+
 use bevy::prelude::*;
+use common::SimFixture;
 use project_phoenix::authoritative::{DeclareState, StateCensus, StateClass};
-use project_phoenix::headless::{build_headless_app, run, HeadlessArgs};
+use project_phoenix::headless::HeadlessArgs;
 use project_phoenix::server_app::{RegistrationOrder, RegistrationProbes};
 use project_phoenix::sim_digest::world_digest;
 
@@ -76,12 +79,12 @@ fn digest_and_census(
         max_ticks: TICKS,
         seed: Some(SEED),
         deterministic: true,
-        registration_order: order,
-        extra_registration_probes: probes,
         ..Default::default()
     };
-    let mut app = build_headless_app(&args).expect("app should build");
-    run(&mut app, args.max_ticks);
+    let app = SimFixture::new(args)
+        .registration_order(order)
+        .extra_registration_probes(probes)
+        .build_and_run();
     let digest = world_digest(app.world());
     let census = app.world().get_resource::<StateCensus>().cloned();
     (digest, census)

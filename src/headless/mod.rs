@@ -22,7 +22,10 @@ pub mod fingerprint;
 pub mod replay;
 pub mod report;
 
-pub use app::{build_headless_app, run, run_sampled, BuildError};
+pub use app::{
+    build_headless_app, build_headless_app_with, run, run_sampled, BuildError,
+    SimRegistrationOverrides,
+};
 pub use args::{parse_args, HeadlessArgs, ParseOutcome, ReportFormat, HELP};
 pub use digest::{state_digest, world_digest, DigestLedger, Divergence, FoldKey, Namespace};
 pub use duel::{apply_duel_sides, resolve_template, DuelError, DuelTemplateLoader};

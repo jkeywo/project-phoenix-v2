@@ -26,7 +26,9 @@ use crate::marker_validate::MarkerFinding;
 use crate::messages::{GamePhase, ServerMessage};
 use crate::modifier_coordination::ModifierCoordinationPlugin;
 use crate::perf::tick::TickSampler;
-use crate::server_app::{add_simulation_plugins_with, SimPluginOptions};
+use crate::server_app::{
+    add_simulation_plugins_with, RegistrationOrder, RegistrationProbes, SimPluginOptions,
+};
 use crate::ship_plugin::PendingShipConfig;
 use crate::sim_rng::{SeedSource, SimRng};
 use crate::world::load::LoadError;
@@ -297,13 +299,55 @@ fn validate_template_markers(key: &str, toml: &str, cfg: &EntityConfig) -> Vec<M
     findings
 }
 
+/// Test-only overrides for how the simulation plugins are registered.
+///
+/// These three knobs used to live on [`HeadlessArgs`], each documented there as
+/// "not a command-line flag and never parsed from one" — a pure test seam that
+/// had leaked into the CLI-shaped session type. They fold straight into
+/// [`SimPluginOptions`] (see that type for what each one proves) and default to
+/// the exact production configuration, so [`build_headless_app`] — the binary
+/// path — composes byte-for-byte the app it always did.
+///
+/// Tests reach this through the `SimFixture` harness in `tests/common`, never
+/// by hand; it is `pub` only because the determinism guards that drive it live
+/// in a separate integration-test crate.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SimRegistrationOverrides {
+    /// Register the physics plugin last instead of first
+    /// (`SimPluginOptions::physics_last`, issue #896). The two orders must reach
+    /// the same state; that they do is the evidence physics is pinned by the
+    /// explicit `configure_sets` edges, not by `add_plugins` call order.
+    pub physics_last: bool,
+    /// Which order to register the `SimSet`-chain plugins in
+    /// (`SimPluginOptions::registration_order`, issue #899). `Shuffled(seed)`
+    /// permutes it deterministically; the digest must not move.
+    pub registration_order: RegistrationOrder,
+    /// Extra mutation-proof probes to fold into the shuffled group
+    /// (`SimPluginOptions::extra_registration_probes`, issue #899). `None` in
+    /// every real run.
+    pub extra_registration_probes: Option<RegistrationProbes>,
+}
+
 /// Assemble the headless app. Does not run it — see [`run`].
+///
+/// The binary path: no test overrides. Delegates to [`build_headless_app_with`]
+/// with the production [`SimRegistrationOverrides::default`], which is exactly
+/// the configuration the three removed `HeadlessArgs` fields defaulted to.
+pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
+    build_headless_app_with(args, SimRegistrationOverrides::default())
+}
+
+/// [`build_headless_app`], with the test-only registration overrides threaded
+/// into the simulation plugins.
 ///
 /// The core plugins, the render surrogate, and the whole world-ingestion order
 /// (reset → load → validate → ledger apply → eager-record → freeze → insert the
 /// world config and its compiled scripts) come from
 /// [`boot::build`](crate::boot::build); see the module docs for what stays here.
-pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
+pub fn build_headless_app_with(
+    args: &HeadlessArgs,
+    sim_overrides: SimRegistrationOverrides,
+) -> Result<App, BuildError> {
     // When `--side-a` is given, its first entry chooses the player ship
     // (issue #844): resolve it to a template path and use it in place of
     // `--ship` so the preload, `PendingShipConfig`, and `SelectedShipResource`
@@ -496,9 +540,9 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         &mut app,
         SimPluginOptions {
             render: false,
-            physics_last: args.physics_last,
-            registration_order: args.registration_order,
-            extra_registration_probes: args.extra_registration_probes,
+            physics_last: sim_overrides.physics_last,
+            registration_order: sim_overrides.registration_order,
+            extra_registration_probes: sim_overrides.extra_registration_probes,
         },
     );
     // After the plugins, so it overrides their OS-seeded `init_resource`.

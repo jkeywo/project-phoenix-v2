@@ -71,9 +71,12 @@
 
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
+mod common;
+
 use bevy::prelude::*;
+use common::SimFixture;
 use project_phoenix::headless::fingerprint::{fingerprint, RunFingerprint};
-use project_phoenix::headless::{build_headless_app, run, HeadlessArgs};
+use project_phoenix::headless::HeadlessArgs;
 use project_phoenix::server_app::{RegistrationOrder, RegistrationProbes};
 use project_phoenix::sim_tick::SimTick;
 
@@ -102,13 +105,12 @@ fn build_and_run(
         max_ticks: TICKS,
         seed: Some(SEED),
         deterministic: true,
-        registration_order,
-        extra_registration_probes,
         ..Default::default()
     };
-    let mut app = build_headless_app(&args).expect("app should build");
-    run(&mut app, args.max_ticks);
-    app
+    SimFixture::new(args)
+        .registration_order(registration_order)
+        .extra_registration_probes(extra_registration_probes)
+        .build_and_run()
 }
 
 fn fingerprint_with_order(registration_order: RegistrationOrder) -> RunFingerprint {
@@ -251,34 +253,28 @@ fn register_probe_read(app: &mut App) {
 fn an_order_dependent_system_pair_produces_different_results_when_flipped() {
     const PROBE_TICKS: u64 = 5;
 
+    let probe_args = || HeadlessArgs {
+        world_path: WORLD.into(),
+        max_ticks: PROBE_TICKS,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    };
+
     let write_then_read = {
-        let args = HeadlessArgs {
-            world_path: WORLD.into(),
-            max_ticks: PROBE_TICKS,
-            seed: Some(SEED),
-            deterministic: true,
-            registration_order: RegistrationOrder::Canonical,
-            extra_registration_probes: Some((register_probe_write, register_probe_read)),
-            ..Default::default()
-        };
-        let mut app = build_headless_app(&args).expect("app should build");
-        run(&mut app, args.max_ticks);
+        let app = SimFixture::new(probe_args())
+            .registration_order(RegistrationOrder::Canonical)
+            .extra_registration_probes(Some((register_probe_write, register_probe_read)))
+            .build_and_run();
         app.world().resource::<OrderProbeLog>().0.clone()
     };
 
     let read_then_write = {
-        let args = HeadlessArgs {
-            world_path: WORLD.into(),
-            max_ticks: PROBE_TICKS,
-            seed: Some(SEED),
-            deterministic: true,
-            registration_order: RegistrationOrder::Canonical,
+        let app = SimFixture::new(probe_args())
+            .registration_order(RegistrationOrder::Canonical)
             // Same pair, registered in the OPPOSITE order — the only change.
-            extra_registration_probes: Some((register_probe_read, register_probe_write)),
-            ..Default::default()
-        };
-        let mut app = build_headless_app(&args).expect("app should build");
-        run(&mut app, args.max_ticks);
+            .extra_registration_probes(Some((register_probe_read, register_probe_write)))
+            .build_and_run();
         app.world().resource::<OrderProbeLog>().0.clone()
     };
 

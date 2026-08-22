@@ -1,0 +1,34 @@
+[package]
+name = "phoenix-math"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+
+# The deterministic foundation, extracted as a workspace crate (issue #1184).
+#
+# The point of the crate boundary is a COMPILER-CHECKED invariant: this crate
+# has NO Bevy dependency, so "the deterministic foundation depends on nothing"
+# is enforced by the type system rather than by a clippy config. Its whole
+# dependency surface is the two pure crates below — anything reaching for
+# `bevy`, `nalgebra`, `rapier3d`/`parry3d` or a Bevy derive (`Resource`,
+# `SystemSet`, `Message`, `Reflect`) does NOT belong here and stays in the root
+# crate. See the root Cargo.toml / issue #1184 for which modules were held back
+# and why (sim_rng/world_id/sim_sets/core::balance are Bevy, simmath_vectors
+# needs nalgebra).
+[dependencies]
+# Backs `simmath` — the shared pure-Rust libm every sanctioned transcendental
+# in simulation code routes through (issue #908). Same version the root crate
+# pins, so Cargo resolves one `libm` for the whole workspace.
+libm = "0.2"
+# `bounded_history` and `audio_config` round-trip through serde. Same version
+# and features as the root crate for a single resolved `serde`.
+serde = { version = "1.0.228", features = ["derive"] }
+
+# Test-only. `audio_config`'s unit tests round-trip its serde types through TOML
+# (the authored `[audio]` shape) and JSON (the host-channel payload). These do
+# NOT enter the crate's runtime dependency surface — that stays libm + serde —
+# so the "deterministic foundation depends on nothing" invariant is unaffected.
+# Same versions the root crate pins, for a single resolved copy of each.
+[dev-dependencies]
+serde_json = "1.0.149"
+toml = "1.0"

@@ -63,8 +63,12 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
 
+      # `--workspace` so the extracted `phoenix-math` crate (issue #1184) is
+      # linted too. Without it, clippy runs only on `project-phoenix` (the sole
+      # default workspace member) and builds `phoenix-math` merely as a
+      # dependency — leaving the deterministic foundation's own source unlinted.
       - name: Clippy (deny warnings)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       # One invocation, one feature set, one compile of the crate and of every
       # integration-test binary. This previously ran as four steps across two
@@ -92,8 +96,16 @@ jobs:
       #
       # Debug (well, [profile.dev] — deps at opt-level 3) is correct: the
       # runner is deterministic and asserts on end state, never wall-clock.
+      #
+      # `--workspace` (issue #1184) so `phoenix-math`'s own unit tests — the
+      # 79 that moved with simmath/composite_rng/bounded_history/lod_tune/
+      # audio_config — run in CI. Without it only `project-phoenix` (the default
+      # member) is tested and those 79 silently stop running. `--features
+      # headless` still applies only to `project-phoenix`, which is the only
+      # selected package that declares it; cargo ignores it for `phoenix-math`
+      # rather than erroring.
       - name: Run the native test suite
-        run: cargo test --features headless
+        run: cargo test --workspace --features headless
 
       # The demo build, actually compiled (issue #940). PHOENIX_DEMO_BUILD is
       # set in exactly one place in this repo — deploy-demo.yml — and that job

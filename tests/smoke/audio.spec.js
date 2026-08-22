@@ -12,7 +12,7 @@
 // server.html exposes what's needed.
 //
 // Panning correctness (the yaw sign) is covered by unit tests in
-// src/audio_config.rs; it can't be verified from here.
+// crates/phoenix-math/src/audio_config.rs; it can't be verified from here.
 
 import {
   test,
@@ -260,7 +260,7 @@ test('audio config is data-driven from ship + world TOML and builds the audio gr
   // Engine volume tracks thrust using the TOML coefficients
   // (idle_volume + thrust * volume_at_full_thrust), not a hardcoded constant.
   // `idle_volume + thrust * volume_at_full_thrust` — the formula named in
-  // src/audio_config.rs and applied in server.html's __updateHud.
+  // crates/phoenix-math/src/audio_config.rs and applied in server.html's __updateHud.
   const engineVolumeAt = (thrust) =>
     EXPECTED.engineIdle + thrust * EXPECTED.engineFullThrust;
 

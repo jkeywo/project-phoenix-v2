@@ -29,7 +29,9 @@ pub mod boot;
 
 pub mod ai;
 pub mod asteroids;
-pub mod audio_config;
+/// Re-exported from the `phoenix-math` workspace crate (issue #1184), so
+/// `crate::audio_config::…` still resolves after the extraction.
+pub use phoenix_math::audio_config;
 /// The authoritative-state declaration registry (issue #1220, Track 3 step C8):
 /// `App::declare_state::<T>(class, pasm)` for an owning plugin to record, at the
 /// site that owns a type, how it relates to the #894 digest boundary. Adds only
@@ -37,7 +39,8 @@ pub mod audio_config;
 /// reads the census, so the registry is inert to `sim_digest::world_digest`.
 pub mod authoritative;
 /// Fixed-capacity history window (issue #788). Pure, Bevy-free, domain-neutral.
-pub mod bounded_history;
+/// Re-exported from the `phoenix-math` workspace crate (issue #1184).
+pub use phoenix_math::bounded_history;
 /// Compile-time build flags readable at runtime (issue #939) — currently just
 /// `PHOENIX_DEMO_BUILD`, which gates the host settings menu's Debug/Cheat tab.
 pub mod build_flags;
@@ -52,8 +55,8 @@ pub mod civilian;
 pub mod command_admission;
 pub mod comms;
 /// Composite-key deterministic value derivation (issue #788). Pure, Bevy-free,
-/// domain-neutral.
-pub mod composite_rng;
+/// domain-neutral. Re-exported from the `phoenix-math` workspace crate (issue #1184).
+pub use phoenix_math::composite_rng;
 pub mod console_ai;
 pub mod console_bridge;
 /// The loaded-content ledger (issue #935): every authored file the world/entity
@@ -124,7 +127,8 @@ pub mod sim_sets;
 pub mod sim_tick;
 /// Shared pure-Rust libm wrappers — the only sanctioned transcendental float
 /// math in simulation code (issue #908; enforced via clippy.toml).
-pub mod simmath;
+/// Re-exported from the `phoenix-math` workspace crate (issue #1184).
+pub use phoenix_math::simmath;
 /// Cross-target vector battery proving native and wasm agree, bit for bit,
 /// on every `simmath` function (issue #909).
 pub mod simmath_vectors;
@@ -183,9 +187,9 @@ pub mod render_setup;
 pub mod render_capture;
 
 /// Pure math behind the automatic LOD switch-range tuner (`tune-lods`): the
-/// alpha-aware image difference and the knee-of-curve rule. Ungated so its unit
-/// tests run under the default `cargo test --lib`.
-pub mod lod_tune;
+/// alpha-aware image difference and the knee-of-curve rule. Re-exported from the
+/// `phoenix-math` workspace crate (issue #1184).
+pub use phoenix_math::lod_tune;
 
 /// Standalone model/shader viewer (`viewer.html`), a dev tool built as its own
 /// Trunk target. Not part of the game binary.

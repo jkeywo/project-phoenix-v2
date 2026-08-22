@@ -200,7 +200,7 @@ entities:
         - "The payload schema is the shared substrate the GM console M6 Live Inspector (T4) later builds on: the GM adds authorization and presentation, never a second inspection pipeline."
         - "The gap is structural, not incidental: FlagStore, ObjectiveManager, pending triggers and the delayed-action queue have no read path beyond the opaque snapshot and the one-way sim digest; ScoredObjective crosses the wire every tick and is rendered nowhere; LogCat::Ai is a built and tested filter with no emitters; the four existing overlays are wasm+server-only strings that cannot be filtered, charted or diffed."
         - "Station-activity counters are always-on because they are a few integers per station and feed the balance report; rendering stays flag-gated. Counts split human/AI at the admitted-command path both control sources already share, which is what makes the chart read as crew-busyness evidence for Backfill and crew-control tuning."
-        - "Capture must not perturb the simulation: payloads are read-only projections off authoritative state on the existing debug cadence, and the bounded-history primitive (src/bounded_history.rs) backs the fire-history and timeline buffers."
+        - "Capture must not perturb the simulation: payloads are read-only projections off authoritative state on the existing debug cadence, and the bounded-history primitive (crates/phoenix-math/src/bounded_history.rs) backs the fire-history and timeline buffers."
     architecture:
       kind: roadmap-milestone
       authority: authoritative

@@ -196,7 +196,7 @@ impl BoundedHistory {
 ///
 /// # Why the trigger-fire recorder needs this and not [`BoundedHistory`]
 ///
-/// A fire record ([`crate::debug::payload::TriggerFire`]) is a struct of a time
+/// A fire record (`crate::debug::payload::TriggerFire`, in the root crate) is a struct of a time
 /// and a list of predicate values, not an `f64`, so it cannot go in the numeric
 /// window at all. What the recorder actually reuses from `bounded_history` is
 /// the *bound*: the ring is `capacity` records per trigger for ever, so a

@@ -59,7 +59,7 @@
 //! step should close; see the report.
 
 // Dev-only batch tuning CLI, run offline — never the shipped sim (issue #908; the
-// tested pure core is src/lod_tune.rs). Opt out of the transcendental ban, and of
+// tested pure core is crates/phoenix-math/src/lod_tune.rs). Opt out of the transcendental ban, and of
 // two style lints that don't earn a refactor in a one-shot tool: Bevy systems
 // carry many params, and this tool's state machine uses early `return`s.
 #![allow(clippy::disallowed_methods)]

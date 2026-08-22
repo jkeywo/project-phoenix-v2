@@ -488,7 +488,7 @@ pub fn scanned_flag(entity_id: &str) -> String {
 ///
 /// `+ - * /` and `round` only — every one of them IEEE-754 exact on every
 /// target, so two peers reading the same structure through the same band report
-/// the same number (see `src/simmath.rs` for why that matters and which
+/// the same number (see `crates/phoenix-math/src/simmath.rs` for why that matters and which
 /// functions are NOT safe here).
 pub fn quantise(fraction: f32, step: f32) -> f32 {
     let clamped = fraction.clamp(0.0, 1.0);

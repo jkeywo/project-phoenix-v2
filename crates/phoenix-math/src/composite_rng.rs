@@ -4,9 +4,9 @@
 //! independent identifiers, produce a stable pseudo-random value that is a
 //! function of all of them, in order.*
 //!
-//! # Why this is not [`crate::sim_rng`]
+//! # Why this is not `crate::sim_rng`
 //!
-//! [`SimRng`](crate::sim_rng::SimRng) is a Bevy `Resource` carrying a master
+//! `crate::sim_rng::SimRng` (in the root crate) is a Bevy `Resource` carrying a master
 //! seed and a fixed set of *per-call-site* streams. It answers "give me the next
 //! number for this call site", which is the right shape for damage rolls and
 //! uuid allocation and the wrong shape here: a recovery manoeuvre needs the

@@ -3,7 +3,7 @@
 //!
 //! # Why this exists
 //!
-//! `src/simmath.rs` (issue #908) pins 12 hand-picked cases as a tripwire —
+//! `crates/phoenix-math/src/simmath.rs` (issue #908) pins 12 hand-picked cases as a tripwire —
 //! enough to catch a wrapper regressing back onto `std`, not enough to prove
 //! native and wasm agree across each function's *domain*. This module is the
 //! systematic version: an enumerated, deterministic battery (no RNG — a

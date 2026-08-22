@@ -1,5 +1,6 @@
 pub mod cadence;
 pub mod core;
+pub mod decision_trace;
 pub mod faction;
 pub mod host;
 pub mod lod;

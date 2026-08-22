@@ -494,6 +494,11 @@ fn handle_set_objective_priority(
 /// `ControlSource::Ai`.
 fn operate_captain_ai(
     time: Res<Time>,
+    // `ai`-category decision-trace instrumentation (issue #1146). `Option<Res>`
+    // for the bare-`App` reason the macro docs give; with `ai` logging off the
+    // trace is skipped and the red-alert decision is unchanged.
+    log: Option<Res<crate::logging::LogFilterConfig>>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     sessions: Res<crate::lobby::Sessions>,
     // Issue #912: the SHARED per-tick world frame, not a scan of the captain's
     // own. `Option<Res<_>>` because bare-`App` fixtures never register
@@ -517,6 +522,8 @@ fn operate_captain_ai(
         Option<&CaptainAiPolicy>,
         Option<&crate::ship::state::ShipPhysics>,
         Option<&crate::entities::spawner::FactionComponent>,
+        // Display name for the `ai` decision trace's `ship` field (issue #1146).
+        Option<&crate::entities::spawner::EntityName>,
     )>,
 ) {
     let now = time.elapsed_secs();
@@ -533,6 +540,7 @@ fn operate_captain_ai(
         ship_policy,
         physics,
         faction,
+        name_opt,
     ) in ship_query.iter_mut()
     {
         // Build the immutable typed-fact snapshot for this evaluation from this
@@ -598,6 +606,24 @@ fn operate_captain_ai(
         if let Some(should_be_red_alert) = should_be_red_alert {
             let current_red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);
             if should_be_red_alert != current_red_alert {
+                // Console-AI decision trace (issue #1146): the Captain host is a
+                // fine-system AI host routed through the `ai::host` spine, and its
+                // one decision is the Red Alert lever. Emit the change as a
+                // STRUCTURED `ai`-category event (tick/ship/prev/new) so it joins
+                // the doctrine and target timelines in one filterable stream. The
+                // `pinfo!` gate does the level + `--log-entity` check; when `ai`
+                // logging is off this is a couple of reads and no formatting.
+                crate::pinfo!(
+                    log,
+                    crate::logging::LogCat::Ai,
+                    entity = ship_entity,
+                    ai_event = "red_alert_change",
+                    tick = sim_tick.as_deref().map(|t| t.0).unwrap_or(0),
+                    ship = name_opt.map(|n| n.0.as_str()).unwrap_or("<unnamed>"),
+                    prev = current_red_alert,
+                    new = should_be_red_alert,
+                    "red alert {current_red_alert} -> {should_be_red_alert}"
+                );
                 // Route through the shared admission seam with this ship's own
                 // `ai:<uuid>` token (issue #830) rather than pushing straight
                 // into `AdmittedCommands` — true AI/human symmetry, mirroring

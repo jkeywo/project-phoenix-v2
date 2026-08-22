@@ -1274,6 +1274,10 @@ fn ai_target_selection(
     // `Option<Res<_>>`, never a bare `Res` — this system runs in bare-`App`
     // weapons fixtures that never insert `LogFilterConfig` (see the macro docs).
     log: Option<Res<crate::logging::LogFilterConfig>>,
+    // The logical tick stamped on the `ai`-category target-reselection event
+    // (issue #1146). `Option<Res<_>>` for the same bare-`App` reason; an absent
+    // resource reads tick 0, which every weapons fixture already tolerates.
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     // The shared admission seam this system emits its decision through (#887);
     // `emit_ai_command` asks `Sessions` about station tenure.
     sessions: Res<crate::lobby::Sessions>,
@@ -1713,11 +1717,13 @@ fn ai_target_selection(
         // and re-broadcast an unchanged lock every tick, and fire the
         // component's change detection with it.
         if weapons_target.0 != selected {
-            // Target CHANGED — the single most load-bearing balance line: the
-            // headline `info` edge names the from→to. Entity-scoped so
-            // `--log-entity <ship>` narrows it to one hull. The "why" is now the
-            // authored selector scoring rather than a fixed tier label, so the
-            // `debug` line reports the data-driven ranking produced this pick.
+            // Target CHANGED — the single most load-bearing balance line, now a
+            // STRUCTURED `ai`-category event (issue #1146): the headline `info`
+            // edge carries `tick`, `ship`, `prev` and `new` as tracing fields, so
+            // a per-ship target-reselection timeline is `grep`-able out of a run's
+            // log stream. Entity-scoped so `--log-entity <ship>` narrows it to one
+            // hull. The `debug` line reports the data-driven ranking that produced
+            // the pick (the "why" behind the reselection).
             let from = weapons_target
                 .0
                 .as_deref()
@@ -1727,16 +1733,27 @@ fn ai_target_selection(
                 .as_deref()
                 .map(name_of)
                 .unwrap_or_else(|| "none".to_string());
+            let tick = sim_tick.as_deref().map(|t| t.0).unwrap_or(0);
+            let ship = self_uuid
+                .map(|u| name_of(&u.0))
+                .unwrap_or_else(|| "<unnamed>".to_string());
             crate::pinfo!(
                 log,
                 crate::logging::LogCat::Ai,
                 entity = ship_entity,
+                ai_event = "target_reselection",
+                tick = tick,
+                ship = ship.as_str(),
+                prev = from.as_str(),
+                new = to.as_str(),
                 "target {from} -> {to}"
             );
             crate::pdebug!(
                 log,
                 crate::logging::LogCat::Ai,
                 entity = ship_entity,
+                tick = tick,
+                ship = ship.as_str(),
                 "acquired {to} via data-driven Tactical selector ({} candidates)",
                 candidates.len()
             );

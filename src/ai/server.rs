@@ -721,8 +721,18 @@ fn entity_direct_fire_banks(
 pub(crate) fn aggregate_doctrine_blackboards(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
+    // `ai`-category decision-trace instrumentation (issue #1146). `Option<Res>`
+    // for the usual bare-`App` reason (a fixture need not insert either); with
+    // `ai` logging off both read as "not enabled" and the trace block is skipped
+    // whole, so a default run pays nothing and its digest is unmoved.
+    log: Option<Res<crate::logging::LogFilterConfig>>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     mut query: Query<
         (
+            // The Bevy entity + its display name, for the `ai` decision trace's
+            // per-entity filter and its `ship` field (issue #1146). Read-only.
+            Entity,
+            Option<&crate::entities::spawner::EntityName>,
             // Optional so a static point-defence platform (the station), which
             // authors no `[behaviour]`, still gets a Viewscreen blackboard. Its
             // phaser AI (`ai_phaser_auto_fire`) aims at the `combat_lock` this
@@ -751,8 +761,16 @@ pub(crate) fn aggregate_doctrine_blackboards(
         .as_deref()
         .map(|wc| wc.global.attacked_memory_secs)
         .unwrap_or_else(|| crate::entities::config::GlobalConfig::default().attacked_memory_secs);
-    for (behaviour, hull, mut blackboards, red_alert_opt, activity_opt, last_attacker_opt) in
-        &mut query
+    for (
+        ship_entity,
+        name_opt,
+        behaviour,
+        hull,
+        mut blackboards,
+        red_alert_opt,
+        activity_opt,
+        last_attacker_opt,
+    ) in &mut query
     {
         let hull_fraction = {
             let max = hull.0.total_max();
@@ -880,6 +898,68 @@ pub(crate) fn aggregate_doctrine_blackboards(
             }
             _ => None,
         };
+        // ── `ai`-category decision trace (issue #1146) ──────────────────────
+        // A read-only projection of the pool just scored. Gated on the `ai`
+        // category being enabled for THIS ship, so a default-level run formats
+        // no label, clones nothing, and touches neither the world nor the RNG —
+        // the seeded digest is byte-identical whether `ai=debug` is on or off
+        // (`tests/ai_decision_log.rs`). The directive-change event's
+        // previous directive is read from last tick's pool, which is still on
+        // the blackboard until the `insert` below overwrites it — no cross-tick
+        // tracking resource, and nothing here that a fixed-tick reader consults.
+        {
+            let cfg = crate::logging::AsLogFilter::log_filter(&log);
+            let ai_debug = cfg.cat_enabled(
+                crate::logging::LogCat::Ai,
+                crate::logging::LevelFilter::Debug,
+            );
+            let ai_info = cfg.cat_enabled(
+                crate::logging::LogCat::Ai,
+                crate::logging::LevelFilter::Info,
+            );
+            if (ai_debug || ai_info) && cfg.entity_allowed(ship_entity) {
+                let tick = sim_tick.as_deref().map(|t| t.0).unwrap_or(0);
+                let ship = name_opt.map(|n| n.0.as_str()).unwrap_or("<unnamed>");
+                // Per-tick scoring trace: why the top directive won this tick.
+                crate::pdebug!(
+                    log,
+                    crate::logging::LogCat::Ai,
+                    entity = ship_entity,
+                    tick = tick,
+                    ship = ship,
+                    "doctrine {}",
+                    crate::ai::decision_trace::format_pool(&scored)
+                );
+                // Structured directive-change event: the per-ship timeline entry.
+                let change = match blackboards
+                    .0
+                    .get(&crate::ship::system_registry::viewscreen_system_id())
+                {
+                    Some(crate::core::messages::SystemBlackboard::Viewscreen(v)) => {
+                        crate::ai::decision_trace::directive_change(&v.scored_objectives, &scored)
+                    }
+                    _ => crate::ai::decision_trace::directive_change(&[], &scored),
+                };
+                if let Some(change) = change {
+                    crate::pinfo!(
+                        log,
+                        crate::logging::LogCat::Ai,
+                        entity = ship_entity,
+                        ai_event = "directive_change",
+                        tick = tick,
+                        ship = ship,
+                        prev = change.prev.as_str(),
+                        new = change.new.as_str(),
+                        target = change.target.as_str(),
+                        score = change.score,
+                        "directive {} -> {}",
+                        change.prev,
+                        change.new
+                    );
+                }
+            }
+        }
+
         let viewscreen_bb = crate::core::messages::ViewscreenBlackboard {
             red_alert,
             hull_integrity_pct: hull_fraction * 100.0,

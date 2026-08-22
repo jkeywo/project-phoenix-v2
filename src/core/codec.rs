@@ -81,13 +81,17 @@ pub fn encode_station_activity(p: &crate::debug::payload::StationActivityPayload
     serde_json::to_string(p).unwrap_or_default()
 }
 
-/// Encode an AI doctrine-pool debug payload to JSON (issue #1149, PRD #1144).
+/// Encode an AI-state debug payload to JSON (issues #1149 and #1152, PRD #1144).
 ///
 /// The single seam where `crate::debug::payload::AiStatePayload` becomes the JSON
 /// the dock panel parses (`gui/ai-doctrine-panel.js`) and the headless report
 /// embeds — AGENTS.md Key Constraint 1 keeps `serde_json` here, so
 /// `debug::ai_state::publish_ai_doctrine` and `headless::report::build_report`
-/// call this rather than serialising themselves. Returns `String` (not `Result`)
+/// call this rather than serialising themselves. The one encoder carries BOTH
+/// AI sub-surfaces — the per-ship doctrine pool (`ships`, #1149) and the per-host
+/// policy-machine view (`hosts`, #1152) — because they are one payload; the
+/// `hosts` field is additive, so no schema-version bump. Returns `String` (not
+/// `Result`)
 /// for the same reason [`encode_station_activity`] does: the payload is
 /// String/int/float scalars in `Vec`s, which serde never fails to encode, so an
 /// error becomes an empty string a consumer treats as "no data yet".
@@ -2927,11 +2931,15 @@ mod tests {
                     status: "Active".into(),
                 }],
             }],
+            // #1152's per-host surface: empty here, so this pins that an
+            // absent-machine world still emits the field as `[]` — the shape the
+            // dock panel and headless report read.
+            hosts: Vec::new(),
         };
         let json = crate::core::codec::encode_ai_doctrine(&payload);
         assert_eq!(
             json,
-            r#"{"schema_version":1,"tick":42,"ships":[{"ship":"Harrow","uuid":"uuid-1","chosen":{"id":"kill","directive":"Destroy(Ashrender)","target":"Ashrender","score":38.0},"candidates":[{"id":"kill","score":38.0,"source":"Doctrine","relevance":["Weapons"],"directive":"Destroy(Ashrender)","target":"Ashrender","mandatory":true,"status":"Active"}]}]}"#,
+            r#"{"schema_version":1,"tick":42,"ships":[{"ship":"Harrow","uuid":"uuid-1","chosen":{"id":"kill","directive":"Destroy(Ashrender)","target":"Ashrender","score":38.0},"candidates":[{"id":"kill","score":38.0,"source":"Doctrine","relevance":["Weapons"],"directive":"Destroy(Ashrender)","target":"Ashrender","mandatory":true,"status":"Active"}]}],"hosts":[]}"#,
             "the AI doctrine JSON shape must match gui/ai-doctrine-panel.js"
         );
         // Round-trips back to the same payload — the schema is stable both ways.

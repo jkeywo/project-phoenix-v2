@@ -532,8 +532,10 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
 /// Read-only, and it runs after the sim has stopped, so it cannot perturb the
 /// run: it reads each `BehaviourSection` ship's viewscreen scored-objective pool
 /// — the same set `debug::ai_state::publish_ai_doctrine` covers live — and folds
-/// it through the shared `collect_ai_doctrine` projector so the report and the
-/// dock speak the identical schema.
+/// it through the shared `collect_ai_doctrine` projector, then folds every
+/// stateful helm host's policy machine through the shared `collect_host_policies`
+/// projector (issue #1152), so the report and the dock speak the identical
+/// schema for BOTH sub-surfaces.
 fn collect_ai_doctrine_json(app: &mut App, tick: u64) -> String {
     use crate::server_app::ShipSystemBlackboards;
 
@@ -557,7 +559,35 @@ fn collect_ai_doctrine_json(app: &mut App, tick: u64) -> String {
             )
         })
         .collect();
-    let payload = crate::debug::ai_state::collect_ai_doctrine(tick, ships);
+    let mut payload = crate::debug::ai_state::collect_ai_doctrine(tick, ships);
+
+    // The per-host policy view (issue #1152): the same stateful helm hosts the
+    // live publish covers, folded through the same projector so the report's AI
+    // surface carries the machine view with the flag off too.
+    let mut hq = app.world_mut().query_filtered::<(
+        Option<&EntityName>,
+        Option<&EntityUuid>,
+        Option<&crate::ship::helm_ai::HelmEnginesAiPolicyState>,
+        Option<&crate::ship::helm_ai::HelmSteeringAiPolicyState>,
+        Option<&crate::ship::helm_ai::HelmBoostAiPolicyState>,
+    ), Or<(
+        With<crate::ship::helm_ai::HelmEnginesAiPolicyState>,
+        With<crate::ship::helm_ai::HelmSteeringAiPolicyState>,
+        With<crate::ship::helm_ai::HelmBoostAiPolicyState>,
+    )>>();
+    let mut host_rows = Vec::new();
+    for (name, uuid, engines, steering, boost) in hq.iter(app.world()) {
+        crate::debug::ai_state::host_rows_for_entity(
+            name,
+            uuid,
+            engines.map(|c| &c.0),
+            steering.map(|c| &c.0),
+            boost.map(|c| &c.0),
+            &mut host_rows,
+        );
+    }
+    payload.hosts = crate::debug::ai_state::collect_host_policies(host_rows);
+
     crate::core::codec::encode_ai_doctrine(&payload)
 }
 

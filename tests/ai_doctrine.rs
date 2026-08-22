@@ -209,4 +209,95 @@ fn enabling_capture_leaves_the_seeded_digest_identical() {
         json.contains("\"ships\""),
         "the captured payload must carry the per-ship doctrine surface; got: {json}"
     );
+    assert!(
+        json.contains("\"hosts\""),
+        "the captured payload must carry the per-host policy surface (issue #1152); got: {json}"
+    );
+}
+
+// ── The per-host policy surface, end-to-end through the system (issue #1152) ──
+
+use project_phoenix::ai::policy::{AiPolicyRuntimeState, BlockedTransition, CommittedTransition};
+use project_phoenix::ship::helm_ai::HelmBoostAiPolicyState;
+
+/// Driving `publish_ai_doctrine` over a ship carrying a STATEFUL helm boost
+/// policy-state component produces a capture whose `hosts` surface names that
+/// host's current state, memory, the transition it committed and the guard
+/// blocking the one it did not — the "stop being a black box" the surface exists
+/// for, read off the authoritative runtime state.
+#[test]
+fn system_projects_stateful_host_policy_machines() {
+    let mut memory = project_phoenix::world::flags::AiPolicyMemory::new();
+    memory.set("engagements", 1.0);
+    let runtime = AiPolicyRuntimeState {
+        current: "surge".into(),
+        entered_at_secs: 2.0,
+        memory,
+        last_transition: Some(CommittedTransition {
+            from: "cruise".into(),
+            to: "surge".into(),
+            guard: "fact(hazard_urgency) > param(surge)".into(),
+            at_secs: 2.0,
+        }),
+        blocked_transition: Some(BlockedTransition {
+            from: "surge".into(),
+            to: "cruise".into(),
+            guard: "state_time >= param(dwell)".into(),
+        }),
+    };
+
+    let mut app = App::new();
+    app.insert_resource(SimTick(5));
+    app.init_resource::<AiDoctrineCapture>();
+    app.world_mut().spawn((
+        HelmBoostAiPolicyState(runtime),
+        EntityName("Harrow".into()),
+        EntityUuid("uuid-harrow".into()),
+    ));
+    app.add_systems(Update, publish_ai_doctrine);
+    app.update();
+
+    let json = app
+        .world()
+        .resource::<AiDoctrineCapture>()
+        .0
+        .clone()
+        .expect("the system must publish a payload");
+
+    // The host is named off the AI host registry, in the current state.
+    assert!(json.contains("\"host\":\"Helm boost\""), "got {json}");
+    assert!(json.contains("\"state\":\"surge\""), "got {json}");
+    assert!(json.contains("\"ship\":\"Harrow\""), "got {json}");
+    // Memory reading, the committed transition, and the blocking guard.
+    assert!(json.contains("\"key\":\"engagements\""), "got {json}");
+    assert!(json.contains("\"last_transition\""), "got {json}");
+    assert!(
+        json.contains("fact(hazard_urgency) > param(surge)"),
+        "got {json}"
+    );
+    assert!(json.contains("\"blocked_transition\""), "got {json}");
+    assert!(json.contains("state_time >= param(dwell)"), "got {json}");
+}
+
+/// A stateless helm axis (an empty `current`, the machine never entered a state)
+/// contributes NO host row — the surface is only meaningful for a real machine.
+#[test]
+fn system_omits_a_stateless_host() {
+    let mut app = App::new();
+    app.insert_resource(SimTick(1));
+    app.init_resource::<AiDoctrineCapture>();
+    app.world_mut().spawn((
+        HelmBoostAiPolicyState(AiPolicyRuntimeState::default()),
+        EntityName("Stateless".into()),
+    ));
+    app.add_systems(Update, publish_ai_doctrine);
+    app.update();
+
+    let json = app
+        .world()
+        .resource::<AiDoctrineCapture>()
+        .0
+        .clone()
+        .expect("the system must publish a payload");
+    assert!(json.contains("\"hosts\":[]"), "got {json}");
 }

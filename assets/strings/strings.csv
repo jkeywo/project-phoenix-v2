@@ -701,6 +701,9 @@ settings.debug.scenario.at_secs,"Server settings menu — scenario-state panel: 
 settings.debug.scenario.trigger_fired,Server settings menu — scenario-state panel badge for a trigger that has already fired,fired
 settings.debug.scenario.trigger_waiting,Server settings menu — scenario-state panel badge for a trigger armed but with its when-gate not holding,waiting
 settings.debug.scenario.trigger_armed,Server settings menu — scenario-state panel badge for a trigger armed and eligible to fire,armed
+settings.debug.ai_hosts_heading,Server settings menu — AI panel heading over the per-host fine-system policy-machine view,Policy machines
+settings.debug.ai_hosts_last,Server settings menu — AI policy-machine label for the transition the machine most recently committed,Last transition
+settings.debug.ai_hosts_blocked,Server settings menu — AI policy-machine label for the transition the machine considered but did not take,Blocked by
 settings.debug.cheats,"Server settings menu — Debug tab, heading over the cheat toggles",Cheats
 settings.debug.wireframes,Server settings menu — toggle drawing region wireframes in the world,Region Wireframes
 settings.debug.godmode,Server settings menu — toggle that makes the player ship take no damage,God Mode

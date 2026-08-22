@@ -40,6 +40,13 @@ function fmtScore(score) {
   return Number.isFinite(n) ? n.toFixed(1) : '0.0';
 }
 
+/** Format a memory / clock reading, trimming a trailing `.0` (a non-number reads `0`). */
+function fmtNum(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '0';
+  return Number.isInteger(n) ? String(n) : String(n);
+}
+
 /** Build one candidate row. Pure: returns a detached `<tr>`. */
 function candidateRow(candidate, chosenId, doc) {
   const row = doc.createElement('tr');
@@ -123,6 +130,97 @@ function shipSection(ship, doc) {
   return section;
 }
 
+/** Build one transition row (last or blocked). Pure: returns a detached `<div>`. */
+function transitionRow(kind, labelId, transition, doc) {
+  const row = doc.createElement('div');
+  row.className = `ah-transition ah-${kind}`;
+  row.setAttribute('data-to', String(transition.to ?? ''));
+
+  const label = doc.createElement('span');
+  label.className = 'ah-t-label';
+  label.textContent = t(labelId);
+  row.appendChild(label);
+
+  const edge = doc.createElement('span');
+  edge.className = 'ah-t-edge';
+  edge.textContent = `${String(transition.from ?? '')} → ${String(transition.to ?? '')}`;
+  row.appendChild(edge);
+
+  const guard = doc.createElement('span');
+  guard.className = 'ah-t-guard';
+  guard.textContent = String(transition.guard ?? '');
+  row.appendChild(guard);
+
+  return row;
+}
+
+/**
+ * Build one host's section — its current state, private memory, and the last /
+ * blocked transitions. Pure: returns a detached `<div>`.
+ */
+function hostSection(host, doc) {
+  const section = doc.createElement('div');
+  section.className = 'ah-host';
+  section.setAttribute('data-ship', String(host.ship ?? ''));
+  section.setAttribute('data-host', String(host.host ?? ''));
+
+  const header = doc.createElement('div');
+  header.className = 'ah-host-header';
+
+  const ship = doc.createElement('span');
+  ship.className = 'ah-host-ship';
+  ship.textContent = String(host.ship ?? '');
+  header.appendChild(ship);
+
+  const name = doc.createElement('span');
+  name.className = 'ah-host-name';
+  name.textContent = String(host.host ?? '');
+  header.appendChild(name);
+
+  const state = doc.createElement('span');
+  state.className = 'ah-state';
+  state.setAttribute('data-state', String(host.state ?? ''));
+  state.textContent = String(host.state ?? '');
+  header.appendChild(state);
+  section.appendChild(header);
+
+  const memory = Array.isArray(host.memory) ? host.memory : [];
+  if (memory.length > 0) {
+    const table = doc.createElement('table');
+    table.className = 'ah-memory';
+    const tbody = doc.createElement('tbody');
+    for (const entry of memory) {
+      if (!entry || typeof entry !== 'object') continue;
+      const row = doc.createElement('tr');
+      row.className = 'ah-mem';
+      row.setAttribute('data-key', String(entry.key ?? ''));
+      const key = doc.createElement('td');
+      key.className = 'ah-m-key';
+      key.textContent = String(entry.key ?? '');
+      const value = doc.createElement('td');
+      value.className = 'ah-m-value';
+      value.textContent = fmtNum(entry.value);
+      row.appendChild(key);
+      row.appendChild(value);
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    section.appendChild(table);
+  }
+
+  if (host.last_transition && typeof host.last_transition === 'object') {
+    section.appendChild(
+      transitionRow('last', 'settings.debug.ai_hosts_last', host.last_transition, doc),
+    );
+  }
+  if (host.blocked_transition && typeof host.blocked_transition === 'object') {
+    section.appendChild(
+      transitionRow('blocked', 'settings.debug.ai_hosts_blocked', host.blocked_transition, doc),
+    );
+  }
+  return section;
+}
+
 /**
  * Build the panel DOM from a parsed payload. Pure: returns a detached element,
  * mutates nothing.
@@ -152,6 +250,20 @@ export function buildAiDoctrinePanel(payload, opts = {}) {
     if (!ship || typeof ship !== 'object') continue;
     root.appendChild(shipSection(ship, doc));
   }
+
+  // The per-host policy-machine view (issue #1152): a distinct sub-surface after
+  // the doctrine pools, present only when a stateful fine-system host is running.
+  const hosts = Array.isArray(payload.hosts) ? payload.hosts : [];
+  if (hosts.length > 0) {
+    const heading = doc.createElement('div');
+    heading.className = 'ah-heading';
+    heading.textContent = t('settings.debug.ai_hosts_heading');
+    root.appendChild(heading);
+    for (const host of hosts) {
+      if (!host || typeof host !== 'object') continue;
+      root.appendChild(hostSection(host, doc));
+    }
+  }
   return root;
 }
 
@@ -169,7 +281,8 @@ export function renderAiDoctrinePanel(container, json, opts = {}) {
   const doc = container.ownerDocument || opts.doc || document;
   const payload = parseAiDoctrine(json);
   container.textContent = '';
-  if (!payload || payload.ships.length === 0) {
+  const hostCount = payload && Array.isArray(payload.hosts) ? payload.hosts.length : 0;
+  if (!payload || (payload.ships.length === 0 && hostCount === 0)) {
     const empty = doc.createElement('div');
     empty.className = 'ad-empty';
     empty.textContent = t('settings.debug.ai_doctrine_empty');

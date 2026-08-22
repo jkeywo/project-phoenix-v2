@@ -56,6 +56,39 @@ function samplePayload() {
   };
 }
 
+/** A payload with the per-host policy surface (issue #1152). */
+function sampleHostPayload() {
+  return {
+    schema_version: 1,
+    tick: 5,
+    ships: [],
+    hosts: [
+      {
+        ship: 'Harrow',
+        uuid: 'uuid-harrow',
+        host: 'Helm boost',
+        state: 'surge',
+        entered_at_secs: 2.0,
+        memory: [
+          { key: 'engagements', value: 1 },
+          { key: 'peak_hazard', value: 0.8 },
+        ],
+        last_transition: {
+          from: 'cruise',
+          to: 'surge',
+          guard: 'fact(hazard_urgency) > param(surge)',
+          at_secs: 2.0,
+        },
+        blocked_transition: {
+          from: 'surge',
+          to: 'cruise',
+          guard: 'state_time >= param(dwell)',
+        },
+      },
+    ],
+  };
+}
+
 describe('parseAiDoctrine', () => {
   it('parses a well-formed payload', () => {
     const payload = parseAiDoctrine(JSON.stringify(samplePayload()));
@@ -118,6 +151,53 @@ describe('buildAiDoctrinePanel', () => {
   });
 });
 
+describe('buildAiDoctrinePanel — per-host policy view (issue #1152)', () => {
+  it('draws one section per stateful host with its current state', () => {
+    const panel = buildAiDoctrinePanel(sampleHostPayload(), { doc: document });
+    const hosts = panel.querySelectorAll('.ah-host');
+    expect(hosts).toHaveLength(1);
+    expect(hosts[0].getAttribute('data-ship')).toBe('Harrow');
+    expect(hosts[0].getAttribute('data-host')).toBe('Helm boost');
+    expect(hosts[0].querySelector('.ah-state').getAttribute('data-state')).toBe('surge');
+  });
+
+  it('lists the private memory readings', () => {
+    const panel = buildAiDoctrinePanel(sampleHostPayload(), { doc: document });
+    const mem = panel.querySelector('.ah-host .ah-mem[data-key="engagements"]');
+    expect(mem).not.toBeNull();
+    expect(mem.querySelector('.ah-m-value').textContent).toBe('1');
+    expect(panel.querySelector('.ah-mem[data-key="peak_hazard"]')).not.toBeNull();
+  });
+
+  it('shows the last committed transition with its guard', () => {
+    const panel = buildAiDoctrinePanel(sampleHostPayload(), { doc: document });
+    const last = panel.querySelector('.ah-host .ah-transition.ah-last');
+    expect(last).not.toBeNull();
+    expect(last.querySelector('.ah-t-edge').textContent).toBe('cruise → surge');
+    expect(last.querySelector('.ah-t-guard').textContent).toBe(
+      'fact(hazard_urgency) > param(surge)',
+    );
+  });
+
+  it('shows the blocked transition with the guard holding it', () => {
+    const panel = buildAiDoctrinePanel(sampleHostPayload(), { doc: document });
+    const blocked = panel.querySelector('.ah-host .ah-transition.ah-blocked');
+    expect(blocked).not.toBeNull();
+    expect(blocked.querySelector('.ah-t-edge').textContent).toBe('surge → cruise');
+    expect(blocked.querySelector('.ah-t-guard').textContent).toBe('state_time >= param(dwell)');
+  });
+
+  it('omits transition rows a machine has not recorded', () => {
+    const payload = sampleHostPayload();
+    delete payload.hosts[0].last_transition;
+    delete payload.hosts[0].blocked_transition;
+    const panel = buildAiDoctrinePanel(payload, { doc: document });
+    expect(panel.querySelectorAll('.ah-transition')).toHaveLength(0);
+    // The host is still drawn — its state and memory remain.
+    expect(panel.querySelector('.ah-host')).not.toBeNull();
+  });
+});
+
 describe('renderAiDoctrinePanel', () => {
   it('renders the panel into a container from raw JSON', () => {
     const container = document.createElement('div');
@@ -138,6 +218,14 @@ describe('renderAiDoctrinePanel', () => {
     renderAiDoctrinePanel(container, JSON.stringify({ schema_version: 1, tick: 0, ships: [] }));
     expect(container.querySelector('.ad-empty')).not.toBeNull();
     expect(container.querySelector('.ad-panel')).toBeNull();
+  });
+
+  it('renders the panel when only per-host policy machines are present', () => {
+    const container = document.createElement('div');
+    renderAiDoctrinePanel(container, JSON.stringify(sampleHostPayload()));
+    expect(container.querySelector('.ad-panel')).not.toBeNull();
+    expect(container.querySelector('.ad-empty')).toBeNull();
+    expect(container.querySelectorAll('.ah-host')).toHaveLength(1);
   });
 
   it('clears prior content on each render', () => {

@@ -733,6 +733,82 @@ impl AiPolicy {
         }
         best
     }
+
+    /// The highest-priority outgoing transition from `state` whose guard does
+    /// NOT fire this tick — the transition the machine *considered and rejected*,
+    /// and the guard that is holding it (issue #1152).
+    ///
+    /// The read-only mirror of [`resolve_transition`](Self::resolve_transition):
+    /// same scan, same strictly-greater / earliest-authored tie-break, inverted
+    /// eligibility. It exists ONLY to make the stateful policy machine visible in
+    /// the AI policy-state debug surface — it never influences which transition
+    /// commits (that is `resolve_transition`'s answer alone), and evaluating a
+    /// guard is side-effect free, so calling it cannot perturb the run or its
+    /// digest. `None` when the policy is idle, declares no machine, names no such
+    /// state, or every outgoing guard is currently satisfied.
+    pub fn blocking_transition(
+        &self,
+        state: &str,
+        facts: &AiFacts,
+        memory: &AiPolicyMemory,
+        flags: &[&FlagStore],
+    ) -> Option<&AiPolicyTransition> {
+        if self.idle {
+            return None;
+        }
+        let state = self.machine.as_ref()?.state(state)?;
+        let mut best: Option<&AiPolicyTransition> = None;
+        for t in &state.transitions {
+            if t.when.evaluate_stateful(facts, memory, &self.params, flags) {
+                continue;
+            }
+            match best {
+                Some(b) if t.priority <= b.priority => {}
+                _ => best = Some(t),
+            }
+        }
+        best
+    }
+}
+
+/// A transition the machine COMMITTED, retained for the read-only AI
+/// policy-state debug surface (issue #1152).
+///
+/// Diagnostic only: it records what the machine *did* so a tuner can see it, and
+/// is never read by the machine's own decision. It is not folded into the #894
+/// authoritative-state digest (`sim_digest::world_digest` does not fold policy
+/// runtime state at all) and is not carried in the #862 snapshot
+/// (`snapshot::policy_state` copies only `current`/`entered_at_secs`/`memory`) —
+/// it is re-derived on the next machine tick, so its absence after a resume is
+/// inert.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommittedTransition {
+    /// The state the machine left.
+    pub from: String,
+    /// The state it entered.
+    pub to: String,
+    /// The guard that fired, rendered as authored (`Predicate::render`).
+    pub guard: String,
+    /// The tick-derived clock reading at which it committed.
+    pub at_secs: f64,
+}
+
+/// The outgoing transition the machine CONSIDERED and did not take on the most
+/// recent tick, and the guard blocking it (issue #1152).
+///
+/// Diagnostic only, with the same digest/snapshot exclusion as
+/// [`CommittedTransition`]: the highest-priority outgoing transition of the
+/// current state whose guard was not satisfied
+/// ([`AiPolicy::blocking_transition`]). This is what turns "the machine is
+/// stuck" from a black box into "it is waiting on *this* guard".
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlockedTransition {
+    /// The current state the machine would leave.
+    pub from: String,
+    /// The state the blocked transition would enter.
+    pub to: String,
+    /// The guard that is not yet satisfied, rendered as authored.
+    pub guard: String,
 }
 
 /// The per-fine-system runtime state of a stateful policy (issue #882).
@@ -755,6 +831,17 @@ pub struct AiPolicyRuntimeState {
     /// This fine system's typed private memory. Seeded into evaluation as the
     /// `memory(...)` / `state_time` bag and readable by nothing else.
     pub memory: AiPolicyMemory,
+    /// The most recent transition this machine COMMITTED, for the read-only AI
+    /// policy-state debug surface (issue #1152). `None` until the first
+    /// transition fires; cleared on [`reset`](Self::reset). Diagnostic only —
+    /// never read by the machine, never folded into the digest, never
+    /// snapshotted (see [`CommittedTransition`]).
+    pub last_transition: Option<CommittedTransition>,
+    /// The outgoing transition the machine considered and did NOT take on the
+    /// most recent tick (issue #1152), with the same diagnostic-only status as
+    /// `last_transition`. `None` when every outgoing guard is satisfied, the
+    /// state has no transitions, or the machine has not ticked since a reset.
+    pub blocked_transition: Option<BlockedTransition>,
 }
 
 impl AiPolicyRuntimeState {
@@ -772,6 +859,10 @@ impl AiPolicyRuntimeState {
                 .machine()
                 .map(|m| m.initial_memory.clone())
                 .unwrap_or_default(),
+            // A fresh (or reset) machine has taken no transition and considered
+            // none — the diagnostic history starts empty (issue #1152).
+            last_transition: None,
+            blocked_transition: None,
         }
     }
 
@@ -1125,6 +1216,87 @@ mod tests {
         // ring rather than letting it re-enter for free.
         assert!(p
             .resolve_transition("recover", &AiFacts::new(), &memory, &[])
+            .is_none());
+    }
+
+    /// The read-only diagnostic scan (issue #1152): `blocking_transition` is the
+    /// exact inverse of `resolve_transition`. When a guard does NOT fire it names
+    /// the highest-priority such transition (with the same priority tie-break),
+    /// and when the guard DOES fire that transition is no longer "blocked".
+    #[test]
+    fn blocking_transition_names_the_highest_priority_unsatisfied_edge() {
+        let p = AiPolicy {
+            params: AiParams::new(),
+            rules: Vec::new(),
+            idle: false,
+            machine: Some(AiPolicyMachine {
+                initial: "hold".into(),
+                initial_memory: AiPolicyMemory::new(),
+                states: vec![
+                    AiPolicyState {
+                        id: "hold".into(),
+                        yields_to_arc_requests: true,
+                        rules: Vec::new(),
+                        transitions: vec![
+                            AiPolicyTransition {
+                                priority: 10,
+                                to: "engage".into(),
+                                when: parse_predicate("fact(threat) > 0").unwrap(),
+                            },
+                            AiPolicyTransition {
+                                priority: 0,
+                                to: "patrol".into(),
+                                when: parse_predicate("fact(bored) > 0").unwrap(),
+                            },
+                        ],
+                    },
+                    AiPolicyState {
+                        id: "engage".into(),
+                        yields_to_arc_requests: true,
+                        rules: Vec::new(),
+                        transitions: Vec::new(),
+                    },
+                    AiPolicyState {
+                        id: "patrol".into(),
+                        yields_to_arc_requests: true,
+                        rules: Vec::new(),
+                        transitions: Vec::new(),
+                    },
+                ],
+            }),
+        };
+        let memory = AiPolicyMemory::new();
+
+        // No fact fires: BOTH guards are unsatisfied, so the blocked edge is the
+        // highest-priority one (`engage`), and nothing resolves.
+        assert!(p
+            .resolve_transition("hold", &AiFacts::new(), &memory, &[])
+            .is_none());
+        let blocked = p
+            .blocking_transition("hold", &AiFacts::new(), &memory, &[])
+            .expect("a guard is blocking");
+        assert_eq!(blocked.to, "engage");
+        assert_eq!(blocked.when.render(), "fact(threat) > 0");
+
+        // Threat present: `engage` now FIRES, so it is no longer blocked — the
+        // blocked edge falls through to the still-unsatisfied `patrol`.
+        let mut facts = AiFacts::new();
+        facts.set("threat", 1.0);
+        assert_eq!(
+            p.resolve_transition("hold", &facts, &memory, &[])
+                .map(|t| t.to.as_str()),
+            Some("engage")
+        );
+        assert_eq!(
+            p.blocking_transition("hold", &facts, &memory, &[])
+                .map(|t| t.to.as_str()),
+            Some("patrol")
+        );
+
+        // Every guard satisfied: nothing is blocked.
+        facts.set("bored", 1.0);
+        assert!(p
+            .blocking_transition("hold", &facts, &memory, &[])
             .is_none());
     }
 

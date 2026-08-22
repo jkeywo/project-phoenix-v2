@@ -210,6 +210,18 @@ impl CmpOp {
             CmpOp::Lt => lhs < rhs,
         }
     }
+
+    /// The comparison as an author writes it, for diagnostics (issue #1152).
+    pub fn symbol(self) -> &'static str {
+        match self {
+            CmpOp::Ge => ">=",
+            CmpOp::Gt => ">",
+            CmpOp::Eq => "==",
+            CmpOp::Ne => "!=",
+            CmpOp::Le => "<=",
+            CmpOp::Lt => "<",
+        }
+    }
 }
 
 // ── Typed AI facts + named parameters (issue #775) ─────────────────────────
@@ -812,6 +824,69 @@ impl Predicate {
     ) -> bool {
         let empty = AiFacts::default();
         self.evaluate_ctx(facts, &empty, &empty, memory, params, chain)
+    }
+
+    /// Render the predicate back to a readable, source-like guard expression for
+    /// diagnostics (issue #1152) — e.g. `fact(range_to_target) < param(orbit)`.
+    ///
+    /// Reconstructed from the parsed tree, so it reads the way the author wrote
+    /// it. A composed `and`/`or` sub-expression is parenthesised so a nested
+    /// guard is unambiguous; every atom (`flag`, `counter`, `fact`, `memory`,
+    /// `state_time`, `history`) renders through the same per-context vocabulary
+    /// the parser accepts. Used only by the read-only AI policy-state debug
+    /// surface (`crate::debug::ai_state`); it never changes an evaluation.
+    pub fn render(&self) -> String {
+        match self {
+            Predicate::Flag { name } => format!("flag({name})"),
+            Predicate::Counter { name, op, rhs } => {
+                format!("counter({name}) {} {rhs}", op.symbol())
+            }
+            Predicate::Fact {
+                context,
+                name,
+                op,
+                rhs,
+            } => {
+                let lhs = match context {
+                    FactContext::SelfCtx => format!("fact({name})"),
+                    FactContext::Candidate => format!("candidate_fact({name})"),
+                    FactContext::Target => format!("target_fact({name})"),
+                    FactContext::Memory => format!("memory({name})"),
+                    // The `state_time` atom takes no argument; `name` is the
+                    // fixed literal, kept for diagnostics only (see FactContext).
+                    FactContext::StateTime => "state_time".to_string(),
+                };
+                format!("{lhs} {} {}", op.symbol(), rhs.render())
+            }
+            Predicate::History {
+                reducer,
+                window,
+                op,
+                rhs,
+            } => format!(
+                "history({}, {}, {}) {} {}",
+                reducer.name(),
+                window.fact,
+                window.ticks.render(),
+                op.symbol(),
+                rhs.render()
+            ),
+            Predicate::Bool(b) => b.to_string(),
+            Predicate::Not(inner) => format!("not {}", inner.render_grouped()),
+            Predicate::And(a, b) => {
+                format!("{} and {}", a.render_grouped(), b.render_grouped())
+            }
+            Predicate::Or(a, b) => format!("{} or {}", a.render_grouped(), b.render_grouped()),
+        }
+    }
+
+    /// [`render`](Self::render), parenthesised when the node is itself a
+    /// composed `and`/`or`, so a nested guard reads unambiguously.
+    fn render_grouped(&self) -> String {
+        match self {
+            Predicate::And(..) | Predicate::Or(..) => format!("({})", self.render()),
+            _ => self.render(),
+        }
     }
 
     /// Evaluate against the three selector fact contexts (self / candidate /
@@ -1641,6 +1716,61 @@ pub fn parse_predicate(src: &str) -> Result<Predicate, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- Predicate::render (issue #1152) -----------------------------------
+
+    #[test]
+    fn render_round_trips_a_fact_atom_with_a_param_operand() {
+        let p = parse_predicate("fact(range_to_target) < param(orbit_range)").unwrap();
+        assert_eq!(p.render(), "fact(range_to_target) < param(orbit_range)");
+    }
+
+    #[test]
+    fn render_names_each_context_and_the_state_time_atom() {
+        assert_eq!(
+            parse_predicate("memory(engagements) >= 3")
+                .unwrap()
+                .render(),
+            "memory(engagements) >= 3"
+        );
+        // `state_time` takes no argument and renders bare.
+        assert_eq!(
+            parse_predicate("state_time >= param(dwell)")
+                .unwrap()
+                .render(),
+            "state_time >= param(dwell)"
+        );
+        assert_eq!(
+            parse_predicate("flag(general_quarters)").unwrap().render(),
+            "flag(general_quarters)"
+        );
+        assert_eq!(
+            parse_predicate("counter(kills) > 2").unwrap().render(),
+            "counter(kills) > 2"
+        );
+    }
+
+    #[test]
+    fn render_parenthesises_composed_guards() {
+        // A three-way `and` is a readable, unambiguous expression once rendered;
+        // the surface only needs the guard back verbatim enough to read.
+        let p = parse_predicate(
+            "fact(hazard_urgency) > param(surge) and fact(boost_available) > 0 \
+             and memory(engagements) < param(cap)",
+        )
+        .unwrap();
+        let rendered = p.render();
+        assert!(
+            rendered.contains("fact(hazard_urgency) > param(surge)"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("fact(boost_available) > 0"), "{rendered}");
+        assert!(
+            rendered.contains("memory(engagements) < param(cap)"),
+            "{rendered}"
+        );
+        assert!(rendered.contains(" and "), "{rendered}");
+    }
 
     // --- FlagStore basics --------------------------------------------------
 

@@ -857,11 +857,36 @@ where
     let mut facts_with_memory = facts.clone();
     seed_memory_derived_facts(&mut facts_with_memory, &state.memory);
     let memory = state.memory_at(now);
-    let to = policy
-        .resolve_transition(&state.current, &facts_with_memory, &memory, flags)?
-        .to
-        .clone();
+    let current = state.current.clone();
+
+    // ── Read-only policy-state diagnostics (issue #1152) ──────────────────────
+    //
+    // Record what the machine considered and did this tick, for the AI
+    // policy-state debug surface. Both writes are diagnostic only: they are never
+    // read by the machine's decision below, are not folded into the #894 digest
+    // (`sim_digest` does not fold policy runtime state) and are not snapshotted,
+    // so recording them cannot move a seeded run — and evaluating a guard is
+    // itself side-effect free. `blocking_transition` is the inverse scan of
+    // `resolve_transition` and shares its tie-break, so "which guard is holding
+    // the machine" is answered the same way "which transition fires" is.
+    state.blocked_transition = policy
+        .blocking_transition(&current, &facts_with_memory, &memory, flags)
+        .map(|t| crate::ai::policy::BlockedTransition {
+            from: current.clone(),
+            to: t.to.clone(),
+            guard: t.when.render(),
+        });
+
+    let transition = policy.resolve_transition(&current, &facts_with_memory, &memory, flags)?;
+    let to = transition.to.clone();
+    let committed = crate::ai::policy::CommittedTransition {
+        from: current,
+        to: to.clone(),
+        guard: transition.when.render(),
+        at_secs: now,
+    };
     state.enter(&to, now);
+    state.last_transition = Some(committed);
 
     // Commit-time host writes. The heading is captured from THIS tick's yaw, so
     // "the current outward heading" means the heading at the merge instant.
@@ -6237,6 +6262,47 @@ when = "state_time >= param(surge_dwell_secs)"
             boost_command(&mut app),
             "the entered state's continuous rule must engage boost through the \
              admitted SetBoost seam in the same tick the transition committed"
+        );
+    }
+
+    /// Issue #1152: the machine tick records its transition diagnostics
+    /// read-only. After the hazard guard carries `cruise → surge`, the runtime
+    /// state names that committed transition; while it then holds in `surge`
+    /// inside the authored dwell, it names the guard blocking the return to
+    /// `cruise`. This is the surface the per-host debug view projects, driven end
+    /// to end through the real host rather than a hand-built state.
+    #[test]
+    fn stateful_boost_machine_records_last_and_blocked_transitions() {
+        let mut app = boost_ai_app(Some(stateful_boost_policy()));
+        tick_twice(&mut app);
+
+        let state = boost_policy_state(&mut app);
+        assert_eq!(state.current, "surge");
+        let last = state
+            .last_transition
+            .expect("the committed cruise -> surge transition must be recorded");
+        assert_eq!(last.from, "cruise");
+        assert_eq!(last.to, "surge");
+        assert!(
+            last.guard.contains("hazard_urgency"),
+            "the recorded guard reads as authored, got {}",
+            last.guard
+        );
+
+        // Held in `surge` inside the 3 s dwell: the only outgoing edge (back to
+        // `cruise`, gated on `state_time`) is not yet satisfied, so it is the
+        // blocking guard.
+        tick_twice(&mut app);
+        let state = boost_policy_state(&mut app);
+        assert_eq!(state.current, "surge");
+        let blocked = state
+            .blocked_transition
+            .expect("the unsatisfied return-to-cruise guard must be recorded");
+        assert_eq!(blocked.to, "cruise");
+        assert!(
+            blocked.guard.contains("state_time"),
+            "the blocking guard reads as authored, got {}",
+            blocked.guard
         );
     }
 

@@ -37,12 +37,12 @@ pub use ai_state::{AiDoctrineCapture, DebugAiDoctrineEnabled};
 pub use payload::{
     ActivitySource, AiStatePayload, DamageDebugPayload, DamageEntry, DoctrineCandidate,
     DoctrineChoice, EntityBehaviorEntry, EntityBehaviorPayload, EntityInspectorPayload,
-    FloatContribution, FloatModifierEntry, InspectorEntity, InspectorHullEntry, InspectorPlayer,
-    InspectorShieldFacing, IntContribution, IntModifierEntry, ModifierDebugPayload,
-    ModifierFlagEntry, PredicateValue, ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction,
-    ScenarioDossierEntry, ScenarioFlag, ScenarioObjective, ScenarioStatePayload, ScenarioTrigger,
-    ShipDoctrine, StationActivityBucket, StationActivityEntry, StationActivityPayload, TriggerFire,
-    DEBUG_SCHEMA_VERSION,
+    FloatContribution, FloatModifierEntry, HostBlockedView, HostMemoryEntry, HostPolicyView,
+    HostTransitionView, InspectorEntity, InspectorHullEntry, InspectorPlayer, InspectorShieldFacing,
+    IntContribution, IntModifierEntry, ModifierDebugPayload, ModifierFlagEntry, PredicateValue,
+    ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction, ScenarioDossierEntry, ScenarioFlag,
+    ScenarioObjective, ScenarioStatePayload, ScenarioTrigger, ShipDoctrine, StationActivityBucket,
+    StationActivityEntry, StationActivityPayload, TriggerFire, DEBUG_SCHEMA_VERSION,
 };
 pub use scenario::{DebugScenarioStateEnabled, ScenarioStateCapture, TriggerFireRecorder};
 pub use station_activity::{

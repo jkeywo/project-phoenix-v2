@@ -160,14 +160,19 @@ impl Default for StationActivityPayload {
 
 /// The AI-state debug surface's whole payload (issue #1149, PRD #1144).
 ///
-/// Today it carries only the per-ship doctrine pool (`ships`). Issue #1152 adds
-/// the per-host fine-system policy view as its OWN `hosts` field alongside
-/// `ships` — the two are independent sub-surfaces of the one AI payload (the
-/// PRD's "doctrine pool plus per-host fine-system policy view"), so #1152 can
-/// grow this struct without reshaping the doctrine part or any type below it.
+/// Two independent sub-surfaces of the one AI payload (the PRD's "doctrine pool
+/// plus per-host fine-system policy view"):
 ///
-/// Not `Eq`: the candidate scores are `f32`. `PartialEq` is enough for the
-/// tests that compare payloads.
+/// * `ships` — the per-ship scored-objective doctrine pool (issue #1149).
+/// * `hosts` — the per-host fine-system policy-machine view (issue #1152): for
+///   each stateful fine-system AI host, its current state, private memory, the
+///   last transition it committed and the guard blocking the transition it did
+///   not take. Added AFTER `ships`, so growing the struct never reshapes the
+///   doctrine part or any type below it — additive, serde-tolerant growth that
+///   does not bump [`DEBUG_SCHEMA_VERSION`] (payload convention 2).
+///
+/// Not `Eq`: the candidate scores and memory readings are floats. `PartialEq`
+/// is enough for the tests that compare payloads.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AiStatePayload {
     /// [`DEBUG_SCHEMA_VERSION`] at the time the host produced this payload.
@@ -177,7 +182,11 @@ pub struct AiStatePayload {
     /// One entry per AI-controlled ship, sorted by `(ship, uuid)` so two hosts
     /// folding the same world produce byte-identical JSON.
     pub ships: Vec<ShipDoctrine>,
-    // #1152 adds `hosts: Vec<HostPolicyView>` here, after `ships`.
+    /// One entry per stateful fine-system AI host, sorted by
+    /// `(ship, uuid, host)` for the same byte-identical wire order (issue
+    /// #1152). Empty when no AI ship runs a stateful policy machine.
+    #[serde(default)]
+    pub hosts: Vec<HostPolicyView>,
 }
 
 impl Default for AiStatePayload {
@@ -186,6 +195,7 @@ impl Default for AiStatePayload {
             schema_version: DEBUG_SCHEMA_VERSION,
             tick: 0,
             ships: Vec::new(),
+            hosts: Vec::new(),
         }
     }
 }
@@ -787,6 +797,89 @@ impl Default for EntityInspectorPayload {
             entities: Vec::new(),
         }
     }
+}
+
+// ── AI-state surface: the per-host policy machine view (issue #1152) ─────────
+//
+// The second AI observability sub-surface. Where `ShipDoctrine` above answers
+// "why did the ship pick this directive", this answers "what is the ship's
+// stateful fine-system policy machine doing" — the black box #882 introduced.
+// One entry per stateful fine-system AI host (the helm Engines/Steering/Boost
+// axes today: the hosts that carry an `AiPolicyRuntimeState`), organised by the
+// `crate::entities::ai_flag_hosts` registry's own host names rather than a new
+// parallel index. The projector that fills these lives in
+// `crate::debug::ai_state`; the last-transition and blocked-transition it reads
+// are recorded read-only by `tick_policy_machine` and are never folded into the
+// #894 digest.
+
+/// One stateful fine-system AI host's policy-machine projection (issue #1152).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HostPolicyView {
+    /// The owning ship's display name (`EntityName`), or `"<unnamed>"`.
+    pub ship: String,
+    /// The ship's stable entity uuid, when it carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uuid: Option<String>,
+    /// The AI host's name from the registry (`ai_flag_hosts::AiHost::system`),
+    /// e.g. `"Helm boost"` — so the view is keyed off the same registry that
+    /// names every evaluation site, not a new parallel index.
+    pub host: String,
+    /// The currently-entered policy state id.
+    pub state: String,
+    /// The tick-derived clock reading at which `state` was entered
+    /// (`AiPolicyRuntimeState::entered_at_secs`). Combined with the payload's
+    /// `tick` this reads as "how long in this state"; kept as the raw datum so
+    /// two hosts fold identically.
+    pub entered_at_secs: f64,
+    /// This host's private memory bag, sorted by key so the wire order is
+    /// deterministic.
+    pub memory: Vec<HostMemoryEntry>,
+    /// The most recent transition this machine committed, or `None` before it
+    /// has taken one since a reset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_transition: Option<HostTransitionView>,
+    /// The outgoing transition the machine considered and did not take on the
+    /// most recent tick, with the guard blocking it — or `None` when every
+    /// outgoing guard is satisfied or the state has no transitions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_transition: Option<HostBlockedView>,
+}
+
+/// One `(name, value)` reading from a host's private memory bag (issue #1152).
+///
+/// Not `Eq`: memory readings are `f64`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HostMemoryEntry {
+    /// The memory slot name, as an author writes it in `memory(name)`.
+    pub key: String,
+    /// The current reading.
+    pub value: f64,
+}
+
+/// A transition the machine committed, as projected for the surface (issue
+/// #1152).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HostTransitionView {
+    /// The state the machine left.
+    pub from: String,
+    /// The state it entered.
+    pub to: String,
+    /// The guard that fired, rendered as authored (`Predicate::render`).
+    pub guard: String,
+    /// The tick-derived clock reading at which it committed.
+    pub at_secs: f64,
+}
+
+/// The outgoing transition the machine considered and rejected, with the guard
+/// blocking it (issue #1152).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HostBlockedView {
+    /// The current state the machine would leave.
+    pub from: String,
+    /// The state the blocked transition would enter.
+    pub to: String,
+    /// The guard that is not yet satisfied, rendered as authored.
+    pub guard: String,
 }
 
 #[cfg(test)]

@@ -443,507 +443,599 @@ impl SpawnSection for BehaviourSpawn {
     fn apply(&self, config: &EntityConfig, position: Vec3, cmds: &mut EntityCommands) {
         // Behaviour section — the "this entity is AI-driven" predicate; ai_plugin
         // registers an AI token for any entity carrying it.
+        //
+        // Decomposed (issue #1198) into per-concern sub-builders. Each inserts a
+        // cohesive slice of the ship's components, and they are called here in the
+        // EXACT order their inserts previously ran inline. Component-insertion order
+        // is archetype-creation order, which the authoritative digest is sensitive
+        // to (see [`SpawnSection`] above and `tests/archetype_order_determinism.rs`),
+        // so this split is pure code motion: the sequence and set of `.insert()`
+        // calls is byte-for-byte the one that shipped before it.
         let static_point_defence = config.is_static_point_defence();
-        if config.behaviour.is_some() || static_point_defence {
-            if let Some(behaviour) = &config.behaviour {
-                cmds.insert(BehaviourSection(behaviour.clone()));
-            }
-            if static_point_defence {
-                cmds.insert(StaticPointDefence);
-            }
-            cmds.insert(crate::server_app::ShipSystemBlackboards::default());
+        if !(config.behaviour.is_some() || static_point_defence) {
+            return;
+        }
+        insert_behaviour_markers(config, static_point_defence, cmds);
+        let power_group_seed = insert_ship_config_and_core_bundle(config, position, cmds);
+        insert_ship_scratch_state(cmds);
+        insert_power_state(config, &power_group_seed, cmds);
+        // Built here (pure, no inserts) so its authored-block reads sit where they
+        // always did; the map is inserted later, in place, by
+        // `insert_power_multipliers_and_modifiers`.
+        let multipliers = build_power_multipliers(config);
+        insert_target_selectors(config, cmds);
+        insert_ai_policies(config, cmds);
+        insert_power_multipliers_and_modifiers(config, multipliers, cmds);
+        insert_ship_markers_and_trackers(cmds);
+    }
+}
 
-            // Build the ship's ShipConfigComponent from its own TOML [[station]]/
-            // [[system]]/[power_groups] blocks, parsed the same way ship entity TOMLs
-            // is parsed. If the entity TOML declared none, this is a truly empty
-            // config (no stations, no systems) — the loop below simply sets nothing.
-            let ship_config = match &config.ship_config {
-                Some(sc) => crate::ship_plugin::ShipConfigComponent(sc.clone()),
-                None => crate::ship_plugin::ShipConfigComponent(crate::ship::config::ShipConfig {
-                    stations: vec![],
-                    systems: vec![],
-                    power_groups: std::collections::HashMap::new(),
-                    coordination_lag_secs: 0.0,
-                }),
-            };
-            // Boot seeding (issue #871). Every hull spawned here comes up with
-            // nobody connected, so every station boots on `Backfill` — which is
-            // what "NPC" now means: a stationed ship with nobody in the seats.
-            //
-            // This is the SAME `seed_boot_ratings` the player game-start path in
-            // `server_app::spawn_game_start_entities` calls, not a parallel
-            // NPC-only rule. The blanket "set every declared system to Ai" loop
-            // that used to live here worked only because NPC hulls declared no
-            // stations at all; once they do, a system's control source has to come
-            // from its station's rating exactly as it does on a player hull, or a
-            // human taking an NPC seat could never be admitted.
-            //
-            // A hull with no stations (a bare `[behaviour]` entity, or one whose
-            // only systems are auto-generated) still ends up all-Ai: every one of
-            // its systems is `ai_only` and the second pass covers them.
-            let (resolver, active_ratings) =
-                crate::ship::rating::seed_boot_ratings(&ship_config.0, |_| {
-                    crate::ship::rating::BACKFILL_RATING.to_string()
-                });
-            // Seed the reactor from the ship's authored power groups (issue #762)
-            // BEFORE `ship_config` is moved into the entity, so authored groups
-            // beyond the canonical three (e.g. `ops`) are allocatable rather than
-            // returning `UnknownGroup`. Empty for ships with no `[power_groups.*]`.
-            let power_group_seed =
-                crate::ship::power::authored_power_group_seed(&ship_config.0.power_groups);
-            // Seed ShipPhysics from the spawn position so the per-entity helm loop
-            // starts with the correct initial state rather than (0, 0).
-            let ship_physics = crate::ship::state::ShipPhysics {
-                x: position.x,
-                z: position.z,
-                yaw: {
-                    let rot =
-                        bevy::math::Quat::from_euler(bevy::math::EulerRot::YXZ, 0.0, 0.0, 0.0);
-                    let _ = rot;
-                    0.0 // initial yaw; updated each tick by integrate_ship_physics
-                },
-                ..Default::default()
-            };
-            cmds.insert((
-                ship_config,
-                crate::core::messages::AdmittedCommands::default(),
-                crate::ship_plugin::ShipSystemControlSources(resolver),
-                crate::ship_plugin::ActiveStationRatings(active_ratings),
-                crate::ship_plugin::CoordinationQueue::default(),
-                ship_physics,
-                crate::ship_plugin::HelmWaypointClearance::default(),
-                crate::console::weapons::TacticalRadarSelection::default(),
-                crate::console::weapons::ActiveBeam::default(),
-                crate::console::weapons::PhaserCooldown::default(),
-                crate::ship::sensors::SensorRadarSelection::default(),
-                // The restraint lever (issue #1041) rides in the SAME bundle as the
-                // alert it layers under, nested rather than added as a second
-                // `insert`. Every ship carries it, player and NPC alike, so the
-                // captain's order and a scenario's order land on the same state and
-                // the fire hosts need no "is this an NPC?" branch; it defaults to
-                // released, so a hull nobody orders behaves exactly as it did
-                // before this issue.
-                //
-                // The nesting is load-bearing, not tidiness. A second `insert` is a
-                // second queued command and a second archetype move per ship, which
-                // shifts what the command queue does afterwards — and a world that
-                // never pulls this lever must be byte-identical, which is the
-                // acceptance criterion this whole slice is built to. Bundles nest,
-                // so pairing it with `ShipRedAlert` keeps the tuple inside Bevy's
-                // 15-element ceiling without paying for a second command.
-                (
-                    crate::ship::state::ShipRedAlert::default(),
-                    crate::ship::state::ShipWeaponsHold::default(),
+/// The "this entity is AI-driven" markers: the optional [`BehaviourSection`], the
+/// [`StaticPointDefence`] marker for a static platform, and the empty per-ship
+/// blackboard set every AI hull carries.
+fn insert_behaviour_markers(
+    config: &EntityConfig,
+    static_point_defence: bool,
+    cmds: &mut EntityCommands,
+) {
+    if let Some(behaviour) = &config.behaviour {
+        cmds.insert(BehaviourSection(behaviour.clone()));
+    }
+    if static_point_defence {
+        cmds.insert(StaticPointDefence);
+    }
+    cmds.insert(crate::server_app::ShipSystemBlackboards::default());
+}
+
+/// Builds the ship's [`ShipConfigComponent`] from its own TOML blocks, seeds the
+/// boot ratings / physics, and inserts the core per-ship state bundle.
+///
+/// Returns the authored power-group seed, computed BEFORE `ship_config` is moved
+/// into the entity so [`insert_power_state`] can build the reactor from groups
+/// beyond the canonical three.
+fn insert_ship_config_and_core_bundle(
+    config: &EntityConfig,
+    position: Vec3,
+    cmds: &mut EntityCommands,
+) -> Vec<(crate::core::messages::PowerGroupId, u8)> {
+    // Build the ship's ShipConfigComponent from its own TOML [[station]]/
+    // [[system]]/[power_groups] blocks, parsed the same way ship entity TOMLs
+    // is parsed. If the entity TOML declared none, this is a truly empty
+    // config (no stations, no systems) — the loop below simply sets nothing.
+    let ship_config = match &config.ship_config {
+        Some(sc) => crate::ship_plugin::ShipConfigComponent(sc.clone()),
+        None => crate::ship_plugin::ShipConfigComponent(crate::ship::config::ShipConfig {
+            stations: vec![],
+            systems: vec![],
+            power_groups: std::collections::HashMap::new(),
+            coordination_lag_secs: 0.0,
+        }),
+    };
+    // Boot seeding (issue #871). Every hull spawned here comes up with
+    // nobody connected, so every station boots on `Backfill` — which is
+    // what "NPC" now means: a stationed ship with nobody in the seats.
+    //
+    // This is the SAME `seed_boot_ratings` the player game-start path in
+    // `server_app::spawn_game_start_entities` calls, not a parallel
+    // NPC-only rule. The blanket "set every declared system to Ai" loop
+    // that used to live here worked only because NPC hulls declared no
+    // stations at all; once they do, a system's control source has to come
+    // from its station's rating exactly as it does on a player hull, or a
+    // human taking an NPC seat could never be admitted.
+    //
+    // A hull with no stations (a bare `[behaviour]` entity, or one whose
+    // only systems are auto-generated) still ends up all-Ai: every one of
+    // its systems is `ai_only` and the second pass covers them.
+    let (resolver, active_ratings) = crate::ship::rating::seed_boot_ratings(&ship_config.0, |_| {
+        crate::ship::rating::BACKFILL_RATING.to_string()
+    });
+    // Seed the reactor from the ship's authored power groups (issue #762)
+    // BEFORE `ship_config` is moved into the entity, so authored groups
+    // beyond the canonical three (e.g. `ops`) are allocatable rather than
+    // returning `UnknownGroup`. Empty for ships with no `[power_groups.*]`.
+    let power_group_seed =
+        crate::ship::power::authored_power_group_seed(&ship_config.0.power_groups);
+    // Seed ShipPhysics from the spawn position so the per-entity helm loop
+    // starts with the correct initial state rather than (0, 0).
+    let ship_physics = crate::ship::state::ShipPhysics {
+        x: position.x,
+        z: position.z,
+        yaw: {
+            let rot = bevy::math::Quat::from_euler(bevy::math::EulerRot::YXZ, 0.0, 0.0, 0.0);
+            let _ = rot;
+            0.0 // initial yaw; updated each tick by integrate_ship_physics
+        },
+        ..Default::default()
+    };
+    cmds.insert((
+        ship_config,
+        crate::core::messages::AdmittedCommands::default(),
+        crate::ship_plugin::ShipSystemControlSources(resolver),
+        crate::ship_plugin::ActiveStationRatings(active_ratings),
+        crate::ship_plugin::CoordinationQueue::default(),
+        ship_physics,
+        crate::ship_plugin::HelmWaypointClearance::default(),
+        crate::console::weapons::TacticalRadarSelection::default(),
+        crate::console::weapons::ActiveBeam::default(),
+        crate::console::weapons::PhaserCooldown::default(),
+        crate::ship::sensors::SensorRadarSelection::default(),
+        // The restraint lever (issue #1041) rides in the SAME bundle as the
+        // alert it layers under, nested rather than added as a second
+        // `insert`. Every ship carries it, player and NPC alike, so the
+        // captain's order and a scenario's order land on the same state and
+        // the fire hosts need no "is this an NPC?" branch; it defaults to
+        // released, so a hull nobody orders behaves exactly as it did
+        // before this issue.
+        //
+        // The nesting is load-bearing, not tidiness. A second `insert` is a
+        // second queued command and a second archetype move per ship, which
+        // shifts what the command queue does afterwards — and a world that
+        // never pulls this lever must be byte-identical, which is the
+        // acceptance criterion this whole slice is built to. Bundles nest,
+        // so pairing it with `ShipRedAlert` keeps the tuple inside Bevy's
+        // 15-element ceiling without paying for a second command.
+        (
+            crate::ship::state::ShipRedAlert::default(),
+            crate::ship::state::ShipWeaponsHold::default(),
+        ),
+        crate::ship::state::ShipViewMode::default(),
+        crate::ship::state::ShipPhaserFrequency::default(),
+        crate::console::navigation::NavigationWaypoint::default(),
+    ));
+    power_group_seed
+}
+
+/// Per-ship scratch/coordination state every AI hull carries: helm intent,
+/// objective cursors, the channel-3 debounce cells, and the repair queue. All
+/// default-constructed, so this depends on neither the config nor the position.
+fn insert_ship_scratch_state(cmds: &mut EntityCommands) {
+    // Per-entity helm intent (audit follow-up). Every ship carries
+    // its own `LastHelmInput` so systems that iterate `With<Ship>`
+    // and read `Option<&LastHelmInput>` see a real value on NPCs
+    // instead of the `unwrap_or_default()` fallback. Notably
+    // `console_ai::server::ai_power_allocation` reads `thrust` to drive
+    // its hysteresis-based movement rule (`tick_power_movement_rule`),
+    // engaging/disengaging helm power by ±1 on sustained high/low
+    // thrust rather than pinning to an absolute level. Inserted
+    // separately because Bevy's tuple Bundle max is 15 elements.
+    // `ShipStationStances` rides the same command as `LastHelmInput` (a
+    // tuple is one Bundle, one archetype move) so a hull nobody commands
+    // pays no extra insert and stays byte-identical. Empty by default: only
+    // a human Command operator's explicit stance pick ever fills it.
+    cmds.insert((
+        crate::ship_plugin::LastHelmInput::default(),
+        crate::console::command::server::ShipStationStances::default(),
+        // Edge-detection scratch for the persist-behind-human trigger
+        // (issue #1108). Transient and NOT folded into the sim digest —
+        // see the type's own docs; a fresh/reloaded hull records its first
+        // observation and fires no edge.
+        crate::console::command::server::LastDirectedControl::default(),
+    ));
+    // Per-objective route cursors: where this ship is on each objective's
+    // route. Read by the low-LOD `simulate_low_lod_ships` path, the high-LOD
+    // `helm_patrol`, and `operate_navigation_ai`; written only by
+    // `advance_objective_cursors`. A ship without one cannot patrol.
+    // Inserted separately to stay under Bevy's tuple-Bundle element cap.
+    cmds.insert(crate::ai::server::ObjectiveCursors::default());
+    // Per-ship coordination bus state (audit follow-up). Every ship
+    // tracks its own shields down/restore notification cycle and its
+    // own sensors→tactical frequency-hint dedupe state so the two
+    // coordination emitters (`emit_shields_coordination`,
+    // `tick_sensors_frequency_hint`) can iterate `With<Ship>` and
+    // route into each ship's own `CoordinationQueue` via
+    // `CoordinationEnqueue.source_entity`.
+    cmds.insert(crate::ship::shields::ShieldsCoordinationState::default());
+    cmds.insert(crate::ship::sensors::SensorsFrequencyState::default());
+    cmds.insert(crate::ship::sensors::SensorsThreatState::default());
+    // Power brownout advisory debounce state (issue #678): per-ship
+    // so each ship tracks its own brownout notification cycle.
+    cmds.insert(crate::ship::power::PowerBrownoutState::default());
+    // Weapons->Helm arc-bearing request state (issue #677): per-ship
+    // debounce for the channel-3 request, and the pending bearing Helm
+    // AI folds into its steering once the request is consumed.
+    cmds.insert(crate::console::weapons::WeaponsArcRequestState::default());
+    cmds.insert(crate::ship_plugin::PendingArcBearingRequest::default());
+    // Distinct docking intent (issue #742): the sanctioned home for
+    // controlled reverse / lateral close manoeuvres, kept separate from the
+    // facing-only arc-bearing request above.
+    cmds.insert(crate::ship_plugin::DockingMotionIntent::default());
+    cmds.insert(crate::ship::shields::PendingShieldsThreatBearing::default());
+    // Sensors→Tactical frequency advisory a backfilled Tactical consumes
+    // off the channel-3 bus (issue #873).
+    cmds.insert(crate::ship_plugin::PendingTacticalFrequencyHint::default());
+    // Per-ship intent-narration memory (issue #879): the previous decision
+    // snapshot of each narrating seat plus this ship's advisory counter.
+    // Belongs to the ship rather than to its LOD tier — a demoted hull
+    // still has seats to narrate for if a human ever takes one.
+    cmds.insert(crate::ship_plugin::ShipIntentNarration::default());
+    cmds.insert(crate::ship_plugin::LastSystemTiers::default());
+    cmds.insert(crate::ship_plugin::RepairHumanAlerted::default());
+    cmds.insert(crate::console::repair::server::RepairRequestQueue::default());
+}
+
+/// The reactor and its allocation AI: the [`ShipPowerSystem`] (seeded from the
+/// authored power groups), the per-entity [`PowerConfigResource`], and the
+/// optional inline power-allocation policy from `[power.ai_policy]`.
+fn insert_power_state(
+    config: &EntityConfig,
+    power_group_seed: &[(crate::core::messages::PowerGroupId, u8)],
+    cmds: &mut EntityCommands,
+) {
+    cmds.insert(crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_authored_groups(
+            &crate::modifiers::power_system::PowerConfig::default(),
+            power_group_seed,
+        ),
+    ));
+    // Per-entity power config (PRD #597 gap-4 closure). NPCs without a
+    // `[power]` TOML block get `PowerConfigResource::default()` /
+    // `PowerAiConfigResource::default()` so `translate_power_modifiers`,
+    // `ai_power_allocation` (issue #693), and `tick_power_system` can
+    // iterate every ship uniformly (`With<Ship>`) without an `is_npc`
+    // fork. When the TOML supplies `[power]` / `[power.ai]`, those
+    // values seed the components.
+    let power_config = match &config.power {
+        Some(pc) => {
+            crate::ship::power::PowerConfigResource(crate::modifiers::power_system::PowerConfig {
+                capacity: pc.capacity,
+                rates: pc.rates,
+                sustainable_total: pc.sustainable_total,
+                max_commanded_total: pc.max_commanded_total,
+                emergency_threshold: pc.emergency_threshold,
+            })
+        }
+        None => crate::ship::power::PowerConfigResource::default(),
+    };
+    cmds.insert(crate::ship::power::ShipPowerSystem(
+        crate::modifiers::power_system::PowerSystem::from_authored_groups(
+            &power_config.0,
+            power_group_seed,
+        ),
+    ));
+    cmds.insert(power_config);
+    // Inline stateless Power allocation AI policy (issue #784) — from the
+    // ship's `[power.ai_policy]` block. Since #885b stage 5d there is no
+    // Rust-side synthesiser behind it: strict AI-declaration mode
+    // (`AiDeclarationMode::DEFAULT`) rejects an AI-capable hull that omits
+    // the block at load, so an AI-bearing entity always authors one and the
+    // `None` arm is reached only by a config built in code. Nothing is
+    // attached in that case — an undeclared system gets no automation, which
+    // is PRD #774 US7's requirement. `to_policy` cannot fail here: the block
+    // was validated in `EntityConfig::from_toml`.
+    if let Some(ai) = config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
+        cmds.insert((
+            crate::ship::power::PowerAiPolicy(ai.to_policy().unwrap_or_default()),
+            // Carried from the SAME authored block (issue #889's
+            // evaluate_every_ticks, wired at runtime): a resolved
+            // `AiPolicy` alone forgets this field, so it rides alongside
+            // as a sibling component.
+            crate::ship::power::PowerAiCadence(ai.evaluate_every_ticks),
+        ));
+    }
+}
+
+/// Per-entity power multipliers, defaulted then overridden by any per-console
+/// `power_multipliers` blocks. Pure — no inserts; the caller inserts the result
+/// via [`insert_power_multipliers_and_modifiers`] at the original insert site.
+fn build_power_multipliers(
+    config: &EntityConfig,
+) -> std::collections::HashMap<crate::core::messages::PowerGroupId, [f32; 4]> {
+    // Per-entity power multipliers. Seeded from any per-console TOML
+    // `power_multipliers` blocks (helm_console/weapons_console/shields_console)
+    // and otherwise defaulted so NPC ships still get MaxSpeed / PhaserDamage
+    // / ShieldRegen bonuses translated by `translate_power_modifiers`.
+    //
+    // After issue #617 the map is keyed by `PowerGroupId`.
+    let defaults = [-0.5f32, 0.0, 0.25, 0.5];
+    let mut multipliers: std::collections::HashMap<crate::core::messages::PowerGroupId, [f32; 4]> =
+        std::collections::HashMap::from([
+            (
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
                 ),
-                crate::ship::state::ShipViewMode::default(),
-                crate::ship::state::ShipPhaserFrequency::default(),
-                crate::console::navigation::NavigationWaypoint::default(),
-            ));
-            // Per-entity helm intent (audit follow-up). Every ship carries
-            // its own `LastHelmInput` so systems that iterate `With<Ship>`
-            // and read `Option<&LastHelmInput>` see a real value on NPCs
-            // instead of the `unwrap_or_default()` fallback. Notably
-            // `console_ai::server::ai_power_allocation` reads `thrust` to drive
-            // its hysteresis-based movement rule (`tick_power_movement_rule`),
-            // engaging/disengaging helm power by ±1 on sustained high/low
-            // thrust rather than pinning to an absolute level. Inserted
-            // separately because Bevy's tuple Bundle max is 15 elements.
-            // `ShipStationStances` rides the same command as `LastHelmInput` (a
-            // tuple is one Bundle, one archetype move) so a hull nobody commands
-            // pays no extra insert and stays byte-identical. Empty by default: only
-            // a human Command operator's explicit stance pick ever fills it.
-            cmds.insert((
-                crate::ship_plugin::LastHelmInput::default(),
-                crate::console::command::server::ShipStationStances::default(),
-                // Edge-detection scratch for the persist-behind-human trigger
-                // (issue #1108). Transient and NOT folded into the sim digest —
-                // see the type's own docs; a fresh/reloaded hull records its first
-                // observation and fires no edge.
-                crate::console::command::server::LastDirectedControl::default(),
-            ));
-            // Per-objective route cursors: where this ship is on each objective's
-            // route. Read by the low-LOD `simulate_low_lod_ships` path, the high-LOD
-            // `helm_patrol`, and `operate_navigation_ai`; written only by
-            // `advance_objective_cursors`. A ship without one cannot patrol.
-            // Inserted separately to stay under Bevy's tuple-Bundle element cap.
-            cmds.insert(crate::ai::server::ObjectiveCursors::default());
-            // Per-ship coordination bus state (audit follow-up). Every ship
-            // tracks its own shields down/restore notification cycle and its
-            // own sensors→tactical frequency-hint dedupe state so the two
-            // coordination emitters (`emit_shields_coordination`,
-            // `tick_sensors_frequency_hint`) can iterate `With<Ship>` and
-            // route into each ship's own `CoordinationQueue` via
-            // `CoordinationEnqueue.source_entity`.
-            cmds.insert(crate::ship::shields::ShieldsCoordinationState::default());
-            cmds.insert(crate::ship::sensors::SensorsFrequencyState::default());
-            cmds.insert(crate::ship::sensors::SensorsThreatState::default());
-            // Power brownout advisory debounce state (issue #678): per-ship
-            // so each ship tracks its own brownout notification cycle.
-            cmds.insert(crate::ship::power::PowerBrownoutState::default());
-            // Weapons->Helm arc-bearing request state (issue #677): per-ship
-            // debounce for the channel-3 request, and the pending bearing Helm
-            // AI folds into its steering once the request is consumed.
-            cmds.insert(crate::console::weapons::WeaponsArcRequestState::default());
-            cmds.insert(crate::ship_plugin::PendingArcBearingRequest::default());
-            // Distinct docking intent (issue #742): the sanctioned home for
-            // controlled reverse / lateral close manoeuvres, kept separate from the
-            // facing-only arc-bearing request above.
-            cmds.insert(crate::ship_plugin::DockingMotionIntent::default());
-            cmds.insert(crate::ship::shields::PendingShieldsThreatBearing::default());
-            // Sensors→Tactical frequency advisory a backfilled Tactical consumes
-            // off the channel-3 bus (issue #873).
-            cmds.insert(crate::ship_plugin::PendingTacticalFrequencyHint::default());
-            // Per-ship intent-narration memory (issue #879): the previous decision
-            // snapshot of each narrating seat plus this ship's advisory counter.
-            // Belongs to the ship rather than to its LOD tier — a demoted hull
-            // still has seats to narrate for if a human ever takes one.
-            cmds.insert(crate::ship_plugin::ShipIntentNarration::default());
-            cmds.insert(crate::ship_plugin::LastSystemTiers::default());
-            cmds.insert(crate::ship_plugin::RepairHumanAlerted::default());
-            cmds.insert(crate::console::repair::server::RepairRequestQueue::default());
-            cmds.insert(crate::ship::power::ShipPowerSystem(
-                crate::modifiers::power_system::PowerSystem::from_authored_groups(
-                    &crate::modifiers::power_system::PowerConfig::default(),
-                    &power_group_seed,
+                defaults,
+            ),
+            (
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
                 ),
-            ));
-            // Per-entity power config (PRD #597 gap-4 closure). NPCs without a
-            // `[power]` TOML block get `PowerConfigResource::default()` /
-            // `PowerAiConfigResource::default()` so `translate_power_modifiers`,
-            // `ai_power_allocation` (issue #693), and `tick_power_system` can
-            // iterate every ship uniformly (`With<Ship>`) without an `is_npc`
-            // fork. When the TOML supplies `[power]` / `[power.ai]`, those
-            // values seed the components.
-            let power_config = match &config.power {
-                Some(pc) => crate::ship::power::PowerConfigResource(
-                    crate::modifiers::power_system::PowerConfig {
-                        capacity: pc.capacity,
-                        rates: pc.rates,
-                        sustainable_total: pc.sustainable_total,
-                        max_commanded_total: pc.max_commanded_total,
-                        emergency_threshold: pc.emergency_threshold,
-                    },
+                defaults,
+            ),
+            (
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
                 ),
-                None => crate::ship::power::PowerConfigResource::default(),
-            };
-            cmds.insert(crate::ship::power::ShipPowerSystem(
-                crate::modifiers::power_system::PowerSystem::from_authored_groups(
-                    &power_config.0,
-                    &power_group_seed,
+                defaults,
+            ),
+        ]);
+    if let Some(hc) = &config.helm_console {
+        if let Some(pm) = hc.power_multipliers {
+            multipliers.insert(
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
                 ),
-            ));
-            cmds.insert(power_config);
-            // Inline stateless Power allocation AI policy (issue #784) — from the
-            // ship's `[power.ai_policy]` block. Since #885b stage 5d there is no
-            // Rust-side synthesiser behind it: strict AI-declaration mode
-            // (`AiDeclarationMode::DEFAULT`) rejects an AI-capable hull that omits
-            // the block at load, so an AI-bearing entity always authors one and the
-            // `None` arm is reached only by a config built in code. Nothing is
-            // attached in that case — an undeclared system gets no automation, which
-            // is PRD #774 US7's requirement. `to_policy` cannot fail here: the block
-            // was validated in `EntityConfig::from_toml`.
-            if let Some(ai) = config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
-                cmds.insert((
-                    crate::ship::power::PowerAiPolicy(ai.to_policy().unwrap_or_default()),
-                    // Carried from the SAME authored block (issue #889's
-                    // evaluate_every_ticks, wired at runtime): a resolved
-                    // `AiPolicy` alone forgets this field, so it rides alongside
-                    // as a sibling component.
-                    crate::ship::power::PowerAiCadence(ai.evaluate_every_ticks),
-                ));
-            }
-            // Per-entity power multipliers. Seeded from any per-console TOML
-            // `power_multipliers` blocks (helm_console/weapons_console/shields_console)
-            // and otherwise defaulted so NPC ships still get MaxSpeed / PhaserDamage
-            // / ShieldRegen bonuses translated by `translate_power_modifiers`.
-            //
-            // After issue #617 the map is keyed by `PowerGroupId`.
-            let defaults = [-0.5f32, 0.0, 0.25, 0.5];
-            let mut multipliers: std::collections::HashMap<
-                crate::core::messages::PowerGroupId,
-                [f32; 4],
-            > = std::collections::HashMap::from([
-                (
-                    crate::core::messages::PowerGroupId(
-                        crate::modifiers::power_system::HELM_POWER_GROUP.into(),
-                    ),
-                    defaults,
-                ),
-                (
-                    crate::core::messages::PowerGroupId(
-                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
-                    ),
-                    defaults,
-                ),
-                (
-                    crate::core::messages::PowerGroupId(
-                        crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
-                    ),
-                    defaults,
-                ),
-            ]);
-            if let Some(hc) = &config.helm_console {
-                if let Some(pm) = hc.power_multipliers {
-                    multipliers.insert(
-                        crate::core::messages::PowerGroupId(
-                            crate::modifiers::power_system::HELM_POWER_GROUP.into(),
-                        ),
-                        pm,
-                    );
-                }
-            }
-            if let Some(wc) = &config.weapons_console {
-                if let Some(pm) = wc.power_multipliers {
-                    multipliers.insert(
-                        crate::core::messages::PowerGroupId(
-                            crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
-                        ),
-                        pm,
-                    );
-                }
-            }
-            if let Some(sc) = &config.shields_console {
-                if let Some(pm) = sc.power_multipliers {
-                    multipliers.insert(
-                        crate::core::messages::PowerGroupId(
-                            crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
-                        ),
-                        pm,
-                    );
-                }
-            }
-            // Sensors AI config — loaded from [sensors_console.ai] if present,
-            // otherwise the parse-time default. Inserted for EVERY entity that
-            // carries a `[behaviour]` block (i.e. every ship spawned through this
-            // path); it used to be inserted only when the TOML also carried the
-            // `.ai` sub-section, and `tick_frequency_hint_high_fidelity` then fell back to the
-            // global Resource. The player ship does not come through here at all —
-            // `server_app::spawn_game_start_entities` attaches its copy.
-            cmds.insert(
-                config
-                    .sensors_console
-                    .as_ref()
-                    .and_then(|sc| sc.ai.as_ref())
-                    .map(|ai| crate::ship::sensors::SensorsAiConfigResource {
-                        frequency_hint_delay_secs: ai.frequency_hint_delay_secs,
-                    })
-                    .unwrap_or_default(),
+                pm,
             );
-            // Sensors target selector (issue #776) — the per-system ranking policy
-            // `operate_sensors_ai` runs to pick the science target, from the
-            // authored `[sensors_console.selector]` block. Since #885b stage 5d
-            // there is no Rust-side synthesiser behind it: strict AI-declaration
-            // mode rejects an AI-capable hull that omits the block at load, so an
-            // unauthored selector means no component and therefore no ranking rather
-            // than an invented one. `to_selector` cannot fail here: the block was
-            // validated in `EntityConfig::from_toml`. Power rating is exposed to the
-            // selector as `self_fact(power_rating)`.
-            if let Some(s) = config
-                .sensors_console
-                .as_ref()
-                .and_then(|sc| sc.selector.as_ref())
-            {
-                cmds.insert(crate::ship::sensors::SensorsTargetSelector {
-                    selector: s.to_selector().unwrap_or_default(),
-                    power_rating: config.power_rating.map(|r| r as f32),
-                });
-            }
-            // Tactical target selector (issue #777) — the per-system ranking policy
-            // `ai_target_selection` runs to pick the authoritative weapons target,
-            // from the authored `[weapons_console.selector]` block.
-            if let Some(s) = config
-                .weapons_console
-                .as_ref()
-                .and_then(|wc| wc.selector.as_ref())
-            {
-                cmds.insert(crate::console::weapons::TacticalTargetSelector {
-                    selector: s.to_selector().unwrap_or_default(),
-                    power_rating: config.power_rating.map(|r| r as f32),
-                    // AC6 (issue #781): explicit radar idle from `[weapons_console]
-                    // selector_idle`, else the baseline (radar runs its selector).
-                    idle: config
-                        .weapons_console
-                        .as_ref()
-                        .map(|wc| wc.selector_idle)
-                        .unwrap_or(false),
-                });
-            }
-            // Navigation target selector (issue #778) — the per-system ranking
-            // policy `operate_navigation_ai` runs to rank objective destinations and
-            // eligible chart contacts into the shared Waypoint, from the authored
-            // `[navigation_console.selector]` block.
-            if let Some(s) = config
-                .navigation_console
-                .as_ref()
-                .and_then(|nc| nc.selector.as_ref())
-            {
-                cmds.insert(crate::console::navigation::NavigationTargetSelector {
-                    selector: s.to_selector().unwrap_or_default(),
-                    power_rating: config.power_rating.map(|r| r as f32),
-                });
-            }
-            // Repair target selector (issue #785) — the per-system ranking policy
-            // `operate_repair_ai` runs once per free repair team to rank the ship's
-            // damaged stations into ordinary admitted `DispatchRepairTeam` inputs,
-            // from the authored `[repair.selector]` block. Attached whenever the
-            // selector is authored, not only to ships that declare repair TEAMS —
-            // the teams component is what gates dispatch, and a ship that gains
-            // teams later still has its ranking.
-            if let Some(s) = config.repair.as_ref().and_then(|rc| rc.selector.as_ref()) {
-                cmds.insert(crate::console::repair::server::RepairTargetSelector {
-                    selector: s.to_selector().unwrap_or_default(),
-                    power_rating: config.power_rating.map(|r| r as f32),
-                });
-            }
-            // Comms hail selector + dialogue-response policy (issue #786) — the two
-            // halves of the Comms console's AI, from the authored
-            // `[comms_console.selector]` / `[comms_console.ai]` blocks. Resolved by
-            // the SHARED `comms_console_ai_components` helper, because
-            // `server_app::spawn_game_start_entities` must attach the identical pair
-            // to the player ship — the only ship either Comms AI host actually runs
-            // on, since both are filtered `With<LocalShip>`. Each half is `None` when
-            // its block is unauthored, and nothing is attached for it.
-            let (comms_selector, comms_response_policy, comms_response_cadence) =
-                crate::console::comms::server::comms_console_ai_components(config);
-            if let Some(sel) = comms_selector {
-                cmds.insert(sel);
-            }
-            if let Some(policy) = comms_response_policy {
-                cmds.insert(policy);
-            }
-            if let Some(cadence) = comms_response_cadence {
-                cmds.insert(cadence);
-            }
-            // Shields AI config — loaded from [shields_console.ai] if present,
-            // otherwise the parse-time default. Inserted for every entity carrying
-            // a `[behaviour]` block, alongside the sensors block above and inside
-            // the same ship gate: `ai_shield_focus` and `emit_shields_coordination`
-            // both query `With<Ship>`, so asteroids/stars/planets have no use for
-            // it. It used to be inserted only when the TOML also carried the `.ai`
-            // sub-section, and those readers then fell back to the global Resource
-            // — which `server_app` writes from the PLAYER ship's TOML. Every NPC
-            // now owns its own shields-AI tuning.
-            cmds.insert(
-                config
-                    .shields_console
-                    .as_ref()
-                    .and_then(|sc| sc.ai.as_ref())
-                    .map(|ai| crate::ship::shields::ShieldsAiConfigResource {
-                        damage_window_secs: ai.damage_window_secs,
-                        min_damage_window_secs: ai.min_damage_window_secs,
-                        damage_pct_threshold: ai.damage_pct_threshold,
-                        health_ratio_threshold: ai.health_ratio_threshold,
-                        ..Default::default()
-                    })
-                    .unwrap_or_default(),
-            );
-            // Shields focus AI policy (issue #783) — the inline stateless
-            // `shield_focus` policy from the authored `[shields_console.ai_policy]`
-            // block, so `ai_shield_focus` resolves a data-authored gate + reads the
-            // authored windows/thresholds from the policy `param` map rather than the
-            // retired `ai_cfg.*` reads. `to_policy` cannot fail here: the block was
-            // validated in `EntityConfig::from_toml`.
-            if let Some(ai) = config
-                .shields_console
-                .as_ref()
-                .and_then(|sc| sc.ai_policy.as_ref())
-            {
-                cmds.insert(crate::ship::shields::ShieldsFocusAiPolicy(
-                    ai.to_policy().unwrap_or_default(),
-                ));
-            }
-            // Captain AI policy (issue #775) — the inline stateless Red Alert
-            // policy from the authored `[captain_console.ai]` block, so
-            // `operate_captain_ai` reads a data-authored policy rather than a
-            // hardcoded controller.
-            if let Some(ai) = config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
-                cmds.insert(crate::console::captain::server::CaptainAiPolicy(
-                    ai.to_policy().unwrap_or_default(),
-                ));
-            }
-            // Helm fine-system AI policies (issues #779/#780, collapsed by #1209):
-            // the inline `[helm_console.*_ai]` policies — engines (longitudinal),
-            // steering (yaw), lateral, vertical, impulse, boost — resolved into ONE
-            // keyed `FineSystemAiPolicies` map so each host reads a data-authored mode
-            // verb by its `system_id()` rather than actuating unconditionally. One
-            // entry per authored block; an unauthored axis contributes none (strict
-            // AI-declaration mode rejects an unauthored AI-capable axis at load).
-            // Built the same shape the weapon banks use above — mirror of
-            // `PhaserBankAiPolicies`. `to_policy` cannot fail: each block was
-            // validated in `EntityConfig::from_toml`.
-            if let Some(hc) = config.helm_console.as_ref() {
-                use crate::ship::system_registry as sr;
-                let mut fine_policies: std::collections::BTreeMap<
-                    crate::core::messages::SystemId,
-                    crate::ai::policy::AiPolicy,
-                > = std::collections::BTreeMap::new();
-                for (block, system_id) in [
-                    (hc.engines_ai.as_ref(), sr::helm_thrust_system_id()),
-                    (hc.steering_ai.as_ref(), sr::helm_steering_system_id()),
-                    (hc.lateral_ai.as_ref(), sr::lateral_thrust_system_id()),
-                    (hc.vertical_ai.as_ref(), sr::vertical_thrust_system_id()),
-                    (hc.impulse_ai.as_ref(), sr::helm_impulse_system_id()),
-                    (hc.boost_ai.as_ref(), sr::helm_boost_system_id()),
-                ] {
-                    if let Some(ai) = block {
-                        fine_policies.insert(system_id, ai.to_policy().unwrap_or_default());
-                    }
-                }
-                cmds.insert(crate::ship::helm_ai::FineSystemAiPolicies(fine_policies));
-            }
-            cmds.insert(crate::ship::power::PowerMultiplierResource { multipliers });
-            // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
-            // gets an empty modifier cache. Region-entry observers and
-            // translate_power_modifiers write to the subject entity's cache;
-            // translate_impulse_modifiers remains LocalShip-only (ShipImpulse is a
-            // player-only mechanic).
-            cmds.insert(crate::modifiers::ShipModifiers::new());
-            // Per-entity ShipRepairTeams — only insert when the entity TOML declares
-            // repair TEAMS, i.e. a `[repair] repair_team_count` above zero. No
-            // count means the ship has no repair teams (the default behaviour for
-            // NPCs today).
-            //
-            // The gate is the COUNT and not the presence of `[repair]`, because
-            // since #885b every hull authors `[repair.selector]` and TOML cannot
-            // write that sub-table without bringing `[repair]` into existence — a
-            // presence gate would hand two teams to six NPC hulls that never had
-            // any. See `RepairConfig::declares_teams`.
-            if let Some(repair_cfg) = &config.repair {
-                if repair_cfg.declares_teams() {
-                    let timings = repair_cfg.to_runtime();
-                    cmds.insert(crate::console::repair::server::ShipRepairTeams(
-                        crate::modifiers::repair_teams::RepairTeams::new_with_timings(
-                            repair_cfg.repair_team_count as usize,
-                            timings,
-                        ),
-                    ));
-                }
-            }
-            // All ship entities carry the Ship marker — player and NPC alike.
-            // The LocalShip marker (not set here) is the viewscreen selector only.
-            cmds.insert(crate::server_app::Ship);
-            // Per-entity CollisionCooldown so NPC ships have their own collision
-            // cooldown timer (PRD #597 PR-8). Player ship gets one in
-            // `spawn_game_start_entities`.
-            cmds.insert(crate::server_app::CollisionCooldown::default());
-            // Per-entity combat activity trackers (PRD #597 PR-10). Every ship
-            // (player + NPC) records its own recent damage/hostile-fire/weapon
-            // fire and last attacker.
-            cmds.insert(crate::ship::combat_activity::RecentCombatActivity::default());
-            cmds.insert(crate::server_app::WeaponFiredThisTick::default());
-            cmds.insert(crate::server_app::ShipAttackedThisTick::default());
-            cmds.insert(crate::console::weapons::LastShipAttacker::default());
-            // Per-ship impulse drive state (audit follow-up). NPCs carry an
-            // idle `ShipImpulse` so `handle_blocks_impulse_region_enter` can
-            // route per-subject and future NPC helm AI can toggle impulse
-            // through the same per-ship pathway the player uses.
-            cmds.insert(crate::server_app::ShipImpulse::default());
-            // Per-ship boost drive battery (audit follow-up). NPCs carry an
-            // empty `ShipBoost` so future NPC helm AI can engage boost through
-            // the same per-ship pathway the player uses.
-            cmds.insert(crate::server_app::ShipBoost::default());
         }
     }
+    if let Some(wc) = &config.weapons_console {
+        if let Some(pm) = wc.power_multipliers {
+            multipliers.insert(
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                ),
+                pm,
+            );
+        }
+    }
+    if let Some(sc) = &config.shields_console {
+        if let Some(pm) = sc.power_multipliers {
+            multipliers.insert(
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
+                ),
+                pm,
+            );
+        }
+    }
+    multipliers
+}
+
+/// The AI target/selector policies read straight off the authored `selector`
+/// blocks: sensors AI config, then the sensors / tactical / navigation / repair
+/// target selectors.
+fn insert_target_selectors(config: &EntityConfig, cmds: &mut EntityCommands) {
+    // Sensors AI config — loaded from [sensors_console.ai] if present,
+    // otherwise the parse-time default. Inserted for EVERY entity that
+    // carries a `[behaviour]` block (i.e. every ship spawned through this
+    // path); it used to be inserted only when the TOML also carried the
+    // `.ai` sub-section, and `tick_frequency_hint_high_fidelity` then fell back to the
+    // global Resource. The player ship does not come through here at all —
+    // `server_app::spawn_game_start_entities` attaches its copy.
+    cmds.insert(
+        config
+            .sensors_console
+            .as_ref()
+            .and_then(|sc| sc.ai.as_ref())
+            .map(|ai| crate::ship::sensors::SensorsAiConfigResource {
+                frequency_hint_delay_secs: ai.frequency_hint_delay_secs,
+            })
+            .unwrap_or_default(),
+    );
+    // Sensors target selector (issue #776) — the per-system ranking policy
+    // `operate_sensors_ai` runs to pick the science target, from the
+    // authored `[sensors_console.selector]` block. Since #885b stage 5d
+    // there is no Rust-side synthesiser behind it: strict AI-declaration
+    // mode rejects an AI-capable hull that omits the block at load, so an
+    // unauthored selector means no component and therefore no ranking rather
+    // than an invented one. `to_selector` cannot fail here: the block was
+    // validated in `EntityConfig::from_toml`. Power rating is exposed to the
+    // selector as `self_fact(power_rating)`.
+    if let Some(s) = config
+        .sensors_console
+        .as_ref()
+        .and_then(|sc| sc.selector.as_ref())
+    {
+        cmds.insert(crate::ship::sensors::SensorsTargetSelector {
+            selector: s.to_selector().unwrap_or_default(),
+            power_rating: config.power_rating.map(|r| r as f32),
+        });
+    }
+    // Tactical target selector (issue #777) — the per-system ranking policy
+    // `ai_target_selection` runs to pick the authoritative weapons target,
+    // from the authored `[weapons_console.selector]` block.
+    if let Some(s) = config
+        .weapons_console
+        .as_ref()
+        .and_then(|wc| wc.selector.as_ref())
+    {
+        cmds.insert(crate::console::weapons::TacticalTargetSelector {
+            selector: s.to_selector().unwrap_or_default(),
+            power_rating: config.power_rating.map(|r| r as f32),
+            // AC6 (issue #781): explicit radar idle from `[weapons_console]
+            // selector_idle`, else the baseline (radar runs its selector).
+            idle: config
+                .weapons_console
+                .as_ref()
+                .map(|wc| wc.selector_idle)
+                .unwrap_or(false),
+        });
+    }
+    // Navigation target selector (issue #778) — the per-system ranking
+    // policy `operate_navigation_ai` runs to rank objective destinations and
+    // eligible chart contacts into the shared Waypoint, from the authored
+    // `[navigation_console.selector]` block.
+    if let Some(s) = config
+        .navigation_console
+        .as_ref()
+        .and_then(|nc| nc.selector.as_ref())
+    {
+        cmds.insert(crate::console::navigation::NavigationTargetSelector {
+            selector: s.to_selector().unwrap_or_default(),
+            power_rating: config.power_rating.map(|r| r as f32),
+        });
+    }
+    // Repair target selector (issue #785) — the per-system ranking policy
+    // `operate_repair_ai` runs once per free repair team to rank the ship's
+    // damaged stations into ordinary admitted `DispatchRepairTeam` inputs,
+    // from the authored `[repair.selector]` block. Attached whenever the
+    // selector is authored, not only to ships that declare repair TEAMS —
+    // the teams component is what gates dispatch, and a ship that gains
+    // teams later still has its ranking.
+    if let Some(s) = config.repair.as_ref().and_then(|rc| rc.selector.as_ref()) {
+        cmds.insert(crate::console::repair::server::RepairTargetSelector {
+            selector: s.to_selector().unwrap_or_default(),
+            power_rating: config.power_rating.map(|r| r as f32),
+        });
+    }
+}
+
+/// The remaining per-console AI policies: comms hail selector + response policy,
+/// shields AI config + focus policy, the captain red-alert policy, and the helm
+/// fine-system policy map.
+fn insert_ai_policies(config: &EntityConfig, cmds: &mut EntityCommands) {
+    // Comms hail selector + dialogue-response policy (issue #786) — the two
+    // halves of the Comms console's AI, from the authored
+    // `[comms_console.selector]` / `[comms_console.ai]` blocks. Resolved by
+    // the SHARED `comms_console_ai_components` helper, because
+    // `server_app::spawn_game_start_entities` must attach the identical pair
+    // to the player ship — the only ship either Comms AI host actually runs
+    // on, since both are filtered `With<LocalShip>`. Each half is `None` when
+    // its block is unauthored, and nothing is attached for it.
+    let (comms_selector, comms_response_policy, comms_response_cadence) =
+        crate::console::comms::server::comms_console_ai_components(config);
+    if let Some(sel) = comms_selector {
+        cmds.insert(sel);
+    }
+    if let Some(policy) = comms_response_policy {
+        cmds.insert(policy);
+    }
+    if let Some(cadence) = comms_response_cadence {
+        cmds.insert(cadence);
+    }
+    // Shields AI config — loaded from [shields_console.ai] if present,
+    // otherwise the parse-time default. Inserted for every entity carrying
+    // a `[behaviour]` block, alongside the sensors block above and inside
+    // the same ship gate: `ai_shield_focus` and `emit_shields_coordination`
+    // both query `With<Ship>`, so asteroids/stars/planets have no use for
+    // it. It used to be inserted only when the TOML also carried the `.ai`
+    // sub-section, and those readers then fell back to the global Resource
+    // — which `server_app` writes from the PLAYER ship's TOML. Every NPC
+    // now owns its own shields-AI tuning.
+    cmds.insert(
+        config
+            .shields_console
+            .as_ref()
+            .and_then(|sc| sc.ai.as_ref())
+            .map(|ai| crate::ship::shields::ShieldsAiConfigResource {
+                damage_window_secs: ai.damage_window_secs,
+                min_damage_window_secs: ai.min_damage_window_secs,
+                damage_pct_threshold: ai.damage_pct_threshold,
+                health_ratio_threshold: ai.health_ratio_threshold,
+                ..Default::default()
+            })
+            .unwrap_or_default(),
+    );
+    // Shields focus AI policy (issue #783) — the inline stateless
+    // `shield_focus` policy from the authored `[shields_console.ai_policy]`
+    // block, so `ai_shield_focus` resolves a data-authored gate + reads the
+    // authored windows/thresholds from the policy `param` map rather than the
+    // retired `ai_cfg.*` reads. `to_policy` cannot fail here: the block was
+    // validated in `EntityConfig::from_toml`.
+    if let Some(ai) = config
+        .shields_console
+        .as_ref()
+        .and_then(|sc| sc.ai_policy.as_ref())
+    {
+        cmds.insert(crate::ship::shields::ShieldsFocusAiPolicy(
+            ai.to_policy().unwrap_or_default(),
+        ));
+    }
+    // Captain AI policy (issue #775) — the inline stateless Red Alert
+    // policy from the authored `[captain_console.ai]` block, so
+    // `operate_captain_ai` reads a data-authored policy rather than a
+    // hardcoded controller.
+    if let Some(ai) = config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
+        cmds.insert(crate::console::captain::server::CaptainAiPolicy(
+            ai.to_policy().unwrap_or_default(),
+        ));
+    }
+    // Helm fine-system AI policies (issues #779/#780, collapsed by #1209):
+    // the inline `[helm_console.*_ai]` policies — engines (longitudinal),
+    // steering (yaw), lateral, vertical, impulse, boost — resolved into ONE
+    // keyed `FineSystemAiPolicies` map so each host reads a data-authored mode
+    // verb by its `system_id()` rather than actuating unconditionally. One
+    // entry per authored block; an unauthored axis contributes none (strict
+    // AI-declaration mode rejects an unauthored AI-capable axis at load).
+    // Built the same shape the weapon banks use above — mirror of
+    // `PhaserBankAiPolicies`. `to_policy` cannot fail: each block was
+    // validated in `EntityConfig::from_toml`.
+    if let Some(hc) = config.helm_console.as_ref() {
+        use crate::ship::system_registry as sr;
+        let mut fine_policies: std::collections::BTreeMap<
+            crate::core::messages::SystemId,
+            crate::ai::policy::AiPolicy,
+        > = std::collections::BTreeMap::new();
+        for (block, system_id) in [
+            (hc.engines_ai.as_ref(), sr::helm_thrust_system_id()),
+            (hc.steering_ai.as_ref(), sr::helm_steering_system_id()),
+            (hc.lateral_ai.as_ref(), sr::lateral_thrust_system_id()),
+            (hc.vertical_ai.as_ref(), sr::vertical_thrust_system_id()),
+            (hc.impulse_ai.as_ref(), sr::helm_impulse_system_id()),
+            (hc.boost_ai.as_ref(), sr::helm_boost_system_id()),
+        ] {
+            if let Some(ai) = block {
+                fine_policies.insert(system_id, ai.to_policy().unwrap_or_default());
+            }
+        }
+        cmds.insert(crate::ship::helm_ai::FineSystemAiPolicies(fine_policies));
+    }
+}
+
+/// Inserts the [`PowerMultiplierResource`] built by [`build_power_multipliers`],
+/// the empty per-entity [`ShipModifiers`] cache, and — only when the config
+/// declares repair TEAMS — the [`ShipRepairTeams`].
+fn insert_power_multipliers_and_modifiers(
+    config: &EntityConfig,
+    multipliers: std::collections::HashMap<crate::core::messages::PowerGroupId, [f32; 4]>,
+    cmds: &mut EntityCommands,
+) {
+    cmds.insert(crate::ship::power::PowerMultiplierResource { multipliers });
+    // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
+    // gets an empty modifier cache. Region-entry observers and
+    // translate_power_modifiers write to the subject entity's cache;
+    // translate_impulse_modifiers remains LocalShip-only (ShipImpulse is a
+    // player-only mechanic).
+    cmds.insert(crate::modifiers::ShipModifiers::new());
+    // Per-entity ShipRepairTeams — only insert when the entity TOML declares
+    // repair TEAMS, i.e. a `[repair] repair_team_count` above zero. No
+    // count means the ship has no repair teams (the default behaviour for
+    // NPCs today).
+    //
+    // The gate is the COUNT and not the presence of `[repair]`, because
+    // since #885b every hull authors `[repair.selector]` and TOML cannot
+    // write that sub-table without bringing `[repair]` into existence — a
+    // presence gate would hand two teams to six NPC hulls that never had
+    // any. See `RepairConfig::declares_teams`.
+    if let Some(repair_cfg) = &config.repair {
+        if repair_cfg.declares_teams() {
+            let timings = repair_cfg.to_runtime();
+            cmds.insert(crate::console::repair::server::ShipRepairTeams(
+                crate::modifiers::repair_teams::RepairTeams::new_with_timings(
+                    repair_cfg.repair_team_count as usize,
+                    timings,
+                ),
+            ));
+        }
+    }
+}
+
+/// The `Ship` marker and the per-ship trackers every hull (player + NPC) carries:
+/// collision cooldown, combat-activity trackers, and the idle impulse/boost drives.
+fn insert_ship_markers_and_trackers(cmds: &mut EntityCommands) {
+    // All ship entities carry the Ship marker — player and NPC alike.
+    // The LocalShip marker (not set here) is the viewscreen selector only.
+    cmds.insert(crate::server_app::Ship);
+    // Per-entity CollisionCooldown so NPC ships have their own collision
+    // cooldown timer (PRD #597 PR-8). Player ship gets one in
+    // `spawn_game_start_entities`.
+    cmds.insert(crate::server_app::CollisionCooldown::default());
+    // Per-entity combat activity trackers (PRD #597 PR-10). Every ship
+    // (player + NPC) records its own recent damage/hostile-fire/weapon
+    // fire and last attacker.
+    cmds.insert(crate::ship::combat_activity::RecentCombatActivity::default());
+    cmds.insert(crate::server_app::WeaponFiredThisTick::default());
+    cmds.insert(crate::server_app::ShipAttackedThisTick::default());
+    cmds.insert(crate::console::weapons::LastShipAttacker::default());
+    // Per-ship impulse drive state (audit follow-up). NPCs carry an
+    // idle `ShipImpulse` so `handle_blocks_impulse_region_enter` can
+    // route per-subject and future NPC helm AI can toggle impulse
+    // through the same per-ship pathway the player uses.
+    cmds.insert(crate::server_app::ShipImpulse::default());
+    // Per-ship boost drive battery (audit follow-up). NPCs carry an
+    // empty `ShipBoost` so future NPC helm AI can engage boost through
+    // the same per-ship pathway the player uses.
+    cmds.insert(crate::server_app::ShipBoost::default());
 }
 
 struct AiProfileSpawn;

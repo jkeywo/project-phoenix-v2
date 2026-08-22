@@ -268,42 +268,42 @@ pub const FINE_SYSTEM_KINDS: &[FineSystemKind] = &[
     FineSystemKind {
         key: FineSystemKey::Engines,
         host: &ai_flag_hosts::HELM_ENGINES,
-        component: "HelmEnginesAiPolicy",
+        component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Steering,
         host: &ai_flag_hosts::HELM_STEERING,
-        component: "HelmSteeringAiPolicy",
+        component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Lateral,
         host: &ai_flag_hosts::HELM_LATERAL,
-        component: "HelmLateralAiPolicy",
+        component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Vertical,
         host: &ai_flag_hosts::HELM_VERTICAL,
-        component: "HelmVerticalAiPolicy",
+        component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Impulse,
         host: &ai_flag_hosts::HELM_IMPULSE,
-        component: "HelmImpulseAiPolicy",
+        component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
     FineSystemKind {
         key: FineSystemKey::Boost,
         host: &ai_flag_hosts::HELM_BOOST,
-        component: "HelmBoostAiPolicy",
+        component: "FineSystemAiPolicies",
         idle_lever: IdleLever::InBandPolicy,
         spawn_sites: SPAWNER_AND_PLAYER,
     },
@@ -1227,7 +1227,10 @@ base_priority = 40.0
             .to_string();
         for (block, component) in [
             ("[captain_console.ai]", "CaptainAiPolicy"),
-            ("[helm_console.lateral_ai]", "HelmLateralAiPolicy"),
+            // Since #1209 every helm axis decodes into the one keyed
+            // `FineSystemAiPolicies` map, so the strict-mode error names that
+            // component for the lateral slot rather than a per-axis newtype.
+            ("[helm_console.lateral_ai]", "FineSystemAiPolicies"),
             ("[shields_console.ai_policy]", "ShieldsFocusAiPolicy"),
             ("[power.ai_policy]", "PowerAiPolicy"),
             ("[comms_console.ai]", "CommsResponseAiPolicy"),
@@ -1295,6 +1298,23 @@ base_priority = 40.0
         (app, entity)
     }
 
+    /// The fine-system id each helm axis's policy is keyed under in the one
+    /// [`crate::ship::helm_ai::FineSystemAiPolicies`] map (issue #1209); `None`
+    /// for every non-helm kind. The six axes share one component now, so the
+    /// cross-check resolves the entry by id rather than reading six newtypes.
+    fn helm_axis_system_id(key: FineSystemKey) -> Option<crate::messages::SystemId> {
+        use crate::system_registry as sr;
+        Some(match key {
+            FineSystemKey::Engines => sr::helm_thrust_system_id(),
+            FineSystemKey::Steering => sr::helm_steering_system_id(),
+            FineSystemKey::Lateral => sr::lateral_thrust_system_id(),
+            FineSystemKey::Vertical => sr::vertical_thrust_system_id(),
+            FineSystemKey::Impulse => sr::helm_impulse_system_id(),
+            FineSystemKey::Boost => sr::helm_boost_system_id(),
+            _ => return None,
+        })
+    }
+
     /// The policy the real spawner attached for one slot, if any.
     ///
     /// Exhaustive over [`FineSystemKey`], so a twentieth fine system cannot be
@@ -1311,24 +1331,21 @@ base_priority = 40.0
             FineSystemKey::CommsResponse => w
                 .get::<crate::console::comms::server::CommsResponseAiPolicy>(e)
                 .map(|c| Attached::Policy(c.0.clone())),
-            FineSystemKey::Engines => w
-                .get::<crate::ship::helm_ai::HelmEnginesAiPolicy>(e)
-                .map(|c| Attached::Policy(c.0.clone())),
-            FineSystemKey::Steering => w
-                .get::<crate::ship::helm_ai::HelmSteeringAiPolicy>(e)
-                .map(|c| Attached::Policy(c.0.clone())),
-            FineSystemKey::Lateral => w
-                .get::<crate::ship::helm_ai::HelmLateralAiPolicy>(e)
-                .map(|c| Attached::Policy(c.0.clone())),
-            FineSystemKey::Vertical => w
-                .get::<crate::ship::helm_ai::HelmVerticalAiPolicy>(e)
-                .map(|c| Attached::Policy(c.0.clone())),
-            FineSystemKey::Impulse => w
-                .get::<crate::ship::helm_ai::HelmImpulseAiPolicy>(e)
-                .map(|c| Attached::Policy(c.0.clone())),
-            FineSystemKey::Boost => w
-                .get::<crate::ship::helm_ai::HelmBoostAiPolicy>(e)
-                .map(|c| Attached::Policy(c.0.clone())),
+            // The six helm axes now decode into ONE keyed `FineSystemAiPolicies`
+            // map (issue #1209); each is looked up by its fine-system id, the
+            // ship-level analogue of the per-bank `map(..)` closure above.
+            FineSystemKey::Engines
+            | FineSystemKey::Steering
+            | FineSystemKey::Lateral
+            | FineSystemKey::Vertical
+            | FineSystemKey::Impulse
+            | FineSystemKey::Boost => {
+                let id = helm_axis_system_id(slot.kind.key)
+                    .expect("the six helm axes each map to a fine-system id");
+                w.get::<crate::ship::helm_ai::FineSystemAiPolicies>(e)
+                    .and_then(|c| c.0.get(&id).cloned())
+                    .map(Attached::Policy)
+            }
             FineSystemKey::ShieldsFocus => w
                 .get::<crate::ship::shields::ShieldsFocusAiPolicy>(e)
                 .map(|c| Attached::Policy(c.0.clone())),
@@ -1399,24 +1416,21 @@ base_priority = 40.0
             FineSystemKey::CommsResponse => one(w
                 .get::<crate::console::comms::server::CommsResponseAiPolicy>(e)
                 .is_some()),
-            FineSystemKey::Engines => one(w
-                .get::<crate::ship::helm_ai::HelmEnginesAiPolicy>(e)
-                .is_some()),
-            FineSystemKey::Steering => one(w
-                .get::<crate::ship::helm_ai::HelmSteeringAiPolicy>(e)
-                .is_some()),
-            FineSystemKey::Lateral => one(w
-                .get::<crate::ship::helm_ai::HelmLateralAiPolicy>(e)
-                .is_some()),
-            FineSystemKey::Vertical => one(w
-                .get::<crate::ship::helm_ai::HelmVerticalAiPolicy>(e)
-                .is_some()),
-            FineSystemKey::Impulse => one(w
-                .get::<crate::ship::helm_ai::HelmImpulseAiPolicy>(e)
-                .is_some()),
-            FineSystemKey::Boost => one(w
-                .get::<crate::ship::helm_ai::HelmBoostAiPolicy>(e)
-                .is_some()),
+            // Each helm axis's entry in the one keyed `FineSystemAiPolicies` map
+            // (issue #1209): present ⇒ 1, exactly as a standalone newtype's
+            // presence used to read, so the manifest count still mirrors the
+            // spawner one axis at a time.
+            FineSystemKey::Engines
+            | FineSystemKey::Steering
+            | FineSystemKey::Lateral
+            | FineSystemKey::Vertical
+            | FineSystemKey::Impulse
+            | FineSystemKey::Boost => {
+                let id = helm_axis_system_id(key)
+                    .expect("the six helm axes each map to a fine-system id");
+                w.get::<crate::ship::helm_ai::FineSystemAiPolicies>(e)
+                    .map_or(0, |c| usize::from(c.0.contains_key(&id)))
+            }
             FineSystemKey::ShieldsFocus => one(w
                 .get::<crate::ship::shields::ShieldsFocusAiPolicy>(e)
                 .is_some()),

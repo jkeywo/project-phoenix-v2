@@ -4,14 +4,6 @@ use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
 use crate::messages::SystemControlPayload;
 
-/// Per-ship inline stateless **Impulse** AI policy (issue #780). From
-/// the authored `[helm_console.impulse_ai]` block. Read by
-/// [`ai_helm_impulse`] to decide whether the impulse manoeuvre is permitted this
-/// tick; the host still applies doctrine `use_impulse` and `decide_impulse`
-/// geometry.
-#[derive(Component, Clone, Debug, Default)]
-pub struct HelmImpulseAiPolicy(pub crate::ai::policy::AiPolicy);
-
 /// The **Impulse** helm axis (issue #1208): gate the `impulse` channel on the
 /// authored `engage_impulse` mode verb, then — on a permit — run the doctrine
 /// `use_impulse` + `decide_impulse` geometry and emit engage/cancel on change.
@@ -145,7 +137,7 @@ pub(crate) fn ai_helm_impulse(
             Option<&ImpulseConfigResource>,
             Option<&BoostConfigResource>,
             Option<&crate::entities::spawner::BehaviourSection>,
-            Option<&HelmImpulseAiPolicy>,
+            Option<&FineSystemAiPolicies>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             Option<&crate::ai_plugin::ObjectiveCursors>,
@@ -162,7 +154,7 @@ pub(crate) fn ai_helm_impulse(
         impulse_cfg,
         boost_cfg,
         behaviour_section,
-        impulse_policy,
+        fine_policies,
         entity_uuid,
         ship_config,
         cursors,
@@ -199,7 +191,7 @@ pub(crate) fn ai_helm_impulse(
         let flag_chain = ai_env.flag_chain(entity);
         if let Some(payload) = run_helm_axis::<ImpulseAxis>(
             sources,
-            impulse_policy.map(|p| &p.0),
+            fine_policies.and_then(|p| p.0.get(&ImpulseAxis::system_id())),
             None,
             0.0,
             &flag_chain,

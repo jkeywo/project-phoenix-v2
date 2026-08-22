@@ -157,7 +157,8 @@ impl Default for ShieldsAiConfigResource {
 }
 
 /// Per-ship inline stateless AI policy for the Shields focus fine system
-/// (issue #783), the shields twin of [`crate::ship::helm_ai::HelmEnginesAiPolicy`]
+/// (issue #783), the shields twin of the helm axes' authored policies (the
+/// [`crate::ship::helm_ai::FineSystemAiPolicies`] map)
 /// / [`crate::console::captain::server::CaptainAiPolicy`].
 ///
 /// Built at spawn from `[shields_console.ai_policy]` if authored, else the

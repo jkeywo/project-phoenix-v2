@@ -4,20 +4,6 @@ use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
 use crate::messages::SystemControlPayload;
 
-/// Per-ship inline stateless **Engines** AI policy (issue #779).
-///
-/// Attached at spawn from the ship's authored `[helm_console.engines_ai]`
-/// block. Read by [`ai_helm_thrust`], which resolves its `longitudinal` channel
-/// over a per-tick fact snapshot to decide *whether* to actuate the planner's
-/// desired travel — the DECISION now flows through a data-authored policy verb
-/// instead of an unconditional hardcoded branch. The continuous thrust magnitude
-/// still comes from the shared `DesiredMotion` planner fact (issue #741).
-///
-/// Since #885b stage 5d there is no Rust-side synthesised default behind it: a
-/// ship without the component takes no AI action on this axis.
-#[derive(Component, Clone, Debug, Default)]
-pub struct HelmEnginesAiPolicy(pub crate::ai::policy::AiPolicy);
-
 /// Per-ship runtime state for a STATEFUL Engines policy (issue #883).
 ///
 /// The Engines twin of [`HelmBoostAiPolicyState`], and separate from it for the
@@ -127,7 +113,7 @@ pub(crate) fn ai_helm_thrust(
             // fact snapshot (see `EnginesAxis::seed`).
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
-            Option<&HelmEnginesAiPolicy>,
+            Option<&FineSystemAiPolicies>,
             Option<&HelmEnginesAiPolicyState>,
             &mut crate::messages::AdmittedCommands,
         ),
@@ -143,7 +129,7 @@ pub(crate) fn ai_helm_thrust(
         ship_config,
         boost_cfg,
         impulse_cfg,
-        engines_policy,
+        fine_policies,
         engines_state,
         mut admitted,
     ) in ships.iter_mut()
@@ -177,7 +163,7 @@ pub(crate) fn ai_helm_thrust(
         let flag_chain = ai_env.flag_chain(entity);
         if let Some(payload) = run_helm_axis::<EnginesAxis>(
             sources,
-            engines_policy.map(|p| &p.0),
+            fine_policies.and_then(|p| p.0.get(&EnginesAxis::system_id())),
             engines_state.map(|s| &s.0),
             clock.0,
             &flag_chain,

@@ -357,9 +357,12 @@ entities:
         - src/entities/config.rs
         - src/ship/helm_ai/impulse.rs
         - src/ship/helm_ai/boost.rs
+        - src/ship/helm_ai/mod.rs
       symbols:
-        - HelmImpulseAiPolicy
-        - HelmBoostAiPolicy
+        # Issue #1209 collapsed the per-axis Helm*AiPolicy newtypes into the one
+        # keyed FineSystemAiPolicies map (src/ship/helm_ai/mod.rs); the impulse and
+        # boost policies are now entries in it, keyed by fine-system id.
+        - FineSystemAiPolicies
       tests:
         - cargo test
 
@@ -909,7 +912,7 @@ entities:
         - HelmAxisHost
         - run_helm_axis
         - emit_helm_lateral_command
-        - HelmLateralAiPolicy
+        - FineSystemAiPolicies
         - HELM_LATERAL_CHANNEL
         - HELM_ACTUATE_LATERAL_THRUST_VERB
         - seed_helm_actuator_facts
@@ -1047,7 +1050,7 @@ entities:
         - EnginesAxis
         - HelmAxisHost
         - run_helm_axis
-        - HelmEnginesAiPolicy
+        - FineSystemAiPolicies
         - HelmEnginesAiPolicyState
         - HelmPassSurface
         - seed_helm_travel_facts
@@ -1106,7 +1109,7 @@ entities:
         - SteeringAxis
         - HelmAxisHost
         - run_helm_axis
-        - HelmSteeringAiPolicy
+        - FineSystemAiPolicies
         - HelmSteeringAiPolicyState
         - HELM_HOLD_COMMITTED_HEADING_VERB
         - HELM_HOLD_RECOVERY_ORBIT_VERB
@@ -1191,7 +1194,7 @@ entities:
         - VerticalAxis
         - HelmAxisHost
         - run_helm_axis
-        - HelmVerticalAiPolicy
+        - FineSystemAiPolicies
         - HELM_VERTICAL_CHANNEL
         - HELM_ACTUATE_VERTICAL_THRUST_VERB
         - seed_helm_actuator_facts
@@ -1239,7 +1242,7 @@ entities:
         - ImpulseAxis
         - HelmAxisHost
         - run_helm_axis
-        - HelmImpulseAiPolicy
+        - FineSystemAiPolicies
         - HELM_IMPULSE_CHANNEL
         - HELM_ENGAGE_IMPULSE_VERB
         - decide_impulse
@@ -1288,7 +1291,7 @@ entities:
         - BoostAxis
         - HelmAxisHost
         - run_helm_axis
-        - HelmBoostAiPolicy
+        - FineSystemAiPolicies
         - HelmBoostAiPolicyState
         - resolve_helm_channel
         - seed_helm_travel_facts

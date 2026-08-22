@@ -4,13 +4,6 @@ use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
 use crate::messages::SystemControlPayload;
 
-/// Per-ship inline stateless **Steering** AI policy (issue #779). Mirror of
-/// [`HelmEnginesAiPolicy`] for the `yaw` channel: from the authored
-/// `[helm_console.steering_ai]` block. Read by [`ai_helm_steering`] to decide
-/// whether to actuate the planner's desired facing.
-#[derive(Component, Clone, Debug, Default)]
-pub struct HelmSteeringAiPolicy(pub crate::ai::policy::AiPolicy);
-
 /// Per-ship runtime state for a STATEFUL Steering policy (issue #883). The
 /// Steering twin of [`HelmEnginesAiPolicyState`]; this is the one whose current
 /// state decides which leg [`HelmPassSurface`] publishes, because the yaw
@@ -154,7 +147,7 @@ pub(crate) fn ai_helm_steering(
             // Availability of the two optional drives — see `ai_helm_thrust`.
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
-            Option<&HelmSteeringAiPolicy>,
+            Option<&FineSystemAiPolicies>,
             Option<&HelmSteeringAiPolicyState>,
             Option<&mut PendingArcBearingRequest>,
             &mut crate::messages::AdmittedCommands,
@@ -171,7 +164,7 @@ pub(crate) fn ai_helm_steering(
         ship_config,
         boost_cfg,
         impulse_cfg,
-        steering_policy,
+        fine_policies,
         steering_state,
         mut pending_bearing,
         mut admitted,
@@ -197,8 +190,12 @@ pub(crate) fn ai_helm_steering(
             capability: None,
             cursors: None,
         };
+        // Resolve this axis's authored policy out of the ship's one keyed
+        // `FineSystemAiPolicies` map (issue #1209); `Option<&AiPolicy>` is `Copy`,
+        // so the same reference feeds both the io scratch and the driver below.
+        let steering_policy = fine_policies.and_then(|p| p.0.get(&SteeringAxis::system_id()));
         let mut io = HelmAxisIo {
-            policy: steering_policy.map(|p| &p.0),
+            policy: steering_policy,
             state: steering_state.map(|s| &s.0),
             pending: pending_bearing.as_deref_mut(),
         };
@@ -207,7 +204,7 @@ pub(crate) fn ai_helm_steering(
         let flag_chain = ai_env.flag_chain(entity);
         if let Some(payload) = run_helm_axis::<SteeringAxis>(
             sources,
-            steering_policy.map(|p| &p.0),
+            steering_policy,
             steering_state.map(|s| &s.0),
             clock.0,
             &flag_chain,

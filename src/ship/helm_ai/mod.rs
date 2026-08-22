@@ -52,11 +52,42 @@ mod vertical;
 pub use self::boost::*;
 pub use self::engines::*;
 pub(crate) use self::facts::*;
-pub use self::impulse::*;
-pub use self::lateral::*;
+// Impulse, Lateral and Vertical are the STATELESS axes: since #1209 deleted
+// their per-axis policy newtypes they export only `pub(crate)` items (the axis
+// marker + host system), so their re-export is crate-visible too — a `pub use`
+// would re-export nothing and warn. Engines/Steering/Boost keep `pub use` for
+// their public `Helm*AiPolicyState` twins.
+pub(crate) use self::impulse::*;
+pub(crate) use self::lateral::*;
 pub use self::steering::*;
 pub use self::surfaces::*;
-pub use self::vertical::*;
+pub(crate) use self::vertical::*;
+
+/// Per-ship map of the helm fine-system AI **policies**, keyed by each fine
+/// system's [`SystemId`](crate::messages::SystemId) (issue #1209). Built at spawn
+/// from the authored `[helm_console.*_ai]` blocks — one entry per block the hull
+/// declares — collapsing the six former `Helm*AiPolicy` newtypes
+/// (`HelmEnginesAiPolicy`, `HelmSteeringAiPolicy`, `HelmLateralAiPolicy`,
+/// `HelmVerticalAiPolicy`, `HelmImpulseAiPolicy`, `HelmBoostAiPolicy`) into one
+/// keyed component — the same shape the weapon banks use
+/// ([`PhaserBankAiPolicies`](crate::weapons_plugin::PhaserBankAiPolicies) /
+/// [`TorpedoTubeAiPolicies`](crate::weapons_plugin::TorpedoTubeAiPolicies)).
+///
+/// A `BTreeMap` for order-stable iteration: each axis host reads only its OWN
+/// policy by its [`HelmAxisHost::system_id`], so the map is never iterated on the
+/// hot path, but keying on the ordered `SystemId` keeps the component a pure
+/// function of its contents regardless of insertion order — the same property the
+/// per-ship blackboard `BTreeMap` relies on. A system with no entry takes no AI
+/// action on that axis, exactly as an absent newtype did.
+///
+/// Only the AUTHORED policy is keyed here. The runtime STATE twins
+/// (`Helm*AiPolicyState`) stay SEPARATE per-fine-system components: they are
+/// LOD-carried (`ai_high_fidelity_components`) and snapshotted, whereas this
+/// authored policy is neither — so collapsing them would confuse two lifetimes.
+#[derive(Component, Default, Clone, Debug)]
+pub struct FineSystemAiPolicies(
+    pub std::collections::BTreeMap<crate::messages::SystemId, crate::ai::policy::AiPolicy>,
+);
 
 /// True when the AI helm is flying this ship: both stick axes
 /// (`helm-thrust` AND `helm-steering`) are AI-operated. The coarse `helm`
@@ -354,16 +385,16 @@ pub(crate) fn ai_policy_state_tick(
             Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
-            // Optional for the same reason the per-axis hosts take them
-            // optionally: a bare-`App` fixture may attach only the policy it is
-            // testing. A ship missing one falls back to that axis's canonical
+            // Optional for the same reason the per-axis hosts take it optionally:
+            // a bare-`App` fixture may attach only the policy it is testing. The
+            // three stateful axes (Engines/Steering/Boost) each read their own
+            // entry out of this ONE keyed map (issue #1209) by `system_id()`; a
+            // ship whose map lacks an axis falls back to that axis's canonical
             // default, which is stateless, so its machine tick returns
-            // immediately. Requiring all three here would instead make the whole
-            // QUERY fail to match and silently skip the ship — the same class of
+            // immediately. Taking the map optionally keeps the whole QUERY from
+            // failing to match and silently skipping the ship — the same class of
             // silent skip #883 added the `resolve_helm_channel` guard for.
-            Option<&HelmEnginesAiPolicy>,
-            Option<&HelmSteeringAiPolicy>,
-            Option<&HelmBoostAiPolicy>,
+            Option<&FineSystemAiPolicies>,
             // This ship's OWN shields (issue #788). Read-only here — `tick_shields`
             // is the single writer — so this adds no ordering question, only a
             // reading that may be one tick old.
@@ -424,9 +455,7 @@ pub(crate) fn ai_policy_state_tick(
         physics_cfg,
         boost_cfg,
         impulse_cfg,
-        engines_policy,
-        steering_policy,
-        boost_policy,
+        fine_policies,
         shields,
         torpedoes,
         blasters,
@@ -440,12 +469,16 @@ pub(crate) fn ai_policy_state_tick(
         // function of both. Since #885b stage 5d there is no synthesised
         // stand-in — strict AI-declaration mode rejects an AI-capable hull that
         // omits either block at load, so a ship missing one takes no helm AI
-        // action rather than being handed a policy nobody wrote.
+        // action rather than being handed a policy nobody wrote. Both are read
+        // out of the ship's one keyed `FineSystemAiPolicies` map (issue #1209).
+        let engines_policy =
+            fine_policies.and_then(|p| p.0.get(&crate::system_registry::helm_thrust_system_id()));
+        let steering_policy =
+            fine_policies.and_then(|p| p.0.get(&crate::system_registry::helm_steering_system_id()));
         let (Some(engines_policy), Some(steering_policy)) = (engines_policy, steering_policy)
         else {
             continue;
         };
-        let (engines_policy, steering_policy) = (&engines_policy.0, &steering_policy.0);
 
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2), shared by all three machines this tick.
@@ -625,7 +658,8 @@ pub(crate) fn ai_policy_state_tick(
             .policy_for(&crate::system_registry::helm_boost_system_id())
             .operate_ai
             && boost_cfg.map(|c| c.enabled).unwrap_or(false);
-        let boost_policy = boost_policy.map(|p| &p.0);
+        let boost_policy =
+            fine_policies.and_then(|p| p.0.get(&crate::system_registry::helm_boost_system_id()));
         let entered = boost_policy.and_then(|boost_policy| {
             tick_policy_machine(
                 boost_policy,
@@ -1744,23 +1778,51 @@ mod tests {
 
     // ── #779: data-authored Engines/Steering policy spine ────────────────────
 
+    /// Merge one axis's authored policy into the ship's ONE keyed
+    /// [`FineSystemAiPolicies`] map (issue #1209), preserving any axes already
+    /// set — the test-side mirror of the single map the spawner builds. Inserting
+    /// a fresh single-key map instead would clobber a sibling axis a prior call
+    /// attached.
+    fn set_fine_policy(
+        app: &mut App,
+        ship: Entity,
+        system: crate::messages::SystemId,
+        policy: crate::ai::policy::AiPolicy,
+    ) {
+        let mut map = app
+            .world()
+            .get::<FineSystemAiPolicies>(ship)
+            .map(|p| p.0.clone())
+            .unwrap_or_default();
+        map.insert(system, policy);
+        app.world_mut()
+            .entity_mut(ship)
+            .insert(FineSystemAiPolicies(map));
+    }
+
     /// Attach an authored Engines policy to the ship (overriding the spawn
     /// default the hosts fall back to).
     fn attach_engines_policy(app: &mut App, cfg: crate::entity_config::FineSystemAiConfigToml) {
         let ship = find_ship_entity(app);
         let policy = cfg.to_policy().expect("engines policy resolves");
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(HelmEnginesAiPolicy(policy));
+        set_fine_policy(
+            app,
+            ship,
+            crate::system_registry::helm_thrust_system_id(),
+            policy,
+        );
     }
 
     /// Attach an authored Steering policy to the ship.
     fn attach_steering_policy(app: &mut App, cfg: crate::entity_config::FineSystemAiConfigToml) {
         let ship = find_ship_entity(app);
         let policy = cfg.to_policy().expect("steering policy resolves");
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(HelmSteeringAiPolicy(policy));
+        set_fine_policy(
+            app,
+            ship,
+            crate::system_registry::helm_steering_system_id(),
+            policy,
+        );
     }
 
     /// AC1/AC3/AC4: with the canonical default Engines *and* Steering policies
@@ -4962,16 +5024,22 @@ mod tests {
 
     fn set_vertical_ai_policy(app: &mut App, policy: crate::ai::policy::AiPolicy) {
         let ship = find_ship_entity(app);
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(HelmVerticalAiPolicy(policy));
+        set_fine_policy(
+            app,
+            ship,
+            crate::system_registry::vertical_thrust_system_id(),
+            policy,
+        );
     }
 
     fn set_lateral_ai_policy(app: &mut App, policy: crate::ai::policy::AiPolicy) {
         let ship = find_ship_entity(app);
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(HelmLateralAiPolicy(policy));
+        set_fine_policy(
+            app,
+            ship,
+            crate::system_registry::lateral_thrust_system_id(),
+            policy,
+        );
     }
 
     /// A vertical policy that actuates only while the seeded `moving_hazard_threat`
@@ -5224,9 +5292,12 @@ mod tests {
 
     fn set_impulse_ai_policy(app: &mut App, policy: crate::ai::policy::AiPolicy) {
         let ship = find_ship_entity(app);
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(HelmImpulseAiPolicy(policy));
+        set_fine_policy(
+            app,
+            ship,
+            crate::system_registry::helm_impulse_system_id(),
+            policy,
+        );
     }
 
     /// A vertical policy whose ONLY guard is the #874 exposure fact.
@@ -5696,9 +5767,12 @@ mod tests {
                 ..Default::default()
             });
         if let Some(policy) = policy {
-            app.world_mut()
-                .entity_mut(ship)
-                .insert(HelmBoostAiPolicy(policy));
+            set_fine_policy(
+                &mut app,
+                ship,
+                crate::system_registry::helm_boost_system_id(),
+                policy,
+            );
         }
         snapshot_with_moving_obstacle(&mut app, [4.0, 0.0, -40.0], 1.0, 0.0, 0.0);
         app
@@ -5814,12 +5888,15 @@ mod tests {
             set_per_axis_helm_ai(&mut app);
             app.init_resource::<crate::world::server::WorldContentRuntime>();
             let ship = find_ship_entity(&mut app);
-            app.world_mut()
-                .entity_mut(ship)
-                .insert(HelmEnginesAiPolicy(flag_gated_helm_policy(
+            set_fine_policy(
+                &mut app,
+                ship,
+                crate::system_registry::helm_thrust_system_id(),
+                flag_gated_helm_policy(
                     crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
                     crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
-                )));
+                ),
+            );
             app
         };
 
@@ -5851,12 +5928,15 @@ mod tests {
             set_per_axis_helm_ai(&mut app);
             app.init_resource::<crate::world::server::WorldContentRuntime>();
             let ship = find_ship_entity(&mut app);
-            app.world_mut()
-                .entity_mut(ship)
-                .insert(HelmSteeringAiPolicy(flag_gated_helm_policy(
+            set_fine_policy(
+                &mut app,
+                ship,
+                crate::system_registry::helm_steering_system_id(),
+                flag_gated_helm_policy(
                     crate::entities::config::HELM_YAW_CHANNEL,
                     crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
-                )));
+                ),
+            );
             app
         };
 
@@ -7553,9 +7633,6 @@ verb = "engage_boost"
             .expect("hull declares [helm_console.boost]");
         let ship = find_ship_entity(&mut app);
         app.world_mut().entity_mut(ship).insert((
-            HelmEnginesAiPolicy(hc.engines_ai.as_ref().unwrap().to_policy().unwrap()),
-            HelmSteeringAiPolicy(hc.steering_ai.as_ref().unwrap().to_policy().unwrap()),
-            HelmBoostAiPolicy(hc.boost_ai.as_ref().unwrap().to_policy().unwrap()),
             crate::ship_plugin::ShipPhysicsConfigResource(crate::ship_physics::ShipPhysicsConfig {
                 max_speed: hc.max_speed,
                 max_reverse_speed: hc.max_reverse_speed,
@@ -7572,6 +7649,26 @@ verb = "engage_boost"
                 recharge_duration: boost.recharge_duration,
             },
         ));
+        // Override the Engines/Steering/Boost entries of the ship's keyed
+        // `FineSystemAiPolicies` map with the hull's own authored policies,
+        // MERGING into (not replacing) the shipped defaults `test_app` attached —
+        // the per-axis newtypes overrode one axis at a time before #1209.
+        for (system_id, policy) in [
+            (
+                crate::system_registry::helm_thrust_system_id(),
+                hc.engines_ai.as_ref().unwrap().to_policy().unwrap(),
+            ),
+            (
+                crate::system_registry::helm_steering_system_id(),
+                hc.steering_ai.as_ref().unwrap().to_policy().unwrap(),
+            ),
+            (
+                crate::system_registry::helm_boost_system_id(),
+                hc.boost_ai.as_ref().unwrap().to_policy().unwrap(),
+            ),
+        ] {
+            set_fine_policy(&mut app, ship, system_id, policy);
+        }
         set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective(BOGEY, 80.0)]);
         set_helm_control_source(&mut app, ControlSource::Ai);
         let uuid = uuid::Uuid::new_v4();
@@ -8520,16 +8617,23 @@ verb = "engage_boost"
         }
     }
 
-    /// A ship chasing a Reach anchor off the starboard bow, with the travel-axis
-    /// policy `policy` attached and boost capability present or absent.
-    fn availability_fact_app(policy: impl Bundle, boost_enabled: Option<bool>) -> App {
+    /// A ship chasing a Reach anchor off the starboard bow, with `policy` merged
+    /// onto the given travel `axis` (issue #1209 — merged into the keyed
+    /// `FineSystemAiPolicies` map `test_app` already attached, so it OVERRIDES
+    /// that one axis and leaves the others' shipped defaults, exactly as the
+    /// per-axis newtype insert did) and boost capability present or absent.
+    fn availability_fact_app(
+        axis: crate::messages::SystemId,
+        policy: crate::ai::policy::AiPolicy,
+        boost_enabled: Option<bool>,
+    ) -> App {
         let mut app = test_app();
         let anchor = "station-alpha";
         set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 10.0)]);
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
         set_per_axis_helm_ai(&mut app);
         let ship = find_ship_entity(&mut app);
-        app.world_mut().entity_mut(ship).insert(policy);
+        set_fine_policy(&mut app, ship, axis, policy);
         if let Some(enabled) = boost_enabled {
             app.world_mut()
                 .entity_mut(ship)
@@ -8551,10 +8655,11 @@ verb = "engage_boost"
     fn a_travel_axis_guard_reads_the_real_boost_availability() {
         // ── Engines ─────────────────────────────────────────────────────────
         let mut available = availability_fact_app(
-            HelmEnginesAiPolicy(boost_availability_gated_policy(
+            crate::system_registry::helm_thrust_system_id(),
+            boost_availability_gated_policy(
                 crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
-            )),
+            ),
             Some(true),
         );
         tick(&mut available);
@@ -8566,10 +8671,11 @@ verb = "engage_boost"
         );
 
         let mut unavailable = availability_fact_app(
-            HelmEnginesAiPolicy(boost_availability_gated_policy(
+            crate::system_registry::helm_thrust_system_id(),
+            boost_availability_gated_policy(
                 crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
-            )),
+            ),
             None,
         );
         tick(&mut unavailable);
@@ -8582,10 +8688,11 @@ verb = "engage_boost"
 
         // ── Steering ────────────────────────────────────────────────────────
         let mut available = availability_fact_app(
-            HelmSteeringAiPolicy(boost_availability_gated_policy(
+            crate::system_registry::helm_steering_system_id(),
+            boost_availability_gated_policy(
                 crate::entities::config::HELM_YAW_CHANNEL,
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
-            )),
+            ),
             Some(true),
         );
         tick(&mut available);
@@ -8597,10 +8704,11 @@ verb = "engage_boost"
         );
 
         let mut unavailable = availability_fact_app(
-            HelmSteeringAiPolicy(boost_availability_gated_policy(
+            crate::system_registry::helm_steering_system_id(),
+            boost_availability_gated_policy(
                 crate::entities::config::HELM_YAW_CHANNEL,
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
-            )),
+            ),
             Some(false),
         );
         tick(&mut unavailable);
@@ -10052,18 +10160,32 @@ verb = "engage_boost"
                 .unwrap_or_else(|| panic!("the shipped hull must author `{name}` to omit it"));
         }
         let ship = find_ship_entity(&mut app);
-        app.world_mut().entity_mut(ship).insert((
-            HelmEnginesAiPolicy(hc.engines_ai.as_ref().unwrap().to_policy().unwrap()),
-            HelmSteeringAiPolicy(hc.steering_ai.as_ref().unwrap().to_policy().unwrap()),
-            crate::ship_plugin::ShipPhysicsConfigResource(crate::ship_physics::ShipPhysicsConfig {
-                max_speed: hc.max_speed,
-                max_reverse_speed: hc.max_reverse_speed,
-                acceleration: hc.acceleration,
-                deceleration: hc.deceleration,
-                max_yaw_rate: hc.max_yaw_rate,
-                ..crate::ship_physics::ShipPhysicsConfig::new()
-            }),
-        ));
+        app.world_mut()
+            .entity_mut(ship)
+            .insert((crate::ship_plugin::ShipPhysicsConfigResource(
+                crate::ship_physics::ShipPhysicsConfig {
+                    max_speed: hc.max_speed,
+                    max_reverse_speed: hc.max_reverse_speed,
+                    acceleration: hc.acceleration,
+                    deceleration: hc.deceleration,
+                    max_yaw_rate: hc.max_yaw_rate,
+                    ..crate::ship_physics::ShipPhysicsConfig::new()
+                },
+            ),));
+        // Override just Engines/Steering in the ship's keyed `FineSystemAiPolicies`
+        // map, MERGING into the shipped defaults `test_app` attached (issue #1209).
+        for (system_id, policy) in [
+            (
+                crate::system_registry::helm_thrust_system_id(),
+                hc.engines_ai.as_ref().unwrap().to_policy().unwrap(),
+            ),
+            (
+                crate::system_registry::helm_steering_system_id(),
+                hc.steering_ai.as_ref().unwrap().to_policy().unwrap(),
+            ),
+        ] {
+            set_fine_policy(&mut app, ship, system_id, policy);
+        }
         set_ship_blackboard_objectives(&mut app, vec![destroy_scored_objective(BOGEY, 80.0)]);
         set_helm_control_source(&mut app, ControlSource::Ai);
         let uuid = uuid::Uuid::new_v4();
@@ -11885,8 +12007,6 @@ verb = "engage_boost"
             .collect();
         let ship = find_ship_entity(&mut app);
         app.world_mut().entity_mut(ship).insert((
-            HelmEnginesAiPolicy(hc.engines_ai.as_ref().unwrap().to_policy().unwrap()),
-            HelmSteeringAiPolicy(hc.steering_ai.as_ref().unwrap().to_policy().unwrap()),
             crate::ship_plugin::ShipPhysicsConfigResource(crate::ship_physics::ShipPhysicsConfig {
                 max_speed: hc.max_speed,
                 max_reverse_speed: hc.max_reverse_speed,
@@ -11896,15 +12016,6 @@ verb = "engage_boost"
                 ..crate::ship_physics::ShipPhysicsConfig::new()
             }),
             crate::weapons_plugin::BlasterSystemResource(banks),
-            // The impulse drive, exactly as `entities::spawner` builds it — see
-            // the doc comment for why its absence was load-bearing.
-            HelmImpulseAiPolicy(
-                hc.impulse_ai
-                    .as_ref()
-                    .expect("the hull authors `[helm_console.impulse_ai]`")
-                    .to_policy()
-                    .expect("authored impulse policy decodes"),
-            ),
             ImpulseConfigResource {
                 charge_duration: hc.impulse_charge_duration,
                 speed_multiplier: hc.impulse_speed_multiplier,
@@ -11918,6 +12029,31 @@ verb = "engage_boost"
                     .unwrap_or(crate::impulse::IMPULSE_STEERING_MULTIPLIER_DEFAULT),
             },
         ));
+        // Override Engines/Steering/Impulse in the ship's keyed
+        // `FineSystemAiPolicies` map, MERGING into the shipped defaults `test_app`
+        // attached (issue #1209). The impulse entry is present for the reason the
+        // doc comment gives — leaving the impulse drive out was how #792 hid — it
+        // just lands in the map now rather than in its own component.
+        for (system_id, policy) in [
+            (
+                crate::system_registry::helm_thrust_system_id(),
+                hc.engines_ai.as_ref().unwrap().to_policy().unwrap(),
+            ),
+            (
+                crate::system_registry::helm_steering_system_id(),
+                hc.steering_ai.as_ref().unwrap().to_policy().unwrap(),
+            ),
+            (
+                crate::system_registry::helm_impulse_system_id(),
+                hc.impulse_ai
+                    .as_ref()
+                    .expect("the hull authors `[helm_console.impulse_ai]`")
+                    .to_policy()
+                    .expect("authored impulse policy decodes"),
+            ),
+        ] {
+            set_fine_policy(&mut app, ship, system_id, policy);
+        }
         let objective = destroy_scored_objective(BOGEY, 80.0);
         // The scenario-shaped doctrine entry the drive's `use_impulse` gate reads
         // — id-matched to the objective above, because that is how the two meet in

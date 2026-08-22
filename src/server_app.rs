@@ -1069,14 +1069,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "helm-ai-surfaces-frame-state",
             )
-            .declare_state::<crate::ship::helm_ai::HelmBoostAiPolicy>(
-                StateClass::DeferredFold,
-                "impulse-manoeuvre-policy-state",
-            )
-            .declare_state::<crate::ship::helm_ai::HelmImpulseAiPolicy>(
-                StateClass::DeferredFold,
-                "impulse-manoeuvre-policy-state",
-            )
             .declare_state::<crate::ship::intent_narration_systems::ShipIntentNarration>(
                 StateClass::DeferredFold,
                 "intent-narration-state",
@@ -4324,80 +4316,32 @@ fn spawn_game_start_entities(
                     ));
             }
 
-            // Helm Engines/Steering AI policies (issue #779) — player-ship half
-            // of the per-entity pattern in `spawner.rs`. The authored
-            // `[helm_console.engines_ai]` / `[helm_console.steering_ai]` blocks
-            // drive `ai_helm_thrust` / `ai_helm_steering`.
-            if let Some(ai) = config
-                .helm_console
-                .as_ref()
-                .and_then(|h| h.engines_ai.as_ref())
-            {
+            // Helm fine-system AI policies (issues #779/#780, collapsed by
+            // #1209) — player-ship half of the per-entity pattern in
+            // `spawner.rs`. The authored `[helm_console.*_ai]` blocks resolve into
+            // ONE keyed `FineSystemAiPolicies` map, one entry per authored block,
+            // driving `ai_helm_thrust` / `ai_helm_steering` / the secondary hosts.
+            if let Some(hc) = config.helm_console.as_ref() {
+                use crate::system_registry as sr;
+                let mut fine_policies: std::collections::BTreeMap<
+                    crate::messages::SystemId,
+                    crate::ai::policy::AiPolicy,
+                > = std::collections::BTreeMap::new();
+                for (block, system_id) in [
+                    (hc.engines_ai.as_ref(), sr::helm_thrust_system_id()),
+                    (hc.steering_ai.as_ref(), sr::helm_steering_system_id()),
+                    (hc.lateral_ai.as_ref(), sr::lateral_thrust_system_id()),
+                    (hc.vertical_ai.as_ref(), sr::vertical_thrust_system_id()),
+                    (hc.impulse_ai.as_ref(), sr::helm_impulse_system_id()),
+                    (hc.boost_ai.as_ref(), sr::helm_boost_system_id()),
+                ] {
+                    if let Some(ai) = block {
+                        fine_policies.insert(system_id, ai.to_policy().unwrap_or_default());
+                    }
+                }
                 commands
                     .entity(spawned)
-                    .insert(crate::ship::helm_ai::HelmEnginesAiPolicy(
-                        ai.to_policy().unwrap_or_default(),
-                    ));
-            }
-            if let Some(ai) = config
-                .helm_console
-                .as_ref()
-                .and_then(|h| h.steering_ai.as_ref())
-            {
-                commands
-                    .entity(spawned)
-                    .insert(crate::ship::helm_ai::HelmSteeringAiPolicy(
-                        ai.to_policy().unwrap_or_default(),
-                    ));
-            }
-
-            // Helm secondary-actuator AI policies (issue #780) — player-ship half
-            // of the per-entity pattern in `spawner.rs`. The authored
-            // `[helm_console.lateral_ai/vertical_ai/impulse_ai/boost_ai]` blocks
-            // drive the secondary hosts.
-            if let Some(ai) = config
-                .helm_console
-                .as_ref()
-                .and_then(|h| h.lateral_ai.as_ref())
-            {
-                commands
-                    .entity(spawned)
-                    .insert(crate::ship::helm_ai::HelmLateralAiPolicy(
-                        ai.to_policy().unwrap_or_default(),
-                    ));
-            }
-            if let Some(ai) = config
-                .helm_console
-                .as_ref()
-                .and_then(|h| h.vertical_ai.as_ref())
-            {
-                commands
-                    .entity(spawned)
-                    .insert(crate::ship::helm_ai::HelmVerticalAiPolicy(
-                        ai.to_policy().unwrap_or_default(),
-                    ));
-            }
-            if let Some(ai) = config
-                .helm_console
-                .as_ref()
-                .and_then(|h| h.impulse_ai.as_ref())
-            {
-                commands
-                    .entity(spawned)
-                    .insert(crate::ship::helm_ai::HelmImpulseAiPolicy(
-                        ai.to_policy().unwrap_or_default(),
-                    ));
-            }
-            if let Some(ai) = config
-                .helm_console
-                .as_ref()
-                .and_then(|h| h.boost_ai.as_ref())
-            {
-                commands
-                    .entity(spawned)
-                    .insert(crate::ship::helm_ai::HelmBoostAiPolicy(
-                        ai.to_policy().unwrap_or_default(),
-                    ));
+                    .insert(crate::ship::helm_ai::FineSystemAiPolicies(fine_policies));
             }
 
             // Shields damage history — per-ship Component tracking HP deltas

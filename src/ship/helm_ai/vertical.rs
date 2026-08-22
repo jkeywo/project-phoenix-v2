@@ -4,13 +4,6 @@ use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
 use crate::messages::SystemControlPayload;
 
-/// Per-ship inline stateless **Vertical Thrust** AI policy (issue #780). From
-/// the authored `[helm_console.vertical_ai]` block. Read by
-/// [`ai_helm_vertical_thrust`] to decide whether to actuate the climb/return this
-/// tick; the authored `VerticalMovementMode` still gates the magnitude host-side.
-#[derive(Component, Clone, Debug, Default)]
-pub struct HelmVerticalAiPolicy(pub crate::ai::policy::AiPolicy);
-
 /// The **Vertical Thrust** helm axis (issue #1208, issue #744): gate the
 /// `vertical` channel on the `actuate_vertical_thrust` mode verb and, on a fire,
 /// emit the climb/return the hull's authored [`VerticalMovementMode`] permits. A
@@ -149,7 +142,7 @@ pub(crate) fn ai_helm_vertical_thrust(
             &ShipPhysics,
             Option<&crate::entities::spawner::BehaviourSection>,
             Option<&crate::entities::spawner::HelmCapabilitySection>,
-            Option<&HelmVerticalAiPolicy>,
+            Option<&FineSystemAiPolicies>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             &mut crate::messages::AdmittedCommands,
@@ -163,7 +156,7 @@ pub(crate) fn ai_helm_vertical_thrust(
         physics,
         behaviour_section,
         capability,
-        vertical_policy,
+        fine_policies,
         entity_uuid,
         ship_config,
         mut admitted,
@@ -193,7 +186,7 @@ pub(crate) fn ai_helm_vertical_thrust(
         let flag_chain = ai_env.flag_chain(entity);
         if let Some(payload) = run_helm_axis::<VerticalAxis>(
             sources,
-            vertical_policy.map(|p| &p.0),
+            fine_policies.and_then(|p| p.0.get(&VerticalAxis::system_id())),
             None,
             0.0,
             &flag_chain,

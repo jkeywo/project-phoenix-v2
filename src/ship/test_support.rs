@@ -213,12 +213,36 @@ pub fn attach_shipped_ai_declarations(app: &mut App, ship: Entity) {
     };
     app.world_mut().entity_mut(ship).insert((
         crate::captain_plugin::CaptainAiPolicy(policy("captain")),
-        crate::ship::helm_ai::HelmEnginesAiPolicy(policy("engines")),
-        crate::ship::helm_ai::HelmSteeringAiPolicy(policy("steering")),
-        crate::ship::helm_ai::HelmLateralAiPolicy(policy("lateral")),
-        crate::ship::helm_ai::HelmVerticalAiPolicy(policy("vertical")),
-        crate::ship::helm_ai::HelmImpulseAiPolicy(policy("impulse")),
-        crate::ship::helm_ai::HelmBoostAiPolicy(policy("boost")),
+        // The six helm axes' authored policies now ride the ONE keyed
+        // `FineSystemAiPolicies` map (issue #1209), keyed by fine-system id —
+        // the same one entry per authored `[helm_console.*_ai]` block the
+        // spawner builds.
+        crate::ship::helm_ai::FineSystemAiPolicies(std::collections::BTreeMap::from([
+            (
+                crate::system_registry::helm_thrust_system_id(),
+                policy("engines"),
+            ),
+            (
+                crate::system_registry::helm_steering_system_id(),
+                policy("steering"),
+            ),
+            (
+                crate::system_registry::lateral_thrust_system_id(),
+                policy("lateral"),
+            ),
+            (
+                crate::system_registry::vertical_thrust_system_id(),
+                policy("vertical"),
+            ),
+            (
+                crate::system_registry::helm_impulse_system_id(),
+                policy("impulse"),
+            ),
+            (
+                crate::system_registry::helm_boost_system_id(),
+                policy("boost"),
+            ),
+        ])),
         crate::ship::shields::ShieldsFocusAiPolicy(policy("shields_focus")),
         crate::power_plugin::PowerAiPolicy(policy("power")),
         crate::console::comms::server::CommsResponseAiPolicy(policy("comms_response")),

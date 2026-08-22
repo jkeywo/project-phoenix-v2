@@ -734,68 +734,35 @@ pub fn spawn_entity(
                 ai.to_policy().unwrap_or_default(),
             ));
         }
-        // Helm Engines/Steering AI policies (issue #779) — the inline
-        // longitudinal/yaw policies from the authored `[helm_console.engines_ai]`
-        // / `[helm_console.steering_ai]` blocks, so `ai_helm_thrust` /
-        // `ai_helm_steering` resolve a data-authored mode verb rather than
-        // actuating unconditionally.
-        if let Some(ai) = config
-            .helm_console
-            .as_ref()
-            .and_then(|h| h.engines_ai.as_ref())
-        {
-            entity_commands.insert(crate::ship::helm_ai::HelmEnginesAiPolicy(
-                ai.to_policy().unwrap_or_default(),
-            ));
-        }
-        if let Some(ai) = config
-            .helm_console
-            .as_ref()
-            .and_then(|h| h.steering_ai.as_ref())
-        {
-            entity_commands.insert(crate::ship::helm_ai::HelmSteeringAiPolicy(
-                ai.to_policy().unwrap_or_default(),
-            ));
-        }
-        // Helm secondary-actuator AI policies (issue #780): lateral / vertical /
-        // impulse / boost, from their authored `[helm_console.*_ai]` blocks, so
-        // the secondary hosts resolve a data-authored mode verb rather than a
-        // hardcoded branch.
-        if let Some(ai) = config
-            .helm_console
-            .as_ref()
-            .and_then(|h| h.lateral_ai.as_ref())
-        {
-            entity_commands.insert(crate::ship::helm_ai::HelmLateralAiPolicy(
-                ai.to_policy().unwrap_or_default(),
-            ));
-        }
-        if let Some(ai) = config
-            .helm_console
-            .as_ref()
-            .and_then(|h| h.vertical_ai.as_ref())
-        {
-            entity_commands.insert(crate::ship::helm_ai::HelmVerticalAiPolicy(
-                ai.to_policy().unwrap_or_default(),
-            ));
-        }
-        if let Some(ai) = config
-            .helm_console
-            .as_ref()
-            .and_then(|h| h.impulse_ai.as_ref())
-        {
-            entity_commands.insert(crate::ship::helm_ai::HelmImpulseAiPolicy(
-                ai.to_policy().unwrap_or_default(),
-            ));
-        }
-        if let Some(ai) = config
-            .helm_console
-            .as_ref()
-            .and_then(|h| h.boost_ai.as_ref())
-        {
-            entity_commands.insert(crate::ship::helm_ai::HelmBoostAiPolicy(
-                ai.to_policy().unwrap_or_default(),
-            ));
+        // Helm fine-system AI policies (issues #779/#780, collapsed by #1209):
+        // the inline `[helm_console.*_ai]` policies — engines (longitudinal),
+        // steering (yaw), lateral, vertical, impulse, boost — resolved into ONE
+        // keyed `FineSystemAiPolicies` map so each host reads a data-authored mode
+        // verb by its `system_id()` rather than actuating unconditionally. One
+        // entry per authored block; an unauthored axis contributes none (strict
+        // AI-declaration mode rejects an unauthored AI-capable axis at load).
+        // Built the same shape the weapon banks use above — mirror of
+        // `PhaserBankAiPolicies`. `to_policy` cannot fail: each block was
+        // validated in `EntityConfig::from_toml`.
+        if let Some(hc) = config.helm_console.as_ref() {
+            use crate::system_registry as sr;
+            let mut fine_policies: std::collections::BTreeMap<
+                crate::messages::SystemId,
+                crate::ai::policy::AiPolicy,
+            > = std::collections::BTreeMap::new();
+            for (block, system_id) in [
+                (hc.engines_ai.as_ref(), sr::helm_thrust_system_id()),
+                (hc.steering_ai.as_ref(), sr::helm_steering_system_id()),
+                (hc.lateral_ai.as_ref(), sr::lateral_thrust_system_id()),
+                (hc.vertical_ai.as_ref(), sr::vertical_thrust_system_id()),
+                (hc.impulse_ai.as_ref(), sr::helm_impulse_system_id()),
+                (hc.boost_ai.as_ref(), sr::helm_boost_system_id()),
+            ] {
+                if let Some(ai) = block {
+                    fine_policies.insert(system_id, ai.to_policy().unwrap_or_default());
+                }
+            }
+            entity_commands.insert(crate::ship::helm_ai::FineSystemAiPolicies(fine_policies));
         }
         entity_commands.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
         // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship

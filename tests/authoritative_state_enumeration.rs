@@ -344,15 +344,19 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "project_phoenix::ship::helm::HelmPhysicsWriteGuard",
     "project_phoenix::ship::helm::VerticalThrustInput",
     "project_phoenix::ship::helm_ai::AiPolicyTickClock",
+    // Issue #1209 collapsed the six per-axis `Helm*AiPolicy` newtypes
+    // (Engines/Steering/Lateral/Vertical/Impulse/Boost) into this ONE keyed
+    // component. It is authored-immutable and not snapshotted, so it sits on the
+    // honest baseline exactly as `PhaserBankAiPolicies` above does — not folded
+    // and not a declared exclusion. The two axes previously declared
+    // `DeferredFold` (Boost/Impulse policies) lost their `declare_state` with the
+    // newtypes; the STATE twins below are unchanged (LOD-carried + snapshotted).
+    "project_phoenix::ship::helm_ai::FineSystemAiPolicies",
     "project_phoenix::ship::helm_ai::boost::HelmBoostAiPolicyState",
-    "project_phoenix::ship::helm_ai::engines::HelmEnginesAiPolicy",
     "project_phoenix::ship::helm_ai::engines::HelmEnginesAiPolicyState",
-    "project_phoenix::ship::helm_ai::lateral::HelmLateralAiPolicy",
     "project_phoenix::ship::helm_ai::surfaces::HelmPassSurface",
     "project_phoenix::ship::helm_ai::surfaces::HelmRecoveryHistory",
-    "project_phoenix::ship::helm_ai::steering::HelmSteeringAiPolicy",
     "project_phoenix::ship::helm_ai::steering::HelmSteeringAiPolicyState",
-    "project_phoenix::ship::helm_ai::vertical::HelmVerticalAiPolicy",
     "project_phoenix::ship::helm_planner::HelmMotionPlan",
     "project_phoenix::ship::power::PowerAiCadence",
     "project_phoenix::ship::power::PowerAiPolicy",

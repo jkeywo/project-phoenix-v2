@@ -4,13 +4,6 @@ use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
 use crate::messages::SystemControlPayload;
 
-/// Per-ship inline stateless **Boost** AI policy (issue #780). From
-/// the authored `[helm_console.boost_ai]` block.
-/// Read by [`ai_helm_boost`] to decide whether to engage boost this tick, emitted
-/// through the same admitted `SetBoost` seam a human uses.
-#[derive(Component, Clone, Debug, Default)]
-pub struct HelmBoostAiPolicy(pub crate::ai::policy::AiPolicy);
-
 /// Per-ship runtime state for a STATEFUL Boost policy (issue #882) — the
 /// minimal host that proves the optional stateful path end to end.
 ///
@@ -22,7 +15,8 @@ pub struct HelmBoostAiPolicy(pub crate::ai::policy::AiPolicy);
 ///
 /// ## Why this is a separate component
 ///
-/// [`HelmBoostAiPolicy`] is immutable authored data; taking it `&mut` to tick
+/// The authored Boost policy (this axis's entry in
+/// [`FineSystemAiPolicies`]) is immutable authored data; taking it `&mut` to tick
 /// a state machine would dirty Bevy change-detection on the policy every tick.
 /// So the runtime state is its own sibling component.
 ///
@@ -134,7 +128,7 @@ pub(crate) fn ai_helm_boost(
             Option<&ShipBoost>,
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
-            Option<&HelmBoostAiPolicy>,
+            Option<&FineSystemAiPolicies>,
             Option<&HelmBoostAiPolicyState>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
@@ -152,7 +146,7 @@ pub(crate) fn ai_helm_boost(
         boost_comp,
         boost_cfg,
         impulse_cfg,
-        boost_policy,
+        fine_policies,
         boost_state,
         entity_uuid,
         ship_config,
@@ -192,7 +186,7 @@ pub(crate) fn ai_helm_boost(
         let flag_chain = ai_env.flag_chain(entity);
         if let Some(payload) = run_helm_axis::<BoostAxis>(
             sources,
-            boost_policy.map(|p| &p.0),
+            fine_policies.and_then(|p| p.0.get(&BoostAxis::system_id())),
             boost_state.map(|s| &s.0),
             clock.0,
             &flag_chain,

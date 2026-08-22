@@ -4,13 +4,6 @@ use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
 use crate::messages::SystemControlPayload;
 
-/// Per-ship inline stateless **Lateral Thrust** AI policy (issue #780). From
-/// the authored `[helm_console.lateral_ai]` block. Read by
-/// [`ai_helm_lateral_thrust`] to decide whether to actuate the dodge this tick;
-/// the continuous magnitude still comes from the shared hazard surface.
-#[derive(Component, Clone, Debug, Default)]
-pub struct HelmLateralAiPolicy(pub crate::ai::policy::AiPolicy);
-
 /// The **Lateral Thrust** helm axis (issue #1208): outside a docking manoeuvre,
 /// gate the `lateral` channel on the authored `actuate_lateral_thrust` mode verb
 /// and, on a fire, emit the shared-hazard dodge weighted by this hull's authored
@@ -120,7 +113,7 @@ pub(crate) fn ai_helm_lateral_thrust(
             // a `[behaviour]` section still runs AI lateral thrust, on the
             // `crate::ai::*` fallbacks that match the serde defaults.
             Option<&crate::entities::spawner::BehaviourSection>,
-            Option<&HelmLateralAiPolicy>,
+            Option<&FineSystemAiPolicies>,
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             &mut crate::messages::AdmittedCommands,
@@ -132,7 +125,7 @@ pub(crate) fn ai_helm_lateral_thrust(
         entity,
         sources,
         behaviour_section,
-        lateral_policy,
+        fine_policies,
         entity_uuid,
         ship_config,
         mut admitted,
@@ -170,7 +163,7 @@ pub(crate) fn ai_helm_lateral_thrust(
         let flag_chain = ai_env.flag_chain(entity);
         if let Some(payload) = run_helm_axis::<LateralAxis>(
             sources,
-            lateral_policy.map(|p| &p.0),
+            fine_policies.and_then(|p| p.0.get(&LateralAxis::system_id())),
             None,
             0.0,
             &flag_chain,

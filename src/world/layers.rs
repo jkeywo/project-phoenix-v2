@@ -1,60 +1,61 @@
-// Pure world-layer load/unload decision layer (issue #821).
-//
-// Pure Rust module — no Bevy. `LoadWorld` / `UnloadWorld` effects queue
-// `WorldLayerChange`s; the `apply_world_layer_changes` applier in
-// `world::server` performs the I/O (TOML read, entity spawn/despawn) and
-// resource mutation, while every decision — de-duplication, parse handling,
-// name→UUID assignment — lives here as plain functions over plain data.
-//
-// # A layer contributes ENTITIES, and (until #1045) nothing else
-//
-// A loaded layer used to merge its own `[[trigger]]` blocks into the live
-// `WorldContentRuntime` — origin-tagged with the layer path so `UnloadWorld`
-// could take exactly them back out — and that was the ONLY way a layer carried
-// scenario logic: scripts compile on the standalone/base-world path only.
-// Issue #985 deleted the `[[trigger]]` parser, so a layer TOML has no way to
-// author a trigger at all, `evaluate_layer_load` has none to return, and
-// `evaluate_layer_unload` had nothing left to compute. Both went.
-//
-// No shipped layer is affected — `reinforcements.toml`, the one layer any
-// shipped world loads, authors none — and the capability comes back through
-// script-in-layers (#1045), which will hand the applier `ScriptTrigger`s to
-// merge rather than parsed `Trigger`s.
-//
-// # The supporting-world script ROUTE (present) vs. its EFFECT (deferred, #1045)
-//
-// This evaluation now runs the layer through the one world-load sequence
-// ([`crate::world::load::load`]) under [`LoadPolicy::Merge`], which compiles the
-// layer's `[script]` block just as the base-world path compiles the base world's.
-// The compiled [`CompiledScripts`] is carried out on
-// [`LayerLoadOutcome::Loaded::scripts`] — the ROUTE is present end to end.
-//
-// The applier (`world::server::apply_world_layer_changes`) still DROPS that set:
-// a supporting world's `[script]` does not yet take effect. That remaining gap is
-// a ledger-FREEZE POLICY question owned by issue #1045, NOT a plumbing omission.
-// A layer loads at runtime, after boot has already `freeze()`d the content
-// ledger; deciding whether a layer's compiled-script digest joins the frozen
-// content set (and how a save reconciles a layer that arrived mid-session) is the
-// policy #1045 settles. Merge under a MemoryReader leaves the frozen digest
-// untouched — the `LoadedWorld.ledger` records are dropped here (the applier
-// already recorded the TOML text via `load_scenario_toml`), and no shipped layer
-// authors a script for the loader to digest — so wiring the route in now moves no
-// behaviour; only #1045's policy will make a layered script fire.
-// # Purity boundaries
-//
-// * **TOML loading is I/O and stays in the applier.** `load_scenario_toml`
-//   reads the filesystem (native) or the WASM pending-world queue (side
-//   effect), so the applier resolves it first and passes the result in as
-//   `Option<&str>`; this module only decides what the `None` / parse-failure /
-//   success branches mean.
-// * **UUID generation is injected.** Named `[[entity]]` blocks receive UUIDs
-//   from the caller-supplied `uuid_source` (production passes
-//   `entity_loader::assign_uuid`; tests pass a counter).
-// * **Entities are never held.** Spawned `Entity` handles, `WorldLayerMap`
-//   insertion, comms merge/removal, and despawning stay in the applier; the
-//   unload evaluation returns *indices* of live trigger states to drop.
-// * **Logging becomes data.** Failure paths push onto `warnings`; the applier
-//   logs them.
+//! Pure world-layer load/unload decision layer (issue #821).
+//!
+//! Pure Rust module — no Bevy. `LoadWorld` / `UnloadWorld` effects queue
+//! `WorldLayerChange`s; the `apply_world_layer_changes` applier in
+//! `world::server` performs the I/O (TOML read, entity spawn/despawn) and
+//! resource mutation, while every decision — de-duplication, parse handling,
+//! name→UUID assignment — lives here as plain functions over plain data.
+//!
+//! # A layer contributes ENTITIES, and (until #1045) nothing else
+//!
+//! A loaded layer used to merge its own `[[trigger]]` blocks into the live
+//! `WorldContentRuntime` — origin-tagged with the layer path so `UnloadWorld`
+//! could take exactly them back out — and that was the ONLY way a layer carried
+//! scenario logic: scripts compile on the standalone/base-world path only.
+//! Issue #985 deleted the `[[trigger]]` parser, so a layer TOML has no way to
+//! author a trigger at all, `evaluate_layer_load` has none to return, and
+//! `evaluate_layer_unload` had nothing left to compute. Both went.
+//!
+//! No shipped layer is affected — `reinforcements.toml`, the one layer any
+//! shipped world loads, authors none — and the capability comes back through
+//! script-in-layers (#1045), which will hand the applier `ScriptTrigger`s to
+//! merge rather than parsed `Trigger`s.
+//!
+//! # The supporting-world script ROUTE (present) vs. its EFFECT (deferred, #1045)
+//!
+//! This evaluation now runs the layer through the one world-load sequence
+//! ([`crate::world::load::load`]) under [`LoadPolicy::Merge`], which compiles the
+//! layer's `[script]` block just as the base-world path compiles the base world's.
+//! The compiled [`CompiledScripts`] is carried out on
+//! [`LayerLoadOutcome::Loaded::scripts`] — the ROUTE is present end to end.
+//!
+//! The applier (`world::server::apply_world_layer_changes`) still DROPS that set:
+//! a supporting world's `[script]` does not yet take effect. That remaining gap is
+//! a ledger-FREEZE POLICY question owned by issue #1045, NOT a plumbing omission.
+//! A layer loads at runtime, after boot has already `freeze()`d the content
+//! ledger; deciding whether a layer's compiled-script digest joins the frozen
+//! content set (and how a save reconciles a layer that arrived mid-session) is the
+//! policy #1045 settles. Merge under a MemoryReader leaves the frozen digest
+//! untouched — the `LoadedWorld.ledger` records are dropped here (the applier
+//! already recorded the TOML text via `load_scenario_toml`), and no shipped layer
+//! authors a script for the loader to digest — so wiring the route in now moves no
+//! behaviour; only #1045's policy will make a layered script fire.
+//!
+//! # Purity boundaries
+//!
+//! * **TOML loading is I/O and stays in the applier.** `load_scenario_toml`
+//!   reads the filesystem (native) or the WASM pending-world queue (side
+//!   effect), so the applier resolves it first and passes the result in as
+//!   `Option<&str>`; this module only decides what the `None` / parse-failure /
+//!   success branches mean.
+//! * **UUID generation is injected.** Named `[[entity]]` blocks receive UUIDs
+//!   from the caller-supplied `uuid_source` (production passes
+//!   `entity_loader::assign_uuid`; tests pass a counter).
+//! * **Entities are never held.** Spawned `Entity` handles, `WorldLayerMap`
+//!   insertion, comms merge/removal, and despawning stay in the applier; the
+//!   unload evaluation returns *indices* of live trigger states to drop.
+//! * **Logging becomes data.** Failure paths push onto `warnings`; the applier
+//!   logs them.
 
 use crate::world::config::{assign_named_entity_uuids, WorldConfig};
 use crate::world::load::{load, LoadError, LoadPolicy, LoadRequest, MemoryReader};

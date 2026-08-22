@@ -16,6 +16,101 @@
 //! on purpose — no axis widens to a component a sibling needs — so the
 //! deterministic schedule and its #894 digest stay byte-identical to before
 //! the split.
+//!
+//! # Per-axis helm AI (issues #701, #703, #824)
+//!
+//! `ai_helm_thrust`, `ai_helm_steering`, `ai_helm_lateral_thrust` and
+//! `ai_helm_impulse` are the per-axis helm AI: one decides the throttle, one
+//! the yaw, one the dodge, one the impulse drive. Each gates on its own axis
+//! alone:
+//!
+//! ```text
+//! if !<own axis>.operate_ai { continue; }
+//! ```
+//!
+//! They are the successors to the `operate_helm_ai` monolith (deleted in #704,
+//! after #800/#703 declared every axis on every shipped hull and removed the
+//! coarse half of each gate).
+//!
+//! **Since #824 no per-axis system writes an intent component.** Each one
+//! emits its decision as an admitted `SystemControlPayload` — `SetThrust`,
+//! `SetSteering`, `LateralThrustInput`, `StartImpulseCharge`/`CancelImpulse` —
+//! into its own ship's per-entity `AdmittedCommands`, through the same
+//! `validate_and_admit` seam every network command passes (admission symmetry,
+//! `pasm/spec/RADAR_TARGET_AUTHORITY_AND_ADMISSION.md` §2). The write into
+//! `AdmittedCommands` is direct and same-tick — deliberately NOT a round-trip
+//! through the `InboundMessage` queue, which would add a one-tick lag and move
+//! every NPC trajectory. `process_helm_inputs` then applies the admitted
+//! payloads to the intent components later in the same tick, for AI and human
+//! commands alike, with no branching on source downstream of admission.
+//!
+//! **Each axis has exactly one decider, and the applier is shared:**
+//!
+//! ```text
+//! SetThrust            ← ai_helm_thrust         iff T
+//! SetSteering          ← ai_helm_steering       iff S
+//! LateralThrustInput   ← ai_helm_lateral_thrust iff L
+//! Start/CancelImpulse  ← ai_helm_impulse        iff I
+//! ```
+//!
+//! (T/S/L/I = the helm-thrust / helm-steering / helm-lateral-thrust /
+//! helm-impulse `operate_ai` policies.) One decider per axis means Bevy's
+//! arbitrary intra-set ordering cannot decide the outcome (the #697 failure
+//! mode) because there is nothing to decide between; the shared applier
+//! (`process_helm_inputs`) applies whatever admission let through.
+//!
+//! **The coarse `helm` policy C is no longer an input to any of this.** It gated
+//! the monolith and nothing else; with the monolith gone, no helm-AI system reads
+//! it. That is a load-bearing absence, not an accident: `C` is exactly the
+//! coarse-fallback channel #800 spent an issue proving dormant, and re-admitting
+//! it would resurrect the failure mode where an axis is silently driven by
+//! something other than its own declaration.
+//! `helm_writers_are_invariant_under_coarse_policy` pins the whole outcome
+//! invariant under C over every (C, T, S, L, I) combination;
+//! `coarse_helm_alone_drives_no_intent_but_the_per_axis_systems_do` pins it
+//! end-to-end through a ticking app;
+//! `shipped_hull_helm_is_driven_by_the_per_axis_declarations_alone` pins it on a
+//! real hull's control sources.
+//!
+//! The corollary is that an axis a hull does not declare is an axis no AI drives.
+//! `ControlSource::default()` is `Human` (`operate_ai == false`), so an
+//! undeclared axis resolves to "human-held" and its system stands down; before
+//! #704 the monolith quietly covered that case. All nine shipped hulls therefore
+//! declare all four axes — see `shipped_hull_config_drives_the_per_axis_helm_systems`
+//! and `shipped_hull_config_drives_ai_helm_lateral_thrust`, which pin the
+//! declarations themselves against the real TOMLs. Adding a hull means declaring
+//! four axes, not one.
+//!
+//! **The decision surface is assembled once, by `build_helm_ai_surfaces_frame`**
+//! (issue #824 — see the `HelmAiSurfacesFrame` note above). The owner's ruling
+//! recorded here through #823 said each per-axis system should call the pure
+//! `operate_helm` itself and keep only its own output, duplicating the
+//! `WorldView` build per ship per tick, because a shared cached `HelmDecision`
+//! would re-create the mini-monolith this split exists to remove. #824 keeps
+//! the load-bearing half of that ruling and retires the duplication: there is
+//! still **no shared decision** — the frame carries only derived, read-only
+//! decision *inputs*, rebuilt every AI tick, and each axis still calls its own
+//! pure decision function (`operate_helm` per axis is pure and cheap; the
+//! expensive part was always the view build). The identical-inputs invariant
+//! the old shape left unenforced — both `operate_helm` callers must see the
+//! same view or the axes disagree — is now true by construction, and
+//! `all_four_axes_observe_the_same_frame` pins it.
+//!
+//! **No shared mutable state** (issue #702). `operate_helm` is a pure function:
+//! it reads the frame (built from `TacticalRadarSelection`, `NavigationWaypoint` +
+//! `HelmWaypointClearance`, `ObjectiveCursors`, the scored pool) and returns
+//! `(thrust, steering)`. The axis systems consume the frame via `Res<_>` —
+//! immutable by construction — so "did some axis mutate the surface between
+//! systems?" is not a question anyone has to answer.
+//!
+//! **`LastHelmInput` has one writer now.** The per-axis systems no longer
+//! mirror their fields; `process_helm_inputs` mirrors every applied helm
+//! payload into the LocalShip's `LastHelmInput` as it applies the intent. The
+//! pair readers in `SimSet::Physics` (`publish_joystick_to_engines`,
+//! `operate_helm_engine_ai`, `tick_boost`) are ordered
+//! `.after(process_helm_inputs)`, so a torn pair — this tick's AI throttle
+//! beside last tick's stale human steering — cannot be observed;
+//! `helm_ai_last_input_pair_is_not_torn` pins the result.
 
 use bevy::prelude::*;
 
@@ -212,96 +307,8 @@ pub(crate) fn detect_reached_objective_completion(
     }
 }
 
-// ── Per-axis helm AI (issues #701, #703, #824) ────────────────────────────────
-//
-// `ai_helm_thrust`, `ai_helm_steering`, `ai_helm_lateral_thrust` and
-// `ai_helm_impulse` are the per-axis helm AI: one decides the throttle, one
-// the yaw, one the dodge, one the impulse drive. Each gates on its own axis
-// alone:
-//
-//     if !<own axis>.operate_ai { continue; }
-//
-// They are the successors to the `operate_helm_ai` monolith (deleted in #704,
-// after #800/#703 declared every axis on every shipped hull and removed the
-// coarse half of each gate).
-//
-// **Since #824 no per-axis system writes an intent component.** Each one
-// emits its decision as an admitted `SystemControlPayload` — `SetThrust`,
-// `SetSteering`, `LateralThrustInput`, `StartImpulseCharge`/`CancelImpulse` —
-// into its own ship's per-entity `AdmittedCommands`, through the same
-// `validate_and_admit` seam every network command passes (admission symmetry,
-// `pasm/spec/RADAR_TARGET_AUTHORITY_AND_ADMISSION.md` §2). The write into
-// `AdmittedCommands` is direct and same-tick — deliberately NOT a round-trip
-// through the `InboundMessage` queue, which would add a one-tick lag and move
-// every NPC trajectory. `process_helm_inputs` then applies the admitted
-// payloads to the intent components later in the same tick, for AI and human
-// commands alike, with no branching on source downstream of admission.
-//
-// **Each axis has exactly one decider, and the applier is shared:**
-//
-//   SetThrust            ← `ai_helm_thrust`         iff T
-//   SetSteering          ← `ai_helm_steering`       iff S
-//   LateralThrustInput   ← `ai_helm_lateral_thrust` iff L
-//   Start/CancelImpulse  ← `ai_helm_impulse`        iff I
-//
-// (T/S/L/I = the helm-thrust / helm-steering / helm-lateral-thrust /
-// helm-impulse `operate_ai` policies.) One decider per axis means Bevy's
-// arbitrary intra-set ordering cannot decide the outcome (the #697 failure
-// mode) because there is nothing to decide between; the shared applier
-// (`process_helm_inputs`) applies whatever admission let through.
-//
-// **The coarse `helm` policy C is no longer an input to any of this.** It gated
-// the monolith and nothing else; with the monolith gone, no helm-AI system reads
-// it. That is a load-bearing absence, not an accident: `C` is exactly the
-// coarse-fallback channel #800 spent an issue proving dormant, and re-admitting
-// it would resurrect the failure mode where an axis is silently driven by
-// something other than its own declaration.
-// `helm_writers_are_invariant_under_coarse_policy` pins the whole outcome
-// invariant under C over every (C, T, S, L, I) combination;
-// `coarse_helm_alone_drives_no_intent_but_the_per_axis_systems_do` pins it
-// end-to-end through a ticking app;
-// `shipped_hull_helm_is_driven_by_the_per_axis_declarations_alone` pins it on a
-// real hull's control sources.
-//
-// The corollary is that an axis a hull does not declare is an axis no AI drives.
-// `ControlSource::default()` is `Human` (`operate_ai == false`), so an
-// undeclared axis resolves to "human-held" and its system stands down; before
-// #704 the monolith quietly covered that case. All nine shipped hulls therefore
-// declare all four axes — see `shipped_hull_config_drives_the_per_axis_helm_systems`
-// and `shipped_hull_config_drives_ai_helm_lateral_thrust`, which pin the
-// declarations themselves against the real TOMLs. Adding a hull means declaring
-// four axes, not one.
-//
-// **The decision surface is assembled once, by `build_helm_ai_surfaces_frame`**
-// (issue #824 — see the `HelmAiSurfacesFrame` note above). The owner's ruling
-// recorded here through #823 said each per-axis system should call the pure
-// `operate_helm` itself and keep only its own output, duplicating the
-// `WorldView` build per ship per tick, because a shared cached `HelmDecision`
-// would re-create the mini-monolith this split exists to remove. #824 keeps
-// the load-bearing half of that ruling and retires the duplication: there is
-// still **no shared decision** — the frame carries only derived, read-only
-// decision *inputs*, rebuilt every AI tick, and each axis still calls its own
-// pure decision function (`operate_helm` per axis is pure and cheap; the
-// expensive part was always the view build). The identical-inputs invariant
-// the old shape left unenforced — both `operate_helm` callers must see the
-// same view or the axes disagree — is now true by construction, and
-// `all_four_axes_observe_the_same_frame` pins it.
-//
-// **No shared mutable state** (issue #702). `operate_helm` is a pure function:
-// it reads the frame (built from `TacticalRadarSelection`, `NavigationWaypoint` +
-// `HelmWaypointClearance`, `ObjectiveCursors`, the scored pool) and returns
-// `(thrust, steering)`. The axis systems consume the frame via `Res<_>` —
-// immutable by construction — so "did some axis mutate the surface between
-// systems?" is not a question anyone has to answer.
-//
-// **`LastHelmInput` has one writer now.** The per-axis systems no longer
-// mirror their fields; `process_helm_inputs` mirrors every applied helm
-// payload into the LocalShip's `LastHelmInput` as it applies the intent. The
-// pair readers in `SimSet::Physics` (`publish_joystick_to_engines`,
-// `operate_helm_engine_ai`, `tick_boost`) are ordered
-// `.after(process_helm_inputs)`, so a torn pair — this tick's AI throttle
-// beside last tick's stale human steering — cannot be observed;
-// `helm_ai_last_input_pair_is_not_torn` pins the result.
+// Per-axis helm AI design notes (issues #701, #703, #824) — see the module
+// doc (`//!`) at the top of this file.
 
 /// The tick-derived clock the policy state machines measure `state_time`
 /// against (issue #882, AC4).

@@ -222,24 +222,3 @@ pub(crate) fn ai_helm_impulse(
         }
     }
 }
-
-// ── Per-axis helm AI: lateral thrust (issues #697, #703, #824) ────────────────
-//
-// Born in #697 as `operate_lateral_thrust_ai`, a partial-automation system
-// gated `L && !C`; #703 collapsed the gate to `L` alone and closed three
-// behaviour divergences against the monolith (radar gating, snapshot
-// fallback, no-objective zeroing); #704 deleted the monolith, leaving `L`
-// the whole story. #824 moved the transport: the dodge is now emitted as an
-// admitted `LateralThrustInput` command rather than a direct
-// `LateralThrustInput` component write — see the per-axis module note above.
-//
-// The ~30 Hz cadence predates the split (it was the private
-// `AiLateralThrustTimer` until #803) and is load-bearing: production `Update`
-// is rAF-driven, so without the shared `run_if(ai_tick_ready)` gate the
-// dodge cadence would follow the host's display refresh rate — precisely the
-// nondeterminism PRD #620 (P2P deterministic lockstep) exists to remove.
-// A skipped frame runs none of the four axis systems, so an axis simply
-// holds its last applied intent through the gap and `integrate_ship_physics`
-// keeps integrating it.
-// `*_runs_on_the_shared_sim_tick_not_per_frame` pins the cadence for each of
-// the four systems.

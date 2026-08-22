@@ -1,60 +1,62 @@
-// Flag store, predicate DSL parser, and evaluation primitives for the world
-// engine (issue #412, foundation for PRD #397).
-//
-// Pure Rust module — no Bevy. The Bevy layer (`world::server`) wraps a
-// `FlagStore` as a resource, dispatches the new flag-mutation trigger actions,
-// and emits `FlagTransition` events that the reactive `on_flag_set` /
-// `on_flag_cleared` trigger conditions react to.
-//
-// # Data model
-//
-// `FlagStore` holds a single namespace of named integer counters. The boolean
-// view of a counter is `counter != 0`. `set_flag` writes `1`, `clear_flag`
-// writes `0`. `increment_flag(name, by)` adds `by`. `set_flag_value(name,
-// value)` assigns directly. All mutations return `(before, after)` integer
-// pairs so callers can detect transitions (false→true, true→false) and emit
-// events for the reactive trigger conditions.
-//
-// Unreferenced names read as `0` (counter view) / `false` (boolean view).
-//
-// # Parent chain
-//
-// World content can be additively layered (root world + sub-worlds via
-// `LoadWorld`). A predicate may reference a flag in a parent layer via
-// `parent:name`. `parent:parent:name` walks up two levels. Walking past the
-// root resolves as "not found" (counter 0 / boolean false), matching the
-// default for unreferenced names.
-//
-// To keep this module Bevy-free, evaluation accepts a slice of `&FlagStore`
-// references representing the layer chain, ordered **innermost first**
-// (`chain[0]` is the current layer, `chain[1]` its parent, etc.). The Bevy
-// layer builds this slice from `WorldLayerMap` / `WorldContentRuntime` and
-// hands it in. In the current single-runtime architecture the slice is
-// usually a single element, and `parent:` references simply resolve as
-// "not found".
-//
-// # Predicate DSL
-//
-// Infix grammar:
-//
-//     expr   := or
-//     or     := and ("or" and)*
-//     and    := unary ("and" unary)*
-//     unary  := "not" unary | atom
-//     atom   := "(" expr ")"
-//             | "flag" "(" NAME ")"
-//             | "counter" "(" NAME ")" CMP INT
-//             | "history" "(" REDUCER "," NAME "," WINDOW ")" CMP OPERAND
-//
-// Precedence: `not` > `and` > `or`. Parens override. Standard math
-// precedence; equivalent to most boolean expression languages.
-//
-// `NAME` is a sequence of `[A-Za-z0-9_:-]+` (so `parent:foo` and
-// `parent:parent:foo-bar` are single tokens). `CMP` is one of `>=`, `<=`,
-// `==`, `!=`, `>`, `<`. `INT` is a (possibly signed) decimal integer.
-//
-// Predicates are parsed eagerly at world-load time. Parse errors include the
-// offending token and a position hint; no panics.
+//! Flag store, predicate DSL parser, and evaluation primitives for the world
+//! engine (issue #412, foundation for PRD #397).
+//!
+//! Pure Rust module — no Bevy. The Bevy layer (`world::server`) wraps a
+//! `FlagStore` as a resource, dispatches the new flag-mutation trigger actions,
+//! and emits `FlagTransition` events that the reactive `on_flag_set` /
+//! `on_flag_cleared` trigger conditions react to.
+//!
+//! # Data model
+//!
+//! `FlagStore` holds a single namespace of named integer counters. The boolean
+//! view of a counter is `counter != 0`. `set_flag` writes `1`, `clear_flag`
+//! writes `0`. `increment_flag(name, by)` adds `by`. `set_flag_value(name,
+//! value)` assigns directly. All mutations return `(before, after)` integer
+//! pairs so callers can detect transitions (false→true, true→false) and emit
+//! events for the reactive trigger conditions.
+//!
+//! Unreferenced names read as `0` (counter view) / `false` (boolean view).
+//!
+//! # Parent chain
+//!
+//! World content can be additively layered (root world + sub-worlds via
+//! `LoadWorld`). A predicate may reference a flag in a parent layer via
+//! `parent:name`. `parent:parent:name` walks up two levels. Walking past the
+//! root resolves as "not found" (counter 0 / boolean false), matching the
+//! default for unreferenced names.
+//!
+//! To keep this module Bevy-free, evaluation accepts a slice of `&FlagStore`
+//! references representing the layer chain, ordered **innermost first**
+//! (`chain[0]` is the current layer, `chain[1]` its parent, etc.). The Bevy
+//! layer builds this slice from `WorldLayerMap` / `WorldContentRuntime` and
+//! hands it in. In the current single-runtime architecture the slice is
+//! usually a single element, and `parent:` references simply resolve as
+//! "not found".
+//!
+//! # Predicate DSL
+//!
+//! Infix grammar:
+//!
+//! ```text
+//! expr   := or
+//! or     := and ("or" and)*
+//! and    := unary ("and" unary)*
+//! unary  := "not" unary | atom
+//! atom   := "(" expr ")"
+//!         | "flag" "(" NAME ")"
+//!         | "counter" "(" NAME ")" CMP INT
+//!         | "history" "(" REDUCER "," NAME "," WINDOW ")" CMP OPERAND
+//! ```
+//!
+//! Precedence: `not` > `and` > `or`. Parens override. Standard math
+//! precedence; equivalent to most boolean expression languages.
+//!
+//! `NAME` is a sequence of `[A-Za-z0-9_:-]+` (so `parent:foo` and
+//! `parent:parent:foo-bar` are single tokens). `CMP` is one of `>=`, `<=`,
+//! `==`, `!=`, `>`, `<`. `INT` is a (possibly signed) decimal integer.
+//!
+//! Predicates are parsed eagerly at world-load time. Parse errors include the
+//! offending token and a position hint; no panics.
 
 use crate::bounded_history::BoundedHistory;
 use serde::{Deserialize, Serialize};

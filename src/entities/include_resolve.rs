@@ -1,106 +1,106 @@
-// Composable entity templates (issue #869).
-//
-// Pure module: no I/O, no Bevy, no thread-locals in the resolver itself. It
-// turns one entity template plus its ordered `includes` into ONE final TOML
-// document, and hands back **provenance** saying which fragment authored each
-// field and through which include chain.
-//
-// # Where this sits
-//
-// ```text
-//   fragment TOML ─┐
-//   fragment TOML ─┼─ resolve_template ─→ one resolved TOML ─→ EntityConfig::from_toml
-//   hull TOML ─────┘   (once per TEMPLATE)                         │
-//                                                                  ▼
-//                                    entity_loader::apply_overrides (once per INSTANCE)
-// ```
-//
-// ## Why include resolution is UPSTREAM of `resolve_entity_via`, not inside it
-//
-// The PRD left this open. It stays upstream, for three reasons that are not
-// preference:
-//
-// 1. **`EntityConfig` is `deny_unknown_fields`.** An `includes` key cannot
-//    survive into a parsed config, so folding resolution into
-//    `entity_loader::apply_overrides` — which starts from an already-parsed
-//    `EntityConfig` — would require adding an `includes` field to
-//    `EntityConfig` purely to carry authoring metadata into the runtime, then
-//    scrubbing it again. Includes would then literally exist at runtime, which
-//    is the one thing #869 forbids. Resolution here operates on raw TOML text
-//    and the key never reaches the struct.
-// 2. **Cardinality.** Includes resolve once per *template* (cached); overrides
-//    apply once per *instance*. `apply_overrides` pays a
-//    `EntityConfig → toml::Value → merge → String → EntityConfig` round trip
-//    because its input is already a struct. Include resolution starts from
-//    text, so it merges as `toml::Value` and parses **exactly once**, at the
-//    end. Conflating them would multiply that round trip by every spawned
-//    instance for no gain.
-// 3. **`67c31b9e` already split the two concerns** — `apply_overrides` came out
-//    of the entity-instance resolver (`resolve_entity` then, `resolve_entity_via`
-//    since #973) so that the instance merge could be reused on its own.
-//    Pushing a second, per-template concern back in would re-fuse them.
-//
-// Both layers share the same merge FUNCTION
-// (`entity_override::merge_entity_config_toml_with`) and differ only in the
-// `MergePolicy` they pass it — see "Array semantics" below. Cardinality and
-// input form differ too.
-//
-// ## Merge order
-//
-// Depth-first, in declared order. Each fragment is merged into the accumulator,
-// and the declaring template is merged **last**, so the includer always wins.
-// A template that includes `[a, b]` resolves as
-// `((a's own closure) ⊕ (b's own closure)) ⊕ self`.
-//
-// ## Array semantics (issue #911 — this SUPERSEDES #869's "everything else
-// replaces wholesale")
-//
-// This layer merges under `MergePolicy::ComposeFragments`, the instance-override
-// layer under `MergePolicy::InstanceOverride`. That is the seam #869 did not
-// have, and the reason it put array extension out of scope: with one shared
-// rule, letting a hull EXTEND a fragment's `[[system]]` suite would have
-// silently let every world override extend it too.
-//
-// What a fragment author writes, and what it does:
-//
-// * **Extend** — declare an entry with an `id` (or, for `[[station.rating]]`, a
-//   `name`) that no earlier fragment used. It is APPENDED. This is the case
-//   #911 exists for: "the library's systems, plus two of my own", with no new
-//   syntax and no marker.
-// * **Replace one entry** — declare an entry whose key MATCHES an inherited
-//   one. It deep-merges into it, **at the inherited entry's position**, so
-//   fields you do not mention survive and `[[shield_arc]]`'s load-bearing order
-//   is preserved.
-// * **Remove one entry** — declare `{ id = "…", _remove = true }`. The
-//   inherited entry is dropped and the tombstone itself never reaches the
-//   resolved document (the marker is stripped exactly as `includes` is, because
-//   `EntityConfig` is `deny_unknown_fields`). A tombstone matching nothing is a
-//   no-op.
-// * **Clear the whole list** — author an empty array (`doctrine = []`,
-//   `system = []`). Unchanged from #869, and it still beats the element-wise
-//   rules.
-// * **Leave it alone** — omit the key. An absent key never reaches the merge.
-//
-// Which arrays reconcile is one table, `entity_override::COMPOSE_KEYED_ARRAYS`,
-// keyed on the dotted, index-free path: `system`/`station`/`shield_arc`/
-// `weapons_console.{phaser,blaster}_banks`/`torpedoes.tubes`/
-// `behaviour.doctrine` by `id`, and `station.rating` by `name`. **Provenance
-// below reads the SAME table** — see `record_leaves`.
-//
-// `tags` has no key (bare strings), so it UNIONS here and REPLACES at the
-// instance layer; that asymmetry is deliberate and is what the policy seam is
-// for. Arrays with no stable identity — `*.ai.rule`, `*_ai.state[].transition`,
-// `*.selector.score`, `hull.system_hull` — keep replacing
-// wholesale. **A fragment contributing an AI policy contributes it WHOLE**;
-// that is the intended granularity.
-//
-// ## Paths
-//
-// Include paths are resolved **relative to the declaring template** and
-// lexically canonicalised (`\` → `/`, `.` and `..` collapsed). Canonicalisation
-// is lexical rather than `std::fs::canonicalize` on purpose: it must produce the
-// same key on WASM, where there is no filesystem, as it does natively, and the
-// keys double as config-cache keys and as the cycle-detection identity.
+//! Composable entity templates (issue #869).
+//!
+//! Pure module: no I/O, no Bevy, no thread-locals in the resolver itself. It
+//! turns one entity template plus its ordered `includes` into ONE final TOML
+//! document, and hands back **provenance** saying which fragment authored each
+//! field and through which include chain.
+//!
+//! # Where this sits
+//!
+//! ```text
+//!   fragment TOML ─┐
+//!   fragment TOML ─┼─ resolve_template ─→ one resolved TOML ─→ EntityConfig::from_toml
+//!   hull TOML ─────┘   (once per TEMPLATE)                         │
+//!                                                                  ▼
+//!                                    entity_loader::apply_overrides (once per INSTANCE)
+//! ```
+//!
+//! ## Why include resolution is UPSTREAM of `resolve_entity_via`, not inside it
+//!
+//! The PRD left this open. It stays upstream, for three reasons that are not
+//! preference:
+//!
+//! 1. **`EntityConfig` is `deny_unknown_fields`.** An `includes` key cannot
+//!    survive into a parsed config, so folding resolution into
+//!    `entity_loader::apply_overrides` — which starts from an already-parsed
+//!    `EntityConfig` — would require adding an `includes` field to
+//!    `EntityConfig` purely to carry authoring metadata into the runtime, then
+//!    scrubbing it again. Includes would then literally exist at runtime, which
+//!    is the one thing #869 forbids. Resolution here operates on raw TOML text
+//!    and the key never reaches the struct.
+//! 2. **Cardinality.** Includes resolve once per *template* (cached); overrides
+//!    apply once per *instance*. `apply_overrides` pays a
+//!    `EntityConfig → toml::Value → merge → String → EntityConfig` round trip
+//!    because its input is already a struct. Include resolution starts from
+//!    text, so it merges as `toml::Value` and parses **exactly once**, at the
+//!    end. Conflating them would multiply that round trip by every spawned
+//!    instance for no gain.
+//! 3. **`67c31b9e` already split the two concerns** — `apply_overrides` came out
+//!    of the entity-instance resolver (`resolve_entity` then, `resolve_entity_via`
+//!    since #973) so that the instance merge could be reused on its own.
+//!    Pushing a second, per-template concern back in would re-fuse them.
+//!
+//! Both layers share the same merge FUNCTION
+//! (`entity_override::merge_entity_config_toml_with`) and differ only in the
+//! `MergePolicy` they pass it — see "Array semantics" below. Cardinality and
+//! input form differ too.
+//!
+//! ## Merge order
+//!
+//! Depth-first, in declared order. Each fragment is merged into the accumulator,
+//! and the declaring template is merged **last**, so the includer always wins.
+//! A template that includes `[a, b]` resolves as
+//! `((a's own closure) ⊕ (b's own closure)) ⊕ self`.
+//!
+//! ## Array semantics (issue #911 — this SUPERSEDES #869's "everything else
+//! replaces wholesale")
+//!
+//! This layer merges under `MergePolicy::ComposeFragments`, the instance-override
+//! layer under `MergePolicy::InstanceOverride`. That is the seam #869 did not
+//! have, and the reason it put array extension out of scope: with one shared
+//! rule, letting a hull EXTEND a fragment's `[[system]]` suite would have
+//! silently let every world override extend it too.
+//!
+//! What a fragment author writes, and what it does:
+//!
+//! * **Extend** — declare an entry with an `id` (or, for `[[station.rating]]`, a
+//!   `name`) that no earlier fragment used. It is APPENDED. This is the case
+//!   #911 exists for: "the library's systems, plus two of my own", with no new
+//!   syntax and no marker.
+//! * **Replace one entry** — declare an entry whose key MATCHES an inherited
+//!   one. It deep-merges into it, **at the inherited entry's position**, so
+//!   fields you do not mention survive and `[[shield_arc]]`'s load-bearing order
+//!   is preserved.
+//! * **Remove one entry** — declare `{ id = "…", _remove = true }`. The
+//!   inherited entry is dropped and the tombstone itself never reaches the
+//!   resolved document (the marker is stripped exactly as `includes` is, because
+//!   `EntityConfig` is `deny_unknown_fields`). A tombstone matching nothing is a
+//!   no-op.
+//! * **Clear the whole list** — author an empty array (`doctrine = []`,
+//!   `system = []`). Unchanged from #869, and it still beats the element-wise
+//!   rules.
+//! * **Leave it alone** — omit the key. An absent key never reaches the merge.
+//!
+//! Which arrays reconcile is one table, `entity_override::COMPOSE_KEYED_ARRAYS`,
+//! keyed on the dotted, index-free path: `system`/`station`/`shield_arc`/
+//! `weapons_console.{phaser,blaster}_banks`/`torpedoes.tubes`/
+//! `behaviour.doctrine` by `id`, and `station.rating` by `name`. **Provenance
+//! below reads the SAME table** — see `record_leaves`.
+//!
+//! `tags` has no key (bare strings), so it UNIONS here and REPLACES at the
+//! instance layer; that asymmetry is deliberate and is what the policy seam is
+//! for. Arrays with no stable identity — `*.ai.rule`, `*_ai.state[].transition`,
+//! `*.selector.score`, `hull.system_hull` — keep replacing
+//! wholesale. **A fragment contributing an AI policy contributes it WHOLE**;
+//! that is the intended granularity.
+//!
+//! ## Paths
+//!
+//! Include paths are resolved **relative to the declaring template** and
+//! lexically canonicalised (`\` → `/`, `.` and `..` collapsed). Canonicalisation
+//! is lexical rather than `std::fs::canonicalize` on purpose: it must produce the
+//! same key on WASM, where there is no filesystem, as it does natively, and the
+//! keys double as config-cache keys and as the cycle-detection identity.
 
 use std::collections::BTreeMap;
 

@@ -184,7 +184,7 @@ pub const PER_SHIP_BUS_COMPONENTS: &[&str] = &[
 /// never goes through `spawn_entity`, so both must be checked.
 pub const PER_SHIP_BUS_SPAWN_SITES: &[(&str, &str)] = &[
     ("src/entities/spawner.rs", "spawn_entity"),
-    ("src/server_app.rs", "spawn_game_start_entities"),
+    ("src/server_app/world_setup.rs", "spawn_game_start_entities"),
 ];
 
 /// A distinct docking intent (issue #742): the UUID of the dock the Helm AI is

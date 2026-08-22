@@ -18,7 +18,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: observed
-      paths: [src/ship/physics.rs, src/ship_plugin.rs, src/server_app.rs]
+      paths: [src/ship/physics.rs, src/ship_plugin.rs, src/server_app/collision.rs]
       symbols: [compute_physics]
       tests: [cargo test]
 
@@ -319,7 +319,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/server_app.rs
+        - src/server_app/components.rs
         - src/ship/impulse.rs
         - src/ship/impulse_boost_systems.rs
         - src/ship_plugin.rs
@@ -385,7 +385,7 @@ entities:
     implementation:
       status: observed
       paths:
-        - src/server_app.rs
+        - src/server_app/components.rs
         - src/ship/boost.rs
         - src/ship/impulse_boost_systems.rs
         - src/ship_plugin.rs

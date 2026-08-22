@@ -38,7 +38,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/entities/spawner.rs, src/asteroids/lifecycle.rs, src/ai/server.rs, src/server_app.rs]
+      paths: [src/entities/spawner.rs, src/asteroids/lifecycle.rs, src/ai/server.rs, src/server_app/components.rs]
       symbols: [EntityUuid, AsteroidUuid]
 
   - state: world-id-mint-state
@@ -189,7 +189,7 @@ entities:
         - src/sim_tick.rs
         - src/core/broadcast/cache_registry.rs
         - src/console/weapons/blackboard.rs
-        - src/server_app.rs
+        - src/server_app/registration.rs
         - src/debug_overlay.rs
       # src/command_admission/mod.rs (clear_inter_system_queue's real home) is
       # deliberately NOT a declared path here: it is also host-command-admission's
@@ -260,7 +260,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/sim_rng.rs, src/core/messages.rs, src/headless/fingerprint.rs, src/server_app.rs, src/lobby/server.rs]
+      paths: [src/sim_rng.rs, src/core/messages.rs, src/headless/fingerprint.rs, src/server_app/components.rs, src/lobby/server.rs]
       symbols: [SimRng, GamePhase, GameOverReason, WorldResource, CaptainPriorityBoost, EntitySnapshot]
 
   - component: vellum-digest-primitive-reference

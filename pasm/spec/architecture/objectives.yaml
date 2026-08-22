@@ -51,7 +51,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/ship/viewscreen.rs, src/ai/server.rs, src/server_app.rs]
+      paths: [src/objectives.rs, src/ship/viewscreen.rs, src/ai/server.rs, src/server_app/broadcast.rs]
       symbols: [UtilityConfig, WorldConditions, attacked_recently, last_landed_hit_secs]
       tests: [cargo test]
 
@@ -223,7 +223,7 @@ entities:
       writers: [captain-objective-priority]
     implementation:
       status: declared
-      paths: [src/server_app.rs]
+      paths: [src/server_app/components.rs]
       symbols: [CaptainPriorityBoost]
       tests: [cargo test]
 
@@ -262,7 +262,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/server_app.rs]
+      paths: [src/console/captain/server.rs, src/server_app/components.rs]
       symbols: [handle_set_objective_priority, CaptainPriorityBoost]
       tests: [cargo test]
 
@@ -278,7 +278,7 @@ entities:
       writers: [scoped-objective-priority]
     implementation:
       status: declared
-      paths: [src/server_app.rs]
+      paths: [src/server_app/components.rs]
       symbols: [CaptainPriorityBoost]
       tests: [cargo test]
 

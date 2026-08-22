@@ -1044,7 +1044,7 @@ entities:
       writers: [world-load-lifecycle-contract]
     implementation:
       status: declared
-      paths: [src/headless/app.rs, src/world/server.rs, src/server_app.rs]
+      paths: [src/headless/app.rs, src/world/server.rs, src/server_app/world_setup.rs]
       symbols: [spawn_immediate_entities_internal, spawn_anonymous_entities_internal, world_activation_blocked, WorldRuntime, apply_world_layer_changes]
 
   - component: world-objective-contract

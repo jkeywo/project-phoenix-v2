@@ -246,7 +246,7 @@ const fn site(file: &'static str, func: &'static str) -> EvalSite {
 /// their omission stopped being masked by a read-time synthesised fallback.
 const SPAWNER_AND_PLAYER: &[EvalSite] = &[
     site("src/entities/spawner.rs", "spawn_entity"),
-    site("src/server_app.rs", "spawn_game_start_entities"),
+    site("src/server_app/world_setup.rs", "spawn_game_start_entities"),
 ];
 /// Both Comms declarations are resolved by one shared helper that both spawn
 /// paths call, so the helper is the single site.

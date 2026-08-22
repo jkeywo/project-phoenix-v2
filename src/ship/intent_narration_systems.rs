@@ -89,7 +89,7 @@ impl ShipIntentNarration {
 /// simply never narrates, and nothing warns.
 pub const INTENT_NARRATION_SPAWN_SITES: &[(&str, &str)] = &[
     ("src/entities/spawner.rs", "spawn_entity"),
-    ("src/server_app.rs", "spawn_game_start_entities"),
+    ("src/server_app/world_setup.rs", "spawn_game_start_entities"),
 ];
 
 /// The stations that narrate, and which decision axes each one reports.

@@ -14,7 +14,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server_app.rs, server.html, gui/action-map.js]
+      paths: [src/console_bridge.rs, src/server/bridge.rs, src/server_app/components.rs, server.html, gui/action-map.js]
       symbols: [LOCAL_CONSOLE_TOKEN, wasm_receive_message, dispatchConsoleAction]
       tests: [cargo test, npx vitest run]
 
@@ -151,6 +151,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/console_ai/mod.rs, src/server_app.rs]
+      paths: [src/console_ai/core.rs, src/console_ai/server.rs, src/console_ai/mod.rs, src/server_app/registration.rs]
       symbols: [ConsoleAiPlugin, ai_shield_focus, ai_power_allocation, ai_torpedo_auto_fire, tick_frequency_hint_high_fidelity]
       tests: [cargo test]

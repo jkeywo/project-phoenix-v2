@@ -66,7 +66,7 @@ entities:
       derived_from: [tactical-radar-blackboard-state, sensor-radar-blackboard-state]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/ai/server.rs, src/server_app.rs]
+      paths: [src/core/messages.rs, src/ai/server.rs, src/server_app/broadcast.rs]
       symbols: [ViewscreenBlackboard]
 
   - component: inter-system-message-router
@@ -200,5 +200,5 @@ entities:
       writers: [intent-narration-coalescer]
     implementation:
       status: declared
-      paths: [src/ship/intent_narration_systems.rs, src/entities/spawner.rs, src/server_app.rs]
+      paths: [src/ship/intent_narration_systems.rs, src/entities/spawner.rs, src/server_app/world_setup.rs]
       symbols: [ShipIntentNarration, INTENT_NARRATION_SPAWN_SITES]

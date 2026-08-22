@@ -92,7 +92,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/weapons/shield.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/server_app.rs]
+      paths: [src/weapons/shield.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/server_app/collision.rs]
       symbols: [ShieldSystem]
       tests: [cargo test]
 
@@ -139,7 +139,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: observed
-      paths: [src/ship/shields.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/entities/config.rs, src/entities/spawner.rs, src/server_app.rs, src/ai/policy.rs]
+      paths: [src/ship/shields.rs, src/console_ai/core.rs, src/console_ai/server.rs, src/entities/config.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/ai/policy.rs]
       symbols: [ai_shield_focus, tick_shield_focus_ai, ShieldsDamageHistory, ShieldsAiConfigToml, ShieldsFocusAiPolicy, seed_shields_focus_facts, SHIELD_FOCUS_CHANNEL, SHIELD_FOCUS_VERB]
       tests: [cargo test]
 

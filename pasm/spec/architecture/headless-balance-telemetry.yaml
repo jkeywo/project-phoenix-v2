@@ -35,7 +35,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/core/balance.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/server_app.rs, src/regions/server.rs, src/ship/damage_sync.rs, src/console/captain/server.rs, src/console/repair/server.rs, src/world/server.rs, src/ship/helm_ai/mod.rs]
+      paths: [src/core/balance.rs, src/console/weapons/beam.rs, src/console/weapons/blaster.rs, src/console/weapons/torpedo.rs, src/server_app/collision.rs, src/server_app/broadcast.rs, src/regions/server.rs, src/ship/damage_sync.rs, src/console/captain/server.rs, src/console/repair/server.rs, src/world/server.rs, src/ship/helm_ai/mod.rs]
       symbols: [BalanceEvent, VictimKind, Outcome]
       tests: [cargo test]
 
@@ -128,7 +128,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/sim_rng.rs, src/server_app.rs, src/headless/app.rs, src/headless/args.rs, src/regions/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/asteroids/lifecycle.rs, src/world/server.rs]
+      paths: [src/sim_rng.rs, src/server_app/registration.rs, src/headless/app.rs, src/headless/args.rs, src/regions/server.rs, src/console/weapons/beam.rs, src/console/weapons/torpedo.rs, src/console/weapons/blaster.rs, src/asteroids/lifecycle.rs, src/world/server.rs]
       symbols: [SimRng, SimStream, SeedSource, assign_uuid_with]
       tests: [cargo test, tests/rng_determinism.rs]
 
@@ -164,7 +164,7 @@ entities:
       runs_in: [headless-runtime]
     implementation:
       status: declared
-      paths: [src/core/balance.rs, src/headless/report.rs, src/world/config.rs, src/world/dispatch.rs, src/world/server.rs, src/server_app.rs]
+      paths: [src/core/balance.rs, src/headless/report.rs, src/world/config.rs, src/world/dispatch.rs, src/world/server.rs, src/server_app/components.rs]
       symbols: [classify, closing_damage_rates, RunOutcome, OutcomeReport, SideMargins, GameOverReason]
       tests: [cargo test, tests/headless_runner.rs]
 

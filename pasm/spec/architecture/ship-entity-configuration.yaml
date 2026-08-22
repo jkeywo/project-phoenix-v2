@@ -218,7 +218,7 @@ entities:
       runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
-      paths: [src/entities/entity_override.rs, src/entities/spawner.rs, src/server_app.rs]
+      paths: [src/entities/entity_override.rs, src/entities/spawner.rs, src/server_app/world_setup.rs]
       symbols: [player_hull_config]
       tests: [cargo test]
     evidence:

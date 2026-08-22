@@ -125,7 +125,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/render_setup.rs, src/entities/visual_fade.rs, src/entities/billboard.rs, src/server_app.rs, src/server/renderer.rs, src/world/config.rs, src/viewer/lod.rs, src/viewer/subject.rs]
+      paths: [src/render_setup.rs, src/entities/visual_fade.rs, src/entities/billboard.rs, src/server_app/registration.rs, src/server/renderer.rs, src/world/config.rs, src/viewer/lod.rs, src/viewer/subject.rs]
       symbols: [RenderConfig, BloomConfig, RenderTuning, apply_render_config, apply_target_hdr, BLOOM_RUNS_ON_THIS_TARGET, VisualFade, drive_visual_fades, retire_lod_visual, yaw_blend, billboard_quad_size, orient_lod_billboards]
       # The viewer half of this runs under `--features viewer`, and CI now
       # EXECUTES it: the `viewer-test` job in .github/workflows/ci.yml runs the
@@ -161,7 +161,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/reference_grid.rs, src/server/reference_grid.rs, assets/shaders/reference_grid.wgsl, src/entities/config.rs, src/server_app.rs]
+      paths: [src/reference_grid.rs, src/server/reference_grid.rs, assets/shaders/reference_grid.wgsl, src/entities/config.rs, src/server_app/registration.rs]
       symbols: [ReferenceGridConfig, ReferenceGridPlugin, ReferenceGridMaterial, ReferenceGridTuning, ReferenceGridPatch, decide_patch_action, material_from_config, distance_to_nearest_line, line_coverage, radial_fade]
       # The WGSL half is not executed by any gate - no shader in this repo is,
       # and `cargo test` cannot reach a fragment stage. What IS tested is the
@@ -231,7 +231,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [server.html, gui/server-settings.js, src/server/bridge.rs, src/server_app.rs]
+      paths: [server.html, gui/server-settings.js, src/server/bridge.rs, src/server_app/components.rs]
       # Since issue #939 these are driven from the host settings cog's
       # Debug/Cheat tab, not a loose toolbar in the debug dock. Pause is the
       # odd one out: it moved to the cog's Gameplay tab, which is NOT gated on
@@ -251,7 +251,7 @@ entities:
       writers: [host-debug-simulation-controls]
     implementation:
       status: declared
-      paths: [src/server/bridge.rs, src/debug_overlay.rs, src/server_app.rs]
+      paths: [src/server/bridge.rs, src/debug_overlay.rs, src/server_app/components.rs]
       # Instagib has no typed resource: INSTAGIB is a raw `thread_local!<bool>`
       # in src/server/bridge.rs, read by is_instagib(). Pause and god mode are
       # real Bevy resources; recorded together with an honest note on the

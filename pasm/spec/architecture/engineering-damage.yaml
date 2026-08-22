@@ -13,7 +13,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/damage.rs, src/server_app.rs, src/ship_plugin.rs]
+      paths: [src/ship/damage.rs, src/server_app/collision.rs, src/ship_plugin.rs]
       symbols: [DamageTier, SystemHull]
       tests: [cargo test]
 
@@ -31,7 +31,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server_app.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/ship/damage.rs]
+      paths: [src/server_app/collision.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/ship/damage.rs]
       tests: [cargo test]
 
   - component: repair-team-cycle-policy
@@ -68,7 +68,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/damage.rs, src/console/weapons/mod.rs, src/server_app.rs]
+      paths: [src/ship/damage.rs, src/console/weapons/mod.rs, src/server_app/collision.rs]
       tests: [cargo test]
 
   - runtime: host-browser-runtime

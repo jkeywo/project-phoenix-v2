@@ -297,7 +297,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ai/cadence.rs, src/console/navigation/mod.rs, src/console/repair/server.rs, src/console/comms/server.rs, src/ship/power.rs, src/console_ai/server.rs, src/entities/spawner.rs, src/server_app.rs, src/entities/authored_ai_pins.rs]
+      paths: [src/ai/cadence.rs, src/console/navigation/mod.rs, src/console/repair/server.rs, src/console/comms/server.rs, src/ship/power.rs, src/console_ai/server.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/entities/authored_ai_pins.rs]
       symbols: [AiTickReady, AiSnapshotReady, AiBaseInterval, tick_ai_cadence, ai_tick_ready, ai_snapshot_ready, evaluate_every_ticks_ready, register_ai_cadence, arm_ai_tick, operate_navigation_ai, operate_repair_ai, operate_comms_ai, operate_comms_response_ai, PowerAiPolicy, PowerAiCadence, CommsResponseAiPolicy, CommsResponseAiCadence, comms_console_ai_components, ai_power_allocation]
       tests: [cargo test]
 

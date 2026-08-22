@@ -157,7 +157,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/comms/server.rs, src/comms/server.rs, src/entities/config.rs, src/entities/spawner.rs, src/server_app.rs, src/ai/selector.rs, src/ai/policy.rs]
+      paths: [src/console/comms/server.rs, src/comms/server.rs, src/entities/config.rs, src/entities/spawner.rs, src/server_app/world_setup.rs, src/ai/selector.rs, src/ai/policy.rs]
       symbols: [operate_comms_ai, operate_comms_response_ai, CommsTargetSelector, CommsResponseAiPolicy, comms_console_ai_components, seed_comms_hail_facts, seed_comms_self_facts, seed_comms_response_facts]
       tests: [cargo test]
 

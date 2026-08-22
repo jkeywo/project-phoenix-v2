@@ -73,7 +73,7 @@ entities:
       writers: [visiting-station-resolver]
     implementation:
       status: declared
-      paths: [src/ship/components.rs, src/server_app.rs, src/core/messages.rs, gui/sim-state.js, gui/hero-bar.js]
+      paths: [src/ship/components.rs, src/server_app/broadcast.rs, src/core/messages.rs, gui/sim-state.js, gui/hero-bar.js]
       symbols: [VisitingStationHosts, StationHostSnapshot]
 
   - component: system-kind-registry
@@ -129,7 +129,7 @@ entities:
       writers: [system-control-source-resolver]
     implementation:
       status: declared
-      paths: [src/ship/control_source.rs, src/server_app.rs, src/core/messages.rs, gui/sim-state.js]
+      paths: [src/ship/control_source.rs, src/server_app/broadcast.rs, src/core/messages.rs, gui/sim-state.js]
       symbols: [ControlSourceResolver, SimSnapshot, build_control_source_snapshots]
 
   - component: station-rating-controller
@@ -151,7 +151,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ship/rating.rs, src/ship_plugin.rs, src/lobby/handler.rs, src/entities/spawner.rs, src/server_app.rs]
+      paths: [src/ship/rating.rs, src/ship_plugin.rs, src/lobby/handler.rs, src/entities/spawner.rs, src/server_app/world_setup.rs]
       symbols: [apply_rating, seed_boot_ratings, ai_only_systems, BACKFILL_RATING]
       messages: [SetStationRating, RatingChanged]
       tests: [cargo test]

@@ -143,7 +143,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/lobby/handler.rs, src/lobby/server.rs, src/server_app.rs, src/server/asset_preload.rs]
+      paths: [src/lobby/handler.rs, src/lobby/server.rs, src/server_app/components.rs, src/server/asset_preload.rs]
       symbols: [GameOverReason]
       messages: [GameStarted, GameOver, LoadingProgress, ReturnedToLobby]
       tests: [cargo test, tests/client/lobby-state.test.js]
@@ -161,7 +161,7 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/server_app.rs]
+      paths: [src/core/messages.rs, src/server_app/registration.rs]
       symbols: [GamePhase]
 
   - state: game-over-reason-state
@@ -177,7 +177,7 @@ entities:
       replicas: [lobby-session-replica]
     implementation:
       status: declared
-      paths: [src/server_app.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/console/comms/server.rs]
+      paths: [src/server_app/components.rs, src/console/weapons/mod.rs, src/regions/server.rs, src/console/comms/server.rs]
       symbols: [GameOverReason]
 
   - component: round-return-controller
@@ -212,7 +212,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server_app.rs, src/world/server.rs, src/entities/spawner.rs]
+      paths: [src/server_app/world_setup.rs, src/world/server.rs, src/entities/spawner.rs]
       tests: [cargo test]
 
   - component: entity-destruction-lifecycle
@@ -231,7 +231,7 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server_app.rs, src/world/server.rs, src/console/weapons/mod.rs, src/regions/server.rs]
+      paths: [src/server_app/broadcast.rs, src/world/server.rs, src/console/weapons/mod.rs, src/regions/server.rs]
       tests: [cargo test]
 
   - component: terminal-round-outcome-router
@@ -249,5 +249,5 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/server_app.rs, src/world/server.rs, src/console/comms/server.rs]
+      paths: [src/server_app/broadcast.rs, src/world/server.rs, src/console/comms/server.rs]
       tests: [cargo test]

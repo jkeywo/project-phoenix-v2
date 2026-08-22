@@ -779,16 +779,13 @@ mod tests {
     /// the crate's own source rather than trusted.
     #[test]
     fn the_narration_state_is_attached_at_every_spawn_site() {
-        use crate::entities::ai_declaration_manifest::source_scan::{
-            function_body, read_non_test_source,
-        };
+        use crate::entities::ai_declaration_manifest::source_scan::spawn_site_source;
         assert!(
             !INTENT_NARRATION_SPAWN_SITES.is_empty(),
             "the scan must have something to check"
         );
         for (file, func) in INTENT_NARRATION_SPAWN_SITES {
-            let src = read_non_test_source(file);
-            let body = function_body(&src, func);
+            let body = spawn_site_source(file, func);
             assert!(
                 body.contains("ShipIntentNarration"),
                 "{file}::{func} never mentions `ShipIntentNarration`. Either the \

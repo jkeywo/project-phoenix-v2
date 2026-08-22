@@ -828,6 +828,24 @@ pub(crate) mod source_scan {
         panic!("`{needle}` body is unbalanced");
     }
 
+    /// The source a spawn-site attachment scan should search for `func` in
+    /// `file`.
+    ///
+    /// Normally the body of `fn func`. The generic entity spawner is the
+    /// exception since #1238: `spawn_entity` no longer inserts sections itself —
+    /// it walks `SPAWN_SECTIONS`, and the `SpawnSection` impls beside it (in the
+    /// same module) hold the actual `insert`s. So for that one site the whole
+    /// non-test module IS the spawn path; narrowing to `fn spawn_entity`'s body
+    /// would see only the dispatch loop and miss every attachment.
+    pub fn spawn_site_source(file: &str, func: &str) -> String {
+        let src = read_non_test_source(file);
+        if file.ends_with("entities/spawner.rs") && func == "spawn_entity" {
+            src
+        } else {
+            function_body(&src, func).to_string()
+        }
+    }
+
     /// Every `default_*_ai_config` / `default_*_target_selector_config` name
     /// mentioned in `src`, deduplicated.
     ///
@@ -910,8 +928,7 @@ mod tests {
     fn every_kind_is_attached_at_every_one_of_its_spawn_sites() {
         for kind in FINE_SYSTEM_KINDS {
             for site in kind.spawn_sites {
-                let src = read_non_test_source(site.file);
-                let body = function_body(&src, site.func);
+                let body = spawn_site_source(site.file, site.func);
                 assert!(
                     body.contains(kind.component),
                     "{}: {}::{} is declared an attachment site for `{}` but never                      mentions it. Either the attachment moved (point the site at where                      it went) or this path never got it — which for                      `spawn_game_start_entities` means the PLAYER ship runs without                      the declaration its own TOML authors.",

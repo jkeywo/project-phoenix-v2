@@ -410,7 +410,7 @@ pub const BANK_LERP_RATE: f32 = 5.0;
 mod tests {
     use super::*;
     use crate::entities::ai_declaration_manifest::source_scan::{
-        function_body, read_non_test_source,
+        read_non_test_source, spawn_site_source,
     };
     use std::collections::BTreeSet;
 
@@ -433,8 +433,7 @@ mod tests {
             "the scan must have something to check"
         );
         for (file, func) in PER_SHIP_BUS_SPAWN_SITES {
-            let src = read_non_test_source(file);
-            let body = function_body(&src, func);
+            let body = spawn_site_source(file, func);
             for component in PER_SHIP_BUS_COMPONENTS {
                 assert!(
                     body.contains(component),

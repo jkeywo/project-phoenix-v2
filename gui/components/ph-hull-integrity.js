@@ -7,21 +7,11 @@ import { t } from '../strings.js';
 
 import './ph-damage-bar.js';
 import './ph-damage-detail.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhHullIntegrity extends HTMLElement {
-  #state = null;
-  #barEl = null;
-  #detailEl = null;
-
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+export class PhHullIntegrity extends PhElement {
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -35,26 +25,21 @@ export class PhHullIntegrity extends HTMLElement {
   <div class="systems-label" id="systems-label">${t('component.hull_integrity.systems')}</div>
   <div id="detail-container"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-
-    this.#barEl = document.createElement('ph-damage-bar');
-    this.#detailEl = document.createElement('ph-damage-detail');
-
-    this.shadowRoot.getElementById('bar-container').appendChild(this.#barEl);
-    this.shadowRoot.getElementById('detail-container').appendChild(this.#detailEl);
   }
 
-  connectedCallback() {}
+  // See the field-initialiser ordering hazard note on PhElement: cached as
+  // plain properties, not declared class fields (public or private) — this
+  // runs before this class's own field-init phase.
+  onTemplate() {
+    this.barEl = document.createElement('ph-damage-bar');
+    this.detailEl = document.createElement('ph-damage-detail');
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
+    this.$('bar-container').appendChild(this.barEl);
+    this.$('detail-container').appendChild(this.detailEl);
   }
 
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state;
+  render(state) {
+    const s = state;
     const root = this.shadowRoot;
     const placeholder = root.getElementById('placeholder');
     const systemsLabel = root.getElementById('systems-label');
@@ -62,7 +47,7 @@ export class PhHullIntegrity extends HTMLElement {
 
     if (s == null) {
       barContainer.style.display = 'none';
-      this.#detailEl.style.display = 'none';
+      this.detailEl.style.display = 'none';
       systemsLabel.style.display = 'none';
       placeholder.style.display = 'block';
       return;
@@ -93,23 +78,21 @@ export class PhHullIntegrity extends HTMLElement {
       barState.destroyed = destroyed;
     }
 
-    this.#barEl.state = Object.keys(barState).length > 0 ? barState : null;
+    this.barEl.state = Object.keys(barState).length > 0 ? barState : null;
 
     const entries = Array.isArray(s.systems) ? s.systems
       : Array.isArray(s.entries) ? s.entries : [];
 
     if (entries.length > 0) {
-      this.#detailEl.style.display = 'block';
+      this.detailEl.style.display = 'block';
       systemsLabel.style.display = 'block';
-      this.#detailEl.state = { entries };
+      this.detailEl.state = { entries };
     } else {
-      this.#detailEl.style.display = 'none';
+      this.detailEl.style.display = 'none';
       systemsLabel.style.display = 'none';
-      this.#detailEl.state = null;
+      this.detailEl.state = null;
     }
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-hull-integrity')) {
-  customElements.define('ph-hull-integrity', PhHullIntegrity);
-}
+phDefine('ph-hull-integrity', PhHullIntegrity);

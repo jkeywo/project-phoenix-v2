@@ -38,19 +38,9 @@
 // table is populated, so #render's t() calls never see an empty table. No-op
 // under vitest, where setup-strings.js owns the table.
 import '../strings-boot.js';
-import { t, has } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { t, wireText } from '../strings.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
-
-/**
- * Resolve `value` when it is a known string id; pass anything else through.
- * @param {string|null|undefined} value
- * @returns {string} the resolved text, or '' when there is nothing to show
- */
-function localised(value) {
-  if (!value) return '';
-  return has(value) ? t(value) : String(value);
-}
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * The build-time `template_path` → card-art index, once fetched.
@@ -112,18 +102,15 @@ export function shipArtStyle(card) {
     + `background-position-x:${x.toFixed(4)}%;`;
 }
 
-export class PhShipPicker extends HTMLElement {
+export class PhShipPicker extends PhElement {
+  // Own state accessors kept (not the base's): `set state` compares the stored
+  // value by identity when the art index resolves on a later paint, which the
+  // base setter (it coerces null→{}) would break.
   #state = null;
   #roving = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; }
     :host * { box-sizing: border-box; }
@@ -190,11 +177,10 @@ export class PhShipPicker extends HTMLElement {
   </style>
   <div class="ship-grid" id="grid"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Role + accessible name + keyboard operation (issue #1178). The cards were
     // clickable <div>s; the grid is now a listbox — one Tab stop, arrows roving
     // over the option cards — with the pending pick marked selected.
@@ -243,15 +229,15 @@ export class PhShipPicker extends HTMLElement {
       return;
     }
     grid.innerHTML = ships.map(ship => {
-      const name = localised(ship.label) || localised(ship.name)
+      const name = wireText(ship.label) || wireText(ship.name)
         || ship.template_path.split('/').pop().replace('.toml', '');
       // `cls` stays the raw token: it is also the badge's CSS class. Only the
       // caption is localised, falling back to the token so a hull class with
-      // no authored caption still reads (the same has()/t() shape as
+      // no authored caption still reads (the same wireText() shape as
       // gui/manual-panel.js ratingCaption).
       const cls = (ship.class || 'unknown').toLowerCase();
       const clsId = `component.ship_picker.class.${cls}`;
-      const clsLabel = has(clsId) ? t(clsId) : cls;
+      const clsLabel = wireText(clsId, cls);
       const hullId = ship.hull_id ? `#${ship.hull_id}` : '';
       const power = ship.power_rating != null ? `⚡${ship.power_rating}` : '';
       const stations = ship.station_count || '';
@@ -298,4 +284,4 @@ export class PhShipPicker extends HTMLElement {
   }
 }
 
-customElements.define('ph-ship-picker', PhShipPicker);
+phDefine('ph-ship-picker', PhShipPicker);

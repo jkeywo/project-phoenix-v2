@@ -18,7 +18,7 @@
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * The `strings.csv` id for a compliance state word.
@@ -46,19 +46,12 @@ export function formatLeg(row) {
   return `${Math.min((row.leg || 0) + 1, legs)}/${legs}`;
 }
 
-export class PhCivilianTraffic extends HTMLElement {
-  #state = null;
+export class PhCivilianTraffic extends PhElement {
   #rowCache = new Map();
   #emptyEl = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -77,19 +70,14 @@ export class PhCivilianTraffic extends HTMLElement {
   <div class="heading" id="heading"></div>
   <div class="list" id="list"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    this.shadowRoot.getElementById('heading').textContent = t('component.civilians.heading');
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
+  onTemplate() {
+    this.$('heading').textContent = t('component.civilians.heading');
   }
 
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const raw = Array.isArray(s.civilians) ? s.civilians : [];
     const list = this.shadowRoot.getElementById('list');
 
@@ -137,6 +125,4 @@ export class PhCivilianTraffic extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-civilian-traffic')) {
-  customElements.define('ph-civilian-traffic', PhCivilianTraffic);
-}
+phDefine('ph-civilian-traffic', PhCivilianTraffic);

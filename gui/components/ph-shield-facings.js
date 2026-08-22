@@ -4,11 +4,11 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import { phColor } from './ph-console-styles.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhShieldFacings extends HTMLElement {
-  #state = null;
+export class PhShieldFacings extends PhElement {
   #facingGs = new Map();
   #emptyEl = null;
   #svgEl = null;
@@ -22,14 +22,8 @@ export class PhShieldFacings extends HTMLElement {
   #cursorArcId = null;
   #keydownBound = false;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -89,11 +83,10 @@ export class PhShieldFacings extends HTMLElement {
     <div class="auto-hint" id="auto-hint" role="status"></div>
   </div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Role + accessible name + keyboard reach (issue #1177). The facing ring is
     // one Tab stop (`tabindex="0"`); `role="group"` with a name is the honest
     // role for a composite whose SVG arcs a screen reader cannot enumerate.
@@ -109,7 +102,7 @@ export class PhShieldFacings extends HTMLElement {
   }
 
   #onKeyDown = (event) => {
-    const s = this.#state || {};
+    const s = this.state || {};
     const facings = Array.isArray(s.facings) ? s.facings : [];
     if (facings.length === 0) return;
     const ids = facings.map((f) => f.arc_id);
@@ -155,7 +148,7 @@ export class PhShieldFacings extends HTMLElement {
    * @param {SVGElement|null} outline
    */
   #activateArc(arcId, arcLabel, outline) {
-    const cur = this.#state || {};
+    const cur = this.state || {};
     if (outline) this.#flashArc(outline);
     if (cur.auto) {
       this.#showAutoHint();
@@ -175,15 +168,8 @@ export class PhShieldFacings extends HTMLElement {
     }
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const facings = Array.isArray(s.facings) ? s.facings : [];
     const focused = s.focused_facing || null;
     const auto = !!s.auto;
@@ -371,6 +357,4 @@ export class PhShieldFacings extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-shield-facings')) {
-  customElements.define('ph-shield-facings', PhShieldFacings);
-}
+phDefine('ph-shield-facings', PhShieldFacings);

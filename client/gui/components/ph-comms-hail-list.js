@@ -5,24 +5,17 @@
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { commsPreview } from '../comms-state.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 
-export class PhCommsHailList extends HTMLElement {
-  #state = null;
+export class PhCommsHailList extends PhElement {
   #rowCache = new Map();
   #emptyEl = null;
   #roving = null;
   #selectedId = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -45,11 +38,10 @@ export class PhCommsHailList extends HTMLElement {
   </style>
   <div class="list" id="list"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Role + accessible name + keyboard operation (issue #1178). The hails were
     // clickable <div>s the keyboard could not land on; the list is now a proper
     // listbox — one Tab stop, arrows roving over the option rows — named from
@@ -83,15 +75,8 @@ export class PhCommsHailList extends HTMLElement {
     }
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const raw = Array.isArray(s.messages) ? s.messages : [];
     const list = this.shadowRoot.getElementById('list');
 
@@ -141,6 +126,4 @@ export class PhCommsHailList extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-comms-hail-list')) {
-  customElements.define('ph-comms-hail-list', PhCommsHailList);
-}
+phDefine('ph-comms-hail-list', PhCommsHailList);

@@ -29,24 +29,16 @@
 // Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-// Node-safe base: gui/console-core.js imports this module and is itself
-// imported by plain-Node vitest suites where HTMLElement does not exist.
-const BaseElement = typeof HTMLElement !== 'undefined' ? HTMLElement : class {};
-
-export class PhTutorialOverlay extends BaseElement {
-  #state = null;
+// PhElement carries the Node-safe base and the shadow/style boilerplate that
+// this element used to hand-roll: gui/console-core.js imports this module and
+// is itself imported by plain-Node vitest suites where HTMLElement is absent.
+export class PhTutorialOverlay extends PhElement {
   #highlighted = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host {
       position: fixed; left: 50%; bottom: 0.9rem; transform: translateX(-50%);
@@ -88,36 +80,33 @@ export class PhTutorialOverlay extends BaseElement {
     <div class="text" id="text"></div>
     <button class="dismiss" id="dismiss">${t('component.tutorial.dismiss')}</button>
   </div>`;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    // Wire the dismiss button ONCE here — the button lives in this element's
-    // own shadow root, so the listener's lifetime is the element's.
-    // connectedCallback runs again on every re-parent and would stack
-    // duplicate listeners (class fields like #dismiss are initialised before
-    // the constructor body runs, so the handler exists at this point).
-    this.shadowRoot.getElementById('dismiss').addEventListener('click', this.#dismiss);
+  }
+
+  onTemplate() {
+    // Wire the dismiss button ONCE, here — the button lives in this element's
+    // own shadow root, so the listener's lifetime is the element's, and
+    // onTemplate (like the old constructor) runs a single time. The click
+    // arrow resolves `this.#dismiss` at click time, after construction, so it
+    // is safe even though the private method is not yet installed while
+    // onTemplate runs. connectedCallback runs again on every re-parent and
+    // would stack duplicate listeners, which is why this is not there.
+    this.$('dismiss').addEventListener('click', () => this.#dismiss());
     this.hidden = true;
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
   }
 
   disconnectedCallback() {
     this.#clearHighlight();
   }
 
-  #dismiss = () => {
-    const active = this.#state && this.#state.active;
+  #dismiss() {
+    const active = this.state && this.state.active;
     if (!active || !this.sendAction) return;
     this.sendAction('tutorial_dismiss', { overlay_id: active.id });
-  };
-
-  set state(val) {
-    this.#state = val || null;
-    this.#render();
   }
-
-  get state() { return this.#state; }
 
   #clearHighlight() {
     if (this.#highlighted) {
@@ -126,8 +115,8 @@ export class PhTutorialOverlay extends BaseElement {
     }
   }
 
-  #render() {
-    const active = this.#state && this.#state.active;
+  render(state) {
+    const active = state && state.active;
     this.#clearHighlight();
     if (!active) {
       this.hidden = true;
@@ -140,7 +129,7 @@ export class PhTutorialOverlay extends BaseElement {
 
     // "+N MORE" hint when further tips are queued behind this one.
     const more = root.getElementById('more');
-    const queued = (this.#state.remaining || 0) - 1;
+    const queued = (state.remaining || 0) - 1;
     if (queued > 0) {
       more.hidden = false;
       more.textContent = t('component.tutorial.more', { n: queued });
@@ -161,7 +150,4 @@ export class PhTutorialOverlay extends BaseElement {
   }
 }
 
-if (typeof window !== 'undefined' && typeof customElements !== 'undefined'
-    && !customElements.get('ph-tutorial-overlay')) {
-  customElements.define('ph-tutorial-overlay', PhTutorialOverlay);
-}
+phDefine('ph-tutorial-overlay', PhTutorialOverlay);

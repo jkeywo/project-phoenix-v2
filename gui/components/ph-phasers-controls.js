@@ -1,4 +1,3 @@
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
 // strings-boot first: its top-level await delays this module's evaluation —
 // and therefore this element's registration and upgrade — until the string
 // table is loaded, so the constructor's template t() calls never see an
@@ -7,16 +6,13 @@ import '../strings-boot.js';
 import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhPhasersControls extends HTMLElement {
-  #state = null;
+export class PhPhasersControls extends PhElement {
   #roving = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -39,12 +35,10 @@ export class PhPhasersControls extends HTMLElement {
   <div class="header"><span>${t('component.phasers.title')}</span><button class="mode-toggle" id="mode-toggle" type="button">${t('component.phasers.manual')}</button></div>
   <div id="banks"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Role + accessible name (issue #1170). The panel is a toolbar — a group of
     // command buttons the arrow keys rove between; its name is the same string
     // its visible heading already shows, so the two never drift.
@@ -54,7 +48,7 @@ export class PhPhasersControls extends HTMLElement {
     const toggle = this.shadowRoot.getElementById('mode-toggle');
     toggle.addEventListener('click', () => {
       if (!this.sendAction) return;
-      const mode = (this.#state && this.#state.mode) || 'Auto';
+      const mode = (this.state && this.state.mode) || 'Auto';
       // Flip between the two operator modes; Auto = banks fire themselves.
       this.sendAction('set_phaser_mode', { mode: mode === 'Auto' ? 'Manual' : 'Auto' });
     });
@@ -80,15 +74,8 @@ export class PhPhasersControls extends HTMLElement {
     syncRovingTabindex(this.#rovingItems());
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const banks = Array.isArray(s.banks) ? s.banks : [];
     const targetValid = s.target_valid !== false;
     const mode = s.mode || 'Auto';
@@ -193,6 +180,4 @@ export class PhPhasersControls extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-phasers-controls')) {
-  customElements.define('ph-phasers-controls', PhPhasersControls);
-}
+phDefine('ph-phasers-controls', PhPhasersControls);

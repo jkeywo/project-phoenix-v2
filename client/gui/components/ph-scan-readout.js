@@ -30,7 +30,7 @@
 // No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * Whole-percent condition, rendered at the precision the answering band bought.
@@ -59,17 +59,9 @@ export function formatTolerance(step) {
   return half >= 1 ? `±${Math.round(half)}%` : null;
 }
 
-export class PhScanReadout extends HTMLElement {
-  #state = null;
-
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+export class PhScanReadout extends PhElement {
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -95,17 +87,12 @@ export class PhScanReadout extends HTMLElement {
   <div class="reason" id="reason" hidden></div>
   <button id="action" type="button" hidden></button>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    this.shadowRoot.getElementById('heading').textContent = t('component.scan.heading');
-    this.shadowRoot.getElementById('action').addEventListener('click', () => this.#onAction());
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
+  onTemplate() {
+    this.$('heading').textContent = t('component.scan.heading');
+    this.$('action').addEventListener('click', () => this.#onAction());
   }
-
-  get state() { return this.#state; }
 
   /**
    * The console action this panel would send, or `null` when its button is not
@@ -113,16 +100,10 @@ export class PhScanReadout extends HTMLElement {
    * rather than re-deriving it.
    */
   get action() {
-    const scan = (this.#state && this.#state.scan) || {};
-    const uuid = (this.#state && this.#state.target_uuid) || null;
+    const scan = (this.state && this.state.scan) || {};
+    const uuid = (this.state && this.state.target_uuid) || null;
     if (!scan.capable || !uuid) return null;
     return { action: 'scan_target', uuid };
-  }
-
-  connectedCallback() {
-    // The console-core wiring pattern every ph-* control uses: the host page
-    // publishes `window.sendAction` and repairs this reference after upgrade.
-    this.sendAction ??= window.sendAction;
   }
 
   #onAction() {
@@ -132,8 +113,8 @@ export class PhScanReadout extends HTMLElement {
     this.sendAction(name, payload);
   }
 
-  #render() {
-    const scan = (this.#state && this.#state.scan) || {};
+  render(state) {
+    const scan = (state && state.scan) || {};
     const reading = scan.reading || null;
     const body = this.shadowRoot.getElementById('body');
     const reasonEl = this.shadowRoot.getElementById('reason');
@@ -237,6 +218,4 @@ export class PhScanReadout extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-scan-readout')) {
-  customElements.define('ph-scan-readout', PhScanReadout);
-}
+phDefine('ph-scan-readout', PhScanReadout);

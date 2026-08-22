@@ -30,7 +30,15 @@
 import { t } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
 import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
-import { createFocusTrap } from './focus-trap.js';
+import {
+  mountOverlayShell,
+  renderTabBar,
+  makeSectionBuilders,
+  makeRowBuilder,
+  VOLUME_MIN,
+  VOLUME_MAX,
+  VOLUME_STEP,
+} from './settings-overlay-kit.js';
 
 // ── Wiring tables ────────────────────────────────────────────────────────────
 //
@@ -88,11 +96,8 @@ const OVERLAY_ID = 'server-settings-overlay';
 const OUTPUT_HOST_ID = 'debug-dock';
 const OUTPUT_CONTENT_ID = 'debug-content';
 
-// The slider's own resolution, not a tunable: master volume is a 0..1 scale
-// factor and the UI offers it in whole percent.
-const VOLUME_MIN = 0;
-const VOLUME_MAX = 1;
-const VOLUME_STEP = 0.01;
+// Master volume's 0..1 range and percent resolution are shared with the
+// client cog — see `gui/settings-overlay-kit.js`.
 
 /**
  * Fold a click on debug output `id` into the next {enabled, viewing} state.
@@ -170,64 +175,32 @@ export function mountServerSettings(opts = {}) {
   };
 
   // ── Elements ───────────────────────────────────────────────────────────────
-
-  let btn = doc.getElementById(BUTTON_ID);
-  if (!btn) {
-    btn = doc.createElement('button');
-    btn.id = BUTTON_ID;
-    btn.className = 'server-settings-btn';
-    btn.type = 'button';
-    doc.body.appendChild(btn);
-  }
-  btn.textContent = '⚙';
-  btn.title = t('settings.title');
-  btn.setAttribute('aria-label', t('settings.title'));
-  btn.setAttribute('aria-expanded', 'false');
-
-  let overlay = doc.getElementById(OVERLAY_ID);
-  if (!overlay) {
-    overlay = doc.createElement('div');
-    overlay.id = OVERLAY_ID;
-    overlay.className = 'server-settings-overlay';
-    overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-modal', 'true');
-    doc.body.appendChild(overlay);
-  }
-  overlay.hidden = true;
-  overlay.setAttribute('aria-hidden', 'true');
-
-  // The modal focus contract (issue #1174): the same shared trap the phone
-  // client's cog uses. Tab/Shift+Tab cycle inside the panel, Escape closes it,
-  // and focus returns to the cog; `open`/`close` only switch it on and off.
-  const focusTrap = createFocusTrap(overlay, { doc, onEscape: () => close() });
+  //
+  // The find-or-create/aria/focus-trap/open-close/backdrop-click mechanics are
+  // shared with the phone client's cog (issue #1238) — see
+  // `gui/settings-overlay-kit.js` for what stayed here vs there.
+  const shell = mountOverlayShell(doc, {
+    buttonId: BUTTON_ID,
+    overlayId: OVERLAY_ID,
+    buttonClass: 'server-settings-btn',
+    overlayClass: 'server-settings-overlay',
+  });
+  const { overlay } = shell;
+  // `buildPanel` is a hoisted function declaration, so this may run before
+  // its textual definition below.
+  shell.buildContent = buildPanel;
 
   const outputHost = doc.getElementById(OUTPUT_HOST_ID);
   const outputContent = doc.getElementById(OUTPUT_CONTENT_ID);
 
   // ── Small builders ─────────────────────────────────────────────────────────
 
-  function section(labelId) {
-    const el = doc.createElement('div');
-    el.className = 'server-settings-section';
-    const heading = doc.createElement('div');
-    heading.className = 'server-settings-heading';
-    heading.textContent = t(labelId);
-    el.appendChild(heading);
-    return el;
-  }
-
-  function hint(labelId) {
-    const el = doc.createElement('div');
-    el.className = 'server-settings-hint';
-    el.textContent = t(labelId);
-    return el;
-  }
-
-  function rowHost() {
-    const el = doc.createElement('div');
-    el.className = 'server-settings-row';
-    return el;
-  }
+  const { section, hint } = makeSectionBuilders(doc, {
+    sectionClass: 'server-settings-section',
+    headingClass: 'server-settings-heading',
+    hintClass: 'server-settings-hint',
+  });
+  const rowHost = makeRowBuilder(doc, 'server-settings-row');
 
   function control(id, labelId, onClick) {
     const el = doc.createElement('button');
@@ -394,7 +367,7 @@ export function mountServerSettings(opts = {}) {
     sessionRow.appendChild(
       control('exit-to-lobby', 'settings.gameplay.exit_to_lobby', () => {
         invoke('__hostReturnToLobby');
-        close();
+        shell.close();
       }),
     );
     sessionSection.appendChild(sessionRow);
@@ -437,18 +410,7 @@ export function mountServerSettings(opts = {}) {
     body.className = 'server-settings-body';
     popup.appendChild(body);
 
-    for (const tab of tabs) {
-      const el = doc.createElement('button');
-      el.type = 'button';
-      el.className = 'server-settings-tab' + (tab.id === activeTab ? ' active' : '');
-      el.setAttribute('data-tab', tab.id);
-      el.textContent = t(tab.labelId);
-      el.addEventListener('click', (e) => {
-        if (e && typeof e.preventDefault === 'function') e.preventDefault();
-        selectTab(tab.id);
-      });
-      tabBar.appendChild(el);
-    }
+    renderTabBar(doc, tabBar, tabs, activeTab, 'server-settings-tab', selectTab);
 
     if (activeTab === 'debug') buildDebugTab(body);
     else if (activeTab === 'audio') buildAudioTab(body);
@@ -460,7 +422,7 @@ export function mountServerSettings(opts = {}) {
 
   function selectTab(id) {
     activeTab = id;
-    if (isOpen()) buildPanel();
+    if (shell.isOpen()) buildPanel();
   }
 
   /** Repaint everything whose truth lives in the simulation. */
@@ -496,47 +458,11 @@ export function mountServerSettings(opts = {}) {
     if (outputs.viewing) paintOutput();
   }
 
-  function isOpen() {
-    return overlay.hidden === false;
-  }
-
-  function open() {
-    // Rebuilt on every open so the demo gate is re-evaluated: the WASM getter
-    // that answers it is not published until the bundle boots (the stamped
-    // meta tag covers that window, but the rebuild costs nothing).
-    buildPanel();
-    overlay.hidden = false;
-    overlay.setAttribute('aria-hidden', 'false');
-    overlay.classList.add('open');
-    btn.setAttribute('aria-expanded', 'true');
-    // Trap focus in the freshly-built panel; the page behind it goes inert.
-    focusTrap.activate();
-  }
-
-  function close() {
-    // Lift the trap first so focus is handed back to the cog before the panel
-    // is hidden.
-    focusTrap.release();
-    overlay.hidden = true;
-    overlay.setAttribute('aria-hidden', 'true');
-    overlay.classList.remove('open');
-    btn.setAttribute('aria-expanded', 'false');
-  }
-
-  btn.addEventListener('click', (e) => {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
-    if (isOpen()) close();
-    else open();
-  });
-  overlay.addEventListener('click', (e) => {
-    if (e && e.target === overlay) close();
-  });
-
   paintOutput();
 
   if (autoRefresh && win && typeof win.requestAnimationFrame === 'function') {
     const loop = () => {
-      if (isOpen() || outputs.viewing) refresh();
+      if (shell.isOpen() || outputs.viewing) refresh();
       rafHandle = win.requestAnimationFrame(loop);
     };
     rafHandle = win.requestAnimationFrame(loop);
@@ -547,10 +473,17 @@ export function mountServerSettings(opts = {}) {
       win.cancelAnimationFrame(rafHandle);
     }
     rafHandle = null;
-    close();
+    shell.close();
   }
 
-  return { open, close, isOpen, refresh, selectTab, destroy };
+  return {
+    open: shell.open,
+    close: shell.close,
+    isOpen: shell.isOpen,
+    refresh,
+    selectTab,
+    destroy,
+  };
 }
 
 // Expose for the classic-script bootstrap in server.html.

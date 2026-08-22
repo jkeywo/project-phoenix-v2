@@ -185,6 +185,34 @@ export function has(id) {
   return table.has(id);
 }
 
+/**
+ * Resolve `value` as a string id when the table has it, else use `fallback`.
+ *
+ * This is the render-site half of the localisation rule: a field that MAY be a
+ * string id (a hull class token, a rating name, a station's raw `name`) but is
+ * just as often literal text — a mod pack's prose, a value the table never
+ * covered. `has(value) ? t(value) : fallback` was being re-derived inline at
+ * several render call sites with slightly different fallbacks (see
+ * gui/manual-panel.js, gui/settings-panel.js, gui/components/ph-ship-picker.js,
+ * client.html's stationLabel); this collects it in one place.
+ *
+ * This is deliberately distinct from `localiseTree`, `applyToDom` and the other
+ * wire-boundary functions above: those resolve a whole payload once, at the
+ * point it crosses in from the network or the DOM. `wireText` is for a single
+ * value at the point it is about to be RENDERED, where the caller already knows
+ * exactly what to show when there is no table entry.
+ *
+ * @param {string|null|undefined} value
+ * @param {string} [fallback] shown when `value` is not a known id; defaults to
+ *   `String(value)` (or '' for a nullish value) when omitted
+ * @returns {string}
+ */
+export function wireText(value, fallback) {
+  if (has(value)) return t(value);
+  if (fallback !== undefined) return fallback;
+  return value === null || value === undefined ? '' : String(value);
+}
+
 // ── Wire boundary ───────────────────────────────────────────────────────────
 
 /**

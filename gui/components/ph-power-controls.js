@@ -6,6 +6,7 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import '../strings-boot.js';
 import { t } from '../strings.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * The lowest rung to draw for a group whose entry carries no `min_level`.
@@ -20,17 +21,13 @@ import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js
  */
 const DEFAULT_MIN_LEVEL = 1;
 
-export class PhPowerControls extends HTMLElement {
-  #state = null;
+export class PhPowerControls extends PhElement {
   #pipCache = new Map();
   #emptyEl = null;
   #roving = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -75,12 +72,10 @@ export class PhPowerControls extends HTMLElement {
   </div>
   <div id="groups-container"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Role + accessible name (issue #1177). The panel is a toolbar — the group
     // of +/− command steppers the arrow keys rove between; its name is the same
     // string its visible heading already shows, so the two never drift.
@@ -107,15 +102,8 @@ export class PhPowerControls extends HTMLElement {
     syncRovingTabindex(this.#rovingItems());
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const groups = Array.isArray(s.groups) ? s.groups : [];
     const auto = !!s.auto;
     const container = this.shadowRoot.getElementById('groups-container');
@@ -269,7 +257,7 @@ export class PhPowerControls extends HTMLElement {
    * a pre-#952 server sends.
    */
   #currentLevel(groupId) {
-    const s = this.#state || {};
+    const s = this.state || {};
     const groups = Array.isArray(s.groups) ? s.groups : [];
     const g = groups.find(x => x.id === groupId);
     return g ? commandedLevel(g) : 0;
@@ -283,6 +271,4 @@ function commandedLevel(group) {
   return group.level != null ? group.level : 0;
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-power-controls')) {
-  customElements.define('ph-power-controls', PhPowerControls);
-}
+phDefine('ph-power-controls', PhPowerControls);

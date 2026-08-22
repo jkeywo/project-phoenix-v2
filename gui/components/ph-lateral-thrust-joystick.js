@@ -4,10 +4,9 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhLateralThrustJoystick extends HTMLElement {
-  #state = null;
+export class PhLateralThrustJoystick extends PhElement {
   #value = 0;
   #pointerId = null;
   #rafId = null;
@@ -17,14 +16,8 @@ export class PhLateralThrustJoystick extends HTMLElement {
   #inputRaf = null;
   #lastKbSend = 0;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; align-items: center; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -59,15 +52,10 @@ export class PhLateralThrustJoystick extends HTMLElement {
   </div>
   <div class="readout" id="readout">0.00</div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
-    if (!this.sendAction) {
-      if (typeof window !== 'undefined' && typeof window.sendAction === 'function') {
-        this.sendAction = window.sendAction;
-      }
-    }
+    super.connectedCallback();
     this.#bindEvents();
     // Focusable, named group (issue #1176). The drag track was a bare <div>
     // the keyboard could not reach or name; the host becomes the one Tab stop.
@@ -106,15 +94,8 @@ export class PhLateralThrustJoystick extends HTMLElement {
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = null; }
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const auto = this.#state ? !!this.#state.auto : false;
+  render(state) {
+    const auto = state ? !!state.auto : false;
     const root = this.shadowRoot;
     const badge = root.getElementById('auto-badge');
     const track = root.getElementById('track');
@@ -137,7 +118,7 @@ export class PhLateralThrustJoystick extends HTMLElement {
   }
 
   #onDown = (e) => {
-    const auto = this.#state ? !!this.#state.auto : false;
+    const auto = this.state ? !!this.state.auto : false;
     if (auto) return;
     if (this.#pointerId !== null) return;
     this.#pointerId = e.pointerId;
@@ -270,7 +251,7 @@ export class PhLateralThrustJoystick extends HTMLElement {
 
   #inputLoop = () => {
     this.#inputRaf = null;
-    const auto = this.#state ? !!this.#state.auto : false;
+    const auto = this.state ? !!this.state.auto : false;
     const keepPolling = Object.keys(this.#keys).length > 0 || this.#hasGamepad();
 
     if (auto || this.#pointerId !== null) {
@@ -313,6 +294,4 @@ export class PhLateralThrustJoystick extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-lateral-thrust-joystick')) {
-  customElements.define('ph-lateral-thrust-joystick', PhLateralThrustJoystick);
-}
+phDefine('ph-lateral-thrust-joystick', PhLateralThrustJoystick);

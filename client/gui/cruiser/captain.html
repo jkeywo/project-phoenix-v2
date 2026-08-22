@@ -56,25 +56,11 @@
     import '../components/ph-objective-list.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    initConsole({
-      name: 'captain',
-      // s is a CaptainConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        var c = document.getElementById('camera-select');
-        var r = document.getElementById('red-alert');
-        var o = document.getElementById('objective-list');
-        c.state = { views: s.camera_views || [], current_view: s.view_direction || '', auto: s.viewscreen_auto || false };
-        r.state = { active: !!s.red_alert, hold: !!s.weapons_hold, auto: s.red_alert_auto || false };
-        o.state = { objectives: s.objectives || [], boosted_objective_id: s.boosted_objective_id ?? null };
-        var n = (s.blips && s.blips.length) || 0;
-        document.getElementById('footer-target').textContent = n > 0
-          ? (n === 1 ? t('console.common.contacts.one', { n: n }) : t('console.common.contacts.other', { n: n }))
-          : t('console.common.no_target');
-        document.getElementById('footer-target').style.color = n > 0 ? 'var(--ink-dim)' : 'var(--ink-faint)';
-        document.getElementById('station-damage').state = s.own_hull || null;
-      }
-    });
+    // The render lives in gui/cruiser/captain.console.js (issue #1235): the
+    // shared Captain renderer + this hull's variant. s is a flat
+    // CaptainConsolePayload. The vitest suite imports the same renderStation.
+    import { renderStation } from './captain.console.js';
+    initConsole({ name: 'captain', family: 'captain', render: renderStation });
   </script>
 </body>
 </html>

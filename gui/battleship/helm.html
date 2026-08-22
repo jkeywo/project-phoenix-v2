@@ -95,24 +95,13 @@
     import '../components/ph-boost-btn.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    import { setAutoState } from '../console-ui.js';
-    initConsole({
-      name: 'helm',
-      // s is a HelmConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        document.getElementById('helm-radar').state = { blips: s.blips || [], range: s.range || 500, x: s.x || 0, z: s.z || 0, ship_heading: s.ship_heading || 0, speed: s.speed || 0, on_screen_active: !!s.on_screen, config: {}, engine_port_thrust: s.engine_port_thrust || 0, engine_stbd_thrust: s.engine_stbd_thrust || 0, hostile_arcs: s.hostile_arcs || [], hostile_arc_color: s.hostile_arc_color || null };
-        document.getElementById('helm-joystick').state = { auto: !!s.helm_auto };
-        document.getElementById('impulse-btn').state = { state: s.impulse_charge_progress > 0 ? 'charging' : 'ready', charge_pct: (s.impulse_charge_progress || 0) * 100, auto: !!s.helm_auto };
-        document.getElementById('boost-btn').state = { available: !!s.boost_enabled, active: !!s.boost_active, recharge_pct: s.boost_battery != null ? s.boost_battery * 100 : 100, auto: !!s.helm_auto };
-        document.getElementById('station-damage').state = s.own_hull || null;
-        var blipCount = (s.blips || []).length;
-        document.getElementById('footer-target').textContent = blipCount === 1
-          ? t('console.common.contacts.one', { n: 1 })
-          : t('console.common.contacts.other', { n: blipCount });
-        setAutoState(null, document.getElementById('helm-auto-badge'), !!s.helm_auto);
-      }
-    });
+    // The render lives in gui/battleship/helm.console.js (issue #1235): the
+    // shared Helm renderer + this hull's variant (no lateral joystick, plain
+    // contact-count footer, no bespoke tail). s is a HelmConsolePayload — see
+    // the @typedef in gui/console-state.js. The vitest suite imports the same
+    // renderStation.
+    import { renderStation } from './helm.console.js';
+    initConsole({ name: 'helm', family: 'helm', render: renderStation });
   </script>
 </body>
 </html>

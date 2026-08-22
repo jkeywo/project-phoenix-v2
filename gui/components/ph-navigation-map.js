@@ -4,25 +4,21 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import { phColor } from './ph-console-styles.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhNavigationMap extends HTMLElement {
+export class PhNavigationMap extends PhElement {
+  // Pure state and per-frame scratch: PRIVATE, because nothing reads them until
+  // the first frame — which is deferred to a rAF — so they are always installed
+  // by the time they are touched. The canvas refs, DOM overlay refs and render
+  // bookkeeping live as PLAIN properties instead (set in onTemplate), because
+  // onTemplate runs before this subclass's field-init phase (see ph-element.js).
   #state = null;
-  #canvas = null;
-  #ctx = null;
   #offscreen = null;
-  #rafId = null;
-  #resizeObserver = null;
-  #needsRender = true;
   #projectedBlips = [];
   #selectedBlip = null;
-  #overlay = null;
-  #toast = null;
   #toastTimer = null;
-  #btnSetWaypoint = null;
-  #btnSetSelected = null;
-  #btnClearWaypoint = null;
   #picking = false;
 
   #zoom = 1;
@@ -44,14 +40,8 @@ export class PhNavigationMap extends HTMLElement {
 
   #touchActive = false;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = [
+  template() {
+    return [
       '<style>',
       ':host { display: block; position: relative; touch-action: none; }',
       'canvas { display: block; width: 100%; height: 100%; touch-action: none; }',
@@ -96,23 +86,34 @@ export class PhNavigationMap extends HTMLElement {
       '  </div>',
       '</div>',
     ].join('\n');
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    this.#canvas = this.shadowRoot.querySelector('canvas');
-    this.#ctx = this.#canvas.getContext('2d', { alpha: false });
-    this.#overlay = this.shadowRoot.getElementById('overlay');
-    this.#toast = this.shadowRoot.getElementById('toast');
-    this.#btnSetWaypoint = this.shadowRoot.getElementById('btn-set-waypoint');
-    this.#btnSetSelected = this.shadowRoot.getElementById('btn-set-selected');
-    this.#btnClearWaypoint = this.shadowRoot.getElementById('btn-clear-waypoint');
-    this.#btnSetWaypoint.addEventListener('click', (e) => { e.stopPropagation(); this.#beginPick(); });
-    this.#btnSetSelected.addEventListener('click', (e) => { e.stopPropagation(); this.#setToSelected(); });
-    this.#btnClearWaypoint.addEventListener('click', (e) => { e.stopPropagation(); this.#clearWaypoint(); });
-    this.#initResize();
-    this.#rafLoop();
+  }
+
+  onTemplate() {
+    this.canvas = this.shadowRoot.querySelector('canvas');
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
+    this.needsRender = true;
+    this.rafId = null;
+    this.resizeObserver = null;
+    this.overlay = this.shadowRoot.getElementById('overlay');
+    this.toast = this.shadowRoot.getElementById('toast');
+    this.btnSetWaypoint = this.shadowRoot.getElementById('btn-set-waypoint');
+    this.btnSetSelected = this.shadowRoot.getElementById('btn-set-selected');
+    this.btnClearWaypoint = this.shadowRoot.getElementById('btn-clear-waypoint');
+    // The click arrows resolve their private handlers at click time (after
+    // construction), so wiring them here is safe even though those methods are
+    // not yet installed while onTemplate runs.
+    this.btnSetWaypoint.addEventListener('click', (e) => { e.stopPropagation(); this.#beginPick(); });
+    this.btnSetSelected.addEventListener('click', (e) => { e.stopPropagation(); this.#setToSelected(); });
+    this.btnClearWaypoint.addEventListener('click', (e) => { e.stopPropagation(); this.#clearWaypoint(); });
+    this.initResize();
+    // Defer the first frame: the arrow resolves `this.#rafLoop` when the rAF
+    // fires (after construction), never synchronously here where the private
+    // method does not yet exist.
+    this.rafId = requestAnimationFrame(() => this.#rafLoop());
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Focusable, named group + keyboard operation (issue #1176). The chart was
     // a bare <canvas> the keyboard could not land on: pan/zoom/tap lived only
     // on the pointer, and the coarse structural floor let it pass because the
@@ -124,65 +125,65 @@ export class PhNavigationMap extends HTMLElement {
     this.setAttribute('aria-label', t('component.navigation_map.label'));
     if (!this.hasAttribute('tabindex')) this.setAttribute('tabindex', '0');
     this.addEventListener('keydown', this.#boundKeyDown);
-    this.#canvas.addEventListener('mousedown', this.#boundMouseDown);
-    this.#canvas.addEventListener('mousemove', this.#boundMouseMove);
-    this.#canvas.addEventListener('mouseup', this.#boundMouseUp);
-    this.#canvas.addEventListener('mouseleave', this.#boundMouseUp);
-    this.#canvas.addEventListener('wheel', this.#boundWheel, { passive: false });
-    this.#canvas.addEventListener('touchstart', this.#boundTouchStart, { passive: false });
-    this.#canvas.addEventListener('touchmove', this.#boundTouchMove, { passive: false });
-    this.#canvas.addEventListener('touchend', this.#boundTouchEnd);
-    this.#canvas.addEventListener('touchcancel', this.#boundTouchEnd);
+    this.canvas.addEventListener('mousedown', this.#boundMouseDown);
+    this.canvas.addEventListener('mousemove', this.#boundMouseMove);
+    this.canvas.addEventListener('mouseup', this.#boundMouseUp);
+    this.canvas.addEventListener('mouseleave', this.#boundMouseUp);
+    this.canvas.addEventListener('wheel', this.#boundWheel, { passive: false });
+    this.canvas.addEventListener('touchstart', this.#boundTouchStart, { passive: false });
+    this.canvas.addEventListener('touchmove', this.#boundTouchMove, { passive: false });
+    this.canvas.addEventListener('touchend', this.#boundTouchEnd);
+    this.canvas.addEventListener('touchcancel', this.#boundTouchEnd);
   }
 
   disconnectedCallback() {
-    if (this.#rafId != null) {
-      cancelAnimationFrame(this.#rafId);
-      this.#rafId = null;
+    if (this.rafId != null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
     }
-    if (this.#resizeObserver) {
-      this.#resizeObserver.disconnect();
-      this.#resizeObserver = null;
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
     }
     this.removeEventListener('keydown', this.#boundKeyDown);
-    this.#canvas.removeEventListener('mousedown', this.#boundMouseDown);
-    this.#canvas.removeEventListener('mousemove', this.#boundMouseMove);
-    this.#canvas.removeEventListener('mouseup', this.#boundMouseUp);
-    this.#canvas.removeEventListener('mouseleave', this.#boundMouseUp);
-    this.#canvas.removeEventListener('wheel', this.#boundWheel);
-    this.#canvas.removeEventListener('touchstart', this.#boundTouchStart);
-    this.#canvas.removeEventListener('touchmove', this.#boundTouchMove);
-    this.#canvas.removeEventListener('touchend', this.#boundTouchEnd);
-    this.#canvas.removeEventListener('touchcancel', this.#boundTouchEnd);
+    this.canvas.removeEventListener('mousedown', this.#boundMouseDown);
+    this.canvas.removeEventListener('mousemove', this.#boundMouseMove);
+    this.canvas.removeEventListener('mouseup', this.#boundMouseUp);
+    this.canvas.removeEventListener('mouseleave', this.#boundMouseUp);
+    this.canvas.removeEventListener('wheel', this.#boundWheel);
+    this.canvas.removeEventListener('touchstart', this.#boundTouchStart);
+    this.canvas.removeEventListener('touchmove', this.#boundTouchMove);
+    this.canvas.removeEventListener('touchend', this.#boundTouchEnd);
+    this.canvas.removeEventListener('touchcancel', this.#boundTouchEnd);
   }
 
   set state(val) {
     this.#state = val;
-    this.#needsRender = true;
+    this.needsRender = true;
   }
 
   get state() { return this.#state; }
 
-  #initResize() {
+  initResize() {
     const updateSize = () => {
       const dpr = window.devicePixelRatio || 1;
       const rect = this.getBoundingClientRect();
       const newW = Math.round(rect.width * dpr);
       const newH = Math.round(rect.height * dpr);
-      if (newW > 0 && newH > 0 && (this.#canvas.width !== newW || this.#canvas.height !== newH)) {
-        this.#canvas.width = newW;
-        this.#canvas.height = newH;
-        this.#needsRender = true;
+      if (newW > 0 && newH > 0 && (this.canvas.width !== newW || this.canvas.height !== newH)) {
+        this.canvas.width = newW;
+        this.canvas.height = newH;
+        this.needsRender = true;
       }
     };
     updateSize();
-    this.#resizeObserver = new ResizeObserver(() => updateSize());
-    this.#resizeObserver.observe(this);
+    this.resizeObserver = new ResizeObserver(() => updateSize());
+    this.resizeObserver.observe(this);
   }
 
   #rafLoop() {
-    if (this.#needsRender) this.#render();
-    this.#rafId = requestAnimationFrame(() => this.#rafLoop());
+    if (this.needsRender) this.#render();
+    this.rafId = requestAnimationFrame(() => this.#rafLoop());
   }
 
   #worldToScreen(wx, wz, shipX, shipZ, headingRad, scale, cx, cy) {
@@ -208,7 +209,7 @@ export class PhNavigationMap extends HTMLElement {
   }
 
   #eventBufPos(e) {
-    const rect = this.#canvas.getBoundingClientRect();
+    const rect = this.canvas.getBoundingClientRect();
     let src;
     if (e.touches && e.touches.length > 0) {
       src = e.touches[0];
@@ -220,13 +221,13 @@ export class PhNavigationMap extends HTMLElement {
     const cssX = src.clientX - rect.left;
     const cssY = src.clientY - rect.top;
     return {
-      x: cssX * (this.#canvas.width / rect.width),
-      y: cssY * (this.#canvas.height / rect.height),
+      x: cssX * (this.canvas.width / rect.width),
+      y: cssY * (this.canvas.height / rect.height),
     };
   }
 
   #render() {
-    const canvas = this.#canvas;
+    const canvas = this.canvas;
     if (!canvas) return;
     const W = canvas.width, H = canvas.height;
     if (W === 0 || H === 0) return;
@@ -261,7 +262,7 @@ export class PhNavigationMap extends HTMLElement {
       this.#dispatch('navselect', null);
     }
 
-    let octx = this.#ctx;
+    let octx = this.ctx;
     if (typeof document !== 'undefined') {
       if (!this.#offscreen || this.#offscreen.width !== W || this.#offscreen.height !== H) {
         this.#offscreen = document.createElement('canvas');
@@ -311,11 +312,11 @@ export class PhNavigationMap extends HTMLElement {
     }
 
     if (this.#offscreen) {
-      this.#ctx.drawImage(this.#offscreen, 0, 0);
+      this.ctx.drawImage(this.#offscreen, 0, 0);
     }
 
     this.#updateBar();
-    this.#needsRender = false;
+    this.needsRender = false;
   }
 
   #drawGrid(octx, cx, cy, scale, shipX, shipZ, headingRad, W, H, range) {
@@ -575,14 +576,14 @@ export class PhNavigationMap extends HTMLElement {
     const kindEl = this.shadowRoot.getElementById('ov-kind');
     const stanceEl = this.shadowRoot.getElementById('ov-stance');
     if (!blip) {
-      this.#overlay.classList.remove('show');
+      this.overlay.classList.remove('show');
       return;
     }
     nameEl.textContent = blip.name || blip.uuid || t('console.common.unknown');
     kindEl.textContent = (blip.kind || 'unknown').toUpperCase();
     stanceEl.textContent = blip.stance ? t('console.stance.' + blip.stance) : t('console.common.unknown');
     stanceEl.className = 'st-' + (blip.stance || 'unknown');
-    this.#overlay.classList.add('show');
+    this.overlay.classList.add('show');
   }
 
   #getBlipAt(canvasX, canvasY) {
@@ -602,10 +603,10 @@ export class PhNavigationMap extends HTMLElement {
     const state = this.#state || {};
     const range = state.range || 50000;
     const rangeClamped = range > 0 ? range : 50000;
-    const R = Math.min(this.#canvas.width, this.#canvas.height) / 2;
+    const R = Math.min(this.canvas.width, this.canvas.height) / 2;
     const scale = R / rangeClamped;
-    const cx = this.#canvas.width / 2;
-    const cy = this.#canvas.height / 2;
+    const cx = this.canvas.width / 2;
+    const cy = this.canvas.height / 2;
 
     // World-anchored chart: map the tapped screen point to its absolute world
     // coordinate (camera fixed on the origin, north-up), matching #render.
@@ -615,7 +616,7 @@ export class PhNavigationMap extends HTMLElement {
     // lands, regardless of whether a blip is underneath (legacy behaviour).
     if (this.#picking) {
       this.#picking = false;
-      this.#canvas.classList.remove('picking');
+      this.canvas.classList.remove('picking');
       this.#selectedBlip = null;
       this.#showOverlay(null);
       this.#dispatch('navselect', null);
@@ -650,10 +651,10 @@ export class PhNavigationMap extends HTMLElement {
       this.#selectedBlip = null;
       this.#showOverlay(null);
       this.#dispatch('navselect', null);
-      this.#canvas.classList.add('picking');
+      this.canvas.classList.add('picking');
       this.#showToast(t('console.navigation.tap_to_place'), 4000);
     } else {
-      this.#canvas.classList.remove('picking');
+      this.canvas.classList.remove('picking');
     }
     this.#updateBar();
   }
@@ -735,18 +736,18 @@ export class PhNavigationMap extends HTMLElement {
     const wp = state.waypoint;
     const hasWp = !!(wp && Number.isFinite(wp.x) && Number.isFinite(wp.z));
     const hasSel = !!this.#selectedBlip;
-    this.#btnSetWaypoint.classList.toggle('show', !hasWp);
-    this.#btnSetSelected.classList.toggle('show', hasSel);
-    this.#btnClearWaypoint.classList.toggle('show', hasWp);
-    this.#btnSetWaypoint.classList.toggle('active', this.#picking);
+    this.btnSetWaypoint.classList.toggle('show', !hasWp);
+    this.btnSetSelected.classList.toggle('show', hasSel);
+    this.btnClearWaypoint.classList.toggle('show', hasWp);
+    this.btnSetWaypoint.classList.toggle('active', this.#picking);
   }
 
   #showToast(msg, duration) {
-    if (!this.#toast) return;
-    this.#toast.textContent = msg;
-    this.#toast.classList.add('show');
+    if (!this.toast) return;
+    this.toast.textContent = msg;
+    this.toast.classList.add('show');
     clearTimeout(this.#toastTimer);
-    this.#toastTimer = setTimeout(() => this.#toast.classList.remove('show'), duration || 1900);
+    this.#toastTimer = setTimeout(() => this.toast.classList.remove('show'), duration || 1900);
   }
 
   #dispatch(type, detail) {
@@ -754,7 +755,7 @@ export class PhNavigationMap extends HTMLElement {
   }
 
   #onPointerTap(e) {
-    if (!this.#canvas) return;
+    if (!this.canvas) return;
     const cpos = this.#eventBufPos(e);
     this.#handleTap(cpos.x, cpos.y);
   }
@@ -779,7 +780,7 @@ export class PhNavigationMap extends HTMLElement {
       this.#tapMoved = true;
       this.#panX = this.#startPanX + dx;
       this.#panY = this.#startPanY + dy;
-      this.#needsRender = true;
+      this.needsRender = true;
     }
   };
 
@@ -796,14 +797,14 @@ export class PhNavigationMap extends HTMLElement {
     const cpos = this.#eventBufPos(e);
     const factor = e.deltaY < 0 ? 1.13 : 0.885;
     const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, this.#zoom * factor));
-    const canvas = this.#canvas;
+    const canvas = this.canvas;
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
     const zoomRatio = newZoom / this.#zoom;
     this.#panX = cpos.x - cx - (cpos.x - cx - this.#panX) * zoomRatio;
     this.#panY = cpos.y - cy - (cpos.y - cy - this.#panY) * zoomRatio;
     this.#zoom = newZoom;
-    this.#needsRender = true;
+    this.needsRender = true;
   };
 
   #boundTouchStart = (e) => {
@@ -821,9 +822,9 @@ export class PhNavigationMap extends HTMLElement {
       this.#tapMoved = true;
       const t0 = e.touches[0], t1 = e.touches[1];
       this.#lastPinchDist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
-      const rect = this.#canvas.getBoundingClientRect();
-      const mx = ((t0.clientX + t1.clientX) / 2 - rect.left) * (this.#canvas.width / rect.width);
-      const my = ((t0.clientY + t1.clientY) / 2 - rect.top) * (this.#canvas.height / rect.height);
+      const rect = this.canvas.getBoundingClientRect();
+      const mx = ((t0.clientX + t1.clientX) / 2 - rect.left) * (this.canvas.width / rect.width);
+      const my = ((t0.clientY + t1.clientY) / 2 - rect.top) * (this.canvas.height / rect.height);
       this.#pinchMidX = mx;
       this.#pinchMidY = my;
     }
@@ -836,7 +837,7 @@ export class PhNavigationMap extends HTMLElement {
       const dist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
       const factor = dist / this.#lastPinchDist;
       const newZoom = Math.max(this.#ZOOM_MIN, Math.min(this.#ZOOM_MAX, this.#zoom * factor));
-      const canvas = this.#canvas;
+      const canvas = this.canvas;
       const cx = canvas.width / 2;
       const cy = canvas.height / 2;
       const zoomRatio = newZoom / this.#zoom;
@@ -844,7 +845,7 @@ export class PhNavigationMap extends HTMLElement {
       this.#panY = this.#pinchMidY - cy - (this.#pinchMidY - cy - this.#panY) * zoomRatio;
       this.#zoom = newZoom;
       this.#lastPinchDist = dist;
-      this.#needsRender = true;
+      this.needsRender = true;
     } else if (e.touches.length === 1 && this.#isDragging) {
       const cpos = this.#eventBufPos(e);
       const dx = cpos.x - this.#dragStartX;
@@ -853,7 +854,7 @@ export class PhNavigationMap extends HTMLElement {
         this.#tapMoved = true;
         this.#panX = this.#startPanX + dx;
         this.#panY = this.#startPanY + dy;
-        this.#needsRender = true;
+        this.needsRender = true;
       }
     }
   };
@@ -874,6 +875,4 @@ export class PhNavigationMap extends HTMLElement {
   };
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-navigation-map')) {
-  customElements.define('ph-navigation-map', PhNavigationMap);
-}
+phDefine('ph-navigation-map', PhNavigationMap);

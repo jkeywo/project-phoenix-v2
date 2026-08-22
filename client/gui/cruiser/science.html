@@ -69,46 +69,13 @@
     import '../components/ph-shield-facings.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    import { setAutoState } from '../console-ui.js';
-    // Generic system-id-keyed payload (issue #825): resolve each panel's view
-    // from the fine system ids this station owns, falling back through the
-    // ids each hull may declare for the same console family.
-    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
-    initConsole({
-      name: 'science',
-      // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
-      render: function(s) {
-        var sr = document.getElementById('sensor-radar');
-        var sp = document.getElementById('sensor-panel');
-        var shp = document.getElementById('shield-panel');
-        var shf = document.getElementById('shield-facings');
-        var sensors = system(s, 'sensors', 'sensor-radar');
-        var shields = system(s, 'shields-system');
-        sr.state = sensors;
-        sp.state = sensors;
-        shp.state = shields;
-        shf.state = { facings: shields.facings || [], focused_facing: shields.focused_facing || null, auto: !!shields.shields_auto };
-        var threatRow = document.getElementById('threat-row');
-        if (shields.threat_bearing != null) {
-          threatRow.classList.add('active');
-          document.getElementById('threat-bearing').textContent = Math.round(shields.threat_bearing) + '°M';
-        } else {
-          threatRow.classList.remove('active');
-          document.getElementById('threat-bearing').textContent = '—';
-        }
-        var tn = sensors.target_name || null;
-        document.getElementById('footer-target').textContent = tn ? '\u25C9 ' + tn : t('console.common.no_target');
-        document.getElementById('footer-target').style.color = tn ? 'var(--tactical)' : 'var(--ink-faint)';
-        // Station badge: the retired composite's science_auto meant "station is
-        // Backfill-rated". The per-system equivalent is every owned system
-        // AI-run \u2014 the conjunction of the resolved views' *_auto flags (the
-        // controlSources these derive from can lag a rating change by one
-        // tick, so the badge may flip one update late).
-        setAutoState(null, document.getElementById('science-auto-badge'), !!(sensors.sensors_auto && shields.shields_auto));
-        document.getElementById('station-damage').state = s.own_hull || null;
-      }
-    });
+    // The render lives in gui/cruiser/science.console.js (issue #1235): the
+    // shared Science renderer + this hull's variant (Sensors + Shields, no
+    // bespoke tail). s is a SystemStationConsolePayload — see the @typedef
+    // in gui/console-state.js. The vitest suite imports the same
+    // renderStation.
+    import { renderStation } from './science.console.js';
+    initConsole({ name: 'science', render: renderStation });
   </script>
 </body>
 </html>

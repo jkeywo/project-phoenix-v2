@@ -1,4 +1,5 @@
 import { PhTacticalRadar } from './ph-tactical-radar.js';
+import { phDefine } from './ph-element.js';
 
 /**
  * Courier pilot radar — one scope, one selection, two consumers.
@@ -15,9 +16,11 @@ import { PhTacticalRadar } from './ph-tactical-radar.js';
 export class PhCourierRadar extends PhTacticalRadar {
   connectedCallback() {
     this.sendAction ??= window.sendAction;
-    // The base class keeps its inner radar in a private field, so reach it
-    // through the shadow root rather than calling super.connectedCallback()
-    // (which would install the single-action passthrough we're replacing).
+    // Deliberately NOT super.connectedCallback(): the tactical base installs a
+    // single-action passthrough on the inner radar, which is exactly the wiring
+    // this subclass replaces — one tap has to fan out to BOTH the blaster target
+    // and the sensor readout. Reach the inner radar through the shadow root
+    // (`this.innerRadar` is only set once the base's own connectedCallback runs).
     const inner = this.shadowRoot.getElementById('inner-radar');
     if (inner) {
       inner.sendAction = (_action, payload) => {
@@ -28,6 +31,4 @@ export class PhCourierRadar extends PhTacticalRadar {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-courier-radar')) {
-  customElements.define('ph-courier-radar', PhCourierRadar);
-}
+phDefine('ph-courier-radar', PhCourierRadar);

@@ -5,19 +5,19 @@ import './ph-radar.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import { phColor } from './ph-console-styles.js';
 import {
   SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
   applyArcCompositeCap, cappedArcAlpha, phPx, TEXT_MIN_FALLBACK_PX,
 } from './ph-scope-chrome.js';
 import { rovingKeyTarget } from '../roving-tabindex.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /** The overlay's user-space box. Badge geometry is in these units, not pixels. */
 const SCOPE_VIEWBOX = 100;
 
-export class PhTacticalRadar extends HTMLElement {
+export class PhTacticalRadar extends PhElement {
   #state = null;
-  #innerRadar = null;
   #resizeObserver = null;
   // The keyboard target cursor (issue #1170): the contact the arrow keys have
   // moved to, which Enter/Space then locks. A scope is a canvas, so it takes
@@ -26,14 +26,8 @@ export class PhTacticalRadar extends HTMLElement {
   // list for a screen reader is explicitly out of scope for this band).
   #cursorUuid = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = [
+  template() {
+    return [
       '<style>',
       ':host { display: block; position: relative; }',
       '.container { position: relative; width: 100%; height: 100%; }',
@@ -58,8 +52,13 @@ export class PhTacticalRadar extends HTMLElement {
       scopeChromeMarkup(),
       '</div>',
     ].join('\n');
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    this.#innerRadar = this.shadowRoot.getElementById('inner-radar');
+  }
+
+  onTemplate() {
+    // A PLAIN property, not a #field: onTemplate runs from the base constructor
+    // before this subclass's field-init phase, so a declared #innerRadar would
+    // be overwritten back to null the moment that phase runs (ph-element.js).
+    this.innerRadar = this.shadowRoot.getElementById('inner-radar');
     // Both arc groups are capped once, here, rather than per render: the cap is
     // a property of the group, not of the arcs that happen to be in it today.
     applyArcCompositeCap(this.shadowRoot.getElementById('phaser-arcs'));
@@ -67,9 +66,9 @@ export class PhTacticalRadar extends HTMLElement {
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
-    if (this.#innerRadar) {
-      this.#innerRadar.sendAction = (action, payload) => {
+    super.connectedCallback();
+    if (this.innerRadar) {
+      this.innerRadar.sendAction = (action, payload) => {
         this.sendAction?.(action, payload);
       };
     }
@@ -179,8 +178,8 @@ export class PhTacticalRadar extends HTMLElement {
 
   #render() {
     const s = this.#state || {};
-    if (this.#innerRadar) {
-      this.#innerRadar.state = {
+    if (this.innerRadar) {
+      this.innerRadar.state = {
         blips: s.blips || [],
         range: s.range,
         ship_heading: s.ship_heading,
@@ -338,6 +337,4 @@ export class PhTacticalRadar extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-tactical-radar')) {
-  customElements.define('ph-tactical-radar', PhTacticalRadar);
-}
+phDefine('ph-tactical-radar', PhTacticalRadar);

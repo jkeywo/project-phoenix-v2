@@ -5,7 +5,7 @@
  * manual and never creates buttons, overlays, or network messages.
  */
 
-import { t, has } from './strings.js';
+import { t, wireText } from './strings.js';
 import { stationDisplayName } from './console-state.js';
 
 /** Format a manual metric without an unnecessary decimal tail. */
@@ -18,7 +18,7 @@ export function formatMetricValue(value) {
 /** Resolve a rating identifier to display text. */
 export function ratingCaption(rating) {
   const id = 'station.rating.' + String(rating).toLowerCase() + '.name';
-  return has(id) ? t(id) : String(rating);
+  return wireText(id, String(rating));
 }
 
 /** Render one system section from the structured manual replica. */
@@ -40,7 +40,7 @@ export function renderSection(doc, section) {
     const row = doc.createElement('div');
     row.className = 'manual-capability';
     const valueId = 'manual.' + section.kind + '.' + capability.code + '.' + capability.value_code;
-    const value = has(valueId) ? t(valueId) : String(capability.value_code);
+    const value = wireText(valueId, String(capability.value_code));
     row.textContent = t('manual.' + section.kind + '.' + capability.code, { value });
     el.appendChild(row);
   }

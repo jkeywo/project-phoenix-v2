@@ -1021,7 +1021,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-e9269035d5d0195.js" crossorigin="anonymous" integrity="sha384-qoFIgWFRT/h+/u4d/oroqT1eeBUB2/jMfoPKRtKZJOY3Zfe0+EOQY8a11FdbCKld"><link rel="preload" href="./project-phoenix-e9269035d5d0195_bg.wasm" crossorigin="anonymous" integrity="sha384-mN20O2eMnyOK6p9uWEbrYgBeb0JgkyGL/FOSrJ0A6L1pVC68GZUIMHP0cijz3WfV" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-f85d8ccc20258e4f.js" crossorigin="anonymous" integrity="sha384-5YAxUeK/VwBWVangj8mEtC3ua3S77LTZ2ca08vXN7LqDey6XzFrMFJ3elKEryJXw"><link rel="preload" href="./project-phoenix-f85d8ccc20258e4f_bg.wasm" crossorigin="anonymous" integrity="sha384-Hc49kSUpzmGEPpxs64gl2emTETpmWwWIakW8Oiy+/CZs6yAnnGHddH9/eYnC71FN" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1413,8 +1413,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-e9269035d5d0195.js';
-const wasm = await init({ module_or_path: './project-phoenix-e9269035d5d0195_bg.wasm' });
+import init, * as bindings from './project-phoenix-f85d8ccc20258e4f.js';
+const wasm = await init({ module_or_path: './project-phoenix-f85d8ccc20258e4f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -1458,12 +1458,231 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
        ClientMessage path the phone clients use. The module publishes
        window.dispatchConsoleAction for the classic-script __sendAction shim. -->
   <script type="module" src="gui/action-map.js"></script>
+  <!-- Page chrome (issue #1227): connection-status dot, Screen Wake Lock,
+       fullscreen toggle, and the mechanical half of the #conn-diag
+       renderer — gui/page-chrome.js is the single source server.html and
+       client.html both used to carry as verbatim copies. The classic
+       script below can't `import` a module directly (same constraint as
+       every other island on this page); early calls made before this
+       island has mounted go through the window.__pageChromeReady queue
+       defined near that script's own #1224-style latch block. Mounted
+       FIRST among the new islands (before the ICE-config island below) so
+       initPeerJS's post-ICE-await diagnostics setup — which only resumes
+       once that later island runs — always finds this script's `_pageChrome`
+       already populated, with no queue needed for that call. -->
+  <script type="module">
+    import { mountPageChrome } from './gui/page-chrome.js';
+    import { t } from './gui/strings.js';
+    const chrome = mountPageChrome({
+      doc: document,
+      t,
+      statusColors: { active: '#4c4', trouble: '#f44' },
+      statusLabels: { disconnected: 'client.reconnecting', error: 'server.conn_error_refresh' },
+      releaseWakeLockOnUnload: true,
+    });
+    window.__pageChromeReady(chrome);
+  </script>
   <!-- Pure host-runtime arbiter for the QR-first pre-scenario selection flow
        (issue #755). Publishes window.scenarioArbiter for the classic-script
        host logic below. -->
   <script type="module" src="gui/scenario-arbiter.js"></script>
+  <!-- Host scenario-catalog + mod-pack view-models (issue #1230): the pure
+       decision behind renderScenarioLockState() (which picker stage to show,
+       or the single-ship auto-resolve) and renderModPackList() (pack rows +
+       reorder eligibility + conflict rows) live in gui/host-scenarios.js so
+       vitest can exercise them directly. Sibling of gui/scenario-arbiter.js
+       above, not a merge into it: the arbiter decides whether a selection
+       request is ACCEPTED; this decides what the already-decided selection
+       RENDERS as. Publishes window.hostScenarios, same self-registering
+       pattern as window.scenarioArbiter — no queue/latch needed, since every
+       call site below fires from an async event (fetch resolving, a user
+       click, a Rust host-channel push) that only ever happens after this
+       module has finished loading. -->
+  <script type="module" src="gui/host-scenarios.js"></script>
+  <!-- Host lobby view-model (issue #1229): the pure phase-transition, title/
+       crew/ready-badge/countdown/station-card/reserved-chip/spectator-pill/
+       hint computation behind __updateLobby's station-grid renderer lives in
+       gui/host-lobby-view.js so vitest can exercise it directly. Sibling of
+       gui/lobby-view.js (client.html), NOT a reuse — the host's roster is
+       Rust-built and already localised, with no myToken. Self-registers
+       window.hostLobbyViewModel, the same load-order-tolerant pattern
+       client.html uses for window.lobbyViewModel. -->
+  <script type="module" src="gui/host-lobby-view.js"></script>
+  <!-- Host audio engine (issue #1228): the data-driven audio graph
+       (clampVol/applyMaster/setChannelVolume/mkLoop/initBlasterAudio/
+       startGameAudio/startMenuMusic/stopMenuMusic/applyHudAudio, the
+       master-volume localStorage key) that used to live inline in the
+       classic script below now lives in gui/host-audio.js so vitest can
+       import it directly with a stubbed Audio constructor (jsdom's own
+       HTMLMediaElement.play() is "Not implemented"). Mounted BEFORE the
+       host-channel island just below so its audio_config/audio_cue/
+       audio_level handlers — window.__audioConfig/__audioCue/__audioLevel —
+       are already the real, extracted functions the moment that island's
+       `handlers` table is built; window.__audioDebug and
+       window.__setMasterVolume/__getMasterVolume are assigned here too, for
+       gui/server-settings.js's volume slider and tests/smoke/audio.spec.js.
+       Everything else (startGameAudio/startMenuMusic/stopMenuMusic/
+       applyHudAudio, called from the classic script's __updateLobby/
+       __updateHud) goes through the window.__hostAudioReady queue/latch
+       defined near that script's own #1224-style latch block, the same
+       classic-script-can't-`import`-a-module bridge #1225/#1227 use. -->
+  <script type="module">
+    import { createHostAudio } from './gui/host-audio.js';
+    // window.localStorage access itself can throw in some private-mode /
+    // sandboxed-iframe configurations — guarded here exactly like the old
+    // inline code guarded window.localStorage.getItem, so a denial degrades
+    // to "master volume stays at its default" rather than breaking the page.
+    let masterVolumeStorage = null;
+    try { masterVolumeStorage = window.localStorage; }
+    catch (_) { /* private mode / storage disabled — stay at the default */ }
+    const hostAudio = createHostAudio({
+      doc: document,
+      storage: masterVolumeStorage,
+      AudioCtor: window.Audio,
+    });
+    window.__audioConfig = hostAudio.audioConfig;
+    window.__audioCue = hostAudio.audioCue;
+    window.__audioLevel = hostAudio.audioLevel;
+    window.__audioDebug = hostAudio.debug;
+    window.__setMasterVolume = hostAudio.setMasterVolume;
+    window.__getMasterVolume = hostAudio.getMasterVolume;
+    window.__hostAudioReady(hostAudio);
+  </script>
+  <!-- Host Channel dispatcher (issue #1225): the handler table and the
+       localisation boundary that used to live inline in the classic script
+       below now live in gui/host-channel.js so vitest can import them
+       directly. This island builds the real dispatcher over the page's
+       render/audio functions and the string table, then installs it through
+       the #1224 latch just below (window.__hostChannelReady). Everything
+       queued on window.__hostChannel before this module runs flushes to the
+       real dispatcher in order; nothing here assumes it runs before or after
+       WASM finishes loading — see the registration note near
+       set_host_channel_callback further down for the other half of that. -->
+  <script type="module">
+    import { createHostChannel } from './gui/host-channel.js';
+    import { t, has, localiseTree } from './gui/strings.js';
+    const hostChannelDispatch = createHostChannel({
+      handlers: {
+        hud:          function(p) { window.__updateHud(p); },
+        lobby:        function(p) { window.__updateLobby(p); },
+        chatter:      function(p) { window.__updateChatter(p); },
+        audio_config: function(p) { window.__audioConfig(p); },
+        audio_cue:    function(p) { window.__audioCue(p); },
+        audio_level:  function(p) { window.__audioLevel(p); },
+        shake:        function(p) { window.__applyShake(p[0], p[1]); },
+      },
+      strings: { t, has, localiseTree },
+    });
+    window.__hostChannelReady(hostChannelDispatch);
+  </script>
+
+  <!-- Host peer routing (issue #1230): the pure target ⇒ connection-list
+       resolution behind routeOutbound() (the `set_message_callback` Rust's
+       outbound flush calls) lives in gui/host-peer-routing.js so vitest can
+       exercise the 'all'/'token:'/'except:' targeting and the snapshot→
+       reliable per-token fallback with plain Map fixtures instead of real
+       PeerJS connections. Publishes window.hostPeerRouting; routeOutbound
+       itself, and the `tokenConns`/`tokenSnapshotConns` Maps it reads, stay
+       inline below — this module never touches either Map, only resolves
+       which entries of them to send on. No queue/latch needed: routeOutbound
+       is only ever invoked from an async WASM callback registered near the
+       bottom of this page, long after every module island here has loaded. -->
+  <script type="module" src="gui/host-peer-routing.js"></script>
+
+  <!-- ICE/TURN config bridge (issue #1226): gui/connection-manager.js is the
+       single source of truth for the STUN pair, the OpenRelay TURN fallback
+       triple, and the worker→OpenRelay fallback policy (covered by
+       connection-manager.test.js). server.html used to re-declare all of
+       that inline; this island publishes fetchIceServers() through the ICE
+       config latch below (window.__iceConfigReady) instead, the same
+       classic-script-can't-`import`-a-module bridge the #1224/#1225
+       host-channel latch uses — but as a single wait-for-ready promise since
+       getIceServers() only ever needs the one function, not a replayable
+       queue of calls made before the module was ready. -->
+  <script type="module">
+    import { fetchIceServers } from './gui/connection-manager.js';
+    window.__iceConfigReady(fetchIceServers);
+  </script>
 
   <script>
+    // ── Host Channel latch (issue #1224) ────────────────────────────────────
+    // window.__hostChannel exists here, first thing this script parses, so
+    // set_host_channel_callback (below, once WASM has loaded) always hands
+    // Rust a real function, never `undefined`. A later `gui/` extraction
+    // (issue #1225) can call window.__hostChannelReady(dispatch) once its own
+    // module has loaded — however that races the WASM load — and whatever
+    // queued in between flushes to it in order.
+    window.__hostChannelQueue = [];
+    window.__hostChannel = function(n, p) { window.__hostChannelQueue.push([n, p]); };
+    window.__hostChannelReady = function(dispatch) {
+      window.__hostChannel = dispatch;
+      window.__hostChannelQueue.splice(0).forEach(function(c) { dispatch(c[0], c[1]); });
+    };
+
+    // ── Page chrome bridge (issue #1227) ────────────────────────────────────
+    // setConnectionStatus/acquireWakeLock/releaseWakeLock, the fullscreen
+    // toggle and the wake-lock visibilitychange wiring now live in
+    // gui/page-chrome.js (shared with client.html). This classic script
+    // can't `import` a module directly, so calls made before the page-chrome
+    // island below has mounted are queued and replayed in order once it
+    // calls window.__pageChromeReady(chrome) — same shape as the
+    // window.__hostChannel queue just above, generalised from one channel
+    // dispatcher to a handful of method names.
+    window.__pageChromeQueue = [];
+    let _pageChrome = null;
+    function setConnectionStatus(state) {
+      if (_pageChrome) _pageChrome.setConnectionStatus(state);
+      else window.__pageChromeQueue.push(['setConnectionStatus', state]);
+    }
+    function acquireWakeLock() {
+      if (_pageChrome) return _pageChrome.acquireWakeLock();
+      window.__pageChromeQueue.push(['acquireWakeLock', undefined]);
+    }
+    function releaseWakeLock() {
+      if (_pageChrome) _pageChrome.releaseWakeLock();
+      else window.__pageChromeQueue.push(['releaseWakeLock', undefined]);
+    }
+    window.__pageChromeReady = function(chrome) {
+      _pageChrome = chrome;
+      window.__pageChromeQueue.splice(0).forEach(function(c) { chrome[c[0]](c[1]); });
+    };
+
+    // ── Host audio bridge (issue #1228) ─────────────────────────────────────
+    // startGameAudio/startMenuMusic/stopMenuMusic (called from __updateLobby's
+    // phase handling below) and applyHudAudio (called from __updateHud) now
+    // live in gui/host-audio.js. This classic script can't `import` a module
+    // directly, so calls made before the host-audio island below has mounted
+    // are queued and replayed in order once it calls
+    // window.__hostAudioReady(audio) — same shape as the window.__pageChrome
+    // queue just above. The audio_config/audio_cue/audio_level host-channel
+    // handlers (window.__audioConfig/__audioCue/__audioLevel), __audioDebug
+    // and __setMasterVolume/__getMasterVolume don't need queuing here: the
+    // host-audio island assigns those window globals directly as soon as it
+    // mounts, and nothing calls them before WASM loads (see that island's own
+    // comment for why).
+    window.__hostAudioQueue = [];
+    let _hostAudio = null;
+    function startGameAudio() {
+      if (_hostAudio) _hostAudio.startGameAudio();
+      else window.__hostAudioQueue.push(['startGameAudio', undefined]);
+    }
+    function startMenuMusic() {
+      if (_hostAudio) _hostAudio.startMenuMusic();
+      else window.__hostAudioQueue.push(['startMenuMusic', undefined]);
+    }
+    function stopMenuMusic() {
+      if (_hostAudio) _hostAudio.stopMenuMusic();
+      else window.__hostAudioQueue.push(['stopMenuMusic', undefined]);
+    }
+    function applyHudAudio(s) {
+      if (_hostAudio) _hostAudio.applyHudAudio(s);
+      else window.__hostAudioQueue.push(['applyHudAudio', s]);
+    }
+    window.__hostAudioReady = function(audio) {
+      _hostAudio = audio;
+      window.__hostAudioQueue.splice(0).forEach(function(c) { audio[c[0]](c[1]); });
+    };
+
     // Resolve a string id via the module bridge; falls back to the raw id
     // before modules load. Render loops re-resolve on every state message.
     function t(id, params) {
@@ -1479,8 +1698,8 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // `world.combat_test.global.title` verbatim (issue #949).
     //
     // This is the pull half. The push half — everything Rust sends over a host
-    // channel — crosses the boundary once in __hostChannel below; see the note
-    // there for why the two halves are fixed differently.
+    // channel — crosses the boundary once in gui/host-channel.js's dispatcher;
+    // see the note there for why the two halves are fixed differently.
     //
     // localiseTree IS the rule (substitute only what the table actually holds),
     // so a mod pack that authored literal prose still reads, and t()'s
@@ -1541,38 +1760,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad HUD json', e); return; }
     const overlay   = document.getElementById('hud-overlay');
     if (overlay) overlay.classList.toggle('alert-on', !!s.red_alert);
-    // ── Red alert: siren one-shot on the edge, music loops underneath ───────
-    if (s.red_alert && !_prevRedAlert && _els.siren) {
-      _els.siren.currentTime = 0;
-      _els.siren.play().catch(() => {});
-    }
-    if (_els.music) {
-      if (s.red_alert && _els.music.paused) {
-        _els.music.play().catch(() => {});
-      } else if (!s.red_alert && !_els.music.paused) {
-        _els.music.pause();
-        _els.music.currentTime = 0;
-      }
-    }
-    _prevRedAlert = !!s.red_alert;
-    // ── Engine volume from thrust (coefficients from the ship's TOML) ───────
-    if (_els.engine && _audioCfg && _audioCfg.engine && typeof s.engine_thrust === 'number') {
-      const e = _audioCfg.engine;
-      // setChannelVolume, not a direct assignment: the ride is the authored
-      // level, and master scales whatever it lands on (issue #939).
-      setChannelVolume('engine', e.idle_volume + s.engine_thrust * e.volume_at_full_thrust);
-    }
-    // ── Phaser loop follows the change-detected firing flag ────────────────
-    if (_els.phaser && _audioCfg && _audioCfg.phaser_loop) {
-      if (s.phaser_firing && !_prevPhaser) {
-        setChannelVolume('phaser', _audioCfg.phaser_loop.volume);
-        _els.phaser.currentTime = 0;
-        _els.phaser.play().catch(() => {});
-      } else if (!s.phaser_firing && _prevPhaser) {
-        _els.phaser.pause();
-      }
-    }
-    _prevPhaser = !!s.phaser_firing;
+    // Red-alert siren/music, engine volume from thrust, and the phaser loop's
+    // firing edge all live in gui/host-audio.js now (issue #1228) — this is
+    // the classic-script bridge into it (see the "Host audio bridge" latch
+    // block near the top of this script).
+    applyHudAudio(s);
     // ── 4-slot viewscreen status strip ──────────────────────────────────────
     const vNav = document.getElementById('v-nav');
     const vTac = document.getElementById('v-tac');
@@ -1621,23 +1813,32 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     let s;
     try { s = JSON.parse(json); } catch (e) { console.warn('[Phoenix] bad lobby state json', e); return; }
 
+    // Pure phase-transition / title / crew / ready-badge / countdown /
+    // station-card / reserved-chip / spectator-pill / hint computation lives
+    // in gui/host-lobby-view.js (issue #1229) — this function only performs
+    // side effects (audio, the shared qrVisible flag) and DOM writes. Boot
+    // race: skip the paint until the module loads — the next lobby push
+    // re-renders (mirrors client.html's window.lobbyViewModel guard).
+    if (typeof window.hostLobbyViewModel !== 'function') return;
+    const vm = window.hostLobbyViewModel(s, _lobbyPrevPhase);
+    const tr = vm.transitions;
+
     // ── Loading overlay ────────────────────────────────────────────────
-    if (s.phase === 'Loading') {
+    if (tr.showLoadingOverlay) {
       const al = document.getElementById('asset-loading');
       if (al) al.style.display = 'flex';
-      if (typeof s.loading_progress === 'number') {
-        const pct = Math.round(s.loading_progress * 100) + '%';
+      if (tr.loadingPct != null) {
         const el1 = document.getElementById('asset-loading-pct');
         const el2 = document.getElementById('loading-progress-pct');
-        if (el1) el1.textContent = pct;
-        if (el2) el2.textContent = pct;
+        if (el1) el1.textContent = tr.loadingPct;
+        if (el2) el2.textContent = tr.loadingPct;
       }
     }
 
     // ── Game-start cue (Loading → InProgress transition) ───────────────
     // Only this edge dismisses the loading overlay — there's nothing to
     // dismiss if we never showed it.
-    if (s.phase === 'InProgress' && _lobbyPrevPhase === 'Loading') {
+    if (tr.dismissLoadingOverlay) {
       const al = document.getElementById('asset-loading');
       if (al) al.style.display = 'none';
       const qrOverlay = document.getElementById('overlay');
@@ -1648,37 +1849,37 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // when the asset preload is already complete, drain_force_start /
     // StartGame set InProgress directly and the sim never passes through
     // Loading, so a Loading-only gate would leave the game silent.
-    if (s.phase === 'InProgress' && _lobbyPrevPhase !== 'InProgress') {
+    if (tr.unlockAudio) {
       startGameAudio();
     }
     // Menu music: loop during lobby, stop when game starts
-    if (s.phase === 'Lobby') {
+    if (tr.menuMusic === 'start') {
       startMenuMusic();
-    } else if (s.phase === 'InProgress' || s.phase === 'Loading') {
+    } else if (tr.menuMusic === 'stop') {
       stopMenuMusic();
     }
     _lobbyPrevPhase = s.phase;
 
     // ── Show/hide panel + canvas based on phase ───────────────────────
-    const isLobby = s.phase === 'Lobby';
     const panel = document.getElementById('lobby-panel');
     const qrOverlay = document.getElementById('overlay');
-    if (panel) panel.style.display = isLobby ? '' : 'none';
+    if (panel) panel.style.display = tr.showPanel ? '' : 'none';
     // NOTE: do NOT hide the Bevy canvas (#canvas) here. The lobby panel already
     // covers it completely (z-index:180, solid background). Hiding the canvas
     // with display:none causes Bevy to see a 0×0 window and throttle / suspend
     // its rAF loop, which delays SimState delivery after game start and breaks
     // the smoke tests. The canvas must stay in the render tree at all times.
-    if (qrOverlay) {
-      if (isLobby) { qrVisible = true; qrOverlay.style.display = 'block'; }
-      else if (s.phase === 'Loading' || s.phase === 'GameOver') { qrVisible = false; qrOverlay.style.display = 'none'; }
-      // During InProgress the settings menus are the sole controllers.
+    if (qrOverlay && tr.qrOverlayAction) {
+      if (tr.qrOverlayAction === 'show') { qrVisible = true; qrOverlay.style.display = 'block'; }
+      else { qrVisible = false; qrOverlay.style.display = 'none'; }
+      // During InProgress the settings menus are the sole controllers (no
+      // qrOverlayAction, so this branch is skipped entirely).
     }
 
     // ── Game-over overlay: force-hidden once the phase leaves GameOver ──
     // (the HUD push that normally drives this overlay only fires while
     // InProgress, so returning to Lobby needs its own hide here.)
-    if (s.phase !== 'GameOver') {
+    if (tr.hideGameOverOverlay) {
       const goOverlay = document.getElementById('game-over-overlay');
       if (goOverlay) goOverlay.style.display = 'none';
     }
@@ -1689,22 +1890,20 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // channel crosses localiseHostPayload in __hostChannel (issue #949).
     const titleEl = document.getElementById('lobby-title');
     const subEl = document.getElementById('lobby-subtitle');
-    if (titleEl) titleEl.textContent = s.scenario_title || t('server.unknown_scenario');
-    if (subEl) subEl.textContent = s.scenario_body || '';
+    if (titleEl) titleEl.textContent = vm.title || t('server.unknown_scenario');
+    if (subEl) subEl.textContent = vm.subtitle;
 
     // ── Crew count ────────────────────────────────────────────────────
     const crewEl = document.getElementById('lobby-crew-count');
     const dotsEl = document.getElementById('lobby-crew-dots');
-    const maxP = s.max_players || 0;
-    const crewN = s.crew_count || 0;
-    if (crewEl) crewEl.textContent = crewN + '/' + maxP;
+    if (crewEl) crewEl.textContent = vm.crew.count + '/' + vm.crew.max;
 
     // Crew dot indicators
     if (dotsEl) {
       dotsEl.innerHTML = '';
-      for (let i = 0; i < maxP; i++) {
+      for (const filled of vm.crew.dots) {
         const dot = document.createElement('div');
-        dot.className = 'crew-dot' + (i < crewN ? ' filled' : '');
+        dot.className = 'crew-dot' + (filled ? ' filled' : '');
         dotsEl.appendChild(dot);
       }
     }
@@ -1712,31 +1911,22 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // Spectator tag
     const specTag = document.getElementById('lobby-spectator-tag');
     if (specTag) {
-      const hasSpecs = s.spectators && s.spectators.length > 0;
-      specTag.style.display = hasSpecs ? 'inline' : 'none';
-      if (hasSpecs) specTag.textContent = '+' + s.spectators.length;
+      specTag.style.display = vm.crew.spectatorTag.visible ? 'inline' : 'none';
+      if (vm.crew.spectatorTag.visible) specTag.textContent = '+' + vm.crew.spectatorTag.count;
     }
 
     // ── Ready badge ───────────────────────────────────────────────────
     const badge = document.getElementById('lobby-ready-badge');
     if (badge) {
-      if (s.countdown_secs > 0) {
-        badge.textContent = t('server.launching_in', { secs: s.countdown_secs });
-        badge.className = 'go';
-      } else if (s.all_ready) {
-        badge.textContent = t('client.all_crew_ready');
-        badge.className = 'go';
-      } else {
-        badge.textContent = t('client.awaiting_crew');
-        badge.className = '';
-      }
+      badge.textContent = t(vm.readyBadge.id, vm.readyBadge.params);
+      badge.className = vm.readyBadge.className;
     }
 
     // ── Countdown display ─────────────────────────────────────────────
     const cdEl = document.getElementById('lobby-countdown');
     if (cdEl) {
-      if (s.countdown_secs > 0) {
-        cdEl.textContent = String(s.countdown_secs);
+      if (vm.countdown.visible) {
+        cdEl.textContent = String(vm.countdown.secs);
         cdEl.style.display = 'flex';
       } else {
         cdEl.style.display = 'none';
@@ -1748,77 +1938,55 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     if (!grid) return;
     grid.innerHTML = '';
 
-    const stations = s.stations || [];
-
-    // Fill grid: show exactly the number of defined stations (the ship TOML
-    // defines its roster — no padding to a fixed count).
-    const MAX_SLOTS = stations.length;
-    for (let i = 0; i < MAX_SLOTS; i++) {
-      const st = i < stations.length ? stations[i] : null;
+    for (const c of vm.cards) {
       const card = document.createElement('div');
+      card.className = 'station-card' + (c.claimed ? ' claimed' : '');
 
-      if (st) {
-        card.className = 'station-card' + (st.holder_name ? ' claimed' : '');
+      // Header row: avatar + name + rank
+      const header = document.createElement('div');
+      header.className = 'card-header';
+      const nameInfo = document.createElement('div');
+      nameInfo.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
+      const name = document.createElement('div');
+      name.className = 'card-name';
+      name.textContent = c.name;
+      const rank = document.createElement('div');
+      rank.className = 'card-rank';
+      rank.textContent = c.rank;
+      nameInfo.appendChild(name);
+      nameInfo.appendChild(rank);
+      header.appendChild(nameInfo);
 
-        // Header row: avatar + name + rank
-        const header = document.createElement('div');
-        header.className = 'card-header';
-        const nameInfo = document.createElement('div');
-        nameInfo.style.cssText = 'display:flex;flex-direction:column;gap:2px;';
-        const name = document.createElement('div');
-        name.className = 'card-name';
-        name.textContent = st.name || st.short_code || '';
-        const rank = document.createElement('div');
-        rank.className = 'card-rank';
-        rank.textContent = st.rank || '';
-        nameInfo.appendChild(name);
-        nameInfo.appendChild(rank);
-        header.appendChild(nameInfo);
+      // Avatar initials
+      const avatar = document.createElement('div');
+      avatar.className = 'card-avatar';
+      avatar.textContent = c.avatar.text;
+      if (c.avatar.placeholder) avatar.style.color = '#556';
+      header.appendChild(avatar);
+      card.appendChild(header);
 
-        // Avatar initials
-        const avatar = document.createElement('div');
-        avatar.className = 'card-avatar';
-        if (st.holder_name) {
-          avatar.textContent = st.holder_name.substring(0, 2).toUpperCase();
-        } else {
-          avatar.textContent = st.short_code ? st.short_code.substring(0, 2).toUpperCase() : '--';
-          avatar.style.color = '#556';
+      // Console chips
+      const chips = document.createElement('div');
+      chips.className = 'card-consoles';
+      for (const chipLabel of c.consoles) {
+        const chip = document.createElement('span');
+        chip.className = 'console-chip';
+        chip.textContent = chipLabel;
+        chips.appendChild(chip);
+      }
+      card.appendChild(chips);
+
+      // Footer: complexity pill(s)
+      if (c.presetPills.length > 0) {
+        const footer = document.createElement('div');
+        footer.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:2px;';
+        for (const pill of c.presetPills) {
+          const pillEl = document.createElement('span');
+          pillEl.className = 'complexity-pill' + (pill.low ? ' low' : '');
+          pillEl.textContent = t(pill.id);
+          footer.appendChild(pillEl);
         }
-        header.appendChild(avatar);
-        card.appendChild(header);
-
-        // Console chips
-        const chips = document.createElement('div');
-        chips.className = 'card-consoles';
-        if (st.consoles && st.consoles.length > 0) {
-          for (const c of st.consoles) {
-            const chip = document.createElement('span');
-            chip.className = 'console-chip';
-            chip.textContent = c;
-            chips.appendChild(chip);
-          }
-        }
-        card.appendChild(chips);
-
-        // Footer: complexity pill(s)
-        if (st.preset_names && st.preset_names.length > 0) {
-          const footer = document.createElement('div');
-          footer.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:2px;';
-          for (const pn of st.preset_names) {
-            const pill = document.createElement('span');
-            pill.className = 'complexity-pill' + (pn === 'Low' ? ' low' : '');
-            pill.textContent = pn === 'Low' ? t('server.complexity_low') : t('server.complexity_normal');
-            footer.appendChild(pill);
-          }
-          card.appendChild(footer);
-        }
-      } else {
-        // Empty slot — visible in wide mode, hidden in compact (CSS)
-        card.className = 'station-card empty per-slot';
-        const label = document.createElement('div');
-        label.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;font-size:0.75rem;color:#556;letter-spacing:.06em;';
-        label.textContent = t('server.reserved');
-        card.appendChild(label);
+        card.appendChild(footer);
       }
 
       grid.appendChild(card);
@@ -1827,14 +1995,11 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // Aggregate RESERVED chip (visible only in compact mode via CSS)
     const aggregate = document.getElementById('reserved-aggregate');
     if (aggregate) {
-      const reservedCount = MAX_SLOTS - stations.length;
-      if (reservedCount > 0) {
+      if (vm.reservedChip.active) {
         aggregate.classList.add('active');
         // Two ids, not one with a JS-side `s`: a language whose plural rule is
         // not English's cannot be served by suffixing a letter.
-        aggregate.textContent = reservedCount === 1
-          ? t('server.slots_reserved.one', { n: reservedCount, max: MAX_SLOTS })
-          : t('server.slots_reserved.other', { n: reservedCount, max: MAX_SLOTS });
+        aggregate.textContent = t(vm.reservedChip.id, vm.reservedChip.params);
       } else {
         aggregate.classList.remove('active');
         aggregate.textContent = '';
@@ -1846,54 +2011,33 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     if (specList) {
       specList.innerHTML = '';
       specList.style.color = '';
-      const allPlayers = s.stations
-        ? s.stations.filter(st => st.holder_name).map(st => ({ name: st.holder_name, station: st.name }))
-        : [];
-      for (const p of allPlayers) {
+      for (const p of vm.spectatorPills) {
         const pill = document.createElement('span');
-        pill.className = 'spectator-pill';
-        pill.textContent = `${p.name} \u00b7 ${p.station}`;
-        specList.appendChild(pill);
-      }
-      if (s.spectators && s.spectators.length > 0) {
-        for (const sp of s.spectators) {
-          const pill = document.createElement('span');
+        if (p.kind === 'crew') {
+          pill.className = 'spectator-pill';
+          pill.textContent = p.text;
+        } else if (p.kind === 'waiting') {
           pill.className = 'spectator-pill waiting';
-          pill.textContent = t('server.spectator_waiting', { name: sp });
-          specList.appendChild(pill);
+          pill.textContent = t(p.id, p.params);
+        } else {
+          pill.className = 'spectator-empty';
+          pill.textContent = t(p.id);
         }
-      }
-      if (allPlayers.length === 0 && (!s.spectators || s.spectators.length === 0)) {
-        const empty = document.createElement('span');
-        empty.className = 'spectator-empty';
-        empty.textContent = t('server.no_players');
-        specList.appendChild(empty);
+        specList.appendChild(pill);
       }
     }
 
     // ── Status hint ───────────────────────────────────────────────────
-    const hint = document.getElementById('lobby-status-hint');
-    if (hint) {
-      if (s.countdown_secs > 0) {
-        hint.textContent = t('server.hint_launching', { secs: s.countdown_secs });
-        hint.style.color = '#5fd8e8';
-      } else if (crewN === 0) {
-        hint.textContent = t('server.waiting_players');
-        hint.style.color = '#667';
-      } else if (s.all_ready) {
-        hint.textContent = t('client.status_all_ready');
-        hint.style.color = '#5fd8e8';
-      } else {
-        hint.textContent = t('server.waiting_ready');
-        hint.style.color = '#889';
-      }
+    const hintEl = document.getElementById('lobby-status-hint');
+    if (hintEl) {
+      hintEl.textContent = t(vm.hint.id, vm.hint.params);
+      hintEl.style.color = vm.hint.color;
     }
 
     // ── AI-only launch button ─────────────────────────────────────────
     const aiBtn = document.getElementById('ai-launch-btn');
     if (aiBtn) {
-      const noPlayers = crewN === 0 && (!s.spectators || s.spectators.length === 0);
-      aiBtn.style.display = noPlayers ? '' : 'none';
+      aiBtn.style.display = vm.aiLaunchVisible ? '' : 'none';
     }
   };
 
@@ -1977,57 +2121,10 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       }
     })();
 
-    // ── Connection status ──────────────────────────────────────────────────
-
-    function setConnectionStatus(state) {
-      const dot = document.getElementById('conn-dot');
-      const label = document.getElementById('conn-label');
-      if (state === 'disconnected') {
-        dot.style.background = '#f44';
-        label.textContent = t('client.reconnecting');
-      } else if (state === 'error') {
-        dot.style.background = '#f44';
-        label.textContent = t('server.conn_error_refresh');
-      } else {
-        dot.style.background = '#4c4';
-        label.textContent = '';
-      }
-    }
-
-    // ── Fullscreen controller ──────────────────────────────────────────────
-
-    (function initFullscreen() {
-      const btn = document.getElementById('fullscreen-btn');
-      function syncIcon() { btn.textContent = document.fullscreenElement ? '✕' : '⛶'; }
-      btn.addEventListener('click', () => {
-        const p = document.fullscreenElement
-          ? document.exitFullscreen()
-          : document.documentElement.requestFullscreen();
-        p && p.catch(() => {});
-      });
-      document.addEventListener('fullscreenchange', syncIcon);
-    })();
-
-    // ── Screen Wake Lock (keep screen on when active) ─────────────────
-    let wakeLockSentinel = null;
-
-    async function acquireWakeLock() {
-      try {
-        if (wakeLockSentinel) return;
-        wakeLockSentinel = await navigator.wakeLock.request('screen');
-        wakeLockSentinel.addEventListener('release', () => { wakeLockSentinel = null; });
-      } catch (_) {}
-    }
-
-    function releaseWakeLock() {
-      if (wakeLockSentinel) { wakeLockSentinel.release(); wakeLockSentinel = null; }
-    }
-
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') acquireWakeLock();
-    });
-
-    window.addEventListener('beforeunload', () => releaseWakeLock());
+    // Connection status, wake lock and fullscreen now live in
+    // gui/page-chrome.js (issue #1227) — setConnectionStatus/acquireWakeLock/
+    // releaseWakeLock above are the classic-script bridge into it (see the
+    // #1227 latch block near the top of this script).
 
     // ── PeerJS host peer ───────────────────────────────────────────────────
 
@@ -2044,38 +2141,25 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       .map(b => b.toString(16).padStart(2, '0')).join('');
     const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/index.html#' + hostPeerId;
 
+    // ── ICE config latch (issue #1226) ─────────────────────────────────────
+    // gui/connection-manager.js's fetchIceServers() is now the single source
+    // of truth for the STUN/TURN server list and the worker→OpenRelay
+    // fallback policy — this script used to re-declare all of that inline.
+    // It can't `import` the module directly (classic script), so the module
+    // island above publishes fetchIceServers() through this latch once it
+    // has loaded. Mirrors the #1224/#1225 host-channel latch's shape, but as
+    // a single wait-for-ready promise rather than a replay queue: unlike the
+    // WASM→JS host-channel callback (which can fire before the module is
+    // ready and must not drop messages), getIceServers() is only ever called
+    // from this same script's own initPeerJS(), so there is nothing to queue
+    // — just one await for the module to finish loading.
+    let _resolveIceConfig;
+    const iceConfigReady = new Promise(resolve => { _resolveIceConfig = resolve; });
+    window.__iceConfigReady = function(fetchIceServersFn) { _resolveIceConfig(fetchIceServersFn); };
+
     async function getIceServers() {
-      // Mirrors gui/connection-manager.js fetchIceServers(): worker
-      // credentials first; if the worker is unreachable, fall back to
-      // Metered's free shared OpenRelay TURN (staticauth. hostname — the
-      // bare openrelay.metered.ca has no DNS records any more). relaySource
-      // 'openrelay' gets a mild degraded notice in the lobby.
-      const base = [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-      ];
-      try {
-        const r = await fetch('https://phoenix-turn-credentials.project-phoenix.workers.dev');
-        if (r.ok) {
-          const extra = await r.json();
-          console.log(`[ICE] Metered.ca returned ${extra.length} server(s) — appending to base list`);
-          const servers = [...base, ...extra];
-          const relayAvailable = servers.some(s => {
-            const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
-            return urls.some(u => typeof u === 'string' && (u.startsWith('turn:') || u.startsWith('turns:')));
-          });
-          return { servers, relayAvailable, relaySource: relayAvailable ? 'worker' : null };
-        }
-        console.warn('[ICE] Metered.ca fetch returned', r.status, '— falling back to shared OpenRelay TURN');
-      } catch (e) {
-        console.warn('[ICE] Metered.ca fetch failed — falling back to shared OpenRelay TURN:', e.message);
-      }
-      const openRelay = [
-        { urls: 'turn:staticauth.openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:staticauth.openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turns:staticauth.openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-      ];
-      return { servers: [...base, ...openRelay], relayAvailable: true, relaySource: 'openrelay' };
+      const fetchIceServersFn = await iceConfigReady;
+      return fetchIceServersFn();
     }
 
     async function initPeerJS() {
@@ -2089,17 +2173,22 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       // stage of any inbound client that is struggling to complete. When ICE
       // fails, PeerJS's 'open' never fires — this is the only place the host
       // operator learns a phone is trying and failing to get through.
-      const connDiagEl = document.getElementById('conn-diag');
+      //
+      // writeDiagLines is the shared mechanical half from gui/page-chrome.js
+      // (issue #1227) — guard for a missing #conn-diag, join, set
+      // textContent. The line-building logic here (multi-client ICE stages)
+      // is host-specific and stays local; see that module's doc comment for
+      // why it isn't unified with client.html's own renderDiag.
+      const writeDiagLines = _pageChrome.mountConnDiag('conn-diag');
       const clientIceStages = new Map(); // shortId → troubled ICE state
       function renderConnDiag() {
-        if (!connDiagEl) return;
         const lines = [];
         if (!relayAvailable) lines.push(t('server.no_relay_warning'));
         else if (relaySource === 'openrelay') lines.push(t('server.relay_fallback_notice'));
         for (const [id, state] of clientIceStages) {
           lines.push(t('server.client_ice_state', { id, state }));
         }
-        connDiagEl.textContent = lines.join('\n');
+        writeDiagLines(lines);
       }
       renderConnDiag();
 
@@ -2591,61 +2680,73 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       if (!_catalogBuilt) return;
       applyPreScenarioRestrictions();
 
-      if (_preSelection.scenario_id == null) {
-        // Scenario stage — one button per catalog scenario.
-        if (label) label.textContent = t('server.select_world');
+      // Pure stage decision (scenario stage / ship stage / single-ship
+      // auto-resolve / locked) lives in gui/host-scenarios.js (issue #1230);
+      // everything below is DOM writes plus the arbiterSelectShip/
+      // window.__sendAction side effects the decision asked for.
+      const vm = window.hostScenarios.scenarioCatalogView(_scenarioCatalog, _preSelection, _worldLoadStarted);
+
+      if (vm.stage === 'ship-auto') {
+        // A scenario curated (or authored) down to exactly one playable hull
+        // resolves straight to it — no picker click needed (issue #917).
+        arbiterSelectShip(vm.templatePath);
+        return;
+      }
+
+      if (vm.stage === 'scenario-empty') {
+        if (label) label.textContent = t(vm.labelId);
         clearScenarioEntries(worldList);
-        if (_scenarioCatalog.length === 0) {
-          const empty = document.createElement('div');
-          empty.id = 'scenario-loading';
-          empty.textContent = t('server.no_scenarios');
-          appendScenarioEntry(worldList, empty);
-          return;
-        }
-        _scenarioCatalog.forEach(function (sc) {
+        const empty = document.createElement('div');
+        empty.id = 'scenario-loading';
+        empty.textContent = t('server.no_scenarios');
+        appendScenarioEntry(worldList, empty);
+        return;
+      }
+
+      if (vm.stage === 'scenario-list') {
+        // Scenario stage — one button per catalog scenario.
+        if (label) label.textContent = t(vm.labelId);
+        clearScenarioEntries(worldList);
+        vm.entries.forEach(function (sc) {
           const btn = document.createElement('button');
           btn.className = 'world-btn ' + SCENARIO_ENTRY_CLASS;
           btn.dataset.path = sc.world;
-          btn.dataset.scenarioId = sc.id;
-          btn.textContent = tData(sc.label) || sc.id;
+          btn.dataset.scenarioId = sc.scenarioId;
+          btn.textContent = tData(sc.label) || sc.scenarioId;
           btn.addEventListener('click', function () {
             // Round 1 and every subsequent round after Game Over route through
             // the same arbiter (issue #756): the second round re-enters
             // select_scenario → arbiter → driveWorldLoad, reusing the loaded
             // world without a page reload.
-            window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: sc.id }));
+            window.__sendAction(JSON.stringify({ action: 'select_scenario', scenario_id: sc.scenarioId }));
           });
           appendScenarioEntry(worldList, btn);
         });
-      } else if (_preSelection.template_path == null) {
+        return;
+      }
+
+      if (vm.stage === 'ship-picker') {
         // Ship stage — the locked scenario's offered ships via ph-ship-picker.
-        const entry = window.scenarioArbiter.findScenario(_scenarioCatalog, _preSelection.scenario_id);
-        const ships = (entry && entry.ships) || [];
-        // A scenario curated (or authored) down to exactly one playable hull
-        // resolves straight to it — no picker click needed (issue #917). This
-        // is count-based, not keyed on any hull name: it fires for any
-        // single-ship catalog entry, curated or not.
-        if (ships.length === 1) {
-          arbiterSelectShip(ships[0].template_path);
-          return;
-        }
-        if (label) label.textContent = t('server.select_ship');
+        if (label) label.textContent = t(vm.labelId);
         clearScenarioEntries(worldList);
         import('./gui/components/ph-ship-picker.js').then(function () {
           if (_preSelection.template_path != null) return; // won meanwhile
           const picker = document.createElement('ph-ship-picker');
           appendScenarioEntry(worldList, picker);
-          picker.state = { ships: ships };
+          picker.state = { ships: vm.ships };
           picker.addEventListener('ship-selected', function (e) {
             window.__sendAction(JSON.stringify({ action: 'select_player_ship', template_path: e.detail.template_path }));
           });
         });
-      } else {
-        // Both locked — world load is starting. Only this render's own entries
-        // go; #mod-pack-upload stays put for the next round's scenario stage
-        // (Return to Lobby re-shows the panel without rebuilding it).
-        clearScenarioEntries(worldList);
+        return;
       }
+
+      // vm.stage === 'locked' — either _worldLoadStarted, or both scenario and
+      // ship are already locked and world load is about to start. Only this
+      // render's own entries go; #mod-pack-upload stays put for the next
+      // round's scenario stage (Return to Lobby re-shows the panel without
+      // rebuilding it).
+      clearScenarioEntries(worldList);
     }
 
     // Which scenario manifest to load: the base catalog (assets/scenarios.toml)
@@ -2715,38 +2816,42 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       conflictsEl.textContent = '';
       let report;
       try { report = wasmBindings.wasm_active_pack_manifest(); } catch (e) { return; }
-      const packs = (report && report.packs) ? Array.from(report.packs) : [];
-      if (packs.length === 0) return;
+
+      // Pure row/conflict computation lives in gui/host-scenarios.js (issue
+      // #1230); everything below is DOM writes plus the reorderModPack/
+      // removeModPack click wiring.
+      const vm = window.hostScenarios.modPackListView(report);
+      if (!vm.visible) return;
 
       const heading = document.createElement('div');
       heading.className = 'mod-pack-heading';
       heading.textContent = t('server.mod_pack_applied_packs');
       listEl.appendChild(heading);
 
-      packs.forEach(function (pack, idx) {
+      vm.packs.forEach(function (pack, idx) {
         const row = document.createElement('div');
         row.className = 'mod-pack-row';
 
         const label = document.createElement('span');
         label.className = 'mod-pack-name';
         label.textContent = t('server.mod_pack_row', {
-          name: pack.name || pack.id || '',
-          version: pack.version || '',
-          count: (pack.file_count != null ? pack.file_count : 0),
+          name: pack.name,
+          version: pack.version,
+          count: pack.fileCount,
         });
         row.appendChild(label);
 
         const up = document.createElement('button');
         up.className = 'mod-pack-ctl';
         up.textContent = t('server.mod_pack_move_up');
-        up.disabled = idx === 0;
+        up.disabled = !pack.canMoveUp;
         up.addEventListener('click', function () { reorderModPack(idx, idx - 1); });
         row.appendChild(up);
 
         const down = document.createElement('button');
         down.className = 'mod-pack-ctl';
         down.textContent = t('server.mod_pack_move_down');
-        down.disabled = idx === packs.length - 1;
+        down.disabled = !pack.canMoveDown;
         down.addEventListener('click', function () { reorderModPack(idx, idx + 1); });
         row.appendChild(down);
 
@@ -2759,20 +2864,18 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         listEl.appendChild(row);
       });
 
-      const conflicts = (report && report.conflicts) ? Array.from(report.conflicts) : [];
-      if (conflicts.length > 0) {
+      if (vm.conflicts.length > 0) {
         const ch = document.createElement('div');
         ch.className = 'mod-pack-heading';
         ch.textContent = t('server.mod_pack_conflicts');
         conflictsEl.appendChild(ch);
-        conflicts.forEach(function (c) {
+        vm.conflicts.forEach(function (c) {
           const line = document.createElement('div');
           line.className = 'mod-pack-conflict';
-          const losers = c.losers ? Array.from(c.losers).join(', ') : '';
           line.textContent = t('server.mod_pack_conflict_entry', {
             path: c.path,
             winner: c.winner,
-            losers: losers,
+            losers: c.losers.join(', '),
           });
           conflictsEl.appendChild(line);
         });
@@ -2994,282 +3097,22 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 
     // ── Outbound routing ───────────────────────────────────────────────────
 
-    // ── Data-driven audio ──────────────────────────────────────────────────
-    //
-    // Rust owns the config (ship [audio] + world [audio.red_alert]), the
-    // forcefield envelope, and the blaster's listener-relative geometry. This
-    // side only plays sounds. Nothing here hardcodes a filename or a volume.
-    //
-    // Looping beds and the siren use <audio> elements. The blaster uses Web
-    // Audio instead: one-shots overlap, and <audio> cannot pan.
-
-    let _audioCfg = null;      // payload from the "audio_config" host channel
-    let _audioUnlocked = false; // user gesture / game start has happened
-    let _audioStarted = false;
-    let _els = {};             // key -> HTMLAudioElement
-    let _actx = null;          // AudioContext (blaster only)
-    let _blasterBuf = null;    // decoded AudioBuffer
-    let _prevRedAlert = false;
-    let _prevPhaser = false;
-    let _menuMusic = null;
-
-    // HTMLMediaElement.volume throws IndexSizeError outside 0..1.
-    function clampVol(v) {
-      const n = Number(v);
-      if (!isFinite(n)) return 0;
-      return Math.min(1, Math.max(0, n));
-    }
-
-    // ── Master volume (issue #939) ─────────────────────────────────────────
-    //
-    // A SCALE FACTOR over the authored volumes, never a replacement for them.
-    // Every per-sound level on this page is designed data — ship [audio],
-    // world [audio.red_alert], the blaster spec, the engine's idle/full-thrust
-    // coefficients — and the host's slider must not overwrite the mix the
-    // designer authored, only turn the whole thing up or down. So each channel
-    // keeps its authored level in `_authoredVol` and what reaches the element
-    // is always `authored × master`. 1 is the identity (unattenuated), which
-    // is why it is the default rather than a tunable.
-    const MASTER_VOLUME_KEY = 'phoenix-server-master-volume';
-    const MASTER_VOLUME_DEFAULT = 1;
-    // The menu bed predates the audio config and has no TOML entry to read;
-    // named here so it composes with master like every other channel.
-    const MENU_MUSIC_VOLUME = 0.5;
-    const _authoredVol = {};   // channel key -> authored (pre-master) volume
-    let _masterVolume = MASTER_VOLUME_DEFAULT;
-    try {
-      const stored = window.localStorage.getItem(MASTER_VOLUME_KEY);
-      if (stored !== null && isFinite(Number(stored))) _masterVolume = clampVol(stored);
-    } catch (_) { /* private mode / storage disabled — stay at the default */ }
-
-    function applyMaster(authored) {
-      return clampVol(clampVol(authored) * _masterVolume);
-    }
-
-    /** Set an element's live volume from an authored level, remembering it. */
-    function setChannelVolume(key, authored) {
-      _authoredVol[key] = clampVol(authored);
-      if (_els[key]) _els[key].volume = applyMaster(authored);
-    }
-
-    window.__getMasterVolume = function() { return _masterVolume; };
-
-    // Live: re-derives every channel from its authored level, so dragging the
-    // slider is audible immediately rather than at the next config push.
-    window.__setMasterVolume = function(v) {
-      _masterVolume = clampVol(v);
-      try { window.localStorage.setItem(MASTER_VOLUME_KEY, String(_masterVolume)); }
-      catch (_) { /* not worth failing the drag over */ }
-      Object.keys(_els).forEach(function(k) {
-        if (k in _authoredVol) _els[k].volume = applyMaster(_authoredVol[k]);
-      });
-      if (_menuMusic) _menuMusic.volume = applyMaster(MENU_MUSIC_VOLUME);
-    };
-
-    function startMenuMusic() {
-      if (_menuMusic) return;
-      _menuMusic = new Audio('assets/sounds/exploration.mp3');
-      _menuMusic.loop = true;
-      _menuMusic.volume = applyMaster(MENU_MUSIC_VOLUME);
-      _menuMusic.play().catch(function() {});
-    }
-
-    function stopMenuMusic() {
-      if (_menuMusic) {
-        _menuMusic.pause();
-        _menuMusic.currentTime = 0;
-        _menuMusic = null;
-      }
-    }
-
-    function mkLoop(key, spec, volume) {
-      if (!spec || !spec.file) return;
-      const el = new Audio(spec.file);
-      el.loop = true;
-      el.preload = 'auto';
-      _els[key] = el;
-      setChannelVolume(key, volume);
-    }
-
-    window.__audioConfig = function(json) {
-      let c;
-      try { c = JSON.parse(json); }
-      catch (e) { console.warn('[Phoenix] bad audio config', e); return; }
-      _audioCfg = c;
-
-      mkLoop('ambient', c.ambient, c.ambient && c.ambient.volume);
-      // Engine starts at idle and is ridden by thrust in __updateHud.
-      mkLoop('engine', c.engine, c.engine && c.engine.idle_volume);
-      // Phaser and forcefield start silent: the phaser is gated on the firing
-      // flag, and the forcefield's level is pushed from Rust each frame.
-      mkLoop('phaser', c.phaser_loop, 0);
-      mkLoop('forcefield', c.forcefield, 0);
-
-      if (c.red_alert && c.red_alert.music_file) {
-        const m = new Audio(c.red_alert.music_file);
-        m.loop = true;
-        m.preload = 'auto';
-        _els.music = m;
-        setChannelVolume('music', c.red_alert.music_volume);
-      }
-      if (c.red_alert && c.red_alert.siren_file) {
-        const s = new Audio(c.red_alert.siren_file);
-        s.preload = 'auto';
-        _els.siren = s;
-        setChannelVolume('siren', c.red_alert.siren_volume);
-      }
-
-      initBlasterAudio(c.blaster);
-      maybeStartAudio();
-    };
-
-    function initBlasterAudio(spec) {
-      if (!spec || !spec.file) return;
-      try {
-        const Ctor = window.AudioContext || window.webkitAudioContext;
-        if (!Ctor) return;
-        _actx = _actx || new Ctor();
-      } catch (e) {
-        console.warn('[Phoenix] no AudioContext; blaster audio disabled', e);
-        return;
-      }
-      // Must not reject: a bubbling rejection fails the smoke test's
-      // pageerror assertion. Headless Chromium may refuse to decode at all,
-      // and "no blaster SFX" is an acceptable degradation.
-      fetch(spec.file)
-        .then(function(r) { return r.arrayBuffer(); })
-        .then(function(b) { return _actx.decodeAudioData(b); })
-        .then(function(buf) { _blasterBuf = buf; })
-        .catch(function(e) { console.warn('[Phoenix] blaster decode failed', e); });
-    }
-
-    // Called on the Loading → InProgress edge, which is also the autoplay
-    // unlock. The config push and this edge can land in the same frame, and
-    // although a single flush (`flush_host_channels`, issue #818) now walks
-    // the host channels in a fixed order, cross-channel ordering remains an
-    // implementation detail JS must not rely on — whichever arrives second
-    // starts the audio.
-    function startGameAudio() {
-      _audioUnlocked = true;
-      maybeStartAudio();
-    }
-
-    function maybeStartAudio() {
-      if (_audioStarted || !_audioUnlocked || !_audioCfg) return;
-      _audioStarted = true;
-      ['ambient', 'engine', 'phaser', 'forcefield'].forEach(function(k) {
-        if (_els[k]) _els[k].play().catch(function() {});
-      });
-      if (_actx && _actx.state === 'suspended') {
-        _actx.resume().catch(function() {});
-      }
-    }
-
-    // One-shot positional cue. Coordinates are already listener-relative, so
-    // the Web Audio listener stays at the origin facing -Z.
-    window.__audioCue = function(json) {
-      let c;
-      try { c = JSON.parse(json); } catch (e) { return; }
-      if (c.kind !== 'blaster' || !_blasterBuf || !_actx) return;
-      const spec = _audioCfg && _audioCfg.blaster;
-      if (!spec) return;
-      try {
-        const src = _actx.createBufferSource();
-        src.buffer = _blasterBuf;
-        const pan = _actx.createPanner();
-        pan.panningModel  = spec.panning_model;
-        pan.distanceModel = spec.distance_model;
-        pan.refDistance   = spec.ref_distance;
-        pan.maxDistance   = spec.max_distance;
-        pan.rolloffFactor = spec.rolloff_factor;
-        if (pan.positionX) {
-          pan.positionX.value = c.x;
-          pan.positionY.value = c.y;
-          pan.positionZ.value = c.z;
-        } else {
-          pan.setPosition(c.x, c.y, c.z); // older Safari
-        }
-        const g = _actx.createGain();
-        // Web Audio, so this one is scaled at the cue rather than carried on
-        // an element — same authored × master composition.
-        g.gain.value = applyMaster(spec.volume);
-        src.connect(pan).connect(g).connect(_actx.destination);
-        src.start();
-      } catch (e) {
-        console.warn('[Phoenix] blaster cue failed', e);
-      }
-    };
-
-    // Forcefield SFX level, computed and clamped in Rust. Rust's number is the
-    // authored level; master scales it like every other channel.
-    window.__audioLevel = function(level) {
-      if (_els.forcefield) setChannelVolume('forcefield', level);
-    };
-
-    // Smoke-test hook — lets Playwright assert on audio state without
-    // needing to hear anything.
-    //
-    // The elements are deliberately exposed here rather than looked up via
-    // document.querySelectorAll('audio'): `new Audio()` builds *detached*
-    // elements that never enter the DOM, so a querySelectorAll sweep finds
-    // nothing and any assertion over it passes vacuously.
-    window.__audioDebug = function() {
-      const vols = {};
-      Object.keys(_els).forEach(function(k) { vols[k] = _els[k].volume; });
-      const paused = {};
-      Object.keys(_els).forEach(function(k) { paused[k] = _els[k].paused; });
-      return {
-        cfg: _audioCfg,
-        els: Object.keys(_els),
-        started: _audioStarted,
-        volumes: vols,
-        // Authored (pre-master) levels and the scale factor over them, so a
-        // test can assert the composition rather than just the product.
-        authoredVolumes: Object.assign({}, _authoredVol),
-        master: _masterVolume,
-        paused: paused,
-        musicPlaying: !!(_els.music && !_els.music.paused),
-        phaserPlaying: !!(_els.phaser && !_els.phaser.paused),
-        blasterReady: !!_blasterBuf
-      };
-    };
+    // ── Data-driven audio (issue #1228) ─────────────────────────────────────
+    // clampVol/applyMaster/setChannelVolume/mkLoop/initBlasterAudio, the
+    // master-volume localStorage key, and window.__audioConfig/__audioCue/
+    // __audioLevel/__audioDebug/__setMasterVolume/__getMasterVolume/
+    // startGameAudio/startMenuMusic/stopMenuMusic/applyHudAudio moved to
+    // gui/host-audio.js. The "Host audio bridge" latch block near the top of
+    // this script queues startGameAudio/startMenuMusic/stopMenuMusic/
+    // applyHudAudio calls until the host-audio island mounts; that same
+    // island assigns the window.__audioConfig/etc. globals directly.
 
     function routeOutbound(target, payload, deliveryClass) {
-      const useSnapshot = deliveryClass === 'snapshot';
-      const primary = useSnapshot ? tokenSnapshotConns : tokenConns;
-      const fallback = useSnapshot ? tokenConns : null;
-      if (target === 'all') {
-        const sent = new Set();
-        for (const [t, c] of primary) {
-          if (c.open || c.readyState === 'open') { c.send(payload); sent.add(t); }
-        }
-        // Fallback: send via reliable for tokens missing a snapshot channel
-        if (useSnapshot && fallback) {
-          for (const [t, c] of fallback) {
-            if (!sent.has(t) && (c.open || c.readyState === 'open')) c.send(payload);
-          }
-        }
-      } else if (target.startsWith('token:')) {
-        const t = target.slice(6);
-        const c = primary.get(t);
-        if (c && (c.open || c.readyState === 'open')) { c.send(payload); return; }
-        // Fallback to reliable
-        if (useSnapshot && fallback) {
-          const fc = fallback.get(t);
-          if (fc && (fc.open || fc.readyState === 'open')) fc.send(payload);
-        }
-      } else if (target.startsWith('except:')) {
-        const exc = target.slice(7);
-        const sent = new Set();
-        for (const [t, c] of primary) {
-          if (t !== exc && (c.open || c.readyState === 'open')) { c.send(payload); sent.add(t); }
-        }
-        if (useSnapshot && fallback) {
-          for (const [t, c] of fallback) {
-            if (!sent.has(t) && t !== exc && (c.open || c.readyState === 'open')) c.send(payload);
-          }
-        }
-      }
+      // Pure target ⇒ connection-list resolution lives in
+      // gui/host-peer-routing.js (issue #1230); this is now purely the
+      // `.send(payload)` glue over the live tokenConns/tokenSnapshotConns Maps.
+      const conns = window.hostPeerRouting.outboundTargets(target, deliveryClass, { tokenConns, tokenSnapshotConns });
+      for (const c of conns) c.send(payload);
     }
 
 // ── Config Preload ──────────────────────────────────────────────────────
@@ -3518,74 +3361,22 @@ function finishInit() {
   window.wasm_force_start = wasmBindings.wasm_force_start;
   window.set_host_channel_callback = wasmBindings.set_host_channel_callback;
 
-  // ── Host Channel dispatcher (issue #818) ─────────────────────────────────
-  // One flush system in Rust (`flush_host_channels`) drains every host-page
-  // channel and calls `__hostChannel(name, payload)`. The handlers table
-  // routes each named channel to its existing handler function. Adding a
-  // channel = one Rust table row + one entry here.
+  // ── Host Channel dispatcher (issue #1225) ────────────────────────────────
+  // The handler table, the localisation boundary (issue #949) and the
+  // dispatcher itself moved to gui/host-channel.js, where the module island
+  // near the top of <head> builds the real dispatcher and installs it
+  // through the #1224 latch (window.__hostChannelReady).
   //
-  // Payload shapes: JSON string for hud/lobby/chatter/audio_config/audio_cue;
-  // a bare number for audio_level; a two-element [x, y] array for shake.
-  //
-  // JS must not assume any cross-channel ordering: even though a single flush
-  // now walks the channels in a fixed order, that order is an implementation
-  // detail — e.g. the audio config push and the Loading → InProgress edge may
-  // still land in either order within a frame (see startGameAudio).
-  var _hostChannelHandlers = {
-    hud:          function(p) { window.__updateHud(p); },
-    lobby:        function(p) { window.__updateLobby(p); },
-    chatter:      function(p) { window.__updateChatter(p); },
-    audio_config: function(p) { window.__audioConfig(p); },
-    audio_cue:    function(p) { window.__audioCue(p); },
-    audio_level:  function(p) { window.__audioLevel(p); },
-    shake:        function(p) { window.__applyShake(p[0], p[1]); }
-  };
-  // Every host-channel payload is built from authored DATA, so — exactly like a
-  // peer message — it can carry string ids: a world's `[global] title` on the
-  // lobby channel, a `game_over` trigger's `message` on the hud channel. A
-  // phone crosses localiseTree() once, in gui/connection-manager.js, at the
-  // point a peer message is decoded. This dispatcher is the host's equivalent
-  // boundary — the single place every channel payload enters the page — so the
-  // ids are resolved HERE rather than at each render site. Fixing it per render
-  // site is what left `world.combat_test.global.title` on #lobby-title after
-  // the scenario buttons were fixed (issue #949): two call sites found, and no
-  // reason to think a third would not appear.
-  //
-  // Same rule as localiseTree: substitute only what the table actually holds.
-  // Machine tokens (`phase`, station-rating names, the audio cue `kind`),
-  // player-typed names and prose a mod pack authored literally all pass through
-  // untouched — every id in strings.csv is dotted, so none of them can collide.
-  //
-  // Before the strings module has evaluated there is nothing to substitute
-  // WITH, so the payload passes through unchanged, exactly as t() does on this
-  // page.
-  function localiseHostPayload(payload) {
-    var s = window.phStrings;
-    if (!s || typeof s.localiseTree !== 'function') return payload;
-    // Channels whose payload is a JSON string (hud/lobby/chatter/audio_config/
-    // audio_cue) are resolved inside the JSON and re-encoded, because each
-    // handler owns its own parse. The numeric taps (audio_level's bare number,
-    // shake's [x, y]) carry no text but still cross the same call, so the rule
-    // holds for every channel without a per-channel list to keep in step.
-    if (typeof payload !== 'string') return s.localiseTree(payload);
-    try {
-      return JSON.stringify(s.localiseTree(JSON.parse(payload)));
-    } catch (e) {
-      // Not JSON: hand the handler exactly what Rust sent and let it report.
-      return payload;
-    }
-  }
-
-  window.__hostChannel = function(name, payload) {
-    var handler = _hostChannelHandlers[name];
-    if (handler) {
-      handler(localiseHostPayload(payload));
-    } else {
-      console.warn('[Phoenix] unhandled host channel:', name);
-    }
-  };
+  // This registration only needs to hand Rust a STABLE function — not
+  // whichever value window.__hostChannel happens to hold right now. That
+  // module island and this WASM-ready callback race independently, so
+  // window.__hostChannel could still be the #1224 queueing stub the moment
+  // this line runs. A trampoline that re-reads window.__hostChannel on every
+  // call, rather than capturing today's value, closes that race for good:
+  // Rust always reaches the CURRENT window.__hostChannel — stub or real
+  // dispatcher — with no ordering risk either way.
   if (typeof set_host_channel_callback === 'function') {
-    set_host_channel_callback(window.__hostChannel);
+    set_host_channel_callback(function(name, payload) { window.__hostChannel(name, payload); });
   }
 
   // ── HTML console action relay (issue #428) ───────────────────────────────

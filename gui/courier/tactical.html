@@ -40,23 +40,12 @@
     import '../components/ph-boost-btn.js';
     import '../components/ph-station-damage.js';
     import { initConsole } from '../console-core.js';
-    import { t } from '../strings.js';
-    function system(s, ...ids) { for (const id of ids) if (s.systems && s.systems[id]) return s.systems[id]; return {}; }
-    // s is a SystemStationConsolePayload — see the @typedef in gui/console-state.js.
-    initConsole({ name: 'tactical', render(s) {
-      const weapons = system(s, 'tactical-radar', 'blaster-fore');
-      const sensors = system(s, 'sensors', 'sensor-radar');
-      const helm = system(s, 'helm-thrust', 'helm-joystick', 'helm-steering');
-      document.getElementById('tactical-radar').state = { blips: weapons.blips || [], x: weapons.ship_x || 0, z: weapons.ship_z || 0, speed: weapons.ship_speed || 0, ship_heading: weapons.ship_heading || 0, phaser_arcs: weapons.phaser_arcs || [], torpedo_arcs: weapons.torpedo_arcs || [], selected_target_uuid: weapons.target_uuid || null };
-      document.getElementById('blasters').state = { banks: weapons.blasters || [] };
-      document.getElementById('sensor-radar').state = sensors;
-      document.getElementById('sensor-panel').state = sensors;
-      document.getElementById('helm').state = { auto: !!helm.helm_auto };
-      document.getElementById('lateral').state = { auto: !!helm.lateral_auto };
-      document.getElementById('impulse').state = { state: helm.impulse_charge_progress > 0 ? 'charging' : 'ready', charge_pct: (helm.impulse_charge_progress || 0) * 100, auto: !!helm.helm_auto };
-      document.getElementById('boost').state = { available: !!helm.boost_enabled, active: !!helm.boost_active, recharge_pct: helm.boost_battery != null ? helm.boost_battery * 100 : 100, auto: !!helm.helm_auto };
-      document.getElementById('damage').state = s.own_hull || null;
-    }});
+    // The render lives in gui/courier/tactical.console.js (issue #1234): the
+    // shared Tactical renderer + this hull's variant (sensors + helm tail). s is
+    // a system-id-keyed SystemStationConsolePayload. The vitest suite imports the
+    // same renderStation.
+    import { renderStation } from './tactical.console.js';
+    initConsole({ name: 'tactical', render: renderStation });
   </script>
 </body>
 </html>

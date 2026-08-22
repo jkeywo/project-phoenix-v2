@@ -1,15 +1,7 @@
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
-export class PhDamageBar extends HTMLElement {
-  #state = null;
-
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+import { PhElement, phDefine } from './ph-element.js';
+export class PhDamageBar extends PhElement {
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -31,18 +23,10 @@ export class PhDamageBar extends HTMLElement {
     <span class="label" id="bar-label">— / —</span>
   </div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const d = this.#state || {};
+  render(state) {
+    const d = state || {};
     const pct = d.pct != null ? d.pct : 1;
     const totalCurrent = d.totalCurrent != null ? d.totalCurrent : null;
     const totalMax = d.totalMax != null ? d.totalMax : null;
@@ -85,6 +69,4 @@ export class PhDamageBar extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-damage-bar')) {
-  customElements.define('ph-damage-bar', PhDamageBar);
-}
+phDefine('ph-damage-bar', PhDamageBar);

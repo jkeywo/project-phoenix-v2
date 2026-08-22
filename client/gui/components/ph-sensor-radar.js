@@ -5,22 +5,14 @@ import './ph-radar.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
 import {
   SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
 } from './ph-scope-chrome.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhSensorRadar extends HTMLElement {
-  #innerRadar = null;
-
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = [
+export class PhSensorRadar extends PhElement {
+  template() {
+    return [
       '<style>',
       ':host { display: block; width: 100%; height: 100%; position: relative; }',
       'ph-radar { display: block; width: 100%; height: 100%; }',
@@ -46,14 +38,18 @@ export class PhSensorRadar extends HTMLElement {
       scopeChromeMarkup(''),
       '<button class="on-screen-btn" id="on-screen-btn" type="button">' + t('console.common.on_screen') + '</button>',
     ].join('\n');
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    this.#innerRadar = this.shadowRoot.getElementById('inner-radar');
+  }
+
+  onTemplate() {
+    // A PLAIN property, not a #field (see ph-element.js's field-init note):
+    // onTemplate runs before this subclass's field-init phase.
+    this.innerRadar = this.shadowRoot.getElementById('inner-radar');
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
-    if (this.#innerRadar) {
-      this.#innerRadar.sendAction = (_action, payload) => {
+    super.connectedCallback();
+    if (this.innerRadar) {
+      this.innerRadar.sendAction = (_action, payload) => {
         this.sendAction?.('set_sensors_target', { uuid: payload.uuid });
       };
     }
@@ -65,8 +61,8 @@ export class PhSensorRadar extends HTMLElement {
   }
 
   set state(val) {
-    if (this.#innerRadar) {
-      this.#innerRadar.state = {
+    if (this.innerRadar) {
+      this.innerRadar.state = {
         blips: val?.blips || [],
         range: val?.scan_range || 0,
         ship_heading: val?.ship_heading || 0,
@@ -100,6 +96,4 @@ export class PhSensorRadar extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-sensor-radar')) {
-  customElements.define('ph-sensor-radar', PhSensorRadar);
-}
+phDefine('ph-sensor-radar', PhSensorRadar);

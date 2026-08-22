@@ -4,23 +4,16 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
 
-export class PhObjectiveList extends HTMLElement {
-  #state = null;
+export class PhObjectiveList extends PhElement {
   #rowCache = new Map();
   #emptyEl = null;
   #roving = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: block; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -42,11 +35,10 @@ export class PhObjectiveList extends HTMLElement {
   </style>
   <div class="list" id="list"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Role + accessible name + keyboard operation (issue #1178). The objectives
     // were clickable <div>s; the list is now a listbox — one Tab stop, arrows
     // roving over the option rows — with the boosted objective marked selected.
@@ -70,15 +62,8 @@ export class PhObjectiveList extends HTMLElement {
     syncRovingTabindex(this.#rovingItems());
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const raw = Array.isArray(s.objectives) ? s.objectives : [];
     const list = this.shadowRoot.getElementById('list');
 
@@ -126,6 +111,4 @@ export class PhObjectiveList extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-objective-list')) {
-  customElements.define('ph-objective-list', PhObjectiveList);
-}
+phDefine('ph-objective-list', PhObjectiveList);

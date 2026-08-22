@@ -1,4 +1,3 @@
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
 // strings-boot first: its top-level await delays this module's evaluation —
 // and therefore this element's registration and upgrade — until the string
 // table is loaded, so the constructor's template t() calls never see an
@@ -7,17 +6,14 @@ import '../strings-boot.js';
 import { t } from '../strings.js';
 import { weaponReadinessView } from '../weapon-readiness.js';
 import { installRovingTabindex, syncRovingTabindex } from '../roving-tabindex.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhBlastersControls extends HTMLElement {
-  #state = null;
+export class PhBlastersControls extends PhElement {
   #emptyEl = null;
   #roving = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -43,12 +39,10 @@ export class PhBlastersControls extends HTMLElement {
   <div class="header"><span>${t('component.blasters.title')}</span></div>
   <div id="banks"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    phAdoptConsoleStyles(this.shadowRoot);
   }
 
   connectedCallback() {
-    this.sendAction ??= window.sendAction;
+    super.connectedCallback();
     // Role + accessible name (issue #1170): a toolbar of charge/fire buttons,
     // named by the same string its visible heading shows.
     this.setAttribute('role', 'toolbar');
@@ -72,15 +66,8 @@ export class PhBlastersControls extends HTMLElement {
     syncRovingTabindex(this.#rovingItems());
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const banks = Array.isArray(s.banks) ? s.banks : [];
     const container = this.shadowRoot.getElementById('banks');
 
@@ -316,6 +303,4 @@ export class PhBlastersControls extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-blasters-controls')) {
-  customElements.define('ph-blasters-controls', PhBlastersControls);
-}
+phDefine('ph-blasters-controls', PhBlastersControls);

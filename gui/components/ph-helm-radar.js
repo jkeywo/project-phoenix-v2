@@ -5,24 +5,18 @@ import './ph-radar.js';
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles, phColor } from './ph-console-styles.js';
+import { phColor } from './ph-console-styles.js';
 import {
   SCOPE_CHROME_CSS, scopeChromeMarkup, updateScopeChrome,
   applyArcCompositeCap, cappedArcAlpha,
 } from './ph-scope-chrome.js';
+import { PhElement, phDefine } from './ph-element.js';
 
-export class PhHelmRadar extends HTMLElement {
+export class PhHelmRadar extends PhElement {
   #state = null;
-  #innerRadar = null;
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = [
+  template() {
+    return [
       '<style>',
       ':host { display: block; position: relative; }',
       '.container { position: relative; width: 100%; height: 100%; }',
@@ -65,8 +59,12 @@ export class PhHelmRadar extends HTMLElement {
       '  <button class="on-screen-btn" id="on-screen-btn" type="button">' + t('console.common.on_screen') + '</button>',
       '</div>',
     ].join('\n');
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
-    this.#innerRadar = this.shadowRoot.getElementById('inner-radar');
+  }
+
+  onTemplate() {
+    // A PLAIN property, not a #field (see ph-element.js's field-init note):
+    // onTemplate runs before this subclass's field-init phase.
+    this.innerRadar = this.shadowRoot.getElementById('inner-radar');
     // Every hostile on the scope contributes its own banks to this one group,
     // so it stacks harder than the tactical scope's does — a three-ship
     // engagement can put a dozen wedges over the same pixel.
@@ -74,11 +72,7 @@ export class PhHelmRadar extends HTMLElement {
   }
 
   connectedCallback() {
-    if (!this.sendAction) {
-      if (typeof window !== 'undefined' && typeof window.sendAction === 'function') {
-        this.sendAction = window.sendAction;
-      }
-    }
+    super.connectedCallback();
     // Name + role for the scope (issue #1176). Unlike the tactical radar this
     // scope is a passive contact DISPLAY — it locks no target, so it takes no
     // tabindex and no arrow cursor (an operationless Tab stop would be a wrong
@@ -105,8 +99,8 @@ export class PhHelmRadar extends HTMLElement {
   #render() {
     const s = this.#state || {};
 
-    if (this.#innerRadar) {
-      this.#innerRadar.state = {
+    if (this.innerRadar) {
+      this.innerRadar.state = {
         blips: s.blips || [],
         range: s.range,
         ship_heading: s.ship_heading,
@@ -303,6 +297,4 @@ export class PhHelmRadar extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-helm-radar')) {
-  customElements.define('ph-helm-radar', PhHelmRadar);
-}
+phDefine('ph-helm-radar', PhHelmRadar);

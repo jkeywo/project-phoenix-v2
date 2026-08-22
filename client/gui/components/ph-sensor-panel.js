@@ -4,7 +4,7 @@
 // empty table. No-op in Node tests (setup-strings.js loads the table there).
 import '../strings-boot.js';
 import { t } from '../strings.js';
-import { phAdoptConsoleStyles } from './ph-console-styles.js';
+import { PhElement, phDefine } from './ph-element.js';
 
 /**
  * `hide-shield-rows` (boolean attribute): suppresses the SHIELD and SHIELD
@@ -17,8 +17,7 @@ import { phAdoptConsoleStyles } from './ph-console-styles.js';
  * `<ph-sensor-panel hide-shield-rows>`; every other hull leaves it unset and
  * keeps the rows.
  */
-export class PhSensorPanel extends HTMLElement {
-  #state = null;
+export class PhSensorPanel extends PhElement {
   #scanRowCache = new Map();
   #noTargetEl = null;
   #targetCardEl = null;
@@ -30,17 +29,11 @@ export class PhSensorPanel extends HTMLElement {
   static get observedAttributes() { return ['hide-shield-rows']; }
 
   attributeChangedCallback(name) {
-    if (name === 'hide-shield-rows') this.#render();
+    if (name === 'hide-shield-rows') this.render(this.state);
   }
 
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    // Every component adopts the shared control family (module 1 of PRD
-    // #1023): custom properties cross a shadow boundary, class rules do not.
-    phAdoptConsoleStyles(this.shadowRoot);
-    const tpl = document.createElement('template');
-    tpl.innerHTML = `
+  template() {
+    return `
   <style>
     :host { display: flex; flex-direction: column; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; color: var(--ink); }
     :host * { box-sizing: border-box; }
@@ -87,18 +80,10 @@ export class PhSensorPanel extends HTMLElement {
   </div>
   <div class="scan-data" id="scan-data"></div>
 `;
-    this.shadowRoot.appendChild(tpl.content.cloneNode(true));
   }
 
-  set state(val) {
-    this.#state = val;
-    this.#render();
-  }
-
-  get state() { return this.#state; }
-
-  #render() {
-    const s = this.#state || {};
+  render(state) {
+    const s = state || {};
     const root = this.shadowRoot;
 
     root.getElementById('range-val').textContent = s.scan_range || 0;
@@ -234,6 +219,4 @@ export class PhSensorPanel extends HTMLElement {
   }
 }
 
-if (typeof window !== 'undefined' && !customElements.get('ph-sensor-panel')) {
-  customElements.define('ph-sensor-panel', PhSensorPanel);
-}
+phDefine('ph-sensor-panel', PhSensorPanel);

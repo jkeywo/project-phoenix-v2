@@ -846,6 +846,75 @@ struct BlipIntent {
     highlighted: bool,
 }
 
+/// The three existing-node queries `sync_radar_blip_nodes` reconciles against,
+/// bundled as one `SystemParam` (issue #1185): the already-spawned blip nodes,
+/// region nodes, and label nodes. Their `Without<..>` filters keep the three
+/// mutable `Node` borrows disjoint.
+///
+/// A signature grouping only — every query keeps its exact shape and filter set,
+/// so the access set is byte-for-byte unchanged; the system destructures it back
+/// to its `existing_blip_nodes` / `existing_region_nodes` / `existing_label_nodes`
+/// locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ExistingRadarNodes<'w, 's> {
+    blips: Query<
+        'w,
+        's,
+        (
+            &'static mut Node,
+            &'static MaterialNode<RadarBlipMaterial>,
+            &'static mut Transform,
+            &'static RadarBlipNode,
+        ),
+        (
+            With<RadarBlipNode>,
+            Without<RadarRegionNode>,
+            Without<RadarLabelNode>,
+        ),
+    >,
+    regions: Query<
+        'w,
+        's,
+        (
+            &'static mut Node,
+            &'static mut BackgroundColor,
+            &'static mut BorderColor,
+            &'static RadarRegionNode,
+        ),
+        (
+            With<RadarRegionNode>,
+            Without<RadarBlipNode>,
+            Without<RadarLabelNode>,
+        ),
+    >,
+    labels: Query<
+        'w,
+        's,
+        (&'static mut Node, &'static RadarLabelNode),
+        (
+            With<RadarLabelNode>,
+            Without<RadarBlipNode>,
+            Without<RadarRegionNode>,
+        ),
+    >,
+}
+
+/// The rendering resources `sync_radar_blip_nodes` draws blips with, bundled as
+/// one `SystemParam` (issue #1185): the icon lookup, the asset server, the blip
+/// material store, and the fallback icon.
+///
+/// A signature grouping only — every field keeps its type and `Option` fallback,
+/// so the access set is byte-for-byte unchanged; the system destructures it back
+/// to its `icons` / `asset_server` / `blip_materials` / `fallback` locals at
+/// entry.
+#[derive(bevy::ecs::system::SystemParam)]
+struct RadarRenderAssets<'w> {
+    icons: ResMut<'w, RadarIconLookup>,
+    asset_server: Res<'w, AssetServer>,
+    blip_materials: ResMut<'w, Assets<RadarBlipMaterial>>,
+    fallback: Option<Res<'w, RadarBlipFallbackIcon>>,
+}
+
 /// Each frame: for every visible `GenericRadarWidget`, project all
 /// `OnRadar` + `RadarAppearance` entities passing the filter into child UI
 /// nodes (icons via `RadarIconLookup`). New blips spawn, existing ones
@@ -886,45 +955,26 @@ fn sync_radar_blip_nodes(
         Option<&BlipLabel>,
     )>,
     centers: Query<&RadarCenter>,
-    mut existing_blip_nodes: Query<
-        (
-            &mut Node,
-            &MaterialNode<RadarBlipMaterial>,
-            &mut Transform,
-            &RadarBlipNode,
-        ),
-        (
-            With<RadarBlipNode>,
-            Without<RadarRegionNode>,
-            Without<RadarLabelNode>,
-        ),
-    >,
-    mut existing_region_nodes: Query<
-        (
-            &mut Node,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &RadarRegionNode,
-        ),
-        (
-            With<RadarRegionNode>,
-            Without<RadarBlipNode>,
-            Without<RadarLabelNode>,
-        ),
-    >,
-    mut existing_label_nodes: Query<
-        (&mut Node, &RadarLabelNode),
-        (
-            With<RadarLabelNode>,
-            Without<RadarBlipNode>,
-            Without<RadarRegionNode>,
-        ),
-    >,
-    mut icons: ResMut<RadarIconLookup>,
-    asset_server: Res<AssetServer>,
-    mut blip_materials: ResMut<Assets<RadarBlipMaterial>>,
-    fallback: Option<Res<RadarBlipFallbackIcon>>,
+    // The three existing-node queries bundled as one `SystemParam` (issue #1185).
+    // See [`ExistingRadarNodes`].
+    existing: ExistingRadarNodes,
+    // The blip rendering resources bundled as one `SystemParam` (issue #1185).
+    // See [`RadarRenderAssets`].
+    render: RadarRenderAssets,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let ExistingRadarNodes {
+        blips: mut existing_blip_nodes,
+        regions: mut existing_region_nodes,
+        labels: mut existing_label_nodes,
+    } = existing;
+    let RadarRenderAssets {
+        mut icons,
+        asset_server,
+        mut blip_materials,
+        fallback,
+    } = render;
+
     // Cache the global RadarCenter once; only used for ship-centred widgets.
     let global_center = centers.iter().next();
 

@@ -7,7 +7,9 @@
 use crate::simmath;
 use bevy::prelude::*;
 
-use super::shared::{any_blaster_bank_operates_ai, live_entity_xz, system_is_registered};
+use super::shared::{
+    any_blaster_bank_operates_ai, live_entity_xz, system_is_registered, DirectFireGeometry,
+};
 use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS};
 use crate::core::messages::{GamePhase, ServerMessage, SystemBlackboard, SystemControlPayload};
 use crate::lobby::{Sessions, Target, WorldResource};
@@ -281,10 +283,17 @@ pub(crate) fn tick_blaster_auto_fire(
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    // The two live-position lookups bundled as one `SystemParam` (issue #1185);
+    // destructured back to `asteroid_q` / `entity_q` at entry so the body is
+    // unchanged and the access set identical.
+    geometry: DirectFireGeometry,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
+    let DirectFireGeometry {
+        asteroids: asteroid_q,
+        entities: entity_q,
+    } = geometry;
+
     crate::ptrace!(
         log,
         crate::logging::LogCat::Weapons,
@@ -666,10 +675,34 @@ pub(crate) fn tick_blaster_system(
 ///
 /// Hit detection uses live ECS Transform positions — the same approach as
 /// `build_torpedo_target_snapshot`.
+///
+/// The write-side outputs the blaster damage chokepoint drives, bundled as one
+/// `SystemParam` (issue #1185): the client outbox, the game-over phase/reason
+/// latch, the world snapshot it edits, the three destruction event writers, the
+/// balance telemetry sink, and the tracked-entity registry it forgets a kill
+/// from. Mirrors [`super::beam::BeamApplySinks`] but keeps `outbox` non-optional,
+/// exactly as this system's standalone parameter was. A signature grouping only:
+/// every field keeps its type and `Option` fallback, so the access set is
+/// byte-for-byte unchanged, and the system destructures it back to its original
+/// locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct BlasterHitSinks<'w> {
+    pub outbox: ResMut<'w, SimOutbox>,
+    pub next_state: Option<ResMut<'w, NextState<GamePhase>>>,
+    pub game_over_reason: Option<ResMut<'w, GameOverReason>>,
+    pub world: ResMut<'w, WorldResource>,
+    pub destroyed_events: MessageWriter<'w, crate::ai::server::AiEntityDestroyed>,
+    pub vfx_events: MessageWriter<'w, AsteroidDestroyedVfx>,
+    pub ship_vfx_events: MessageWriter<'w, ShipDestroyedVfx>,
+    pub balance_events: Option<ResMut<'w, Messages<crate::core::balance::BalanceEvent>>>,
+    pub tracked: Option<ResMut<'w, crate::server_app::TrackedEntities>>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_blaster_hits(
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    // The two live-position lookups bundled as one `SystemParam` (issue #1185);
+    // destructured back to `asteroid_q` / `entity_q` at entry.
+    geometry: DirectFireGeometry,
     mut hit_target_q: Query<(
         Entity,
         Option<&AsteroidUuid>,
@@ -691,25 +724,33 @@ pub(crate) fn handle_blaster_hits(
         ),
         With<crate::server_app::Ship>,
     >,
-    mut outbox: ResMut<SimOutbox>,
     mut commands: Commands,
-    mut next_state: Option<ResMut<NextState<GamePhase>>>,
-    mut game_over_reason: Option<ResMut<GameOverReason>>,
-    mut world: ResMut<WorldResource>,
-    mut destroyed_events: MessageWriter<crate::ai::server::AiEntityDestroyed>,
-    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
-    mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
     collider_q: Query<&crate::entities::spawner::ColliderSection>,
-    // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
-    // registered the message still pass Bevy's parameter validation.
-    mut balance_events: Option<ResMut<Messages<crate::core::balance::BalanceEvent>>>,
-    // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
-    // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
-    mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
+    // The write-side outputs (outbox, game-over latch, world, destruction event
+    // writers, balance sink, tracked registry) bundled as one `SystemParam`
+    // (issue #1185). See [`BlasterHitSinks`].
+    sinks: BlasterHitSinks,
     // Seeded RNG + log filter + God Mode (issue #900), bundled: separately
     // they put this system one over Bevy's 16-parameter ceiling.
     ambient: crate::server_app::SimRngAndLog,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let DirectFireGeometry {
+        asteroids: asteroid_q,
+        entities: entity_q,
+    } = geometry;
+    let BlasterHitSinks {
+        mut outbox,
+        mut next_state,
+        mut game_over_reason,
+        mut world,
+        mut destroyed_events,
+        mut vfx_events,
+        mut ship_vfx_events,
+        mut balance_events,
+        mut tracked,
+    } = sinks;
+
     let sim_rng = &ambient.rng;
     let log = &ambient.log;
     let god_mode = ambient.god_mode_active();

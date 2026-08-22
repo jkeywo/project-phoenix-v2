@@ -334,6 +334,24 @@ pub(crate) struct HelmPolicyRuntime {
     recovery: &'static mut HelmRecoveryHistory,
 }
 
+/// The read-only per-tick inputs `ai_policy_state_tick` reads besides the
+/// [`crate::ai::host::AiHostEnv`], bundled as one `SystemParam` (issue #1185):
+/// the world config (authored AI tick rate), the helm-AI surfaces frame, the
+/// motion plan, and the run's master seed (`sim_rng`, the WORLD field of the
+/// orbit-direction composite key).
+///
+/// A signature grouping only — every field keeps its type and `Option` fallback
+/// (`world_config`/`sim_rng` stay `Option` for the bare-`App` fixtures that never
+/// insert them), so the access set is byte-for-byte unchanged; the system
+/// destructures it back to its original locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct HelmPolicyInputs<'w> {
+    world_config: Option<Res<'w, crate::world::config::WorldConfig>>,
+    frame: Res<'w, HelmAiSurfacesFrame>,
+    plan: Res<'w, crate::ship::helm_planner::HelmMotionPlan>,
+    sim_rng: Option<Res<'w, crate::sim_rng::SimRng>>,
+}
+
 /// Advance every stateful fine-system policy's state machine, ONCE per shared
 /// AI tick, and COMMIT the entered state before any output resolves this tick
 /// (issue #882).
@@ -385,20 +403,14 @@ pub(crate) struct HelmPolicyRuntime {
 ///   merge rather than a heading that keeps being re-solved.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_policy_state_tick(
-    world_config: Option<Res<crate::world::config::WorldConfig>>,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
-    frame: Res<HelmAiSurfacesFrame>,
-    plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
-    // The run's master seed — the WORLD field of the orbit-direction composite
-    // key (issue #788). `Option` for the same reason every other simulation
-    // system takes it optionally: a bare `Res` fails Bevy parameter validation
-    // in every bare-`App` fixture in this crate. Absent resolves to seed 0,
-    // which is still deterministic.
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
+    // The world config, helm-AI surfaces frame, motion plan, and seeded RNG
+    // bundled as one `SystemParam` (issue #1185). See [`HelmPolicyInputs`].
+    inputs: HelmPolicyInputs,
     mut clock: ResMut<AiPolicyTickClock>,
     mut ships: Query<
         (
@@ -461,6 +473,14 @@ pub(crate) fn ai_policy_state_tick(
     // rather than once per tick.
     mut last_reported_phase: Local<std::collections::HashMap<Entity, String>>,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let HelmPolicyInputs {
+        world_config,
+        frame,
+        plan,
+        sim_rng,
+    } = inputs;
+
     // One authored tick period per run — the shared cadence, never Time::delta.
     let hz = world_config
         .as_deref()

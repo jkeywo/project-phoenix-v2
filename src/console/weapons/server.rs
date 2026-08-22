@@ -309,7 +309,8 @@ use super::{blaster, shared, torpedo};
 // Shared weapons utilities extracted to `shared.rs` (issue #721). Re-exported
 // so `use super::*;` in the test module keeps resolving them.
 pub(crate) use super::shared::{
-    any_tactical_system_operates_ai, live_entity_xz, BeamContext, TorpedoTargetSnapshot,
+    any_tactical_system_operates_ai, live_entity_xz, BeamContext, DirectFireGeometry,
+    TorpedoTargetSnapshot,
 };
 
 // Blaster systems extracted to `blaster.rs` (issue #726). `BlasterSystemResource`
@@ -747,6 +748,37 @@ pub fn longest_usable_direct_fire_range(emitters: &[DirectFireEmitter]) -> f32 {
 /// Iterates every ship (player + NPC), mirroring `tick_sensors_frequency_hint`.
 /// Debounced via [`WeaponsArcRequestState`]: re-fires when the family, target,
 /// OR the usable arc set changes, not on every tick the same miss persists.
+/// The two extra read-only lookups `tick_weapons_arc_request` needs on top of
+/// the shared [`DirectFireGeometry`] pair, bundled as one `SystemParam` (issue
+/// #1185): the entity-name table (for resolving an authored objective/hail
+/// target name) and the locked target's own shields + heading (the one
+/// cross-family reading the arc-bearing doctrine is authored against).
+///
+/// A signature grouping only — both queries keep their exact shapes, so the
+/// access set is byte-for-byte unchanged, and the system destructures it back to
+/// its `entity_name_q` / `target_shield_q` locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+struct ArcRequestTargetLookups<'w, 's> {
+    entity_names: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::entities::spawner::EntityName,
+        ),
+    >,
+    target_shields: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::ship::shields::ShipShields,
+            Option<&'static ShipPhysics>,
+            &'static Transform,
+        ),
+    >,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn tick_weapons_arc_request(
     // The read-only AI-host world context — flag chain, sessions, and origin
@@ -772,26 +804,26 @@ fn tick_weapons_arc_request(
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
-    entity_name_q: Query<(
-        &crate::entities::spawner::EntityUuid,
-        &crate::entities::spawner::EntityName,
-    )>,
-    // The locked target's own shields and heading, for the one cross-family
-    // reading the doctrine is authored against (issue #956). Separate from
-    // `entity_q` rather than widening it, because `live_entity_xz` is shared
-    // with the other Weapons systems and has no business growing a shield
-    // lookup.
-    target_shield_q: Query<(
-        &crate::entities::spawner::EntityUuid,
-        &crate::ship::shields::ShipShields,
-        Option<&ShipPhysics>,
-        &Transform,
-    )>,
+    // The two live-position lookups bundled as one `SystemParam` (issue #1185).
+    geometry: DirectFireGeometry,
+    // The entity-name table and the locked target's shields/heading, bundled as
+    // one `SystemParam` (issue #1185). `target_shields` stays separate from
+    // `geometry.entities` because `live_entity_xz` is shared with the other
+    // Weapons systems and has no business growing a shield lookup (issue #956).
+    target_lookups: ArcRequestTargetLookups,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
     use crate::entities::config::PhaserCombatConfig;
+
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let DirectFireGeometry {
+        asteroids: asteroid_q,
+        entities: entity_q,
+    } = geometry;
+    let ArcRequestTargetLookups {
+        entity_names: entity_name_q,
+        target_shields: target_shield_q,
+    } = target_lookups;
 
     for (
         ship_entity,
@@ -1158,6 +1190,81 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
     }
 }
 
+/// The three read-only scan surfaces `ai_target_selection` acquires targets
+/// from, bundled as one `SystemParam` (issue #1185): the asteroid field, the
+/// `Without<Asteroid>` entity surface (wide enough to resolve an authored name),
+/// and the deliberately narrower tier-4 auto-acquisition surface.
+///
+/// A signature grouping only — every query keeps its exact shape and filter, so
+/// the access set is byte-for-byte unchanged; the system destructures it back to
+/// its `asteroid_q` / `other_ships_q` / `hostile_scan_q` locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+struct TargetSelectionScans<'w, 's> {
+    asteroids: Query<
+        'w,
+        's,
+        (&'static AsteroidUuid, &'static Transform),
+        With<crate::server_app::Asteroid>,
+    >,
+    other_ships: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static Transform,
+            Option<&'static crate::entities::spawner::EntityName>,
+        ),
+        Without<crate::server_app::Asteroid>,
+    >,
+    /// The tier-4 scan surface, deliberately narrower than `other_ships`. That
+    /// query is `Without<Asteroid>`, wide enough for resolving an authored name
+    /// (a mission may name anything, and a miss is harmless), but as an
+    /// *auto-acquisition* surface it would lock any factioned entity that
+    /// happens to carry an `EntityUuid` + `Transform`. The filter used to be
+    /// `(With<Ship>, Without<StaticPointDefence>)` — until the first factioned
+    /// station, `assets/entities/station_axiom.toml` (issue #1011): `spawn_entity`
+    /// inserts BOTH `StaticPointDefence` and `Ship` for a static-point-defence
+    /// entity, so the station carries the `Ship` marker the old filter asked for
+    /// — it was the `Without<StaticPointDefence>` half that excluded it. Dropping
+    /// that `Without` is the load-bearing change; the `With<StaticPointDefence>`
+    /// arm is a hedge for a future entity that carries `StaticPointDefence`
+    /// without `Ship`. It does NOT make an unfactioned `StaticPointDefence`
+    /// acquirable: the hostility verdicts require BOTH sides to carry a
+    /// `FactionComponent`, so a factionless turret stays invisible to
+    /// auto-acquisition — this filter only decides who is IN the scan.
+    hostiles: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static Transform,
+            Option<&'static FactionComponent>,
+        ),
+        Or<(
+            With<crate::server_app::Ship>,
+            With<crate::entities::spawner::StaticPointDefence>,
+        )>,
+    >,
+}
+
+/// The read-only resource context `ai_target_selection` reads besides the
+/// [`crate::ai::host::AiHostEnv`] — the log filter, the reselection-event tick
+/// stamp, the session table its `emit_ai_command` consults, and the faction
+/// registry the hostility verdicts need — bundled as one `SystemParam` (issue
+/// #1185).
+///
+/// A signature grouping only — every field keeps its type and `Option` fallback
+/// (`sim_tick`/`log`/`faction_registry` stay `Option` for the bare-`App`
+/// fixtures that never insert them), so the access set is byte-for-byte
+/// unchanged; the system destructures it back to its original locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+struct TargetSelectionEnv<'w> {
+    log: Option<Res<'w, crate::logging::LogFilterConfig>>,
+    sim_tick: Option<Res<'w, crate::sim_tick::SimTick>>,
+    sessions: Res<'w, crate::lobby::Sessions>,
+    faction_registry: Option<Res<'w, crate::entities::config_cache::FactionRegistryResource>>,
+}
+
 /// Tactical AI target prioritisation (issues #697, #700, #703).
 ///
 /// Runs for every ship whose Tactical surface is AI-controlled — player ship
@@ -1271,16 +1378,10 @@ fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSyste
 /// its own and an AI ship can no more engage two hostiles at once than a crewed
 /// one can (AGENTS.md #6).
 fn ai_target_selection(
-    // `Option<Res<_>>`, never a bare `Res` — this system runs in bare-`App`
-    // weapons fixtures that never insert `LogFilterConfig` (see the macro docs).
-    log: Option<Res<crate::logging::LogFilterConfig>>,
-    // The logical tick stamped on the `ai`-category target-reselection event
-    // (issue #1146). `Option<Res<_>>` for the same bare-`App` reason; an absent
-    // resource reads tick 0, which every weapons fixture already tolerates.
-    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
-    // The shared admission seam this system emits its decision through (#887);
-    // `emit_ai_command` asks `Sessions` about station tenure.
-    sessions: Res<crate::lobby::Sessions>,
+    // The log filter, reselection-event tick stamp, session table, and faction
+    // registry bundled as one `SystemParam` (issue #1185). See
+    // [`TargetSelectionEnv`].
+    env: TargetSelectionEnv,
     mut ship_query: Query<
         (
             Entity,
@@ -1313,57 +1414,28 @@ fn ai_target_selection(
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::server_app::Asteroid>>,
+    // The three read-only scan surfaces bundled as one `SystemParam` (issue
+    // #1185). See [`TargetSelectionScans`].
+    scans: TargetSelectionScans,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
-    // `Option` so test apps without the entity-config cache still run; an
-    // absent registry behaves as an empty one, i.e. nobody is hostile.
-    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
-    other_ships_q: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &Transform,
-            Option<&crate::entities::spawner::EntityName>,
-        ),
-        Without<crate::server_app::Asteroid>,
-    >,
-    // The tier-4 scan surface, deliberately narrower than `other_ships_q`.
-    // That query is `Without<Asteroid>`, which is wide enough for resolving an
-    // authored name (a mission may name anything, and a miss is harmless), but
-    // as an *auto-acquisition* surface it would lock any factioned entity that
-    // happens to carry an `EntityUuid` + `Transform`. The filter used to be
-    // `(With<Ship>, Without<StaticPointDefence>)` — until the first factioned
-    // station, `assets/entities/station_axiom.toml` (issue #1011): `spawn_entity`
-    // (`src/entities/spawner.rs`) inserts BOTH `StaticPointDefence` and `Ship`
-    // for a static-point-defence entity, so the station actually carries the
-    // `Ship` marker the old filter asked for — it was the `Without<StaticPointDefence>`
-    // half that excluded it. Dropping that `Without` is the load-bearing change;
-    // the `With<StaticPointDefence>` arm of the new `Or<>` is a deliberate hedge
-    // for a future entity that carries `StaticPointDefence` without `Ship` (a
-    // factioned mine, probe, or comms-buoy template), not something any shipped
-    // entity needs today.
-    //
-    // This does NOT make an unfactioned `StaticPointDefence` acquirable: the
-    // `is_hostile` / `find_nearest_hostile` verdicts below both require BOTH
-    // sides to carry a `FactionComponent` (`faction::is_enemy` returns `false`
-    // the moment either side is `None`), so a factionless point-defence turret
-    // stays invisible to auto-acquisition exactly as before — this filter only
-    // decides who is IN the scan, not who reads as hostile.
-    hostile_scan_q: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &Transform,
-            Option<&FactionComponent>,
-        ),
-        Or<(
-            With<crate::server_app::Ship>,
-            With<crate::entities::spawner::StaticPointDefence>,
-        )>,
-    >,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let TargetSelectionEnv {
+        log,
+        sim_tick,
+        sessions,
+        faction_registry,
+    } = env;
+    let TargetSelectionScans {
+        asteroids: asteroid_q,
+        other_ships: other_ships_q,
+        hostiles: hostile_scan_q,
+    } = scans;
+
     let registry_default = crate::ai::faction::FactionRegistry::default();
     let registry: &crate::ai::faction::FactionRegistry = faction_registry
         .as_deref()

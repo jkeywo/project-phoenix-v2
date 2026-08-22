@@ -35,6 +35,42 @@ pub(crate) fn live_entity_xz(
     None
 }
 
+/// The two live-position lookup queries almost every Weapons system carries:
+/// asteroids (keyed by [`AsteroidUuid`]) and non-asteroid entities (ships,
+/// stations, keyed by [`crate::entities::spawner::EntityUuid`]), bundled as one
+/// `SystemParam` (issue #1185).
+///
+/// This is a **readability** grouping only — the two `Query`s keep the exact
+/// shapes and `Without<..>` filters they had as separate parameters, so the
+/// system's access set and the schedule it builds are byte-for-byte unchanged.
+/// The pair is the input [`live_entity_xz`] resolves an arbitrary target UUID
+/// through, and it appears verbatim in `ai_target_selection`'s siblings across
+/// `server.rs`, `beam.rs`, and `blaster.rs`; every host destructures it back to
+/// its own `asteroid_q` / `entity_q` locals at entry so the body is untouched.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct DirectFireGeometry<'w, 's> {
+    /// Asteroids, keyed by [`AsteroidUuid`]; `Without<EntityUuid>` mirrors the
+    /// disjoint split every Weapons system already spelled inline.
+    pub asteroids: Query<
+        'w,
+        's,
+        (&'static AsteroidUuid, &'static Transform),
+        Without<crate::entities::spawner::EntityUuid>,
+    >,
+    /// Non-asteroid entities (ships, stations), keyed by
+    /// [`crate::entities::spawner::EntityUuid`]; `Without<AsteroidUuid>` is the
+    /// complementary half of the same split.
+    pub entities: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static Transform,
+        ),
+        Without<AsteroidUuid>,
+    >,
+}
+
 /// Ship-level Tactical concerns (SetTarget, SetPhaserMode, SetPhaserFrequency)
 /// are gated on "any phaser bank accepts human input"
 /// (issue #512, option c). This preserves the "fire when only one bank is

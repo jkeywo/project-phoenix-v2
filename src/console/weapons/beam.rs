@@ -19,7 +19,7 @@ use crate::ship_plugin::ShipSystemControlSources;
 
 use super::shared::{
     any_bank_accepts_human_input, any_bank_operates_ai, live_entity_xz, system_is_registered,
-    BeamContext, ShooterState,
+    BeamContext, DirectFireGeometry, ShooterState,
 };
 use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS};
 
@@ -858,10 +858,17 @@ pub(crate) fn ai_phaser_auto_fire(
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    // The two live-position lookups bundled as one `SystemParam` (issue #1185);
+    // destructured back to `asteroid_q` / `entity_q` at entry so the body is
+    // unchanged and the access set identical.
+    geometry: DirectFireGeometry,
 ) {
     use crate::entities::config::PhaserCombatConfig;
+
+    let DirectFireGeometry {
+        asteroids: asteroid_q,
+        entities: entity_q,
+    } = geometry;
 
     for (
         ship_entity,
@@ -1122,6 +1129,33 @@ pub(crate) fn ai_phaser_auto_fire(
 /// The three phases together merge the former `tick_active_beam`
 /// (player-only) and `tick_npc_beams` (NPC-only) systems — final divergence
 /// closed under PRD #597.
+///
+/// The line-of-sight raycast inputs [`tick_beams_prepare`] carries — the Rapier
+/// context, the faction registry the friendly-fire verdict needs, and the
+/// blocker-classification lookup — bundled as one `SystemParam` (issue #1185).
+///
+/// Purely a signature grouping: every field keeps the exact shape and
+/// optionality it had as a standalone parameter (the Rapier context and registry
+/// stay `Option` so fixtures without `RapierPhysicsPlugin` / the config cache
+/// still run), so the system's access set is byte-for-byte unchanged. The system
+/// destructures it back to its `rapier_context` / `faction_registry` /
+/// `blocker_info_q` locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct LineOfSightInputs<'w, 's> {
+    pub rapier_context: Option<ReadRapierContext<'w, 's>>,
+    pub faction_registry: Option<Res<'w, crate::entities::config_cache::FactionRegistryResource>>,
+    pub blocker_info_q: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static crate::entities::spawner::EntityUuid>,
+            Option<&'static AsteroidUuid>,
+            Option<&'static FactionComponent>,
+        ),
+    >,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tick_beams_prepare(
     time: Res<Time>,
@@ -1156,21 +1190,26 @@ pub(crate) fn tick_beams_prepare(
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
-    // LOS raycast parameters (optional so tests without RapierPhysicsPlugin still pass).
-    rapier_context: Option<ReadRapierContext>,
-    faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
-    // Read-only lookup: entity → UUID + faction, used to classify the LOS blocker.
-    blocker_info_q: Query<(
-        Entity,
-        Option<&crate::entities::spawner::EntityUuid>,
-        Option<&AsteroidUuid>,
-        Option<&FactionComponent>,
-    )>,
+    // The two live-position lookups bundled as one `SystemParam` (issue #1185).
+    geometry: DirectFireGeometry,
+    // The LOS raycast inputs bundled as one `SystemParam` (issue #1185): Rapier
+    // context + faction registry (both `Option` so fixtures without the physics
+    // plugin still pass) + the blocker-classification lookup.
+    los: LineOfSightInputs,
     mut beam_context: ResMut<BeamContext>,
 ) {
     use crate::entities::config::PhaserCombatConfig;
+
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let DirectFireGeometry {
+        asteroids: asteroid_q,
+        entities: entity_q,
+    } = geometry;
+    let LineOfSightInputs {
+        rapier_context,
+        faction_registry,
+        blocker_info_q,
+    } = los;
 
     let dt = time.delta_secs();
 
@@ -1507,6 +1546,47 @@ pub(crate) fn tick_beams_prepare(
 /// **compared before writing**, because its change detection is the rising edge
 /// that fires `AiEntityAttacked` and the `on_entity_attacked` triggers behind it
 /// (issue #702). See the note on [`LastShipAttacker`].
+/// The write-side outputs the beam damage chokepoint drives, bundled as one
+/// `SystemParam` (issue #1185): the world snapshot it edits, the client outbox,
+/// the game-over phase/reason latch, the three destruction event writers, the
+/// balance telemetry sink, and the tracked-entity registry it forgets a kill
+/// from.
+///
+/// A signature grouping only — every field keeps the exact type and `Option`
+/// fallback it had as a standalone parameter, so the access set is byte-for-byte
+/// unchanged. `tick_beams_apply_damage` destructures it back to its original
+/// `world` / `outbox` / … locals at entry, leaving the body untouched.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct BeamApplySinks<'w> {
+    pub world: ResMut<'w, WorldResource>,
+    pub outbox: Option<ResMut<'w, SimOutbox>>,
+    pub next_state: Option<ResMut<'w, NextState<GamePhase>>>,
+    pub game_over_reason: Option<ResMut<'w, GameOverReason>>,
+    pub destroyed_events: MessageWriter<'w, crate::ai::server::AiEntityDestroyed>,
+    pub vfx_events: MessageWriter<'w, AsteroidDestroyedVfx>,
+    pub ship_vfx_events: MessageWriter<'w, ShipDestroyedVfx>,
+    pub balance_events: Option<ResMut<'w, Messages<crate::core::balance::BalanceEvent>>>,
+    pub tracked: Option<ResMut<'w, crate::server_app::TrackedEntities>>,
+}
+
+/// The ambient read-only scalars the beam damage chokepoint consults — the
+/// seeded RNG it draws hull distribution from, the log filter its lines gate on,
+/// God Mode, and Instagib — bundled as one `SystemParam` (issue #1185).
+///
+/// This is the beam twin of [`crate::server_app::SimRngAndLog`], but it must NOT
+/// reuse that struct: `SimRngAndLog` also reads `WorldIdMint`, which this system
+/// does not, and folding it in would add a resource access this system never had
+/// — the one thing this additive refactor may not do. Every field keeps its
+/// `Option<Res<_>>` shape, so the access set is unchanged; the system
+/// destructures it back to its original locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct BeamApplyAmbient<'w> {
+    pub sim_rng: Option<Res<'w, crate::sim_rng::SimRng>>,
+    pub log: Option<Res<'w, crate::logging::LogFilterConfig>>,
+    pub god_mode: Option<Res<'w, crate::server_app::GodMode>>,
+    pub instagib: Option<Res<'w, crate::server::bridge::Instagib>>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tick_beams_apply_damage(
     mut commands: Commands,
@@ -1532,43 +1612,37 @@ pub(crate) fn tick_beams_apply_damage(
         Option<&mut crate::entities::spawner::EntityShipArcHull>,
         Option<&crate::entities::spawner::ColliderSection>,
     )>,
-    mut world: ResMut<WorldResource>,
-    mut outbox: Option<ResMut<SimOutbox>>,
-    mut next_state: Option<ResMut<NextState<GamePhase>>>,
-    mut game_over_reason: Option<ResMut<GameOverReason>>,
-    mut destroyed_events: MessageWriter<crate::ai::server::AiEntityDestroyed>,
-    mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
-    mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
     mut beam_context: ResMut<BeamContext>,
-    // `Option<ResMut<Messages<_>>>` rather than `MessageWriter` so bare-`App`
-    // fixtures that never registered the message still pass Bevy's parameter
-    // validation. Balance telemetry must never be the reason a test app fails
-    // to run.
-    mut balance_events: Option<ResMut<Messages<crate::core::balance::BalanceEvent>>>,
-    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
-    // Single-emission bookkeeping (issue #838): this kill site is the eager
-    // emitter of `EntityDespawned`, so it must forget the uuid from the
-    // `TrackedEntities` registry it despawns. Otherwise the reconcile sweep
-    // (`reconcile_runtime_entities`), which emits `EntityDespawned` for every
-    // reported uuid no longer in the ECS, re-emits a *second* one for the same
-    // kill. `Option` because bare-`App` weapons fixtures never insert the
-    // resource — there the sweep does not run either, so the eager emit stands
-    // alone and the tests that assert on it stay green.
-    mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
-    // `Option<Res<_>>`, never bare — bare-`App` weapons fixtures never insert
-    // `LogFilterConfig` (see logging macro docs).
-    log: Option<Res<crate::logging::LogFilterConfig>>,
-    // God Mode (issue #900): `Option<Res<_>>` for the same reason as `log` —
-    // bare-`App` weapons fixtures never insert it, and a bare `Res` would fail
-    // parameter validation there rather than defaulting to "off".
-    god_mode: Option<Res<crate::server_app::GodMode>>,
-    // Instagib (issue #1181): the former `is_instagib()` ambient thread-local
-    // read, now a scheduler-visible resource read. `Option<Res<_>>` for the same
-    // reason as `god_mode` — only the wasm host inserts it, so it is absent (off)
-    // on native and in bare-`App` fixtures, exactly as `is_instagib()` returned
-    // `false` there.
-    instagib: Option<Res<crate::server::bridge::Instagib>>,
+    // The write-side outputs (world, outbox, game-over latch, destruction event
+    // writers, balance sink, tracked registry) bundled as one `SystemParam`
+    // (issue #1185); `SimOutbox` / latch / balance / tracked stay `Option` for
+    // bare-`App` fixtures. See [`BeamApplySinks`].
+    sinks: BeamApplySinks,
+    // The ambient read-only scalars (seeded RNG, log filter, God Mode, Instagib)
+    // bundled as one `SystemParam` (issue #1185). See [`BeamApplyAmbient`].
+    ambient: BeamApplyAmbient,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged
+    // (issue #1185). Bundling the parameters does not alter their types, their
+    // `Option` fallbacks, or the system's access set.
+    let BeamApplySinks {
+        mut world,
+        mut outbox,
+        mut next_state,
+        mut game_over_reason,
+        mut destroyed_events,
+        mut vfx_events,
+        mut ship_vfx_events,
+        mut balance_events,
+        mut tracked,
+    } = sinks;
+    let BeamApplyAmbient {
+        sim_rng,
+        log,
+        god_mode,
+        instagib,
+    } = ambient;
+
     // Uuids whose destruction has already been reported this tick (issue #790).
     //
     // `apply_hull_damage` reports `destroyed` from `hull.is_destroyed()`, so a

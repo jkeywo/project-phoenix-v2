@@ -339,6 +339,82 @@ fn effective_sensor_range(
     base * modifiers.get(&ModifierSlot::SensorRadarRange)
 }
 
+/// The two threat-candidate position surfaces `tick_sensors_threat_warning`
+/// scans, bundled as one `SystemParam` (issue #1185): non-ship entities (whose
+/// live position is on `Transform`) and ships (whose live position is on
+/// `ShipPhysics`, since the spawn `Transform` goes stale).
+///
+/// A signature grouping only — both queries keep their exact shapes and filters,
+/// so the access set is byte-for-byte unchanged; the system destructures it back
+/// to its `entity_positions` / `ship_positions` locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct ThreatScanSurfaces<'w, 's> {
+    pub entity_positions: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static Transform,
+            Option<&'static crate::entities::spawner::FactionComponent>,
+        ),
+        Without<crate::server_app::Ship>,
+    >,
+    pub ship_positions: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::ship::state::ShipPhysics,
+            &'static crate::entities::spawner::FactionComponent,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+}
+
+/// The three read-only lookup surfaces `operate_sensors_ai` reads, bundled as
+/// one `SystemParam` (issue #1185): the entity name/position table (tier-2 name
+/// resolution) and the split hostile-scan candidates — ships (live position on
+/// `ShipPhysics`) and non-ship entities (live position on `Transform`), the same
+/// split [`ThreatScanSurfaces`] makes.
+///
+/// A signature grouping only — every query keeps its exact shape and filter, so
+/// the access set is byte-for-byte unchanged (all three stay read-only and
+/// disjoint from the mutable `AdmittedCommands` in the ship query); the system
+/// destructures it back to its `entity_q` / `hostile_ship_q` / `hostile_entity_q`
+/// locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct SensorScanSurfaces<'w, 's> {
+    pub entities: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            Option<&'static crate::entities::spawner::EntityName>,
+            &'static Transform,
+        ),
+    >,
+    pub hostile_ships: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static crate::ship::state::ShipPhysics,
+            &'static crate::entities::spawner::FactionComponent,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    pub hostile_entities: Query<
+        'w,
+        's,
+        (
+            &'static crate::entities::spawner::EntityUuid,
+            &'static Transform,
+            Option<&'static crate::entities::spawner::FactionComponent>,
+        ),
+        Without<crate::server_app::Ship>,
+    >,
+}
+
 /// Emit a channel-3 `ThreatBearing` coordination message to Shields whenever
 /// each ship's sensors detect an in-range closing hostile (or incoming torpedo).
 ///
@@ -348,22 +424,9 @@ fn effective_sensor_range(
 pub fn tick_sensors_threat_warning(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
-    entity_positions: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &Transform,
-            Option<&crate::entities::spawner::FactionComponent>,
-        ),
-        Without<crate::server_app::Ship>,
-    >,
-    ship_positions: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &crate::ship::state::ShipPhysics,
-            &crate::entities::spawner::FactionComponent,
-        ),
-        With<crate::server_app::Ship>,
-    >,
+    // The two threat-candidate position surfaces bundled as one `SystemParam`
+    // (issue #1185). See [`ThreatScanSurfaces`].
+    scans: ThreatScanSurfaces,
     mut ships: Query<
         (
             Entity,
@@ -379,6 +442,12 @@ pub fn tick_sensors_threat_warning(
     >,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let ThreatScanSurfaces {
+        entity_positions,
+        ship_positions,
+    } = scans;
+
     let cfg = &ship_config.0;
     let Some(faction_registry) = faction_registry else {
         return; // No faction registry available (e.g. in tests without world setup)
@@ -726,36 +795,20 @@ pub fn operate_sensors_ai(
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
-    entity_q: Query<(
-        &crate::entities::spawner::EntityUuid,
-        Option<&crate::entities::spawner::EntityName>,
-        &Transform,
-    )>,
+    // The entity name/position table and the split hostile-scan candidates
+    // bundled as one `SystemParam` (issue #1185). See [`SensorScanSurfaces`].
+    scans: SensorScanSurfaces,
     // Independent nearest-hostile tier (issue #746). Faction verdicts need the
     // registry; absent (tests without world setup), tier 3 is simply skipped.
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
-    // Candidate contacts for the hostile scan, split the same way
-    // `tick_sensors_threat_warning` splits them: ships carry their live
-    // position on `ShipPhysics` (the spawn `Transform` goes stale), non-ship
-    // entities carry it on `Transform`. Both read-only, disjoint from the
-    // mutable `AdmittedCommands` in `ships`, so no borrow conflict.
-    hostile_ship_q: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &crate::ship::state::ShipPhysics,
-            &crate::entities::spawner::FactionComponent,
-        ),
-        With<crate::server_app::Ship>,
-    >,
-    hostile_entity_q: Query<
-        (
-            &crate::entities::spawner::EntityUuid,
-            &Transform,
-            Option<&crate::entities::spawner::FactionComponent>,
-        ),
-        Without<crate::server_app::Ship>,
-    >,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let SensorScanSurfaces {
+        entities: entity_q,
+        hostile_ships: hostile_ship_q,
+        hostile_entities: hostile_entity_q,
+    } = scans;
+
     let console_range = ship_config.0.sensors_radar_range;
 
     // Build the shared candidate snapshot once (world state is the same for

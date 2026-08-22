@@ -1230,6 +1230,43 @@ fn has_unread_from_sender_with(
     })
 }
 
+/// The read-only comms context `operate_comms_ai` reads besides the
+/// [`crate::ai::host::AiHostEnv`], bundled as one `SystemParam` (issue #1185):
+/// the objective pool, the comms runtime, the inbox, the session table, and the
+/// log filter.
+///
+/// A signature grouping only — every field keeps its type and optionality;
+/// `comms` stays `ResMut` for the one write this system makes (retiring the
+/// `open_hails` candidacy latch), so the access set is byte-for-byte unchanged.
+/// The system destructures it back to its original locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct CommsAiContext<'w> {
+    objectives: Option<Res<'w, ObjectiveManagerRes>>,
+    comms: Option<ResMut<'w, CommsRuntime>>,
+    inbox: Option<Res<'w, CommsInboxRes>>,
+    sessions: Res<'w, crate::lobby::Sessions>,
+    log: Option<Res<'w, crate::logging::LogFilterConfig>>,
+}
+
+/// The read-only comms context `operate_comms_response_ai` reads besides the
+/// [`crate::ai::host::AiHostEnv`], bundled as one `SystemParam` (issue #1185):
+/// the comms runtime, the inbox, the session table, the log filter, and the
+/// shared AI base cadence (raw tick + interval).
+///
+/// A signature grouping only — every field keeps its type and `Option` fallback
+/// (`comms` here is a plain `Res`, unlike [`CommsAiContext`]'s `ResMut`), so the
+/// access set is byte-for-byte unchanged; the system destructures it back to its
+/// original locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct CommsResponseContext<'w> {
+    comms: Option<Res<'w, CommsRuntime>>,
+    inbox: Option<Res<'w, CommsInboxRes>>,
+    sessions: Res<'w, crate::lobby::Sessions>,
+    log: Option<Res<'w, crate::logging::LogFilterConfig>>,
+    tick: Option<Res<'w, crate::sim_tick::SimTick>>,
+    base_interval: Option<Res<'w, crate::ai::cadence::AiBaseInterval>>,
+}
+
 /// Backfill Comms AI: rank and issue hails through the AUTHORED selector
 /// (issue #753, converted to a data-driven policy by issue #786).
 ///
@@ -1331,20 +1368,15 @@ fn has_unread_from_sender_with(
 /// `handle_clear_comms`, and [`operate_comms_response_ai`] is `.after` this one.
 #[allow(clippy::too_many_arguments)]
 pub fn operate_comms_ai(
-    objectives: Option<Res<ObjectiveManagerRes>>,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
-    // `ResMut` for ONE reason: retiring the `open_hails` latch for targets that
-    // stopped being candidates (the AC5 re-arm). Every other comms read here is
-    // a plain read.
-    mut comms: Option<ResMut<CommsRuntime>>,
-    inbox: Option<Res<CommsInboxRes>>,
-    sessions: Res<crate::lobby::Sessions>,
-    // `Option<Res<_>>`, never bare — bare-`App` fixtures never insert it.
-    log: Option<Res<crate::logging::LogFilterConfig>>,
+    // The objective pool, comms runtime + inbox, session table, and log filter
+    // bundled as one `SystemParam` (issue #1185); `comms` stays `ResMut` for the
+    // AC5 `open_hails` retirement. See [`CommsAiContext`].
+    context: CommsAiContext,
     mut ships: Query<
         (
             Entity,
@@ -1359,6 +1391,15 @@ pub fn operate_comms_ai(
         With<crate::server_app::LocalShip>,
     >,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let CommsAiContext {
+        objectives,
+        mut comms,
+        inbox,
+        sessions,
+        log,
+    } = context;
+
     /// One resolved `hail-objectives` candidacy for this tick: the contact UUID
     /// an active `Hail` directive names, plus the readings the latch retirement
     /// and the fact seed both need.
@@ -1661,24 +1702,15 @@ pub fn operate_comms_ai(
 /// `&[&FlagStore]`, whose mutators all require `&mut self`.
 #[allow(clippy::too_many_arguments)]
 pub fn operate_comms_response_ai(
-    comms: Option<Res<CommsRuntime>>,
-    inbox: Option<Res<CommsInboxRes>>,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
-    sessions: Res<crate::lobby::Sessions>,
-    log: Option<Res<crate::logging::LogFilterConfig>>,
-    // The shared AI base cadence's raw tick + interval (issue #889's
-    // evaluate_every_ticks, wired at runtime). `Option<Res<_>>` for the usual
-    // bare-`App` reason: several fixtures below register this system directly
-    // without `register_ai_cadence`, so these read the same (0, 1) fallback
-    // `evaluate_every_ticks_ready` already treats as "always due" — identical
-    // to this system's pre-existing (ungated w.r.t. per-host cadence)
-    // behaviour in every such fixture.
-    tick: Option<Res<crate::sim_tick::SimTick>>,
-    base_interval: Option<Res<crate::ai::cadence::AiBaseInterval>>,
+    // The comms runtime + inbox, session table, log filter, and shared AI base
+    // cadence (tick + interval) bundled as one `SystemParam` (issue #1185). See
+    // [`CommsResponseContext`].
+    context: CommsResponseContext,
     mut ships: Query<
         (
             Entity,
@@ -1701,6 +1733,16 @@ pub fn operate_comms_response_ai(
         With<crate::server_app::LocalShip>,
     >,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let CommsResponseContext {
+        comms,
+        inbox,
+        sessions,
+        log,
+        tick,
+        base_interval,
+    } = context;
+
     let (Some(comms), Some(inbox)) = (comms.as_deref(), inbox.as_deref()) else {
         return;
     };

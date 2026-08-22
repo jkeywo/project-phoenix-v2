@@ -506,6 +506,25 @@ pub(crate) fn ai_shield_focus(
 // `emit_power_ai_command` (issue #831) likewise collapsed into the shared
 // `command_admission::ai_emit::emit_ai_command` seam (issue #738).
 
+/// The read-only resource context `ai_power_allocation` reads besides the
+/// [`crate::ai::host::AiHostEnv`], bundled as one `SystemParam` (issue #1185):
+/// the session table the emit seam consults, the log filter, the global
+/// objective pool scored for the OBJECTIVE fact, and the shared AI base cadence
+/// (raw tick + interval).
+///
+/// A signature grouping only — every field keeps its type and `Option` fallback
+/// (`log`/`objectives`/`tick`/`base_interval` stay `Option` for the bare-`App`
+/// fixtures that never insert them), so the access set is byte-for-byte
+/// unchanged; the system destructures it back to its original locals at entry.
+#[derive(bevy::ecs::system::SystemParam)]
+struct PowerAiContext<'w> {
+    sessions: Res<'w, crate::lobby::Sessions>,
+    log: Option<Res<'w, crate::logging::LogFilterConfig>>,
+    objectives: Option<Res<'w, crate::world::server::ObjectiveManagerRes>>,
+    tick: Option<Res<'w, crate::sim_tick::SimTick>>,
+    base_interval: Option<Res<'w, crate::ai::cadence::AiBaseInterval>>,
+}
+
 /// AI power-allocation decision system (issue #784: inline stateless policy
 /// spine; admitted transport #831).
 ///
@@ -563,25 +582,15 @@ pub(crate) fn ai_shield_focus(
 /// cannot be refused cannot be re-emitted for ever either.
 fn ai_power_allocation(
     time: Res<Time>,
-    sessions: Res<crate::lobby::Sessions>,
-    log: Option<Res<crate::logging::LogFilterConfig>>,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
-    // Global objective pool for the OBJECTIVE fact. `Option<Res<_>>` for the same
-    // bare-`App` reason. Scored once per tick, outside the per-ship loop.
-    objectives: Option<Res<crate::world::server::ObjectiveManagerRes>>,
-    // The shared AI base cadence's raw tick + interval (issue #889's
-    // evaluate_every_ticks, wired at runtime). `Option<Res<_>>` for the usual
-    // bare-`App` reason: `power_test_app` below never calls
-    // `register_ai_cadence`, so these read the same (0, 1) fallback
-    // `evaluate_every_ticks_ready` already treats as "always due" — identical
-    // to this system's pre-existing (ungated w.r.t. per-host cadence)
-    // behaviour in every such fixture.
-    tick: Option<Res<crate::sim_tick::SimTick>>,
-    base_interval: Option<Res<crate::ai::cadence::AiBaseInterval>>,
+    // The session table, log filter, objective pool, and shared AI base cadence
+    // (tick + interval) bundled as one `SystemParam` (issue #1185). See
+    // [`PowerAiContext`].
+    context: PowerAiContext,
     mut ships: Query<
         (
             Entity,
@@ -610,6 +619,15 @@ fn ai_power_allocation(
         ),
     >,
 ) {
+    // Restore the pre-#1185 locals so the body below is byte-for-byte unchanged.
+    let PowerAiContext {
+        sessions,
+        log,
+        objectives,
+        tick,
+        base_interval,
+    } = context;
+
     let now = time.elapsed_secs();
     let tick = tick.map(|t| t.0).unwrap_or(0);
     let base_interval = base_interval.map(|b| b.0).unwrap_or(1);

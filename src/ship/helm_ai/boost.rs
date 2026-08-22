@@ -1,3 +1,14 @@
+//! The **Boost** helm axis (issue #1208, #780, #882): the `boost` channel,
+//! resolving `EngageBoost` over the shared hazard/travel facts and emitting
+//! `SetBoost { active }` on change. Stateful — the #882 machine's minimal
+//! demonstrator, whose shipped default policy is idle.
+//!
+//! [`ai_helm_boost`] is the Bevy system; [`BoostAxis`] is its
+//! [`super::HelmAxisHost`] impl.
+//!
+//! Invariant: unlike the other five axes, Boost actuates on `Held` too — any
+//! non-boost verdict means release, so the drive never stays on by default.
+
 use super::*;
 
 use crate::ai::host::HostOutcome;

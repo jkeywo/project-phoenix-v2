@@ -1,3 +1,15 @@
+//! The **Vertical Thrust** helm axis (issue #1208, #744): the `vertical`
+//! channel, gating on `ActuateVerticalThrust` and emitting a climb/return
+//! dodge scaled by `vertical_hazard_sensitivity`. Stateless, and AI-only —
+//! there is no player-facing vertical control.
+//!
+//! [`ai_helm_vertical_thrust`] is the Bevy system; [`VerticalAxis`] is its
+//! [`super::HelmAxisHost`] impl.
+//!
+//! Invariant: behaviour forks on the hull's authored `VerticalMovementMode`
+//! — Planar never commands vertical motion, Bounded climbs up to a ceiling
+//! and auto-returns, Full3D climbs unbounded with no auto-return.
+
 use super::*;
 
 use crate::ai::host::HostOutcome;

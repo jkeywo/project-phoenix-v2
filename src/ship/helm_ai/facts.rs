@@ -1,3 +1,18 @@
+//! The helm fact-seeding family (issue #780+) — pure and Bevy-free by
+//! construction (AGENTS.md #10): every fn takes plain values (a
+//! `HazardAssessment`, a `ShipPhysics`, an `AiParams`) and writes into an
+//! `AiFacts` snapshot, never a `Res`/`Query`.
+//!
+//! [`seed_helm_actuator_facts`] is the ONE seeder every helm host calls
+//! unconditionally, closing the #779 sharp edge where an empty `AiFacts`
+//! leaves a `fact(...)` guard validating at load and never firing. The other
+//! `seed_*` fns layer narrower-scoped facts (travel, hostile arcs, recovery,
+//! pressed, torpedo opportunity) on top, alongside the `*_params_authored`
+//! validators that gate each axis's optional doctrine blocks.
+//!
+//! Invariant: a fact seeded unconditionally must stay seeded on every call
+//! site — a guard that stops evaluating is worse than one that never did.
+
 use super::*;
 
 /// The fact name the shared hazard surface is seeded under by

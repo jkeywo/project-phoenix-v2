@@ -1,3 +1,15 @@
+//! The **Impulse** helm axis (issue #1208): the `impulse` channel, gating on
+//! `EngageImpulse` then running the `use_impulse`/`decide_impulse` geometry
+//! over the radar-gated `visible_view`. Stateless.
+//!
+//! [`ai_helm_impulse`] is the Bevy system; [`ImpulseAxis`] is its
+//! [`super::HelmAxisHost`] impl.
+//!
+//! Invariant: emits only on an `Engage`/`Cancel` transition, never on
+//! `NoChange` — `apply_helm_commands` transitions on `ImpulseCommand` change
+//! detection, so an unconditional emit would re-issue `start_charge`/
+//! `cancel_charge` every tick.
+
 use super::*;
 
 use crate::ai::host::HostOutcome;

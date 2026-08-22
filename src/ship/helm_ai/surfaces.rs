@@ -1,3 +1,18 @@
+//! The decision-input surfaces the helm AI reads (issue #702) — a Bevy
+//! adapter, not a pure module: [`build_helm_ai_surfaces_frame`] is the system
+//! that runs once per shared tick, folding `WorldSnapshot`, the console-owned
+//! goal surfaces ([`HelmAiSurfaces`] — waypoint, clearance, cursors) and each
+//! ship's viewscreen blackboard into the [`HelmAiSurfacesFrame`] resource
+//! every per-axis host then reads.
+//!
+//! Also owns the doctrine pass surface ([`HelmPassSurface`],
+//! [`build_pass_surface`]) the policy-state machine advances, and the
+//! Weapons→Helm arc-bearing override ([`apply_arc_bearing_request`]).
+//!
+//! Invariant: every surface here is something a human operator could equally
+//! drive — the Helm AI owns none of it and keeps no private copy, so folding
+//! happens exactly once per tick rather than once per host.
+
 use super::*;
 
 /// The console-owned surfaces the AI Helm derives its goals from (issue #702).

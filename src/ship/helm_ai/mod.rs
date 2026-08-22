@@ -1,3 +1,22 @@
+//! The helm AI's shared decision spine, plus the `FineSystemAiPolicies`
+//! component (issue #1208, #1209) — a Bevy adapter, and the module the six
+//! per-host-entity axis files ([`engines`], [`steering`], [`impulse`],
+//! [`lateral`], [`vertical`], [`boost`]) plus [`surfaces`] and [`facts`]
+//! attach to.
+//!
+//! Owns three things the split (issue #1206) left here rather than in a
+//! dedicated `policies.rs`: [`FineSystemAiPolicies`] itself, the one
+//! keyed-by-`SystemId` component every axis resolves its own entry from;
+//! [`HelmAxisHost`] + [`run_helm_axis`], the generic driver that walks the
+//! gate/declare/resolve spine so no per-axis system copies it; and
+//! [`ai_policy_state_tick`], the shared #882 machine tick that advances every
+//! stateful axis's runtime state once per ship per tick.
+//!
+//! Invariant: the six per-axis systems keep their own distinct Bevy queries
+//! on purpose — no axis widens to a component a sibling needs — so the
+//! deterministic schedule and its #894 digest stay byte-identical to before
+//! the split.
+
 use bevy::prelude::*;
 
 // Vertical thrust and boost (the AI-only / non-shim axes) still emit directly

@@ -1,3 +1,16 @@
+//! The **Engines** helm axis (issue #1208): the `longitudinal` channel,
+//! resolving `[helm_console.engines_ai]` against `ActuateDesiredTravel` and
+//! emitting the planner-decoded forward throttle as `SetThrust`. Stateful —
+//! the destroyer's fly-through machine (issue #883) runs its own copy of
+//! [`HelmEnginesAiPolicyState`] here.
+//!
+//! [`ai_helm_thrust`] is the Bevy system; [`EnginesAxis`] is its
+//! [`super::HelmAxisHost`] impl, resolved through the shared
+//! [`super::run_helm_axis`] driver (issue #1208).
+//!
+//! Invariant: a "hold" (no rule fires) emits nothing — `ThrustInput` latches
+//! its last value rather than coasting or decaying.
+
 use super::*;
 
 use crate::ai::host::HostOutcome;

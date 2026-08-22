@@ -1,3 +1,14 @@
+//! The **Steering** helm axis (issue #1208): the `yaw` channel, resolving
+//! `[helm_console.steering_ai]` against seven mode verbs
+//! (`ActuateDesiredFacing` plus six `Hold*`/`PivotToReengage` doctrine legs)
+//! and emitting the planner-decoded yaw. Stateful — the fly-through machine
+//! decides which leg [`super::HelmPassSurface`] publishes.
+//!
+//! [`ai_helm_steering`] is the Bevy system; [`SteeringAxis`] is its
+//! [`super::HelmAxisHost`] impl. Unique among the six axes: it also owns the
+//! Weapons→Helm arc-bearing override (issue #677), applied on top of the
+//! planner's decoded facing when the current leg consents to yield.
+
 use super::*;
 
 use crate::ai::host::HostOutcome;

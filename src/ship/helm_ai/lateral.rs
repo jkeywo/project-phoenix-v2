@@ -1,3 +1,15 @@
+//! The **Lateral Thrust** helm axis (issue #1208): the `lateral` channel,
+//! gating on `ActuateLateralThrust` and emitting the shared hazard dodge
+//! weighted by this hull's authored `lateral_hazard_sensitivity`. Stateless.
+//!
+//! [`ai_helm_lateral_thrust`] is the Bevy system; [`LateralAxis`] is its
+//! [`super::HelmAxisHost`] impl.
+//!
+//! Invariant: the docking close manoeuvre (issue #742) is the one sanctioned
+//! [`super::HelmAxisHost::pre_override`] — it PRECEDES the policy gate (but
+//! not the Control-Source gate), so a docking hull always translates onto
+//! its berth regardless of what any authored policy says.
+
 use super::*;
 
 use crate::ai::host::HostOutcome;

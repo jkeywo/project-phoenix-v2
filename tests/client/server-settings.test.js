@@ -56,10 +56,23 @@ function makeBindings(overrides = {}) {
     wasm_toggle_debug_damage: record('wasm_toggle_debug_damage'),
     wasm_toggle_debug_entities: record('wasm_toggle_debug_entities'),
     wasm_toggle_entity_inspector: record('wasm_toggle_entity_inspector'),
-    wasm_get_debug_state: () => 'MODIFIERS',
-    wasm_get_damage_log: () => 'DAMAGE',
-    wasm_get_entity_debug_state: () => 'ENTITIES',
-    wasm_get_entity_inspector: () => 'INSPECTOR',
+    // The four legacy overlays now publish structured JSON the dock parses and
+    // renders (issue #1150), not pre-formatted text — so the reads return
+    // payloads matching each surface's `codec::encode_*` wire shape.
+    wasm_get_debug_state: () =>
+      JSON.stringify({ schema_version: 1, flags: [], float_modifiers: [], int_modifiers: [] }),
+    wasm_get_damage_log: () =>
+      JSON.stringify({
+        schema_version: 1,
+        entries: [{ source: 'asteroid-9', shield_arc: 'Fore', amount: 4.0 }],
+      }),
+    wasm_get_entity_debug_state: () =>
+      JSON.stringify({
+        schema_version: 1,
+        entries: [{ name: 'Raider', x: 1, y: 0, z: 2, target: 'none' }],
+      }),
+    wasm_get_entity_inspector: () =>
+      JSON.stringify({ schema_version: 1, player: null, entities: [] }),
     wasm_toggle_debug_regions: () => { calls.push(['wasm_toggle_debug_regions']); state.regions = !state.regions; },
     wasm_is_debug_regions_enabled: () => state.regions,
     wasm_toggle_god_mode: () => { calls.push(['wasm_toggle_god_mode']); state.godmode = !state.godmode; },
@@ -196,7 +209,9 @@ describe('the Debug/Cheat tab', () => {
 
     control('damage').click();
     expect(dock.classList.contains('open')).toBe(true);
-    expect($('#debug-content').textContent).toBe('DAMAGE');
+    // The dock now renders the damage payload as DOM (issue #1150), not text.
+    expect($('#debug-content .dbg-damage')).not.toBeNull();
+    expect($('#debug-content').textContent).toContain('asteroid-9');
   });
 
   it('each output flips exactly its own Bevy resource, not all four', () => {
@@ -237,7 +252,9 @@ describe('the Debug/Cheat tab', () => {
     control('modifiers').click();
     control('damage').click();
     expect($('#debug-dock').classList.contains('open')).toBe(true);
-    expect($('#debug-content').textContent).toBe('DAMAGE');
+    // Switching to damage renders its payload; the modifier DOM is gone.
+    expect($('#debug-content .dbg-damage')).not.toBeNull();
+    expect($('#debug-content').textContent).toContain('asteroid-9');
   });
 
   it('every declared output is offered and reads its own stream', () => {

@@ -108,6 +108,41 @@ pub fn encode_scenario_state(p: &crate::debug::payload::ScenarioStatePayload) ->
     serde_json::to_string(p).unwrap_or_default()
 }
 
+/// Encode a damage-log debug payload to JSON (issue #1150, PRD #1144).
+///
+/// The seam where `crate::debug::payload::DamageDebugPayload` becomes the JSON
+/// the dock's damage renderer parses. Same contract as
+/// [`encode_station_activity`]: `serde_json` is confined here, the return is a
+/// `String` (a serialise failure becomes the empty string the dock treats as
+/// "no data yet"), and it replaces the legacy `DamageLog::format` text stream.
+pub fn encode_damage_debug(p: &crate::debug::payload::DamageDebugPayload) -> String {
+    serde_json::to_string(p).unwrap_or_default()
+}
+
+/// Encode a modifier debug payload to JSON (issue #1150, PRD #1144).
+///
+/// Replaces the legacy `ShipModifiers::format_debug` text stream. See
+/// [`encode_station_activity`] for the shared encoder contract.
+pub fn encode_modifier_debug(p: &crate::debug::payload::ModifierDebugPayload) -> String {
+    serde_json::to_string(p).unwrap_or_default()
+}
+
+/// Encode an entity-behavior debug payload to JSON (issue #1150, PRD #1144).
+///
+/// Replaces the legacy `write_entity_debug_state` text stream. See
+/// [`encode_station_activity`] for the shared encoder contract.
+pub fn encode_entity_behavior(p: &crate::debug::payload::EntityBehaviorPayload) -> String {
+    serde_json::to_string(p).unwrap_or_default()
+}
+
+/// Encode an entity-inspector debug payload to JSON (issue #1150, PRD #1144).
+///
+/// Replaces the legacy `update_entity_inspector` text stream. See
+/// [`encode_station_activity`] for the shared encoder contract.
+pub fn encode_entity_inspector(p: &crate::debug::payload::EntityInspectorPayload) -> String {
+    serde_json::to_string(p).unwrap_or_default()
+}
+
 /// Decode inbound JSON from the HTML/PeerJS bridge.
 ///
 /// The wire shape is a full `ClientMessage` — every emitter (phone consoles,
@@ -2987,6 +3022,153 @@ mod tests {
         );
         // Round-trips back to the same payload — the schema is stable both ways.
         let decoded: ScenarioStatePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    // ── The four migrated legacy overlays' wire shapes (issue #1150) ─────────
+    //
+    // The same pinning contract as `station_activity_payload_wire_shape_is_pinned`,
+    // one per surface: the Rust encoder and the JS dock renderer read the same
+    // keys, so a rename on one side without the other fails here before it ships.
+
+    #[test]
+    fn damage_debug_payload_wire_shape_is_pinned() {
+        use crate::debug::payload::{DamageDebugPayload, DamageEntry, DEBUG_SCHEMA_VERSION};
+        let payload = DamageDebugPayload {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            entries: vec![
+                DamageEntry {
+                    source: "region-zone".into(),
+                    shield_arc: None,
+                    amount: 3.0,
+                },
+                DamageEntry {
+                    source: "asteroid-42".into(),
+                    shield_arc: Some("Fore".into()),
+                    amount: 12.5,
+                },
+            ],
+        };
+        let json = crate::core::codec::encode_damage_debug(&payload);
+        assert_eq!(
+            json,
+            r#"{"schema_version":1,"entries":[{"source":"region-zone","shield_arc":null,"amount":3.0},{"source":"asteroid-42","shield_arc":"Fore","amount":12.5}]}"#,
+            "the damage JSON shape must match gui/debug-overlays.js"
+        );
+        let decoded: DamageDebugPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn modifier_debug_payload_wire_shape_is_pinned() {
+        use crate::debug::payload::{
+            FloatContribution, FloatModifierEntry, IntContribution, IntModifierEntry,
+            ModifierDebugPayload, ModifierFlagEntry, DEBUG_SCHEMA_VERSION,
+        };
+        let payload = ModifierDebugPayload {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            flags: vec![ModifierFlagEntry {
+                flag: "CommsJammed".into(),
+                sources: vec!["ImpulseDrive".into()],
+            }],
+            float_modifiers: vec![FloatModifierEntry {
+                slot: "MaxSpeed".into(),
+                multiplier: 1.5,
+                contributions: vec![FloatContribution {
+                    source: "ImpulseDrive".into(),
+                    bonus: 0.5,
+                }],
+            }],
+            int_modifiers: vec![IntModifierEntry {
+                slot: "RepairTeams".into(),
+                sum: 2,
+                contributions: vec![IntContribution {
+                    source: "ImpulseDrive".into(),
+                    bonus: 2,
+                }],
+            }],
+        };
+        let json = crate::core::codec::encode_modifier_debug(&payload);
+        assert_eq!(
+            json,
+            r#"{"schema_version":1,"flags":[{"flag":"CommsJammed","sources":["ImpulseDrive"]}],"float_modifiers":[{"slot":"MaxSpeed","multiplier":1.5,"contributions":[{"source":"ImpulseDrive","bonus":0.5}]}],"int_modifiers":[{"slot":"RepairTeams","sum":2,"contributions":[{"source":"ImpulseDrive","bonus":2}]}]}"#,
+            "the modifier JSON shape must match gui/debug-overlays.js"
+        );
+        let decoded: ModifierDebugPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn entity_behavior_payload_wire_shape_is_pinned() {
+        use crate::debug::payload::{
+            EntityBehaviorEntry, EntityBehaviorPayload, DEBUG_SCHEMA_VERSION,
+        };
+        let payload = EntityBehaviorPayload {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            entries: vec![EntityBehaviorEntry {
+                name: "Aurora".into(),
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+                target: "none".into(),
+            }],
+        };
+        let json = crate::core::codec::encode_entity_behavior(&payload);
+        assert_eq!(
+            json,
+            r#"{"schema_version":1,"entries":[{"name":"Aurora","x":1.0,"y":2.0,"z":3.0,"target":"none"}]}"#,
+            "the entity-behavior JSON shape must match gui/debug-overlays.js"
+        );
+        let decoded: EntityBehaviorPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn entity_inspector_payload_wire_shape_is_pinned() {
+        use crate::debug::payload::{
+            EntityInspectorPayload, InspectorEntity, InspectorHullEntry, InspectorPlayer,
+            InspectorShieldFacing, DEBUG_SCHEMA_VERSION,
+        };
+        let payload = EntityInspectorPayload {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            player: Some(InspectorPlayer {
+                x: 10.0,
+                z: 20.0,
+                hull: vec![InspectorHullEntry {
+                    system: "core".into(),
+                    current: 50.0,
+                    max: 100.0,
+                }],
+                shields: vec![InspectorShieldFacing {
+                    label: "Fore".into(),
+                    hp: 20,
+                    max_hp: 40,
+                    offline: false,
+                    focused: true,
+                }],
+            }),
+            entities: vec![InspectorEntity {
+                name: "Scout".into(),
+                tags: vec!["ship".into()],
+                x: 13.0,
+                z: 24.0,
+                distance: 5.0,
+                faction: Some("Hostiles".into()),
+                hull_current: Some(30.0),
+                hull_max: Some(60.0),
+                comms_hailable: Some(true),
+                comms_in_range: Some(true),
+                comms_range: Some(500.0),
+                ai_target: Some("none".into()),
+            }],
+        };
+        let json = crate::core::codec::encode_entity_inspector(&payload);
+        assert_eq!(
+            json,
+            r#"{"schema_version":1,"player":{"x":10.0,"z":20.0,"hull":[{"system":"core","current":50.0,"max":100.0}],"shields":[{"label":"Fore","hp":20,"max_hp":40,"offline":false,"focused":true}]},"entities":[{"name":"Scout","tags":["ship"],"x":13.0,"z":24.0,"distance":5.0,"faction":"Hostiles","hull_current":30.0,"hull_max":60.0,"comms_hailable":true,"comms_in_range":true,"comms_range":500.0,"ai_target":"none"}]}"#,
+            "the entity-inspector JSON shape must match gui/debug-overlays.js"
+        );
+        let decoded: EntityInspectorPayload = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, payload);
     }
 

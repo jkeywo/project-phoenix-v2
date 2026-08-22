@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use std::collections::VecDeque;
 
 use crate::entities::spawner::RegionShapeSection;
-use crate::modifiers::ShipModifiers;
 use crate::regions::shape::RegionShape;
 
 /// Resource indicating whether debug region wireframes are enabled.
@@ -69,24 +68,11 @@ impl DamageLog {
         }
     }
 
-    /// Format the log as a multi-line string for display.
-    pub fn format(&self) -> String {
-        if self.entries.is_empty() {
-            return "(no damage)".to_string();
-        }
-        let mut out = String::from("DAMAGE LOG (newest first)\n");
-        for (i, e) in self.entries.iter().enumerate() {
-            let arc = e.shield_arc.as_deref().unwrap_or("—");
-            out.push_str(&format!(
-                "{:>2}. {:<24} arc={:<10} dmg={:.1}\n",
-                i + 1,
-                e.source,
-                arc,
-                e.amount
-            ));
-        }
-        out
-    }
+    // The pre-formatted `format` text stream was retired by issue #1150: the
+    // damage surface is now a structured serde-JSON payload projected from this
+    // ring buffer by `crate::debug::damage::project_damage`. This resource stays
+    // the always-on data source (damage sites push to it every tick); only its
+    // text rendering moved onto the debug pipeline.
 }
 
 // ── The phone client's settings route (issue #940) ──────────────────────────
@@ -384,22 +370,15 @@ impl Plugin for DebugOverlayPlugin {
                 draw_region_wireframes.run_if(|r: Res<DebugRegionsEnabled>| r.0),
             );
         }
-        app.add_systems(
-            PostUpdate,
-            write_debug_state.run_if(|r: Res<DebugOverlayEnabled>| r.0),
-        );
-        app.add_systems(
-            PostUpdate,
-            write_damage_log.run_if(|r: Res<DebugDamageEnabled>| r.0),
-        );
-        app.add_systems(
-            PostUpdate,
-            write_entity_debug_state.run_if(|r: Res<DebugEntitiesEnabled>| r.0),
-        );
-        app.add_systems(
-            PostUpdate,
-            update_entity_inspector.run_if(|r: Res<DebugEntityInspectorEnabled>| r.0),
-        );
+        // The modifier / damage / entity-behavior / entity-inspector OUTPUTS no
+        // longer emit here. As of issue #1150 (PRD #1144) each is a structured
+        // serde-JSON payload published on the debug pipeline by `crate::debug`'s
+        // per-surface `publish_*` system (added by `DebugPlugin`), retiring the
+        // pre-formatted-text path that used to live in this plugin — "one debug
+        // system at the end, not two". This plugin keeps only what stayed text or
+        // gizmo: the region wireframes above and the enabled-flag resources it
+        // owns; the phone settings route (`report_debug_state` and the drains)
+        // is registered in `server_app`.
     }
 }
 
@@ -434,281 +413,6 @@ pub fn is_playwright_automation() -> bool {
 
 fn should_install_region_wireframes() -> bool {
     !is_playwright_automation()
-}
-
-/// Reads `ShipModifiers` from the LocalShip entity and writes the formatted
-/// debug text to the WASM thread-local `DEBUG_STATE_STRING`.
-///
-/// Only runs when `DebugOverlayEnabled` is true.
-#[cfg(all(target_arch = "wasm32", feature = "server"))]
-fn write_debug_state(modifiers_q: Query<&ShipModifiers, With<crate::server_app::LocalShip>>) {
-    if let Some(modifiers) = modifiers_q.iter().next() {
-        let text = modifiers.format_debug();
-        crate::server::bridge::set_debug_state_string(text);
-    }
-}
-
-/// Native / test stub — does nothing (no thread-locals available outside WASM).
-#[cfg(not(all(target_arch = "wasm32", feature = "server")))]
-fn write_debug_state(_modifiers_q: Query<&ShipModifiers, With<crate::server_app::LocalShip>>) {}
-
-/// Reads the `DamageLog` resource and writes the formatted text to the WASM
-/// thread-local `DAMAGE_LOG_STRING` for the damage overlay.
-///
-/// Only runs when `DebugDamageEnabled` is true.
-#[cfg(all(target_arch = "wasm32", feature = "server"))]
-fn write_damage_log(log: Res<DamageLog>) {
-    let text = log.format();
-    crate::server::bridge::set_damage_log_string(text);
-}
-
-/// Native / test stub — does nothing.
-#[cfg(not(all(target_arch = "wasm32", feature = "server")))]
-fn write_damage_log(_log: Res<DamageLog>) {}
-
-/// Reads all entities with `BehaviourSection` (i.e. AI-driven NPCs) and writes a
-/// formatted table (name, position, current state) to the WASM thread-local for
-/// the entity behavior overlay.
-///
-/// Only runs when `DebugEntitiesEnabled` is true.
-#[cfg(all(target_arch = "wasm32", feature = "server"))]
-fn write_entity_debug_state(
-    entities: Query<(
-        &crate::entities::spawner::BehaviourSection,
-        &Transform,
-        Option<&crate::entities::spawner::EntityName>,
-        Option<&crate::console::weapons::TacticalRadarSelection>,
-    )>,
-) {
-    let count = entities.iter().count();
-    let mut out = format!("ENTITY BEHAVIOR ({} entities)\n", count);
-    for (i, (_ai, transform, name, memory)) in entities.iter().enumerate() {
-        let label = name.map(|n| n.0.as_str()).unwrap_or("<unnamed>");
-        let p = transform.translation;
-        // The ship's authoritative Tactical lock (issue #702). Was
-        // `ShipAiMemory.target`, a private mirror that could disagree with what
-        // the ship was actually shooting — so the overlay could report a target
-        // the ship had not selected.
-        let target_str = memory
-            .and_then(|t| t.0.clone())
-            .unwrap_or_else(|| "none".to_string());
-        out.push_str(&format!(
-            "{:>2}. {:<20} pos=({:>7.1},{:>7.1},{:>7.1})  target={}\n",
-            i + 1,
-            label,
-            p.x,
-            p.y,
-            p.z,
-            target_str
-        ));
-    }
-    crate::server::bridge::set_entity_debug_string(out);
-}
-
-/// Native / test stub — does nothing.
-#[cfg(not(all(target_arch = "wasm32", feature = "server")))]
-fn write_entity_debug_state(
-    _entities: Query<(
-        &crate::entities::spawner::BehaviourSection,
-        &Transform,
-        Option<&crate::entities::spawner::EntityName>,
-        Option<&crate::console::weapons::TacticalRadarSelection>,
-    )>,
-) {
-}
-
-/// Reads all non-asteroid entities plus the player ship resources and writes a
-/// formatted entity inspector block to the WASM thread-local.
-///
-/// Displays: name, tags, position, distance from player, faction name, hull HP,
-/// shield arcs (player ship only), comms hailability, and AI state.
-///
-/// Only runs when `DebugEntityInspectorEnabled` is true.
-#[cfg(all(target_arch = "wasm32", feature = "server"))]
-fn update_entity_inspector(
-    entities: Query<
-        (
-            &Transform,
-            &crate::entities::spawner::EntityName,
-            Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::comms::component::CommsRange>,
-            Option<&crate::console::weapons::TacticalRadarSelection>,
-            &crate::entities::spawner::EntityTagsSection,
-        ),
-        bevy::ecs::query::Without<crate::server_app::Asteroid>,
-    >,
-    ship_physics_q: Query<&crate::ship::state::ShipPhysics, With<crate::server_app::LocalShip>>,
-    player_hull_q: Query<
-        &crate::entities::spawner::EntitySystemHull,
-        With<crate::server_app::LocalShip>,
-    >,
-    ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
-    faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,
-) {
-    let Ok(ship_shields) = ship_shields_q.single() else {
-        return;
-    };
-    let ship_phys = ship_physics_q.single().ok().copied().unwrap_or_default();
-    let player_x = ship_phys.x;
-    let player_z = ship_phys.z;
-
-    let mut out = String::from("ENTITY INSPECTOR\n");
-    out.push_str("────────────────────────────────────────────────────────────\n");
-
-    // ── Player ship ────────────────────────────────────────────────────────
-    out.push_str(&format!(
-        "[Player Ship]  pos=({:>8.1}, {:>8.1})\n",
-        player_x, player_z
-    ));
-
-    // Per-system hull from the LocalShip's EntitySystemHull component.
-    let hull_entries: Vec<(crate::core::messages::SystemId, f32, f32)> = player_hull_q
-        .single()
-        .map(|h| {
-            h.0.entries()
-                .map(|(sid, cur, max)| (sid.clone(), cur, max))
-                .collect()
-        })
-        .unwrap_or_default();
-    if hull_entries.is_empty() {
-        out.push_str("  hull: n/a\n");
-    } else {
-        out.push_str("  hull:");
-        for (sid, cur, max) in &hull_entries {
-            out.push_str(&format!("  {} {}/{}", sid.0, *cur as i32, *max as i32));
-        }
-        out.push('\n');
-    }
-
-    // Per-arc shields
-    let facings = &ship_shields.0.facings;
-    if facings.is_empty() {
-        out.push_str("  shields: n/a\n");
-    } else {
-        out.push_str("  shields:");
-        for f in facings {
-            let pct = if f.max_hp > 0 {
-                (f.hp as f32 / f.max_hp as f32 * 100.0) as i32
-            } else {
-                0
-            };
-            let status = if f.offline_remaining > 0.0 {
-                " [OFFLINE]"
-            } else {
-                ""
-            };
-            let focus = if f.is_focused { "*" } else { "" };
-            out.push_str(&format!(
-                "  {}{} {}/{} ({}%){}",
-                focus, f.label, f.hp, f.max_hp, pct, status
-            ));
-        }
-        out.push('\n');
-    }
-
-    out.push_str("────────────────────────────────────────────────────────────\n");
-
-    // ── World entities ─────────────────────────────────────────────────────
-    let mut sorted: Vec<_> = entities.iter().collect();
-    // Sort by distance from player for readability
-    sorted.sort_by(|a, b| {
-        let da = {
-            let p = a.0.translation;
-            let dx = p.x - player_x;
-            let dz = p.z - player_z;
-            dx * dx + dz * dz
-        };
-        let db = {
-            let p = b.0.translation;
-            let dx = p.x - player_x;
-            let dz = p.z - player_z;
-            dx * dx + dz * dz
-        };
-        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    for (i, (transform, name, hull, faction_comp, comms_range, ai, tags)) in
-        sorted.iter().enumerate()
-    {
-        let p = transform.translation;
-        let dx = p.x - player_x;
-        let dz = p.z - player_z;
-        let dist = (dx * dx + dz * dz).sqrt();
-
-        let tag_list = tags.0.join(", ");
-        out.push_str(&format!("{:>2}. {}  [{}]\n", i + 1, name.0, tag_list));
-        out.push_str(&format!(
-            "    pos=({:>8.1}, {:>8.1})  dist={:>7.1}u\n",
-            p.x, p.z, dist
-        ));
-
-        // Faction
-        if let Some(fc) = faction_comp {
-            let faction_name = faction_registry
-                .0
-                .get(&fc.0)
-                .map(|f| f.name.as_str())
-                .unwrap_or("<unknown>");
-            out.push_str(&format!("    faction: {}\n", faction_name));
-        }
-
-        // Hull
-        if let Some(h) = hull {
-            let cur = h.0.total_current();
-            let max = h.0.total_max();
-            let pct = if max > 0.0 {
-                (cur / max * 100.0) as i32
-            } else {
-                0
-            };
-            out.push_str(&format!(
-                "    hull: {}/{} ({}%)\n",
-                cur as i32, max as i32, pct
-            ));
-        }
-
-        // Comms
-        if let Some(range) = comms_range {
-            let in_range = dist <= range.0;
-            if in_range {
-                out.push_str("    comms: hailable (in range)\n");
-            } else {
-                out.push_str(&format!("    comms: hailable (range {:.0}u)\n", range.0));
-            }
-        }
-
-        // AI state
-        if let Some(target) = ai {
-            out.push_str(&format!(
-                "    ai: target={}\n",
-                target.0.clone().unwrap_or_else(|| "none".to_string())
-            ));
-        }
-    }
-
-    out.push_str("────────────────────────────────────────────────────────────\n");
-    crate::server::bridge::set_entity_inspector_string(out);
-}
-
-/// Native / test stub — does nothing.
-#[cfg(not(all(target_arch = "wasm32", feature = "server")))]
-fn update_entity_inspector(
-    _entities: Query<
-        (
-            &Transform,
-            &crate::entities::spawner::EntityName,
-            Option<&crate::entities::spawner::EntitySystemHull>,
-            Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::comms::component::CommsRange>,
-            Option<&crate::console::weapons::TacticalRadarSelection>,
-            &crate::entities::spawner::EntityTagsSection,
-        ),
-        bevy::ecs::query::Without<crate::server_app::Asteroid>,
-    >,
-    _ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
-    _faction_registry: Res<crate::entities::config_cache::FactionRegistryResource>,
-) {
 }
 
 /// Draws wireframe outlines for every region entity with a shape component.
@@ -878,7 +582,6 @@ mod tests {
     fn damage_log_starts_empty() {
         let log = DamageLog::default();
         assert!(log.entries.is_empty());
-        assert_eq!(log.format(), "(no damage)");
     }
 
     #[test]
@@ -907,20 +610,11 @@ mod tests {
         assert_eq!(log.entries[DAMAGE_LOG_CAPACITY - 1].source, "s5");
     }
 
-    #[test]
-    fn damage_log_format_includes_source_arc_and_amount() {
-        let mut log = DamageLog::default();
-        log.push(entry("asteroid-42", Some("Fore"), 12.5));
-        log.push(entry("region-zone", None, 3.0));
-        let text = log.format();
-        assert!(text.contains("region-zone"));
-        assert!(text.contains("asteroid-42"));
-        assert!(text.contains("Fore"));
-        assert!(text.contains("12.5"));
-        assert!(text.contains("3.0"));
-        // None arc renders as em-dash placeholder
-        assert!(text.contains("—"));
-    }
+    // `damage_log_format_includes_source_arc_and_amount` retired with
+    // `DamageLog::format` (issue #1150). The same facts — source, arc and
+    // amount surviving into the surface, newest first — are now pinned on the
+    // structured projection by
+    // `crate::debug::damage::tests::projection_preserves_newest_first_order_and_facts`.
 
     #[test]
     fn debug_damage_disabled_by_default() {

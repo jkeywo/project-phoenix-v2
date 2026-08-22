@@ -300,24 +300,28 @@ thread_local! {
     /// [`RESTORE_DEADLINE_FRAMES`].
     static RESTORE_WAITED: RefCell<u32> = const { RefCell::new(0) };
 
-    /// Pre-formatted modifier debug text written by `write_debug_state` each
-    /// `PostUpdate` frame when the overlay is enabled. Read by
-    /// `wasm_get_debug_state()` from JS.
+    /// Modifier debug payload as JSON (issue #1150), written by
+    /// `debug::modifiers::publish_modifier_debug` each `PostUpdate` frame when
+    /// the surface is enabled. Read by `wasm_get_debug_state()` from JS; the dock
+    /// parses it and renders the three modifier sections rather than printing it.
     static DEBUG_STATE_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
-    /// Pre-formatted damage-log text written by `write_damage_log` each
-    /// `PostUpdate` frame when the damage overlay is enabled. Read by
-    /// `wasm_get_damage_log()` from JS.
+    /// Damage-log debug payload as JSON (issue #1150), written by
+    /// `debug::damage::publish_damage_debug` each `PostUpdate` frame when the
+    /// surface is enabled. Read by `wasm_get_damage_log()` from JS; the dock
+    /// parses and renders it.
     static DAMAGE_LOG_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
-    /// Pre-formatted entity behavior text written by `write_entity_debug_state`
-    /// each `PostUpdate` frame when the overlay is enabled. Read by
-    /// `wasm_get_entity_debug_state()` from JS.
+    /// Entity-behavior debug payload as JSON (issue #1150), written by
+    /// `debug::entities::publish_entity_behavior_debug` each `PostUpdate` frame
+    /// when the surface is enabled. Read by `wasm_get_entity_debug_state()` from
+    /// JS; the dock parses and renders it.
     static ENTITY_DEBUG_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
-    /// Pre-formatted entity inspector text written by `update_entity_inspector`
-    /// each `PostUpdate` frame when the overlay is enabled. Read by
-    /// `wasm_get_entity_inspector()` from JS.
+    /// Entity-inspector debug payload as JSON (issue #1150), written by
+    /// `debug::inspector::publish_entity_inspector_debug` each `PostUpdate` frame
+    /// when the surface is enabled. Read by `wasm_get_entity_inspector()` from
+    /// JS; the dock parses and renders it.
     static ENTITY_INSPECTOR_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
     /// The station-activity debug payload as JSON (issue #1145), written by
@@ -1525,31 +1529,33 @@ pub fn wasm_toggle_debug_damage() {
     });
 }
 
-/// Called by JS each animation frame to read the latest formatted modifier
-/// debug state when the overlay is visible.
+/// Called by JS each animation frame to read the latest modifier debug payload
+/// as JSON while the surface is visible (issue #1150). The dock parses it and
+/// renders the modifier sections; empty until the first publish.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_debug_state() -> String {
     DEBUG_STATE_STRING.with(|v| v.borrow().clone())
 }
 
-/// Called by the Bevy `write_debug_state` system to update the debug state
-/// string that JS reads via `wasm_get_debug_state()`.
+/// Called by the Bevy `debug::modifiers::publish_modifier_debug` system to update
+/// the modifier debug JSON that JS reads via `wasm_get_debug_state()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_debug_state_string(text: String) {
     DEBUG_STATE_STRING.with(|v| *v.borrow_mut() = text);
 }
 
-/// Called by JS each animation frame to read the latest damage log text when
-/// the damage overlay is visible.
+/// Called by JS each animation frame to read the latest damage-log payload as
+/// JSON while the surface is visible (issue #1150). The dock parses and renders
+/// it; empty until the first publish.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_damage_log() -> String {
     DAMAGE_LOG_STRING.with(|v| v.borrow().clone())
 }
 
-/// Called by the Bevy `write_damage_log` system to update the damage log
-/// string that JS reads via `wasm_get_damage_log()`.
+/// Called by the Bevy `debug::damage::publish_damage_debug` system to update the
+/// damage-log JSON that JS reads via `wasm_get_damage_log()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_damage_log_string(text: String) {
     DAMAGE_LOG_STRING.with(|v| *v.borrow_mut() = text);
@@ -1568,16 +1574,17 @@ pub fn wasm_toggle_debug_entities() {
     });
 }
 
-/// Called by JS each animation frame to read the latest entity behavior debug
-/// text when the overlay is visible.
+/// Called by JS each animation frame to read the latest entity-behavior payload
+/// as JSON while the surface is visible (issue #1150). The dock parses and
+/// renders it; empty until the first publish.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_entity_debug_state() -> String {
     ENTITY_DEBUG_STRING.with(|v| v.borrow().clone())
 }
 
-/// Called by the Bevy `write_entity_debug_state` system to update the entity
-/// debug string that JS reads via `wasm_get_entity_debug_state()`.
+/// Called by the Bevy `debug::entities::publish_entity_behavior_debug` system to
+/// update the entity-behavior JSON that JS reads via `wasm_get_entity_debug_state()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_entity_debug_string(text: String) {
     ENTITY_DEBUG_STRING.with(|v| *v.borrow_mut() = text);
@@ -1596,16 +1603,17 @@ pub fn wasm_toggle_entity_inspector() {
     });
 }
 
-/// Called by JS each animation frame to read the latest entity inspector text
-/// when the overlay is visible.
+/// Called by JS each animation frame to read the latest entity-inspector payload
+/// as JSON while the surface is visible (issue #1150). The dock parses and
+/// renders it; empty until the first publish.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_entity_inspector() -> String {
     ENTITY_INSPECTOR_STRING.with(|v| v.borrow().clone())
 }
 
-/// Called by the Bevy `update_entity_inspector` system to update the entity
-/// inspector string that JS reads via `wasm_get_entity_inspector()`.
+/// Called by the Bevy `debug::inspector::publish_entity_inspector_debug` system
+/// to update the entity-inspector JSON that JS reads via `wasm_get_entity_inspector()`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_entity_inspector_string(text: String) {
     ENTITY_INSPECTOR_STRING.with(|v| *v.borrow_mut() = text);

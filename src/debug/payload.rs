@@ -190,6 +190,48 @@ impl Default for AiStatePayload {
     }
 }
 
+// ── Damage-log surface (issue #1150) ─────────────────────────────────────────
+//
+// The structured form of the legacy `debug_overlay::DamageLog::format` text
+// stream. The always-on ring buffer (`debug_overlay::DamageLog`) is the data
+// source — the analogue of `AdmittedCommands` for the station-activity surface
+// — and this payload is a read-only projection of it, newest event first.
+
+/// One recorded damage event.
+///
+/// The wire form of a `debug_overlay::DamageLogEntry`. `shield_arc` is `None`
+/// when shields were bypassed or absent (the legacy text rendered that as an
+/// em-dash); the dock decides how to show the absence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DamageEntry {
+    /// Human-readable damage source (asteroid uuid, region uuid, weapon name).
+    pub source: String,
+    /// Shield arc label hit, or `None` when shields were bypassed / absent.
+    pub shield_arc: Option<String>,
+    /// Total damage amount before shield absorption (hull + shield combined).
+    pub amount: f32,
+}
+
+/// The damage surface's whole payload: the recent damage events, newest first.
+///
+/// Not `Eq`: `DamageEntry::amount` is an `f32`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DamageDebugPayload {
+    /// [`DEBUG_SCHEMA_VERSION`] at the time the host produced this payload.
+    pub schema_version: u32,
+    /// Recent damage events, newest first (the ring buffer's own order).
+    pub entries: Vec<DamageEntry>,
+}
+
+impl Default for DamageDebugPayload {
+    fn default() -> Self {
+        Self {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            entries: Vec::new(),
+        }
+    }
+}
+
 // ── Scenario-state surface (issue #1148) ────────────────────────────────────
 //
 // A read-only projection of the running scenario's working state — the flags
@@ -450,6 +492,93 @@ impl Default for ScenarioStatePayload {
     }
 }
 
+// ── Modifier surface (issue #1150) ───────────────────────────────────────────
+//
+// The structured form of the legacy `ShipModifiers::format_debug` text stream,
+// for the LocalShip. Three labelled sections — flags, float modifiers, integer
+// modifiers — each an entry list sorted by name so the JSON is deterministic
+// (convention 4). Built by `crate::modifiers::ShipModifiers::debug_payload`,
+// which owns the private-field access the projection needs.
+
+/// One active boolean modifier flag and the sources that set it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModifierFlagEntry {
+    /// The `FlagKind` name (its `Debug` spelling).
+    pub flag: String,
+    /// The sources holding this flag active, sorted.
+    pub sources: Vec<String>,
+}
+
+/// One source's additive bonus to a float modifier slot.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FloatContribution {
+    /// The rendered `ModifierSource` (e.g. `PowerGroup(helm)`, `Region(1a2b3c4d)`).
+    pub source: String,
+    /// The additive bonus this source contributes (positive buff, negative debuff).
+    pub bonus: f32,
+}
+
+/// One float modifier slot: its computed multiplier and per-source breakdown.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FloatModifierEntry {
+    /// The `ModifierSlot` name (its `Debug` spelling).
+    pub slot: String,
+    /// The cached multiplier the simulation applies for this slot.
+    pub multiplier: f32,
+    /// Per-source additive contributions, sorted by rendered source.
+    pub contributions: Vec<FloatContribution>,
+}
+
+/// One source's additive bonus to an integer modifier slot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntContribution {
+    /// The rendered `ModifierSource`.
+    pub source: String,
+    /// The additive integer bonus this source contributes.
+    pub bonus: i32,
+}
+
+/// One integer modifier slot: its summed total and per-source breakdown.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntModifierEntry {
+    /// The `IntModifierSlot` name (its `Debug` spelling).
+    pub slot: String,
+    /// The summed total across all active sources.
+    pub sum: i32,
+    /// Per-source additive contributions, sorted by rendered source.
+    pub contributions: Vec<IntContribution>,
+}
+
+/// The modifier surface's whole payload for the LocalShip.
+///
+/// Every section is empty when the LocalShip has no modifiers, or when there is
+/// no LocalShip at all (a headless run) — the payload is always produced so the
+/// dock and the determinism guard have something to read.
+///
+/// Not `Eq`: `FloatModifierEntry::multiplier` is an `f32`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModifierDebugPayload {
+    /// [`DEBUG_SCHEMA_VERSION`] at the time the host produced this payload.
+    pub schema_version: u32,
+    /// Active boolean flags, sorted by flag name.
+    pub flags: Vec<ModifierFlagEntry>,
+    /// Active float modifier slots, sorted by slot name.
+    pub float_modifiers: Vec<FloatModifierEntry>,
+    /// Active integer modifier slots, sorted by slot name.
+    pub int_modifiers: Vec<IntModifierEntry>,
+}
+
+impl Default for ModifierDebugPayload {
+    fn default() -> Self {
+        Self {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            flags: Vec::new(),
+            float_modifiers: Vec::new(),
+            int_modifiers: Vec::new(),
+        }
+    }
+}
+
 /// One AI-controlled ship's doctrine-pool projection.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShipDoctrine {
@@ -514,6 +643,149 @@ impl ScenarioStatePayload {
     /// A version-stamped empty payload; the base the collector fills.
     pub fn empty() -> Self {
         Self::default()
+    }
+}
+
+// ── Entity-behavior surface (issue #1150) ────────────────────────────────────
+//
+// The structured form of the legacy `write_entity_debug_state` table: every
+// AI-driven entity's name, position and current Tactical lock. Sorted by name
+// so the JSON is deterministic regardless of ECS iteration order.
+
+/// One AI-driven entity's behavior row.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EntityBehaviorEntry {
+    /// The entity's display name, or `<unnamed>`.
+    pub name: String,
+    /// World position.
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    /// The ship's authoritative Tactical lock, or `none` (issue #702).
+    pub target: String,
+}
+
+/// The entity-behavior surface's whole payload.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EntityBehaviorPayload {
+    /// [`DEBUG_SCHEMA_VERSION`] at the time the host produced this payload.
+    pub schema_version: u32,
+    /// AI-driven entities, sorted by name.
+    pub entries: Vec<EntityBehaviorEntry>,
+}
+
+impl Default for EntityBehaviorPayload {
+    fn default() -> Self {
+        Self {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            entries: Vec::new(),
+        }
+    }
+}
+
+// ── Entity-inspector surface (issue #1150) ───────────────────────────────────
+//
+// The structured form of the legacy `update_entity_inspector` block: the player
+// ship's position, per-system hull and per-arc shields, plus every non-asteroid
+// world entity's name, tags, position, distance, faction, hull, comms
+// hailability and AI target. World entities are sorted by distance from the
+// player (then name) so the JSON is deterministic.
+
+/// One system's hull HP on the player ship.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InspectorHullEntry {
+    /// The `SystemId` string.
+    pub system: String,
+    /// Current hull HP.
+    pub current: f32,
+    /// Maximum hull HP.
+    pub max: f32,
+}
+
+/// One shield arc's state on the player ship.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InspectorShieldFacing {
+    /// The arc label (e.g. `Fore`, `Port`).
+    pub label: String,
+    /// Current arc HP.
+    pub hp: i32,
+    /// Maximum arc HP.
+    pub max_hp: i32,
+    /// Whether the arc is currently offline (recovering).
+    pub offline: bool,
+    /// Whether this arc is the focused (reinforced) one.
+    pub focused: bool,
+}
+
+/// The player ship's inspector block.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InspectorPlayer {
+    /// Planar position.
+    pub x: f32,
+    pub z: f32,
+    /// Per-system hull, in the ship's declared system order.
+    pub hull: Vec<InspectorHullEntry>,
+    /// Per-arc shields.
+    pub shields: Vec<InspectorShieldFacing>,
+}
+
+/// One inspected world entity.
+///
+/// The optional fields mirror the legacy overlay, which only printed a line when
+/// the matching component was present: `faction` iff the entity had a faction,
+/// the `hull_*` pair iff it had hull, the `comms_*` trio iff it had a comms
+/// range, `ai_target` iff it carried a Tactical selection (its value is `none`
+/// when the selection is empty).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InspectorEntity {
+    /// The entity's display name.
+    pub name: String,
+    /// The entity's tags.
+    pub tags: Vec<String>,
+    /// Planar position.
+    pub x: f32,
+    pub z: f32,
+    /// Distance from the player ship.
+    pub distance: f32,
+    /// Faction display name, if the entity has a faction.
+    pub faction: Option<String>,
+    /// Current total hull, if the entity has hull.
+    pub hull_current: Option<f32>,
+    /// Maximum total hull, if the entity has hull.
+    pub hull_max: Option<f32>,
+    /// Whether the entity is hailable, if it has a comms range (always `true`
+    /// today — the presence of a range is what makes it hailable).
+    pub comms_hailable: Option<bool>,
+    /// Whether the player is within comms range, if the entity has one.
+    pub comms_in_range: Option<bool>,
+    /// The entity's comms range, if it has one.
+    pub comms_range: Option<f32>,
+    /// The entity's Tactical lock (`none` when empty), if it carries one.
+    pub ai_target: Option<String>,
+}
+
+/// The entity-inspector surface's whole payload.
+///
+/// `player` is `None` when there is no LocalShip (a headless run); `entities`
+/// is still produced. The payload is always emitted so the dock and the
+/// determinism guard have something to read.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EntityInspectorPayload {
+    /// [`DEBUG_SCHEMA_VERSION`] at the time the host produced this payload.
+    pub schema_version: u32,
+    /// The player ship block, if a LocalShip exists.
+    pub player: Option<InspectorPlayer>,
+    /// World entities, sorted by distance from the player (then name).
+    pub entities: Vec<InspectorEntity>,
+}
+
+impl Default for EntityInspectorPayload {
+    fn default() -> Self {
+        Self {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            player: None,
+            entities: Vec::new(),
+        }
     }
 }
 

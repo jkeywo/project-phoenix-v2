@@ -23,6 +23,10 @@
 //! overlays do; the counters, being invisible and inert to the sim, stay.
 
 pub mod ai_state;
+pub mod damage;
+pub mod entities;
+pub mod inspector;
+pub mod modifiers;
 pub mod payload;
 pub mod scenario;
 pub mod station_activity;
@@ -31,15 +35,24 @@ use bevy::prelude::*;
 
 pub use ai_state::{AiDoctrineCapture, DebugAiDoctrineEnabled};
 pub use payload::{
-    ActivitySource, AiStatePayload, DoctrineCandidate, DoctrineChoice, PredicateValue,
-    ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction, ScenarioDossierEntry, ScenarioFlag,
-    ScenarioObjective, ScenarioStatePayload, ScenarioTrigger, ShipDoctrine, StationActivityBucket,
-    StationActivityEntry, StationActivityPayload, TriggerFire, DEBUG_SCHEMA_VERSION,
+    ActivitySource, AiStatePayload, DamageDebugPayload, DamageEntry, DoctrineCandidate,
+    DoctrineChoice, EntityBehaviorEntry, EntityBehaviorPayload, EntityInspectorPayload,
+    FloatContribution, FloatModifierEntry, InspectorEntity, InspectorHullEntry, InspectorPlayer,
+    InspectorShieldFacing, IntContribution, IntModifierEntry, ModifierDebugPayload,
+    ModifierFlagEntry, PredicateValue, ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction,
+    ScenarioDossierEntry, ScenarioFlag, ScenarioObjective, ScenarioStatePayload, ScenarioTrigger,
+    ShipDoctrine, StationActivityBucket, StationActivityEntry, StationActivityPayload, TriggerFire,
+    DEBUG_SCHEMA_VERSION,
 };
 pub use scenario::{DebugScenarioStateEnabled, ScenarioStateCapture, TriggerFireRecorder};
 pub use station_activity::{
     DebugStationActivityEnabled, StationActivityCapture, StationActivityTracker,
 };
+
+pub use damage::DamageDebugCapture;
+pub use entities::EntityBehaviorCapture;
+pub use inspector::EntityInspectorCapture;
+pub use modifiers::ModifierDebugCapture;
 
 /// Wires the always-on debug counters and their flag-gated JSON publish into the
 /// simulation app on every target (issue #1145).
@@ -65,6 +78,16 @@ impl Plugin for DebugPlugin {
             .init_resource::<ScenarioStateCapture>()
             .init_resource::<TriggerFireRecorder>();
 
+        // The four legacy-overlay capture sinks (issue #1150). Each is the
+        // target-agnostic JSON home for one migrated surface, the analogue of
+        // `StationActivityCapture`. `None` until the flag-gated publish first
+        // runs; on the browser host the publish ALSO feeds a WASM bridge
+        // thread-local the dock reads.
+        app.init_resource::<ModifierDebugCapture>()
+            .init_resource::<DamageDebugCapture>()
+            .init_resource::<EntityBehaviorCapture>()
+            .init_resource::<EntityInspectorCapture>();
+
         // The observability surfaces are read-only projections nothing in the
         // fixed tick reads back, so they are digest EXCLUSIONS, not authoritative
         // state — see `crate::authoritative` and the enumeration guard.
@@ -87,7 +110,11 @@ impl Plugin for DebugPlugin {
         // The trigger-fire recorder (issue #1151): a read-only projection nothing
         // in the fixed tick reads back, so it is a digest EXCLUSION exactly like
         // the scenario capture it accompanies.
-        .declare_state::<TriggerFireRecorder>(StateClass::Presentation, "debug-scenario-state");
+        .declare_state::<TriggerFireRecorder>(StateClass::Presentation, "debug-scenario-state")
+        .declare_state::<ModifierDebugCapture>(StateClass::Presentation, "debug-legacy-overlays")
+        .declare_state::<DamageDebugCapture>(StateClass::Presentation, "debug-legacy-overlays")
+        .declare_state::<EntityBehaviorCapture>(StateClass::Presentation, "debug-legacy-overlays")
+        .declare_state::<EntityInspectorCapture>(StateClass::Presentation, "debug-legacy-overlays");
 
         // Counters: always-on, after the whole tick's admission has run (the
         // same window the unrouted-command lint observes), gated only on there
@@ -146,5 +173,24 @@ impl Plugin for DebugPlugin {
                 .run_if(in_state(crate::core::messages::GamePhase::InProgress))
                 .run_if(|flag: Res<DebugScenarioStateEnabled>| flag.0),
         );
+
+        // The four migrated legacy overlays (issue #1150). Each is a read-only
+        // projection published in `PostUpdate` — the schedule the retired text
+        // overlays ran in, after `Update`'s render sync has settled the
+        // `Transform`s the entity/inspector surfaces read. They run on every
+        // target so headless and the determinism guard get the same capture path.
+        //
+        // The flag-gate lives INSIDE each system (each takes its
+        // `debug_overlay` enabled flag as `Option<Res<..>>` and returns early
+        // when it is absent or off), not on a `run_if`: those flags are only
+        // inserted where `DebugOverlayPlugin` ran (the browser host), while a
+        // headless run merely declares them — so a `run_if` fetching the flag as
+        // `Res` could touch a resource that does not exist. The projections cost
+        // nothing when the flag is off, and the determinism guard inserts the
+        // flags to drive the publish deliberately.
+        app.add_systems(PostUpdate, modifiers::publish_modifier_debug);
+        app.add_systems(PostUpdate, damage::publish_damage_debug);
+        app.add_systems(PostUpdate, entities::publish_entity_behavior_debug);
+        app.add_systems(PostUpdate, inspector::publish_entity_inspector_debug);
     }
 }

@@ -2711,6 +2711,27 @@ mod tests {
         );
     }
 
+    /// `[global] trigger_fire_history_depth` (issue #1151): how many recent fires
+    /// the trigger-fire-history debug recorder keeps per trigger. Authored data,
+    /// not a Rust literal (AGENTS.md #11) — the serde default is the only
+    /// sanctioned hardcoded copy, and it IS the shipped tuning.
+    #[test]
+    fn parse_world_reads_the_trigger_fire_history_depth() {
+        let defaulted = parse_world("[global]\nseed = 7\n").expect("TOML should parse");
+        assert_eq!(
+            defaulted.global.trigger_fire_history_depth, 16,
+            "an omitted trigger_fire_history_depth falls back to sixteen fires"
+        );
+
+        let authored =
+            parse_world("[global]\ntrigger_fire_history_depth = 4\n").expect("TOML should parse");
+        assert_eq!(
+            authored.global.trigger_fire_history_depth, 4,
+            "an authored ring depth must be read verbatim — a scenario author sets \
+             how deep the fire history goes without touching Rust"
+        );
+    }
+
     /// `attacked_memory_secs` feeds straight into `now - last <
     /// attacked_memory_secs` in `objectives::attacked_recently` with no
     /// runtime clamp. TOML admits `nan`/`inf` as float literals, and IEEE 754

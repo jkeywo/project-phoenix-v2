@@ -244,6 +244,48 @@ pub struct ScenarioObjective {
     pub directive: AiDirective,
 }
 
+/// One atom of a trigger's `condition` / `when`, paired with the value the
+/// fire recorder observed for it at fire time (issue #1151).
+///
+/// The [`atom`](Self::atom) string quotes the SAME vocabulary
+/// [`ScenarioTrigger::condition`] / [`ScenarioTrigger::when`] render in — a
+/// `flag(ready)` in the `when` string reads back as a `flag(ready)` atom here —
+/// so an author reads a fire against the predicate they wrote. The
+/// [`value`](Self::value) is that atom's observed reading rendered to a string:
+/// `true` / `false` for a `flag(...)`, the counter reading (e.g. `5`) for a
+/// `counter(...)`, or `n/a` for an AI-policy `fact` / `history` atom that a world
+/// trigger's gate never uses and that carries no flag-store reading here.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PredicateValue {
+    /// The atom, rendered in the #1148 `condition` / `when` string vocabulary.
+    pub atom: String,
+    /// Its observed value at fire time, rendered as a string.
+    pub value: String,
+}
+
+/// One recorded trigger fire: when it fired, and the predicate atom values the
+/// recorder observed at that moment (issue #1151).
+///
+/// The bounded per-trigger fire ring pushes one of these each time a trigger
+/// fires, so an author can reconstruct why a beat fired early, late, or not at
+/// all: [`fired_secs`](Self::fired_secs) answers the timing question the
+/// `condition` poses (fired at 32.5s when the timer was authored for 30s), and
+/// [`predicate_values`](Self::predicate_values) answers why the `when` gate held
+/// (and which flag-referencing condition atom held) at that fire.
+///
+/// Not `Eq`: `fired_secs` is an `f32`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TriggerFire {
+    /// World-elapsed seconds at which the trigger fired — its
+    /// `last_fired_elapsed` at the recorded fire.
+    pub fired_secs: f32,
+    /// The flag-store atom values observed for this fire, drawn from the
+    /// trigger's flag-referencing `condition` atom (if any) first, then its
+    /// `when` gate's atoms in left-to-right tree order. Empty for a gateless
+    /// event/entity trigger, whose whole story is `fired_secs`.
+    pub predicate_values: Vec<PredicateValue>,
+}
+
 /// One trigger's pending state and current eligibility.
 ///
 /// "Eligibility" is two independent facts the author needs to tell a waiting
@@ -252,14 +294,15 @@ pub struct ScenarioObjective {
 /// HOLDS ([`when_holds`](Self::when_holds)). A beat that never fires despite its
 /// event arriving is usually a `when` that never became true.
 ///
-/// # Extension point for #1151
+/// # Fire history (#1151)
 ///
-/// Issue #1151 (trigger fire history with predicate values) adds a
-/// `fire_history: Vec<...>` field to THIS struct. It is a named-field struct
-/// precisely so that is additive — a new field with `#[serde(default)]` does not
-/// reshape the payload and does not bump [`DEBUG_SCHEMA_VERSION`]. The
-/// projector's rendered `condition` / `when` strings are already the vocabulary
-/// #1151's per-fire records quote predicate values against.
+/// [`fire_history`](Self::fire_history) is the bounded record of this trigger's
+/// recent fires with the predicate values observed at each. It is additive on
+/// #1148's schema — a new `#[serde(default)]` field that neither reshapes the
+/// payload nor bumps [`DEBUG_SCHEMA_VERSION`], so an older consumer, or a payload
+/// from a host that predates #1151, still deserialises. The projector's rendered
+/// `condition` / `when` strings are the vocabulary those per-fire records quote
+/// their predicate values against.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioTrigger {
     /// The authored trigger id, or `None` for an anonymous trigger.
@@ -286,6 +329,13 @@ pub struct ScenarioTrigger {
     /// World-elapsed seconds at which the trigger last fired, or `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_fired_secs: Option<f32>,
+    /// This trigger's recent fires with the predicate values observed at each
+    /// (issue #1151), oldest first, bounded per trigger. Empty when the trigger
+    /// has not fired since capture began. Always emitted (not skipped) so a
+    /// consumer always finds the field, even for a never-fired trigger; additive
+    /// and `#[serde(default)]` so a pre-#1151 payload without it still decodes.
+    #[serde(default)]
+    pub fire_history: Vec<TriggerFire>,
 }
 
 /// One action queued for deferred dispatch off a trigger's `action_delays`.

@@ -37,13 +37,17 @@
 
 use bevy::prelude::*;
 
+use crate::bounded_history::BoundedRing;
 use crate::debug::payload::{
-    ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction, ScenarioDossierEntry,
-    ScenarioFlag, ScenarioObjective, ScenarioStatePayload, ScenarioTrigger,
+    PredicateValue, ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction,
+    ScenarioDossierEntry, ScenarioFlag, ScenarioObjective, ScenarioStatePayload, ScenarioTrigger,
+    TriggerFire,
 };
 use crate::objectives::ObjectiveManager;
-use crate::world::config::{TriggerAction, TriggerCondition};
-use crate::world::flags::{CmpOp, FactContext, FlagStore, Operand, Predicate};
+use crate::world::config::{TriggerAction, TriggerCondition, WorldConfig};
+use crate::world::flags::{
+    counter_in_chain, flag_in_chain, CmpOp, FactContext, FlagStore, Operand, Predicate,
+};
 use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
 
 /// Whether the scenario-state debug output is being rendered (issue #1148).
@@ -66,9 +70,229 @@ pub struct DebugScenarioStateEnabled(pub bool);
 #[derive(Resource, Default, Debug)]
 pub struct ScenarioStateCapture(pub Option<String>);
 
+/// Ring-depth fallback when no world config authors one (issue #1151). The only
+/// sanctioned hardcoded copy is the config serde default
+/// (`[global] trigger_fire_history_depth`, AGENTS.md #11); this mirrors it for a
+/// bare-`App` fixture that registered no `WorldConfig`.
+const DEFAULT_FIRE_HISTORY_DEPTH: usize = 16;
+
+/// The value recorded for a predicate atom that carries no flag-store reading in
+/// the world-trigger context — an AI-policy `fact` / `history` atom a world
+/// `when` gate never uses. The extractor stays total (it can quote any
+/// predicate) without inventing a reading the world context does not have.
+const FIRE_VALUE_UNAVAILABLE: &str = "n/a";
+
+/// The bounded per-trigger record of recent trigger fires with the predicate
+/// values observed at each (issue #1151).
+///
+/// # A read-only projection, never authoritative state
+///
+/// Declared `StateClass::Presentation` at `DebugPlugin::build`, exactly like the
+/// scenario capture and the station-activity counters, so `world_digest` never
+/// folds it. [`record_trigger_fires`] reads the authoritative
+/// [`WorldContentRuntime`] by `Res` (never `ResMut`) and writes ONLY here, so
+/// recording fire history cannot move the sim or its #894 digest whether capture
+/// is on or off — proven by `tests/scenario_state.rs`.
+///
+/// # How a fire is detected without touching authoritative state
+///
+/// The recorder cannot live in `TriggerState` (that is folded into the digest),
+/// so it detects fires by DIFFING each trigger's authoritative
+/// `last_fired_elapsed` against the value it saw last tick: a change to a new
+/// `Some(..)` is a new fire (once-only `None→Some`, or a `repeat` re-fire whose
+/// elapsed advanced). A trigger reset (`Some→None`) is not a fire. The
+/// `observed` guard means a trigger that fired BEFORE capture began is not
+/// mis-recorded as firing on the first captured tick.
+///
+/// The records are parallel to `WorldContentRuntime.trigger_states` by index —
+/// the same order [`collect_scenario_state`] emits triggers in — so
+/// [`Self::fire_history`] keys straight off the collection index. Grown in place
+/// when the roster extends (a sub-world's triggers append) and rebuilt when it
+/// shrinks (a world reload); a same-count reload keeps stale rings but cannot
+/// mis-record, since every reset trigger re-seeds its baseline to `None` before
+/// its next fire (one world per session is the norm — see #342 in this module's
+/// docs).
+#[derive(Resource, Debug, Default)]
+pub struct TriggerFireRecorder {
+    /// Per-trigger fire record, indexed like `trigger_states`.
+    per_trigger: Vec<TriggerFireRecord>,
+    /// The ring depth last applied, so a retuned config re-caps existing rings.
+    depth: usize,
+}
+
+/// One trigger's fire ring plus the fire-detection baseline.
+#[derive(Debug)]
+struct TriggerFireRecord {
+    ring: BoundedRing<TriggerFire>,
+    /// The `last_fired_elapsed` seen last tick, to detect a new fire.
+    last_seen_fired_at: Option<f32>,
+    /// `false` until this trigger has been observed once. Guards against
+    /// recording a pre-capture fire on the first captured tick.
+    observed: bool,
+}
+
+impl TriggerFireRecord {
+    fn new(depth: usize) -> Self {
+        Self {
+            ring: BoundedRing::new(depth),
+            last_seen_fired_at: None,
+            observed: false,
+        }
+    }
+}
+
+impl TriggerFireRecorder {
+    /// Reconcile the per-trigger records with the live roster, then record any
+    /// new fires this tick. Pure w.r.t. `runtime` (takes `&`), so it is unit
+    /// testable without an `App`.
+    fn sync_and_record(&mut self, runtime: &WorldContentRuntime, depth: usize) {
+        let n = runtime.trigger_states.len();
+
+        // Roster reconciliation. Shrink → rebuild fresh (a world reload); grow →
+        // extend in place (appended sub-world triggers keep existing history).
+        if self.per_trigger.len() > n {
+            self.per_trigger.clear();
+        }
+        while self.per_trigger.len() < n {
+            self.per_trigger.push(TriggerFireRecord::new(depth));
+        }
+
+        // Re-cap on a retuned depth (a no-op on the common unchanged tick).
+        if self.depth != depth {
+            for rec in &mut self.per_trigger {
+                rec.ring.set_capacity(depth);
+            }
+            self.depth = depth;
+        }
+
+        let chain: [&FlagStore; 1] = [&runtime.flags];
+        for (idx, state) in runtime.trigger_states.iter().enumerate() {
+            let rec = &mut self.per_trigger[idx];
+            let cur = state.last_fired_elapsed;
+
+            // First observation seeds the baseline without recording: we cannot
+            // tell whether an already-fired trigger fired before or during
+            // capture, so we do not attribute a fire to this tick.
+            if !rec.observed {
+                rec.observed = true;
+                rec.last_seen_fired_at = cur;
+                continue;
+            }
+
+            let is_new_fire = cur.is_some() && cur != rec.last_seen_fired_at;
+            rec.last_seen_fired_at = cur;
+            if !is_new_fire {
+                continue;
+            }
+
+            let mut predicate_values = Vec::new();
+            condition_atom_values(&state.trigger.condition, &chain, &mut predicate_values);
+            if let Some(pred) = &state.trigger.when {
+                predicate_atom_values(pred, &chain, &mut predicate_values);
+            }
+            rec.ring.push(TriggerFire {
+                fired_secs: cur.unwrap_or(0.0),
+                predicate_values,
+            });
+        }
+    }
+
+    /// The recorded fire history for the trigger at collection index `idx`,
+    /// oldest first. Empty for a trigger with no ring (out of range) or no fires.
+    fn fire_history(&self, idx: usize) -> Vec<TriggerFire> {
+        self.per_trigger
+            .get(idx)
+            .map(|rec| rec.ring.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+}
+
+/// Record any trigger fires this tick into the bounded per-trigger rings
+/// (issue #1151). Gated on the scenario-state debug flag, ordered after
+/// `SimSet::Broadcast` (the trigger pipeline's end-of-tick state) and before
+/// [`publish_scenario_state`], which reads the rings it fills.
+///
+/// Read-only w.r.t. every folded resource: it borrows [`WorldContentRuntime`]
+/// and [`WorldConfig`] by `Res` and writes only the `Presentation`-class
+/// recorder, so its running or not cannot move the digest. The resources are
+/// `Option` so a bare-`App` fixture that registered neither still runs (a no-op).
+pub fn record_trigger_fires(
+    runtime: Option<Res<WorldContentRuntime>>,
+    world_config: Option<Res<WorldConfig>>,
+    mut recorder: ResMut<TriggerFireRecorder>,
+) {
+    let Some(runtime) = runtime.as_deref() else {
+        return;
+    };
+    let depth = world_config
+        .as_deref()
+        .map(|wc| wc.global.trigger_fire_history_depth as usize)
+        .unwrap_or(DEFAULT_FIRE_HISTORY_DEPTH);
+    recorder.sync_and_record(runtime, depth);
+}
+
+/// Collect the flag-store atoms of a predicate with their observed values,
+/// left-to-right in tree order (deterministic), against `chain` (issue #1151).
+///
+/// Only the flag-family atoms a world `when` gate uses carry a reading here;
+/// `fact` / `history` atoms are AI-policy grammar and record as
+/// [`FIRE_VALUE_UNAVAILABLE`] so the extractor stays total.
+fn predicate_atom_values(pred: &Predicate, chain: &[&FlagStore], out: &mut Vec<PredicateValue>) {
+    match pred {
+        Predicate::Flag { name } => out.push(PredicateValue {
+            atom: format!("flag({name})"),
+            value: flag_in_chain(chain, name).to_string(),
+        }),
+        Predicate::Counter { name, .. } => out.push(PredicateValue {
+            atom: format!("counter({name})"),
+            value: counter_in_chain(chain, name).to_string(),
+        }),
+        Predicate::Bool(b) => out.push(PredicateValue {
+            atom: b.to_string(),
+            value: b.to_string(),
+        }),
+        Predicate::Not(inner) => predicate_atom_values(inner, chain, out),
+        Predicate::And(a, b) | Predicate::Or(a, b) => {
+            predicate_atom_values(a, chain, out);
+            predicate_atom_values(b, chain, out);
+        }
+        Predicate::Fact { .. } | Predicate::History { .. } => out.push(PredicateValue {
+            atom: render_predicate(pred),
+            value: FIRE_VALUE_UNAVAILABLE.to_string(),
+        }),
+    }
+}
+
+/// Collect the flag-store atom of a flag-referencing `condition`, if any, with
+/// its observed value (issue #1151).
+///
+/// Event / entity / timer conditions carry no flag-store reading — their timing
+/// is the fire record's `fired_secs` — so only `on_flag_set` / `on_flag_cleared`
+/// contribute an atom, and it reads back in the same `flag(name)` vocabulary the
+/// `when` atoms use.
+fn condition_atom_values(
+    condition: &TriggerCondition,
+    chain: &[&FlagStore],
+    out: &mut Vec<PredicateValue>,
+) {
+    match condition {
+        TriggerCondition::OnFlagSet { name } | TriggerCondition::OnFlagCleared { name } => {
+            out.push(PredicateValue {
+                atom: format!("flag({name})"),
+                value: flag_in_chain(chain, name).to_string(),
+            });
+        }
+        _ => {}
+    }
+}
+
 /// Project the scenario runtime + objective manager into the wire payload
 /// (issue #1148). Pure and Bevy-agnostic: the whole surface is testable without
 /// an `App`.
+///
+/// The public two-argument form carries an EMPTY fire history for every trigger;
+/// [`collect_scenario_state_with_fires`] is the form the flag-gated publish and
+/// the headless report use to fold in the recorded fires (issue #1151).
 ///
 /// Flags are sorted by name; every other collection is emitted in its authored
 /// / insertion order, which the underlying stores already keep deterministic
@@ -85,6 +309,21 @@ pub struct ScenarioStateCapture(pub Option<String>);
 pub fn collect_scenario_state(
     runtime: &WorldContentRuntime,
     objectives: &ObjectiveManager,
+) -> ScenarioStatePayload {
+    collect_scenario_state_with_fires(runtime, objectives, &TriggerFireRecorder::default())
+}
+
+/// Project the scenario runtime + objective manager into the wire payload,
+/// folding in each trigger's recorded fire history from `recorder` (issue #1151).
+///
+/// Identical to [`collect_scenario_state`] but for the per-trigger
+/// [`ScenarioTrigger::fire_history`]: the recorder's rings are parallel to
+/// `trigger_states` by index, the same order this collects them in, so the fire
+/// history keys straight off the enumeration index.
+pub fn collect_scenario_state_with_fires(
+    runtime: &WorldContentRuntime,
+    objectives: &ObjectiveManager,
+    recorder: &TriggerFireRecorder,
 ) -> ScenarioStatePayload {
     let mut payload = ScenarioStatePayload::empty();
 
@@ -118,7 +357,8 @@ pub fn collect_scenario_state(
     payload.triggers = runtime
         .trigger_states
         .iter()
-        .map(|state| {
+        .enumerate()
+        .map(|(idx, state)| {
             let when_holds = match &state.trigger.when {
                 Some(pred) => pred.evaluate(&chain),
                 None => true,
@@ -133,6 +373,7 @@ pub fn collect_scenario_state(
                 pending: state.trigger.repeat || !state.fired,
                 when_holds,
                 last_fired_secs: state.last_fired_elapsed,
+                fire_history: recorder.fire_history(idx),
             }
         })
         .collect();
@@ -202,15 +443,23 @@ pub fn collect_scenario_state(
 /// digest.
 ///
 /// The runtime resources are `Option` so a bare-`App` fixture that registered
-/// neither still runs (it publishes an empty, version-stamped payload).
+/// neither still runs (it publishes an empty, version-stamped payload). The
+/// [`TriggerFireRecorder`] is folded in so each trigger carries its recorded
+/// fire history (issue #1151); [`record_trigger_fires`] runs before this in the
+/// same tick, so the rings it reads are current.
 pub fn publish_scenario_state(
     runtime: Option<Res<WorldContentRuntime>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
+    recorder: Res<TriggerFireRecorder>,
     mut capture: ResMut<ScenarioStateCapture>,
 ) {
     let payload = match (runtime.as_deref(), objectives.as_deref()) {
-        (Some(runtime), Some(objectives)) => collect_scenario_state(runtime, &objectives.0),
-        (Some(runtime), None) => collect_scenario_state(runtime, &ObjectiveManager::default()),
+        (Some(runtime), Some(objectives)) => {
+            collect_scenario_state_with_fires(runtime, &objectives.0, &recorder)
+        }
+        (Some(runtime), None) => {
+            collect_scenario_state_with_fires(runtime, &ObjectiveManager::default(), &recorder)
+        }
         // No world loaded — an empty, version-stamped payload.
         (None, _) => ScenarioStatePayload::empty(),
     };
@@ -783,5 +1032,257 @@ mod tests {
             let pred = parse_predicate(src).expect("parses");
             assert_eq!(render_predicate(&pred), expected, "for source {src:?}");
         }
+    }
+
+    // ── Trigger fire history recorder (issue #1151) ───────────────────────────
+
+    /// Push a `TriggerState` onto the runtime and return its index, so a test can
+    /// mutate its fire fields to simulate the authoritative trigger pipeline.
+    fn push_trigger(
+        runtime: &mut WorldContentRuntime,
+        id: Option<&str>,
+        condition: TriggerCondition,
+        when: Option<&str>,
+        repeat: bool,
+    ) -> usize {
+        runtime
+            .trigger_states
+            .push(trigger_state(id, condition, when, repeat, false));
+        runtime.trigger_states.len() - 1
+    }
+
+    /// Simulate the authoritative fire of the trigger at `idx`: the same two
+    /// fields `evaluate_single_trigger` sets when a trigger fires.
+    fn simulate_fire(runtime: &mut WorldContentRuntime, idx: usize, elapsed: f32) {
+        runtime.trigger_states[idx].fired = true;
+        runtime.trigger_states[idx].last_fired_elapsed = Some(elapsed);
+    }
+
+    const DEPTH: usize = 4;
+
+    /// A fire records its fire time and the observed values of its `when` gate's
+    /// atoms — the evidence an author reconstructs "why did this beat fire" from.
+    #[test]
+    fn a_fire_records_its_time_and_when_atom_values() {
+        let mut runtime = WorldContentRuntime::default();
+        let idx = push_trigger(
+            &mut runtime,
+            Some("beat"),
+            TriggerCondition::OnTimer { after_secs: 30.0 },
+            Some("flag(ready) and counter(kills) >= 3"),
+            false,
+        );
+        let mut recorder = TriggerFireRecorder::default();
+
+        // First observation seeds the baseline; the trigger has not fired yet.
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert!(recorder.fire_history(idx).is_empty(), "no fire yet");
+
+        // The pipeline fires it at t=32.5 with the gate flags holding.
+        runtime.flags.set_flag("ready");
+        runtime.flags.set_flag_value("kills", 5);
+        simulate_fire(&mut runtime, idx, 32.5);
+        recorder.sync_and_record(&runtime, DEPTH);
+
+        let history = recorder.fire_history(idx);
+        assert_eq!(history.len(), 1, "one fire recorded");
+        assert_eq!(history[0].fired_secs, 32.5);
+        // Atom values quote the `when` vocabulary the surface already renders.
+        let values: Vec<(&str, &str)> = history[0]
+            .predicate_values
+            .iter()
+            .map(|v| (v.atom.as_str(), v.value.as_str()))
+            .collect();
+        assert!(
+            values.contains(&("flag(ready)", "true")),
+            "the gate flag's observed value, got {values:?}"
+        );
+        assert!(
+            values.contains(&("counter(kills)", "5")),
+            "the gate counter's observed reading, got {values:?}"
+        );
+    }
+
+    /// A flag-referencing `condition` contributes its atom too — the "condition"
+    /// half of "the atoms in its condition/when that made it fire".
+    #[test]
+    fn a_flag_condition_atom_is_recorded() {
+        let mut runtime = WorldContentRuntime::default();
+        let idx = push_trigger(
+            &mut runtime,
+            Some("on_alarm"),
+            TriggerCondition::OnFlagSet {
+                name: "alarm".into(),
+            },
+            None,
+            false,
+        );
+        let mut recorder = TriggerFireRecorder::default();
+        recorder.sync_and_record(&runtime, DEPTH);
+
+        runtime.flags.set_flag("alarm");
+        simulate_fire(&mut runtime, idx, 10.0);
+        recorder.sync_and_record(&runtime, DEPTH);
+
+        let history = recorder.fire_history(idx);
+        assert_eq!(history.len(), 1);
+        assert_eq!(
+            history[0].predicate_values,
+            vec![PredicateValue {
+                atom: "flag(alarm)".into(),
+                value: "true".into(),
+            }],
+            "the condition's flag reads back in the flag(name) vocabulary"
+        );
+    }
+
+    /// The per-trigger ring is bounded: firing past its depth keeps the most
+    /// recent `depth` fires and evicts the oldest.
+    #[test]
+    fn the_ring_caps_at_the_authored_depth() {
+        let mut runtime = WorldContentRuntime::default();
+        let idx = push_trigger(
+            &mut runtime,
+            Some("beacon"),
+            TriggerCondition::OnTimer { after_secs: 1.0 },
+            None,
+            true, // repeat, so it can fire many times
+        );
+        let mut recorder = TriggerFireRecorder::default();
+        recorder.sync_and_record(&runtime, 2); // depth 2
+
+        for elapsed in [10.0_f32, 20.0, 30.0, 40.0] {
+            simulate_fire(&mut runtime, idx, elapsed);
+            recorder.sync_and_record(&runtime, 2);
+        }
+
+        let history = recorder.fire_history(idx);
+        assert_eq!(history.len(), 2, "ring bounded at depth 2");
+        let times: Vec<f32> = history.iter().map(|f| f.fired_secs).collect();
+        assert_eq!(
+            times,
+            vec![30.0, 40.0],
+            "the two most recent fires, oldest first"
+        );
+    }
+
+    /// A trigger that fired BEFORE capture began is not mis-recorded on the first
+    /// captured tick: the first observation only seeds the baseline.
+    #[test]
+    fn a_pre_capture_fire_is_not_recorded() {
+        let mut runtime = WorldContentRuntime::default();
+        let idx = push_trigger(
+            &mut runtime,
+            Some("already"),
+            TriggerCondition::OnWorldLoaded,
+            None,
+            false,
+        );
+        // It fired at t=5 before the recorder ever saw it.
+        simulate_fire(&mut runtime, idx, 5.0);
+
+        let mut recorder = TriggerFireRecorder::default();
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert!(
+            recorder.fire_history(idx).is_empty(),
+            "a fire before capture must not be attributed to the first tick"
+        );
+    }
+
+    /// A `ResetTrigger` (last_fired_elapsed Some→None) is not a fire, and a
+    /// subsequent genuine re-fire after the reset IS recorded.
+    #[test]
+    fn a_reset_is_not_a_fire_but_the_next_fire_is() {
+        let mut runtime = WorldContentRuntime::default();
+        let idx = push_trigger(
+            &mut runtime,
+            Some("resettable"),
+            TriggerCondition::OnWorldLoaded,
+            None,
+            false,
+        );
+        let mut recorder = TriggerFireRecorder::default();
+        recorder.sync_and_record(&runtime, DEPTH);
+
+        // Fire, then reset (what `reset_triggers_by_id` does to the fire fields).
+        simulate_fire(&mut runtime, idx, 5.0);
+        recorder.sync_and_record(&runtime, DEPTH);
+        runtime.trigger_states[idx].fired = false;
+        runtime.trigger_states[idx].last_fired_elapsed = None;
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert_eq!(
+            recorder.fire_history(idx).len(),
+            1,
+            "the reset is not a fire"
+        );
+
+        // A fresh fire after the reset is recorded.
+        simulate_fire(&mut runtime, idx, 12.0);
+        recorder.sync_and_record(&runtime, DEPTH);
+        let history = recorder.fire_history(idx);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[1].fired_secs, 12.0);
+    }
+
+    /// The recorded fire history flows into the collected payload at the matching
+    /// trigger index — the additive `fire_history` field the dock reads.
+    #[test]
+    fn fire_history_lands_on_the_collected_trigger() {
+        let mut runtime = WorldContentRuntime::default();
+        let idx = push_trigger(
+            &mut runtime,
+            Some("beat"),
+            TriggerCondition::OnTimer { after_secs: 30.0 },
+            Some("flag(ready)"),
+            false,
+        );
+        let mut recorder = TriggerFireRecorder::default();
+        recorder.sync_and_record(&runtime, DEPTH);
+        runtime.flags.set_flag("ready");
+        simulate_fire(&mut runtime, idx, 30.0);
+        recorder.sync_and_record(&runtime, DEPTH);
+
+        let payload =
+            collect_scenario_state_with_fires(&runtime, &ObjectiveManager::default(), &recorder);
+        assert_eq!(payload.triggers[idx].fire_history.len(), 1);
+        assert_eq!(payload.triggers[idx].fire_history[0].fired_secs, 30.0);
+        // The public two-arg form carries an empty fire history (no recorder).
+        let plain = collect_scenario_state(&runtime, &ObjectiveManager::default());
+        assert!(plain.triggers[idx].fire_history.is_empty());
+    }
+
+    /// When the roster shrinks (a world reload), the recorder rebuilds rather than
+    /// mis-aligning old rings onto new triggers.
+    #[test]
+    fn a_shrinking_roster_rebuilds_the_records() {
+        let mut runtime = WorldContentRuntime::default();
+        let a = push_trigger(
+            &mut runtime,
+            Some("a"),
+            TriggerCondition::OnWorldLoaded,
+            None,
+            true,
+        );
+        let _b = push_trigger(
+            &mut runtime,
+            Some("b"),
+            TriggerCondition::OnWorldLoaded,
+            None,
+            true,
+        );
+        let mut recorder = TriggerFireRecorder::default();
+        recorder.sync_and_record(&runtime, DEPTH);
+        simulate_fire(&mut runtime, a, 5.0);
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert_eq!(recorder.fire_history(a).len(), 1);
+
+        // A reload leaves a single trigger; the recorder must not carry the old
+        // ring onto it.
+        runtime.trigger_states.truncate(1);
+        recorder.sync_and_record(&runtime, DEPTH);
+        assert!(
+            recorder.fire_history(0).is_empty(),
+            "the rebuilt record starts empty and re-seeds its baseline"
+        );
     }
 }

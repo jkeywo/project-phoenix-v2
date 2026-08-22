@@ -183,6 +183,119 @@ impl BoundedHistory {
     }
 }
 
+/// A fixed-capacity ring of at most `capacity` recent `T` values, oldest
+/// evicted first (issue #1151).
+///
+/// The pure ring mechanic that [`BoundedHistory`] is the `f64`-window
+/// specialisation of: identical eviction rule, identical `capacity == 0`
+/// degenerate reading (nothing is ever retained), but generic over the sample
+/// type and WITHOUT the numeric reducers (`min` / `max` / `net_change` /
+/// `all_at_least`) that only mean anything over reals. `BoundedHistory` keeps
+/// its own `VecDeque<f64>` storage rather than wrapping this, so its #862
+/// snapshot wire shape is untouched; the two share a design, not a field.
+///
+/// # Why the trigger-fire recorder needs this and not [`BoundedHistory`]
+///
+/// A fire record ([`crate::debug::payload::TriggerFire`]) is a struct of a time
+/// and a list of predicate values, not an `f64`, so it cannot go in the numeric
+/// window at all. What the recorder actually reuses from `bounded_history` is
+/// the *bound*: the ring is `capacity` records per trigger for ever, so a
+/// session that runs for hours keeps the last `capacity` fires of each trigger
+/// and nothing older — a `Vec` that only grows is a leak in exactly that run.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BoundedRing<T> {
+    capacity: usize,
+    samples: VecDeque<T>,
+}
+
+impl<T> Default for BoundedRing<T> {
+    /// A zero-capacity ring — the degenerate window that retains nothing, the
+    /// same safe reading of "no length authored yet" [`BoundedHistory`] takes.
+    /// Hand-written rather than derived so the bound is not `T: Default` (a
+    /// record type need not be default-constructible to live in a ring of them).
+    fn default() -> Self {
+        Self {
+            capacity: 0,
+            samples: VecDeque::new(),
+        }
+    }
+}
+
+impl<T> BoundedRing<T> {
+    /// An empty ring of the given capacity.
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity,
+            samples: VecDeque::with_capacity(capacity),
+        }
+    }
+
+    /// The authored ring length.
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// How many records are currently retained (never more than `capacity`).
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
+    }
+
+    /// `true` once the ring holds a full `capacity` records. Always `false` for
+    /// a zero capacity.
+    pub fn is_full(&self) -> bool {
+        self.capacity > 0 && self.samples.len() >= self.capacity
+    }
+
+    /// Re-author the ring length, discarding the oldest records if the new
+    /// length is shorter. Re-authoring to the SAME capacity is a no-op, so
+    /// calling it every tick (the recorder does, to track a retuned config) is
+    /// free and cannot reset the ring.
+    pub fn set_capacity(&mut self, capacity: usize) {
+        if capacity == self.capacity {
+            return;
+        }
+        self.capacity = capacity;
+        self.trim();
+    }
+
+    /// Record one value, evicting the oldest when the ring is full. A
+    /// zero-capacity ring retains nothing.
+    pub fn push(&mut self, sample: T) {
+        if self.capacity == 0 {
+            self.samples.clear();
+            return;
+        }
+        self.samples.push_back(sample);
+        self.trim();
+    }
+
+    /// Drop every retained record, keeping the capacity.
+    pub fn clear(&mut self) {
+        self.samples.clear();
+    }
+
+    /// Evict from the front until the ring fits its capacity.
+    fn trim(&mut self) {
+        while self.samples.len() > self.capacity {
+            self.samples.pop_front();
+        }
+    }
+
+    /// The most recently pushed record.
+    pub fn last(&self) -> Option<&T> {
+        self.samples.back()
+    }
+
+    /// Iterate the retained records, oldest first.
+    pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
+        self.samples.iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +520,90 @@ mod tests {
         w.set_capacity(0);
         assert!(w.is_empty());
         assert!(!w.is_full());
+    }
+
+    // ── BoundedRing<T> (issue #1151) ──────────────────────────────────────────
+    //
+    // The generic ring the trigger-fire recorder keeps per trigger. The same
+    // bound-is-the-point properties `BoundedHistory` has, over an arbitrary
+    // record type (here `&'static str`, standing in for a fire record).
+
+    #[test]
+    fn a_ring_fills_to_capacity_then_evicts_the_oldest() {
+        let mut r: BoundedRing<&str> = BoundedRing::new(2);
+        assert!(r.is_empty());
+        r.push("a");
+        r.push("b");
+        assert!(r.is_full());
+        assert_eq!(r.len(), 2);
+        r.push("c");
+        assert_eq!(r.len(), 2, "the ring must never exceed its capacity");
+        assert_eq!(
+            r.iter().copied().collect::<Vec<_>>(),
+            vec!["b", "c"],
+            "the oldest record aged out; the last `capacity` remain, oldest first"
+        );
+        assert_eq!(r.last(), Some(&"c"));
+    }
+
+    #[test]
+    fn a_zero_capacity_ring_retains_nothing() {
+        let mut r: BoundedRing<&str> = BoundedRing::new(0);
+        r.push("a");
+        r.push("b");
+        assert!(r.is_empty());
+        assert!(!r.is_full());
+        assert_eq!(r.last(), None);
+    }
+
+    #[test]
+    fn shrinking_a_ring_discards_the_oldest_records() {
+        let mut r: BoundedRing<i32> = BoundedRing::new(4);
+        for n in 1..=4 {
+            r.push(n);
+        }
+        r.set_capacity(2);
+        assert_eq!(r.iter().copied().collect::<Vec<_>>(), vec![3, 4]);
+        assert!(r.is_full());
+    }
+
+    #[test]
+    fn re_authoring_the_same_ring_capacity_does_not_reset_it() {
+        let mut r: BoundedRing<i32> = BoundedRing::new(3);
+        for n in 0..3 {
+            r.push(n);
+        }
+        for _ in 0..10 {
+            r.set_capacity(3);
+        }
+        assert_eq!(
+            r.len(),
+            3,
+            "an idempotent re-author must not clear the ring"
+        );
+    }
+
+    #[test]
+    fn clearing_a_ring_drops_records_but_keeps_capacity() {
+        let mut r: BoundedRing<i32> = BoundedRing::new(2);
+        r.push(1);
+        r.push(2);
+        r.clear();
+        assert!(r.is_empty());
+        assert_eq!(r.capacity(), 2);
+    }
+
+    #[test]
+    fn a_default_ring_retains_nothing_until_a_capacity_is_authored() {
+        // The recorder builds records with an explicit capacity; a `default()`
+        // ring is the degenerate zero-length one, matching `BoundedHistory`.
+        let mut r: BoundedRing<i32> = BoundedRing::default();
+        assert_eq!(r.capacity(), 0);
+        r.push(1);
+        assert!(r.is_empty());
+        r.set_capacity(2);
+        r.push(1);
+        r.push(2);
+        assert_eq!(r.iter().copied().collect::<Vec<_>>(), vec![1, 2]);
     }
 }

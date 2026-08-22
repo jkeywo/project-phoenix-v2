@@ -15083,6 +15083,19 @@ pub struct GlobalConfig {
     /// `debug::station_activity::StationActivityTracker::configure`.
     #[serde(default = "default_station_activity_bucket_secs")]
     pub station_activity_bucket_secs: f32,
+    /// How many recent fires the trigger-fire-history debug recorder keeps per
+    /// trigger (issue #1151, PRD #1144).
+    ///
+    /// When the scenario-state debug surface is on, a bounded ring records each
+    /// trigger's recent fires with the predicate values observed at each, so an
+    /// author can reconstruct why a beat fired early, late, or not at all. This
+    /// is the ring depth — the bound that keeps a session that runs for hours
+    /// from leaking. Read-only diagnostic capture into a `Presentation`-class
+    /// resource, so it never moves the #894 digest whatever the depth. The serde
+    /// default is the only sanctioned hardcoded copy (AGENTS.md #11); no world
+    /// TOML authors the key, it IS the shipped tuning.
+    #[serde(default = "default_trigger_fire_history_depth")]
+    pub trigger_fire_history_depth: u32,
 }
 
 /// Serde default for [`GlobalConfig::intent_break_off_hull_fraction`]: half
@@ -15114,6 +15127,15 @@ fn default_station_activity_bucket_secs() -> f32 {
     15.0
 }
 
+/// Serde default for [`GlobalConfig::trigger_fire_history_depth`]: sixteen fires
+/// per trigger (issue #1151). The only sanctioned hardcoded copy of the shipped
+/// ring depth (AGENTS.md #11) — a TOML-parse fallback. Sixteen is deep enough to
+/// show a repeat trigger's recent rhythm and shallow enough to stay a "few
+/// records per trigger" bound.
+fn default_trigger_fire_history_depth() -> u32 {
+    16
+}
+
 impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
@@ -15126,6 +15148,7 @@ impl Default for GlobalConfig {
             intent_break_off_hull_fraction: default_intent_break_off_hull_fraction(),
             attacked_memory_secs: default_attacked_memory_secs(),
             station_activity_bucket_secs: default_station_activity_bucket_secs(),
+            trigger_fire_history_depth: default_trigger_fire_history_depth(),
         }
     }
 }

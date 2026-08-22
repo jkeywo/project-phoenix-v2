@@ -16,6 +16,12 @@
 //!    inert to the fold. This follows the seeded-headless prior art in
 //!    `tests/rng_determinism.rs` and `tests/station_activity.rs`.
 //!
+//!    The flag now also gates the #1151 trigger-fire recorder, so this same A/B
+//!    proves recording fire history is digest-neutral: the recorder is a
+//!    `Presentation`-class bounded ring the record system writes only when the
+//!    flag is on, yet `digest_on == digest_off`. The captured payload additionally
+//!    carries the additive `fire_history` field on every trigger.
+//!
 //! The projector's *content* — that a given authored world state produces the
 //! expected flags/objectives/triggers/queues/commitments/dossiers — is asserted
 //! by the pure unit tests in `src/debug/scenario.rs`, which build the authoritative
@@ -97,4 +103,12 @@ fn enabling_capture_leaves_the_seeded_digest_identical() {
             "the captured payload must carry {key}; got: {json}"
         );
     }
+
+    // The additive #1151 fire-history field rides on every trigger (this world
+    // authors scripted triggers, so the array is non-empty and the field is
+    // present even when no fire has been recorded yet).
+    assert!(
+        json.contains("\"fire_history\""),
+        "the captured payload's triggers must carry the additive fire_history field; got: {json}"
+    );
 }

@@ -57,6 +57,16 @@ function samplePayload() {
         fired: true,
         pending: false,
         when_holds: true,
+        // Fire history (#1151): one recorded fire with its predicate values.
+        fire_history: [
+          {
+            fired_secs: 12.5,
+            predicate_values: [
+              { atom: 'flag(ready)', value: 'true' },
+              { atom: 'counter(kills)', value: '5' },
+            ],
+          },
+        ],
       },
     ],
     delayed_actions: [{ action: 'set_world_flag(reinforce)', fire_at_secs: 45 }],
@@ -142,6 +152,32 @@ describe('buildScenarioStatePanel', () => {
     const loaded = panel.querySelector('.ss-trigger[data-id="loaded"]');
     expect(loaded.getAttribute('data-fired')).toBe('true');
     expect(loaded.querySelector('.ss-trigger-status').getAttribute('data-state')).toBe('fired');
+  });
+
+  it('renders a fired trigger fire history with its predicate values (#1151)', () => {
+    const panel = buildScenarioStatePanel(samplePayload(), { doc: document });
+    const loaded = panel.querySelector('.ss-trigger[data-id="loaded"]');
+    const fires = loaded.querySelector('.ss-trigger-fires');
+    expect(fires, 'the fired trigger shows its fire history').not.toBeNull();
+    expect(fires.getAttribute('data-count')).toBe('1');
+    const fire = fires.querySelector('.ss-fire');
+    expect(fire.getAttribute('data-fired-secs')).toBe('12.5');
+    // Each predicate atom reads back in the condition/when vocabulary with its
+    // observed value.
+    const ready = fire.querySelector('.ss-fire-value[data-atom="flag(ready)"]');
+    expect(ready).not.toBeNull();
+    expect(ready.textContent).toBe('flag(ready) = true');
+    expect(
+      fire.querySelector('.ss-fire-value[data-atom="counter(kills)"]').textContent,
+    ).toBe('counter(kills) = 5');
+  });
+
+  it('omits the fire-history block for a trigger that has not fired (#1151)', () => {
+    const panel = buildScenarioStatePanel(samplePayload(), { doc: document });
+    // The 'beat' trigger has no fire_history key at all — a pre-fire / pre-#1151
+    // payload — and must render without throwing and without a fires block.
+    const beat = panel.querySelector('.ss-trigger[data-id="beat"]');
+    expect(beat.querySelector('.ss-trigger-fires')).toBeNull();
   });
 
   it('renders the deadline and commitment states', () => {

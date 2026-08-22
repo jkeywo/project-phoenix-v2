@@ -157,6 +157,39 @@ export function buildScenarioStatePanel(payload, opts = {}) {
         trig.fired && !trig.repeat ? 'fired' : trig.when_holds ? 'armed' : 'waiting',
       );
       row.appendChild(badge);
+
+      // ── Fire history (#1151) ──
+      // The bounded record of this trigger's recent fires with the predicate
+      // values observed at each — how an author reconstructs why a beat fired
+      // early, late, or not at all. Absent on a pre-#1151 payload, and empty
+      // until the trigger fires while capture is on: shown only when non-empty so
+      // a never-fired trigger stays uncluttered.
+      const fires = Array.isArray(trig.fire_history) ? trig.fire_history : [];
+      if (fires.length > 0) {
+        const hist = el(doc, 'div', 'ss-trigger-fires');
+        hist.setAttribute('data-count', String(fires.length));
+        for (const fire of fires) {
+          const fireRow = el(doc, 'div', 'ss-fire');
+          fireRow.setAttribute('data-fired-secs', String(fire.fired_secs));
+          fireRow.appendChild(
+            el(
+              doc,
+              'span',
+              'ss-fire-when',
+              t('settings.debug.scenario.at_secs', { secs: fire.fired_secs }),
+            ),
+          );
+          const values = Array.isArray(fire.predicate_values) ? fire.predicate_values : [];
+          for (const pv of values) {
+            const pvEl = el(doc, 'span', 'ss-fire-value');
+            pvEl.setAttribute('data-atom', String(pv.atom));
+            pvEl.textContent = `${pv.atom} = ${pv.value}`;
+            fireRow.appendChild(pvEl);
+          }
+          hist.appendChild(fireRow);
+        }
+        row.appendChild(hist);
+      }
       sec.appendChild(row);
     }
     root.appendChild(sec);

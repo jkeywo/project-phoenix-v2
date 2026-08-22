@@ -2942,6 +2942,14 @@ mod tests {
                 pending: true,
                 when_holds: false,
                 last_fired_secs: None,
+                // #1151: additive, always emitted (an unfired trigger's is empty).
+                fire_history: vec![crate::debug::payload::TriggerFire {
+                    fired_secs: 30.0,
+                    predicate_values: vec![crate::debug::payload::PredicateValue {
+                        atom: "flag(ready)".into(),
+                        value: "true".into(),
+                    }],
+                }],
             }],
             delayed_actions: vec![ScenarioDelayedAction {
                 action: "set_world_flag(reinforce)".into(),
@@ -2974,7 +2982,7 @@ mod tests {
         let json = crate::core::codec::encode_scenario_state(&payload);
         assert_eq!(
             json,
-            r#"{"schema_version":1,"flags":[{"name":"alarm","value":1}],"objectives":[{"id":"kill","status":"Active","mandatory":true,"base_priority":7.0,"directive":{"kind":"Destroy","target":"raider"}}],"triggers":[{"id":"beat","condition":"on_timer(after_secs=30)","when":"flag(ready)","repeat":false,"fired":false,"pending":true,"when_holds":false}],"delayed_actions":[{"action":"set_world_flag(reinforce)","fire_at_secs":45.0}],"deadlines":[{"id":"window","label":"world.deadline.window","visible":true,"due_tick":36000,"state":"pending"}],"commitments":[{"id":"passage","made_to":"strike_committee","terms":"terms.passage","state":"open","made_at_tick":10}],"dossier":[{"subject_uuid":"uuid-1","text":"evidence.forged_manifest","provenance":"records","gathered_at_tick":40}]}"#,
+            r#"{"schema_version":1,"flags":[{"name":"alarm","value":1}],"objectives":[{"id":"kill","status":"Active","mandatory":true,"base_priority":7.0,"directive":{"kind":"Destroy","target":"raider"}}],"triggers":[{"id":"beat","condition":"on_timer(after_secs=30)","when":"flag(ready)","repeat":false,"fired":false,"pending":true,"when_holds":false,"fire_history":[{"fired_secs":30.0,"predicate_values":[{"atom":"flag(ready)","value":"true"}]}]}],"delayed_actions":[{"action":"set_world_flag(reinforce)","fire_at_secs":45.0}],"deadlines":[{"id":"window","label":"world.deadline.window","visible":true,"due_tick":36000,"state":"pending"}],"commitments":[{"id":"passage","made_to":"strike_committee","terms":"terms.passage","state":"open","made_at_tick":10}],"dossier":[{"subject_uuid":"uuid-1","text":"evidence.forged_manifest","provenance":"records","gathered_at_tick":40}]}"#,
             "the scenario-state JSON shape must match gui/scenario-state-panel.js"
         );
         // Round-trips back to the same payload — the schema is stable both ways.

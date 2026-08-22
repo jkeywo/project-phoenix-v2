@@ -31,12 +31,12 @@ use bevy::prelude::*;
 
 pub use ai_state::{AiDoctrineCapture, DebugAiDoctrineEnabled};
 pub use payload::{
-    ActivitySource, AiStatePayload, DoctrineCandidate, DoctrineChoice, ScenarioCommitment,
-    ScenarioDeadline, ScenarioDelayedAction, ScenarioDossierEntry, ScenarioFlag, ScenarioObjective,
-    ScenarioStatePayload, ScenarioTrigger, ShipDoctrine, StationActivityBucket,
-    StationActivityEntry, StationActivityPayload, DEBUG_SCHEMA_VERSION,
+    ActivitySource, AiStatePayload, DoctrineCandidate, DoctrineChoice, PredicateValue,
+    ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction, ScenarioDossierEntry, ScenarioFlag,
+    ScenarioObjective, ScenarioStatePayload, ScenarioTrigger, ShipDoctrine, StationActivityBucket,
+    StationActivityEntry, StationActivityPayload, TriggerFire, DEBUG_SCHEMA_VERSION,
 };
-pub use scenario::{DebugScenarioStateEnabled, ScenarioStateCapture};
+pub use scenario::{DebugScenarioStateEnabled, ScenarioStateCapture, TriggerFireRecorder};
 pub use station_activity::{
     DebugStationActivityEnabled, StationActivityCapture, StationActivityTracker,
 };
@@ -62,7 +62,8 @@ impl Plugin for DebugPlugin {
             .init_resource::<DebugAiDoctrineEnabled>()
             .init_resource::<AiDoctrineCapture>()
             .init_resource::<DebugScenarioStateEnabled>()
-            .init_resource::<ScenarioStateCapture>();
+            .init_resource::<ScenarioStateCapture>()
+            .init_resource::<TriggerFireRecorder>();
 
         // The observability surfaces are read-only projections nothing in the
         // fixed tick reads back, so they are digest EXCLUSIONS, not authoritative
@@ -82,7 +83,11 @@ impl Plugin for DebugPlugin {
             StateClass::Presentation,
             "debug-scenario-state",
         )
-        .declare_state::<ScenarioStateCapture>(StateClass::Presentation, "debug-scenario-state");
+        .declare_state::<ScenarioStateCapture>(StateClass::Presentation, "debug-scenario-state")
+        // The trigger-fire recorder (issue #1151): a read-only projection nothing
+        // in the fixed tick reads back, so it is a digest EXCLUSION exactly like
+        // the scenario capture it accompanies.
+        .declare_state::<TriggerFireRecorder>(StateClass::Presentation, "debug-scenario-state");
 
         // Counters: always-on, after the whole tick's admission has run (the
         // same window the unrouted-command lint observes), gated only on there
@@ -120,10 +125,24 @@ impl Plugin for DebugPlugin {
         // flag-gated publish. Ordered after `SimSet::Broadcast` so it reads the
         // trigger pipeline's end-of-tick state, the same window the
         // station-activity tap uses.
+        //
+        // Trigger-fire recording (issue #1151) runs in the same flag-gated window
+        // BEFORE the publish, so the fire rings the publish folds in are current.
+        // Both are read-only projections into `Presentation`-class resources, so
+        // gating them together gives a crisp determinism A/B: the whole
+        // scenario-debug surface on vs off leaves the seeded digest identical
+        // (`tests/scenario_state.rs`).
+        app.add_systems(
+            FixedUpdate,
+            scenario::record_trigger_fires
+                .after(crate::sim_sets::SimSet::Broadcast)
+                .run_if(in_state(crate::core::messages::GamePhase::InProgress))
+                .run_if(|flag: Res<DebugScenarioStateEnabled>| flag.0),
+        );
         app.add_systems(
             FixedUpdate,
             scenario::publish_scenario_state
-                .after(crate::sim_sets::SimSet::Broadcast)
+                .after(scenario::record_trigger_fires)
                 .run_if(in_state(crate::core::messages::GamePhase::InProgress))
                 .run_if(|flag: Res<DebugScenarioStateEnabled>| flag.0),
         );

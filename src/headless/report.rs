@@ -489,7 +489,16 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
                 .get_resource::<crate::world::server::ObjectiveManagerRes>()
                 .map(|o| &o.0)
                 .unwrap_or(&default_objectives);
-            crate::debug::scenario::collect_scenario_state(runtime, objectives)
+            // Fold in the recorded trigger fire history (issue #1151) so the AAR
+            // carries why each beat fired, not just the end-of-run trigger state.
+            // The recorder is a `Presentation`-class resource `DebugPlugin`
+            // installs on every target; absent only in a fixture without it.
+            let default_recorder = crate::debug::TriggerFireRecorder::default();
+            let recorder = app
+                .world()
+                .get_resource::<crate::debug::TriggerFireRecorder>()
+                .unwrap_or(&default_recorder);
+            crate::debug::scenario::collect_scenario_state_with_fires(runtime, objectives, recorder)
         });
 
     RunReport {

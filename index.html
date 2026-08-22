@@ -897,6 +897,63 @@
       line-height: 1.35;
       color: #0f0;
     }
+    /* Station-activity chart (issue #1145) — the one structured-JSON debug
+       output, drawn rather than printed, so it opts out of the monospace text
+       styling the four legacy overlays share. */
+    #debug-content .sa-chart { white-space: normal; color: #cde; font-family: monospace; }
+    .sa-title { font-size: 12px; color: #9fd; margin-bottom: 2px; }
+    .sa-caption { font-size: 10px; color: #6a86a0; margin-bottom: 6px; }
+    .sa-legend { display: flex; gap: 12px; font-size: 10px; margin-bottom: 6px; }
+    .sa-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+    .sa-swatch { width: 10px; height: 10px; display: inline-block; border-radius: 2px; }
+    .sa-swatch-human { background: #4fd1ff; }
+    .sa-swatch-ai { background: #ffb347; }
+    .sa-bar-human { fill: #4fd1ff; }
+    .sa-bar-ai { fill: #ffb347; }
+    .sa-station-label { fill: #cde; font-size: 10px; font-family: monospace; }
+    .sa-svg { max-width: 100%; height: auto; }
+    .sa-empty { color: #6a86a0; font-size: 11px; }
+    /* Scenario-state panel (issue #1148) — the second structured-JSON debug
+       output. Like the station-activity chart it opts out of the monospace text
+       styling the four legacy overlays share, and lays its surfaces out as
+       labelled sections. */
+    #debug-content .ss-panel { white-space: normal; color: #cde; font-family: monospace; font-size: 10px; }
+    .ss-title { font-size: 12px; color: #9fd; margin-bottom: 4px; }
+    .ss-section { margin-bottom: 8px; }
+    .ss-section-title { font-size: 10px; color: #9fd; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; border-bottom: 1px solid #24384c; }
+    .ss-none { color: #6a86a0; font-size: 10px; }
+    .ss-flag, .ss-objective, .ss-trigger, .ss-delayed, .ss-deadline, .ss-commitment, .ss-dossier-entry {
+      display: flex; gap: 8px; padding: 1px 0; flex-wrap: wrap; align-items: baseline;
+    }
+    .ss-flag-name, .ss-objective-id, .ss-deadline-id, .ss-commitment-id, .ss-dossier-subject { color: #cde; }
+    .ss-flag-value, .ss-objective-priority, .ss-deadline-due { color: #ffb347; }
+    .ss-objective-status, .ss-objective-directive, .ss-deadline-state, .ss-commitment-state,
+    .ss-dossier-provenance, .ss-trigger-status { color: #6a86a0; }
+    .ss-trigger-condition, .ss-delayed-action { color: #4fd1ff; }
+    .ss-trigger-when { color: #9fd; }
+    .ss-trigger-when[data-holds="false"] { color: #ffb347; }
+    .ss-trigger-status[data-state="fired"] { color: #4f8f6a; }
+    .ss-trigger-status[data-state="waiting"] { color: #ffb347; }
+    .ss-empty { color: #6a86a0; font-size: 11px; }
+
+    /* AI doctrine-pool panel (issue #1149) — the second structured-JSON debug
+       output: per AI ship, its scored-objective pool as a candidate table with
+       the chosen directive marked. Drawn rather than printed, like the chart. */
+    #debug-content .ad-panel { white-space: normal; color: #cde; font-family: monospace; }
+    .ad-title { font-size: 12px; color: #9fd; margin-bottom: 2px; }
+    .ad-caption { font-size: 10px; color: #6a86a0; margin-bottom: 6px; }
+    .ad-ship { margin-bottom: 10px; }
+    .ad-ship-header { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin-bottom: 2px; }
+    .ad-ship-name { color: #9fd; font-weight: bold; }
+    .ad-chosen { color: #ffb347; }
+    .ad-chosen-none { color: #6a86a0; }
+    .ad-candidates { width: 100%; border-collapse: collapse; font-size: 10px; }
+    .ad-candidates th { text-align: left; color: #6a86a0; font-weight: normal; border-bottom: 1px solid #24405a; padding: 1px 4px; }
+    .ad-candidates td { padding: 1px 4px; }
+    .ad-candidate.chosen { color: #ffd; background: rgba(255, 179, 71, 0.12); }
+    .ad-candidate.mandatory .ad-c-objective::after { content: " *"; color: #ff6b6b; }
+    .ad-c-score { text-align: right; }
+    .ad-empty { color: #6a86a0; font-size: 11px; }
 
     /* ── Settings cog (issue #939) ───────────────────────────────
        Top-left, over the viewscreen. Fixed rather than docked: the shell is a
@@ -1021,7 +1078,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-f85d8ccc20258e4f.js" crossorigin="anonymous" integrity="sha384-5YAxUeK/VwBWVangj8mEtC3ua3S77LTZ2ca08vXN7LqDey6XzFrMFJ3elKEryJXw"><link rel="preload" href="./project-phoenix-f85d8ccc20258e4f_bg.wasm" crossorigin="anonymous" integrity="sha384-Hc49kSUpzmGEPpxs64gl2emTETpmWwWIakW8Oiy+/CZs6yAnnGHddH9/eYnC71FN" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-b4eae701275e564e.js" crossorigin="anonymous" integrity="sha384-zbFUgr3Nso5pb+2/j4pfOLlinqDH+xK+H64JEOcDcEQ5feEKEY/v5pT5kHTcGo+L"><link rel="preload" href="./project-phoenix-b4eae701275e564e_bg.wasm" crossorigin="anonymous" integrity="sha384-T3DmYciCuZ4D6vAfyY7tyyaoFeTKFKRnLrMt0z2MJvLc1F4EXO3tBbimvCDLciNw" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1413,8 +1470,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-f85d8ccc20258e4f.js';
-const wasm = await init({ module_or_path: './project-phoenix-f85d8ccc20258e4f_bg.wasm' });
+import init, * as bindings from './project-phoenix-b4eae701275e564e.js';
+const wasm = await init({ module_or_path: './project-phoenix-b4eae701275e564e_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -3279,6 +3336,20 @@ function finishInit() {
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;
   window.wasm_toggle_entity_inspector = wasmBindings.wasm_toggle_entity_inspector;
   window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
+  // Station activity (issue #1145): the first structured-JSON debug surface. The
+  // getter returns a StationActivityPayload as JSON, which the settings cog's
+  // station-activity output parses and charts (gui/station-activity-chart.js)
+  // rather than printing. The toggle flips the flag that gates the JSON publish;
+  // the counters behind it are always-on.
+  window.wasm_toggle_station_activity = wasmBindings.wasm_toggle_station_activity;
+  window.wasm_get_station_activity = wasmBindings.wasm_get_station_activity;
+  // AI doctrine pool (issue #1149): the second structured-JSON debug surface. The
+  // getter returns an AiStatePayload as JSON, which the settings cog's AI-doctrine
+  // output parses and draws as a per-ship candidate table (gui/ai-doctrine-panel.js)
+  // rather than printing. The toggle flips the flag that gates the JSON publish;
+  // the pool it projects is authoritative state.
+  window.wasm_toggle_ai_doctrine = wasmBindings.wasm_toggle_ai_doctrine;
+  window.wasm_get_ai_doctrine = wasmBindings.wasm_get_ai_doctrine;
   window.wasm_toggle_god_mode = wasmBindings.wasm_toggle_god_mode;
   window.wasm_get_god_mode = wasmBindings.wasm_get_god_mode;
   window.wasm_toggle_instagib = wasmBindings.wasm_toggle_instagib;

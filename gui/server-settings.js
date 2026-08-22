@@ -29,6 +29,15 @@
 
 import { t } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
+import { renderStationActivityChart } from './station-activity-chart.js';
+import { renderAiDoctrinePanel } from './ai-doctrine-panel.js';
+import { renderScenarioStatePanel } from './scenario-state-panel.js';
+import {
+  renderModifierDebug,
+  renderDamageDebug,
+  renderEntityBehaviorDebug,
+  renderEntityInspectorDebug,
+} from './debug-overlays.js';
 import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
 import {
   mountOverlayShell,
@@ -47,16 +56,24 @@ import {
 // file spells a `wasm_*` name.
 
 /**
- * Debug overlays that also produce a text stream for the output panel. `read`
- * is polled while that output is the visible one; `toggle` flips the matching
- * Bevy resource (`DebugOverlayEnabled`, `DebugDamageEnabled`,
- * `DebugEntitiesEnabled`, `DebugEntityInspectorEnabled`).
+ * Debug outputs shown in the output panel. `read` is polled while that output
+ * is the visible one; `toggle` flips the matching Bevy resource. Every output
+ * now carries a `render` function that parses a structured-JSON payload and
+ * builds DOM: the first four were migrated off pre-formatted TEXT onto the
+ * observability pipeline by issue #1150 (PRD #1144), joining station activity
+ * (issue #1145), the AI doctrine pool (issue #1149) and scenario state (issue
+ * #1148) so the dock speaks one language — "one debug system, not two".
  */
 export const DEBUG_OUTPUTS = [
-  { id: 'modifiers', labelId: 'settings.debug.modifiers', toggle: 'wasm_toggle_debug_overlay', read: 'wasm_get_debug_state' },
-  { id: 'damage', labelId: 'settings.debug.damage', toggle: 'wasm_toggle_debug_damage', read: 'wasm_get_damage_log' },
-  { id: 'entities', labelId: 'settings.debug.entities', toggle: 'wasm_toggle_debug_entities', read: 'wasm_get_entity_debug_state' },
-  { id: 'inspector', labelId: 'settings.debug.inspector', toggle: 'wasm_toggle_entity_inspector', read: 'wasm_get_entity_inspector' },
+  { id: 'modifiers', labelId: 'settings.debug.modifiers', toggle: 'wasm_toggle_debug_overlay', read: 'wasm_get_debug_state', render: renderModifierDebug },
+  { id: 'damage', labelId: 'settings.debug.damage', toggle: 'wasm_toggle_debug_damage', read: 'wasm_get_damage_log', render: renderDamageDebug },
+  { id: 'entities', labelId: 'settings.debug.entities', toggle: 'wasm_toggle_debug_entities', read: 'wasm_get_entity_debug_state', render: renderEntityBehaviorDebug },
+  { id: 'inspector', labelId: 'settings.debug.inspector', toggle: 'wasm_toggle_entity_inspector', read: 'wasm_get_entity_inspector', render: renderEntityInspectorDebug },
+  { id: 'station-activity', labelId: 'settings.debug.station_activity', toggle: 'wasm_toggle_station_activity', read: 'wasm_get_station_activity', render: renderStationActivityChart },
+  // AI doctrine pool (issue #1149): the second structured-JSON surface, drawn as
+  // a per-ship candidate table rather than printed as text.
+  { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', toggle: 'wasm_toggle_ai_doctrine', read: 'wasm_get_ai_doctrine', render: renderAiDoctrinePanel },
+  { id: 'scenario-state', labelId: 'settings.debug.scenario', toggle: 'wasm_toggle_scenario_state', read: 'wasm_get_scenario_state', render: renderScenarioStatePanel },
 ];
 
 /** Cheats and world-drawing toggles, each with an authoritative read-back. */
@@ -229,8 +246,14 @@ export function mountServerSettings(opts = {}) {
     }
     if (outputContent && viewing) {
       const entry = DEBUG_OUTPUTS.find((o) => o.id === viewing);
-      const text = entry ? invoke(entry.read) : undefined;
-      outputContent.textContent = typeof text === 'string' ? text : '';
+      const raw = entry ? invoke(entry.read) : undefined;
+      if (entry && typeof entry.render === 'function') {
+        // Structured-JSON surface (issue #1145): the read string is a payload
+        // the entry's renderer parses and draws, not text to print.
+        entry.render(outputContent, typeof raw === 'string' ? raw : '');
+      } else {
+        outputContent.textContent = typeof raw === 'string' ? raw : '';
+      }
     }
     for (const entry of DEBUG_OUTPUTS) {
       const el = controls.outputs[entry.id];

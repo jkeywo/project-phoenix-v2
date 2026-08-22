@@ -720,57 +720,13 @@ impl Plugin for WorldPlugin {
                     .in_set(crate::sim_sets::SimSet::Physics)
                     .after(tick_trigger_pipeline),
             )
-            // The two world-layer mutators (issue #1183). Both were `.in_set`
-            // only, with NO edge relative to each other or to
-            // `tick_trigger_pipeline` — yet all three write
-            // `ResMut<WorldContentRuntime>` (and `apply_world_layer_changes`
-            // additionally shares `ObjectiveManagerRes`, `WorldLayerMap` and
-            // `PendingWorldLayerChanges` with the pipeline), so no two of them
-            // can run in parallel and the executor was picking their order by
-            // Bevy's `--deterministic` registration tie-break alone — the same
-            // silent P2P-lockstep hazard (#854) the registration-shuffle guard
-            // exists to close. These edges pin it.
-            //
-            // # Order: tick_trigger_pipeline -> scenario_loads -> layer_changes
-            //
-            // * AFTER `tick_trigger_pipeline` because the pipeline is the
-            //   PRODUCER: a fired `load_world`/`unload_world` trigger action
-            //   pushes a `WorldLayerChange` onto `PendingWorldLayerChanges` this
-            //   tick (see `apply_dispatch_result`), which `apply_world_layer_changes`
-            //   then drains — so it must observe the pipeline's same-tick output.
-            //   `apply_pending_scenario_loads` names the pipeline too so BOTH
-            //   world-runtime merges land at a FIXED position relative to the
-            //   pipeline's own `WorldContentRuntime` writes: any world merged
-            //   this tick first becomes live for trigger evaluation NEXT tick,
-            //   the same one-tick cadence `collect_world_events` already imposes.
-            // * scenario_loads BEFORE layer_changes because both APPEND to
-            //   `WorldContentRuntime.trigger_states`, and that append order fixes
-            //   the trigger-evaluation order (hence the digest). Pinning scenario
-            //   first also keeps a layer's stored snapshot length (which
-            //   `UnloadWorld` reverses by index) taken with scenario merges
-            //   already in place, so an unload retains the scenario-merged
-            //   triggers below its snapshot boundary.
-            //
-            // # Determinism
-            // This pinned order EQUALS the order the schedule already resolved to
-            // (insertion-order tie-break), so it moves no digest and no replay
-            // fingerprint — it only removes the executor's freedom to pick a
-            // different one. `registration_order_determinism` guards it: without
-            // these edges the three form ambiguous, `WorldContentRuntime`-
-            // conflicting pairs in `ScheduleGraph::conflicting_systems()`; with
-            // them they are ordered and drop out.
             .add_systems(
                 FixedUpdate,
-                apply_pending_scenario_loads
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(tick_trigger_pipeline),
+                apply_pending_scenario_loads.in_set(crate::sim_sets::SimSet::Physics),
             )
             .add_systems(
                 FixedUpdate,
-                apply_world_layer_changes
-                    .in_set(crate::sim_sets::SimSet::Physics)
-                    .after(tick_trigger_pipeline)
-                    .after(apply_pending_scenario_loads),
+                apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics),
             )
             .add_observer(handle_region_entered_event)
             .add_observer(handle_region_exited_event);

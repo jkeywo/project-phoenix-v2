@@ -15,6 +15,8 @@
 //!    projection; the counters are always-on in both runs and inert to the fold.
 //!    This follows the seeded-headless prior art in `tests/rng_determinism.rs`.
 
+#![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+
 use bevy::prelude::*;
 
 use project_phoenix::core::messages::{

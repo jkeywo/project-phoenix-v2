@@ -27,6 +27,8 @@
 //! by the pure unit tests in `src/debug/scenario.rs`, which build the authoritative
 //! state directly rather than through a whole app.
 
+#![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+
 use project_phoenix::debug::{DebugScenarioStateEnabled, ScenarioStateCapture};
 use project_phoenix::headless::{build_headless_app, run, HeadlessArgs};
 use project_phoenix::sim_digest::world_digest;

@@ -16,6 +16,8 @@
 //!    projection off the doctrine blackboards; enabling it is inert to the fold.
 //!    This follows the seeded-headless prior art in `tests/station_activity.rs`.
 
+#![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+
 use bevy::prelude::*;
 
 use project_phoenix::core::messages::{

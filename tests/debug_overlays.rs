@@ -17,6 +17,8 @@
 //!    the JSON publish is inert to the fold. This mirrors the station-activity
 //!    guard in `tests/station_activity.rs`.
 
+#![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
+
 use bevy::prelude::*;
 
 use project_phoenix::debug::damage::publish_damage_debug;

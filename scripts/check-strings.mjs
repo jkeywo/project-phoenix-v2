@@ -334,6 +334,14 @@ const UNLOCALISED_FILES = new Set([
   // Its <title> shows for the duration of one redirect; wiring the string table
   // into it would cost a fetch to translate a flicker.
   'gui/lobby-client.html',
+  // The debug dock's four migrated legacy overlays (issue #1150, PRD #1144).
+  // Operator/developer diagnostics — entity inspector, damage log, modifier and
+  // entity-behaviour readouts — that render only when a debug flag is toggled on
+  // in a dev build; a player never sees them. Each row interpolates raw machine
+  // values (arc=, dmg=, pos=(x,y,z), ai target ids) that are not display copy.
+  // Its player-adjacent section titles already go through t() and stay validated
+  // by the id-existence check above (section 2, which does not consult this set).
+  'gui/debug-overlays.js',
 ]);
 
 // The rules live in scripts/strings-literals.mjs and scripts/strings-markup.mjs

@@ -638,10 +638,13 @@ pub fn operate_navigation_ai(
         mut admitted,
     ) in ships.iter_mut()
     {
-        let policy = sources
-            .0
-            .policy_for(&crate::system_registry::navigation_system_id());
-        if !policy.operate_ai {
+        // Control-Source gate through the shared AI host spine (issue #1208): a
+        // human holder (or an offline system) stands the selector down.
+        // Navigation resolves a data-driven SELECTOR the spine does not model, so
+        // only its gate — the one step it shares with the policy hosts — routes
+        // here.
+        if !crate::ai::host::ai_operates(&sources.0, crate::system_registry::navigation_system_id())
+        {
             continue;
         }
         // No authored `[navigation_console.selector]` ⇒ no component ⇒ no

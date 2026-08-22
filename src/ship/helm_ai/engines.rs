@@ -1,5 +1,9 @@
 use super::*;
 
+use crate::ai::host::HostOutcome;
+use crate::ai::policy::AiPolicyVerb;
+use crate::messages::SystemControlPayload;
+
 /// Per-ship inline stateless **Engines** AI policy (issue #779).
 ///
 /// Attached at spawn from the ship's authored `[helm_console.engines_ai]`
@@ -25,6 +29,69 @@ pub struct HelmEnginesAiPolicy(pub crate::ai::policy::AiPolicy);
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmEnginesAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState);
 
+/// The **Engines** helm axis (issue #1208): resolve `[helm_console.engines_ai]`'s
+/// `longitudinal` channel to the `actuate_desired_travel` mode verb, and on a
+/// fire emit the planner-decoded forward throttle. A stateful axis — the
+/// destroyer's fly-through machine runs here (issue #883).
+///
+/// The DECISION is a pure fact→mode map; the continuous magnitude comes from the
+/// shared [`DesiredMotion`](crate::ship::helm_planner) planner fact, so no
+/// geometry lives in the policy (AGENTS.md #11). A "hold" (no rule fires) emits
+/// nothing and `ThrustInput` latches its last value — it does not coast, decay
+/// or centre; `integrate_ship_physics` keeps integrating the latch every tick
+/// (issue #968's capability gate is what covers the axis being destroyed).
+pub(crate) struct EnginesAxis;
+
+impl HelmAxisHost for EnginesAxis {
+    fn system_id() -> crate::messages::SystemId {
+        crate::system_registry::helm_thrust_system_id()
+    }
+    const CHANNEL: &'static str = crate::entities::config::HELM_LONGITUDINAL_CHANNEL;
+    const STATEFUL: bool = true;
+
+    fn accepts(verb: &AiPolicyVerb) -> bool {
+        matches!(verb, AiPolicyVerb::ActuateDesiredTravel)
+    }
+
+    fn seed(cx: &HelmAxisCtx) -> crate::world::flags::AiFacts {
+        // Issue #883 (AC5): a really-seeded snapshot — hazard/availability from
+        // the shared surfaces, target-relative motion from the frame — so a
+        // `fact(...)` guard on `longitudinal` evaluates against the world. The
+        // availability pair is seeded honestly from the ship's own config
+        // resources, never a hardcoded `false` (the #779 trap one fact narrower).
+        let mut facts = seed_helm_actuator_facts(
+            cx.plan.map(|sp| &sp.hazard),
+            cx.impulse_cfg.is_some(),
+            cx.boost_cfg.map(|c| c.enabled).unwrap_or(false),
+            cx.physics.map(|p| p.y).unwrap_or(0.0),
+            frame_red_alert(cx.frame),
+        );
+        if let Some(physics) = cx.physics {
+            seed_helm_travel_facts(&mut facts, cx.frame, physics, cx.max_speed);
+        }
+        facts
+    }
+
+    fn act(
+        outcome: HostOutcome,
+        cx: &HelmAxisCtx,
+        _io: &mut HelmAxisIo,
+    ) -> Option<SystemControlPayload> {
+        match outcome {
+            HostOutcome::Act(verb) if Self::accepts(verb) => {
+                // Decode our own axis (forward throttle) from the ship's 3D
+                // desired velocity rather than re-deriving the decision here.
+                let sp = cx.plan?;
+                let thrust = crate::ai::decode_thrust_from_velocity(
+                    sp.motion.desired_velocity_local.to_array(),
+                );
+                Some(SystemControlPayload::SetThrust { value: thrust })
+            }
+            _ => None,
+        }
+    }
+}
+
 /// Per-axis helm AI: throttle. Decides the throttle for ships whose
 /// helm-thrust system is AI-operated and emits it as an admitted `SetThrust`
 /// into the ship's own `AdmittedCommands` (issues #800, #704, #824) —
@@ -34,9 +101,9 @@ pub struct HelmEnginesAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState)
 /// marker, and the intent components the admitted command lands on only
 /// exist there (`lod_ai_ships` inserts/removes them with the marker).
 ///
-/// Decodes only its own axis from the shared motion plan (built this tick by
-/// `helm_motion_planner` from the pure `plan_helm_travel` decision, see the
-/// module note).
+/// Since #1208 the gate/declare/resolve preamble is the shared
+/// [`run_helm_axis::<EnginesAxis>`](run_helm_axis) driver's; this body only
+/// assembles the per-ship context and emits the payload it returns.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_thrust(
     // The read-only AI-host world context — flag chain, sessions, and origin
@@ -57,7 +124,7 @@ pub(crate) fn ai_helm_thrust(
             Option<&crate::entity_spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             // Availability of the two optional drives, seeded honestly into the
-            // fact snapshot below (see the `seed_helm_actuator_facts` call).
+            // fact snapshot (see `EnginesAxis::seed`).
             Option<&BoostConfigResource>,
             Option<&ImpulseConfigResource>,
             Option<&HelmEnginesAiPolicy>,
@@ -81,96 +148,51 @@ pub(crate) fn ai_helm_thrust(
         mut admitted,
     ) in ships.iter_mut()
     {
-        // Gate on our own axis alone (issue #800) — see the module note above.
-        if !sources
-            .0
-            .policy_for(&crate::system_registry::helm_thrust_system_id())
-            .operate_ai
-        {
-            continue;
-        }
-        // Consume the shared desired-motion contract published by the motion
-        // planner this tick (issue #741): decode our own axis (forward
-        // throttle) from the ship's 3D desired velocity rather than
-        // re-deriving the decision here. No plan entry (no AI helm axis / no
-        // frame) means nothing to actuate.
+        // No plan entry (no AI helm axis / no frame) means nothing to actuate:
+        // the throttle decode below reads the plan's decoded velocity.
         let Some(sp) = plan.ships.get(&entity) else {
             continue;
         };
-        // Resolve the data-authored #779 Engines policy's `longitudinal` mode
-        // verb to decide WHETHER to actuate this tick. The stateless policy is a
-        // pure fact→mode map; the continuous magnitude below still comes from
-        // the planner fact, so no geometry lives in the policy (AGENTS.md #11).
-        // A "hold" resolution (no rule fires / explicit idle) emits nothing, and
-        // `ThrustInput` therefore keeps the last value it was given. Note what
-        // that is NOT: the throttle does not coast, decay or centre. The intent
-        // component is a latch and `integrate_ship_physics` goes on integrating
-        // it every tick, so "hold" means the ship carries on doing exactly what
-        // it was last told to do, indefinitely. Issue #968 is what that costs
-        // when the axis can no longer be commanded at all: the fix there is a
-        // capability gate in the integrator plus an offline clear in
-        // `process_helm_inputs`, and whether a POLICY "hold" should also decay
-        // toward neutral is still open.
-        //
-        // Issue #883 (AC5) closes the #779 empty-facts gap on this axis: the
-        // snapshot below is really seeded — hazard/availability from the shared
-        // surfaces, target-relative motion from the frame's merged view — so a
-        // `fact(...)` guard on `longitudinal` evaluates against the world
-        // instead of validating and never firing.
-        //
-        // The availability pair is seeded from the ship's OWN config resources,
-        // exactly as `ai_policy_state_tick` and `ai_helm_boost` seed it. Passing
-        // a hardcoded `false` here would have been the #779 trap one fact
-        // narrower: a guard on `fact(boost_available)` would validate at load
-        // and then read 0 for ever, which is silently wrong in the same way an
-        // absent fact is.
-        // No attached `[helm_console.engines_ai]` ⇒ no AI action on this axis.
-        // Since #885b stage 5d there is no synthesised stand-in: strict
-        // AI-declaration mode rejects an AI-capable hull that omits the block at
-        // load, so an absent component means the declaration is missing and a
-        // missing declaration gets no automation (PRD #774 US7).
-        let Some(engines_policy) = engines_policy else {
-            continue;
+        let cx = HelmAxisCtx {
+            physics: Some(physics),
+            max_speed: physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
+            plan: Some(sp),
+            frame: frame.ships.get(&entity),
+            anchors: &frame.anchors,
+            impulse: None,
+            impulse_cfg,
+            boost_cfg,
+            boost: None,
+            behaviour: None,
+            capability: None,
+            cursors: None,
         };
-        let policy = &engines_policy.0;
-        let mut facts = seed_helm_actuator_facts(
-            Some(&sp.hazard),
-            impulse_cfg.is_some(),
-            boost_cfg.map(|c| c.enabled).unwrap_or(false),
-            physics.y,
-            frame_red_alert(frame.ships.get(&entity)),
-        );
-        seed_helm_travel_facts(
-            &mut facts,
-            frame.ships.get(&entity),
-            physics,
-            physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
-        );
-        // The scenario flag chain, anchored at the layer that spawned this
-        // ship (issue #891 stage 2).
+        let mut io = HelmAxisIo {
+            policy: None,
+            state: None,
+            pending: None,
+        };
+        // The scenario flag chain, anchored at the layer that spawned this ship
+        // (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(entity);
-        if resolve_helm_channel(
-            policy,
+        if let Some(payload) = run_helm_axis::<EnginesAxis>(
+            sources,
+            engines_policy.map(|p| &p.0),
             engines_state.map(|s| &s.0),
-            crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
-            &facts,
             clock.0,
             &flag_chain,
-        ) != Some(&crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel)
-        {
-            continue;
+            &cx,
+            &mut io,
+        ) {
+            emit_helm_ai_command(
+                entity_uuid,
+                EnginesAxis::system_id(),
+                payload,
+                sources,
+                &sessions,
+                ship_config,
+                &mut admitted,
+            );
         }
-        let thrust =
-            crate::ai::decode_thrust_from_velocity(sp.motion.desired_velocity_local.to_array());
-
-        emit_helm_ai_command(
-            entity_uuid,
-            crate::system_registry::helm_thrust_system_id(),
-            crate::messages::SystemControlPayload::SetThrust { value: thrust },
-            sources,
-            &sessions,
-            ship_config,
-            &mut admitted,
-        );
     }
 }

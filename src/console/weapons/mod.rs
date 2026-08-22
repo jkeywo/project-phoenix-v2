@@ -1430,10 +1430,14 @@ fn ai_target_selection(
         // `[weapons_console.selector]` means no ranking exists to run, so the
         // radar clears any stale lock and takes no selection.
         let radar_idle = target_selector.is_none_or(|s| s.idle);
-        let radar_operates_ai = control_sources
-            .0
-            .policy_for(&crate::system_registry::tactical_radar_system_id())
-            .operate_ai;
+        // Control-Source gate through the shared AI host spine (issue #1208): the
+        // radar's OWN `operate_ai`. Tactical target selection resolves a
+        // data-driven SELECTOR the spine does not model, so only its gate — the
+        // one step it shares with the policy hosts — routes here.
+        let radar_operates_ai = crate::ai::host::ai_operates(
+            &control_sources.0,
+            crate::system_registry::tactical_radar_system_id(),
+        );
         if radar_idle || !radar_operates_ai {
             clear_locked_target_if_present(&mut blackboards);
             continue;

@@ -830,25 +830,6 @@ where
     Some(to)
 }
 
-/// Resolve a helm fine-system policy's single mode channel to a bare "actuate
-/// this tick?" boolean (issue #779).
-///
-/// The policy is a pure fact→verb(mode) map: it returns the channel's mode verb
-/// when a guard fires and `None` ("hold") otherwise. This collapses that to the
-/// host's decision — emit the planner-decoded scalar, or emit nothing — without
-/// letting the continuous magnitude leak into the policy. `expected` is the mode
-/// verb this channel is allowed to carry (validated at load), so a mismatched
-/// verb resolves to "hold" defensively rather than actuating on a wrong axis.
-fn helm_policy_actuates(
-    policy: &crate::ai::policy::AiPolicy,
-    channel: &str,
-    facts: &crate::world::flags::AiFacts,
-    expected: &crate::ai::policy::AiPolicyVerb,
-    flags: &[&crate::world::flags::FlagStore],
-) -> bool {
-    policy.resolve_channel(channel, facts, flags) == Some(expected)
-}
-
 /// Resolve one helm fine system's single mode channel, on whichever of the two
 /// policy paths the authored content chose (issues #779, #882, #883).
 ///
@@ -902,6 +883,238 @@ fn resolve_helm_channel<'a>(
     }
 }
 
+// ── The six helm axes behind one trait + one driver (issue #1208) ─────────────
+//
+// Every per-axis helm host walks the identical decision spine: **gate** the
+// axis's Control Source on AI, **check** it declares a policy, **resolve** the
+// axis's single mode channel, and — on a fired-and-accepted verb — **actuate**.
+// Issue #1205 lifted that spine into [`crate::ai::host::decide`]; this trait is
+// what lets the six axes SHARE it. Each axis is one [`HelmAxisHost`] impl naming
+// its system id, channel, statefulness, accepted verb(s), fact seeding and
+// actuation; [`run_helm_axis`] is the one generic driver that walks the spine
+// for any of them, so the twelve-step gate/declare/resolve preamble that used to
+// be copied into each of the six ~120-line systems now lives ONCE, in the spine.
+//
+// The six per-axis SYSTEMS stay distinct (each keeps its own query), on purpose:
+// no axis gains a component another needs, so the Bevy access footprint — and
+// therefore the deterministic schedule and its digest — is byte-identical to
+// before #1208. Each system body is now a thin loop that builds the per-ship
+// [`HelmAxisCtx`]/[`HelmAxisIo`], calls `run_helm_axis::<ThisAxis>`, and emits
+// whatever payload it returns through the axis's own admission shim.
+
+/// The read-only per-ship context a [`HelmAxisHost`] seeds facts and actuates
+/// from (issue #1208).
+///
+/// Built once per ship by the axis's system body from that body's OWN query, so
+/// a field an axis does not read is simply left `None`/default — the ctx is the
+/// union of what the six axes need, never a widened query. `seed` and `act` read
+/// only the fields their axis populates.
+pub(crate) struct HelmAxisCtx<'a> {
+    /// The ship's live physics (pose, forward speed, vertical offset `y`).
+    /// `None` only for the Lateral axis, whose query carries no `ShipPhysics`
+    /// (its dodge reads the plan's hazard surface, never the pose) — keeping the
+    /// six per-axis query footprints byte-identical to before #1208.
+    pub(crate) physics: Option<&'a ShipPhysics>,
+    /// `ShipPhysicsConfigResource.0.max_speed`, or `0.0` when unconfigured.
+    pub(crate) max_speed: f32,
+    /// This ship's shared motion plan for the tick (`HelmMotionPlan.ships`),
+    /// carrying the decoded travel/facing intent, hazard surface and docking
+    /// flag. `None` for a ship the planner published no entry for.
+    pub(crate) plan: Option<&'a crate::ship::helm_planner::ShipMotionPlan>,
+    /// This ship's shared decision frame for the tick (`HelmAiSurfacesFrame`).
+    pub(crate) frame: Option<&'a HelmAiShipFrame>,
+    /// World anchors, captured once per tick on the frame.
+    pub(crate) anchors: &'a std::collections::HashMap<String, [f32; 3]>,
+    /// The impulse drive component (phase), when the hull carries one.
+    pub(crate) impulse: Option<&'a ShipImpulse>,
+    /// The impulse drive per-hull config (engage/cancel distances). Its presence
+    /// is the impulse capability.
+    pub(crate) impulse_cfg: Option<&'a ImpulseConfigResource>,
+    /// The boost drive per-hull config; `enabled` is the boost capability.
+    pub(crate) boost_cfg: Option<&'a BoostConfigResource>,
+    /// The boost drive component (active state), when the hull carries one.
+    pub(crate) boost: Option<&'a ShipBoost>,
+    /// The authored `[behaviour]` section (doctrine, avoidance sensitivities).
+    pub(crate) behaviour: Option<&'a crate::entities::spawner::BehaviourSection>,
+    /// The authored `[helm_capability]` section (vertical movement mode/limits).
+    pub(crate) capability: Option<&'a crate::entities::spawner::HelmCapabilitySection>,
+    /// This ship's per-objective patrol cursors, for target resolution.
+    pub(crate) cursors: Option<&'a crate::ai_plugin::ObjectiveCursors>,
+}
+
+/// The policy/state/mutable-scratch a [`HelmAxisHost::act`] reads to actuate
+/// (issue #1208).
+///
+/// Separate from [`HelmAxisCtx`] because these are the pieces an axis needs
+/// mutable or policy-shaped access to — today only the Steering axis, which
+/// reads its policy's leg-yield flag and mutates the pending arc-bearing
+/// request. Every other axis ignores it.
+pub(crate) struct HelmAxisIo<'a> {
+    /// The axis's resolvable policy (Steering reads `leg_yields_to_arc_requests`).
+    pub(crate) policy: Option<&'a crate::ai::policy::AiPolicy>,
+    /// The axis's runtime state, for the current leg id.
+    pub(crate) state: Option<&'a crate::ai::policy::AiPolicyRuntimeState>,
+    /// The Weapons→Helm arc-bearing request this axis owns, mutated in place.
+    pub(crate) pending: Option<&'a mut PendingArcBearingRequest>,
+}
+
+/// One helm fine-system axis, reduced to what its shared decision spine needs
+/// (issue #1208). Six impls — Engines, Steering, Impulse, Lateral, Vertical,
+/// Boost — collapse the six near-identical hosts behind [`run_helm_axis`].
+pub(crate) trait HelmAxisHost {
+    /// The fine system whose Control Source gates this axis.
+    fn system_id() -> crate::messages::SystemId;
+    /// The single output channel this axis resolves its mode verb on.
+    const CHANNEL: &'static str;
+    /// Whether this axis's policy may run the #882 state machine. Stateful axes
+    /// (Engines, Steering, Boost) take the state-aware `resolve_channel_in_state`
+    /// path; stateless ones (Impulse, Lateral, Vertical) always take the frozen
+    /// `resolve_channel`, exactly as the retired `helm_policy_actuates` did.
+    const STATEFUL: bool;
+
+    /// True when `verb` is one this axis actuates on. A verb outside the set
+    /// holds (the actuator latches its last input), exactly as a no-rule "hold".
+    fn accepts(verb: &crate::ai::policy::AiPolicyVerb) -> bool;
+
+    /// Seed this axis's immutable per-tick fact snapshot from the ctx.
+    fn seed(cx: &HelmAxisCtx) -> crate::world::flags::AiFacts;
+
+    /// A sanctioned override that PRECEDES the policy resolution (issue #780) —
+    /// today only the Lateral axis's docking translation. `Some` emits it and
+    /// skips the policy path for the tick; the default is `None`. It runs AFTER
+    /// the Control-Source gate, so a human-held axis overrides nothing.
+    fn pre_override(_cx: &HelmAxisCtx) -> Option<crate::messages::SystemControlPayload> {
+        None
+    }
+
+    /// Turn the spine's verdict into the payload to admit — the axis's
+    /// actuation, including any post-resolution override it owns (the Steering
+    /// arc-bearing request) or on-change gating it applies (Boost, Impulse).
+    /// `None` emits nothing this tick. The driver has already ruled out
+    /// `NotAiOperated`; each axis decides what the remaining outcomes mean for
+    /// it (most actuate only on an accepted [`HostOutcome::Act`], but Boost also
+    /// releases on `Held`).
+    fn act(
+        outcome: crate::ai::host::HostOutcome,
+        cx: &HelmAxisCtx,
+        io: &mut HelmAxisIo,
+    ) -> Option<crate::messages::SystemControlPayload>;
+}
+
+/// Resolve one helm axis's verdict through the shared [`decide`] spine, choosing
+/// the stateful or stateless resolution path exactly as the retired
+/// `resolve_helm_channel` / `helm_policy_actuates` pair did (issue #1208).
+///
+/// [`decide`]: crate::ai::host::decide
+fn helm_axis_outcome<'p, H: HelmAxisHost>(
+    sources: &ShipSystemControlSources,
+    policy: Option<&'p crate::ai::policy::AiPolicy>,
+    state: Option<&crate::ai::policy::AiPolicyRuntimeState>,
+    facts: &crate::world::flags::AiFacts,
+    now: f64,
+    flags: &[&crate::world::flags::FlagStore],
+) -> crate::ai::host::HostOutcome<'p> {
+    use crate::ai::host::{decide, HostState, HostTick};
+    let system = H::system_id();
+    if H::STATEFUL {
+        match (policy.and_then(|p| p.machine()), state) {
+            // A stateful policy WITH its runtime-state component: resolve inside
+            // the committed state over the memory-seeded facts and time-stamped
+            // memory, byte-identical to `resolve_helm_channel`'s stateful arm.
+            (Some(_), Some(st)) => {
+                let mut seeded = facts.clone();
+                seed_memory_derived_facts(&mut seeded, &st.memory);
+                let memory = st.memory_at(now);
+                let tick = HostTick {
+                    system,
+                    channel: H::CHANNEL,
+                    facts: &seeded,
+                    flags,
+                    state: Some(HostState {
+                        current: st.current.as_str(),
+                        memory: &memory,
+                    }),
+                };
+                decide(&sources.0, policy, &tick)
+            }
+            // Machine declared but no state component — the #883 loud middle
+            // case: stop the test suite rather than silently degrade, then fall
+            // through to the stateless path in release exactly as before.
+            (Some(_), None) => {
+                debug_assert!(
+                    false,
+                    "fine system channel '{}' has a STATEFUL authored policy but the ship \
+                     carries no policy-state component: the machine cannot run and this would \
+                     silently degrade to the stateless path. Every per-ship AI component must be \
+                     declared in ai_high_fidelity_components() (src/ai/server.rs), never inserted \
+                     by hand on one spawn path",
+                    H::CHANNEL
+                );
+                let tick = HostTick {
+                    system,
+                    channel: H::CHANNEL,
+                    facts,
+                    flags,
+                    state: None,
+                };
+                decide(&sources.0, policy, &tick)
+            }
+            (None, _) => {
+                let tick = HostTick {
+                    system,
+                    channel: H::CHANNEL,
+                    facts,
+                    flags,
+                    state: None,
+                };
+                decide(&sources.0, policy, &tick)
+            }
+        }
+    } else {
+        // Stateless axis: always the frozen `resolve_channel` path (the retired
+        // `helm_policy_actuates`), machine field ignored.
+        let tick = HostTick {
+            system,
+            channel: H::CHANNEL,
+            facts,
+            flags,
+            state: None,
+        };
+        decide(&sources.0, policy, &tick)
+    }
+}
+
+/// The one generic driver every per-axis helm system body runs (issue #1208):
+/// seed the axis's facts, walk the [`decide`] spine, honour the axis's
+/// sanctioned pre-policy override, and hand the verdict to the axis's `act`.
+///
+/// Returns the payload to admit, or `None` to emit nothing this tick. The
+/// Control-Source gate lives only inside [`decide`] (via [`helm_axis_outcome`]):
+/// a human-held or offline axis stands down here and overrides nothing.
+///
+/// [`decide`]: crate::ai::host::decide
+fn run_helm_axis<H: HelmAxisHost>(
+    sources: &ShipSystemControlSources,
+    policy: Option<&crate::ai::policy::AiPolicy>,
+    state: Option<&crate::ai::policy::AiPolicyRuntimeState>,
+    now: f64,
+    flags: &[&crate::world::flags::FlagStore],
+    cx: &HelmAxisCtx,
+    io: &mut HelmAxisIo,
+) -> Option<crate::messages::SystemControlPayload> {
+    let facts = H::seed(cx);
+    let outcome = helm_axis_outcome::<H>(sources, policy, state, &facts, now, flags);
+    // Gate — the ONE place a human/offline axis suppresses the AI.
+    if matches!(outcome, crate::ai::host::HostOutcome::NotAiOperated) {
+        return None;
+    }
+    // Sanctioned pre-policy override (Lateral docking), AFTER the gate.
+    if let Some(payload) = H::pre_override(cx) {
+        return Some(payload);
+    }
+    H::act(outcome, cx, io)
+}
+
 #[cfg(test)]
 // Fixture ids only (issue #907): a test that needs "some distinct id" has no
 // run to reproduce. Production identity is minted by `crate::world_id`, and
@@ -917,6 +1130,85 @@ mod tests {
     use crate::ship_physics::ShipPhysicsConfig;
     use crate::simmath;
     use crate::simulation::Ship;
+
+    // ── Table-driven per-axis wiring guard (issue #1208) ──────────────────────
+    //
+    // Every `HelmAxisHost` must resolve its OWN accepted verb through the shared
+    // `decide` spine when its fine system is AI-operated and a policy fires, and
+    // must stand DOWN — the spine's Control-Source gate returning
+    // `NotAiOperated` — under a human Control Source. A new axis cannot be added
+    // without a row below, because each call names its impl type: the six
+    // `assert_axis_wiring::<_>` lines are the registry, and an unwired seventh
+    // axis has no entry to prove it gates and fires. The per-axis Bevy tests
+    // elsewhere in this module carry the second half — that the resolved verb's
+    // payload lands in `AdmittedCommands` and that a human emits nothing — end to
+    // end through the real systems.
+
+    /// A one-rule policy that fires `verb` on `channel` unconditionally.
+    fn wiring_firing_policy(
+        channel: &str,
+        verb: crate::ai::policy::AiPolicyVerb,
+    ) -> crate::ai::policy::AiPolicy {
+        crate::ai::policy::AiPolicy {
+            params: crate::world::flags::AiParams::new(),
+            rules: vec![crate::ai::policy::AiPolicyRule {
+                priority: 0,
+                channel: channel.into(),
+                when: crate::world::flags::parse_predicate("true").unwrap(),
+                verb,
+            }],
+            idle: false,
+            machine: None,
+        }
+    }
+
+    /// AI on `system`, human on everything else.
+    fn wiring_ai_sources(system: crate::messages::SystemId) -> ShipSystemControlSources {
+        let mut resolver = ControlSourceResolver::new();
+        resolver.set(system, ControlSource::Ai);
+        ShipSystemControlSources(resolver)
+    }
+
+    fn assert_axis_wiring<H: HelmAxisHost>(fire_verb: crate::ai::policy::AiPolicyVerb) {
+        let policy = wiring_firing_policy(H::CHANNEL, fire_verb);
+        let facts = crate::world::flags::AiFacts::new();
+        let flags: [&crate::world::flags::FlagStore; 0] = [];
+
+        // AI-operated on this axis + a policy that fires ⇒ the spine resolves the
+        // axis's own accepted verb.
+        let ai = wiring_ai_sources(H::system_id());
+        match helm_axis_outcome::<H>(&ai, Some(&policy), None, &facts, 0.0, &flags) {
+            crate::ai::host::HostOutcome::Act(v) => assert!(
+                H::accepts(v),
+                "axis on channel '{}' resolved a verb it does not accept",
+                H::CHANNEL
+            ),
+            other => panic!(
+                "axis on channel '{}' did not fire under AI + a firing policy: {other:?}",
+                H::CHANNEL
+            ),
+        }
+
+        // Human Control Source ⇒ the gate stands the axis down before it resolves
+        // anything — no verb, no payload.
+        let human = ShipSystemControlSources(ControlSourceResolver::new());
+        assert_eq!(
+            helm_axis_outcome::<H>(&human, Some(&policy), None, &facts, 0.0, &flags),
+            crate::ai::host::HostOutcome::NotAiOperated,
+            "axis on channel '{}' resolved under a human Control Source",
+            H::CHANNEL
+        );
+    }
+
+    #[test]
+    fn every_helm_axis_gates_on_ai_and_resolves_its_verb() {
+        assert_axis_wiring::<EnginesAxis>(crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel);
+        assert_axis_wiring::<SteeringAxis>(crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing);
+        assert_axis_wiring::<ImpulseAxis>(crate::ai::policy::AiPolicyVerb::EngageImpulse);
+        assert_axis_wiring::<LateralAxis>(crate::ai::policy::AiPolicyVerb::ActuateLateralThrust);
+        assert_axis_wiring::<VerticalAxis>(crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust);
+        assert_axis_wiring::<BoostAxis>(crate::ai::policy::AiPolicyVerb::EngageBoost);
+    }
 
     /// Lock this ship's Tactical surface onto `uuid` (issue #702).
     ///

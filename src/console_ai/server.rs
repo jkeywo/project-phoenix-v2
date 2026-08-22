@@ -421,11 +421,23 @@ pub(crate) fn ai_shield_focus(
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(ship_entity);
-        let acts = policy.resolve_channel(
-            crate::entities::config::SHIELD_FOCUS_CHANNEL,
-            &facts,
-            &flag_chain,
-        ) == Some(&crate::ai::policy::AiPolicyVerb::FocusShieldArc);
+        // Resolve the `shield_focus` channel through the shared AI host spine
+        // (issue #1208). The Control-Source gate and the declaration check stay
+        // explicit ABOVE this call because they guard the sanctioned
+        // threat-bearing override and the pre-resolve params/damage analysis the
+        // spine cannot see — `decide` re-confirms both (a no-op here, since we
+        // only reach it AI-operated and declared) and owns the resolution.
+        let tick = crate::ai::host::HostTick {
+            system: crate::system_registry::shields_system_id(),
+            channel: crate::entities::config::SHIELD_FOCUS_CHANNEL,
+            facts: &facts,
+            flags: &flag_chain,
+            state: None,
+        };
+        let acts = matches!(
+            crate::ai::host::decide(&control_sources.0, Some(policy), &tick),
+            crate::ai::host::HostOutcome::Act(crate::ai::policy::AiPolicyVerb::FocusShieldArc)
+        );
         if !acts {
             continue;
         }
@@ -623,12 +635,16 @@ fn ai_power_allocation(
         mut admitted,
     ) in ships.iter_mut()
     {
-        let control_policy = control_sources
-            .0
-            .policy_for(&crate::system_registry::power_reactor_system_id());
-        if !control_policy.operate_ai {
-            // Not (or no longer) AI-driven — human Control Source. Stateless, so
-            // nothing to reset; the next tick under AI control decides cleanly.
+        // Control-Source gate through the shared AI host spine (issue #1208): not
+        // (or no longer) AI-driven — a human Control Source — stands the reactor
+        // down. Power resolves a RANKED channel the spine does not model, so only
+        // its gate — the one step it shares with the policy hosts — routes here.
+        // Stateless, so nothing to reset; the next tick under AI control decides
+        // cleanly.
+        if !crate::ai::host::ai_operates(
+            &control_sources.0,
+            crate::system_registry::power_reactor_system_id(),
+        ) {
             continue;
         }
 
@@ -964,8 +980,12 @@ pub(crate) fn ai_torpedo_auto_fire(
         // The scenario flag chain, anchored at the layer that spawned this
         // ship (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(ship_entity);
-        let policy = control_sources.0.policy_for(&policy_sid);
-        if !policy.operate_ai {
+        // Control-Source gate through the shared AI host spine (issue #1208): the
+        // torpedo MAGAZINE's own operate_ai is the natural per-ship gate — the
+        // shared bottleneck resource across tubes, and there is no unified
+        // torpedo_system_id. The per-tube LAUNCH resolution stays in
+        // `torpedo_tube_launch_policy_fires`.
+        if !crate::ai::host::ai_operates(&control_sources.0, policy_sid.clone()) {
             continue;
         }
 
@@ -1223,7 +1243,10 @@ pub(crate) fn ai_torpedo_load(
         mut admitted,
     ) in ships.iter_mut()
     {
-        if !control_sources.0.policy_for(&magazine_id).operate_ai {
+        // Control-Source gate through the shared AI host spine (issue #1208): the
+        // torpedo MAGAZINE's own operate_ai. The per-tube LOAD resolution stays in
+        // `torpedo_tube_load_policy_fires`.
+        if !crate::ai::host::ai_operates(&control_sources.0, magazine_id.clone()) {
             continue;
         }
 

@@ -144,9 +144,6 @@ pub struct AiHost {
 // iterate this slice as a SET (`BTreeSet` of blocks / eval sites), so ordering
 // here is a reading aid and never a correctness property.
 
-/// The three secondary helm axes collapse their channel to a bare "actuate this
-/// tick?" through one shared helper.
-const HELM_ACTUATOR_SITES: &[EvalSite] = &[site("src/ship/helm_ai/mod.rs", "helm_policy_actuates")];
 /// The three helm axes that may author a #882 state machine resolve their
 /// channel on either policy path, and their TRANSITIONS through the shared
 /// machine tick — three call sites, all of which must agree.
@@ -195,7 +192,13 @@ pub const HELM_LATERAL: AiHost = AiHost {
     system: "Helm lateral thrust",
     block: "[helm_console.lateral_ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: HELM_ACTUATOR_SITES,
+    // Issue #1208: the three stateless actuator axes now resolve through the
+    // shared `run_helm_axis` / `decide` spine, so each pins its own flag chain
+    // in its own host body rather than through the retired `helm_policy_actuates`.
+    eval_sites: &[site(
+        "src/ship/helm_ai/lateral.rs",
+        "ai_helm_lateral_thrust",
+    )],
     history_fold: None,
 };
 
@@ -203,7 +206,10 @@ pub const HELM_VERTICAL: AiHost = AiHost {
     system: "Helm vertical thrust",
     block: "[helm_console.vertical_ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: HELM_ACTUATOR_SITES,
+    eval_sites: &[site(
+        "src/ship/helm_ai/vertical.rs",
+        "ai_helm_vertical_thrust",
+    )],
     history_fold: None,
 };
 
@@ -211,7 +217,7 @@ pub const HELM_IMPULSE: AiHost = AiHost {
     system: "Helm impulse",
     block: "[helm_console.impulse_ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: HELM_ACTUATOR_SITES,
+    eval_sites: &[site("src/ship/helm_ai/impulse.rs", "ai_helm_impulse")],
     history_fold: None,
 };
 
@@ -649,10 +655,15 @@ mod tests {
     ///
     /// Sites that instead RECEIVE an already-built chain as a `flags: &[&
     /// FlagStore]` parameter (the three helm machine axes' `resolve_helm_channel`
-    /// / `tick_policy_machine`, the three helm actuator axes' `helm_policy_actuates`,
-    /// and the per-bank/tube/magazine `*_policy_fires` helpers) have no
-    /// resources of their own to declare — building the chain is the
-    /// CALLER's job, not theirs — so those keep the original text-only rule.
+    /// / `tick_policy_machine` and the per-bank/tube/magazine `*_policy_fires`
+    /// helpers) have no resources of their own to declare — building the chain is
+    /// the CALLER's job, not theirs — so those keep the original text-only rule.
+    ///
+    /// Spine-based hosts (the three helm actuator axes since issue #1208) neither
+    /// build `entity_flag_chain` nor call an `EVAL_CALLS` resolver directly: they
+    /// hand `ai_env.flag_chain(...)` to `run_helm_axis`, which resolves inside the
+    /// exempt `crate::ai::host::decide` spine. The trailing `run_helm_axis::<`
+    /// branch below pins that chain.
     fn chains_in(body: &str, sig: &str) -> Vec<FlagChain> {
         let builds_own_chain = body.contains("entity_flag_chain(");
         let declares_chain_resources = (sig
@@ -675,6 +686,25 @@ mod tests {
                 });
                 from = open + 1;
             }
+        }
+
+        // Spine-based hosts (issue #1208): a host that resolves through
+        // `crate::ai::host::decide` — directly, or via the six helm axes' shared
+        // `run_helm_axis` driver — has no `EVAL_CALLS` of its own in its file,
+        // because the `resolve_channel` call now lives in the exempt spine
+        // (`src/ai/host.rs`). What the host body DOES own is the flag chain it
+        // builds and hands the spine in its `HostTick` — `ai_env.flag_chain(...)`,
+        // which unlike the retired `entity_flag_chain(None, None, None)` cannot
+        // degrade to empty (`AiHostEnv` holds bare `Res`). Its presence is the
+        // plumbing: a host that builds it that way is Plumbed; one that hands the
+        // spine `&[]` has no `ai_env.flag_chain(` and reads Empty, exactly as the
+        // argument scan above would flag a dropped chain.
+        if body.contains("run_helm_axis::<") || body.contains("ai::host::decide(") {
+            out.push(if body.contains("ai_env.flag_chain(") {
+                FlagChain::Plumbed
+            } else {
+                FlagChain::Empty
+            });
         }
         out
     }
@@ -959,8 +989,9 @@ mod tests {
 
     /// The three helm hosts fold, but the three per-axis ACTUATOR axes sitting
     /// beside them do not — and that asymmetry is the whole point. Their guards
-    /// are resolved by `helm_policy_actuates`, which has no per-system bag to
-    /// fold into, so a window authored there would read absent for ever.
+    /// are resolved through the stateless `decide` path (no state component, no
+    /// per-system bag to fold into), so a window authored there would read absent
+    /// for ever.
     #[test]
     fn the_per_axis_actuator_hosts_reject_history() {
         let windowed =

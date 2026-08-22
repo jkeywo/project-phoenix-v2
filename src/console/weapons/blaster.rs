@@ -362,8 +362,11 @@ pub(crate) fn tick_blaster_auto_fire(
             // another's control source.
             if let Some(bank_sid) = crate::system_registry::blaster_bank_system_id(&bank.config.id)
             {
+                // Per-bank Control-Source gate through the shared AI host spine
+                // (issue #1208): skip offline/human banks. The per-bank FIRE
+                // resolution stays in `blaster_bank_policy_fires`.
                 if system_is_registered(control_sources, &bank_sid)
-                    && !control_sources.0.policy_for(&bank_sid).operate_ai
+                    && !crate::ai::host::ai_operates(&control_sources.0, bank_sid.clone())
                 {
                     continue;
                 }

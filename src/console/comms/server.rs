@@ -1354,10 +1354,12 @@ pub fn operate_comms_ai(
     for (entity, entity_uuid, sources, ship_config, mut admitted, red_alert, hull, selector_comp) in
         ships.iter_mut()
     {
-        let policy = sources
-            .0
-            .policy_for(&crate::system_registry::comms_system_id());
-        if !policy.operate_ai {
+        // Control-Source gate through the shared AI host spine (issue #1208): a
+        // human holder (or an offline system) stands the hail selector down.
+        // Comms hail selection resolves a data-driven SELECTOR the spine does not
+        // model, so only its gate — the one step it shares with the policy hosts —
+        // routes here.
+        if !crate::ai::host::ai_operates(&sources.0, crate::system_registry::comms_system_id()) {
             continue;
         }
         // No authored `[comms_console.selector]` ⇒ no component ⇒ no hail
@@ -1697,20 +1699,12 @@ pub fn operate_comms_response_ai(
         selector_comp,
     ) in ships.iter_mut()
     {
-        let control = sources
-            .0
-            .policy_for(&crate::system_registry::comms_system_id());
-        if !control.operate_ai {
-            // AC5 human exclusivity: a human Comms officer answers their own
-            // dialogues. Stateless, so nothing to reset.
-            continue;
-        }
-        // No authored `[comms_console.ai]` ⇒ no component ⇒ the ship answers
-        // nothing. There is no synthesised stand-in since #885b stage 5d.
-        let Some(policy_comp) = policy_comp else {
-            continue;
-        };
-        let policy = &policy_comp.0;
+        // The Control-Source gate (AC5 human exclusivity — a human Comms officer
+        // answers their own dialogues) and the strict AI-declaration check (no
+        // `[comms_console.ai]` ⇒ the ship answers nothing) now live in the shared
+        // `decide` spine, evaluated per message below (issue #1208). The policy is
+        // borrowed there straight from the optional component.
+        let policy = policy_comp.map(|p| &p.0);
         // Per-host multiplier on the shared base cadence (issue #889's
         // evaluate_every_ticks, wired at runtime): a ship whose
         // `[comms_console.ai]` authors `evaluate_every_ticks = n` decides on
@@ -1764,17 +1758,23 @@ pub fn operate_comms_response_ai(
             };
             let facts = seed_comms_response_facts(&reading);
 
-            // Only the response verb ever resolves on this channel (the policy is
-            // validated to carry no other), so this `if let` is exhaustive in
-            // practice; anything else holds (no emit).
-            let Some(crate::ai::policy::AiPolicyVerb::RespondToMessage(index)) = policy
-                .resolve_channel(
-                    crate::entities::config::COMMS_RESPOND_CHANNEL,
-                    &facts,
-                    &flag_chain,
-                )
+            // Gate → declare → resolve the `respond` channel through the shared AI
+            // host spine (issue #1208). Only the response verb ever resolves on
+            // this channel (the policy is validated to carry no other), so this
+            // `let else` is exhaustive in practice; a human holder
+            // (`NotAiOperated`), an undeclared ship (`Undeclared`) or a no-rule
+            // tick (`Held`) all leave the dialogue open this tick.
+            let tick = crate::ai::host::HostTick {
+                system: crate::system_registry::comms_system_id(),
+                channel: crate::entities::config::COMMS_RESPOND_CHANNEL,
+                facts: &facts,
+                flags: &flag_chain,
+                state: None,
+            };
+            let crate::ai::host::HostOutcome::Act(
+                crate::ai::policy::AiPolicyVerb::RespondToMessage(index),
+            ) = crate::ai::host::decide(&sources.0, policy, &tick)
             else {
-                // No rule fired: hold — leave the dialogue open this tick.
                 continue;
             };
             let index = *index as usize;

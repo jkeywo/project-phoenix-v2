@@ -897,6 +897,7 @@ entities:
       status: observed
       paths:
         - src/ship/helm_ai/lateral.rs
+        - src/ship/helm_ai/mod.rs
         - src/ship/helm_ai/facts.rs
         - src/ship/helm_lateral_emit.rs
         - src/ai/core.rs
@@ -904,6 +905,9 @@ entities:
         - src/entities/config.rs
       symbols:
         - ai_helm_lateral_thrust
+        - LateralAxis
+        - HelmAxisHost
+        - run_helm_axis
         - emit_helm_lateral_command
         - HelmLateralAiPolicy
         - HELM_LATERAL_CHANNEL
@@ -1040,6 +1044,9 @@ entities:
         - src/entities/config.rs
       symbols:
         - ai_helm_thrust
+        - EnginesAxis
+        - HelmAxisHost
+        - run_helm_axis
         - HelmEnginesAiPolicy
         - HelmEnginesAiPolicyState
         - HelmPassSurface
@@ -1096,6 +1103,9 @@ entities:
         - src/entities/config.rs
       symbols:
         - ai_helm_steering
+        - SteeringAxis
+        - HelmAxisHost
+        - run_helm_axis
         - HelmSteeringAiPolicy
         - HelmSteeringAiPolicyState
         - HELM_HOLD_COMMITTED_HEADING_VERB
@@ -1171,12 +1181,16 @@ entities:
       status: observed
       paths:
         - src/ship/helm_ai/vertical.rs
+        - src/ship/helm_ai/mod.rs
         - src/ship/helm_ai/facts.rs
         - src/ship/helm_planner.rs
         - src/ai/policy.rs
         - src/entities/config.rs
       symbols:
         - ai_helm_vertical_thrust
+        - VerticalAxis
+        - HelmAxisHost
+        - run_helm_axis
         - HelmVerticalAiPolicy
         - HELM_VERTICAL_CHANNEL
         - HELM_ACTUATE_VERTICAL_THRUST_VERB
@@ -1214,6 +1228,7 @@ entities:
       status: observed
       paths:
         - src/ship/helm_ai/impulse.rs
+        - src/ship/helm_ai/mod.rs
         - src/ship/helm_ai/facts.rs
         - src/ship/helm_ai_emit.rs
         - src/ai/core.rs
@@ -1221,6 +1236,9 @@ entities:
         - src/entities/config.rs
       symbols:
         - ai_helm_impulse
+        - ImpulseAxis
+        - HelmAxisHost
+        - run_helm_axis
         - HelmImpulseAiPolicy
         - HELM_IMPULSE_CHANNEL
         - HELM_ENGAGE_IMPULSE_VERB
@@ -1267,6 +1285,9 @@ entities:
         - src/entities/config.rs
       symbols:
         - ai_helm_boost
+        - BoostAxis
+        - HelmAxisHost
+        - run_helm_axis
         - HelmBoostAiPolicy
         - HelmBoostAiPolicyState
         - resolve_helm_channel

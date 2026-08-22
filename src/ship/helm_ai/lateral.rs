@@ -1,5 +1,9 @@
 use super::*;
 
+use crate::ai::host::HostOutcome;
+use crate::ai::policy::AiPolicyVerb;
+use crate::messages::SystemControlPayload;
+
 /// Per-ship inline stateless **Lateral Thrust** AI policy (issue #780). From
 /// the authored `[helm_console.lateral_ai]` block. Read by
 /// [`ai_helm_lateral_thrust`] to decide whether to actuate the dodge this tick;
@@ -7,17 +11,98 @@ use super::*;
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmLateralAiPolicy(pub crate::ai::policy::AiPolicy);
 
+/// The **Lateral Thrust** helm axis (issue #1208): outside a docking manoeuvre,
+/// gate the `lateral` channel on the authored `actuate_lateral_thrust` mode verb
+/// and, on a fire, emit the shared-hazard dodge weighted by this hull's authored
+/// `lateral_hazard_sensitivity`. A stateless axis.
+///
+/// The docking close manoeuvre (issue #742) is the sanctioned
+/// [`pre_override`](HelmAxisHost::pre_override): its controlled translation owns
+/// the lateral axis and PRECEDES the policy gate (but not the Control-Source
+/// gate), so a docking hull always translates onto its berth. Since #743 the
+/// dodge is no longer re-derived here — it reads the planner's `assess_hazards`
+/// surface — so the dodge and the yaw agree because both read the one hazard
+/// surface the planner built from the hull's authored avoidance tuning.
+pub(crate) struct LateralAxis;
+
+impl HelmAxisHost for LateralAxis {
+    fn system_id() -> crate::messages::SystemId {
+        crate::system_registry::lateral_thrust_system_id()
+    }
+    const CHANNEL: &'static str = crate::entities::config::HELM_LATERAL_CHANNEL;
+    const STATEFUL: bool = false;
+
+    fn accepts(verb: &AiPolicyVerb) -> bool {
+        matches!(verb, AiPolicyVerb::ActuateLateralThrust)
+    }
+
+    fn seed(cx: &HelmAxisCtx) -> crate::world::flags::AiFacts {
+        let mut facts = seed_helm_actuator_facts(
+            cx.plan.map(|sp| &sp.hazard),
+            false,
+            false,
+            0.0,
+            frame_red_alert(cx.frame),
+        );
+        // Issue #874: lateral is the literal dodge axis, so this is the axis a
+        // movement doctrine reaches for `fact(hostile_arc_exposure)` on first.
+        seed_hostile_arc_facts(&mut facts, cx.frame);
+        facts
+    }
+
+    fn pre_override(cx: &HelmAxisCtx) -> Option<SystemControlPayload> {
+        // A docking close manoeuvre (issue #742), when the planner engaged one
+        // this tick, owns the lateral axis: its controlled translation is read
+        // straight off the shared desired-motion contract's `x`. An UNCONDITIONAL
+        // sanctioned override — it precedes the policy gate.
+        cx.plan
+            .filter(|sp| sp.docking_active)
+            .map(|sp| SystemControlPayload::LateralThrustInput {
+                lateral: sp.motion.desired_velocity_local.x,
+            })
+    }
+
+    fn act(
+        outcome: HostOutcome,
+        cx: &HelmAxisCtx,
+        _io: &mut HelmAxisIo,
+    ) -> Option<SystemControlPayload> {
+        match outcome {
+            HostOutcome::Act(verb) if Self::accepts(verb) => {}
+            _ => return None,
+        }
+        let sf = cx.frame?;
+        let lateral = if !sf.has_objective {
+            // No objectives → zero the dodge rather than latch the last one,
+            // matching what the monolith did for the axis.
+            0.0
+        } else {
+            // Horizontal collision avoidance flows from the shared hazard
+            // assessment (issue #743): the planner's `assess_hazards` publishes a
+            // ship-local repulsion, and this actuator responds through its own
+            // authored `lateral_hazard_sensitivity`.
+            let sensitivity = cx
+                .behaviour
+                .map(|b| b.0.lateral_hazard_sensitivity)
+                .unwrap_or(crate::ai::LATERAL_HAZARD_SENSITIVITY);
+            cx.plan
+                .map(|sp| (sp.hazard.hazard_forces.x * sensitivity).clamp(-1.0, 1.0))
+                .unwrap_or(0.0)
+        };
+        Some(SystemControlPayload::LateralThrustInput { lateral })
+    }
+}
+
 /// Per-axis helm AI: lateral thrust. Decides the dodge for ships whose
 /// helm-lateral-thrust system is AI-operated and emits it as an admitted
 /// `LateralThrustInput` into the ship's own `AdmittedCommands` (issues #703,
-/// #704, #824).
+/// #704, #824). Docking translation still overrides it (issue #742), and the
+/// emit → admit → apply arbiter path is unchanged.
 ///
-/// Since #743 the dodge is no longer re-derived here: it reads the shared
-/// hazard assessment the planner published in `HelmMotionPlan` (the ship-level
-/// `assess_hazards` surface built from the hull's authored avoidance tuning)
-/// and weights its starboard repulsion by this hull's authored
-/// `lateral_hazard_sensitivity`. Docking translation still overrides it (issue
-/// #742), and the emit → admit → apply arbiter path is unchanged.
+/// Since #1208 the gate/declare/resolve preamble is the shared
+/// [`run_helm_axis::<LateralAxis>`](run_helm_axis) driver's, with the docking
+/// override expressed as [`LateralAxis::pre_override`](HelmAxisHost::pre_override);
+/// this body assembles the per-ship context and emits the payload it returns.
 pub(crate) fn ai_helm_lateral_thrust(
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
@@ -53,118 +138,54 @@ pub(crate) fn ai_helm_lateral_thrust(
         mut admitted,
     ) in ships.iter_mut()
     {
-        // Gate on our own system alone (issue #703) — see the module note above.
-        if !sources
-            .0
-            .policy_for(&crate::system_registry::lateral_thrust_system_id())
-            .operate_ai
-        {
-            continue;
-        }
-        let Some(sf) = frame.ships.get(&entity) else {
+        // Lateral always needs its frame entry — the dodge zeroing and the
+        // has-objective gate both read it — so no frame entry stands down (and
+        // the docking override too, matching the pre-#1208 order).
+        let Some(_sf) = frame.ships.get(&entity) else {
             continue;
         };
-
-        // The ship's plan for this tick: both the docking translation (issue
-        // #742) and the shared hazard surface (issue #743) are read off it, so
-        // the human and AI paths stay symmetric downstream (the planner is the
-        // single writer of both).
-        let ship_plan = plan.ships.get(&entity);
-
-        // A docking close manoeuvre (issue #742), when the planner engaged one
-        // this tick, owns the lateral axis: its controlled translation is the
-        // sanctioned use of lateral thrust, distinct from the avoidance dodge
-        // below and from the facing-only arc-bearing request. Read straight off
-        // the shared desired-motion contract's `x`. This is an UNCONDITIONAL
-        // sanctioned override (issue #780): it precedes the policy gate so a
-        // docking hull always translates onto its berth.
-        let docking_lateral = ship_plan
-            .filter(|sp| sp.docking_active)
-            .map(|sp| sp.motion.desired_velocity_local.x);
-
-        // Authored actuation-policy gate (issue #780, AC1/AC3): outside a docking
-        // manoeuvre, the DECISION to actuate the dodge flows through
-        // HelmLateralAiPolicy over a fact snapshot seeded from the shared hazard
-        // surface — never a doctrine swap (AC3), only a gate on the dodge. Its
-        // default (unconditional actuate) reproduces the pre-#780 always-on
-        // avoidance; a "hold" resolution emits nothing, so `LateralThrustInput`
-        // keeps the last fraction it was given. Not a coast — the latch is
-        // re-integrated every tick, so a held lateral axis strafes at a fixed
-        // rate indefinitely (issue #968 measured a wrecked destroyer doing
-        // exactly that at 8.77 u/s for 300 s). The capability gate in
-        // `integrate_ship_physics` and the offline clear in
-        // `process_helm_inputs` cover the DESTROYED case; whether a policy
-        // "hold" should also decay toward neutral is still open.
-        if docking_lateral.is_none() {
-            let mut facts = seed_helm_actuator_facts(
-                ship_plan.map(|sp| &sp.hazard),
-                false,
-                false,
-                0.0,
-                sf.red_alert,
-            );
-            // Issue #874: lateral is the literal dodge axis, so this is the axis
-            // a movement doctrine reaches for `fact(hostile_arc_exposure)` on
-            // first. `sf` above is this tick's frame entry — see
-            // `seed_hostile_arc_facts`.
-            seed_hostile_arc_facts(&mut facts, Some(sf));
-            // No attached `[helm_console.lateral_ai]` ⇒ no AI action on this axis.
-            // Since #885b stage 5d there is no synthesised stand-in: strict
-            // AI-declaration mode rejects an AI-capable hull that omits the block at
-            // load, so an absent component means the declaration is missing and a
-            // missing declaration gets no automation (PRD #774 US7).
-            let Some(lateral_policy) = lateral_policy else {
-                continue;
-            };
-            let policy = &lateral_policy.0;
-            // The scenario flag chain, anchored at the layer that spawned
-            // this ship (issue #891 stage 2).
-            let flag_chain = ai_env.flag_chain(entity);
-            if !helm_policy_actuates(
-                policy,
-                crate::entities::config::HELM_LATERAL_CHANNEL,
-                &facts,
-                &crate::ai::policy::AiPolicyVerb::ActuateLateralThrust,
-                &flag_chain,
-            ) {
-                continue;
-            }
-        }
-
-        let lateral = if let Some(docking_lateral) = docking_lateral {
-            docking_lateral
-        } else if !sf.has_objective {
-            // No objectives → zero the dodge rather than latch the last one,
-            // matching what the monolith did for the axis.
-            0.0
-        } else {
-            // Horizontal collision avoidance now flows from the shared hazard
-            // assessment (issue #743): the planner's `assess_hazards` publishes a
-            // ship-local repulsion, and this actuator responds through its own
-            // authored `lateral_hazard_sensitivity` rather than re-deriving the
-            // projected-collision geometry in a separate helper. The dodge and
-            // the yaw agree because both read the one hazard surface the planner
-            // built from the hull's authored avoidance tuning.
-            // `lateral_thrust_ai_honours_toml_authored_avoidance_buffer` /
-            // `..._look_ahead` pin the buffer/look-ahead reaching that surface;
-            // `lateral_thrust_ai_responds_to_shared_hazard_surface` pins the
-            // sensitivity weighting.
-            let sensitivity = behaviour_section
-                .map(|b| b.0.lateral_hazard_sensitivity)
-                .unwrap_or(crate::ai::LATERAL_HAZARD_SENSITIVITY);
-            ship_plan
-                .map(|sp| (sp.hazard.hazard_forces.x * sensitivity).clamp(-1.0, 1.0))
-                .unwrap_or(0.0)
+        let cx = HelmAxisCtx {
+            // The Lateral query carries no `ShipPhysics` — its dodge reads the
+            // plan's hazard surface, not the pose (see `HelmAxisCtx::physics`).
+            physics: None,
+            max_speed: 0.0,
+            plan: plan.ships.get(&entity),
+            frame: frame.ships.get(&entity),
+            anchors: &frame.anchors,
+            impulse: None,
+            impulse_cfg: None,
+            boost_cfg: None,
+            boost: None,
+            behaviour: behaviour_section,
+            capability: None,
+            cursors: None,
         };
-
-        emit_helm_lateral_command(
-            entity_uuid,
-            crate::system_registry::lateral_thrust_system_id(),
-            crate::messages::SystemControlPayload::LateralThrustInput { lateral },
+        let mut io = HelmAxisIo {
+            policy: None,
+            state: None,
+            pending: None,
+        };
+        // The scenario flag chain, anchored at the layer that spawned this ship
+        // (issue #891 stage 2).
+        let flag_chain = ai_env.flag_chain(entity);
+        if let Some(payload) = run_helm_axis::<LateralAxis>(
             sources,
-            &sessions,
-            ship_config,
-            &mut admitted,
-        );
+            lateral_policy.map(|p| &p.0),
+            None,
+            0.0,
+            &flag_chain,
+            &cx,
+            &mut io,
+        ) {
+            emit_helm_lateral_command(
+                entity_uuid,
+                LateralAxis::system_id(),
+                payload,
+                sources,
+                &sessions,
+                ship_config,
+                &mut admitted,
+            );
+        }
     }
 }

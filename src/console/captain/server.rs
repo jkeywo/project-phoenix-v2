@@ -516,21 +516,6 @@ fn operate_captain_ai(
         faction,
     ) in ship_query.iter_mut()
     {
-        let policy = control_sources
-            .0
-            .policy_for(&crate::system_registry::red_alert_system_id());
-        if !policy.operate_ai {
-            continue;
-        }
-        // No attached `[captain_console.ai]` ⇒ no Red Alert decisions. Since
-        // #885b stage 5d there is no synthesised stand-in: strict
-        // AI-declaration mode rejects an AI-capable hull that omits the block at
-        // load, so an absent component means the declaration is missing and a
-        // missing declaration gets no automation (PRD #774 US7).
-        let Some(ship_policy) = ship_policy else {
-            continue;
-        };
-
         // Build the immutable typed-fact snapshot for this evaluation from this
         // ship's own combat activity. `secs_since_combat` is absent when the
         // ship has no combat history at all — the policy then reads "not in
@@ -564,75 +549,29 @@ fn operate_captain_ai(
             hostile_range.unwrap_or(0.0) as f64,
         );
 
-        // Resolve the `red_alert` output channel over the snapshot, with the
-        // scenario flag chain anchored at the layer that spawned this ship
-        // (issue #891 stage 2).
+        // Gate → declare → resolve the `red_alert` channel through the shared AI
+        // host spine (issue #1208): the Control-Source gate, the strict
+        // AI-declaration check (an absent `[captain_console.ai]` ⇒ `Undeclared`
+        // ⇒ no automation, PRD #774 US7) and the channel resolution all live in
+        // `decide`. The scenario flag chain is anchored at the layer that spawned
+        // this ship (issue #891 stage 2). The Captain drives only `red_alert`, so
+        // any verb other than `SetRedAlert` — and every non-acting outcome —
+        // means "no Red Alert decision this tick".
         let flag_chain = ai_env.flag_chain(ship_entity);
-        let active_policy = &ship_policy.0;
-        let should_be_red_alert = active_policy
-            .resolve_channel(
-                crate::entities::config::CAPTAIN_RED_ALERT_CHANNEL,
-                &facts,
-                &flag_chain,
-            )
-            .and_then(|verb| match verb {
-                crate::ai::policy::AiPolicyVerb::SetRedAlert(b) => Some(*b),
-                // The Captain drives only the `red_alert` channel; helm
-                // continuous-actuator mode verbs (issue #779) never resolve on
-                // it, but the match must stay exhaustive.
-                crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel
-                | crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing
-                // The Steering frozen-heading mode verb (issue #883) is likewise
-                // a helm axis verb, never a red_alert one.
-                | crate::ai::policy::AiPolicyVerb::HoldCommittedHeading
-                // The Steering recovery-orbit / re-engage mode verbs (issue
-                // #788) — helm axis verbs too.
-                | crate::ai::policy::AiPolicyVerb::HoldRecoveryOrbit
-                | crate::ai::policy::AiPolicyVerb::PivotToReengage
-                // The Steering combat broadside-orbit mode verb (issue #790) —
-                // a helm axis verb too.
-                | crate::ai::policy::AiPolicyVerb::HoldCombatOrbit
-                // The Steering torpedo-opportunity bow hold (issue #791) — a
-                // helm axis verb too.
-                | crate::ai::policy::AiPolicyVerb::HoldTorpedoBearing
-                // The Steering artillery firing position (issue #792) — a helm
-                // axis verb too.
-                | crate::ai::policy::AiPolicyVerb::HoldArtilleryPosition
-                | crate::ai::policy::AiPolicyVerb::ActuateLateralThrust
-                | crate::ai::policy::AiPolicyVerb::ActuateVerticalThrust
-                | crate::ai::policy::AiPolicyVerb::EngageImpulse
-                | crate::ai::policy::AiPolicyVerb::EngageBoost
-                // Weapon-bank fire verbs (issue #781) never resolve on the
-                // Captain's red_alert channel, but the match must stay exhaustive.
-                | crate::ai::policy::AiPolicyVerb::FirePhaser
-                | crate::ai::policy::AiPolicyVerb::FireBlaster
-                // Torpedo tube/magazine verbs (issue #782) never resolve on the
-                // Captain's red_alert channel, but the match must stay exhaustive.
-                | crate::ai::policy::AiPolicyVerb::LoadTorpedo
-                | crate::ai::policy::AiPolicyVerb::LaunchTorpedo
-                | crate::ai::policy::AiPolicyVerb::GrantTorpedoRound
-                // Torpedo conservation verb (issue #943) resolves inside
-                // `handle_fire_torpedo`, never on the Captain's red_alert
-                // channel, but the match must stay exhaustive.
-                | crate::ai::policy::AiPolicyVerb::ReleaseTorpedo
-                // Shields focus verb (issue #783) never resolves on the
-                // Captain's red_alert channel, but the match must stay exhaustive.
-                | crate::ai::policy::AiPolicyVerb::FocusShieldArc
-                // Power allocation verb (issue #784) never resolves on the
-                // Captain's red_alert channel, but the match must stay exhaustive.
-                | crate::ai::policy::AiPolicyVerb::SetPowerGroupAllocation(_)
-                // Comms dialogue-response verb (issue #786) never resolves on
-                // the Captain's red_alert channel, but the match must stay
-                // exhaustive.
-                | crate::ai::policy::AiPolicyVerb::RespondToMessage(_)
-                // Weapons doctrine family verbs (issue #956) resolve on the
-                // arc-bearing rank channels of `[weapons_console.ai]`, never on
-                // the Captain's red_alert channel — but the match must stay
-                // exhaustive.
-                | crate::ai::policy::AiPolicyVerb::BringPhasersToBear
-                | crate::ai::policy::AiPolicyVerb::BringBlastersToBear
-                | crate::ai::policy::AiPolicyVerb::BringTorpedoesToBear => None,
-            });
+        let tick = crate::ai::host::HostTick {
+            system: crate::system_registry::red_alert_system_id(),
+            channel: crate::entities::config::CAPTAIN_RED_ALERT_CHANNEL,
+            facts: &facts,
+            flags: &flag_chain,
+            state: None,
+        };
+        let should_be_red_alert =
+            match crate::ai::host::decide(&control_sources.0, ship_policy.map(|p| &p.0), &tick) {
+                crate::ai::host::HostOutcome::Act(
+                    crate::ai::policy::AiPolicyVerb::SetRedAlert(b),
+                ) => Some(*b),
+                _ => None,
+            };
 
         if let Some(should_be_red_alert) = should_be_red_alert {
             let current_red_alert = red_alert_opt.map(|ra| ra.0).unwrap_or(false);

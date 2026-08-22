@@ -1006,8 +1006,12 @@ pub(crate) fn ai_phaser_auto_fire(
                 .filter_map(|b| {
                     // Per-bank fine-system gate — skip offline banks.
                     if let Some(bank_id) = crate::system_registry::phaser_bank_system_id(&b.id) {
+                        // Per-bank Control-Source gate through the shared AI host
+                        // spine (issue #1208): skip offline/human banks. The
+                        // per-bank FIRE resolution stays in
+                        // `phaser_bank_policy_fires`.
                         if system_is_registered(control_sources, &bank_id)
-                            && !control_sources.0.policy_for(&bank_id).operate_ai
+                            && !crate::ai::host::ai_operates(&control_sources.0, bank_id.clone())
                         {
                             return None;
                         }

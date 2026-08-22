@@ -174,6 +174,30 @@ pub fn decide<'p>(
     }
 }
 
+/// The Control-Source gate alone, decided through the same [`decide`] spine the
+/// policy hosts walk (issue #1208).
+///
+/// A host whose RESOLUTION the spine does not model — a **selector** (Sensors,
+/// Navigation, Repair, the Comms hail selector, Tactical target selection) or a
+/// **ranked** channel (Power allocation) — still shares exactly one step with
+/// the policy hosts: the gate on its fine system's Control Source being AI. This
+/// runs [`decide`]'s gate 1 with a `None` policy (so the declaration and
+/// resolution gates are moot and the tick's facts/flags/channel go unread) and
+/// returns whether the AI may proceed. Routing it here keeps that gate in the
+/// spine for the selector/ranked hosts too, rather than hand-inlined as a
+/// twenty-second copy of `policy_for(sid).operate_ai`.
+pub fn ai_operates(sources: &ControlSourceResolver, system: crate::messages::SystemId) -> bool {
+    let facts = AiFacts::new();
+    let tick = HostTick {
+        system,
+        channel: "",
+        facts: &facts,
+        flags: &[],
+        state: None,
+    };
+    !matches!(decide(sources, None, &tick), HostOutcome::NotAiOperated)
+}
+
 /// The read-only world context every AI host reads to seed [`decide`]'s inputs,
 /// bundled as one [`SystemParam`](bevy::ecs::system::SystemParam).
 ///

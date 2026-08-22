@@ -1,5 +1,9 @@
 use super::*;
 
+use crate::ai::host::HostOutcome;
+use crate::ai::policy::AiPolicyVerb;
+use crate::messages::SystemControlPayload;
+
 /// Per-ship inline stateless **Boost** AI policy (issue #780). From
 /// the authored `[helm_console.boost_ai]` block.
 /// Read by [`ai_helm_boost`] to decide whether to engage boost this tick, emitted
@@ -36,22 +40,81 @@ pub struct HelmBoostAiPolicy(pub crate::ai::policy::AiPolicy);
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmBoostAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState);
 
+/// The **Boost** helm axis (issue #1208, issue #780): resolve the `boost`
+/// channel to the `engage_boost` mode verb over the shared hazard/travel facts
+/// and emit `SetBoost { active }` on change. A stateful axis — the #882 machine
+/// demonstrator.
+///
+/// Unlike the other axes, Boost actuates on `Held` too: a hold (or any non-boost
+/// verb) means *release*, so the axis emits `SetBoost { false }` when the drive
+/// is currently active. It emits only when the desired state differs from the
+/// current [`ShipBoost`], so it does not re-issue `SetBoost` every tick. The
+/// canonical default policy is idle, so a ship that authors no
+/// `[helm_console.boost_ai]` never AI-boosts.
+pub(crate) struct BoostAxis;
+
+impl HelmAxisHost for BoostAxis {
+    fn system_id() -> crate::messages::SystemId {
+        crate::system_registry::helm_boost_system_id()
+    }
+    const CHANNEL: &'static str = crate::entities::config::HELM_BOOST_CHANNEL;
+    const STATEFUL: bool = true;
+
+    fn accepts(verb: &AiPolicyVerb) -> bool {
+        matches!(verb, AiPolicyVerb::EngageBoost)
+    }
+
+    fn seed(cx: &HelmAxisCtx) -> crate::world::flags::AiFacts {
+        // boost_available is literally `true` here — this IS the boost axis, and
+        // the body's availability guard has proven an enabled `BoostConfigResource`.
+        let mut facts = seed_helm_actuator_facts(
+            cx.plan.map(|sp| &sp.hazard),
+            cx.impulse_cfg.is_some(),
+            true,
+            cx.physics.map(|p| p.y).unwrap_or(0.0),
+            frame_red_alert(cx.frame),
+        );
+        // Issue #883 seeds the target-relative travel facts too, so an authored
+        // escape-leg boost rule can guard on the pass geometry, not just hazard.
+        if let Some(physics) = cx.physics {
+            seed_helm_travel_facts(&mut facts, cx.frame, physics, cx.max_speed);
+        }
+        facts
+    }
+
+    fn act(
+        outcome: HostOutcome,
+        cx: &HelmAxisCtx,
+        _io: &mut HelmAxisIo,
+    ) -> Option<SystemControlPayload> {
+        // Fires (`engage_boost`) ⇒ boost on; holds or any other verb ⇒ boost
+        // off. Undeclared/not-AI never touches the drive.
+        let desired = match outcome {
+            HostOutcome::Act(AiPolicyVerb::EngageBoost) => true,
+            HostOutcome::Act(_) | HostOutcome::Held => false,
+            HostOutcome::Undeclared | HostOutcome::NotAiOperated => return None,
+        };
+        // On-change only: re-issuing an unchanged state every tick is redundant.
+        let current = cx.boost.map(|b| b.0.is_active()).unwrap_or(false);
+        if desired == current {
+            None
+        } else {
+            Some(SystemControlPayload::SetBoost { active: desired })
+        }
+    }
+}
+
 /// Per-axis helm AI: boost drive (issue #780). Decides engage/release for ships
 /// whose `helm-boost` system is AI-operated and emits it as an admitted
 /// `SetBoost { active }` into the ship's own `AdmittedCommands` — the SAME seam
-/// a human `SetBoost`/`ToggleBoost` passes through (`process_helm_inputs`,
-/// which since issue #881 applies boost for EVERY ship, not just the
-/// `LocalShip`), preserving human/AI symmetry (AGENTS.md #6).
+/// a human `SetBoost`/`ToggleBoost` passes through (`process_helm_inputs`),
+/// preserving human/AI symmetry (AGENTS.md #6).
 ///
-/// Modelled on [`ai_helm_impulse`]: discrete and on-change. Availability (AC6) is
-/// the presence of an *enabled* [`BoostConfigResource`] — no config, or a
-/// feature-disabled one, and the system stands down without emitting. The
-/// DECISION flows through [`HelmBoostAiPolicy`] resolving the `boost` channel to
-/// the `engage_boost` mode verb over a fact snapshot seeded from the shared
-/// hazard surface: fires ⇒ boost on, holds ⇒ boost off. The canonical default is
-/// idle, so a ship that authors no `[helm_console.boost_ai]` never AI-boosts —
-/// the pre-#780 baseline. It emits only when the desired state differs from the
-/// current `ShipBoost`, so it does not re-issue `SetBoost` every tick.
+/// Availability (AC6) is the presence of an *enabled* [`BoostConfigResource`].
+/// Since #1208 the gate/declare/resolve preamble is the shared
+/// [`run_helm_axis::<BoostAxis>`](run_helm_axis) driver's; this body checks the
+/// boost capability, assembles the per-ship context, and emits the payload it
+/// returns.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_boost(
     // The read-only AI-host world context — flag chain, sessions, and origin
@@ -96,90 +159,55 @@ pub(crate) fn ai_helm_boost(
         mut admitted,
     ) in ships.iter_mut()
     {
-        // Gate on our own system alone — see the module note above.
-        if !sources
-            .0
-            .policy_for(&crate::system_registry::helm_boost_system_id())
-            .operate_ai
-        {
-            continue;
-        }
-
         // Availability (AC6): the feature must be present AND enabled. No
         // BoostConfigResource, or one with the feature disabled, means no boost
-        // capability — emit nothing (mirrors the shared applier's
-        // `enabled`-guard in `process_helm_inputs`).
+        // capability — emit nothing.
         let (Some(boost), Some(cfg)) = (boost_comp, boost_cfg) else {
             continue;
         };
         if !cfg.enabled {
             continue;
         }
-
-        // Authored manoeuvre policy (issue #780, AC6): resolve the `boost`
-        // channel over a fact snapshot seeded from the shared hazard surface and
-        // availability. Fires ⇒ engage; holds ⇒ release.
-        // Issue #883 also seeds the target-relative travel facts here, so an
-        // authored escape-leg boost rule can guard on the pass geometry (range,
-        // closing rate, speed fraction) and not just on hazard/state time.
-        let mut facts = seed_helm_actuator_facts(
-            plan.ships.get(&entity).map(|sp| &sp.hazard),
-            impulse_cfg.is_some(),
-            true,
-            physics.y,
-            frame_red_alert(frame.ships.get(&entity)),
-        );
-        seed_helm_travel_facts(
-            &mut facts,
-            frame.ships.get(&entity),
-            physics,
-            physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
-        );
-        // No attached `[helm_console.boost_ai]` ⇒ no AI action on this axis.
-        // Since #885b stage 5d there is no synthesised stand-in: strict
-        // AI-declaration mode rejects an AI-capable hull that omits the block at
-        // load, so an absent component means the declaration is missing and a
-        // missing declaration gets no automation (PRD #774 US7).
-        let Some(boost_policy) = boost_policy else {
-            continue;
+        let cx = HelmAxisCtx {
+            physics: Some(physics),
+            max_speed: physics_cfg.map(|c| c.0.max_speed).unwrap_or(0.0),
+            plan: plan.ships.get(&entity),
+            frame: frame.ships.get(&entity),
+            anchors: &frame.anchors,
+            impulse: None,
+            impulse_cfg,
+            boost_cfg: Some(cfg),
+            boost: Some(boost),
+            behaviour: None,
+            capability: None,
+            cursors: None,
         };
-        let policy = &boost_policy.0;
-        // Stateless (the shipped shape) resolves exactly as it always has.
-        // A policy that opted into the #882 machine instead resolves the SAME
-        // channel inside its current state — committed earlier this tick by
-        // `ai_policy_state_tick`, so the outputs are the new state's outputs
-        // immediately (AC2). The shared helper also carries the #883
-        // silent-degradation guard for the "machine declared, state component
-        // missing" case that used to fall through unnoticed.
-        // The scenario flag chain, anchored at the layer that spawned this
-        // ship (issue #891 stage 2).
+        let mut io = HelmAxisIo {
+            policy: None,
+            state: None,
+            pending: None,
+        };
+        // The scenario flag chain, anchored at the layer that spawned this ship
+        // (issue #891 stage 2).
         let flag_chain = ai_env.flag_chain(entity);
-        let desired_active = resolve_helm_channel(
-            policy,
+        if let Some(payload) = run_helm_axis::<BoostAxis>(
+            sources,
+            boost_policy.map(|p| &p.0),
             boost_state.map(|s| &s.0),
-            crate::entities::config::HELM_BOOST_CHANNEL,
-            &facts,
             clock.0,
             &flag_chain,
-        ) == Some(&crate::ai::policy::AiPolicyVerb::EngageBoost);
-
-        // On-change only: `SetBoost` sets the desired active state, and the
-        // shared integrator applies the transition; re-issuing an unchanged state
-        // every tick is redundant. Mirrors `ai_helm_impulse`'s NoChange skip.
-        if desired_active == boost.0.is_active() {
-            continue;
+            &cx,
+            &mut io,
+        ) {
+            emit_ai_command(
+                entity_uuid,
+                BoostAxis::system_id(),
+                payload,
+                sources,
+                &sessions,
+                ship_config,
+                &mut admitted,
+            );
         }
-
-        emit_ai_command(
-            entity_uuid,
-            crate::system_registry::helm_boost_system_id(),
-            crate::messages::SystemControlPayload::SetBoost {
-                active: desired_active,
-            },
-            sources,
-            &sessions,
-            ship_config,
-            &mut admitted,
-        );
     }
 }

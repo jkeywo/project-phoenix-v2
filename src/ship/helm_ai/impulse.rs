@@ -1,5 +1,9 @@
 use super::*;
 
+use crate::ai::host::HostOutcome;
+use crate::ai::policy::AiPolicyVerb;
+use crate::messages::SystemControlPayload;
+
 /// Per-ship inline stateless **Impulse** AI policy (issue #780). From
 /// the authored `[helm_console.impulse_ai]` block. Read by
 /// [`ai_helm_impulse`] to decide whether the impulse manoeuvre is permitted this
@@ -8,6 +12,109 @@ use super::*;
 #[derive(Component, Clone, Debug, Default)]
 pub struct HelmImpulseAiPolicy(pub crate::ai::policy::AiPolicy);
 
+/// The **Impulse** helm axis (issue #1208): gate the `impulse` channel on the
+/// authored `engage_impulse` mode verb, then — on a permit — run the doctrine
+/// `use_impulse` + `decide_impulse` geometry and emit engage/cancel on change.
+///
+/// Reads the radar-gated `visible_view` (deliberately NOT the merged view), so
+/// the drive charges toward a point the Helm can actually see. Emits only on an
+/// `Engage`/`Cancel` decision, never on `NoChange`: `apply_helm_commands`
+/// transitions on `ImpulseCommand` change detection, so an unconditional
+/// emission would re-issue `start_charge`/`cancel_charge` every tick. A
+/// stateless axis (the frozen `resolve_channel` path).
+pub(crate) struct ImpulseAxis;
+
+impl HelmAxisHost for ImpulseAxis {
+    fn system_id() -> crate::messages::SystemId {
+        crate::system_registry::helm_impulse_system_id()
+    }
+    const CHANNEL: &'static str = crate::entities::config::HELM_IMPULSE_CHANNEL;
+    const STATEFUL: bool = false;
+
+    fn accepts(verb: &AiPolicyVerb) -> bool {
+        matches!(verb, AiPolicyVerb::EngageImpulse)
+    }
+
+    fn seed(cx: &HelmAxisCtx) -> crate::world::flags::AiFacts {
+        // impulse_available is literally `true` here — the impulse capability
+        // (an `ImpulseConfigResource`) is proven present by the body's
+        // availability guard before this seed runs.
+        let mut facts = seed_helm_actuator_facts(
+            cx.plan.map(|sp| &sp.hazard),
+            true,
+            cx.boost_cfg.map(|c| c.enabled).unwrap_or(false),
+            cx.physics.map(|p| p.y).unwrap_or(0.0),
+            frame_red_alert(cx.frame),
+        );
+        // Issue #874: the arc facts reach this axis too, seeded from the same
+        // frame entry the decision below reads.
+        seed_hostile_arc_facts(&mut facts, cx.frame);
+        facts
+    }
+
+    fn act(
+        outcome: HostOutcome,
+        cx: &HelmAxisCtx,
+        _io: &mut HelmAxisIo,
+    ) -> Option<SystemControlPayload> {
+        match outcome {
+            HostOutcome::Act(verb) if Self::accepts(verb) => {}
+            _ => return None,
+        }
+
+        // No Helm objective → emit nothing (a lull in objectives should not
+        // cancel an in-progress charge).
+        let sf = cx.frame?;
+        if !sf.has_objective {
+            return None;
+        }
+
+        // Resolve where the Helm is going, over the radar-gated visible view.
+        let target_pos = resolve_helm_target_position(
+            &sf.scored,
+            &sf.visible_view,
+            cx.anchors,
+            cx.cursors,
+            sf.weapons_target,
+        )?;
+
+        // Whether the AI may engage impulse while pursuing this objective is
+        // TOML-authored per doctrine entry; an objective with no matching
+        // doctrine entry never engages.
+        let top_obj = sf.scored.iter().find(|o| {
+            o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+        });
+        let use_impulse = top_obj
+            .and_then(|obj| {
+                cx.behaviour
+                    .and_then(|b| b.0.doctrine.iter().find(|d| d.id == obj.id))
+            })
+            .map(|d| d.effective_use_impulse())
+            .unwrap_or(false);
+        if !use_impulse {
+            return None;
+        }
+
+        let impulse = cx.impulse?;
+        let cfg = cx.impulse_cfg?;
+        let physics = cx.physics?;
+        let decision = crate::ai::decide_impulse(&crate::ai::ImpulseDecisionInput {
+            pos: [physics.x, physics.z],
+            yaw: physics.yaw,
+            target_pos,
+            phase: impulse.0.phase,
+            engage_distance: cfg.engage_distance,
+            cancel_distance: cfg.cancel_distance,
+            angle_tolerance: crate::ai::IMPULSE_ANGLE_TOLERANCE_RAD,
+        });
+        match decision {
+            crate::ai::ImpulseDecision::Engage => Some(SystemControlPayload::StartImpulseCharge),
+            crate::ai::ImpulseDecision::Cancel => Some(SystemControlPayload::CancelImpulse),
+            crate::ai::ImpulseDecision::NoChange => None,
+        }
+    }
+}
+
 /// Per-axis helm AI: impulse drive. Decides engage/cancel for ships whose
 /// helm-impulse system is AI-operated and emits it as an admitted
 /// `StartImpulseCharge`/`CancelImpulse` into the ship's own
@@ -15,17 +122,10 @@ pub struct HelmImpulseAiPolicy(pub crate::ai::policy::AiPolicy);
 /// applies it to `ImpulseCommand` later this tick, before
 /// `apply_helm_commands` consumes the transition.
 ///
-/// **Reads the shared helm surfaces; mutates none of them.** It resolves where
-/// the Helm is going via `resolve_helm_target_position`, over the frame's
-/// radar-gated `visible_view` — deliberately NOT the merged view, preserving
-/// the pre-#824 shape where the impulse decision never saw an out-of-radar
-/// shared target — so the drive charges toward a point the Helm can actually
-/// see.
-///
-/// Emits only on an `Engage`/`Cancel` decision, never on `NoChange`:
-/// `apply_helm_commands` transitions on `ImpulseCommand` change detection, so
-/// an unconditional emission would re-issue `start_charge`/`cancel_charge`
-/// every tick.
+/// Since #1208 the gate/declare/resolve preamble is the shared
+/// [`run_helm_axis::<ImpulseAxis>`](run_helm_axis) driver's; this body checks
+/// the impulse capability, assembles the per-ship context, and emits the payload
+/// it returns.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn ai_helm_impulse(
     // The read-only AI-host world context — flag chain, sessions, and origin
@@ -69,134 +169,53 @@ pub(crate) fn ai_helm_impulse(
         mut admitted,
     ) in ships.iter_mut()
     {
-        // Gate on our own system alone — see the module note above.
-        if !sources
-            .0
-            .policy_for(&crate::system_registry::helm_impulse_system_id())
-            .operate_ai
-        {
-            continue;
-        }
-
-        // No drive or no per-hull drive config → nothing to command. Matches
-        // the monolith, which guards the same pair. Availability (AC6): the
-        // presence of `ImpulseConfigResource` is the impulse capability — no
-        // config, no emit.
+        // No drive or no per-hull drive config → nothing to command. Availability
+        // (AC6): the presence of `ImpulseConfigResource` is the impulse
+        // capability — no config, no emit.
         let (Some(impulse), Some(cfg)) = (impulse_comp, impulse_cfg) else {
             continue;
         };
-
-        // Authored manoeuvre policy gate (issue #780, AC6): seed the hazard +
-        // availability facts and resolve the `impulse` channel. Its default
-        // (unconditional permit) preserves the pre-#780 baseline exactly — the
-        // engage/cancel decision is still made below from doctrine + geometry —
-        // while an authored guard may hold impulse. A "hold" resolution emits
-        // nothing.
-        let boost_available = boost_cfg.map(|c| c.enabled).unwrap_or(false);
-        let mut facts = seed_helm_actuator_facts(
-            plan.ships.get(&entity).map(|sp| &sp.hazard),
-            true,
-            boost_available,
-            physics.y,
-            frame_red_alert(frame.ships.get(&entity)),
-        );
-        // Issue #874: the arc facts reach this axis too — see
-        // `seed_hostile_arc_facts`. Seeded from the same frame entry the
-        // decision below reads, so the guard and the manoeuvre cannot disagree
-        // about the tick.
-        seed_hostile_arc_facts(&mut facts, frame.ships.get(&entity));
-        // No attached `[helm_console.impulse_ai]` ⇒ no AI action on this axis.
-        // Since #885b stage 5d there is no synthesised stand-in: strict
-        // AI-declaration mode rejects an AI-capable hull that omits the block at
-        // load, so an absent component means the declaration is missing and a
-        // missing declaration gets no automation (PRD #774 US7).
-        let Some(impulse_policy) = impulse_policy else {
-            continue;
-        };
-        let policy = &impulse_policy.0;
-        // The scenario flag chain, anchored at the layer that spawned this
-        // ship (issue #891 stage 2).
-        let flag_chain = ai_env.flag_chain(entity);
-        if !helm_policy_actuates(
-            policy,
-            crate::entities::config::HELM_IMPULSE_CHANNEL,
-            &facts,
-            &crate::ai::policy::AiPolicyVerb::EngageImpulse,
-            &flag_chain,
-        ) {
-            continue;
-        }
-
-        let Some(sf) = frame.ships.get(&entity) else {
-            continue;
-        };
-        // No Helm objective → emit nothing. The monolith's no-objective
-        // branch `continue`s before its impulse block for exactly the same
-        // reason: an in-progress charge is not something a lull in objectives
-        // should cancel. (Behaviourally a redundant early-out — the
-        // top-objective filters below reach the same `continue` — kept
-        // because it short-circuits the target resolution and keeps the shape
-        // legible against the monolith it replaces.)
-        if !sf.has_objective {
-            continue;
-        }
-
-        // Resolve where the Helm is going, from the same surfaces `operate_helm`
-        // reads, over the radar-gated visible view (see the doc comment).
-        let Some(target_pos) = resolve_helm_target_position(
-            &sf.scored,
-            &sf.visible_view,
-            &frame.anchors,
+        let cx = HelmAxisCtx {
+            physics: Some(physics),
+            max_speed: 0.0,
+            plan: plan.ships.get(&entity),
+            frame: frame.ships.get(&entity),
+            anchors: &frame.anchors,
+            impulse: Some(impulse),
+            impulse_cfg: Some(cfg),
+            boost_cfg,
+            boost: None,
+            behaviour: behaviour_section,
+            capability: None,
             cursors,
-            sf.weapons_target,
-        ) else {
-            continue;
         };
-
-        // Whether the AI may engage impulse at all while pursuing this
-        // objective is TOML-authored per doctrine entry
-        // (`[[behaviour.doctrine]] use_impulse`); an objective with no matching
-        // doctrine entry never engages.
-        let top_obj = sf.scored.iter().find(|o| {
-            o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
-        });
-        let use_impulse = top_obj
-            .and_then(|obj| {
-                behaviour_section.and_then(|b| b.0.doctrine.iter().find(|d| d.id == obj.id))
-            })
-            .map(|d| d.effective_use_impulse())
-            .unwrap_or(false);
-        if !use_impulse {
-            continue;
-        }
-
-        let decision = crate::ai::decide_impulse(&crate::ai::ImpulseDecisionInput {
-            pos: [physics.x, physics.z],
-            yaw: physics.yaw,
-            target_pos,
-            phase: impulse.0.phase,
-            engage_distance: cfg.engage_distance,
-            cancel_distance: cfg.cancel_distance,
-            angle_tolerance: crate::ai::IMPULSE_ANGLE_TOLERANCE_RAD,
-        });
-        let payload = match decision {
-            crate::ai::ImpulseDecision::Engage => {
-                crate::messages::SystemControlPayload::StartImpulseCharge
-            }
-            crate::ai::ImpulseDecision::Cancel => {
-                crate::messages::SystemControlPayload::CancelImpulse
-            }
-            crate::ai::ImpulseDecision::NoChange => continue,
+        let mut io = HelmAxisIo {
+            policy: None,
+            state: None,
+            pending: None,
         };
-        emit_helm_ai_command(
-            entity_uuid,
-            crate::system_registry::helm_impulse_system_id(),
-            payload,
+        // The scenario flag chain, anchored at the layer that spawned this ship
+        // (issue #891 stage 2).
+        let flag_chain = ai_env.flag_chain(entity);
+        if let Some(payload) = run_helm_axis::<ImpulseAxis>(
             sources,
-            &sessions,
-            ship_config,
-            &mut admitted,
-        );
+            impulse_policy.map(|p| &p.0),
+            None,
+            0.0,
+            &flag_chain,
+            &cx,
+            &mut io,
+        ) {
+            emit_helm_ai_command(
+                entity_uuid,
+                ImpulseAxis::system_id(),
+                payload,
+                sources,
+                &sessions,
+                ship_config,
+                &mut admitted,
+            );
+        }
     }
 }
 

@@ -49,13 +49,20 @@ describe('billboardFor — entity → model → sidecar → billboard', () => {
 });
 
 describe('playableHulls / shipCardIndex', () => {
+  // playableHulls() reads every assets/worlds/*.toml (~40 files), and
+  // shipCardIndex() additionally runs billboardFor() — two more file reads
+  // plus an existsSync each — per playable hull. That real FS scan is
+  // ~20-40ms in isolation but can clear vitest's default 5000ms under
+  // full-suite parallel load contention, not because it got slower.
+  // Explicit per-test timeout, not a vitest.config.js bump, so a genuinely
+  // slow test elsewhere still fails loudly.
   it('scopes the index to hulls a world offers as a playable choice', () => {
     const hulls = playableHulls(ROOT);
     expect(hulls.size).toBeGreaterThan(0);
     for (const templatePath of hulls) {
       expect(templatePath.startsWith('assets/entities/')).toBe(true);
     }
-  });
+  }, 20000);
 
   it('keys the index by template_path — the only hull identity on the wire', () => {
     const index = shipCardIndex(ROOT);
@@ -66,7 +73,7 @@ describe('playableHulls / shipCardIndex', () => {
       expect(entry.tile).toBeGreaterThanOrEqual(0);
       expect(entry.tile).toBeLessThan(entry.views);
     }
-  });
+  }, 20000);
 
   it('gives every playable hull with a captured billboard an entry', () => {
     const index = shipCardIndex(ROOT);
@@ -75,5 +82,5 @@ describe('playableHulls / shipCardIndex', () => {
         expect(index[templatePath]).toBeDefined();
       }
     }
-  });
+  }, 20000);
 });

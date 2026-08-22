@@ -166,7 +166,12 @@ describe('shared display-text ids', () => {
     }
     expect([...unknown].sort(), 'ship TOML declares [[system]] kinds system_registry.rs does not')
       .toEqual([]);
-  });
+  // entityDocs() walks and parses every assets/entities/**/*.toml file (~80
+  // files); that real FS scan is ~60ms alone but can clear vitest's default
+  // 5000ms under full-suite parallel load contention, not because it got
+  // slower. Explicit timeout, not a vitest.config.js bump, so a genuinely
+  // slow test elsewhere still fails loudly.
+  }, 20000);
 
   it('gives hulls that word an arc or mount the same way the same id for it', async () => {
     const table = buildTable(await readFile(stringsFile, 'utf8'));
@@ -230,7 +235,8 @@ describe('shared display-text ids', () => {
     // Guard the guard: hulls really do share, so the assertions above ran on
     // more authored blocks than there are distinct ids.
     expect(slots.length).toBeGreaterThan(slotForId.size);
-  });
+  // Same entityDocs() full-fleet TOML scan as above — see that comment.
+  }, 20000);
 
   it('resolves every shared arc and weapon id to text', async () => {
     const table = buildTable(await readFile(stringsFile, 'utf8'));

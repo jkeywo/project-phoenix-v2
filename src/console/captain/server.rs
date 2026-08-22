@@ -626,12 +626,13 @@ fn operate_captain_ai(
                 );
                 // Route through the shared admission seam with this ship's own
                 // `ai:<uuid>` token (issue #830) rather than pushing straight
-                // into `AdmittedCommands` — true AI/human symmetry, mirroring
-                // `emit_sensors_ai_command`. Emits the same idempotent
+                // into `AdmittedCommands` — true AI/human symmetry, binding the
+                // red-alert `SystemId` at this call site. Emits the same idempotent
                 // `SetRedAlert` command a human captain sends (issue #748); the
                 // on-change guard only avoids admission spam.
-                emit_captain_ai_command(
+                emit_ai_command(
                     entity_uuid,
+                    crate::ship::system_registry::red_alert_system_id(),
                     SystemControlPayload::SetRedAlert {
                         active: should_be_red_alert,
                     },
@@ -643,28 +644,6 @@ fn operate_captain_ai(
             }
         }
     }
-}
-
-/// Emit an admitted Captain AI command targeting the red-alert system through
-/// the shared [`crate::command_admission::validate_and_admit`] seam, using this
-/// ship's own `ai:<uuid>` token (mirrors `emit_sensors_ai_command`).
-fn emit_captain_ai_command(
-    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
-    payload: SystemControlPayload,
-    sources: &ShipSystemControlSources,
-    sessions: &crate::lobby::Sessions,
-    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
-    admitted: &mut AdmittedCommands,
-) -> bool {
-    emit_ai_command(
-        entity_uuid,
-        crate::ship::system_registry::red_alert_system_id(),
-        payload,
-        sources,
-        sessions,
-        ship_config,
-        admitted,
-    )
 }
 
 /// Planar range to this ship's nearest faction-hostile contact, or `None` when

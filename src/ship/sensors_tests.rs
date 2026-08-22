@@ -691,8 +691,8 @@ fn sensors_ai_test_app() -> App {
         // default carries the same default_sensors_radar_range() base the
         // old Option fallback supplied, so test ranges are unchanged.
         .init_resource::<crate::lobby::server::ShipClientConfigResource>()
-        // `emit_sensors_ai_command` validates through the shared
-        // admission seam, which consults Sessions for human tokens; the
+        // The Sensors AI emit validates through the shared admission
+        // seam, which consults Sessions for human tokens; the
         // `ai:` path only needs the resource present.
         .insert_resource(crate::lobby::Sessions(
             crate::lobby::session::SessionManager::new(),
@@ -1242,8 +1242,9 @@ fn human_held_sensors_refuses_the_ai_emission() {
     let sessions = crate::lobby::Sessions(crate::lobby::session::SessionManager::new());
     let mut admitted = crate::core::messages::AdmittedCommands::default();
     assert!(
-        !emit_sensors_ai_command(
+        !crate::command_admission::ai_emit::emit_ai_command(
             None,
+            crate::ship::system_registry::sensors_system_id(),
             SystemControlPayload::SetScienceTarget {
                 uuid: target_uuid.clone()
             },

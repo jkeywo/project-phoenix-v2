@@ -535,8 +535,9 @@ fn store_resolved_selection(
 /// When no human hosts Command — its coarse system reads `operate_ai` — the
 /// ship's AI directs the target Station from EXACTLY the authored stance
 /// catalogue a human uses, and applies its choice through the SAME authoritative
-/// path: it emits an admitted `SetStationStance` (via
-/// [`emit_command_ai_command`]) targeting `command_system_id()`, so admission
+/// path: it emits an admitted `SetStationStance` (via the shared
+/// [`crate::command_admission::ai_emit::emit_ai_command`] seam) targeting
+/// `command_system_id()`, so admission
 /// validates the `ai:` token against the Command system's `operate_ai` policy
 /// and the shared [`handle_set_station_stance`] applier lands it through its
 /// three content gates. This is why AC2/AC3 come for free: the AI can neither
@@ -614,8 +615,9 @@ fn operate_command_ai(
         if in_force.as_deref() == Some(chosen.as_str()) {
             continue;
         }
-        emit_command_ai_command(
+        crate::command_admission::ai_emit::emit_ai_command(
             entity_uuid,
+            crate::ship::system_registry::command_system_id(),
             SystemControlPayload::SetStationStance {
                 station: target.clone(),
                 stance: chosen,
@@ -626,28 +628,6 @@ fn operate_command_ai(
             &mut admitted,
         );
     }
-}
-
-/// Emit an admitted Command AI order targeting the Command system through the
-/// shared [`crate::command_admission::ai_emit::emit_ai_command`] seam, using this
-/// ship's own `ai:<uuid>` token (mirrors `emit_captain_ai_command`).
-fn emit_command_ai_command(
-    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
-    payload: SystemControlPayload,
-    sources: &ShipSystemControlSources,
-    sessions: &crate::lobby::Sessions,
-    ship_config: Option<&ShipConfigComponent>,
-    admitted: &mut AdmittedCommands,
-) -> bool {
-    crate::command_admission::ai_emit::emit_ai_command(
-        entity_uuid,
-        crate::ship::system_registry::command_system_id(),
-        payload,
-        sources,
-        sessions,
-        ship_config,
-        admitted,
-    )
 }
 
 // ── Blackboard publish ─────────────────────────────────────────────────────────

@@ -197,6 +197,7 @@ entities:
         - "Issue #776 generalized the three hardcoded priority tiers into the data-driven per-system-target-ranking-policy: operate_sensors_ai now feeds combat-lock / objective-destroy / radar-contacts as registered candidate sources into a per-ship SensorsTargetSelector and emits its pick as the same admitted SetScienceTarget/ClearScienceTarget. Sensors target AUTHORITY is unchanged — the selection stays advisory to Tactical (channel-3 TargetDesignation) and never writes weapons-target-state."
         - "Issue #885 (411ace37 authored the block, 8555e336 deleted the fallback) removed the 'or the canonical default' half of that sentence. [sensors_console.selector] is authored on every shipped hull, default_sensors_target_selector_config is deleted, and strict AI-declaration mode makes an omitted block a load error. #885 also deleted the three inert params that synthesiser declared — combat_lock_weight, objective_weight and radar_weight — because no guard read them: each tier's magnitude is its own score term's authored weight field, so the param was a second indirection that could only disagree with the weight beside it."
         - "Issue #889 moved this host off the hardcoded 10 Hz AiSnapshotTimer and onto run_if(ai_snapshot_ready) at registration. The RATE is unchanged — the slower cadence derived from [global] ai_tick_hz / ai_snapshot_hz — but the gate is no longer an Option<Res<_>> check inside the system body, which fell back to evaluating EVERY tick whenever the resource was absent. That is every bare-App fixture in the crate, so before #889 the shipped cadence was exercised by no unit test at all (AGENTS.md rule #7)."
+        - "Issue #1186 deleted the single-owner emit_sensors_ai_command trampoline (sensors.rs); operate_sensors_ai now calls the shared command_admission::ai_emit::emit_ai_command seam directly, binding sensors_system_id() at the call site. Behaviour-preserving: the emitted command, admission edge and digest are byte-identical — one fewer thin wrapper over the shared seam, matching the #1211 helm/shields shim deletions."
     architecture:
       kind: ai-operator
       authority: authoritative
@@ -206,7 +207,7 @@ entities:
     implementation:
       status: declared
       paths: [src/ship/sensors.rs, src/ai/core.rs, src/ai/selector.rs]
-      symbols: [operate_sensors_ai, emit_sensors_ai_command, effective_sensor_range, find_nearest_hostile, SensorsTargetSelector]
+      symbols: [operate_sensors_ai, effective_sensor_range, find_nearest_hostile, SensorsTargetSelector]
       tests: [cargo test]
 
   - component: sensors-target-selection-ai

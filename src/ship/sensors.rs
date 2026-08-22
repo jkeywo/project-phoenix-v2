@@ -622,33 +622,6 @@ pub fn publish_sensor_radar_blackboard(
     }
 }
 
-/// Validate-and-enqueue one Sensors AI decision into this ship's own
-/// `AdmittedCommands` (issue #828, mirroring `console_ai::server::
-/// emit_shield_ai_command` from #826 / `ship::helm_ai::emit_helm_ai_command`
-/// from #824): the AI's `ai:` token flows through the same
-/// `validate_and_admit` seam network commands do, checked against this
-/// entity's own `ControlSourceResolver` (`operate_ai` must hold). The write
-/// happens in the same tick — `handle_sensors_messages` applies it later
-/// this frame — so there is no one-tick queue lag on the AI sensors path.
-fn emit_sensors_ai_command(
-    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
-    payload: crate::core::messages::SystemControlPayload,
-    sources: &crate::ship_plugin::ShipSystemControlSources,
-    sessions: &crate::lobby::Sessions,
-    ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
-    admitted: &mut crate::core::messages::AdmittedCommands,
-) -> bool {
-    emit_ai_command(
-        entity_uuid,
-        crate::ship::system_registry::sensors_system_id(),
-        payload,
-        sources,
-        sessions,
-        ship_config,
-        admitted,
-    )
-}
-
 /// Build a [`crate::ai::selector::SelectorCandidate`] for a detectable,
 /// hostile contact surfaced by one Sensors source (issue #776).
 ///
@@ -692,8 +665,8 @@ fn detectable_candidate(
 ///      contact ([`crate::ai::find_nearest_hostile`]) inside this ship's own
 ///      live sensor horizon and designates it to Tactical as advisory
 ///      intelligence. This is *advice*, not authority: the designation flows
-///      through the same [`emit_sensors_ai_command`] → `handle_sensors_messages`
-///      applier a human selection does, which never mutates
+///      through the same [`crate::command_admission::ai_emit::emit_ai_command`]
+///      → `handle_sensors_messages` applier a human selection does, which never mutates
 ///      `TacticalRadarSelection`. Tactical keeps final firing-target authority.
 ///
 /// All three tiers are gated on this ship's own sensor horizon
@@ -709,7 +682,7 @@ fn detectable_candidate(
 ///
 /// Decide-and-emit (issue #828): instead of writing [`SensorRadarSelection`]
 /// directly, the decision is emitted as an admitted `SetScienceTarget` /
-/// `ClearScienceTarget` through [`emit_sensors_ai_command`], for
+/// `ClearScienceTarget` through [`crate::command_admission::ai_emit::emit_ai_command`], for
 /// `handle_sensors_messages` to apply later this tick. Emission happens only
 /// when the decided value differs from the current [`SensorRadarSelection`]: the old
 /// direct writes were idempotent assignments, so no-change ticks produce no
@@ -977,8 +950,9 @@ pub fn operate_sensors_ai(
             Some(uuid) => crate::core::messages::SystemControlPayload::SetScienceTarget { uuid },
             None => crate::core::messages::SystemControlPayload::ClearScienceTarget,
         };
-        emit_sensors_ai_command(
+        emit_ai_command(
             entity_uuid,
+            crate::ship::system_registry::sensors_system_id(),
             payload,
             sources,
             &sessions,

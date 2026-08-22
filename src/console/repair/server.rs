@@ -1046,42 +1046,21 @@ pub fn operate_repair_ai(
                     winner.clone(),
                 ))
             };
-            emit_repair_ai_command(
+            emit_ai_command(
                 entity_uuid,
+                crate::ship::system_registry::repair_system_id(),
                 crate::core::messages::SystemControlPayload::DispatchRepairTeam {
                     team_idx: team_idx as u8,
                     target,
                 },
                 sources,
                 &sessions,
-                config,
+                Some(config),
                 &mut admitted,
             );
             excluded.insert(winner);
         }
     }
-}
-
-/// Emit an admitted Repair AI command targeting the repair system through the
-/// shared [`crate::command_admission::validate_and_admit`] seam, using this
-/// ship's own `ai:<uuid>` token (mirrors `emit_sensors_ai_command`).
-fn emit_repair_ai_command(
-    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
-    payload: crate::core::messages::SystemControlPayload,
-    sources: &ShipSystemControlSources,
-    sessions: &crate::lobby::Sessions,
-    config: &crate::ship_plugin::ShipConfigComponent,
-    admitted: &mut crate::core::messages::AdmittedCommands,
-) -> bool {
-    emit_ai_command(
-        entity_uuid,
-        crate::ship::system_registry::repair_system_id(),
-        payload,
-        sources,
-        sessions,
-        Some(config),
-        admitted,
-    )
 }
 
 #[cfg(test)]

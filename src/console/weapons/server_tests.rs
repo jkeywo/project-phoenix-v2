@@ -1,6 +1,6 @@
-use super::shared::system_is_registered;
 use super::*;
 use crate::ai::server::AiTokenRegistry;
+use crate::console::weapons::shared::system_is_registered;
 use crate::core::messages::*;
 use crate::entities::spawner::EntitySystemHull;
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target, WorldResource};

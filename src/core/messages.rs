@@ -2194,7 +2194,7 @@ pub enum ClientMessage {
     ///
     /// **Absent from a demo build.** The `phoenix_demo_build` cfg `build.rs`
     /// derives from `PHOENIX_DEMO_BUILD` removes this variant, its drain
-    /// (`debug_overlay::drain_client_debug_flags`) and its registration, so a
+    /// (`server::bridge::drain_client_debug_flags`) and its registration, so a
     /// demo binary's `ClientMessage` has no such shape to decode: the wire
     /// route is gone, not merely refused. That is what the hidden Debug/Cheat
     /// tab claims, and a hidden tab is a forgeable UI fact on its own.
@@ -2230,10 +2230,10 @@ pub enum ClientMessage {
 
 /// One host-page debug overlay a settings menu can flip (issue #940).
 ///
-/// Mirrors the diagnostic half of `crate::server::bridge::DebugToggleKind` — that enum
-/// is the host page's local pending-toggle vocabulary and this is its wire
-/// form, with a `From<DebugFlag>` conversion between them so the two cannot
-/// drift into different flag sets.
+/// Mirrors the diagnostic half of [`DebugToggleKind`] — that enum is the host
+/// page's local pending-toggle vocabulary and this is its wire form, with a
+/// `From<DebugFlag>` conversion between them (defined just below) so the two
+/// cannot drift into different flag sets.
 ///
 /// Every member is diagnostic-only by construction, which is what lets
 /// `ClientMessage::ToggleDebugFlag` be removed wholesale from a demo build
@@ -2293,6 +2293,82 @@ impl DebugFlag {
         DebugFlag::AiDoctrine,
         DebugFlag::ScenarioState,
     ];
+}
+
+/// Identifies which debug overlay/toggle a pending request is for.
+///
+/// The host page's local pending-toggle vocabulary. Lives in the protocol layer
+/// (issue #1193, moved down from `server::bridge`) because it IS a toggle
+/// vocabulary — the always-compiled sim half of `debug_overlay` names it, so it
+/// cannot sit behind the `server` feature. Its marshalling counterpart
+/// (`server::bridge::apply_pending_toggles`) stays on the bridge/marshalling
+/// side; only the vocabulary comes down here.
+///
+/// One enum-keyed pending set replaces what used to be six near-identical
+/// `RefCell<bool>` thread-locals (one per debug overlay) plus six matching
+/// blocks in the drain system (issue #609). Adding a new debug overlay now
+/// means: add a variant here, add its resource field to
+/// `bridge::apply_pending_toggles`, and add one `wasm_bindgen` export that
+/// inserts the variant — no new thread-local, no new drain block.
+///
+/// Deliberately free of Bevy types and `target_arch = "wasm32"`, like the wire
+/// `DebugFlag` beside it, so the conversion below and
+/// `bridge::apply_pending_toggles` can be unit-tested on native without a
+/// running Bevy App.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DebugToggleKind {
+    /// Region wireframes (`DebugRegionsEnabled`).
+    Regions,
+    /// Modifier debug overlay (`DebugOverlayEnabled`).
+    Overlay,
+    /// Simulation pause (`SimulationPaused`); also (un)pauses `Time<Virtual>`.
+    ///
+    /// Reached from the host settings menu's Gameplay tab, which is not
+    /// build-gated — so this variant, unlike its neighbours, has a caller that
+    /// survives into a demo build.
+    Pause,
+    /// Damage debug log (`DebugDamageEnabled`).
+    Damage,
+    /// Entity behavior overlay (`DebugEntitiesEnabled`).
+    Entities,
+    /// Entity inspector overlay (`DebugEntityInspectorEnabled`).
+    EntityInspector,
+    /// Station-activity chart (`debug::DebugStationActivityEnabled`), the first
+    /// surface on the structured debug pipeline (issue #1145).
+    StationActivity,
+    /// AI doctrine-pool panel (`debug::DebugAiDoctrineEnabled`, issue #1149).
+    AiDoctrine,
+    /// Scenario-state panel (`debug::DebugScenarioStateEnabled`), the second
+    /// structured surface on the pipeline (issue #1148).
+    ScenarioState,
+}
+
+impl From<DebugFlag> for DebugToggleKind {
+    /// The wire form of the *diagnostic* half of [`DebugToggleKind`] (issue #940)
+    /// maps one-for-one onto it, so an overlay flipped from a phone and one
+    /// flipped from the host page converge on the same pending-toggle vocabulary
+    /// and the same [`crate::server::bridge::apply_pending_toggles`] call.
+    /// Exhaustive on purpose: adding a `DebugFlag` without a kind to carry it is a
+    /// compile error rather than a silently ignored toggle.
+    ///
+    /// [`DebugToggleKind::Pause`] is deliberately outside this conversion's
+    /// range. `DebugFlag` has no `Pause` member — a phone reaches the clock
+    /// through `ClientMessage::TogglePause`, gated separately — so there is no
+    /// wire flag a client could send that stops the simulation through the
+    /// overlay drain. `debug_overlay::tests::no_debug_flag_maps_to_the_pause_toggle`
+    /// pins that.
+    fn from(flag: DebugFlag) -> Self {
+        match flag {
+            DebugFlag::Regions => DebugToggleKind::Regions,
+            DebugFlag::Modifiers => DebugToggleKind::Overlay,
+            DebugFlag::Damage => DebugToggleKind::Damage,
+            DebugFlag::Entities => DebugToggleKind::Entities,
+            DebugFlag::Inspector => DebugToggleKind::EntityInspector,
+            DebugFlag::StationActivity => DebugToggleKind::StationActivity,
+            DebugFlag::AiDoctrine => DebugToggleKind::AiDoctrine,
+            DebugFlag::ScenarioState => DebugToggleKind::ScenarioState,
+        }
+    }
 }
 
 /// Typed payload for a channel-3 coordination message (issue #494).

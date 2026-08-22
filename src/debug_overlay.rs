@@ -117,80 +117,21 @@ pub struct LastReportedDebugState(
 /// the build gate is the `#[cfg]` on this function and on the message itself.
 /// Returns the toggle kinds in arrival order; `apply_pending_toggles` dedupes
 /// them, exactly as it does for the host page's own pending set.
+///
+/// Stays on the sim side (issue #1193): it names only the protocol-layer
+/// [`crate::core::messages::DebugToggleKind`], nothing under `server::bridge`.
+/// Its consumer, the phone-route drain that feeds `apply_pending_toggles`, moved
+/// to `server::bridge::drain_client_debug_flags` (the marshalling side).
 #[cfg(not(phoenix_demo_build))]
 pub fn admitted_flag_toggles<'a>(
     messages: impl IntoIterator<Item = (&'a str, crate::core::messages::DebugFlag)>,
     is_connected: impl Fn(&str) -> bool,
-) -> Vec<crate::server::bridge::DebugToggleKind> {
+) -> Vec<crate::core::messages::DebugToggleKind> {
     messages
         .into_iter()
         .filter(|(token, _)| is_connected(token))
-        .map(|(_, flag)| crate::server::bridge::DebugToggleKind::from(flag))
+        .map(|(_, flag)| crate::core::messages::DebugToggleKind::from(flag))
         .collect()
-}
-
-/// Drain `ClientMessage::ToggleDebugFlag` from connected phones and apply it.
-///
-/// **Not compiled into a demo build**, and neither is the message it reads.
-///
-/// Reads raw `InboundMessage` rather than `AdmittedCommands` deliberately —
-/// see the variant's doc for why these never cross command admission. The
-/// authority check is not skipped, it is [`admitted_flag_toggles`].
-///
-/// The flag-flipping itself is `bridge::apply_pending_toggles`, the same pure
-/// function the host page's drain calls, so a flag flipped from a phone and one
-/// flipped from the host page cannot diverge. `paused` is passed to it as a
-/// throwaway local: no `DebugFlag` maps to `DebugToggleKind::Pause` any more,
-/// so this drain can no longer touch the clock even by accident.
-#[cfg(not(phoenix_demo_build))]
-#[allow(clippy::too_many_arguments)]
-pub fn drain_client_debug_flags(
-    mut reader: MessageReader<crate::lobby::InboundMessage>,
-    sessions: Res<crate::lobby::Sessions>,
-    mut regions: ResMut<DebugRegionsEnabled>,
-    mut overlay: ResMut<DebugOverlayEnabled>,
-    mut damage: ResMut<DebugDamageEnabled>,
-    mut entities: ResMut<DebugEntitiesEnabled>,
-    mut inspector: ResMut<DebugEntityInspectorEnabled>,
-    mut station_activity: ResMut<crate::debug::DebugStationActivityEnabled>,
-    mut ai_doctrine: ResMut<crate::debug::DebugAiDoctrineEnabled>,
-    mut scenario_state: ResMut<crate::debug::DebugScenarioStateEnabled>,
-) {
-    let mut requests: Vec<(String, crate::core::messages::DebugFlag)> = Vec::new();
-    for ev in reader.read() {
-        if let crate::core::messages::ClientMessage::ToggleDebugFlag { flag } = &ev.msg {
-            requests.push((ev.token.clone(), *flag));
-        }
-    }
-    if requests.is_empty() {
-        return;
-    }
-
-    let pending = admitted_flag_toggles(
-        requests.iter().map(|(token, flag)| (token.as_str(), *flag)),
-        |token| sessions.0.players().iter().any(|p| p.token == token),
-    );
-    if pending.is_empty() {
-        return;
-    }
-
-    let mut unreachable_pause = false;
-    let pause_changed = crate::server::bridge::apply_pending_toggles(
-        pending,
-        &mut regions.0,
-        &mut overlay.0,
-        &mut unreachable_pause,
-        &mut damage.0,
-        &mut entities.0,
-        &mut inspector.0,
-        &mut station_activity.0,
-        &mut ai_doctrine.0,
-        &mut scenario_state.0,
-    );
-    debug_assert!(
-        !pause_changed,
-        "no DebugFlag maps to DebugToggleKind::Pause — pause is ClientMessage::TogglePause"
-    );
 }
 
 /// Count the pause requests in a batch that are honoured.
@@ -633,7 +574,7 @@ mod tests {
     fn every_flag_maps_to_its_own_toggle_kind() {
         let kinds: std::collections::HashSet<_> = crate::core::messages::DebugFlag::ALL
             .iter()
-            .map(|f| crate::server::bridge::DebugToggleKind::from(*f))
+            .map(|f| crate::core::messages::DebugToggleKind::from(*f))
             .collect();
         assert_eq!(kinds.len(), crate::core::messages::DebugFlag::ALL.len());
     }
@@ -645,8 +586,8 @@ mod tests {
     fn no_debug_flag_maps_to_the_pause_toggle() {
         for flag in crate::core::messages::DebugFlag::ALL {
             assert_ne!(
-                crate::server::bridge::DebugToggleKind::from(flag),
-                crate::server::bridge::DebugToggleKind::Pause,
+                crate::core::messages::DebugToggleKind::from(flag),
+                crate::core::messages::DebugToggleKind::Pause,
                 "{flag:?} would let the overlay drain stop the simulation clock"
             );
         }
@@ -681,8 +622,8 @@ mod tests {
             assert_eq!(
                 kinds,
                 vec![
-                    crate::server::bridge::DebugToggleKind::Regions,
-                    crate::server::bridge::DebugToggleKind::Damage,
+                    crate::core::messages::DebugToggleKind::Regions,
+                    crate::core::messages::DebugToggleKind::Damage,
                 ]
             );
         }
@@ -697,43 +638,11 @@ mod tests {
             );
         }
 
-        /// An admitted batch flips exactly the resources it names, through the
-        /// same pure function the host page's own drain uses — and never the
-        /// clock, whatever it names.
-        #[test]
-        fn an_admitted_batch_flips_only_the_flags_it_names() {
-            let (mut regions, mut overlay, mut paused) = (false, false, false);
-            let (mut damage, mut entities, mut inspector) = (false, false, false);
-            let mut station_activity = false;
-            let mut ai_doctrine = false;
-            let mut scenario_state = false;
-            let pending =
-                admitted_flag_toggles([("phone", DebugFlag::Damage)], connected(&["phone"]));
-            let pause_changed = crate::server::bridge::apply_pending_toggles(
-                pending,
-                &mut regions,
-                &mut overlay,
-                &mut paused,
-                &mut damage,
-                &mut entities,
-                &mut inspector,
-                &mut station_activity,
-                &mut ai_doctrine,
-                &mut scenario_state,
-            );
-            assert!(damage, "the named flag must flip");
-            assert!(!pause_changed);
-            assert!(
-                !regions
-                    && !overlay
-                    && !paused
-                    && !entities
-                    && !inspector
-                    && !station_activity
-                    && !ai_doctrine
-                    && !scenario_state
-            );
-        }
+        // `an_admitted_batch_flips_only_the_flags_it_names` — the round-trip that
+        // feeds `admitted_flag_toggles`' output into `apply_pending_toggles` —
+        // moved to `server::bridge::tests` with the drain and the marshalling it
+        // exercises (issue #1193). The two tests above keep the sim-side authority
+        // filter (`admitted_flag_toggles`) covered here.
 
         /// Pause is a toggle, so an even number of admitted taps in one frame
         /// is a no-op and an odd number is one flip. Collapsing the batch to

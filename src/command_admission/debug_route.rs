@@ -46,7 +46,7 @@
 //!    reach admission at all (the flags are presentation; see the variant's
 //!    doc). No predicate gates it because the **variant itself** carries
 //!    `#[cfg(not(phoenix_demo_build))]`: in a demo build there is no such
-//!    message to decode and no `drain_client_debug_flags` to run.
+//!    message to decode and no `server::bridge::drain_client_debug_flags` to run.
 //!  - **Pause** — `ClientMessage::TogglePause`, gated identically and for a
 //!    blunter reason: any one of N demo players could otherwise freeze the
 //!    mission for everyone. The host's own pause is untouched in every build.

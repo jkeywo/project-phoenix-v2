@@ -1,15 +1,27 @@
 // WASM/JS bridge — all public functions are #[wasm_bindgen] exports.
 //
-// On native targets this module is empty except for the debug-toggle
-// pending-set (`DebugToggleKind` + `apply_pending_toggles`), which is kept
-// free of `target_arch = "wasm32"` and Bevy types specifically so it can be
-// unit-tested natively (see the `tests` module at the bottom of this file).
-// The WASM-specific glue (thread-locals, wasm_bindgen exports, the Bevy
-// drain system) is gated behind #[cfg(target_arch = "wasm32")].
+// On native targets this module carries only the debug-toggle MARSHALLING —
+// `apply_pending_toggles` (the pure flag-flipping logic, Bevy-free so it is
+// unit-tested natively; see the `tests` module at the bottom) and
+// `drain_client_debug_flags` (the phone-route system that feeds it, moved here
+// from `debug_overlay` in issue #1193 so the always-compiled sim half of the
+// overlay names nothing under `crate::server::bridge`). The toggle VOCABULARY
+// they use — `core::messages::DebugToggleKind` — lives in the protocol layer,
+// not here. The WASM-specific glue (thread-locals, wasm_bindgen exports, the
+// host-page Bevy drain system) is gated behind #[cfg(target_arch = "wasm32")].
 
-// Used by the debug-toggle pending-set below, which is compiled on every
-// target (see comment on `DebugToggleKind`), so this import is not gated.
+// Used by `apply_pending_toggles` below, which is compiled on every target, so
+// this import is not gated.
+use crate::core::messages::DebugToggleKind;
 use std::collections::HashSet;
+
+// `drain_client_debug_flags` (moved here from `debug_overlay` in issue #1193) is
+// a Bevy system, so it needs these prelude types on the native path — the rest
+// of this module's native portion is Bevy-free. On WASM they come from the
+// `bevy::prelude::*` glob in the gated `use` block below, and under a demo build
+// the drain is compiled out entirely, so the import is scoped to match.
+#[cfg(all(not(target_arch = "wasm32"), not(phoenix_demo_build)))]
+use bevy::prelude::{MessageReader, Res, ResMut};
 
 #[cfg(target_arch = "wasm32")]
 use {
@@ -38,75 +50,22 @@ use {
     wasm_bindgen::prelude::*,
 };
 
-// ── Debug toggle pending-set ────────────────────────────────────────────────
+// ── Debug toggle marshalling ────────────────────────────────────────────────
 //
-// One enum-keyed pending set replaces what used to be six near-identical
-// `RefCell<bool>` thread-locals (one per debug overlay) plus six matching
-// blocks in the drain system (issue #609). Adding a new debug overlay now
-// means: add a variant here, add its resource field to `apply_pending_toggles`,
-// and add one `wasm_bindgen` export that inserts the variant — no new
-// thread-local, no new drain block.
+// The toggle VOCABULARY (`DebugToggleKind`) and its wire form (`DebugFlag`) both
+// live in `crate::core::messages` (the protocol layer, issue #1193). What stays
+// here is the marshalling: `apply_pending_toggles` (below) and, further down,
+// `drain_client_debug_flags`. Both are on the bridge/marshalling side of the
+// sim↔presentation seam so the always-compiled `debug_overlay` never names them.
 //
-// Deliberately kept free of `target_arch = "wasm32"` and Bevy types so it can
-// be unit-tested on native (`cargo test`) without a running Bevy App.
-
-/// Identifies which debug overlay/toggle a pending request is for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DebugToggleKind {
-    /// Region wireframes (`DebugRegionsEnabled`).
-    Regions,
-    /// Modifier debug overlay (`DebugOverlayEnabled`).
-    Overlay,
-    /// Simulation pause (`SimulationPaused`); also (un)pauses `Time<Virtual>`.
-    ///
-    /// Reached from the host settings menu's Gameplay tab, which is not
-    /// build-gated — so this variant, unlike its neighbours, has a caller that
-    /// survives into a demo build.
-    Pause,
-    /// Damage debug log (`DebugDamageEnabled`).
-    Damage,
-    /// Entity behavior overlay (`DebugEntitiesEnabled`).
-    Entities,
-    /// Entity inspector overlay (`DebugEntityInspectorEnabled`).
-    EntityInspector,
-    /// Station-activity chart (`debug::DebugStationActivityEnabled`), the first
-    /// surface on the structured debug pipeline (issue #1145).
-    StationActivity,
-    /// AI doctrine-pool panel (`debug::DebugAiDoctrineEnabled`, issue #1149).
-    AiDoctrine,
-    /// Scenario-state panel (`debug::DebugScenarioStateEnabled`), the second
-    /// structured surface on the pipeline (issue #1148).
-    ScenarioState,
-}
-
-impl From<crate::core::messages::DebugFlag> for DebugToggleKind {
-    /// The wire form of the *diagnostic* half of this enum (issue #940) maps
-    /// one-for-one onto it, so an overlay flipped from a phone and one flipped
-    /// from the host page converge on the same pending-toggle vocabulary and
-    /// the same [`apply_pending_toggles`] call. Exhaustive on purpose: adding a
-    /// `DebugFlag` without a kind to carry it is a compile error rather than a
-    /// silently ignored toggle.
-    ///
-    /// [`DebugToggleKind::Pause`] is deliberately outside this conversion's
-    /// range. `DebugFlag` has no `Pause` member — a phone reaches the clock
-    /// through `ClientMessage::TogglePause`, gated separately — so there is no
-    /// wire flag a client could send that stops the simulation through the
-    /// overlay drain. `debug_overlay::tests::no_debug_flag_maps_to_the_pause_toggle`
-    /// pins that.
-    fn from(flag: crate::core::messages::DebugFlag) -> Self {
-        use crate::core::messages::DebugFlag;
-        match flag {
-            DebugFlag::Regions => DebugToggleKind::Regions,
-            DebugFlag::Modifiers => DebugToggleKind::Overlay,
-            DebugFlag::Damage => DebugToggleKind::Damage,
-            DebugFlag::Entities => DebugToggleKind::Entities,
-            DebugFlag::Inspector => DebugToggleKind::EntityInspector,
-            DebugFlag::StationActivity => DebugToggleKind::StationActivity,
-            DebugFlag::AiDoctrine => DebugToggleKind::AiDoctrine,
-            DebugFlag::ScenarioState => DebugToggleKind::ScenarioState,
-        }
-    }
-}
+// Adding a new debug overlay means: add a `DebugToggleKind` variant (in
+// `core::messages`), add its resource field to `apply_pending_toggles`, and add
+// one `wasm_bindgen` export that inserts the variant — no new thread-local, no
+// new drain block (issue #609).
+//
+// `apply_pending_toggles` is deliberately kept free of `target_arch = "wasm32"`
+// and Bevy types so it can be unit-tested on native (`cargo test`) without a
+// running Bevy App.
 
 /// Applies a batch of pending debug-toggle requests to plain `bool` flags.
 ///
@@ -150,6 +109,78 @@ pub fn apply_pending_toggles(
         }
     }
     pause_changed
+}
+
+/// Drain `ClientMessage::ToggleDebugFlag` from connected phones and apply it.
+///
+/// Moved here from `debug_overlay` in issue #1193: it is the phone-route
+/// MARSHALLING that feeds [`apply_pending_toggles`], so it belongs on the
+/// bridge/marshalling side of the sim↔presentation seam rather than in the
+/// always-compiled overlay. `debug_overlay` keeps the authority filter
+/// ([`crate::debug_overlay::admitted_flag_toggles`], still sim-side) and the
+/// overlay resources this flips; only the call into `apply_pending_toggles`
+/// lives here now.
+///
+/// **Not compiled into a demo build**, and neither is the message it reads.
+///
+/// Reads raw `InboundMessage` rather than `AdmittedCommands` deliberately —
+/// see the variant's doc for why these never cross command admission. The
+/// authority check is not skipped, it is `admitted_flag_toggles`.
+///
+/// The flag-flipping itself is [`apply_pending_toggles`], the same pure function
+/// the host page's drain calls, so a flag flipped from a phone and one flipped
+/// from the host page cannot diverge. `paused` is passed to it as a throwaway
+/// local: no `DebugFlag` maps to `DebugToggleKind::Pause` any more, so this drain
+/// can no longer touch the clock even by accident.
+#[cfg(not(phoenix_demo_build))]
+#[allow(clippy::too_many_arguments)]
+pub fn drain_client_debug_flags(
+    mut reader: MessageReader<crate::lobby::InboundMessage>,
+    sessions: Res<crate::lobby::Sessions>,
+    mut regions: ResMut<crate::debug_overlay::DebugRegionsEnabled>,
+    mut overlay: ResMut<crate::debug_overlay::DebugOverlayEnabled>,
+    mut damage: ResMut<crate::debug_overlay::DebugDamageEnabled>,
+    mut entities: ResMut<crate::debug_overlay::DebugEntitiesEnabled>,
+    mut inspector: ResMut<crate::debug_overlay::DebugEntityInspectorEnabled>,
+    mut station_activity: ResMut<crate::debug::DebugStationActivityEnabled>,
+    mut ai_doctrine: ResMut<crate::debug::DebugAiDoctrineEnabled>,
+    mut scenario_state: ResMut<crate::debug::DebugScenarioStateEnabled>,
+) {
+    let mut requests: Vec<(String, crate::core::messages::DebugFlag)> = Vec::new();
+    for ev in reader.read() {
+        if let crate::core::messages::ClientMessage::ToggleDebugFlag { flag } = &ev.msg {
+            requests.push((ev.token.clone(), *flag));
+        }
+    }
+    if requests.is_empty() {
+        return;
+    }
+
+    let pending = crate::debug_overlay::admitted_flag_toggles(
+        requests.iter().map(|(token, flag)| (token.as_str(), *flag)),
+        |token| sessions.0.players().iter().any(|p| p.token == token),
+    );
+    if pending.is_empty() {
+        return;
+    }
+
+    let mut unreachable_pause = false;
+    let pause_changed = apply_pending_toggles(
+        pending,
+        &mut regions.0,
+        &mut overlay.0,
+        &mut unreachable_pause,
+        &mut damage.0,
+        &mut entities.0,
+        &mut inspector.0,
+        &mut station_activity.0,
+        &mut ai_doctrine.0,
+        &mut scenario_state.0,
+    );
+    debug_assert!(
+        !pause_changed,
+        "no DebugFlag maps to DebugToggleKind::Pause — pause is ClientMessage::TogglePause"
+    );
 }
 
 // ── De-globalised bridge state (issue #1181) ────────────────────────────────
@@ -2957,7 +2988,7 @@ fn publish_instagib(instagib: Res<Instagib>) {
 ///
 /// `drain_debug_toggles` already writes both, but only for flips *it* applied.
 /// Since a phone can now flip the same resources
-/// (`debug_overlay::drain_client_debug_flags`), the host page's own settings cog
+/// (`drain_client_debug_flags`, above), the host page's own settings cog
 /// would otherwise paint a stale Region Wireframes or Pause button whenever a
 /// client moved one. Mirroring unconditionally each frame removes the whole
 /// staleness class rather than adding a second writer at the new flip site.
@@ -3114,16 +3145,18 @@ fn flush_host_channels(
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 //
-// `apply_pending_toggles` and `DebugToggleKind` are defined outside the
-// `target_arch = "wasm32"` gate specifically so this module runs under plain
-// `cargo test` on native, with no Bevy App and no wasm_bindgen involved.
+// `apply_pending_toggles` is defined outside the `target_arch = "wasm32"` gate
+// (and its `DebugToggleKind` vocabulary lives in `core::messages`) specifically
+// so this module runs under plain `cargo test` on native, with no Bevy App and
+// no wasm_bindgen involved.
 #[cfg(test)]
 mod tests {
     use super::{
         apply_instagib_toggles, apply_pending_toggles, apply_teleport_to_waypoint, host_channels,
-        next_restore_step, DebugToggleKind, Instagib, PendingRestore, RestoreStep, RestoreWaited,
+        next_restore_step, Instagib, PendingRestore, RestoreStep, RestoreWaited,
     };
     use crate::console::navigation::{NavigationWaypoint, WaypointMode};
+    use crate::core::messages::DebugToggleKind;
     use crate::ship::state::ShipPhysics;
 
     /// Teleport onto a Free waypoint sets `x`/`z` and leaves `y` unchanged.
@@ -3368,6 +3401,51 @@ mod tests {
         );
 
         assert!(entities, "should have flipped once (false -> true)");
+    }
+
+    /// The phone-flag round trip (moved here from `debug_overlay` with the drain
+    /// in issue #1193): a connected player's admitted flags feed
+    /// `apply_pending_toggles` and flip exactly the resources they name — through
+    /// the same pure function the host page's own drain uses — and never the
+    /// clock, whatever they name. Exercises the marshalling
+    /// (`drain_client_debug_flags`) now lives beside the pure function it calls.
+    #[cfg(not(phoenix_demo_build))]
+    #[test]
+    fn an_admitted_batch_flips_only_the_flags_it_names() {
+        use crate::core::messages::DebugFlag;
+        let (mut regions, mut overlay, mut paused) = (false, false, false);
+        let (mut damage, mut entities, mut inspector) = (false, false, false);
+        let mut station_activity = false;
+        let mut ai_doctrine = false;
+        let mut scenario_state = false;
+        let pending =
+            crate::debug_overlay::admitted_flag_toggles([("phone", DebugFlag::Damage)], |token| {
+                token == "phone"
+            });
+        let pause_changed = apply_pending_toggles(
+            pending,
+            &mut regions,
+            &mut overlay,
+            &mut paused,
+            &mut damage,
+            &mut entities,
+            &mut inspector,
+            &mut station_activity,
+            &mut ai_doctrine,
+            &mut scenario_state,
+        );
+        assert!(damage, "the named flag must flip");
+        assert!(!pause_changed);
+        assert!(
+            !regions
+                && !overlay
+                && !paused
+                && !entities
+                && !inspector
+                && !station_activity
+                && !ai_doctrine
+                && !scenario_state
+        );
     }
 
     // ── Instagib queue-drain semantics (issue #1181) ────────────────────────

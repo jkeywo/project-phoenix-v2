@@ -1294,7 +1294,10 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     app.add_systems(
         PreUpdate,
         (
-            crate::debug_overlay::drain_client_debug_flags,
+            // `drain_client_debug_flags` moved to the bridge/marshalling side in
+            // issue #1193 (it calls `apply_pending_toggles`); its pause sibling
+            // stays sim-side in `debug_overlay`.
+            crate::server::bridge::drain_client_debug_flags,
             crate::debug_overlay::drain_client_pause,
         )
             .chain()

@@ -897,6 +897,22 @@
       line-height: 1.35;
       color: #0f0;
     }
+    /* Station-activity chart (issue #1145) — the one structured-JSON debug
+       output, drawn rather than printed, so it opts out of the monospace text
+       styling the four legacy overlays share. */
+    #debug-content .sa-chart { white-space: normal; color: #cde; font-family: monospace; }
+    .sa-title { font-size: 12px; color: #9fd; margin-bottom: 2px; }
+    .sa-caption { font-size: 10px; color: #6a86a0; margin-bottom: 6px; }
+    .sa-legend { display: flex; gap: 12px; font-size: 10px; margin-bottom: 6px; }
+    .sa-legend-item { display: inline-flex; align-items: center; gap: 4px; }
+    .sa-swatch { width: 10px; height: 10px; display: inline-block; border-radius: 2px; }
+    .sa-swatch-human { background: #4fd1ff; }
+    .sa-swatch-ai { background: #ffb347; }
+    .sa-bar-human { fill: #4fd1ff; }
+    .sa-bar-ai { fill: #ffb347; }
+    .sa-station-label { fill: #cde; font-size: 10px; font-family: monospace; }
+    .sa-svg { max-width: 100%; height: auto; }
+    .sa-empty { color: #6a86a0; font-size: 11px; }
 
     /* ── Settings cog (issue #939) ───────────────────────────────
        Top-left, over the viewscreen. Fixed rather than docked: the shell is a
@@ -3268,6 +3284,13 @@ function finishInit() {
   window.wasm_get_entity_debug_state = wasmBindings.wasm_get_entity_debug_state;
   window.wasm_toggle_entity_inspector = wasmBindings.wasm_toggle_entity_inspector;
   window.wasm_get_entity_inspector = wasmBindings.wasm_get_entity_inspector;
+  // Station activity (issue #1145): the first structured-JSON debug surface. The
+  // getter returns a StationActivityPayload as JSON, which the settings cog's
+  // station-activity output parses and charts (gui/station-activity-chart.js)
+  // rather than printing. The toggle flips the flag that gates the JSON publish;
+  // the counters behind it are always-on.
+  window.wasm_toggle_station_activity = wasmBindings.wasm_toggle_station_activity;
+  window.wasm_get_station_activity = wasmBindings.wasm_get_station_activity;
   window.wasm_toggle_god_mode = wasmBindings.wasm_toggle_god_mode;
   window.wasm_get_god_mode = wasmBindings.wasm_get_god_mode;
   window.wasm_toggle_instagib = wasmBindings.wasm_toggle_instagib;

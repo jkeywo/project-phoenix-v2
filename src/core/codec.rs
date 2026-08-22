@@ -67,6 +67,20 @@ pub fn encode_audio_cue(c: &crate::audio_config::AudioCue) -> Result<String, ser
     serde_json::to_string(c)
 }
 
+/// Encode a station-activity debug payload to JSON (issue #1145, PRD #1144).
+///
+/// The single seam where `crate::debug::payload::StationActivityPayload` becomes
+/// the JSON the dock chart parses — AGENTS.md Key Constraint 1 keeps `serde_json`
+/// here, so `debug::station_activity::publish_station_activity` calls this rather
+/// than serialising itself. Returns `String` (not `Result`): the payload is
+/// String/int/float scalars in `Vec`s, which serde never fails to encode, so an
+/// error becomes an empty string the dock treats as "no data yet" rather than a
+/// panic on the sim thread. This is the encoder every later PRD #1144 surface
+/// copies for its own payload.
+pub fn encode_station_activity(p: &crate::debug::payload::StationActivityPayload) -> String {
+    serde_json::to_string(p).unwrap_or_default()
+}
+
 /// Decode inbound JSON from the HTML/PeerJS bridge.
 ///
 /// The wire shape is a full `ClientMessage` — every emitter (phone consoles,
@@ -2754,6 +2768,57 @@ mod tests {
             r#"{"type":"DebugState","data":{"flags":[["Regions",true],["Modifiers",false]],"paused":true,"god_mode":true}}"#,
             "DebugState wire shape must match what settings-panel.js folds"
         );
+
+        // The station-activity flag rides the same `ToggleDebugFlag` route the
+        // phone sends by hand (issue #1145) — pin its spelling with the others.
+        #[cfg(not(phoenix_demo_build))]
+        {
+            let msg = ClientMessage::ToggleDebugFlag {
+                flag: DebugFlag::StationActivity,
+            };
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_eq!(
+                JsonCodec.encode_client(&msg).unwrap(),
+                r#"{"type":"ToggleDebugFlag","data":{"flag":"StationActivity"}}"#,
+                "the StationActivity flag spelling must match settings-panel.js"
+            );
+        }
+    }
+
+    /// The station-activity debug payload's JSON shape (issue #1145, PRD #1144),
+    /// pinned because `gui/station-activity-chart.js` parses it by field name and
+    /// the two must not drift. This is the schema-conventions contract the later
+    /// PRD #1144 surfaces copy: a versioned envelope plus a sorted time series.
+    #[test]
+    fn station_activity_payload_wire_shape_is_pinned() {
+        use crate::debug::payload::{
+            StationActivityBucket, StationActivityEntry, StationActivityPayload,
+            DEBUG_SCHEMA_VERSION,
+        };
+
+        let payload = StationActivityPayload {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            bucket_ticks: 900,
+            bucket_secs: 15.0,
+            buckets: vec![StationActivityBucket {
+                start_tick: 0,
+                stations: vec![StationActivityEntry {
+                    station: "helm".into(),
+                    human: 3,
+                    ai: 1,
+                    offline: 0,
+                }],
+            }],
+        };
+        let json = crate::core::codec::encode_station_activity(&payload);
+        assert_eq!(
+            json,
+            r#"{"schema_version":1,"bucket_ticks":900,"bucket_secs":15.0,"buckets":[{"start_tick":0,"stations":[{"station":"helm","human":3,"ai":1,"offline":0}]}]}"#,
+            "the station-activity JSON shape must match gui/station-activity-chart.js"
+        );
+        // Round-trips back to the same payload — the schema is stable both ways.
+        let decoded: StationActivityPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, payload);
     }
 
     // ── The demo build's missing routes (issue #940) ─────────────────────────

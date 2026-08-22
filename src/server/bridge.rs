@@ -69,6 +69,9 @@ pub enum DebugToggleKind {
     Entities,
     /// Entity inspector overlay (`DebugEntityInspectorEnabled`).
     EntityInspector,
+    /// Station-activity chart (`debug::DebugStationActivityEnabled`), the first
+    /// surface on the structured debug pipeline (issue #1145).
+    StationActivity,
 }
 
 impl From<crate::core::messages::DebugFlag> for DebugToggleKind {
@@ -93,6 +96,7 @@ impl From<crate::core::messages::DebugFlag> for DebugToggleKind {
             DebugFlag::Damage => DebugToggleKind::Damage,
             DebugFlag::Entities => DebugToggleKind::Entities,
             DebugFlag::Inspector => DebugToggleKind::EntityInspector,
+            DebugFlag::StationActivity => DebugToggleKind::StationActivity,
         }
     }
 }
@@ -115,6 +119,7 @@ pub fn apply_pending_toggles(
     damage: &mut bool,
     entities: &mut bool,
     entity_inspector: &mut bool,
+    station_activity: &mut bool,
 ) -> bool {
     let mut pause_changed = false;
     // Dedupe in case the same kind was queued multiple times between drains.
@@ -130,6 +135,7 @@ pub fn apply_pending_toggles(
             DebugToggleKind::Damage => *damage = !*damage,
             DebugToggleKind::Entities => *entities = !*entities,
             DebugToggleKind::EntityInspector => *entity_inspector = !*entity_inspector,
+            DebugToggleKind::StationActivity => *station_activity = !*station_activity,
         }
     }
     pause_changed
@@ -302,6 +308,13 @@ thread_local! {
     /// each `PostUpdate` frame when the overlay is enabled. Read by
     /// `wasm_get_entity_inspector()` from JS.
     static ENTITY_INSPECTOR_STRING: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// The station-activity debug payload as JSON (issue #1145), written by
+    /// `debug::station_activity::publish_station_activity` each tick while the
+    /// station-activity flag is on. Read by `wasm_get_station_activity()` from
+    /// JS. Unlike its neighbours this is structured JSON, not pre-formatted text
+    /// — the dock parses it and draws a chart (`gui/station-activity-chart.js`).
+    static STATION_ACTIVITY_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
     /// Pending force-start request from `wasm_force_start()`. Drained by
     /// `drain_force_start_input` each `PreUpdate` frame into the
@@ -1573,6 +1586,42 @@ pub fn set_entity_inspector_string(text: String) {
     ENTITY_INSPECTOR_STRING.with(|v| *v.borrow_mut() = text);
 }
 
+/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the
+/// station-activity chart at runtime (issue #1145).
+///
+/// Sets a pending flag consumed by `drain_debug_toggles` in the next `PreUpdate`
+/// frame, which flips `debug::DebugStationActivityEnabled`. The counters behind
+/// the chart are always-on regardless; only the JSON publish is gated. This is
+/// the transport pattern every later PRD #1144 surface copies: one pending-set
+/// variant, one `apply_pending_toggles` field, one `wasm_bindgen` toggle here,
+/// and one getter below.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_station_activity() {
+    PENDING_TOGGLES.with(|set| {
+        set.borrow_mut().insert(DebugToggleKind::StationActivity);
+    });
+}
+
+/// Called by JS each animation frame to read the latest station-activity payload
+/// as JSON while the chart is visible (issue #1145).
+///
+/// Returns the raw JSON string `debug::station_activity::publish_station_activity`
+/// wrote; the dock parses it and draws a chart rather than printing it. Empty
+/// until the first publish.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_station_activity() -> String {
+    STATION_ACTIVITY_STRING.with(|v| v.borrow().clone())
+}
+
+/// Called by the Bevy `publish_station_activity` system to update the
+/// station-activity JSON that JS reads via `wasm_get_station_activity()`.
+#[cfg(target_arch = "wasm32")]
+pub fn set_station_activity_string(text: String) {
+    STATION_ACTIVITY_STRING.with(|v| *v.borrow_mut() = text);
+}
+
 /// Called by JS (lobby "Launch AI Ship" button) to start the game with no
 /// human players — all stations run under AI/backfill control.
 ///
@@ -2321,6 +2370,7 @@ fn drain_debug_toggles(
     mut damage_enabled: ResMut<crate::debug_overlay::DebugDamageEnabled>,
     mut entities_enabled: ResMut<crate::debug_overlay::DebugEntitiesEnabled>,
     mut entity_inspector_enabled: ResMut<crate::debug_overlay::DebugEntityInspectorEnabled>,
+    mut station_activity_enabled: ResMut<crate::debug::DebugStationActivityEnabled>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
     let pending: Vec<DebugToggleKind> =
@@ -2337,6 +2387,7 @@ fn drain_debug_toggles(
         &mut damage_enabled.0,
         &mut entities_enabled.0,
         &mut entity_inspector_enabled.0,
+        &mut station_activity_enabled.0,
     );
 
     // Region-wireframe state also lives in a thread-local (read back by
@@ -2793,6 +2844,7 @@ mod tests {
     fn queueing_regions_toggle_flips_only_regions_once() {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (false, false, false, false, false, false);
+        let mut station_activity = false;
 
         let pause_changed = apply_pending_toggles(
             [DebugToggleKind::Regions],
@@ -2802,6 +2854,7 @@ mod tests {
             &mut damage,
             &mut entities,
             &mut inspector,
+            &mut station_activity,
         );
 
         assert!(regions, "Regions flag should have flipped to true");
@@ -2810,6 +2863,7 @@ mod tests {
         assert!(!damage);
         assert!(!entities);
         assert!(!inspector);
+        assert!(!station_activity);
         assert!(!pause_changed, "pause was not in this batch");
     }
 
@@ -2819,6 +2873,7 @@ mod tests {
     fn draining_empty_set_does_not_flip_again() {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (true, false, false, false, false, false);
+        let mut station_activity = false;
 
         let pause_changed = apply_pending_toggles(
             std::iter::empty(),
@@ -2828,6 +2883,7 @@ mod tests {
             &mut damage,
             &mut entities,
             &mut inspector,
+            &mut station_activity,
         );
 
         assert!(regions, "previous state must be preserved, not re-toggled");
@@ -2840,6 +2896,7 @@ mod tests {
     fn queueing_pause_toggle_flips_paused_and_reports_change() {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (false, false, false, false, false, false);
+        let mut station_activity = false;
 
         let pause_changed = apply_pending_toggles(
             [DebugToggleKind::Pause],
@@ -2849,6 +2906,7 @@ mod tests {
             &mut damage,
             &mut entities,
             &mut inspector,
+            &mut station_activity,
         );
 
         assert!(paused);
@@ -2861,12 +2919,14 @@ mod tests {
     fn queueing_multiple_distinct_toggles_flips_each_independently() {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (false, false, false, false, false, false);
+        let mut station_activity = false;
 
         apply_pending_toggles(
             [
                 DebugToggleKind::Overlay,
                 DebugToggleKind::Damage,
                 DebugToggleKind::EntityInspector,
+                DebugToggleKind::StationActivity,
             ],
             &mut regions,
             &mut overlay,
@@ -2874,6 +2934,7 @@ mod tests {
             &mut damage,
             &mut entities,
             &mut inspector,
+            &mut station_activity,
         );
 
         assert!(!regions);
@@ -2882,6 +2943,7 @@ mod tests {
         assert!(damage);
         assert!(!entities);
         assert!(inspector);
+        assert!(station_activity);
     }
 
     /// A duplicate variant appearing twice in the same batch (e.g. queued
@@ -2891,6 +2953,7 @@ mod tests {
     fn duplicate_variant_in_same_batch_flips_only_once() {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (false, false, false, false, false, false);
+        let mut station_activity = false;
 
         apply_pending_toggles(
             [DebugToggleKind::Entities, DebugToggleKind::Entities],
@@ -2900,6 +2963,7 @@ mod tests {
             &mut damage,
             &mut entities,
             &mut inspector,
+            &mut station_activity,
         );
 
         assert!(entities, "should have flipped once (false -> true)");

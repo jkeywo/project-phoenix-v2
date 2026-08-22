@@ -2257,6 +2257,12 @@ pub enum DebugFlag {
     Entities,
     /// Entity inspector overlay (`DebugEntityInspectorEnabled`).
     Inspector,
+    /// Station-activity chart (`debug::DebugStationActivityEnabled`), the first
+    /// surface on the structured debug pipeline (issue #1145, PRD #1144). Unlike
+    /// its neighbours it gates a JSON payload rendered as a chart, not a
+    /// pre-formatted text stream; the counters behind it are always-on and only
+    /// the rendering is flag-gated.
+    StationActivity,
 }
 
 impl DebugFlag {
@@ -2265,12 +2271,13 @@ impl DebugFlag {
     /// A fixed slice rather than map iteration, so identical state always
     /// produces an identical message — the client's fold diffs it and the
     /// codec test pins its shape.
-    pub const ALL: [DebugFlag; 5] = [
+    pub const ALL: [DebugFlag; 6] = [
         DebugFlag::Regions,
         DebugFlag::Modifiers,
         DebugFlag::Damage,
         DebugFlag::Entities,
         DebugFlag::Inspector,
+        DebugFlag::StationActivity,
     ];
 }
 

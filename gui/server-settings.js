@@ -29,6 +29,7 @@
 
 import { t } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
+import { renderStationActivityChart } from './station-activity-chart.js';
 import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
 import {
   mountOverlayShell,
@@ -47,16 +48,19 @@ import {
 // file spells a `wasm_*` name.
 
 /**
- * Debug overlays that also produce a text stream for the output panel. `read`
- * is polled while that output is the visible one; `toggle` flips the matching
- * Bevy resource (`DebugOverlayEnabled`, `DebugDamageEnabled`,
- * `DebugEntitiesEnabled`, `DebugEntityInspectorEnabled`).
+ * Debug outputs shown in the output panel. `read` is polled while that output
+ * is the visible one; `toggle` flips the matching Bevy resource. The first four
+ * are legacy pre-formatted TEXT streams (painted as `textContent`). The fifth,
+ * station activity (issue #1145), is the first structured-JSON surface: it
+ * carries a `render` function that parses the payload and draws a chart instead
+ * — the pattern every later PRD #1144 surface copies.
  */
 export const DEBUG_OUTPUTS = [
   { id: 'modifiers', labelId: 'settings.debug.modifiers', toggle: 'wasm_toggle_debug_overlay', read: 'wasm_get_debug_state' },
   { id: 'damage', labelId: 'settings.debug.damage', toggle: 'wasm_toggle_debug_damage', read: 'wasm_get_damage_log' },
   { id: 'entities', labelId: 'settings.debug.entities', toggle: 'wasm_toggle_debug_entities', read: 'wasm_get_entity_debug_state' },
   { id: 'inspector', labelId: 'settings.debug.inspector', toggle: 'wasm_toggle_entity_inspector', read: 'wasm_get_entity_inspector' },
+  { id: 'station-activity', labelId: 'settings.debug.station_activity', toggle: 'wasm_toggle_station_activity', read: 'wasm_get_station_activity', render: renderStationActivityChart },
 ];
 
 /** Cheats and world-drawing toggles, each with an authoritative read-back. */
@@ -229,8 +233,14 @@ export function mountServerSettings(opts = {}) {
     }
     if (outputContent && viewing) {
       const entry = DEBUG_OUTPUTS.find((o) => o.id === viewing);
-      const text = entry ? invoke(entry.read) : undefined;
-      outputContent.textContent = typeof text === 'string' ? text : '';
+      const raw = entry ? invoke(entry.read) : undefined;
+      if (entry && typeof entry.render === 'function') {
+        // Structured-JSON surface (issue #1145): the read string is a payload
+        // the entry's renderer parses and draws, not text to print.
+        entry.render(outputContent, typeof raw === 'string' ? raw : '');
+      } else {
+        outputContent.textContent = typeof raw === 'string' ? raw : '';
+      }
     }
     for (const entry of DEBUG_OUTPUTS) {
       const el = controls.outputs[entry.id];

@@ -2690,6 +2690,27 @@ mod tests {
         );
     }
 
+    /// `[global] station_activity_bucket_secs` (issue #1145): how long one
+    /// station-activity debug bucket spans. Authored data, not a Rust literal
+    /// (AGENTS.md #11) — the serde default is the only sanctioned hardcoded copy,
+    /// and it IS the shipped tuning: no world TOML authors the key.
+    #[test]
+    fn parse_world_reads_the_station_activity_bucket_secs() {
+        let defaulted = parse_world("[global]\nseed = 7\n").expect("TOML should parse");
+        assert_eq!(
+            defaulted.global.station_activity_bucket_secs, 15.0,
+            "an omitted station_activity_bucket_secs falls back to fifteen seconds"
+        );
+
+        let authored = parse_world("[global]\nstation_activity_bucket_secs = 5.0\n")
+            .expect("TOML should parse");
+        assert_eq!(
+            authored.global.station_activity_bucket_secs, 5.0,
+            "an authored bucket length must be read verbatim — a crew-control \
+             designer retunes the activity chart's resolution without touching Rust"
+        );
+    }
+
     /// `attacked_memory_secs` feeds straight into `now - last <
     /// attacked_memory_secs` in `objectives::attacked_recently` with no
     /// runtime clamp. TOML admits `nan`/`inf` as float literals, and IEEE 754

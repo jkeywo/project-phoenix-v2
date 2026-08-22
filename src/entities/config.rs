@@ -15071,6 +15071,18 @@ pub struct GlobalConfig {
     /// without a recompile — see `objectives::attacked_recently`.
     #[serde(default = "default_attacked_memory_secs")]
     pub attacked_memory_secs: f32,
+    /// How long (simulation seconds) one station-activity debug bucket spans
+    /// (issue #1145, PRD #1144).
+    ///
+    /// The always-on station-activity counters tally admitted commands per
+    /// station per this time chunk, split by control source. Authored so a
+    /// crew-control designer can widen or narrow the chart's resolution without a
+    /// recompile — the serde default is the only sanctioned hardcoded copy of it
+    /// (AGENTS.md #11), and it IS the shipped tuning: no world TOML authors the
+    /// key. Converted to an integer tick count at `sim_tick_hz` by
+    /// `debug::station_activity::StationActivityTracker::configure`.
+    #[serde(default = "default_station_activity_bucket_secs")]
+    pub station_activity_bucket_secs: f32,
 }
 
 /// Serde default for [`GlobalConfig::intent_break_off_hull_fraction`]: half
@@ -15095,6 +15107,13 @@ fn default_attacked_memory_secs() -> f32 {
     8.0
 }
 
+/// Serde default for [`GlobalConfig::station_activity_bucket_secs`]: fifteen
+/// seconds (issue #1145). The only sanctioned hardcoded copy of the shipped
+/// bucket length (AGENTS.md #11) — a TOML-parse fallback.
+fn default_station_activity_bucket_secs() -> f32 {
+    15.0
+}
+
 impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
@@ -15106,6 +15125,7 @@ impl Default for GlobalConfig {
             ai_snapshot_hz: default_ai_snapshot_hz(),
             intent_break_off_hull_fraction: default_intent_break_off_hull_fraction(),
             attacked_memory_secs: default_attacked_memory_secs(),
+            station_activity_bucket_secs: default_station_activity_bucket_secs(),
         }
     }
 }

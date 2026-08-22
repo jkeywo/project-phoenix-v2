@@ -672,6 +672,11 @@ settings.debug.modifiers,Server settings menu — debug output showing the ship 
 settings.debug.damage,Server settings menu — debug output showing the recent damage log,Damage Log
 settings.debug.entities,Server settings menu — debug output showing per-entity behaviour,Entity Behaviour
 settings.debug.inspector,Server settings menu — debug output showing the entity inspector,Entity Inspector
+settings.debug.station_activity,Server settings menu — debug output charting per-station admitted-command activity split by control source,Station Activity
+settings.debug.station_activity_empty,Server settings menu — station-activity chart placeholder shown before any command has been admitted,No station activity yet.
+settings.debug.station_activity_human,Server settings menu — station-activity chart legend label for commands issued by a human-crewed station,Human
+settings.debug.station_activity_ai,Server settings menu — station-activity chart legend label for commands issued by an AI-crewed station,AI
+settings.debug.station_activity_buckets,"Server settings menu — station-activity chart caption naming the time-bucket length in seconds, {secs} is the number",{secs}s buckets
 settings.debug.cheats,"Server settings menu — Debug tab, heading over the cheat toggles",Cheats
 settings.debug.wireframes,Server settings menu — toggle drawing region wireframes in the world,Region Wireframes
 settings.debug.godmode,Server settings menu — toggle that makes the player ship take no damage,God Mode

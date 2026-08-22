@@ -86,6 +86,10 @@ export const CLIENT_DEBUG_FLAGS = [
   { id: 'damage', labelId: 'settings.debug.damage', flag: 'Damage' },
   { id: 'entities', labelId: 'settings.debug.entities', flag: 'Entities' },
   { id: 'inspector', labelId: 'settings.debug.inspector', flag: 'Inspector' },
+  // Station activity (issue #1145) renders only on the host viewscreen, but the
+  // phone still toggles the flag — the client keeps its toggle-only role even
+  // where it cannot draw the surface (PRD #1144).
+  { id: 'station-activity', labelId: 'settings.debug.station_activity', flag: 'StationActivity' },
 ];
 
 /**

@@ -159,6 +159,13 @@ pub mod server;
 
 pub mod debug_overlay;
 
+/// Structured debug observability (PRD #1144): one read-only projection pipeline
+/// off authoritative state, carried as `serde` JSON to the dock, the headless
+/// report, and (later) the GM Live Inspector. The first slice (issue #1145) is
+/// the always-on station-activity tracker + its dock chart. The schema and
+/// transport conventions the later slices reuse live in `crate::debug::payload`.
+pub mod debug;
+
 /// Shared 3D render setup (skybox, camera optics, ambient fill) — used by both
 /// the game renderer and the standalone model viewer.
 pub mod render_setup;

@@ -3,6 +3,10 @@
 debug
 target
 dist
+# The unanchored `debug` pattern above (Cargo's build-output dir) also matches
+# the SOURCE module `src/debug/` — the PRD #1144 debug-observability pipeline —
+# so re-include it explicitly. (issue #1145)
+!src/debug/
 # Model-viewer Trunk output + its generated model index (scripts/generate-model-index.mjs)
 dist-viewer
 assets/models/index.json

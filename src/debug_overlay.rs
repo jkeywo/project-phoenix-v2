@@ -166,6 +166,7 @@ pub fn drain_client_debug_flags(
     mut damage: ResMut<DebugDamageEnabled>,
     mut entities: ResMut<DebugEntitiesEnabled>,
     mut inspector: ResMut<DebugEntityInspectorEnabled>,
+    mut station_activity: ResMut<crate::debug::DebugStationActivityEnabled>,
 ) {
     let mut requests: Vec<(String, crate::core::messages::DebugFlag)> = Vec::new();
     for ev in reader.read() {
@@ -194,6 +195,7 @@ pub fn drain_client_debug_flags(
         &mut damage.0,
         &mut entities.0,
         &mut inspector.0,
+        &mut station_activity.0,
     );
     debug_assert!(
         !pause_changed,
@@ -297,6 +299,7 @@ pub fn report_debug_state(
     damage: Res<DebugDamageEnabled>,
     entities: Res<DebugEntitiesEnabled>,
     inspector: Res<DebugEntityInspectorEnabled>,
+    station_activity: Res<crate::debug::DebugStationActivityEnabled>,
     god_mode: Option<Res<crate::server_app::GodMode>>,
     mut last: ResMut<LastReportedDebugState>,
     mut writer: MessageWriter<crate::lobby::OutboundMessage>,
@@ -328,6 +331,7 @@ pub fn report_debug_state(
                 DebugFlag::Damage => damage.0,
                 DebugFlag::Entities => entities.0,
                 DebugFlag::Inspector => inspector.0,
+                DebugFlag::StationActivity => station_activity.0,
             };
             (*flag, on)
         })
@@ -998,6 +1002,7 @@ mod tests {
         fn an_admitted_batch_flips_only_the_flags_it_names() {
             let (mut regions, mut overlay, mut paused) = (false, false, false);
             let (mut damage, mut entities, mut inspector) = (false, false, false);
+            let mut station_activity = false;
             let pending =
                 admitted_flag_toggles([("phone", DebugFlag::Damage)], connected(&["phone"]));
             let pause_changed = crate::server::bridge::apply_pending_toggles(
@@ -1008,10 +1013,13 @@ mod tests {
                 &mut damage,
                 &mut entities,
                 &mut inspector,
+                &mut station_activity,
             );
             assert!(damage, "the named flag must flip");
             assert!(!pause_changed);
-            assert!(!regions && !overlay && !paused && !entities && !inspector);
+            assert!(
+                !regions && !overlay && !paused && !entities && !inspector && !station_activity
+            );
         }
 
         /// Pause is a toggle, so an even number of admitted taps in one frame

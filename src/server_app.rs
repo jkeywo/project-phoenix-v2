@@ -1303,6 +1303,15 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         ),
     );
 
+    // Structured debug observability (PRD #1144, issue #1145). Always-on
+    // station-activity counters read the tick's fully-populated `AdmittedCommands`
+    // after `SimSet::Broadcast` — the same window the unrouted lint below uses,
+    // and the only tap that sees both network-admitted and in-process AI-emitted
+    // commands (see `crate::debug::station_activity`). Added on every target so
+    // headless and native get the same counters; the JSON publish behind it is
+    // flag-gated, the counters are not. Read-only, so it never moves the digest.
+    app.add_plugins(crate::debug::DebugPlugin);
+
     // Unrouted-command lint (issue #833). Production wires the admission seam
     // through `register_admission_seam` (above) rather than via
     // `AdmissionPlugin`, so the lint is added here too. Warning-only, ordered

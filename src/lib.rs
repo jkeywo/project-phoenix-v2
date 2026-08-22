@@ -108,6 +108,11 @@ pub mod regions;
 /// `pasm/spec/design/simulation-differentiation.yaml`.
 pub mod science;
 pub mod server_app;
+/// The render half lifted out of `server_app` (issue #1195): the Bevy mesh
+/// cache, material factory, LOD swapper, and light spawners. Registered from
+/// `server_app` under `SimPluginOptions::render`; presentation-only, outside
+/// the authoritative digest.
+pub mod server_app_render;
 pub mod ship;
 pub mod ship_plugin;
 /// The canonical authoritative-state digest (issue #901). At the crate root

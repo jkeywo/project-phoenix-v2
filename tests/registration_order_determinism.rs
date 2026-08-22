@@ -50,6 +50,17 @@
 //! graph directly and fails if the three world-layer mutators ever become
 //! ambiguous with one another again.
 //!
+//! A third guard, `every_simulation_set_system_is_registered_under_fixed_update`
+//! (issue #1182), closes the *schedule* half of the same family: every `SimSet`
+//! member must live in `FixedUpdate` (the deterministic fixed clock) and never
+//! in `Update`/`PostUpdate` (the frame-paced virtual clock) — the `Res<Time>`
+//! trap ~62 systems would otherwise fall into. It too reads the real headless
+//! app's built schedule graphs, walks `SimSet` set-membership across every
+//! schedule, and enumerates the sim-adjacent fixed-family exceptions census-
+//! style. All three guards share this binary because all three assert schedule
+//! structure against the real `--deterministic` app and want its task-pool
+//! isolation.
+//!
 //! # What stays out of the shuffle, and why that is fine
 //!
 //! `add_simulation_plugins_with` registers a handful of `FixedUpdate`
@@ -82,12 +93,15 @@
 
 mod common;
 
+use bevy::ecs::schedule::{NodeId, Schedules, SystemKey, SystemSetKey};
 use bevy::prelude::*;
 use common::SimFixture;
 use project_phoenix::headless::fingerprint::{fingerprint, RunFingerprint};
 use project_phoenix::headless::HeadlessArgs;
 use project_phoenix::server_app::{RegistrationOrder, RegistrationProbes};
+use project_phoenix::sim_sets::SimSet;
 use project_phoenix::sim_tick::SimTick;
+use std::collections::{HashMap, HashSet};
 
 /// `rng_coverage.toml` (issue #837): two NPCs in weapons range, an asteroid
 /// field the player flies through, and a radiation zone — beam, blaster,
@@ -416,4 +430,333 @@ fn the_world_layer_mutators_are_explicitly_ordered_not_ambiguous() {
          order tick_trigger_pipeline -> apply_pending_scenario_loads -> \
          apply_world_layer_changes is the one the digests were captured under."
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// FixedUpdate-membership guard (issue #1182)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The seven `SimSet`-chain variants (`src/sim_sets.rs`). Every system that is
+/// a member of one of these must run in `FixedUpdate`: there `Res<Time>` is the
+/// deterministic fixed clock, whereas in `Update`/`PostUpdate` the very same
+/// `Res<Time>` is silently the frame-paced virtual clock. That substitution is
+/// invisible at the type level (`Res<Time>` in both) — it is the `Res<Time>`
+/// trap the ~62 time-reading sim systems live one misregistration away from.
+const SIM_SETS: [SimSet; 7] = [
+    SimSet::Input,
+    SimSet::Physics,
+    SimSet::Damage,
+    SimSet::Modifiers,
+    SimSet::Publish,
+    SimSet::PublishAggregate,
+    SimSet::Broadcast,
+];
+
+/// The genuine exceptions: `SimSet`-member systems that are permitted to run
+/// OUTSIDE `FixedUpdate`, census-style — one `(system-name-substring, schedule)`
+/// per entry, each earning its place.
+///
+/// EMPTY as of issue #1182. Every one of the ~168 `SimSet` members in the real
+/// headless app resolves into `FixedUpdate`; there is no legitimate reason for a
+/// system that reads the simulation clock through set membership to run on any
+/// other. A future system that must be a `SimSet` member yet run elsewhere would
+/// be added here WITH its justification, turning an intentional design choice
+/// into a reviewed line of code rather than a silent guard failure; until then,
+/// any `SimSet` member outside `FixedUpdate` is the bug this guard exists to
+/// catch.
+const ALLOWED_SIMSET_MEMBERS_OUTSIDE_FIXED_UPDATE: [(&str, &str); 0] = [];
+
+/// The sim-ADJACENT systems that deliberately live outside `FixedUpdate`,
+/// census-style: `(system-name-substring, expected-schedule, reason)`.
+///
+/// None of these is a `SimSet` member, so the membership guard never flags them
+/// — they are enumerated here so the boundary is explicit and self-checking
+/// (`sim_adjacent_infrastructure_sits_in_the_fixed_timestep_family` asserts each
+/// one is present in its named schedule AND is not a `SimSet` member). Each runs
+/// on the deterministic fixed clock anyway (`FixedFirst`/`FixedLast` are inside
+/// the fixed-timestep loop; `First` only reconfigures the timestep before it),
+/// so none is exposed to the trap above.
+const FIXED_FAMILY_INFRASTRUCTURE: [(&str, &str, &str); 3] = [
+    (
+        "sim_tick::advance_sim_tick",
+        "FixedLast",
+        "advances the SimTick counter once per fixed step, after the whole \
+         SimSet chain has run; kept out of any SimSet so a step counts exactly \
+         once (see register_sim_tick)",
+    ),
+    (
+        "world_id::sync_world_id_mint",
+        "FixedFirst",
+        "resets the tick-scoped WorldIdMint at the head of each fixed step so \
+         every sim system in the step mints against that step's index; inside \
+         the fixed loop, not a SimSet member",
+    ),
+    (
+        "sim_tick::reconcile_fixed_timestep",
+        "First",
+        "reconciles Time<Fixed>'s period from the loaded WorldConfig before the \
+         fixed loop runs; touches Time only to reconfigure the timestep and runs \
+         no simulation logic",
+    ),
+];
+
+/// A brief headless run — enough frames to build the FixedUpdate/Update/… graphs
+/// the guards read; the schedule structure they assert is fixed at registration,
+/// not something the length of the run changes.
+fn schedule_probe_app() -> App {
+    let args = HeadlessArgs {
+        world_path: WORLD.into(),
+        max_ticks: 5,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    };
+    SimFixture::new(args).build_and_run()
+}
+
+/// Every `(schedule-label, SimSet-variant, system-name)` triple for which the
+/// system is a member of that `SimSet` variant, across EVERY schedule in the
+/// app — not just `FixedUpdate`. This is the census the guards filter.
+///
+/// Membership is read straight from each schedule's hierarchy graph: an
+/// `.in_set(SimSet::X)` registration adds a `Set(X) -> member` edge there
+/// (Bevy's `ScheduleGraph`), so the set's transitive out-edges ARE its members,
+/// nested subsets included. A system misregistered into `Update.in_set(..)`
+/// therefore shows up here tagged `Update`, which is exactly what makes it
+/// catchable.
+fn simset_members_by_schedule(app: &App) -> Vec<(String, String, String)> {
+    let schedules = app.world().resource::<Schedules>();
+    let mut members = Vec::new();
+
+    for (label, schedule) in schedules.iter() {
+        let label_str = format!("{label:?}");
+        let graph = schedule.graph();
+
+        // SystemKey -> name. After `build_schedule` the systems are moved out of
+        // `graph.systems` into the executable, so resolve from `Schedule::systems()`
+        // when the schedule has run and fall back to the unbuilt container otherwise
+        // (state schedules like `OnEnter(..)` may never have run).
+        let mut names: HashMap<SystemKey, String> = HashMap::new();
+        if let Ok(built) = schedule.systems() {
+            for (key, sys) in built {
+                names.insert(key, sys.name().as_string());
+            }
+        } else {
+            for (key, sys, _conditions) in graph.systems.iter() {
+                names.insert(key, sys.name().as_string());
+            }
+        }
+
+        // The `SimSet` variants that exist as set nodes in THIS schedule.
+        let simset_nodes: Vec<(SystemSetKey, String)> = SIM_SETS
+            .iter()
+            .filter_map(|ss| {
+                graph
+                    .system_sets
+                    .get_key(ss.intern())
+                    .map(|key| (key, format!("{ss:?}")))
+            })
+            .collect();
+        if simset_nodes.is_empty() {
+            continue;
+        }
+
+        // Hierarchy adjacency: edge (parent-set -> child member).
+        let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for (parent, child) in graph.hierarchy().graph().all_edges() {
+            children.entry(parent).or_default().push(child);
+        }
+
+        for (set_key, set_name) in simset_nodes {
+            let mut stack = vec![NodeId::Set(set_key)];
+            let mut seen: HashSet<NodeId> = HashSet::new();
+            while let Some(node) = stack.pop() {
+                if !seen.insert(node) {
+                    continue;
+                }
+                if let Some(cs) = children.get(&node) {
+                    stack.extend(cs.iter().copied());
+                }
+                if let Some(system_key) = node.as_system() {
+                    let name = names
+                        .get(&system_key)
+                        .cloned()
+                        .unwrap_or_else(|| format!("<unresolved {system_key:?}>"));
+                    members.push((label_str.clone(), set_name.clone(), name));
+                }
+            }
+        }
+    }
+
+    members
+}
+
+/// Issue #1182's headline acceptance criterion: every simulation-set system is
+/// registered under `FixedUpdate`, closing the `Res<Time>` trap for good.
+///
+/// Reads the REAL headless app's built schedules, walks `SimSet` membership
+/// across all of them, and fails if any member resolves into a schedule other
+/// than `FixedUpdate` (minus the census allow-list, currently empty). Prior art
+/// is the shuffle guard above and the physics-last ordering test: both assert
+/// schedule structure against the real app rather than a hand-rolled fixture.
+#[test]
+fn every_simulation_set_system_is_registered_under_fixed_update() {
+    let app = schedule_probe_app();
+    let members = simset_members_by_schedule(&app);
+
+    // Precondition: the whole sim chain really is being enumerated, so an
+    // all-clear cannot be a vacuous pass from an empty walk.
+    let fixed_update_members: HashSet<&String> = members
+        .iter()
+        .filter(|(schedule, _, _)| schedule == "FixedUpdate")
+        .map(|(_, _, system)| system)
+        .collect();
+    assert!(
+        fixed_update_members.len() >= 150,
+        "precondition: expected the SimSet chain's ~168 members under \
+         FixedUpdate, found only {} — the membership walk is not seeing the \
+         real app's simulation systems",
+        fixed_update_members.len()
+    );
+
+    let offenders: Vec<&(String, String, String)> = members
+        .iter()
+        .filter(|(schedule, _, _)| schedule != "FixedUpdate")
+        .filter(|(schedule, _, system)| {
+            !ALLOWED_SIMSET_MEMBERS_OUTSIDE_FIXED_UPDATE.iter().any(
+                |(allowed_sys, allowed_sched)| {
+                    system.contains(allowed_sys) && schedule == allowed_sched
+                },
+            )
+        })
+        .collect();
+
+    assert!(
+        offenders.is_empty(),
+        "these SimSet members are registered OUTSIDE FixedUpdate, where \
+         `Res<Time>` silently becomes the frame-paced virtual clock instead of \
+         the deterministic fixed clock (issue #1182): {offenders:?}. Move each \
+         back to `FixedUpdate`, or — if it genuinely must run elsewhere — add it \
+         to `ALLOWED_SIMSET_MEMBERS_OUTSIDE_FIXED_UPDATE` with a justification."
+    );
+}
+
+/// A no-op standing in for a simulation system whose author reached for the
+/// wrong schedule. Used only by the negative test below.
+fn misregistered_marker_system() {}
+
+/// Issue #1182, the deliberate-misregistration proof: registering a `SimSet`
+/// member in `Update` makes the guard fire, naming the offender.
+///
+/// This is the schedule-guard analogue of the #1183 ambiguity proof. It takes
+/// the real headless app, injects `misregistered_marker_system` into `Update`
+/// as a `SimSet::Physics` member — the exact mistake #1182 exists to catch —
+/// and asserts the SAME offender computation the guard above uses now flags it.
+/// Remove the misregistration (as the assertion's inverse shows) and the
+/// offender list is empty again: the guard is load-bearing, not decorative.
+#[test]
+fn the_membership_guard_fires_on_a_sim_system_misregistered_outside_fixed_update() {
+    let ticks = 5u64;
+    let args = HeadlessArgs {
+        world_path: WORLD.into(),
+        max_ticks: ticks,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    };
+    let mut app = SimFixture::new(args).build();
+    // The misregistration: a SimSet member in Update rather than FixedUpdate.
+    app.add_systems(Update, misregistered_marker_system.in_set(SimSet::Physics));
+    project_phoenix::headless::run(&mut app, ticks);
+
+    let members = simset_members_by_schedule(&app);
+
+    // The membership walk must SEE the misregistered system, tagged Update/Physics.
+    let seen = members.iter().any(|(schedule, set, system)| {
+        schedule == "Update" && set == "Physics" && system.contains("misregistered_marker_system")
+    });
+    assert!(
+        seen,
+        "the membership walk did not observe a SimSet::Physics member injected \
+         into Update — the guard would be blind to a real misregistration. \
+         Members outside FixedUpdate: {:?}",
+        members
+            .iter()
+            .filter(|(s, _, _)| s != "FixedUpdate")
+            .collect::<Vec<_>>()
+    );
+
+    // ...and the guard's offender computation must reject it (fail-on-removal-of-
+    // protection: were the marker instead a real production system, the guard
+    // above would panic exactly here).
+    let offenders: Vec<&(String, String, String)> = members
+        .iter()
+        .filter(|(schedule, _, _)| schedule != "FixedUpdate")
+        .filter(|(schedule, _, system)| {
+            !ALLOWED_SIMSET_MEMBERS_OUTSIDE_FIXED_UPDATE.iter().any(
+                |(allowed_sys, allowed_sched)| {
+                    system.contains(allowed_sys) && schedule == allowed_sched
+                },
+            )
+        })
+        .collect();
+    assert!(
+        offenders
+            .iter()
+            .any(|(_, _, system)| system.contains("misregistered_marker_system")),
+        "offender computation missed the injected misregistration: {offenders:?}"
+    );
+}
+
+/// Issue #1182, the census's live half: the sim-adjacent systems enumerated in
+/// `FIXED_FAMILY_INFRASTRUCTURE` really do sit in the fixed-timestep-family
+/// schedule each claims, and none of them is secretly a `SimSet` member.
+///
+/// This keeps the allow-list honest. If `advance_sim_tick` were ever moved, or
+/// quietly folded into a `SimSet`, the census would be stale — and a stale
+/// census is how an exception silently stops being the thing it was justified
+/// as. Asserting it turns the comment into a check.
+#[test]
+fn sim_adjacent_infrastructure_sits_in_the_fixed_timestep_family() {
+    let app = schedule_probe_app();
+    let schedules = app.world().resource::<Schedules>();
+
+    // schedule-label -> the system names it contains.
+    let mut by_schedule: HashMap<String, Vec<String>> = HashMap::new();
+    for (label, schedule) in schedules.iter() {
+        let entry = by_schedule.entry(format!("{label:?}")).or_default();
+        if let Ok(built) = schedule.systems() {
+            for (_key, sys) in built {
+                entry.push(sys.name().as_string());
+            }
+        } else {
+            for (_key, sys, _conditions) in schedule.graph().systems.iter() {
+                entry.push(sys.name().as_string());
+            }
+        }
+    }
+
+    for (system, expected_schedule, _reason) in FIXED_FAMILY_INFRASTRUCTURE {
+        let present = by_schedule
+            .get(expected_schedule)
+            .is_some_and(|names| names.iter().any(|n| n.contains(system)));
+        assert!(
+            present,
+            "census drift: `{system}` is enumerated as living in the \
+             `{expected_schedule}` schedule, but it was not found there. Update \
+             FIXED_FAMILY_INFRASTRUCTURE (issue #1182)."
+        );
+    }
+
+    // None of them may be a SimSet member — that is the whole premise for their
+    // being exempt from the FixedUpdate obligation.
+    let members = simset_members_by_schedule(&app);
+    for (system, _expected_schedule, _reason) in FIXED_FAMILY_INFRASTRUCTURE {
+        assert!(
+            !members.iter().any(|(_, _, m)| m.contains(system)),
+            "census contradiction: `{system}` is listed as a non-SimSet \
+             fixed-family system, but it IS a SimSet member — it must then \
+             either run in FixedUpdate or leave FIXED_FAMILY_INFRASTRUCTURE."
+        );
+    }
 }

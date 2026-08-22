@@ -38,11 +38,12 @@ pub use payload::{
     ActivitySource, AiStatePayload, DamageDebugPayload, DamageEntry, DoctrineCandidate,
     DoctrineChoice, EntityBehaviorEntry, EntityBehaviorPayload, EntityInspectorPayload,
     FloatContribution, FloatModifierEntry, HostBlockedView, HostMemoryEntry, HostPolicyView,
-    HostTransitionView, InspectorEntity, InspectorHullEntry, InspectorPlayer, InspectorShieldFacing,
-    IntContribution, IntModifierEntry, ModifierDebugPayload, ModifierFlagEntry, PredicateValue,
-    ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction, ScenarioDossierEntry, ScenarioFlag,
-    ScenarioObjective, ScenarioStatePayload, ScenarioTrigger, ShipDoctrine, StationActivityBucket,
-    StationActivityEntry, StationActivityPayload, TriggerFire, DEBUG_SCHEMA_VERSION,
+    HostTransitionView, InspectorEntity, InspectorHullEntry, InspectorPlayer,
+    InspectorShieldFacing, IntContribution, IntModifierEntry, ModifierDebugPayload,
+    ModifierFlagEntry, PredicateValue, ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction,
+    ScenarioDossierEntry, ScenarioFlag, ScenarioObjective, ScenarioStatePayload, ScenarioTrigger,
+    ShipDoctrine, StationActivityBucket, StationActivityEntry, StationActivityPayload, TriggerFire,
+    DEBUG_SCHEMA_VERSION,
 };
 pub use scenario::{DebugScenarioStateEnabled, ScenarioStateCapture, TriggerFireRecorder};
 pub use station_activity::{

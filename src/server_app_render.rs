@@ -458,7 +458,7 @@ pub(crate) fn render_spawned_entities(
 }
 
 /// Distance-based LOD driver. For each entity carrying a [`MeshLods`] component,
-/// computes the 3-D distance from the [`GameCamera`](crate::server::renderer::GameCamera)
+/// computes the 3-D distance from the [`GameCamera`](crate::render_setup::GameCamera)
 /// to the entity, selects the appropriate level via
 /// [`crate::entities::config::select_lod`] (with hysteresis), and — when the chosen
 /// level differs from the current one — tears down the old visual and builds the
@@ -486,7 +486,7 @@ pub(crate) fn update_mesh_lod(
     scenes: Res<Assets<bevy::scene::Scene>>,
     tuning: Option<Res<crate::render_setup::RenderTuning>>,
     phase: Option<Res<State<GamePhase>>>,
-    camera: Query<&GlobalTransform, With<crate::server::renderer::GameCamera>>,
+    camera: Query<&GlobalTransform, With<crate::render_setup::GameCamera>>,
     mut lod_entities: Query<(
         Entity,
         &mut Transform,

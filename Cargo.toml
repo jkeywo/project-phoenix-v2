@@ -136,13 +136,14 @@ server = []
 # viewer.html), a dev tool for iterating on model appearance, lighting and
 # WGSL without booting the game.
 #
-# Depends on `server` because the simulation modules reference `crate::bridge`
-# and `crate::server::renderer` directly, so the crate does not currently
-# compile without it. The viewer only *runs* its own plugin — none of the
-# simulation systems are registered — so this costs binary size, not
-# behaviour. If viewer rebuilds ever get painful, breaking those references is
-# the thing to fix.
-viewer = ["server"]
+# No longer depends on `server` (issue #1194): once the sim→presentation boundary
+# was enforced (`--no-default-features` builds), no always-compiled module names
+# `crate::server` with the feature off, so the viewer — which only *runs* its own
+# plugin and shares the always-compiled `render_setup` / `server_app_render` —
+# compiles without the whole presentation stack. The old alias pulled in the
+# renderer, bridge and lobby purely to satisfy references that are now gone. A
+# viewer build is therefore strictly smaller.
+viewer = []
 # Debug feature: enables Bevy's debug feature for local development.
 # Not included in release/deployed builds (opt in via `--features debug`).
 debug = ["bevy/debug"]

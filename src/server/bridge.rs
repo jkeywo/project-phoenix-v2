@@ -198,43 +198,18 @@ pub fn drain_client_debug_flags(
 // moved here is the DURABLE, sim-visible state in between; what stayed at the
 // edge is only that transient transport.
 //
-// Every type here is defined UNGATED (native + wasm) even though most are
-// inserted only under `wasm_init`: `Instagib` is a `tick_beams_apply_damage`
-// system parameter on both targets, `BridgeWorldSource` is a
-// `world::server::insert_raw_world_source_resource` parameter on both, and the
-// restore types are exercised by the native unit tests at the bottom of this
-// file. Bevy's `Resource` derive is spelled with its full path so this stays
-// clear of the wasm-gated `use bevy::prelude::*` glob further down.
-
-/// Instagib cheat: the LocalShip deals 100× damage (issue #1181, formerly the
-/// `INSTAGIB` thread-local read ambiently by `console::weapons::beam`).
-///
-/// Toggled from the host settings cog's Debug/Cheat tab. On native it is never
-/// inserted — the toggle is a `#[wasm_bindgen]` export with no native caller —
-/// so `tick_beams_apply_damage`'s `Option<Res<Instagib>>` resolves to `None`
-/// (off), exactly as the old `is_instagib()` returned a hard-coded `false`
-/// there. A wasm-only host debug simulation override, the sibling of `GodMode`
-/// and `SimulationPaused`; it is declared into the `StateCensus` at that same
-/// site (`server_app`) so the enumeration guard accounts for it.
-#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Instagib(pub bool);
-
-/// The world this session loaded — `(path, TOML text)` — handed from the wasm
-/// edge into the `World` (issue #1181, replacing the `get_raw_world_source()`
-/// ambient read `world::server::insert_raw_world_source_resource` used).
-///
-/// `wasm_init` inserts this from the `SNAPSHOT_WORLD` edge stash before the app
-/// runs; the browser's `Startup` re-parse then reads it as an ordinary
-/// `Option<Res<BridgeWorldSource>>` instead of reaching back through a bridge
-/// free function. Never inserted on native (that path uses `PreCompiledScripts`),
-/// so the read is a no-op there exactly as the old wasm-gated body was.
-#[derive(bevy::prelude::Resource, Clone, Debug)]
-pub struct BridgeWorldSource {
-    /// The world TOML's path (`Run::scenario` / content-ledger key).
-    pub path: String,
-    /// The untouched world TOML text.
-    pub toml: String,
-}
+// The restore types here are defined UNGATED (native + wasm) even though most
+// are inserted only under `wasm_init`, because they are exercised by the native
+// unit tests at the bottom of this file. Bevy's `Resource` derive is spelled
+// with its full path so this stays clear of the wasm-gated `use bevy::prelude::*`
+// glob further down.
+//
+// Two former members of this block moved to sim-side homes in issue #1194, so
+// this presentation module no longer DEFINES sim-visible state that
+// always-compiled code reads: `Instagib` now lives beside its sibling `GodMode`
+// in `crate::server_app`, and `BridgeWorldSource` beside its `RawWorldSource`
+// consumer in `crate::world::server`. The wasm edge below only mirrors, drains,
+// and inserts them through those new paths.
 
 /// A save that passed the version gate and is waiting for the world to finish
 /// bootstrapping before `drain_snapshot_restore` writes it over the top (issue
@@ -319,40 +294,15 @@ pub fn apply_instagib_toggles(count: u32, current: &mut bool) {
 
 // ── Host teleport-to-waypoint override (issue #770) ─────────────────────────
 //
-// A deliberate host-only simulation override: snap the LocalShip's
-// authoritative position onto the shared Navigation waypoint. Unlike a client
-// helm command it does NOT go through command admission — it directly sets
-// `ShipPhysics.{x,z}`, a discontinuous jump contrasted with the helm's velocity
-// integration. Kept free of `target_arch = "wasm32"` (though it does touch Bevy
-// component types, which compile natively) so the logic is unit-testable under
-// plain `cargo test` without a wasm target — the wasm glue (thread-local,
-// `wasm_bindgen` export, the Bevy drain system) is gated below.
-
-/// Apply a pending teleport-to-waypoint to one ship's physics.
-///
-/// Reads the ship's `NavigationWaypoint` snapshot (which resolves BOTH Free and
-/// Anchored modes to a live x/z) and, when a waypoint exists, sets the ship's
-/// planar position to it. Returns `true` when a teleport happened, `false` when
-/// there was no waypoint (a no-op).
-///
-/// `physics.y` (altitude) is left UNCHANGED on purpose: `WaypointMode` is
-/// X/Z-only and carries no altitude, so keeping the ship's current height is the
-/// least-surprising behaviour — the ship slides across to the waypoint without
-/// changing altitude (issue #768 allows ships to sit at nonzero Y).
-pub fn apply_teleport_to_waypoint(
-    physics: &mut crate::ship::state::ShipPhysics,
-    waypoint: &crate::console::navigation::NavigationWaypoint,
-) -> bool {
-    match waypoint.snapshot() {
-        Some(snapshot) => {
-            physics.x = snapshot.x;
-            physics.z = snapshot.z;
-            // physics.y deliberately unchanged — see the doc comment.
-            true
-        }
-        None => false,
-    }
-}
+// A deliberate host-only simulation override: snap the LocalShip's authoritative
+// position onto the shared Navigation waypoint. Unlike a client helm command it
+// does NOT go through command admission — it directly sets `ShipPhysics.{x,z}`,
+// a discontinuous jump contrasted with the helm's velocity integration. The pure
+// override logic is `crate::console::navigation::server::apply_teleport_to_waypoint`
+// (relocated sim-side in issue #1194 — it mutates only `ShipPhysics` from a
+// `NavigationWaypoint`, so it must not sit in this presentation module); the wasm
+// glue (thread-local, `wasm_bindgen` export, the Bevy drain system) stays here,
+// gated below, and calls into it.
 
 // ── The wasm edge: minimal thread-local inbox/outbox (issue #1181) ──────────
 //
@@ -361,9 +311,11 @@ pub fn apply_teleport_to_waypoint(
 // export is called synchronously by JS, outside Bevy's schedule and with no
 // `World` handle, so the value it carries (or is asked for) has nowhere to live
 // but a thread-local. The durable, simulation-visible state these used to also
-// hold moved into typed Resources above (`Instagib`, `BridgeWorldSource`,
-// `PendingRestore`, `RestoreWaited`), drained into / mirrored back from here by
-// the seam systems each frame. What is left falls into four edge categories, and
+// hold moved into typed Resources — `crate::server_app::Instagib` and
+// `crate::world::server::BridgeWorldSource` (relocated sim-side in issue #1194),
+// plus `PendingRestore` / `RestoreWaited` above — drained into / mirrored back
+// from here by the seam systems each frame. What is left falls into four edge
+// categories, and
 // each MUST stay a thread-local for the stated reason:
 //
 //  1. INBOX queues — JS pushes, a `PreUpdate` seam system drains into the sim.
@@ -609,12 +561,12 @@ thread_local! {
         const { RefCell::new(None) };
 
     /// INBOX: instagib-toggle requests from `wasm_toggle_instagib()`, drained by
-    /// `drain_instagib_toggle` each `PreUpdate` into the [`Instagib`] Resource
+    /// `drain_instagib_toggle` each `PreUpdate` into the [`crate::server_app::Instagib`] Resource
     /// (issue #1181). A count (not a bool) so two clicks in one frame flip twice,
     /// matching the God Mode queue; parity is applied by `apply_instagib_toggles`.
     static PENDING_INSTAGIB_TOGGLES: RefCell<u32> = const { RefCell::new(0) };
 
-    /// OUTBOX mirror of the [`Instagib`] Resource, refreshed each frame by
+    /// OUTBOX mirror of the [`crate::server_app::Instagib`] Resource, refreshed each frame by
     /// `publish_instagib` so `wasm_get_instagib()` can read it back without a
     /// `World` handle (issue #1181). Same pattern as `GOD_MODE_MIRROR`.
     static INSTAGIB_MIRROR: RefCell<bool> = const { RefCell::new(false) };
@@ -684,7 +636,7 @@ pub mod host_channels {
 // ── Instagib helper (issue #900 context, de-globalised in #1181) ────────────
 //
 // Unlike God Mode (issue #900), Instagib is not routed through command
-// admission — it flips the [`Instagib`] Resource directly. Since issue #1181 the
+// admission — it flips the [`crate::server_app::Instagib`] Resource directly. Since issue #1181 the
 // authoritative flag lives in that Resource (read by `tick_beams_apply_damage`)
 // rather than a thread-local `is_instagib()` reached ambiently; the wasm edge
 // keeps only the toggle inbox and the read-back mirror.
@@ -714,7 +666,7 @@ pub fn wasm_get_god_mode() -> bool {
 
 /// Called by JS (settings cog Debug/Cheat tab) to request an instagib flip.
 ///
-/// Queues a request that `drain_instagib_toggle` applies to the [`Instagib`]
+/// Queues a request that `drain_instagib_toggle` applies to the [`crate::server_app::Instagib`]
 /// Resource on the next `PreUpdate` frame (issue #1181). The JS binding's
 /// signature is unchanged; only the state it targets moved from a thread-local
 /// into a Resource `tick_beams_apply_damage` reads through the scheduler.
@@ -726,7 +678,7 @@ pub fn wasm_toggle_instagib() {
 
 /// Called by JS each frame to read back the instagib flag for the cog button
 /// (issue #1181). Reads the `INSTAGIB_MIRROR` maintained by `publish_instagib`,
-/// since the authoritative value now lives in the [`Instagib`] Resource this
+/// since the authoritative value now lives in the [`crate::server_app::Instagib`] Resource this
 /// `World`-less function cannot touch directly (same pattern as
 /// `wasm_get_god_mode`).
 #[cfg(target_arch = "wasm32")]
@@ -983,7 +935,7 @@ pub fn wasm_init() {
     // `PendingRestore` / `RestoreWaited` take the save staged pre-init by
     // `wasm_prepare_resume` (empty when there is none). `BridgeWorldSource` is
     // inserted just below, only when a world was loaded.
-    .init_resource::<Instagib>()
+    .init_resource::<crate::server_app::Instagib>()
     .insert_resource(PendingRestore(
         PENDING_RESTORE_STAGED.with(|p| p.borrow_mut().take()),
     ))
@@ -1046,7 +998,7 @@ pub fn wasm_init() {
     // browser always loads one before `wasm_init`, but the absent case leaves
     // the resource off exactly as the old `get_raw_world_source() == None` did.
     if let Some((path, toml)) = SNAPSHOT_WORLD.with(|w| w.borrow().clone()) {
-        app.insert_resource(BridgeWorldSource { path, toml });
+        app.insert_resource(crate::world::server::BridgeWorldSource { path, toml });
     }
 
     // Frame sampling brackets each animation frame's schedule. These two
@@ -2905,7 +2857,7 @@ fn drain_teleport_to_waypoint(
         return;
     }
     for (mut physics, waypoint) in ship_q.iter_mut() {
-        apply_teleport_to_waypoint(&mut physics, waypoint);
+        crate::console::navigation::server::apply_teleport_to_waypoint(&mut physics, waypoint);
     }
 }
 
@@ -2960,13 +2912,13 @@ fn publish_god_mode(god_mode: Option<Res<crate::server_app::GodMode>>) {
     GOD_MODE_MIRROR.with(|v| *v.borrow_mut() = active);
 }
 
-/// Drains the queued instagib toggles each frame into the [`Instagib`] Resource
+/// Drains the queued instagib toggles each frame into the [`crate::server_app::Instagib`] Resource
 /// (issue #1181). Unlike `drain_god_mode_toggle` it flips the Resource directly
 /// rather than crossing command admission — instagib is a raw host cheat, not a
 /// replicated command. The parity logic is [`apply_instagib_toggles`], unit-
 /// tested on native.
 #[cfg(target_arch = "wasm32")]
-fn drain_instagib_toggle(mut instagib: ResMut<Instagib>) {
+fn drain_instagib_toggle(mut instagib: ResMut<crate::server_app::Instagib>) {
     let count = PENDING_INSTAGIB_TOGGLES.with(|v| {
         let n = *v.borrow();
         *v.borrow_mut() = 0;
@@ -2975,11 +2927,11 @@ fn drain_instagib_toggle(mut instagib: ResMut<Instagib>) {
     apply_instagib_toggles(count, &mut instagib.0);
 }
 
-/// Mirrors the authoritative [`Instagib`] Resource into a thread-local each
+/// Mirrors the authoritative [`crate::server_app::Instagib`] Resource into a thread-local each
 /// frame so `wasm_get_instagib()` can read it back without a `World` handle
 /// (issue #1181). Pure read; the same pattern as `publish_god_mode`.
 #[cfg(target_arch = "wasm32")]
-fn publish_instagib(instagib: Res<Instagib>) {
+fn publish_instagib(instagib: Res<crate::server_app::Instagib>) {
     INSTAGIB_MIRROR.with(|v| *v.borrow_mut() = instagib.0);
 }
 
@@ -3152,11 +3104,13 @@ fn flush_host_channels(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_instagib_toggles, apply_pending_toggles, apply_teleport_to_waypoint, host_channels,
-        next_restore_step, Instagib, PendingRestore, RestoreStep, RestoreWaited,
+        apply_instagib_toggles, apply_pending_toggles, host_channels, next_restore_step,
+        PendingRestore, RestoreStep, RestoreWaited,
     };
+    use crate::console::navigation::server::apply_teleport_to_waypoint;
     use crate::console::navigation::{NavigationWaypoint, WaypointMode};
     use crate::core::messages::DebugToggleKind;
+    use crate::server_app::Instagib;
     use crate::ship::state::ShipPhysics;
 
     /// Teleport onto a Free waypoint sets `x`/`z` and leaves `y` unchanged.

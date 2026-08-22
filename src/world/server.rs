@@ -368,13 +368,36 @@ pub struct WorldEventBuffer(pub Vec<WorldEvent>);
 
 // ── Scripting seam (issue #984, Rhai M6 phase 2a) ───────────────────────────
 
+/// The world this session loaded — `(path, TOML text)` — handed from the wasm
+/// edge into the `World` (issue #1181, replacing the `get_raw_world_source()`
+/// ambient read [`insert_raw_world_source_resource`] used).
+///
+/// `wasm_init` inserts this from the `SNAPSHOT_WORLD` edge stash before the app
+/// runs; the browser's `Startup` re-parse then reads it as an ordinary
+/// `Option<Res<BridgeWorldSource>>` instead of reaching back through a bridge
+/// free function. Never inserted on native (that path uses [`PreCompiledScripts`]),
+/// so the read is a no-op there exactly as the old wasm-gated body was.
+///
+/// Lives here — beside its [`RawWorldSource`] consumer — rather than in
+/// `crate::server::bridge` (issue #1194): it is sim-visible state read by the
+/// always-compiled [`insert_raw_world_source_resource`], so the `--server`
+/// feature gate must not be able to compile it out. The wasm bridge only inserts
+/// it (`wasm_init`), through this path.
+#[derive(Resource, Clone, Debug)]
+pub struct BridgeWorldSource {
+    /// The world TOML's path (`Run::scenario` / content-ledger key).
+    pub path: String,
+    /// The untouched world TOML text.
+    pub toml: String,
+}
+
 /// The raw world source a session loaded: its path plus the world TOML as a
 /// `Value`.
 ///
 /// `WorldConfig` drops the raw `[script]` / `script` keys the Rhai loader needs,
 /// so this carries the whole TOML alongside its path. Since issue #1214 it is the
 /// **browser's** route only: `insert_raw_world_source_resource` reads the
-/// `server::bridge::BridgeWorldSource` Resource the wasm bridge inserts at
+/// [`BridgeWorldSource`] Resource the wasm bridge inserts at
 /// `wasm_init` (issue #1181) at `Startup` and inserts it, and
 /// `compile_world_scripts` reads it once. Headless no longer inserts it — it
 /// compiles the world's scripts once in `world::load::load` and hands the result
@@ -823,7 +846,7 @@ pub(crate) fn insert_world_config_resource(mut commands: Commands) {
 ///
 /// The script-loader's twin of [`insert_world_config_resource`]: `WorldConfig`
 /// has dropped the raw `[script]` / `script` keys, so the Rhai loader needs the
-/// untouched TOML text. Reads the [`crate::server::bridge::BridgeWorldSource`]
+/// untouched TOML text. Reads the [`BridgeWorldSource`]
 /// Resource the wasm bridge inserts at `wasm_init` (issue #1181, replacing the
 /// former `get_raw_world_source()` ambient free-function read). On native that
 /// Resource is never inserted — headless compiles its scripts once in
@@ -832,7 +855,7 @@ pub(crate) fn insert_world_config_resource(mut commands: Commands) {
 /// is a no-op there, exactly as its wasm-gated body used to be.
 pub(crate) fn insert_raw_world_source_resource(
     mut commands: Commands,
-    bridge: Option<Res<crate::server::bridge::BridgeWorldSource>>,
+    bridge: Option<Res<BridgeWorldSource>>,
 ) {
     let Some(bridge) = bridge else {
         return;

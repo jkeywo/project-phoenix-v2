@@ -1653,7 +1653,7 @@ fn operate_navigation_ai_chart_contact_waypoint_auto_clears_on_despawn() {
 /// set.
 #[test]
 fn host_teleport_moves_local_ship_to_waypoint() {
-    use crate::server::bridge::apply_teleport_to_waypoint;
+    use super::apply_teleport_to_waypoint;
 
     let mut world = World::new();
     let ship = world
@@ -1695,7 +1695,7 @@ fn host_teleport_moves_local_ship_to_waypoint() {
 /// the control) and the teleport apply is a no-op.
 #[test]
 fn host_teleport_disabled_and_noop_without_waypoint() {
-    use crate::server::bridge::apply_teleport_to_waypoint;
+    use super::apply_teleport_to_waypoint;
 
     let mut world = World::new();
     let ship = world

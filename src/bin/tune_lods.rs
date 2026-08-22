@@ -87,7 +87,7 @@ use project_phoenix::render_capture::{
     create_render_target, frame_distance, measure_world_bounds, orbit_transform, unpad_rows,
     ImageCopyPlugin, MainWorldReceiver,
 };
-use project_phoenix::server::renderer::GameCamera;
+use project_phoenix::render_setup::GameCamera;
 
 // ── Config from argv ────────────────────────────────────────────────────────
 

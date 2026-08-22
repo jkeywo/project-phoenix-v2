@@ -200,12 +200,66 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
 
-      # `viewer` implies `server` (see Cargo.toml), so this is the default
-      # feature set plus the viewer plugin — the same command the viewer's own
-      # tests were always meant to be run with, now run by something other than
-      # a person remembering to.
+      # Since issue #1194 `viewer` no longer implies `server` (the sim→presentation
+      # boundary is enforced, so the viewer compiles without the presentation
+      # stack). This invocation does not pass `--no-default-features`, so it is the
+      # default feature set plus the viewer plugin — server included — which is what
+      # exercises the viewer's own tests. The server-OFF viewer build (the one
+      # `viewer.html` actually ships, `--no-default-features --features viewer`) is
+      # covered by the `boundary` job below, which builds exactly that feature set.
       - name: Run the viewer test suite
         run: cargo test --features viewer
+
+  # ── Sim → presentation boundary (`--no-default-features`) ──────────────────────
+  #
+  # THIS JOB IS THE IMPORT BAN (issue #1194). The intended architecture is a
+  # simulation half that never depends on the presentation half: the presentation
+  # code — the 3-D renderer, the JS↔WASM bridge, asset preloading and the
+  # viewscreen border — all lives under `crate::server`, gated behind the `server`
+  # feature (`#[cfg(feature = "server")] pub mod server;` in src/lib.rs). Every
+  # other module compiles unconditionally and IS the simulation.
+  #
+  # So "a simulation module imports a presentation module" is exactly "an
+  # always-compiled module names `crate::server::…` without a `feature = "server"`
+  # gate" — and that is exactly what fails to COMPILE when the feature is off.
+  # `cargo check --no-default-features` therefore turns the boundary into a
+  # compiler-checked invariant with zero false positives and zero false negatives:
+  # a legitimately `#[cfg(feature = "server")]`-gated reference compiles away, an
+  # ungated one is an `unresolved import crate::server` error, and CI goes red.
+  # This is more robust than any grep/clippy rule could be, because the crate
+  # already carries dozens of correctly-gated inline `crate::server` references
+  # (the debug-observability string seams, the render assembly, the wasm bridge
+  # glue) that a source scan would have to reimplement `cfg` evaluation to clear.
+  #
+  # It is a SEPARATE JOB for the same reason `viewer-test` is: `--no-default-
+  # features` is its own feature set and its own codegen, so folding it into `test`
+  # would serialise a full check behind that job rather than running concurrently
+  # here. It also builds the exact feature set `viewer.html` ships
+  # (`--no-default-features --features viewer`), closing the gap that `viewer-test`
+  # (which keeps the default `server` on) cannot see.
+  #
+  # To prove the guard bites: add an ungated `use crate::server::renderer::…;` to
+  # any always-compiled module and this job goes red; remove it and it is green.
+  boundary:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust and cache
+        uses: jkeywo/vellum/actions/setup-fleet-rust@a08dca9ca49033307bb6d5e85cb068205c1164b6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libudev-dev libxkbcommon-dev libasound2-dev
+
+      # The headline gate: no simulation module may import a presentation module.
+      - name: Check the sim builds without the presentation feature
+        run: cargo check --no-default-features
+
+      # The server-OFF viewer build that `viewer.html` actually ships.
+      - name: Check the standalone viewer builds without the presentation feature
+        run: cargo check --no-default-features --features viewer
 
   # ── WASM build ────────────────────────────────────────────────────────────────
   #
@@ -792,7 +846,7 @@ jobs:
 
   # ── Deploy (main branch only, requires both test + smoke to pass) ─────────────
   deploy:
-    needs: [test, build, editor-test, smoke, viewer-test]
+    needs: [test, build, editor-test, smoke, viewer-test, boundary]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

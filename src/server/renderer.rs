@@ -26,7 +26,7 @@ use crate::regions::server::RegionMembership;
 use crate::regions::shape::RegionShape;
 use crate::render_setup::{
     apply_render_config, apply_target_hdr, default_ambient_light, game_camera_projection,
-    space_skybox, RenderTuning, SpaceSkyboxAsset, SpaceSkyboxPlugin,
+    space_skybox, GameCamera, RenderTuning, SpaceSkyboxAsset, SpaceSkyboxPlugin,
 };
 use crate::server::pfx::PfxPlugin;
 use crate::server_app::AsteroidDestroyedVfx;
@@ -51,9 +51,6 @@ const RIPPLE_MAX_RADIUS: f32 = 30.0;
 
 #[derive(Component)]
 struct LobbyCamera;
-
-#[derive(Component)]
-pub struct GameCamera;
 
 /// FPS counter text — rendered in the Bevy UI overlay.
 #[derive(Component)]

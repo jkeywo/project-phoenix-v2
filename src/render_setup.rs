@@ -35,6 +35,20 @@ pub const SPACE_SKYBOX_BRIGHTNESS: f32 = 450.0;
 /// Far plane for the game camera. Anything beyond this is the skybox's job.
 pub const GAME_CAMERA_FAR: f32 = 5000.0;
 
+/// Marker for the one in-game 3-D camera (as opposed to the lobby camera).
+///
+/// Spawned and driven by `crate::server::renderer` (the presentation stack), but
+/// the marker TYPE lives here — the always-compiled shared render-setup module
+/// (issue #1194) — because the LOD driver `update_mesh_lod` in
+/// `crate::server_app_render` and the `orient_lod_billboards::<GameCamera>`
+/// registration in `crate::server_app` both name it from always-compiled code
+/// that must still build with the `server` feature off. Keeping it beside
+/// [`GAME_CAMERA_FAR`] and [`RenderTuning`], the camera's other always-compiled
+/// render properties, also lets the standalone viewer share it (`--features
+/// viewer` no longer pulls in `server`).
+#[derive(Component)]
+pub struct GameCamera;
+
 /// Default ambient fill when a world supplies no `[ambient_light]` block —
 /// a warm key that stars then layer point lights on top of.
 ///

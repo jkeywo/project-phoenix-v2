@@ -51,12 +51,15 @@ pub struct AssetManifest {
     pub sub_worlds: Vec<String>,
 }
 
-/// Radar icon name injected onto the player's own ship at game-start spawn
-/// (see `player_ship_identity` in `src/server_app.rs`). Because it is injected
-/// at spawn rather than authored in any hull template, the template scan below
-/// never discovers it — so it is preloaded unconditionally in
-/// `discover_base_assets`. Keep this in sync with the injection site.
-pub const PLAYER_SHIP_RADAR_ICON: &str = "playerShip";
+/// Radar icon name injected onto the player's own ship at game-start spawn.
+///
+/// The identity constant is sim-side — [`crate::entities::config::PLAYER_SHIP_RADAR_ICON`],
+/// beside the `RadarAppearanceConfig` the spawn injection fills (issue #1194) —
+/// and re-exported here so this preloader (which loads the icon unconditionally
+/// in `discover_base_assets`, because the template scan never discovers a
+/// spawn-injected icon) keeps naming it under its familiar local path. Keep the
+/// injection site and this preloader in sync through that one constant.
+pub use crate::entities::config::PLAYER_SHIP_RADAR_ICON;
 
 // ── Icon naming convention (mirrors gui/radar.rs) ─────────────────────────
 

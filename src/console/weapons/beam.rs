@@ -1584,7 +1584,7 @@ pub(crate) struct BeamApplyAmbient<'w> {
     pub sim_rng: Option<Res<'w, crate::sim_rng::SimRng>>,
     pub log: Option<Res<'w, crate::logging::LogFilterConfig>>,
     pub god_mode: Option<Res<'w, crate::server_app::GodMode>>,
-    pub instagib: Option<Res<'w, crate::server::bridge::Instagib>>,
+    pub instagib: Option<Res<'w, crate::server_app::Instagib>>,
 }
 
 #[allow(clippy::too_many_arguments)]

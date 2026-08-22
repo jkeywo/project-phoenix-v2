@@ -1325,6 +1325,20 @@ pub struct AppearanceConfig {
     pub size_max: f32,
 }
 
+/// Radar icon name injected onto the player's own ship at game-start spawn
+/// (see `player_ship_identity` in `src/server_app.rs`, which writes it into
+/// [`RadarAppearanceConfig::icon`]). Because it is injected at spawn rather than
+/// authored in any hull template, the preload scan never discovers it — so the
+/// presentation preloader (`crate::server::asset_preload`) reads this same
+/// constant to load the icon unconditionally.
+///
+/// Lives here — sim-side, beside the [`RadarAppearanceConfig`] it fills — rather
+/// than in the presentation `asset_preload` module (issue #1194): the player
+/// ship's radar identity is authoritative spawn data set by always-compiled
+/// code, so the `--server` feature gate must not be able to compile it out.
+/// Keep the injection site and the preloader in sync through this one constant.
+pub const PLAYER_SHIP_RADAR_ICON: &str = "playerShip";
+
 /// Declares that an entity should appear on radar and how. There are no
 /// defaults derived from tags or entity type anywhere downstream — this
 /// table is the single source of truth. At least one of `icon` or

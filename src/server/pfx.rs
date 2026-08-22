@@ -19,7 +19,7 @@ use crate::core::messages::GamePhase;
 use crate::entities::config::{EnginePfxConfig, PhaserBankConfig};
 use crate::entities::model_rig::ModelMarkers;
 use crate::entities::spawner::{EntityUuid, HelmConsoleSection};
-use crate::server::renderer::GameCamera;
+use crate::render_setup::GameCamera;
 use crate::server_app::{
     ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig, TorpedoSystemResource,
 };

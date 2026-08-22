@@ -8,7 +8,6 @@ use crate::lobby::handler::CountdownAction;
 pub use crate::lobby::handler::Target;
 use crate::lobby::session::SessionManager;
 use crate::lobby::stations_config::{stations_from_ship_config, ShipStations};
-use crate::server::asset_preload::AssetPreloadResource;
 use crate::ship::rating;
 use crate::ship_plugin::{
     load_ship_config_from_disk, ActiveStationRatings, PendingShipConfig, ShipConfigComponent,
@@ -1104,7 +1103,9 @@ pub fn handle_set_ready_system(
     mut next_state: ResMut<NextState<GamePhase>>,
     mut outbox: ResMut<LobbyOutbox>,
     ship_stations: Option<Res<ShipStations>>,
-    preload: Option<Res<AssetPreloadResource>>,
+    #[cfg(feature = "server")] preload: Option<
+        Res<crate::server::asset_preload::AssetPreloadResource>,
+    >,
     mut ship_query: Query<
         (
             &ShipConfigComponent,
@@ -1121,15 +1122,20 @@ pub fn handle_set_ready_system(
         .map(|s| s.as_ref())
         .unwrap_or(&default_stations);
     let phase = state.get().clone();
-    // Preload gate: same logic as handle_disconnect.
-    let preload_complete = if crate::debug_overlay::is_playwright_automation() {
-        true
-    } else {
-        preload
-            .as_ref()
-            .map(|p| !p.started || p.complete)
-            .unwrap_or(true)
-    };
+    // Preload gate: same logic as handle_disconnect. `AssetPreloadResource` is
+    // presentation (`crate::server::asset_preload`), present only in server+render
+    // builds, so the read is `server`-gated (issue #1194) to keep this always-
+    // compiled lobby system from naming the presentation module with the feature
+    // off. Feature-off reads "ready" — matching the None / `!started` default —
+    // and no simulation runs in a feature-off build regardless.
+    #[cfg(feature = "server")]
+    let preload_ready = preload
+        .as_ref()
+        .map(|p| !p.started || p.complete)
+        .unwrap_or(true);
+    #[cfg(not(feature = "server"))]
+    let preload_ready = true;
+    let preload_complete = crate::debug_overlay::is_playwright_automation() || preload_ready;
     let events: Vec<_> = inbound.read().cloned().collect();
     for ev in events {
         let ClientMessage::SetReady { ready } = &ev.msg else {
@@ -1424,21 +1430,25 @@ fn handle_disconnect(
         With<crate::server_app::LocalShip>,
     >,
     stations: Option<Res<ShipStations>>,
-    preload: Option<Res<AssetPreloadResource>>,
+    #[cfg(feature = "server")] preload: Option<
+        Res<crate::server::asset_preload::AssetPreloadResource>,
+    >,
     mut countdown: Option<ResMut<CountdownTimer>>,
 ) {
     let empty_stations = ShipStations::default();
     let ship_stations = stations.as_deref().unwrap_or(&empty_stations);
 
-    // Preload gate: same logic as handle_set_ready_system.
-    let preload_complete = if crate::debug_overlay::is_playwright_automation() {
-        true
-    } else {
-        preload
-            .as_ref()
-            .map(|p| !p.started || p.complete)
-            .unwrap_or(true)
-    };
+    // Preload gate: same logic as handle_set_ready_system — `server`-gated because
+    // `AssetPreloadResource` is presentation (issue #1194); see that system for the
+    // full rationale. Feature-off reads "ready" and no simulation runs there.
+    #[cfg(feature = "server")]
+    let preload_ready = preload
+        .as_ref()
+        .map(|p| !p.started || p.complete)
+        .unwrap_or(true);
+    #[cfg(not(feature = "server"))]
+    let preload_ready = true;
+    let preload_complete = crate::debug_overlay::is_playwright_automation() || preload_ready;
 
     for ev in events.read() {
         // Apply Backfill rating to the disconnecting player's station so the

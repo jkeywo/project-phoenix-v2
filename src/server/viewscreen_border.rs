@@ -33,9 +33,9 @@ use crate::core::messages::{
 };
 use crate::lobby::stations_config::ShipStations;
 use crate::lobby::{CountdownTimer, OutboundMessage, Sessions, WorldResource};
-use crate::server::asset_preload::AssetPreloadResource;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::server::renderer::GameCamera;
+use crate::render_setup::GameCamera;
+use crate::server::asset_preload::AssetPreloadResource;
 use crate::server_app::GameOverReason;
 use crate::ship::state::ShipPhysics;
 

@@ -401,7 +401,13 @@ fn render_surrogate(app: &mut App) {
 fn render_stack(app: &mut App, log_filter: &str) {
     app.insert_resource(RenderStackApplied);
 
-    #[cfg(target_arch = "wasm32")]
+    // `feature = "server"` as well as `wasm32` (issue #1194): this branch names the
+    // presentation `crate::server::{renderer,viewscreen_border}` plugins, so the
+    // always-compiled boot module must not reference them with the feature off. The
+    // browser host always builds with the default `server` feature, so `all(wasm32,
+    // server)` is exactly the real BrowserHost build — no behaviour change — while
+    // keeping this simulation-side module free of any ungated `crate::server` name.
+    #[cfg(all(target_arch = "wasm32", feature = "server"))]
     {
         // The full Bevy stack the browser host runs on, customised exactly as the
         // pre-#1219 `wasm_init` real branch did (issue #1219): the `#canvas`
@@ -478,11 +484,16 @@ fn register_render_contract(app: &mut App) {
     register_render_assets(app);
     app.add_message::<HudStateChanged>()
         .add_message::<LobbyStateChanged>()
-        .add_message::<AiChatterEvent>()
-        // The one system the missing ViewscreenBorderPlugin still owes the HTML
-        // lobby overlay. Its parameters are all `Option<Res<_>>` bar the `GamePhase`
-        // state, so a boot that never inits that state simply never runs it.
-        .add_systems(Update, crate::server::viewscreen_border::push_lobby_state);
+        .add_message::<AiChatterEvent>();
+    // The one system the missing ViewscreenBorderPlugin still owes the HTML lobby
+    // overlay. Its parameters are all `Option<Res<_>>` bar the `GamePhase` state,
+    // so a boot that never inits that state simply never runs it. `server`-gated
+    // (issue #1194): `push_lobby_state` lives in the presentation
+    // `crate::server::viewscreen_border`, which the feature-off build has no module
+    // for — and the HTML lobby overlay it feeds is a browser/host (server) surface,
+    // so there is nothing for it to push when the feature is absent.
+    #[cfg(feature = "server")]
+    app.add_systems(Update, crate::server::viewscreen_border::push_lobby_state);
 }
 
 // ── ingest_world ─────────────────────────────────────────────────────────────

@@ -195,6 +195,26 @@ pub struct ShipAttackedThisTick(pub bool);
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GodMode(pub bool);
 
+/// Instagib cheat: the LocalShip deals 100× damage (issue #1181, formerly the
+/// `INSTAGIB` thread-local read ambiently by `console::weapons::beam`).
+///
+/// Toggled from the host settings cog's Debug/Cheat tab. On native it is never
+/// inserted — the toggle is a `#[wasm_bindgen]` export with no native caller —
+/// so `tick_beams_apply_damage`'s `Option<Res<Instagib>>` resolves to `None`
+/// (off), exactly as the old `is_instagib()` returned a hard-coded `false`
+/// there. A wasm-only host debug simulation override, the sibling of [`GodMode`]
+/// and [`crate::debug_overlay::SimulationPaused`]; it is declared into the
+/// `StateCensus` in `add_simulation_plugins_with` so the enumeration guard
+/// accounts for it.
+///
+/// Lives here — the always-compiled simulation app assembly, beside its sibling
+/// [`GodMode`] — rather than in `crate::server::bridge` (issue #1194): it is
+/// sim-visible state read by always-compiled weapon code, so the `--server`
+/// feature gate must not be able to compile it out. The wasm bridge only
+/// mirrors and drains it (`drain_instagib_toggle` / `publish_instagib`).
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Instagib(pub bool);
+
 #[derive(Resource, Clone, Debug, Default)]
 pub struct CaptainPriorityBoost {
     /// scope key (the captain's ship identity) -> currently boosted objective id.
@@ -1038,7 +1058,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             // registers in the headless app the enumeration guard scans. Same
             // classification as `GodMode` / `SimulationPaused` — a wasm-only host
             // cheat, off and uninserted on native, that alters damage when on.
-            .declare_state::<crate::server::bridge::Instagib>(
+            .declare_state::<Instagib>(
                 StateClass::DeferredFold,
                 "host-debug-simulation-override-state",
             )
@@ -1051,87 +1071,96 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             .declare_state::<crate::science::server::ShipScanRecord>(
                 StateClass::DeferredFold,
                 "science-scan-state",
-            )
-            .declare_state::<crate::server::asset_preload::AssetPreloadResource>(
-                StateClass::DeferredFold,
-                "asset-loading-state",
-            )
-            .declare_state::<crate::ship::combat_activity::RecentCombatActivity>(
-                StateClass::DeferredFold,
-                "recent-combat-activity-state",
-            )
-            .declare_state::<crate::ship::components::ActiveStationRatings>(
-                StateClass::DeferredFold,
-                "active-station-rating-state",
-            )
-            .declare_state::<crate::ship::components::CoordinationQueue>(
-                StateClass::DeferredFold,
-                "coordination-lag-queue-state",
-            )
-            .declare_state::<crate::ship::components::LastHelmInput>(
-                StateClass::DeferredFold,
-                "last-helm-input-state",
-            )
-            .declare_state::<crate::ship::components::PendingArcBearingRequest>(
-                StateClass::DeferredFold,
-                "pending-arc-bearing-request-state",
-            )
-            .declare_state::<crate::ship::helm::BoostCommand>(
-                StateClass::DeferredFold,
-                "helm-actuator-input-state",
-            )
-            .declare_state::<crate::ship::helm::ImpulseCommand>(
-                StateClass::DeferredFold,
-                "helm-actuator-input-state",
-            )
-            .declare_state::<crate::ship::helm::LateralThrustInput>(
-                StateClass::DeferredFold,
-                "helm-actuator-input-state",
-            )
-            .declare_state::<crate::ship::helm::SteeringInput>(
-                StateClass::DeferredFold,
-                "helm-actuator-input-state",
-            )
-            .declare_state::<crate::ship::helm::ThrustInput>(
-                StateClass::DeferredFold,
-                "helm-actuator-input-state",
-            )
-            .declare_state::<crate::ship::helm_ai::HelmAiSurfacesFrame>(
-                StateClass::DeferredFold,
-                "helm-ai-surfaces-frame-state",
-            )
-            .declare_state::<crate::ship::intent_narration_systems::ShipIntentNarration>(
-                StateClass::DeferredFold,
-                "intent-narration-state",
-            )
-            .declare_state::<crate::ship::sensors::SensorRadarSelection>(
-                StateClass::DeferredFold,
-                "sensors-target-state",
-            )
-            .declare_state::<crate::ship::shields::ShieldsDamageHistory>(
-                StateClass::DeferredFold,
-                "shields-damage-history-state",
-            )
-            .declare_state::<crate::world::config::WorldConfig>(
-                StateClass::DeferredFold,
-                "world-configuration-state",
-            )
-            .declare_state::<crate::world::server::EntityOriginLayer>(
-                StateClass::DeferredFold,
-                "world-layer-runtime-state",
-            )
-            .declare_state::<crate::world::server::PendingWorldLayerChanges>(
-                StateClass::DeferredFold,
-                "world-layer-runtime-state",
-            )
-            .declare_state::<crate::world::server::WorldEventBuffer>(
-                StateClass::DeferredFold,
-                "world-event-buffer-state",
-            )
-            .declare_state::<crate::world::server::WorldLayerMap>(
-                StateClass::DeferredFold,
-                "world-layer-runtime-state",
             );
+        // `AssetPreloadResource` is a presentation resource (`crate::server::
+        // asset_preload`), init'd only in the `#[cfg(feature = "server")] if
+        // opts.render` block below, so its declaration is gated the same way
+        // (issue #1194): the always-compiled assembly must not name the presentation
+        // module with the `server` feature off. Split out of the chain because a
+        // single `.declare_state` link cannot carry a `#[cfg]`. Census-neutral for
+        // every config that runs the enumeration guard — all of them build with
+        // `server` on (headless = default + headless).
+        #[cfg(feature = "server")]
+        app.declare_state::<crate::server::asset_preload::AssetPreloadResource>(
+            StateClass::DeferredFold,
+            "asset-loading-state",
+        );
+        app.declare_state::<crate::ship::combat_activity::RecentCombatActivity>(
+            StateClass::DeferredFold,
+            "recent-combat-activity-state",
+        )
+        .declare_state::<crate::ship::components::ActiveStationRatings>(
+            StateClass::DeferredFold,
+            "active-station-rating-state",
+        )
+        .declare_state::<crate::ship::components::CoordinationQueue>(
+            StateClass::DeferredFold,
+            "coordination-lag-queue-state",
+        )
+        .declare_state::<crate::ship::components::LastHelmInput>(
+            StateClass::DeferredFold,
+            "last-helm-input-state",
+        )
+        .declare_state::<crate::ship::components::PendingArcBearingRequest>(
+            StateClass::DeferredFold,
+            "pending-arc-bearing-request-state",
+        )
+        .declare_state::<crate::ship::helm::BoostCommand>(
+            StateClass::DeferredFold,
+            "helm-actuator-input-state",
+        )
+        .declare_state::<crate::ship::helm::ImpulseCommand>(
+            StateClass::DeferredFold,
+            "helm-actuator-input-state",
+        )
+        .declare_state::<crate::ship::helm::LateralThrustInput>(
+            StateClass::DeferredFold,
+            "helm-actuator-input-state",
+        )
+        .declare_state::<crate::ship::helm::SteeringInput>(
+            StateClass::DeferredFold,
+            "helm-actuator-input-state",
+        )
+        .declare_state::<crate::ship::helm::ThrustInput>(
+            StateClass::DeferredFold,
+            "helm-actuator-input-state",
+        )
+        .declare_state::<crate::ship::helm_ai::HelmAiSurfacesFrame>(
+            StateClass::DeferredFold,
+            "helm-ai-surfaces-frame-state",
+        )
+        .declare_state::<crate::ship::intent_narration_systems::ShipIntentNarration>(
+            StateClass::DeferredFold,
+            "intent-narration-state",
+        )
+        .declare_state::<crate::ship::sensors::SensorRadarSelection>(
+            StateClass::DeferredFold,
+            "sensors-target-state",
+        )
+        .declare_state::<crate::ship::shields::ShieldsDamageHistory>(
+            StateClass::DeferredFold,
+            "shields-damage-history-state",
+        )
+        .declare_state::<crate::world::config::WorldConfig>(
+            StateClass::DeferredFold,
+            "world-configuration-state",
+        )
+        .declare_state::<crate::world::server::EntityOriginLayer>(
+            StateClass::DeferredFold,
+            "world-layer-runtime-state",
+        )
+        .declare_state::<crate::world::server::PendingWorldLayerChanges>(
+            StateClass::DeferredFold,
+            "world-layer-runtime-state",
+        )
+        .declare_state::<crate::world::server::WorldEventBuffer>(
+            StateClass::DeferredFold,
+            "world-event-buffer-state",
+        )
+        .declare_state::<crate::world::server::WorldLayerMap>(
+            StateClass::DeferredFold,
+            "world-layer-runtime-state",
+        );
     }
 
     app.add_message::<AsteroidDestroyedVfx>()
@@ -1304,13 +1333,20 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     );
 
     app.init_resource::<crate::debug_overlay::LastReportedDebugState>();
-    #[cfg(not(phoenix_demo_build))]
+    // `drain_client_debug_flags` moved to the bridge/marshalling side in issue
+    // #1193 (it calls `apply_pending_toggles`); its pause sibling stays sim-side
+    // in `debug_overlay`. The whole chain is `server`-gated (issue #1194): the
+    // debug-flag drain names `crate::server::bridge`, presentation the always-
+    // compiled assembly must not reference with the feature off. The pause drain
+    // rides along inside the gate rather than being split into its own ungated
+    // call — every config that runs the client-facing debug route builds with
+    // `server` on (a phone only reaches the host through the bridge), and keeping
+    // both in one `.chain()` preserves the exact schedule shape server-on builds
+    // already had, so the sim digest is untouched.
+    #[cfg(all(not(phoenix_demo_build), feature = "server"))]
     app.add_systems(
         PreUpdate,
         (
-            // `drain_client_debug_flags` moved to the bridge/marshalling side in
-            // issue #1193 (it calls `apply_pending_toggles`); its pause sibling
-            // stays sim-side in `debug_overlay`.
             crate::server::bridge::drain_client_debug_flags,
             crate::debug_overlay::drain_client_pause,
         )
@@ -1426,7 +1462,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 // last frame's — the two share one alpha channel and
                 // `orient_lod_billboards` is its only writer.
                 crate::entities::billboard::orient_lod_billboards::<
-                    crate::server::renderer::GameCamera,
+                    crate::render_setup::GameCamera,
                 >
                     .after(update_mesh_lod)
                     .after(crate::entities::visual_fade::drive_visual_fades),
@@ -3735,7 +3771,7 @@ fn player_ship_identity(
                 size: None,
                 region_colour: None,
             });
-    radar.icon = Some(crate::server::asset_preload::PLAYER_SHIP_RADAR_ICON.to_string());
+    radar.icon = Some(crate::entities::config::PLAYER_SHIP_RADAR_ICON.to_string());
     (tags, radar)
 }
 

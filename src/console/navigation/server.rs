@@ -955,6 +955,39 @@ fn anchor_pos(
         .and_then(|wc| wc.anchors.get(anchor).copied())
 }
 
+/// Apply a pending host teleport-to-waypoint to one ship's physics (issue #770;
+/// relocated here from `crate::server::bridge` in issue #1194).
+///
+/// A deliberate host-only simulation override: reads the ship's
+/// [`NavigationWaypoint`] snapshot (which resolves BOTH Free and Anchored modes
+/// to a live x/z) and, when a waypoint exists, snaps the ship's planar position
+/// to it — a discontinuous jump, unlike the helm's velocity integration, and
+/// deliberately NOT routed through command admission. Returns `true` when a
+/// teleport happened, `false` when there was no waypoint (a no-op).
+///
+/// `physics.y` (altitude) is left UNCHANGED on purpose: `WaypointMode` is
+/// X/Z-only and carries no altitude, so keeping the ship's current height is the
+/// least-surprising behaviour — the ship slides across to the waypoint without
+/// changing altitude (issue #768 allows ships to sit at nonzero Y).
+///
+/// Pure and Bevy-`World`-free, so it stays unit-testable under plain `cargo
+/// test`; the wasm edge (`drain_teleport_to_waypoint` in `crate::server::bridge`)
+/// calls into it.
+pub fn apply_teleport_to_waypoint(
+    physics: &mut crate::ship::state::ShipPhysics,
+    waypoint: &NavigationWaypoint,
+) -> bool {
+    match waypoint.snapshot() {
+        Some(snapshot) => {
+            physics.x = snapshot.x;
+            physics.z = snapshot.z;
+            // physics.y deliberately unchanged — see the doc comment.
+            true
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 // Fixture ids only (issue #907): a test that needs "some distinct id" has no
 // run to reproduce. Production identity is minted by `crate::world_id`, and

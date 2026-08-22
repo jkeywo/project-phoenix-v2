@@ -36,8 +36,8 @@ use crate::world::content::WorldEvent;
 use crate::world::script::comms::{enter_node, project_node, EnterError};
 use crate::world::script::schedule::{SchedClock, TickBudget};
 use crate::world::server::{
-    apply_script_commands, ObjectiveManagerRes, ScriptRuntimeParams, ShipModifiersParams,
-    WorldContentRuntime, WorldLayerParams, WorldScriptRuntime,
+    apply_script_commands, EffectQueues, ObjectiveManagerRes, ScriptRuntimeParams,
+    ShipModifiersParams, WorldContentRuntime, WorldLayerParams, WorldScriptRuntime,
 };
 
 /// The three tick-scoped reads [`open_scripted_comms_threads`] needs that are
@@ -122,6 +122,9 @@ pub(crate) fn open_scripted_comms_threads(
         With<crate::entity_spawner::BehaviourSection>,
     >,
     mut aux: ScriptedCommsAux,
+    // The per-owner effect queues a comms root fn's script pushes onto (issue
+    // #1223), the same sinks the trigger/callback paths use.
+    mut effect_queues: EffectQueues,
 ) {
     // `now_tick` before the `WorldScriptRuntime` borrow (disjoint `script` field).
     let now_tick = script.sim_tick.as_ref().map(|t| t.0).unwrap_or(0);
@@ -338,6 +341,7 @@ pub(crate) fn open_scripted_comms_threads(
             // response path's pre-resolved `sender_entity_name`.
             None,
             Some(req.from.clone()),
+            &mut effect_queues.out(),
         );
         runtime.pending_world_events.extend(out_events);
         if elapsed_secs.is_some() {

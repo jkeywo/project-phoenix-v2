@@ -26,6 +26,7 @@ use crate::console::repair::external::{
 };
 use crate::console::weapons::beam::TacticalRadarSelection;
 use crate::damage::DamageTier;
+use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::EntityUuid;
 use crate::infrastructure::condition::ConditionAdjustment;
 use crate::infrastructure::InfrastructureCondition;
@@ -354,14 +355,18 @@ pub fn tick_external_repair(
 /// repaired condition crossing the target's OWN authored thresholds, by the one
 /// system that owns the flag edges.
 pub fn apply_external_repair(
-    runtime: Option<ResMut<WorldContentRuntime>>,
+    // The condition-adjustment queue, extracted off `WorldContentRuntime` (issue
+    // #1223) and owned by `InfrastructurePlugin`; this pusher feeds it. `Option`
+    // so a reduced test app that runs the repair systems without
+    // `InfrastructurePlugin` is a no-op rather than a panic — the same
+    // defensiveness the former `Option<ResMut<WorldContentRuntime>>` had.
+    condition_queue: Option<ResMut<EffectQueue<ConditionAdjustment>>>,
     time: Option<Res<Time>>,
     operators: Query<&ExternalRepairDispatch>,
     targets: Query<(&EntityUuid, &InfrastructureCondition)>,
 ) {
     // Collect from read-only queries first, so a world with no live dispatch
-    // never takes `WorldContentRuntime` mutably and marks it changed on a quiet
-    // tick.
+    // never takes the queue mutably and marks it changed on a quiet tick.
     let dt = time.map(|t| t.delta_secs()).unwrap_or(0.0);
     let mut adjustments: Vec<ConditionAdjustment> = operators
         .iter()
@@ -386,10 +391,10 @@ pub fn apply_external_repair(
     // UUID order so two hosts queue identically — the walk-order rule the
     // infrastructure and tractor ticks all keep.
     adjustments.sort_by(|a, b| a.uuid.cmp(&b.uuid));
-    let Some(mut runtime) = runtime else {
+    let Some(mut condition_queue) = condition_queue else {
         return;
     };
-    runtime.pending_condition_adjustments.extend(adjustments);
+    condition_queue.0.extend(adjustments);
 }
 
 /// Marks a ship whose external repair team the backfill host DISPATCHED to serve

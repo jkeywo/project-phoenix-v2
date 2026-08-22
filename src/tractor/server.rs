@@ -24,6 +24,7 @@ use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::console::weapons::beam::TacticalRadarSelection;
 use crate::damage::DamageTier;
+use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntityMass, EntityName, EntitySystemHull, EntityUuid};
 use crate::entity_config::DEFAULT_ENTITY_MASS;
 use crate::infrastructure::condition::ConditionAdjustment;
@@ -682,14 +683,17 @@ pub fn apply_tow_load_penalty(
 /// which is why a structure recovered across `restores_above` sets the
 /// operational flag a scenario already reads.
 pub fn arrest_held_declines(
-    runtime: Option<ResMut<WorldContentRuntime>>,
+    // The condition-adjustment queue, extracted off `WorldContentRuntime` (issue
+    // #1223) and owned by `InfrastructurePlugin`; this pusher feeds it. `Option`
+    // so a reduced test app that runs the tractor systems without
+    // `InfrastructurePlugin` is a no-op rather than a panic.
+    condition_queue: Option<ResMut<EffectQueue<ConditionAdjustment>>>,
     time: Option<Res<Time>>,
     operators: Query<&TractorBeam>,
     targets: Query<(&EntityUuid, &HeldResponseSection, &InfrastructureCondition)>,
 ) {
     // Collect from read-only queries first, so a world with no arrest-decline
-    // hold never takes `WorldContentRuntime` mutably and marks it changed on a
-    // quiet tick.
+    // hold never takes the queue mutably and marks it changed on a quiet tick.
     let dt = time.map(|t| t.delta_secs()).unwrap_or(0.0);
     let mut adjustments: Vec<ConditionAdjustment> = operators
         .iter()
@@ -713,10 +717,10 @@ pub fn arrest_held_declines(
     // UUID order so two hosts queue identically — the walk-order rule the
     // infrastructure tick keeps.
     adjustments.sort_by(|a, b| a.uuid.cmp(&b.uuid));
-    let Some(mut runtime) = runtime else {
+    let Some(mut condition_queue) = condition_queue else {
         return;
     };
-    runtime.pending_condition_adjustments.extend(adjustments);
+    condition_queue.0.extend(adjustments);
 }
 
 // ── The wire ─────────────────────────────────────────────────────────────────

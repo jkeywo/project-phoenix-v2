@@ -11,10 +11,11 @@
 //! and a scripted repair or hit — and all three land in
 //! [`tick_infrastructure_condition`]. That is deliberate: a threshold crossing
 //! is only observable if the code that crosses it is also the code that mirrors
-//! the resulting flag, so scripted adjustments are *queued* on
-//! `WorldContentRuntime::pending_condition_adjustments` and drained here rather
-//! than written where they are authored. `#1027`'s field-repair operation feeds
-//! the same queue, one slice of progress per tick.
+//! the resulting flag, so scripted adjustments are *queued* on the
+//! `EffectQueue<ConditionAdjustment>` resource (issue #1223; formerly a
+//! `pending_*` field on `WorldContentRuntime`) and drained here rather than
+//! written where they are authored. `#1027`'s field-repair operation feeds the
+//! same queue, one slice of progress per tick.
 //!
 //! # Where the flags become observable
 //!
@@ -30,8 +31,12 @@
 
 use bevy::prelude::*;
 
+use crate::authoritative::{DeclareState, StateClass};
+use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
-use crate::infrastructure::condition::{FlagChange, InfrastructureState};
+use crate::infrastructure::condition::{
+    CapacityAdjustment, ConditionAdjustment, FlagChange, InfrastructureState,
+};
 use crate::logging::LogFilterConfig;
 use crate::world::content::WorldEvent;
 use crate::world::server::WorldContentRuntime;
@@ -50,6 +55,22 @@ pub struct InfrastructurePlugin;
 
 impl Plugin for InfrastructurePlugin {
     fn build(&self, app: &mut App) {
+        // The two per-owner effect queues `tick_infrastructure_condition` drains
+        // (issue #1223), registered and declared at this owning site. Each is a
+        // transient inter-system queue — drained in full every tick, empty at
+        // every fold/snapshot boundary — so `ClearedAtFold`. They key distinctly
+        // in the census by full type path (`EffectQueue<ConditionAdjustment>` vs
+        // `EffectQueue<CapacityAdjustment>`).
+        app.init_resource::<EffectQueue<ConditionAdjustment>>()
+            .init_resource::<EffectQueue<CapacityAdjustment>>()
+            .declare_state::<EffectQueue<ConditionAdjustment>>(
+                StateClass::ClearedAtFold,
+                "digest-exclusion-classes",
+            )
+            .declare_state::<EffectQueue<CapacityAdjustment>>(
+                StateClass::ClearedAtFold,
+                "digest-exclusion-classes",
+            );
         app.add_systems(
             FixedUpdate,
             tick_infrastructure_condition.in_set(crate::sim_sets::SimSet::Modifiers),
@@ -77,6 +98,10 @@ impl Plugin for InfrastructurePlugin {
 /// [`crate::sim_digest`] applies to its own walks.
 pub fn tick_infrastructure_condition(
     runtime: Option<ResMut<WorldContentRuntime>>,
+    // The two script/console effect queues, extracted off `WorldContentRuntime`
+    // (issue #1223). This is their owning drain.
+    mut condition_queue: ResMut<EffectQueue<ConditionAdjustment>>,
+    mut capacity_queue: ResMut<EffectQueue<CapacityAdjustment>>,
     time: Option<Res<Time>>,
     mut structures: Query<(
         Entity,
@@ -89,21 +114,18 @@ pub fn tick_infrastructure_condition(
     let Some(mut runtime) = runtime else {
         return;
     };
-    // A read, so a world with no infrastructure and no queued work never marks
-    // `WorldContentRuntime` changed.
-    if structures.is_empty()
-        && runtime.pending_condition_adjustments.is_empty()
-        && runtime.pending_capacity_adjustments.is_empty()
-    {
+    // A read (`Deref`, not `DerefMut`), so a world with no infrastructure and no
+    // queued work marks neither the runtime nor either queue changed.
+    if structures.is_empty() && condition_queue.0.is_empty() && capacity_queue.0.is_empty() {
         return;
     }
-    let queued = std::mem::take(&mut runtime.pending_condition_adjustments);
+    let queued = std::mem::take(&mut condition_queue.0);
     // Taken through `DerefMut` only when there is something in it, so a world
-    // whose structures never trade does not mark the runtime changed each tick.
-    let queued_capacity = if runtime.pending_capacity_adjustments.is_empty() {
+    // whose structures never trade does not mark the queue changed each tick.
+    let queued_capacity = if capacity_queue.0.is_empty() {
         Vec::new()
     } else {
-        std::mem::take(&mut runtime.pending_capacity_adjustments)
+        std::mem::take(&mut capacity_queue.0)
     };
     let delta_secs = time.map(|t| t.delta_secs()).unwrap_or(0.0);
 
@@ -269,6 +291,8 @@ mod tests {
     fn app_with(config: &InfrastructureConfig) -> (App, Entity) {
         let mut app = App::new();
         app.init_resource::<WorldContentRuntime>();
+        app.init_resource::<EffectQueue<ConditionAdjustment>>();
+        app.init_resource::<EffectQueue<CapacityAdjustment>>();
         app.add_systems(Update, tick_infrastructure_condition);
         let entity = app
             .world_mut()
@@ -339,8 +363,8 @@ mod tests {
         drain_events(&mut app);
 
         app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .pending_condition_adjustments
+            .resource_mut::<EffectQueue<ConditionAdjustment>>()
+            .0
             .push(ConditionAdjustment {
                 uuid: "depot-1".to_string(),
                 delta: -65.0,
@@ -361,8 +385,8 @@ mod tests {
         );
 
         app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .pending_condition_adjustments
+            .resource_mut::<EffectQueue<ConditionAdjustment>>()
+            .0
             .push(ConditionAdjustment {
                 uuid: "depot-1".to_string(),
                 delta: 20.0,
@@ -389,8 +413,8 @@ mod tests {
         let (mut app, entity) = app_with(&depot_config(0.0));
         app.update();
         app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .pending_condition_adjustments
+            .resource_mut::<EffectQueue<ConditionAdjustment>>()
+            .0
             .push(ConditionAdjustment {
                 uuid: "no-such-depot".to_string(),
                 delta: -90.0,
@@ -405,8 +429,8 @@ mod tests {
         );
         assert!(
             app.world()
-                .resource::<WorldContentRuntime>()
-                .pending_condition_adjustments
+                .resource::<EffectQueue<ConditionAdjustment>>()
+                .0
                 .is_empty(),
             "…and the queue is drained regardless, so a stale name cannot accumulate"
         );
@@ -418,6 +442,8 @@ mod tests {
     fn authored_decay_walks_a_structure_down_through_its_threshold() {
         let mut app = App::new();
         app.init_resource::<WorldContentRuntime>();
+        app.init_resource::<EffectQueue<ConditionAdjustment>>();
+        app.init_resource::<EffectQueue<CapacityAdjustment>>();
         app.insert_resource(Time::<()>::default());
         app.add_systems(Update, tick_infrastructure_condition);
         app.world_mut().spawn((
@@ -464,6 +490,8 @@ mod tests {
         config.capacities.clear();
         let mut forward = App::new();
         forward.init_resource::<WorldContentRuntime>();
+        forward.init_resource::<EffectQueue<ConditionAdjustment>>();
+        forward.init_resource::<EffectQueue<CapacityAdjustment>>();
         forward.add_systems(Update, tick_infrastructure_condition);
         for uuid in ["depot-a", "depot-b", "depot-c"] {
             forward.world_mut().spawn((
@@ -475,6 +503,8 @@ mod tests {
 
         let mut reverse = App::new();
         reverse.init_resource::<WorldContentRuntime>();
+        reverse.init_resource::<EffectQueue<ConditionAdjustment>>();
+        reverse.init_resource::<EffectQueue<CapacityAdjustment>>();
         reverse.add_systems(Update, tick_infrastructure_condition);
         for uuid in ["depot-c", "depot-b", "depot-a"] {
             reverse.world_mut().spawn((

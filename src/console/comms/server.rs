@@ -18,7 +18,7 @@ use crate::comms::server::{
 use crate::entity_spawner::EntityUuid;
 use crate::messages::{CommsMessage, GamePhase};
 use crate::world::content::WorldEvent;
-use crate::world::server::{ShipModifiersParams, WorldLayerParams};
+use crate::world::server::{EffectQueues, ShipModifiersParams, WorldLayerParams};
 
 pub struct CommsConsolePlugin;
 
@@ -325,6 +325,9 @@ pub(crate) fn handle_respond_to_message(
     // rejection-feedback seam (`Sessions` + `SimOutbox`) addressed to the
     // submitting Comms holder.
     mut aux: CommsRespondAux,
+    // The per-owner effect queues an `on_pick` script pushes onto (issue #1223),
+    // the same sinks the trigger/callback paths use.
+    mut effect_queues: EffectQueues,
 ) {
     let Some((admitted, ship_config, seeking_hosts)) = ship_query.iter().next() else {
         return;
@@ -609,6 +612,7 @@ pub(crate) fn handle_respond_to_message(
                 .unwrap_or(&empty_anchors),
             origin_layer.clone(),
             sender_entity_name.clone(),
+            &mut effect_queues.out(),
         );
         // Single-shot dispatch, not a chaining pass — `new_events` go onto
         // `pending_world_events` for `tick_trigger_pipeline` to observe, the

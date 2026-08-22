@@ -138,6 +138,9 @@ pub mod dock;
 /// channel. Holds no state of its own — every fact is a fold of something
 /// another subsystem already owns.
 pub mod dossier;
+/// `EffectQueue<T>`: per-owner transient per-tick effect queues (issue #1223),
+/// extracted from the `WorldContentRuntime` god-resource.
+pub mod effect_queue;
 /// Infrastructure condition + capacity on authored world furniture (issue
 /// #1025): the pure degradation/repair track and its Bevy adapter.
 pub mod infrastructure;

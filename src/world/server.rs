@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rhai::{Map, AST};
 
+use crate::effect_queue::EffectQueue;
 use crate::lobby::{Target, WorldResource};
 use crate::messages::{GamePhase, ServerMessage};
 use crate::objectives::ObjectiveManager;
@@ -95,9 +96,8 @@ pub struct WorldContentRuntime {
     ///
     /// It sits on this resource rather than becoming a resource of its own so
     /// every site that already borrows the content runtime to apply a call's
-    /// effects can apply its deadline mutations too, and so the state census
-    /// (`tests/authoritative_state_enumeration.rs`) sees no new registration —
-    /// the same shape `WorldScriptRuntime::pending_callbacks` has.
+    /// effects can apply its deadline mutations too — the same shape
+    /// `WorldScriptRuntime::pending_callbacks` has.
     pub deadlines: crate::world::deadlines::DeadlineTable,
     /// The promises this run has made (issue #1029): every
     /// `ctx.commitments.record(…)` a dialogue beat wrote, and whether each ended
@@ -112,8 +112,7 @@ pub struct WorldContentRuntime {
     ///
     /// It sits on this resource beside `deadlines`, and for the same reason:
     /// every site that already borrows the content runtime to apply a call's
-    /// effects can apply its commitment mutations too, and the state census
-    /// (`tests/authoritative_state_enumeration.rs`) sees no new registration.
+    /// effects can apply its commitment mutations too.
     pub commitments: crate::world::commitments::CommitmentLedger,
     /// What this run's crew have found out (issue #1031): every
     /// `ctx.dossier.append(…)` a scan handler or a dialogue `on_pick` wrote,
@@ -129,9 +128,7 @@ pub struct WorldContentRuntime {
     /// It is the ONE input to a dossier that is not recomputed every tick, which
     /// is why it sits here rather than in `src/dossier/`: state belongs beside
     /// the other scenario state already on this resource, so every site that
-    /// borrows the content runtime to apply a call's effects can append to it,
-    /// and the state census (`tests/authoritative_state_enumeration.rs`) sees no
-    /// new registration.
+    /// borrows the content runtime to apply a call's effects can append to it.
     pub evidence: crate::dossier::evidence::EvidenceLog,
     /// The sides of this world's labour dispute (issue #1035): whether each is
     /// out, and what each makes of the crew.
@@ -145,54 +142,20 @@ pub struct WorldContentRuntime {
     ///
     /// It sits on this resource beside `deadlines` and `commitments`, and for
     /// their reason: every site that already borrows the content runtime to
-    /// apply a call's effects can apply a settlement too, and the state census
-    /// (`tests/authoritative_state_enumeration.rs`) sees no new registration.
+    /// apply a call's effects can apply a settlement too.
     pub workforce: crate::world::workforce::WorkforceRegister,
-    /// Infrastructure condition adjustments queued this tick by a scripted
-    /// `repair_infrastructure` / `damage_infrastructure` effect (issue #1025),
-    /// already resolved to the target's UUID.
-    ///
-    /// Drained every tick by
-    /// [`crate::infrastructure::tick_infrastructure_condition`] in
-    /// `SimSet::Modifiers`, so it is empty at every tick boundary — including
-    /// the one a snapshot is taken at. It exists so that the one system that
-    /// owns threshold edges is also the one system that moves condition:
-    /// an effect writing the component directly would cross a threshold with
-    /// nobody listening, and the world flag store would never hear about it.
-    pub pending_condition_adjustments: Vec<crate::infrastructure::ConditionAdjustment>,
-    /// Named infrastructure capacities a completed `transfer` moved this tick
-    /// (issue #1027), already resolved to each end's UUID.
-    ///
-    /// Drained by the same
-    /// [`crate::infrastructure::tick_infrastructure_condition`] on the same
-    /// terms and for the same reason as `pending_condition_adjustments` above:
-    /// that system is the one place a structure's published numbers move, so it
-    /// is the one place that can re-publish the counter a scenario predicate
-    /// reads. A transfer writing the component itself would move the goods and
-    /// leave every `counter(depot_transfer_throughput)` test reading the figure
-    /// the depot was authored with.
-    pub pending_capacity_adjustments: Vec<crate::infrastructure::CapacityAdjustment>,
-    /// Civilian orders queued this tick by a scripted `order_civilian_*` effect
-    /// (issue #1028), already resolved to the target's UUID.
-    ///
-    /// Drained every tick by [`crate::civilian::tick_civilian_traffic`] in
-    /// `SimSet::Input`, so it is empty at every tick boundary — including the
-    /// one a snapshot is taken at. It exists for the same reason the condition
-    /// queue above does: one system owns the compliance state machine, and an
-    /// effect writing the component directly would skip the acknowledgement the
-    /// crew is meant to watch for.
-    pub pending_civilian_orders: Vec<crate::civilian::PendingCivilianOrder>,
-    /// Weapons-hold orders queued this tick by a scripted `hold_fire` /
-    /// `release_fire` effect (issue #1041), as `(ship uuid, held)`, already
-    /// resolved from the authored entity name.
-    ///
-    /// Drained every tick by
-    /// [`crate::captain_plugin::apply_scripted_weapons_holds`] in
-    /// `SimSet::Modifiers`, so it is empty at every tick boundary — including
-    /// the one a snapshot is taken at. Queued rather than applied where it is
-    /// authored for the reason every name-carrying command here is: the applier
-    /// holds `name_to_uuid` and no entity query at all.
-    pub pending_weapons_holds: Vec<(String, bool)>,
+    // The four transient per-tick effect queues that used to sit here —
+    // `pending_condition_adjustments`, `pending_capacity_adjustments`,
+    // `pending_civilian_orders` and `pending_weapons_holds` — were extracted to
+    // their own per-owner `crate::effect_queue::EffectQueue<T>` resources (issue
+    // #1223), registered and drained by the plugin that owns each edge
+    // (Infrastructure / Civilian / captain). They lived here partly so the
+    // authoritative-state census "saw no new registration"; #1220–#1222 gave the
+    // census a real declaration registry, so each queue is now declared
+    // `ClearedAtFold` at its owning `build()` instead. `pending_world_events` and
+    // `pending_delayed_actions` stay: unlike those four they are NOT empty at a
+    // tick boundary (they are snapshotted / carried across ticks), so they are
+    // deferred state rather than a transient inter-system queue.
 }
 
 /// Bevy resource wrapping the server-side objective manager.
@@ -1923,6 +1886,9 @@ pub(crate) fn tick_trigger_pipeline(
     // take the `None` arm and the scripted-handler branch below is skipped
     // entirely — behaviour there is byte-identical to before scripting existed.
     mut script: ScriptRuntimeParams,
+    // The per-owner effect queues a fired trigger's scripted handler pushes onto
+    // (issue #1223).
+    mut effect_queues: EffectQueues,
 ) {
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
     // Seeded UUID source for `SpawnEntity` dispatch. Bound once per system run
@@ -2159,6 +2125,7 @@ pub(crate) fn tick_trigger_pipeline(
                                 .unwrap_or(&empty_anchors),
                             ft.origin_layer.clone(),
                             ft.entity_name.clone(),
+                            &mut effect_queues.out(),
                         );
                         // Script-scheduled delayed effects join the SAME queue a
                         // TOML `action_delays` entry uses; dropped when the
@@ -2327,6 +2294,9 @@ pub(crate) fn apply_script_commands(
     base_anchors: &HashMap<String, [f32; 3]>,
     origin_layer: Option<String>,
     entity_name: Option<String>,
+    // The per-owner effect queues (issue #1223), threaded through to the shared
+    // `apply_dispatch_result` below unchanged.
+    effects: &mut EffectQueuesOut,
 ) {
     for eff in commands_in {
         match eff {
@@ -2388,6 +2358,7 @@ pub(crate) fn apply_script_commands(
                     faction_dispatch,
                     ai_query,
                     balance_events.as_deref_mut(),
+                    effects,
                 );
             }
 
@@ -2434,8 +2405,77 @@ pub(crate) fn apply_script_commands(
                     faction_dispatch,
                     ai_query,
                     balance_events.as_deref_mut(),
+                    effects,
                 );
             }
+        }
+    }
+}
+
+/// The four transient per-tick effect queues an applied dispatch can enqueue
+/// (issue #1223), borrowed as plain `&mut Vec<T>` so [`apply_dispatch_result`]
+/// and [`apply_script_commands`] stay Bevy-agnostic — the same shape their
+/// `runtime: &mut WorldContentRuntime` parameter already has. An effect-applying
+/// SYSTEM holds the four `EffectQueue<T>` resources (via [`EffectQueues`]) and
+/// lends them here with [`EffectQueues::out`]; a bare-`App` test lends four local
+/// `Vec`s instead.
+pub(crate) struct EffectQueuesOut<'a> {
+    /// Drained by `crate::infrastructure::tick_infrastructure_condition`.
+    pub condition_adjustments: &'a mut Vec<crate::infrastructure::ConditionAdjustment>,
+    /// Drained by the same infrastructure tick.
+    pub capacity_adjustments: &'a mut Vec<crate::infrastructure::CapacityAdjustment>,
+    /// Drained by `crate::civilian::tick_civilian_traffic`.
+    pub civilian_orders: &'a mut Vec<crate::civilian::PendingCivilianOrder>,
+    /// Drained by `crate::console::captain::server::apply_scripted_weapons_holds`,
+    /// as `(ship uuid, held)`.
+    pub weapons_holds: &'a mut Vec<(String, bool)>,
+}
+
+/// The four per-owner [`EffectQueue`] resources an effect-applying SYSTEM needs,
+/// bundled as one `SystemParam` (issue #1223) so a dispatch system gains one
+/// parameter rather than four. Each resource is registered and declared
+/// `ClearedAtFold` by its OWNING plugin (Infrastructure / Civilian / captain);
+/// this bundle only borrows them at the push site.
+///
+/// Each queue is `Option<ResMut>` with a `Local` fallback so a bare-`App` test
+/// that runs a dispatch system WITHOUT the owning plugins does not panic on a
+/// missing resource: an effect with nowhere real to land goes to the fallback and
+/// is dropped. In a full sim app every owning plugin registers its queue, so the
+/// fallback is never reached — a property the digest A/B leans on, because an
+/// effect silently dropped there would move a shipped world's digest.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct EffectQueues<'w, 's> {
+    condition: Option<ResMut<'w, EffectQueue<crate::infrastructure::ConditionAdjustment>>>,
+    capacity: Option<ResMut<'w, EffectQueue<crate::infrastructure::CapacityAdjustment>>>,
+    civilian_orders: Option<ResMut<'w, EffectQueue<crate::civilian::PendingCivilianOrder>>>,
+    weapons_holds: Option<ResMut<'w, EffectQueue<(String, bool)>>>,
+    condition_fallback: Local<'s, Vec<crate::infrastructure::ConditionAdjustment>>,
+    capacity_fallback: Local<'s, Vec<crate::infrastructure::CapacityAdjustment>>,
+    civilian_orders_fallback: Local<'s, Vec<crate::civilian::PendingCivilianOrder>>,
+    weapons_holds_fallback: Local<'s, Vec<(String, bool)>>,
+}
+
+impl EffectQueues<'_, '_> {
+    /// Borrow the four queues as an [`EffectQueuesOut`] to lend to the applier,
+    /// falling back to the per-queue `Local` sink when the resource is absent.
+    pub(crate) fn out(&mut self) -> EffectQueuesOut<'_> {
+        EffectQueuesOut {
+            condition_adjustments: match &mut self.condition {
+                Some(q) => &mut q.0,
+                None => &mut self.condition_fallback,
+            },
+            capacity_adjustments: match &mut self.capacity {
+                Some(q) => &mut q.0,
+                None => &mut self.capacity_fallback,
+            },
+            civilian_orders: match &mut self.civilian_orders {
+                Some(q) => &mut q.0,
+                None => &mut self.civilian_orders_fallback,
+            },
+            weapons_holds: match &mut self.weapons_holds {
+                Some(q) => &mut q.0,
+                None => &mut self.weapons_holds_fallback,
+            },
         }
     }
 }
@@ -2485,6 +2525,11 @@ pub(crate) fn apply_dispatch_result(
     // objective actually transitioning. `Option<&mut Messages<_>>` so callers
     // in bare-`App` fixtures (no registered message) can pass `None`.
     mut balance_events: Option<&mut bevy::ecs::message::Messages<crate::balance::BalanceEvent>>,
+    // The four transient effect queues a name-resolved command lands on (issue
+    // #1223): condition/capacity adjustments, civilian orders and weapons holds
+    // used to be `pending_*` fields on `runtime`; each is now its owning plugin's
+    // `EffectQueue<T>` resource, lent here as plain `&mut Vec<T>`.
+    effects: &mut EffectQueuesOut,
 ) {
     let DispatchResult {
         commands: action_cmds,
@@ -2683,8 +2728,8 @@ pub(crate) fn apply_dispatch_result(
                     );
                     continue;
                 };
-                runtime
-                    .pending_condition_adjustments
+                effects
+                    .condition_adjustments
                     .push(crate::infrastructure::ConditionAdjustment { uuid, delta });
             }
 
@@ -2705,13 +2750,13 @@ pub(crate) fn apply_dispatch_result(
                     );
                     continue;
                 };
-                runtime.pending_capacity_adjustments.push(
-                    crate::infrastructure::CapacityAdjustment {
+                effects
+                    .capacity_adjustments
+                    .push(crate::infrastructure::CapacityAdjustment {
                         uuid,
                         capacity,
                         delta,
-                    },
-                );
+                    });
             }
 
             // Issue #1035. Nothing to resolve and nothing to queue: a
@@ -2743,7 +2788,7 @@ pub(crate) fn apply_dispatch_result(
                     );
                     continue;
                 };
-                runtime.pending_weapons_holds.push((uuid, held));
+                effects.weapons_holds.push((uuid, held));
             }
 
             // Issue #1028, and the same shape for the same reason: the applier
@@ -2762,8 +2807,8 @@ pub(crate) fn apply_dispatch_result(
                     );
                     continue;
                 };
-                runtime
-                    .pending_civilian_orders
+                effects
+                    .civilian_orders
                     .push(crate::civilian::PendingCivilianOrder { uuid, order });
             }
 
@@ -3053,6 +3098,10 @@ pub(crate) fn tick_delayed_actions(
     >,
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    // The per-owner effect queues (issue #1223): a delayed action can resolve a
+    // `hold_fire` / `order_civilian` / infrastructure adjustment exactly as an
+    // immediate one does, so it needs the same sinks.
+    mut effect_queues: EffectQueues,
 ) {
     let Some(elapsed) = time.as_ref().and_then(|t| {
         runtime
@@ -3084,6 +3133,7 @@ pub(crate) fn tick_delayed_actions(
     let schedule = partition_delayed_actions(queued, elapsed);
     runtime.pending_delayed_actions = schedule.still_pending;
 
+    let mut effects_out = effect_queues.out();
     for pda in schedule.ready {
         // Same live-store rule as `tick_trigger_pipeline`: re-project per action so
         // each dispatch sees the previous one's writes.
@@ -3127,6 +3177,7 @@ pub(crate) fn tick_delayed_actions(
             &mut faction_dispatch,
             &mut ai_query,
             balance_events.as_deref_mut(),
+            &mut effects_out,
         );
         runtime.pending_world_events.extend(out_events);
     }
@@ -3198,6 +3249,9 @@ pub(crate) fn tick_script_callbacks(
     // for a bare-`App` fixture, exactly like `tick_delayed_actions`.
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
     mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    // The per-owner effect queues a due callback's script pushes onto (issue
+    // #1223), the same sinks the trigger and delayed paths use.
+    mut effect_queues: EffectQueues,
 ) {
     // `now_tick` before the `WorldScriptRuntime` borrow (disjoint `script` field).
     let now_tick = script.sim_tick.as_ref().map(|t| t.0).unwrap_or(0);
@@ -3339,6 +3393,7 @@ pub(crate) fn tick_script_callbacks(
                 .unwrap_or(&empty_anchors),
             None,
             None,
+            &mut effect_queues.out(),
         );
         runtime.pending_world_events.extend(out_events);
         // A callback-scheduled `in_seconds` effect joins the SAME delayed queue,

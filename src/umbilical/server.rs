@@ -28,6 +28,7 @@ use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::damage::DamageTier;
 use crate::dock::DockControl;
+use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::{CapacityAdjustment, InfrastructureCondition};
 use crate::messages::{
@@ -40,7 +41,6 @@ use crate::umbilical::flow::{
     plan_flow, CapacityEnd, FlowContext, FlowEnds, FlowVerdict, UmbilicalConfig,
     UmbilicalDirection, UmbilicalRefusal,
 };
-use crate::world::server::WorldContentRuntime;
 
 /// One ship's transfer umbilical (issue #1160): the authored flow terms, the
 /// power group it draws from, and the live run state.
@@ -357,7 +357,11 @@ struct OperatorRow {
 /// shows both ends' levels the moment a berth is in reach.
 #[allow(clippy::type_complexity)]
 pub fn tick_umbilical(
-    runtime: Option<ResMut<WorldContentRuntime>>,
+    // The capacity-adjustment queue, extracted off `WorldContentRuntime` (issue
+    // #1223) and owned by `InfrastructurePlugin`; this pusher feeds it. `Option`
+    // so a reduced test app that runs the umbilical systems without
+    // `InfrastructurePlugin` is a no-op rather than a panic.
+    capacity_queue: Option<ResMut<EffectQueue<CapacityAdjustment>>>,
     time: Res<Time>,
     mut set: ParamSet<(
         // Operator rows: everything the verdict needs off the umbilical's own hull.
@@ -546,15 +550,14 @@ pub fn tick_umbilical(
     }
 
     // Queue the moves only when there is something to move, so a world whose
-    // umbilicals are idle never marks `WorldContentRuntime` changed on a quiet
-    // tick.
+    // umbilicals are idle never marks the capacity queue changed on a quiet tick.
     if adjustments.is_empty() {
         return;
     }
-    let Some(mut runtime) = runtime else {
+    let Some(mut capacity_queue) = capacity_queue else {
         return;
     };
-    runtime.pending_capacity_adjustments.extend(adjustments);
+    capacity_queue.0.extend(adjustments);
 }
 
 // ── The wire ─────────────────────────────────────────────────────────────────

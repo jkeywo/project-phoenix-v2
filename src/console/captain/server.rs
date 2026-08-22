@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 
+use crate::authoritative::{DeclareState, StateClass};
 use crate::command_admission::ai_emit::emit_ai_command;
+use crate::effect_queue::EffectQueue;
 use crate::messages::{
     AdmittedCommands, CameraView, CaptainBlackboard, ObjectiveSnapshot, SystemBlackboard,
     SystemControlPayload, SystemId, ViewMode,
@@ -41,6 +43,16 @@ impl Plugin for CaptainPlugin {
             crate::system_registry::VIEWSCREEN_SYSTEM_ID,
         ));
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
+        // The scripted weapons-hold queue `apply_scripted_weapons_holds` drains
+        // (issue #1223), registered and declared at this owning site. A transient
+        // inter-system queue — drained in full every tick, empty at every
+        // fold/snapshot boundary — so `ClearedAtFold`. Payload is `(ship uuid,
+        // held)`, resolved from the authored entity name by the applier.
+        app.init_resource::<EffectQueue<(String, bool)>>()
+            .declare_state::<EffectQueue<(String, bool)>>(
+                StateClass::ClearedAtFold,
+                "digest-exclusion-classes",
+            );
         // The ONE shared AI decision cadence (issues #889, #895).
         crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
@@ -179,7 +191,12 @@ fn handle_set_weapons_hold(
 /// posture is, and the posture is then read through the same authored predicate
 /// a captain's order is.
 pub fn apply_scripted_weapons_holds(
-    runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
+    // The scripted weapons-hold queue, extracted off `WorldContentRuntime` (issue
+    // #1223) and owned by `CaptainPlugin`; this is its drain. `Option` so a
+    // reduced test app that runs this system without the registering plugin is a
+    // no-op rather than a panic — the same defensiveness the former
+    // `Option<ResMut<WorldContentRuntime>>` had.
+    weapons_holds_queue: Option<ResMut<EffectQueue<(String, bool)>>>,
     mut ships: Query<
         (
             &crate::entity_spawner::EntityUuid,
@@ -188,15 +205,15 @@ pub fn apply_scripted_weapons_holds(
         With<crate::server_app::Ship>,
     >,
 ) {
-    let Some(mut runtime) = runtime else {
+    let Some(mut weapons_holds_queue) = weapons_holds_queue else {
         return;
     };
-    // A `Deref` read, so a world that queues nothing never marks
-    // `WorldContentRuntime` changed — the `tick_operations` precedent.
-    if runtime.pending_weapons_holds.is_empty() {
+    // A `Deref` read, so a world that queues nothing never marks the queue
+    // changed — the `tick_operations` precedent.
+    if weapons_holds_queue.0.is_empty() {
         return;
     }
-    let queued = std::mem::take(&mut runtime.pending_weapons_holds);
+    let queued = std::mem::take(&mut weapons_holds_queue.0);
     for (uuid, held) in queued {
         let mut found = false;
         for (ship_uuid, mut hold) in ships.iter_mut() {

@@ -46,8 +46,9 @@
 //!
 //! * a **console** order arrives as an admitted `OrderCivilian` payload on the
 //!   `navigation` system, read out of the ordering ship's `AdmittedCommands`;
-//! * a **script** order arrives on `WorldContentRuntime::pending_civilian_orders`,
-//!   pushed by the applier with the target already resolved to a UUID.
+//! * a **script** order arrives on the `EffectQueue<PendingCivilianOrder>`
+//!   resource (issue #1223), pushed by the applier with the target already
+//!   resolved to a UUID.
 //!
 //! A malformed or unaddressable console order is answered with a
 //! `ServerMessage::CivilianOrderRejected` carrying a `strings.csv` reason id, on
@@ -57,9 +58,11 @@
 
 use bevy::prelude::*;
 
+use crate::authoritative::{DeclareState, StateClass};
 use crate::civilian::traffic::{
     CivilianConfig, CivilianOrder, CivilianState, CivilianTravel, ComplianceDisposition,
 };
+use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{BehaviourSection, EntityUuid, FactionComponent};
 use crate::entity_config::DoctrineObjective;
 use crate::logging::LogFilterConfig;
@@ -123,6 +126,15 @@ pub struct CivilianPlugin;
 
 impl Plugin for CivilianPlugin {
     fn build(&self, app: &mut App) {
+        // The scripted-order queue `tick_civilian_traffic` drains (issue #1223),
+        // registered and declared at this owning site. A transient inter-system
+        // queue — drained in full every tick, empty at every fold/snapshot
+        // boundary — so `ClearedAtFold`.
+        app.init_resource::<EffectQueue<PendingCivilianOrder>>()
+            .declare_state::<EffectQueue<PendingCivilianOrder>>(
+                StateClass::ClearedAtFold,
+                "digest-exclusion-classes",
+            );
         app.add_systems(
             FixedUpdate,
             tick_civilian_traffic.in_set(crate::sim_sets::SimSet::Input),
@@ -147,6 +159,10 @@ impl Plugin for CivilianPlugin {
 #[allow(clippy::too_many_arguments)]
 pub fn tick_civilian_traffic(
     runtime: Option<ResMut<WorldContentRuntime>>,
+    // The scripted civilian-order queue, extracted off `WorldContentRuntime`
+    // (issue #1223). This is its owning drain; console orders still arrive on the
+    // `order_sources` query below.
+    mut civilian_orders_queue: ResMut<EffectQueue<PendingCivilianOrder>>,
     world_config: Option<Res<WorldConfig>>,
     factions: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
@@ -163,10 +179,10 @@ pub fn tick_civilian_traffic(
     )>,
     log: Option<Res<LogFilterConfig>>,
 ) {
-    let Some(mut runtime) = runtime else {
+    let Some(runtime) = runtime else {
         return;
     };
-    if civilians.is_empty() && runtime.pending_civilian_orders.is_empty() {
+    if civilians.is_empty() && civilian_orders_queue.0.is_empty() {
         return;
     }
     let now = sim_tick.map(|t| t.0).unwrap_or(0);
@@ -189,8 +205,7 @@ pub fn tick_civilian_traffic(
     // target UUID. Script orders are taken first so a scenario and a crew
     // issuing on the same tick resolve in a fixed order — and the crew wins,
     // because the later `receive_order` replaces the earlier.
-    let mut queued: Vec<PendingCivilianOrder> =
-        std::mem::take(&mut runtime.pending_civilian_orders);
+    let mut queued: Vec<PendingCivilianOrder> = std::mem::take(&mut civilian_orders_queue.0);
     let mut rejections: Vec<(String, String, String)> = Vec::new();
     for admitted in order_sources.iter() {
         for cmd in admitted.for_target(crate::system_registry::NAVIGATION_SYSTEM_ID) {
@@ -822,8 +837,8 @@ mod tests {
             },
         );
         app.world_mut()
-            .resource_mut::<WorldContentRuntime>()
-            .pending_civilian_orders
+            .resource_mut::<EffectQueue<PendingCivilianOrder>>()
+            .0
             .push(PendingCivilianOrder {
                 uuid: "civ-1".into(),
                 order: CivilianOrder::divert_to_anchor("holding_point"),
@@ -936,8 +951,8 @@ mod tests {
         app.world_mut().run_schedule(FixedUpdate);
         assert!(app
             .world()
-            .resource::<WorldContentRuntime>()
-            .pending_civilian_orders
+            .resource::<EffectQueue<PendingCivilianOrder>>()
+            .0
             .is_empty());
     }
 }

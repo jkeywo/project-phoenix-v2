@@ -95,6 +95,19 @@ pub fn encode_ai_doctrine(p: &crate::debug::payload::AiStatePayload) -> String {
     serde_json::to_string(p).unwrap_or_default()
 }
 
+/// Encode a scenario-state debug payload to JSON (issue #1148, PRD #1144).
+///
+/// The single seam where `crate::debug::payload::ScenarioStatePayload` becomes
+/// the JSON the dock panel and the headless report read — the same
+/// `serde_json`-confined encoder every PRD #1144 surface uses (AGENTS.md Key
+/// Constraint 1). Returns `String` (not `Result`) for `encode_station_activity`'s
+/// reason: the payload is String/int/float scalars in `Vec`s that serde never
+/// fails to encode, so an error becomes an empty string the dock treats as "no
+/// data yet" rather than a panic on the sim thread.
+pub fn encode_scenario_state(p: &crate::debug::payload::ScenarioStatePayload) -> String {
+    serde_json::to_string(p).unwrap_or_default()
+}
+
 /// Decode inbound JSON from the HTML/PeerJS bridge.
 ///
 /// The wire shape is a full `ClientMessage` — every emitter (phone consoles,
@@ -2888,6 +2901,84 @@ mod tests {
         );
         // Round-trips back to the same payload — the schema is stable both ways.
         let decoded: AiStatePayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    /// The scenario-state payload's JSON shape is pinned to what
+    /// `gui/scenario-state-panel.js` parses (issue #1148). Same contract as the
+    /// station-activity test: a versioned envelope, deterministic ordering, and a
+    /// round-trip. If the wire shape changes, the panel and this test move
+    /// together.
+    #[test]
+    fn scenario_state_payload_wire_shape_is_pinned() {
+        use crate::core::messages::{AiDirective, ObjectiveStatus};
+        use crate::debug::payload::{
+            ScenarioCommitment, ScenarioDeadline, ScenarioDelayedAction, ScenarioDossierEntry,
+            ScenarioFlag, ScenarioObjective, ScenarioStatePayload, ScenarioTrigger,
+            DEBUG_SCHEMA_VERSION,
+        };
+
+        let payload = ScenarioStatePayload {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            flags: vec![ScenarioFlag {
+                name: "alarm".into(),
+                value: 1,
+            }],
+            objectives: vec![ScenarioObjective {
+                id: "kill".into(),
+                status: ObjectiveStatus::Active,
+                mandatory: true,
+                base_priority: 7.0,
+                directive: AiDirective::Destroy {
+                    target: "raider".into(),
+                },
+            }],
+            triggers: vec![ScenarioTrigger {
+                id: Some("beat".into()),
+                condition: "on_timer(after_secs=30)".into(),
+                when: Some("flag(ready)".into()),
+                repeat: false,
+                fired: false,
+                pending: true,
+                when_holds: false,
+                last_fired_secs: None,
+            }],
+            delayed_actions: vec![ScenarioDelayedAction {
+                action: "set_world_flag(reinforce)".into(),
+                entity: None,
+                fire_at_secs: 45.0,
+            }],
+            deadlines: vec![ScenarioDeadline {
+                id: "window".into(),
+                label: "world.deadline.window".into(),
+                visible: true,
+                due_tick: 36000,
+                state: "pending".into(),
+            }],
+            commitments: vec![ScenarioCommitment {
+                id: "passage".into(),
+                made_to: "strike_committee".into(),
+                terms: "terms.passage".into(),
+                resolves_when: String::new(),
+                state: "open".into(),
+                made_at_tick: 10,
+                resolved_at_tick: None,
+            }],
+            dossier: vec![ScenarioDossierEntry {
+                subject_uuid: "uuid-1".into(),
+                text: "evidence.forged_manifest".into(),
+                provenance: "records".into(),
+                gathered_at_tick: 40,
+            }],
+        };
+        let json = crate::core::codec::encode_scenario_state(&payload);
+        assert_eq!(
+            json,
+            r#"{"schema_version":1,"flags":[{"name":"alarm","value":1}],"objectives":[{"id":"kill","status":"Active","mandatory":true,"base_priority":7.0,"directive":{"kind":"Destroy","target":"raider"}}],"triggers":[{"id":"beat","condition":"on_timer(after_secs=30)","when":"flag(ready)","repeat":false,"fired":false,"pending":true,"when_holds":false}],"delayed_actions":[{"action":"set_world_flag(reinforce)","fire_at_secs":45.0}],"deadlines":[{"id":"window","label":"world.deadline.window","visible":true,"due_tick":36000,"state":"pending"}],"commitments":[{"id":"passage","made_to":"strike_committee","terms":"terms.passage","state":"open","made_at_tick":10}],"dossier":[{"subject_uuid":"uuid-1","text":"evidence.forged_manifest","provenance":"records","gathered_at_tick":40}]}"#,
+            "the scenario-state JSON shape must match gui/scenario-state-panel.js"
+        );
+        // Round-trips back to the same payload — the schema is stable both ways.
+        let decoded: ScenarioStatePayload = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, payload);
     }
 

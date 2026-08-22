@@ -217,6 +217,11 @@ pub struct RunReport {
     /// its dock. Empty (`buckets: []`) for a run that admitted no station
     /// commands.
     pub station_activity: StationActivityPayload,
+    /// The end-of-run scenario-state projection (issue #1148, PRD #1144): the
+    /// flags, objectives, triggers, queues, commitments and dossier the run
+    /// finished with. `None` when no world was loaded. A read-only projection
+    /// off `WorldContentRuntime` — capturing it never moves the seeded digest.
+    pub scenario: Option<crate::debug::payload::ScenarioStatePayload>,
 }
 
 impl RunReport {
@@ -314,6 +319,15 @@ impl RunReport {
         s.push_str(&format!(
             "  \"station_activity\": {},\n",
             crate::core::codec::encode_station_activity(&self.station_activity)
+        ));
+        // The scenario-state surface (issue #1148): the structured JSON the codec
+        // seam produces, spliced in as one field, or `null` when no world loaded.
+        s.push_str(&format!(
+            "  \"scenario\": {},\n",
+            match &self.scenario {
+                Some(payload) => crate::core::codec::encode_scenario_state(payload),
+                None => "null".to_string(),
+            }
         ));
         // `OutcomeReport::to_json` emits `"outcome": ..., "sides": {...}` as a
         // body, so it slots straight in as the final two report fields.
@@ -462,6 +476,21 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         .get_resource::<crate::debug::StationActivityTracker>()
         .map(|tracker| tracker.report())
         .unwrap_or_default();
+    // The end-of-run scenario-state projection (issue #1148). A read-only fold
+    // off `WorldContentRuntime` and the objective manager, so it costs the run
+    // nothing and cannot move the digest. `None` when no world was loaded.
+    let scenario = app
+        .world()
+        .get_resource::<crate::world::server::WorldContentRuntime>()
+        .map(|runtime| {
+            let default_objectives = crate::objectives::ObjectiveManager::default();
+            let objectives = app
+                .world()
+                .get_resource::<crate::world::server::ObjectiveManagerRes>()
+                .map(|o| &o.0)
+                .unwrap_or(&default_objectives);
+            crate::debug::scenario::collect_scenario_state(runtime, objectives)
+        });
 
     RunReport {
         ticks,
@@ -483,6 +512,7 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         outcome_report,
         ai_doctrine,
         station_activity,
+        scenario,
     }
     .tap_stream(app, args)
 }
@@ -728,6 +758,7 @@ mod tests {
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
+            scenario: None,
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)
@@ -774,6 +805,7 @@ mod tests {
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
+            scenario: None,
         };
         let parsed: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
         assert!(parsed["ship"].is_null());
@@ -832,6 +864,7 @@ mod tests {
             ),
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
+            scenario: None,
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)
@@ -897,6 +930,7 @@ mod tests {
             ),
             ai_doctrine: String::new(),
             station_activity: payload,
+            scenario: None,
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)

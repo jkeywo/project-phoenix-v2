@@ -168,6 +168,7 @@ pub fn drain_client_debug_flags(
     mut inspector: ResMut<DebugEntityInspectorEnabled>,
     mut station_activity: ResMut<crate::debug::DebugStationActivityEnabled>,
     mut ai_doctrine: ResMut<crate::debug::DebugAiDoctrineEnabled>,
+    mut scenario_state: ResMut<crate::debug::DebugScenarioStateEnabled>,
 ) {
     let mut requests: Vec<(String, crate::core::messages::DebugFlag)> = Vec::new();
     for ev in reader.read() {
@@ -198,6 +199,7 @@ pub fn drain_client_debug_flags(
         &mut inspector.0,
         &mut station_activity.0,
         &mut ai_doctrine.0,
+        &mut scenario_state.0,
     );
     debug_assert!(
         !pause_changed,
@@ -303,6 +305,7 @@ pub fn report_debug_state(
     inspector: Res<DebugEntityInspectorEnabled>,
     station_activity: Res<crate::debug::DebugStationActivityEnabled>,
     ai_doctrine: Res<crate::debug::DebugAiDoctrineEnabled>,
+    scenario_state: Res<crate::debug::DebugScenarioStateEnabled>,
     god_mode: Option<Res<crate::server_app::GodMode>>,
     mut last: ResMut<LastReportedDebugState>,
     mut writer: MessageWriter<crate::lobby::OutboundMessage>,
@@ -336,6 +339,7 @@ pub fn report_debug_state(
                 DebugFlag::Inspector => inspector.0,
                 DebugFlag::StationActivity => station_activity.0,
                 DebugFlag::AiDoctrine => ai_doctrine.0,
+                DebugFlag::ScenarioState => scenario_state.0,
             };
             (*flag, on)
         })
@@ -1008,6 +1012,7 @@ mod tests {
             let (mut damage, mut entities, mut inspector) = (false, false, false);
             let mut station_activity = false;
             let mut ai_doctrine = false;
+            let mut scenario_state = false;
             let pending =
                 admitted_flag_toggles([("phone", DebugFlag::Damage)], connected(&["phone"]));
             let pause_changed = crate::server::bridge::apply_pending_toggles(
@@ -1020,6 +1025,7 @@ mod tests {
                 &mut inspector,
                 &mut station_activity,
                 &mut ai_doctrine,
+                &mut scenario_state,
             );
             assert!(damage, "the named flag must flip");
             assert!(!pause_changed);
@@ -1031,6 +1037,7 @@ mod tests {
                     && !inspector
                     && !station_activity
                     && !ai_doctrine
+                    && !scenario_state
             );
         }
 

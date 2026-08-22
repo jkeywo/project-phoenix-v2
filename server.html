@@ -913,6 +913,28 @@
     .sa-station-label { fill: #cde; font-size: 10px; font-family: monospace; }
     .sa-svg { max-width: 100%; height: auto; }
     .sa-empty { color: #6a86a0; font-size: 11px; }
+    /* Scenario-state panel (issue #1148) — the second structured-JSON debug
+       output. Like the station-activity chart it opts out of the monospace text
+       styling the four legacy overlays share, and lays its surfaces out as
+       labelled sections. */
+    #debug-content .ss-panel { white-space: normal; color: #cde; font-family: monospace; font-size: 10px; }
+    .ss-title { font-size: 12px; color: #9fd; margin-bottom: 4px; }
+    .ss-section { margin-bottom: 8px; }
+    .ss-section-title { font-size: 10px; color: #9fd; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; border-bottom: 1px solid #24384c; }
+    .ss-none { color: #6a86a0; font-size: 10px; }
+    .ss-flag, .ss-objective, .ss-trigger, .ss-delayed, .ss-deadline, .ss-commitment, .ss-dossier-entry {
+      display: flex; gap: 8px; padding: 1px 0; flex-wrap: wrap; align-items: baseline;
+    }
+    .ss-flag-name, .ss-objective-id, .ss-deadline-id, .ss-commitment-id, .ss-dossier-subject { color: #cde; }
+    .ss-flag-value, .ss-objective-priority, .ss-deadline-due { color: #ffb347; }
+    .ss-objective-status, .ss-objective-directive, .ss-deadline-state, .ss-commitment-state,
+    .ss-dossier-provenance, .ss-trigger-status { color: #6a86a0; }
+    .ss-trigger-condition, .ss-delayed-action { color: #4fd1ff; }
+    .ss-trigger-when { color: #9fd; }
+    .ss-trigger-when[data-holds="false"] { color: #ffb347; }
+    .ss-trigger-status[data-state="fired"] { color: #4f8f6a; }
+    .ss-trigger-status[data-state="waiting"] { color: #ffb347; }
+    .ss-empty { color: #6a86a0; font-size: 11px; }
 
     /* AI doctrine-pool panel (issue #1149) — the second structured-JSON debug
        output: per AI ship, its scored-objective pool as a candidate table with

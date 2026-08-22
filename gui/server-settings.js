@@ -31,6 +31,7 @@ import { t } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
 import { renderStationActivityChart } from './station-activity-chart.js';
 import { renderAiDoctrinePanel } from './ai-doctrine-panel.js';
+import { renderScenarioStatePanel } from './scenario-state-panel.js';
 import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
 import {
   mountOverlayShell,
@@ -54,7 +55,8 @@ import {
  * are legacy pre-formatted TEXT streams (painted as `textContent`). The fifth,
  * station activity (issue #1145), is the first structured-JSON surface: it
  * carries a `render` function that parses the payload and draws a chart instead
- * — the pattern every later PRD #1144 surface copies.
+ * — the pattern every later PRD #1144 surface copies. Scenario state (issue
+ * #1148) is the second, drawing a panel from its own payload.
  */
 export const DEBUG_OUTPUTS = [
   { id: 'modifiers', labelId: 'settings.debug.modifiers', toggle: 'wasm_toggle_debug_overlay', read: 'wasm_get_debug_state' },
@@ -65,6 +67,7 @@ export const DEBUG_OUTPUTS = [
   // AI doctrine pool (issue #1149): the second structured-JSON surface, drawn as
   // a per-ship candidate table rather than printed as text.
   { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', toggle: 'wasm_toggle_ai_doctrine', read: 'wasm_get_ai_doctrine', render: renderAiDoctrinePanel },
+  { id: 'scenario-state', labelId: 'settings.debug.scenario', toggle: 'wasm_toggle_scenario_state', read: 'wasm_get_scenario_state', render: renderScenarioStatePanel },
 ];
 
 /** Cheats and world-drawing toggles, each with an authoritative read-back. */

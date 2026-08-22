@@ -24,15 +24,19 @@
 
 pub mod ai_state;
 pub mod payload;
+pub mod scenario;
 pub mod station_activity;
 
 use bevy::prelude::*;
 
 pub use ai_state::{AiDoctrineCapture, DebugAiDoctrineEnabled};
 pub use payload::{
-    ActivitySource, AiStatePayload, DoctrineCandidate, DoctrineChoice, ShipDoctrine,
-    StationActivityBucket, StationActivityEntry, StationActivityPayload, DEBUG_SCHEMA_VERSION,
+    ActivitySource, AiStatePayload, DoctrineCandidate, DoctrineChoice, ScenarioCommitment,
+    ScenarioDeadline, ScenarioDelayedAction, ScenarioDossierEntry, ScenarioFlag, ScenarioObjective,
+    ScenarioStatePayload, ScenarioTrigger, ShipDoctrine, StationActivityBucket,
+    StationActivityEntry, StationActivityPayload, DEBUG_SCHEMA_VERSION,
 };
+pub use scenario::{DebugScenarioStateEnabled, ScenarioStateCapture};
 pub use station_activity::{
     DebugStationActivityEnabled, StationActivityCapture, StationActivityTracker,
 };
@@ -56,7 +60,9 @@ impl Plugin for DebugPlugin {
             .init_resource::<DebugStationActivityEnabled>()
             .init_resource::<StationActivityCapture>()
             .init_resource::<DebugAiDoctrineEnabled>()
-            .init_resource::<AiDoctrineCapture>();
+            .init_resource::<AiDoctrineCapture>()
+            .init_resource::<DebugScenarioStateEnabled>()
+            .init_resource::<ScenarioStateCapture>();
 
         // The observability surfaces are read-only projections nothing in the
         // fixed tick reads back, so they are digest EXCLUSIONS, not authoritative
@@ -71,7 +77,12 @@ impl Plugin for DebugPlugin {
         )
         .declare_state::<StationActivityCapture>(StateClass::Presentation, "debug-station-activity")
         .declare_state::<DebugAiDoctrineEnabled>(StateClass::Presentation, "debug-ai-doctrine")
-        .declare_state::<AiDoctrineCapture>(StateClass::Presentation, "debug-ai-doctrine");
+        .declare_state::<AiDoctrineCapture>(StateClass::Presentation, "debug-ai-doctrine")
+        .declare_state::<DebugScenarioStateEnabled>(
+            StateClass::Presentation,
+            "debug-scenario-state",
+        )
+        .declare_state::<ScenarioStateCapture>(StateClass::Presentation, "debug-scenario-state");
 
         // Counters: always-on, after the whole tick's admission has run (the
         // same window the unrouted-command lint observes), gated only on there
@@ -102,6 +113,19 @@ impl Plugin for DebugPlugin {
                 .after(crate::sim_sets::SimSet::Broadcast)
                 .run_if(in_state(crate::core::messages::GamePhase::InProgress))
                 .run_if(|flag: Res<DebugAiDoctrineEnabled>| flag.0),
+        );
+
+        // Scenario state (issue #1148): a read-only projection off the world
+        // content runtime, with no counters to feed — the whole surface is this
+        // flag-gated publish. Ordered after `SimSet::Broadcast` so it reads the
+        // trigger pipeline's end-of-tick state, the same window the
+        // station-activity tap uses.
+        app.add_systems(
+            FixedUpdate,
+            scenario::publish_scenario_state
+                .after(crate::sim_sets::SimSet::Broadcast)
+                .run_if(in_state(crate::core::messages::GamePhase::InProgress))
+                .run_if(|flag: Res<DebugScenarioStateEnabled>| flag.0),
         );
     }
 }

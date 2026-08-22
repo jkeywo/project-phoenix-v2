@@ -340,6 +340,25 @@ struct ObjectiveRecord {
     command_stance: Option<(StationId, StationStanceConfig)>,
 }
 
+/// A read-only view over one objective for the scenario-state debug surface
+/// (issue #1148). Borrows the record so [`ObjectiveManager::debug_views`] can
+/// project without cloning; the debug projector maps it into the owned
+/// `crate::debug::payload::ScenarioObjective` it puts on the wire.
+#[derive(Clone, Copy, Debug)]
+pub struct ObjectiveDebugView<'a> {
+    /// Stable objective id.
+    pub id: &'a str,
+    /// Active / Completed / Failed.
+    pub status: &'a ObjectiveStatus,
+    /// Whether the mission requires this objective.
+    pub mandatory: bool,
+    /// The authored base priority — the "score" the debug objective table shows,
+    /// before the mandatory bonus and any per-tick condition modifiers.
+    pub base_priority: f32,
+    /// The mission-altitude AI directive attached to this objective.
+    pub directive: &'a AiDirective,
+}
+
 // ── Manager ────────────────────────────────────────────────────────────────
 
 /// Manages the full lifecycle of mission objectives.
@@ -591,6 +610,29 @@ impl ObjectiveManager {
         // guard depends on every scoring path being totally ordered (#752).
         pool.sort_by(|a, b| b.score.total_cmp(&a.score));
         pool
+    }
+
+    /// Read-only views over every objective for the scenario-state debug
+    /// surface (issue #1148): each objective's id, status, whether it is
+    /// mandatory, its authored base priority, and its AI directive.
+    ///
+    /// A borrowing projection rather than an extension of [`ObjectiveSnapshot`]:
+    /// the wire snapshot the captain panel reads deliberately carries neither
+    /// the directive nor the raw base priority, and this surface must not widen
+    /// that player-facing payload. Mandatory objectives come first (the manager's
+    /// insertion-ordered listing), so the debug table reads in the same order the
+    /// captain panel does. Reads nothing dirty and mutates nothing — a pure
+    /// projection off authoritative state.
+    pub fn debug_views(&self) -> impl Iterator<Item = ObjectiveDebugView<'_>> {
+        let mandatory = self.objectives.iter().filter(|o| o.mandatory);
+        let optional = self.objectives.iter().filter(|o| !o.mandatory);
+        mandatory.chain(optional).map(|o| ObjectiveDebugView {
+            id: &o.id,
+            status: &o.status,
+            mandatory: o.mandatory,
+            base_priority: o.utility.base_priority,
+            directive: &o.directive,
+        })
     }
 
     /// `true` when the objective list has changed since the last `mark_clean` call.

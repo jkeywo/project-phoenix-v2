@@ -93,6 +93,9 @@ export const CLIENT_DEBUG_FLAGS = [
   // AI doctrine pool (issue #1149) renders only on the host viewscreen, but the
   // phone still toggles the flag — the client keeps its toggle-only role.
   { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', flag: 'AiDoctrine' },
+  // Scenario state (issue #1148) is the same: host-viewscreen panel, phone
+  // toggle only.
+  { id: 'scenario-state', labelId: 'settings.debug.scenario', flag: 'ScenarioState' },
 ];
 
 /**

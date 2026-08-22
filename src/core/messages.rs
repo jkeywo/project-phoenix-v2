@@ -2268,6 +2268,13 @@ pub enum DebugFlag {
     /// pool projection the dock panel renders. The pool is authoritative state
     /// projected read-only, so only the rendering is flag-gated.
     AiDoctrine,
+    /// Scenario-state panel (`debug::DebugScenarioStateEnabled`), the
+    /// second structured-JSON surface on the debug pipeline (issue #1148, PRD
+    /// #1144). Like `StationActivity` it gates a JSON payload rendered as a
+    /// panel, not a text stream; unlike it there are no always-on counters —
+    /// scenario state is authoritative already, so only the flag-gated projection
+    /// exists.
+    ScenarioState,
 }
 
 impl DebugFlag {
@@ -2276,7 +2283,7 @@ impl DebugFlag {
     /// A fixed slice rather than map iteration, so identical state always
     /// produces an identical message — the client's fold diffs it and the
     /// codec test pins its shape.
-    pub const ALL: [DebugFlag; 7] = [
+    pub const ALL: [DebugFlag; 8] = [
         DebugFlag::Regions,
         DebugFlag::Modifiers,
         DebugFlag::Damage,
@@ -2284,6 +2291,7 @@ impl DebugFlag {
         DebugFlag::Inspector,
         DebugFlag::StationActivity,
         DebugFlag::AiDoctrine,
+        DebugFlag::ScenarioState,
     ];
 }
 

@@ -190,6 +190,216 @@ impl Default for AiStatePayload {
     }
 }
 
+// ── Scenario-state surface (issue #1148) ────────────────────────────────────
+//
+// A read-only projection of the running scenario's working state — the flags
+// table, the objective table, the pending triggers with their eligibility, the
+// delayed-action and deadline queues, the commitments board and the comms
+// dossier — off `crate::world::server::WorldContentRuntime` and the objective
+// manager. It answers "why didn't the story beat fire?" without reading a
+// snapshot save or a digest hash. Rhai runtime internals (handler
+// registrations, op budgets) are deliberately NOT here (PRD #1144 out-of-scope).
+//
+// The two enum-shaped fields that ARE the acceptance criteria's "status" and
+// "directive" reuse the canonical wire vocabulary in [`crate::core::messages`]
+// ([`ObjectiveStatus`], [`AiDirective`]) rather than re-spelling it: those are
+// already the objective summary's wire types, so a consumer that reads the
+// captain panel and one that reads this surface see the same shapes. The
+// domain-local state words (a deadline's / commitment's state, a finding's
+// provenance) travel as their documented `as_str()` labels so this schema does
+// not depend on the `crate::world` module internals that own them.
+
+pub use crate::core::messages::{AiDirective, ObjectiveStatus};
+
+/// One entry in the world flag / counter store.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScenarioFlag {
+    /// The flag name.
+    pub name: String,
+    /// Its counter value. A boolean flag reads as `1`; an unset flag never
+    /// appears (the store drops zeroes), so every entry here is a set flag.
+    pub value: i64,
+}
+
+/// One mission objective: id, status, its authored resting priority, and the
+/// AI directive attached to it.
+///
+/// `base_priority` is the acceptance criteria's "score" — the objective's
+/// authored importance to the mission before any per-tick utility conditions
+/// apply. The LIVE per-ship scored-objective pool (utility conditions folded in)
+/// is the AI-state surface's job, not this one, so this stays a pure projection
+/// off the objective manager with no `WorldConditions` to evaluate against.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioObjective {
+    /// Stable objective id.
+    pub id: String,
+    /// Active / Completed / Failed.
+    pub status: ObjectiveStatus,
+    /// Whether the mission requires this objective.
+    pub mandatory: bool,
+    /// The authored base priority (before the mandatory bonus and any condition
+    /// modifiers) — the "score" the objective table shows.
+    pub base_priority: f32,
+    /// The mission-altitude AI directive this objective carries.
+    pub directive: AiDirective,
+}
+
+/// One trigger's pending state and current eligibility.
+///
+/// "Eligibility" is two independent facts the author needs to tell a waiting
+/// beat from a dead one: whether the trigger is still ARMED to fire
+/// ([`pending`](Self::pending)), and whether its `when` predicate currently
+/// HOLDS ([`when_holds`](Self::when_holds)). A beat that never fires despite its
+/// event arriving is usually a `when` that never became true.
+///
+/// # Extension point for #1151
+///
+/// Issue #1151 (trigger fire history with predicate values) adds a
+/// `fire_history: Vec<...>` field to THIS struct. It is a named-field struct
+/// precisely so that is additive — a new field with `#[serde(default)]` does not
+/// reshape the payload and does not bump [`DEBUG_SCHEMA_VERSION`]. The
+/// projector's rendered `condition` / `when` strings are already the vocabulary
+/// #1151's per-fire records quote predicate values against.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioTrigger {
+    /// The authored trigger id, or `None` for an anonymous trigger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// The firing condition, rendered to a stable compact string
+    /// (e.g. `on_timer(after_secs=30)`, `on_flag_set(alarm)`).
+    pub condition: String,
+    /// The `when` predicate gate, rendered to a stable string, or `None` when
+    /// the trigger has no gate (always eligible).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
+    /// Whether the trigger re-arms after firing (`repeat = true`).
+    pub repeat: bool,
+    /// Whether the trigger has already fired at least once.
+    pub fired: bool,
+    /// Whether the trigger is still armed to fire: for a once-only trigger,
+    /// `!fired`; for a `repeat` trigger, always `true`.
+    pub pending: bool,
+    /// Whether the `when` predicate evaluates true against the current flags
+    /// (always `true` when there is no `when` gate). A pending trigger with
+    /// `when_holds == false` is armed but waiting on its gate.
+    pub when_holds: bool,
+    /// World-elapsed seconds at which the trigger last fired, or `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_fired_secs: Option<f32>,
+}
+
+/// One action queued for deferred dispatch off a trigger's `action_delays`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioDelayedAction {
+    /// The action kind, rendered to a stable compact string
+    /// (e.g. `set_world_flag(alarm)`, `add_objective(rescue)`).
+    pub action: String,
+    /// The entity name the action was raised for, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity: Option<String>,
+    /// World-elapsed seconds at which the action is due to dispatch.
+    pub fire_at_secs: f32,
+}
+
+/// One mission deadline's live state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScenarioDeadline {
+    /// The authored deadline id.
+    pub id: String,
+    /// The crew-facing `strings.csv` label id (empty when the deadline authored
+    /// none). Only meaningful when `visible`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+    /// Whether the crew sees a countdown for this deadline.
+    pub visible: bool,
+    /// The absolute `SimTick` the deadline is due.
+    pub due_tick: u64,
+    /// `pending` / `fired` / `cancelled` — the deadline table's own state label.
+    pub state: String,
+}
+
+/// One promise on the commitments board.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScenarioCommitment {
+    /// The promise id.
+    pub id: String,
+    /// The party it was made to (an entity or faction name, unresolved).
+    pub made_to: String,
+    /// `strings.csv` id for the terms.
+    pub terms: String,
+    /// `strings.csv` id for what would count as keeping it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub resolves_when: String,
+    /// `open` / `kept` / `broken` — the ledger's own state label.
+    pub state: String,
+    /// The `SimTick` the promise was made on.
+    pub made_at_tick: u64,
+    /// The `SimTick` it was resolved on, or `None` while still open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_at_tick: Option<u64>,
+}
+
+/// One finding on the comms dossier.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScenarioDossierEntry {
+    /// The subject's UUID.
+    pub subject_uuid: String,
+    /// `strings.csv` id for what was learned.
+    pub text: String,
+    /// `scan` / `dialogue` / `records` / `briefing` — how the crew learned it.
+    pub provenance: String,
+    /// The `SimTick` it was learned on.
+    pub gathered_at_tick: u64,
+}
+
+/// The scenario-state surface's whole payload (issue #1148).
+///
+/// Produced by `crate::debug::scenario::collect_scenario_state`, encoded to JSON
+/// by `crate::core::codec::encode_scenario_state`, and read by the dock panel
+/// (`gui/scenario-state-panel.js`) and the headless report. Every collection is
+/// emitted in a deterministic order (flags sorted by name; every other list in
+/// its authored / insertion order, which is already deterministic) so two hosts
+/// folding the same state produce byte-identical JSON.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioStatePayload {
+    /// [`DEBUG_SCHEMA_VERSION`] at the time the host produced this payload.
+    pub schema_version: u32,
+    /// The world flag / counter store, sorted by flag name.
+    pub flags: Vec<ScenarioFlag>,
+    /// The mission objectives, mandatory first then optional (the objective
+    /// manager's own sorted order).
+    pub objectives: Vec<ScenarioObjective>,
+    /// Every authored trigger with its pending state and eligibility.
+    pub triggers: Vec<ScenarioTrigger>,
+    /// The delayed-action queue, in dispatch order.
+    pub delayed_actions: Vec<ScenarioDelayedAction>,
+    /// The mission deadline queue, in authored order.
+    pub deadlines: Vec<ScenarioDeadline>,
+    /// The commitments board, oldest promise first.
+    pub commitments: Vec<ScenarioCommitment>,
+    /// The comms dossier, oldest finding first.
+    pub dossier: Vec<ScenarioDossierEntry>,
+}
+
+impl Default for ScenarioStatePayload {
+    /// A version-stamped empty payload — what a bare fixture with no world
+    /// loaded projects, and the base the collector fills. Stamps the schema
+    /// version like [`StationActivityPayload`] so a `..Default::default()` can
+    /// never leak a version-0 payload onto the wire.
+    fn default() -> Self {
+        Self {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            flags: Vec::new(),
+            objectives: Vec::new(),
+            triggers: Vec::new(),
+            delayed_actions: Vec::new(),
+            deadlines: Vec::new(),
+            commitments: Vec::new(),
+            dossier: Vec::new(),
+        }
+    }
+}
+
 /// One AI-controlled ship's doctrine-pool projection.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShipDoctrine {
@@ -248,6 +458,13 @@ pub struct DoctrineCandidate {
     pub mandatory: bool,
     /// The objective's status (`"Active"` / `"Completed"` / `"Failed"`).
     pub status: String,
+}
+
+impl ScenarioStatePayload {
+    /// A version-stamped empty payload; the base the collector fills.
+    pub fn empty() -> Self {
+        Self::default()
+    }
 }
 
 #[cfg(test)]

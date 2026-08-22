@@ -429,13 +429,22 @@ fn render_stack(app: &mut App, log_filter: &str) {
                     ..default()
                 }),
         );
-        // `DefaultPlugins`' `RenderPlugin` already `init_asset`s the four types, so
-        // these are the idempotent belt-and-braces the parity floor is stated in
-        // terms of. `ViewscreenBorderPlugin` already registers HudStateChanged,
-        // LobbyStateChanged and `push_lobby_state`, so only the asset types and
-        // AiChatterEvent are added here (the latter also rides in on ShipPlugin in
-        // the full app; `add_message` is idempotent).
-        register_render_assets(app);
+        // Do NOT re-register the four asset types here. `DefaultPlugins`' render
+        // stack already `init_asset`s Shader/Image/Mesh/StandardMaterial AND
+        // installs the `ShaderLoader`; calling `register_render_assets` on top of
+        // it registers a SECOND `ShaderLoader` for the same extensions (Bevy warns
+        // "Duplicate AssetLoader registered for … Shader") and leaves the shader
+        // `Assets` storage and its index allocator out of step, which panics in
+        // `DenseAssetStorage::insert` ("index out of bounds") the moment the
+        // pipeline loads a shader — trapping the wasm instance so the sim loop, and
+        // with it the Welcome handshake, never runs (issue #1219 regressed this;
+        // the pre-#1219 real branch added ONLY `DefaultPlugins` here). The
+        // renderer-less profiles still need the manual registration — that is what
+        // `render_surrogate`/`register_render_contract` are for — but the
+        // BrowserHost render path must leave it entirely to `DefaultPlugins`.
+        // `AiChatterEvent` is NOT part of that render-owned set (it rides in on
+        // `ShipPlugin` in the full app), so it is added explicitly; `add_message`
+        // is idempotent.
         app.add_message::<AiChatterEvent>();
         app.add_plugins(crate::server::renderer::RendererPlugin)
             .add_plugins(crate::server::viewscreen_border::ViewscreenBorderPlugin);

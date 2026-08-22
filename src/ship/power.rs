@@ -114,6 +114,7 @@ pub fn seed_power_facts(
     has_destroy_objective: bool,
     offline_system_count: u32,
 ) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
     facts.set(
         crate::entities::config::POWER_BATTERY_PCT_FACT,
@@ -128,20 +129,20 @@ pub fn seed_power_facts(
     for (id, level) in power.iter() {
         facts.set(&format!("power_{}", id.0), level as f64);
     }
-    facts.set("total_allocation", power.total() as f64);
+    facts.set_fact(fid::TOTAL_ALLOCATION, power.total() as f64);
     // THREAT: only set when known, so an absent-fact guard reads "no threat".
     if let Some(s) = secs_since_combat {
-        facts.set("secs_since_combat", s as f64);
+        facts.set_fact(fid::SECS_SINCE_COMBAT, s as f64);
     }
     if let Some(d) = nearest_enemy_dist {
-        facts.set("nearest_enemy_dist", d as f64);
+        facts.set_fact(fid::NEAREST_ENEMY_DIST, d as f64);
     }
     // OBJECTIVE + SYSTEM.
-    facts.set(
-        "has_destroy_objective",
+    facts.set_fact(
+        fid::HAS_DESTROY_OBJECTIVE,
         if has_destroy_objective { 1.0 } else { 0.0 },
     );
-    facts.set("offline_system_count", offline_system_count as f64);
+    facts.set_fact(fid::OFFLINE_SYSTEM_COUNT, offline_system_count as f64);
     facts
 }
 

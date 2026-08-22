@@ -71,16 +71,14 @@ pub fn seed_blaster_bank_facts(
     in_arc: bool,
     posture: crate::weapons_plugin::WeaponsAlertPosture,
 ) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
-    facts.set("on_cooldown", if on_cooldown { 1.0 } else { 0.0 });
-    facts.set("cooldown_remaining", cooldown_remaining as f64);
-    facts.set("in_range", if in_range { 1.0 } else { 0.0 });
-    facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
-    facts.set(
-        crate::entities::config::POWER_RED_ALERT_FACT,
-        posture.alert_fact_value(),
-    );
+    facts.set_fact(fid::TARGET_VALID, if target_valid { 1.0 } else { 0.0 });
+    facts.set_fact(fid::ON_COOLDOWN, if on_cooldown { 1.0 } else { 0.0 });
+    facts.set_fact(fid::COOLDOWN_REMAINING, cooldown_remaining as f64);
+    facts.set_fact(fid::IN_RANGE, if in_range { 1.0 } else { 0.0 });
+    facts.set_fact(fid::IN_ARC, if in_arc { 1.0 } else { 0.0 });
+    facts.set_fact(fid::RED_ALERT, posture.alert_fact_value());
     facts
 }
 

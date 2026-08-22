@@ -224,6 +224,26 @@ impl CmpOp {
 // Both are read-only. Flags and counters remain read-only too: a policy never
 // writes world state through an expression.
 
+/// The registry name of one typed AI fact (issue #1210).
+///
+/// A `&'static str` newtype whose only values are the catalogue constants in
+/// [`crate::entities::ai_flag_hosts`]. Production seeders record a reading
+/// through [`AiFacts::set_fact`] so the seeded name is a registry constant
+/// rather than a bare literal that a typo could silently diverge from — the
+/// developer-facing half of closing PRD #774 §11's unvalidated-`fact()` hole.
+/// The author-facing half is
+/// [`crate::entities::ai_flag_hosts::AiHost::check_facts`], which rejects a
+/// `fact(...)` name no host declares it seeds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FactId(pub &'static str);
+
+impl FactId {
+    /// The fact's name, as it appears in a `fact(...)` atom.
+    pub const fn name(self) -> &'static str {
+        self.0
+    }
+}
+
 /// Immutable snapshot of typed facts for one policy evaluation.
 ///
 /// A fact that is *absent* (no reading available — e.g. the ship has never
@@ -290,9 +310,25 @@ impl AiFacts {
         Self::default()
     }
 
-    /// Record a present fact reading.
+    /// Record a present fact reading under a bare name.
+    ///
+    /// Kept for tests, and for the two dynamically-named fact FAMILIES a
+    /// registry constant cannot express — `power_<group>` and
+    /// `recent_damage_<facing>`, whose suffix is a data-driven id. Every
+    /// statically-named production seed goes through [`set_fact`](Self::set_fact)
+    /// instead (issue #1210).
     pub fn set(&mut self, name: &str, value: f64) {
         self.values.insert(name.to_string(), value);
+    }
+
+    /// Record a present fact reading under a registry [`FactId`] (issue #1210).
+    ///
+    /// The typed-name path every statically-named production seeder uses, so a
+    /// seeded fact name is a catalogue constant that
+    /// [`crate::entities::ai_flag_hosts`]'s drift test can pin against the
+    /// per-host descriptor registry.
+    pub fn set_fact(&mut self, id: FactId, value: f64) {
+        self.set(id.name(), value);
     }
 
     /// Read a fact reading; `None` when the fact is absent this tick.
@@ -985,6 +1021,43 @@ impl Predicate {
             Predicate::And(a, b) | Predicate::Or(a, b) => {
                 a.referenced_memory(out);
                 b.referenced_memory(out);
+            }
+        }
+    }
+
+    /// Collect every world-context typed fact atom referenced anywhere in the
+    /// expression, as `(context, name)` pairs (issue #1210).
+    ///
+    /// The three world contexts — `fact(...)` / `self_fact(...)` (both
+    /// [`FactContext::SelfCtx`]), `candidate_fact(...)`
+    /// ([`FactContext::Candidate`]) and `target_fact(...)`
+    /// ([`FactContext::Target`]) — are collected; the two PRIVATE contexts are
+    /// not. `memory(...)` is validated against the policy's declared slots by
+    /// [`referenced_memory`](Self::referenced_memory), and `state_time` by
+    /// [`references_state_time`](Self::references_state_time); neither is a
+    /// host-seeded fact. This walker exists so a host can reject a typed
+    /// `fact(...)` NAME it never seeds — the unvalidated-`fact()` hole PRD #774
+    /// §11 leaves open, and the sibling of
+    /// [`referenced_world_state`](Self::referenced_world_state).
+    pub fn referenced_facts(&self, out: &mut Vec<(FactContext, String)>) {
+        match self {
+            Predicate::Fact { context, name, .. }
+                if matches!(
+                    context,
+                    FactContext::SelfCtx | FactContext::Candidate | FactContext::Target
+                ) =>
+            {
+                out.push((*context, name.clone()))
+            }
+            Predicate::Fact { .. }
+            | Predicate::History { .. }
+            | Predicate::Flag { .. }
+            | Predicate::Counter { .. }
+            | Predicate::Bool(_) => {}
+            Predicate::Not(inner) => inner.referenced_facts(out),
+            Predicate::And(a, b) | Predicate::Or(a, b) => {
+                a.referenced_facts(out);
+                b.referenced_facts(out);
             }
         }
     }

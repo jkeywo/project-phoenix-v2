@@ -1548,9 +1548,12 @@ fn ai_target_selection(
                 if range_bounds_targets && !within_range(uuid) {
                     return None;
                 }
+                use crate::entities::ai_flag_hosts as fid;
                 let mut facts = crate::world::flags::AiFacts::new();
-                facts.set("detectable", 1.0);
-                facts.set("hostile", if is_hostile(uuid) { 1.0 } else { 0.0 });
+                facts.set_fact(fid::DETECTABLE, 1.0);
+                facts.set_fact(fid::HOSTILE, if is_hostile(uuid) { 1.0 } else { 0.0 });
+                // `source_fact` is a registry constant's `.name()` handed in by
+                // the caller (issue #1210) — one of the `SOURCE_*` catalogue ids.
                 facts.set(source_fact, 1.0);
                 Some(crate::ai::selector::SelectorCandidate {
                     uuid: uuid.to_string(),
@@ -1602,13 +1605,18 @@ fn ai_target_selection(
         // carries the recomputed `hostile` fact, and the authored eligibility
         // drops a friendly / out-of-range designation.
         if let Some(sci) = science_target.as_deref() {
-            if let Some(c) = make_candidate(sci, "source_sensors_designation") {
+            if let Some(c) = make_candidate(
+                sci,
+                crate::entities::ai_flag_hosts::SOURCE_SENSORS_DESIGNATION.name(),
+            ) {
                 candidates.push(c);
             }
         }
         // Source: objective-destroy — the explicit named Destroy target.
         if let Some(obj) = objective_target.as_deref() {
-            if let Some(c) = make_candidate(obj, "source_objective") {
+            if let Some(c) =
+                make_candidate(obj, crate::entities::ai_flag_hosts::SOURCE_OBJECTIVE.name())
+            {
                 candidates.push(c);
             }
         }
@@ -1622,13 +1630,18 @@ fn ai_target_selection(
         // carries its independent `hostile` verdict like any other, but the
         // authored `source_operate` eligibility term admits it regardless.
         if let Some(op) = operate_target.as_deref() {
-            if let Some(c) = make_candidate(op, "source_operate") {
+            if let Some(c) =
+                make_candidate(op, crate::entities::ai_flag_hosts::SOURCE_OPERATE.name())
+            {
                 candidates.push(c);
             }
         }
         // Source: last-attacker — whoever last hit us.
         if let Some(att) = last_attacker.0.as_deref() {
-            if let Some(c) = make_candidate(att, "source_last_attacker") {
+            if let Some(c) = make_candidate(
+                att,
+                crate::entities::ai_flag_hosts::SOURCE_LAST_ATTACKER.name(),
+            ) {
                 candidates.push(c);
             }
         }
@@ -1642,7 +1655,9 @@ fn ai_target_selection(
         if let Some(cur) = current_lock.as_deref() {
             let combat_appropriate = !destroy_is_untargeted || is_hostile(cur);
             if combat_appropriate {
-                if let Some(c) = make_candidate(cur, "source_retained") {
+                if let Some(c) =
+                    make_candidate(cur, crate::entities::ai_flag_hosts::SOURCE_RETAINED.name())
+                {
                     candidates.push(c);
                 }
             }
@@ -1656,7 +1671,10 @@ fn ai_target_selection(
         // ever locks a hostile actually in range.
         if destroy_is_untargeted || is_static_point_defence {
             if let Some(nearest) = nearest_hostile(registry) {
-                if let Some(c) = make_candidate(&nearest, "source_radar") {
+                if let Some(c) = make_candidate(
+                    &nearest,
+                    crate::entities::ai_flag_hosts::SOURCE_RADAR.name(),
+                ) {
                     candidates.push(c);
                 }
             }
@@ -1666,7 +1684,7 @@ fn ai_target_selection(
         // the authored power rating, exposed as `self_fact(power_rating)` (AC2).
         let mut self_facts = crate::world::flags::AiFacts::new();
         if let Some(pr) = selector_comp.power_rating {
-            self_facts.set("power_rating", pr as f64);
+            self_facts.set_fact(crate::entities::ai_flag_hosts::POWER_RATING, pr as f64);
         }
         let self_ctx = crate::ai::selector::SelfContext {
             position: [physics.x, 0.0, physics.z],

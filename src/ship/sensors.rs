@@ -663,9 +663,11 @@ fn detectable_candidate(
     position: [f32; 3],
     source_fact: &str,
 ) -> crate::ai::selector::SelectorCandidate {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("detectable", 1.0);
-    facts.set("hostile", 1.0);
+    facts.set_fact(fid::DETECTABLE, 1.0);
+    facts.set_fact(fid::HOSTILE, 1.0);
+    // `source_fact` is a `SOURCE_*` catalogue constant's `.name()` (issue #1210).
     facts.set(source_fact, 1.0);
     crate::ai::selector::SelectorCandidate {
         uuid: uuid.to_string(),
@@ -862,7 +864,11 @@ pub fn operate_sensors_ai(
                 if let Some(pos) = entity_q.iter().find_map(|(u, _, tf)| {
                     (u.0 == *target_uuid && in_range(tf)).then(|| tf.translation.to_array())
                 }) {
-                    candidates.push(detectable_candidate(target_uuid, pos, "source_combat_lock"));
+                    candidates.push(detectable_candidate(
+                        target_uuid,
+                        pos,
+                        crate::entities::ai_flag_hosts::SOURCE_COMBAT_LOCK.name(),
+                    ));
                 }
             }
 
@@ -886,7 +892,11 @@ pub fn operate_sensors_ai(
                         if let Some(pos) = entity_q.iter().find_map(|(u, _, tf)| {
                             (u.0 == uuid && in_range(tf)).then(|| tf.translation.to_array())
                         }) {
-                            candidates.push(detectable_candidate(&uuid, pos, "source_objective"));
+                            candidates.push(detectable_candidate(
+                                &uuid,
+                                pos,
+                                crate::entities::ai_flag_hosts::SOURCE_OBJECTIVE.name(),
+                            ));
                         }
                     }
                 }
@@ -923,7 +933,11 @@ pub fn operate_sensors_ai(
                 if let Some((u, pos, _)) = hostile_candidates.iter().find(|(u, pos, _)| {
                     uuid::Uuid::parse_str(u).ok() == Some(found) && in_range_pos(*pos)
                 }) {
-                    candidates.push(detectable_candidate(u, *pos, "source_radar"));
+                    candidates.push(detectable_candidate(
+                        u,
+                        *pos,
+                        crate::entities::ai_flag_hosts::SOURCE_RADAR.name(),
+                    ));
                 }
             }
         }
@@ -932,7 +946,7 @@ pub fn operate_sensors_ai(
         // exposed to the selector expressions as `self_fact(power_rating)` (AC2).
         let mut self_facts = crate::world::flags::AiFacts::new();
         if let Some(pr) = selector_comp.power_rating {
-            self_facts.set("power_rating", pr as f64);
+            self_facts.set_fact(crate::entities::ai_flag_hosts::POWER_RATING, pr as f64);
         }
         let self_ctx = SelfContext {
             position: [physics.x, 0.0, physics.z],

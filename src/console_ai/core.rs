@@ -543,6 +543,7 @@ pub fn seed_shields_focus_facts(
     min_damage_window_secs: f32,
     current_time_secs: f32,
 ) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
 
     // Same window the kernel measures concentration over.
@@ -571,14 +572,14 @@ pub fn seed_shields_focus_facts(
         max_arc = max_arc.max(arc_sum);
     }
 
-    facts.set("recent_damage_total", total as f64);
+    facts.set_fact(fid::RECENT_DAMAGE_TOTAL, total as f64);
     let fraction_max = if total > 0 {
         max_arc as f64 / total as f64
     } else {
         0.0
     };
-    facts.set("recent_damage_fraction_max", fraction_max);
-    facts.set("recent_damage_pct_max", fraction_max * 100.0);
+    facts.set_fact(fid::RECENT_DAMAGE_FRACTION_MAX, fraction_max);
+    facts.set_fact(fid::RECENT_DAMAGE_PCT_MAX, fraction_max * 100.0);
 
     // Health-imbalance fallback signal: lowest normalized health as a ratio of
     // the second-lowest (the same comparison the kernel's fallback branch makes).
@@ -597,8 +598,8 @@ pub fn seed_shields_focus_facts(
         let lowest = normalized[0];
         let second = normalized[1];
         let ratio = if second > 0.0 { lowest / second } else { 1.0 };
-        facts.set("health_fraction_min_ratio", ratio as f64);
-        facts.set("health_ratio_pct", (ratio * 100.0) as f64);
+        facts.set_fact(fid::HEALTH_FRACTION_MIN_RATIO, ratio as f64);
+        facts.set_fact(fid::HEALTH_RATIO_PCT, (ratio * 100.0) as f64);
     }
 
     facts

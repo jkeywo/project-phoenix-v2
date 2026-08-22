@@ -526,7 +526,10 @@ fn operate_captain_ai(
         );
         let mut facts = crate::world::flags::AiFacts::new();
         if let Some(s) = last_combat {
-            facts.set("secs_since_combat", (now - s) as f64);
+            facts.set_fact(
+                crate::entities::ai_flag_hosts::SECS_SINCE_COMBAT,
+                (now - s) as f64,
+            );
         }
 
         // First-contact readings (issue #912). ALWAYS seeded, both of them, so

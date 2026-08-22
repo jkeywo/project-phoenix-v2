@@ -831,6 +831,7 @@ pub(crate) fn seed_helm_actuator_facts(
     vertical_offset: f32,
     red_alert: bool,
 ) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
     let (urgency, moving_threat) = hazard
         .map(|h| (h.urgency, h.moving_hazard_threat))
@@ -844,14 +845,17 @@ pub(crate) fn seed_helm_actuator_facts(
             POSTURE_DEFENSIVE
         },
     );
-    facts.set("moving_hazard_threat", moving_threat as f64);
-    facts.set("hazard_present", if urgency > 0.0 { 1.0 } else { 0.0 });
-    facts.set(
-        "impulse_available",
+    facts.set_fact(fid::MOVING_HAZARD_THREAT, moving_threat as f64);
+    facts.set_fact(fid::HAZARD_PRESENT, if urgency > 0.0 { 1.0 } else { 0.0 });
+    facts.set_fact(
+        fid::IMPULSE_AVAILABLE,
         if impulse_available { 1.0 } else { 0.0 },
     );
-    facts.set("boost_available", if boost_available { 1.0 } else { 0.0 });
-    facts.set("vertical_offset", vertical_offset as f64);
+    facts.set_fact(
+        fid::BOOST_AVAILABLE,
+        if boost_available { 1.0 } else { 0.0 },
+    );
+    facts.set_fact(fid::VERTICAL_OFFSET, vertical_offset as f64);
     facts
 }
 

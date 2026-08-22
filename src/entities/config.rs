@@ -2934,6 +2934,7 @@ fn validate_selector_inner(
     let check_params = |pred: &crate::world::flags::Predicate, what: &str| -> Result<(), String> {
         if let Some(host) = host {
             host.check_guard(&format!("target selector {what}"), pred)?;
+            host.check_facts(&format!("target selector {what}"), pred)?;
         }
         // Unlike the flag chain, this one needs no host to answer (issue #890):
         // a selector evaluates through `Predicate::evaluate_selector`, which
@@ -3641,6 +3642,7 @@ fn check_policy_predicate(
 ) -> Result<(), String> {
     if let Some(host) = host {
         host.check_guard(&format!("ai policy {what}"), pred)?;
+        host.check_facts(&format!("ai policy {what}"), pred)?;
     }
     let mut refs = Vec::new();
     pred.referenced_params(&mut refs);
@@ -13605,7 +13607,9 @@ param = { arrival_radius = 5.0 }
 [[helm_console.engines_ai.rule]]
 priority = 10
 channel = "longitudinal"
-when = "fact(distance_to_dest) > param(arrival_radius)"
+# `range_to_target` is a real Engines-seeded fact (issue #1210): the fixture
+# used a made-up `distance_to_dest`, which the fact registry now rejects at load.
+when = "fact(range_to_target) > param(arrival_radius)"
 verb = "actuate_desired_travel"
 
 [helm_console.steering_ai]

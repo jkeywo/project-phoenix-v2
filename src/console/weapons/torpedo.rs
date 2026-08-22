@@ -64,12 +64,13 @@ pub fn seed_torpedo_tube_load_facts(
     magazine: u32,
     operates_ai: bool,
 ) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("loaded_count", loaded_count as f64);
-    facts.set("target_count", target_count as f64);
-    facts.set("ai_target_count", ai_target_count as f64);
-    facts.set("magazine", magazine as f64);
-    facts.set("operates_ai", if operates_ai { 1.0 } else { 0.0 });
+    facts.set_fact(fid::LOADED_COUNT, loaded_count as f64);
+    facts.set_fact(fid::TARGET_COUNT, target_count as f64);
+    facts.set_fact(fid::AI_TARGET_COUNT, ai_target_count as f64);
+    facts.set_fact(fid::MAGAZINE, magazine as f64);
+    facts.set_fact(fid::OPERATES_AI, if operates_ai { 1.0 } else { 0.0 });
     facts
 }
 
@@ -102,20 +103,15 @@ pub fn seed_torpedo_tube_launch_facts(
     tubes_full: bool,
     posture: crate::weapons_plugin::WeaponsAlertPosture,
 ) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("loaded", if loaded { 1.0 } else { 0.0 });
-    facts.set("target_valid", if target_valid { 1.0 } else { 0.0 });
-    facts.set("in_range", if in_range { 1.0 } else { 0.0 });
-    facts.set("in_arc", if in_arc { 1.0 } else { 0.0 });
-    facts.set(
-        crate::entities::config::TARGET_FACING_SHIELDS_FACT,
-        target_facing_shields as f64,
-    );
-    facts.set("tubes_full", if tubes_full { 1.0 } else { 0.0 });
-    facts.set(
-        crate::entities::config::POWER_RED_ALERT_FACT,
-        posture.alert_fact_value(),
-    );
+    facts.set_fact(fid::LOADED, if loaded { 1.0 } else { 0.0 });
+    facts.set_fact(fid::TARGET_VALID, if target_valid { 1.0 } else { 0.0 });
+    facts.set_fact(fid::IN_RANGE, if in_range { 1.0 } else { 0.0 });
+    facts.set_fact(fid::IN_ARC, if in_arc { 1.0 } else { 0.0 });
+    facts.set_fact(fid::TARGET_FACING_SHIELDS, target_facing_shields as f64);
+    facts.set_fact(fid::TUBES_FULL, if tubes_full { 1.0 } else { 0.0 });
+    facts.set_fact(fid::RED_ALERT, posture.alert_fact_value());
     facts
 }
 
@@ -124,9 +120,10 @@ pub fn seed_torpedo_tube_launch_facts(
 /// `in_flight` is the count of this ship's torpedoes currently in flight — the
 /// AC5 public fact the magazine policy can gate on.
 pub fn seed_torpedo_magazine_facts(magazine: u32, in_flight: u32) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("magazine", magazine as f64);
-    facts.set("in_flight", in_flight as f64);
+    facts.set_fact(fid::MAGAZINE, magazine as f64);
+    facts.set_fact(fid::IN_FLIGHT, in_flight as f64);
     facts
 }
 

@@ -1003,16 +1003,20 @@ pub struct CommsHailCandidateReading {
 /// fact an authored guard could name is seeded here, so a `candidate_fact(...)`
 /// guard actually fires instead of silently reading "absent → false".
 pub fn seed_comms_hail_facts(reading: &CommsHailCandidateReading) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
     let b = |v: bool| if v { 1.0 } else { 0.0 };
-    facts.set("source_hail_objective", b(reading.source_hail_objective));
-    facts.set("source_comms_contact", b(reading.source_comms_contact));
-    facts.set("objective_score", reading.objective_score as f64);
-    facts.set("in_range", b(reading.in_range));
-    facts.set("is_urgent", b(reading.is_urgent));
-    facts.set("has_open_hail_thread", b(reading.has_open_hail_thread));
-    facts.set("has_unread_from_sender", b(reading.has_unread_from_sender));
-    facts.set("mandatory", b(reading.mandatory));
+    facts.set_fact(fid::SOURCE_HAIL_OBJECTIVE, b(reading.source_hail_objective));
+    facts.set_fact(fid::SOURCE_COMMS_CONTACT, b(reading.source_comms_contact));
+    facts.set_fact(fid::OBJECTIVE_SCORE, reading.objective_score as f64);
+    facts.set_fact(fid::IN_RANGE, b(reading.in_range));
+    facts.set_fact(fid::IS_URGENT, b(reading.is_urgent));
+    facts.set_fact(fid::HAS_OPEN_HAIL_THREAD, b(reading.has_open_hail_thread));
+    facts.set_fact(
+        fid::HAS_UNREAD_FROM_SENDER,
+        b(reading.has_unread_from_sender),
+    );
+    facts.set_fact(fid::MANDATORY, b(reading.mandatory));
     facts
 }
 
@@ -1034,12 +1038,16 @@ pub fn seed_comms_self_facts(
     red_alert: bool,
     contact_count: usize,
 ) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("comms_available", if comms_available { 1.0 } else { 0.0 });
-    facts.set("red_alert", if red_alert { 1.0 } else { 0.0 });
-    facts.set("contact_count", contact_count as f64);
+    facts.set_fact(
+        fid::COMMS_AVAILABLE,
+        if comms_available { 1.0 } else { 0.0 },
+    );
+    facts.set_fact(fid::RED_ALERT, if red_alert { 1.0 } else { 0.0 });
+    facts.set_fact(fid::CONTACT_COUNT, contact_count as f64);
     if let Some(pr) = power_rating {
-        facts.set("power_rating", pr as f64);
+        facts.set_fact(fid::POWER_RATING, pr as f64);
     }
     facts
 }
@@ -1080,25 +1088,26 @@ pub struct CommsResponseReading {
 /// [`seed_comms_hail_facts`]: every fact an authored `when` guard could name is
 /// seeded, so `fact(is_urgent)`, `fact(response_count)`, … all read real values.
 pub fn seed_comms_response_facts(reading: &CommsResponseReading) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
     let b = |v: bool| if v { 1.0 } else { 0.0 };
-    facts.set("response_count", reading.response_count as f64);
-    facts.set(
-        "available_response_count",
+    facts.set_fact(fid::RESPONSE_COUNT, reading.response_count as f64);
+    facts.set_fact(
+        fid::AVAILABLE_RESPONSE_COUNT,
         reading.available_response_count as f64,
     );
-    facts.set(
-        "important_response_count",
+    facts.set_fact(
+        fid::IMPORTANT_RESPONSE_COUNT,
         reading.important_response_count as f64,
     );
-    facts.set("is_urgent", b(reading.is_urgent));
-    facts.set("is_read", b(reading.is_read));
-    facts.set("is_orphaned", b(reading.is_orphaned));
-    facts.set("sender_in_range", b(reading.sender_in_range));
-    facts.set("red_alert", b(reading.red_alert));
-    facts.set("comms_available", b(reading.comms_available));
+    facts.set_fact(fid::IS_URGENT, b(reading.is_urgent));
+    facts.set_fact(fid::IS_READ, b(reading.is_read));
+    facts.set_fact(fid::IS_ORPHANED, b(reading.is_orphaned));
+    facts.set_fact(fid::SENDER_IN_RANGE, b(reading.sender_in_range));
+    facts.set_fact(fid::RED_ALERT, b(reading.red_alert));
+    facts.set_fact(fid::COMMS_AVAILABLE, b(reading.comms_available));
     if let Some(pr) = reading.power_rating {
-        facts.set("power_rating", pr as f64);
+        facts.set_fact(fid::POWER_RATING, pr as f64);
     }
     facts
 }

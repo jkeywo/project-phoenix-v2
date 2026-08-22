@@ -500,29 +500,30 @@ pub struct RepairCandidateReading {
 /// an authored guard can reference is seeded here, so a `candidate_fact(...)`
 /// guard actually fires instead of silently reading "absent → false".
 pub fn seed_repair_facts(reading: &RepairCandidateReading) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("tier_ordinal", reading.tier_ordinal as f64);
-    facts.set("deficit", reading.deficit as f64);
-    facts.set("damage_fraction", reading.damage_fraction as f64);
-    facts.set(
-        "worst_system_damage_fraction",
+    facts.set_fact(fid::TIER_ORDINAL, reading.tier_ordinal as f64);
+    facts.set_fact(fid::DEFICIT, reading.deficit as f64);
+    facts.set_fact(fid::DAMAGE_FRACTION, reading.damage_fraction as f64);
+    facts.set_fact(
+        fid::WORST_SYSTEM_DAMAGE_FRACTION,
         reading.worst_system_damage_fraction as f64,
     );
-    facts.set("system_count", reading.system_count as f64);
-    facts.set("is_core", if reading.is_core { 1.0 } else { 0.0 });
-    facts.set(
-        "source_repair_request",
+    facts.set_fact(fid::SYSTEM_COUNT, reading.system_count as f64);
+    facts.set_fact(fid::IS_CORE, if reading.is_core { 1.0 } else { 0.0 });
+    facts.set_fact(
+        fid::SOURCE_REPAIR_REQUEST,
         if reading.source_repair_request {
             1.0
         } else {
             0.0
         },
     );
-    facts.set(
-        "source_core_bucket",
+    facts.set_fact(
+        fid::SOURCE_CORE_BUCKET,
         if reading.is_core { 1.0 } else { 0.0 },
     );
-    facts.set("assigned", if reading.assigned { 1.0 } else { 0.0 });
+    facts.set_fact(fid::ASSIGNED, if reading.assigned { 1.0 } else { 0.0 });
     facts
 }
 
@@ -547,15 +548,16 @@ pub fn seed_repair_self_facts(
     power_rating: Option<f32>,
     red_alert: bool,
 ) -> crate::world::flags::AiFacts {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("free_team_count", free_team_count as f64);
-    facts.set(
-        "total_hull_health_fraction",
+    facts.set_fact(fid::FREE_TEAM_COUNT, free_team_count as f64);
+    facts.set_fact(
+        fid::TOTAL_HULL_HEALTH_FRACTION,
         total_hull_health_fraction as f64,
     );
-    facts.set("red_alert", if red_alert { 1.0 } else { 0.0 });
+    facts.set_fact(fid::RED_ALERT, if red_alert { 1.0 } else { 0.0 });
     if let Some(pr) = power_rating {
-        facts.set("power_rating", pr as f64);
+        facts.set_fact(fid::POWER_RATING, pr as f64);
     }
     facts
 }

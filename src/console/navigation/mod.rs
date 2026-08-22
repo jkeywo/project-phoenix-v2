@@ -797,7 +797,7 @@ pub fn operate_navigation_ai(
         // exposed to the selector expressions as `self_fact(power_rating)`.
         let mut self_facts = crate::world::flags::AiFacts::new();
         if let Some(pr) = selector_comp.power_rating {
-            self_facts.set("power_rating", pr as f64);
+            self_facts.set_fact(crate::entities::ai_flag_hosts::POWER_RATING, pr as f64);
         }
         let self_ctx = SelfContext {
             position: [ship_physics.x, 0.0, ship_physics.z],
@@ -910,10 +910,11 @@ fn nav_objective_candidate(
     position: [f32; 3],
     objective_score: f32,
 ) -> crate::ai::selector::SelectorCandidate {
+    use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("reachable", 1.0);
-    facts.set("source_nav_objective", 1.0);
-    facts.set("objective_score", objective_score as f64);
+    facts.set_fact(fid::REACHABLE, 1.0);
+    facts.set_fact(fid::SOURCE_NAV_OBJECTIVE, 1.0);
+    facts.set_fact(fid::OBJECTIVE_SCORE, objective_score as f64);
     crate::ai::selector::SelectorCandidate {
         uuid: uuid.to_string(),
         position,
@@ -931,7 +932,7 @@ fn chart_contact_candidate(
     position: [f32; 3],
 ) -> crate::ai::selector::SelectorCandidate {
     let mut facts = crate::world::flags::AiFacts::new();
-    facts.set("source_chart_contact", 1.0);
+    facts.set_fact(crate::entities::ai_flag_hosts::SOURCE_CHART_CONTACT, 1.0);
     crate::ai::selector::SelectorCandidate {
         uuid: uuid.to_string(),
         position,

@@ -41,6 +41,15 @@
 //! RNG-site determinism on its own axis (seed reproducibility), independent
 //! of registration order.
 //!
+//! The shuffle guard permutes *plugin* registration order, so it only closes
+//! the ambiguity *between* the 13 plugins. Ordering ambiguities *within* a
+//! single plugin — two systems the same plugin adds to one `SimSet` with no
+//! edge between them — are the shuffle's blind spot, because it never moves
+//! them relative to each other. `the_world_layer_mutators_are_explicitly_ordered`
+//! (issue #1183) is the within-plugin counterpart: it reads the built schedule
+//! graph directly and fails if the three world-layer mutators ever become
+//! ambiguous with one another again.
+//!
 //! # What stays out of the shuffle, and why that is fine
 //!
 //! `add_simulation_plugins_with` registers a handful of `FixedUpdate`
@@ -302,5 +311,109 @@ fn an_order_dependent_system_pair_produces_different_results_when_flipped() {
         "flipping the registration order of two systems in the same SimSet, \
          with no edge between them, did NOT change the outcome — the probe \
          pair failed to demonstrate the property this guard exists to catch"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Within-plugin ordering guard (issue #1183)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The three names of the `SimSet::Physics` world-layer mutators #1183 pins.
+/// Matched by suffix against `System::name()` (the `bevy/debug` feature — on
+/// for every test build, see `Cargo.toml` — makes those the real module paths).
+const WORLD_LAYER_MUTATORS: [&str; 3] = [
+    "world::server::tick_trigger_pipeline",
+    "world::server::apply_pending_scenario_loads",
+    "world::server::apply_world_layer_changes",
+];
+
+/// Issue #1183: the world-layer mutators must stay *explicitly* ordered, not
+/// merely ordered-by-accident.
+///
+/// `tick_trigger_pipeline`, `apply_pending_scenario_loads` and
+/// `apply_world_layer_changes` all take `ResMut<WorldContentRuntime>` (and the
+/// first two share still more state with the third), so the scheduler can never
+/// run two of them at once and MUST pick an order. Before #1183 that order came
+/// from Bevy's registration tie-break alone; #1183 pinned it with explicit
+/// `.after` edges (`world::server`, in the `WorldContentPlugin` build).
+///
+/// This is the within-plugin analogue of the shuffle guard above, and it fails
+/// the moment those edges are removed — WITHOUT depending on the tie-break
+/// happening to change. Bevy records every pair of systems that BOTH conflict on
+/// data access AND lack any ordering path between them (a genuine scheduling
+/// ambiguity) in `ScheduleGraph::conflicting_systems()`. With the edges present
+/// the three mutators are a linear chain, so no pair among them is disconnected
+/// and none appears there. Delete an edge and the newly-unordered,
+/// `WorldContentRuntime`-conflicting pair reappears — which this test asserts
+/// against directly. (Verified by construction: on the pre-#1183 code all three
+/// pairs are present in `conflicting_systems()`.)
+#[test]
+fn the_world_layer_mutators_are_explicitly_ordered_not_ambiguous() {
+    // A handful of frames is enough to force the FixedUpdate schedule to build;
+    // `conflicting_systems()` is populated at schedule-build time, independent
+    // of whether the mutators' run conditions ever fire.
+    let args = HeadlessArgs {
+        world_path: WORLD.into(),
+        max_ticks: 3,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    };
+    let app = SimFixture::new(args).build_and_run();
+
+    let schedules = app.world().resource::<bevy::ecs::schedule::Schedules>();
+    let fixed = schedules
+        .get(FixedUpdate)
+        .expect("the built app must own a FixedUpdate schedule");
+    let graph = fixed.graph();
+
+    // A reliable SystemKey -> name map. It comes from the *executable*
+    // (`Schedule::systems()`): `build_schedule` moves the systems out of
+    // `graph.systems`, so resolving `conflicting_systems()` keys through the
+    // graph container directly returns `None` for every one of them.
+    let names: std::collections::HashMap<_, String> = fixed
+        .systems()
+        .expect("the schedule executor is initialized after the app has run")
+        .map(|(key, sys)| (key, sys.name().as_string()))
+        .collect();
+
+    let is_mutator = |name: &str| WORLD_LAYER_MUTATORS.iter().any(|m| name.contains(m));
+
+    // Precondition: all three mutators are actually registered in this schedule,
+    // so an all-clear below cannot be a vacuous pass from a renamed system.
+    let present: Vec<&str> = WORLD_LAYER_MUTATORS
+        .iter()
+        .copied()
+        .filter(|m| names.values().any(|n| n.contains(m)))
+        .collect();
+    assert_eq!(
+        present.len(),
+        WORLD_LAYER_MUTATORS.len(),
+        "precondition: expected all three world-layer mutators in the \
+         FixedUpdate schedule, found only {present:?} — a rename would make the \
+         ambiguity check below vacuous"
+    );
+
+    // The offending pairs: BOTH ends are world-layer mutators AND the pair is a
+    // scheduling ambiguity (unordered + data-conflicting). Must be empty.
+    let offending: Vec<(String, String)> = graph
+        .conflicting_systems()
+        .0
+        .iter()
+        .filter_map(|(a, b, _conflicts)| {
+            let na = names.get(a)?;
+            let nb = names.get(b)?;
+            (is_mutator(na) && is_mutator(nb)).then(|| (na.clone(), nb.clone()))
+        })
+        .collect();
+
+    assert!(
+        offending.is_empty(),
+        "the SimSet::Physics world-layer mutators are ambiguously ordered again \
+         — these pairs conflict on WorldContentRuntime (and friends) with no \
+         ordering edge between them: {offending:?}. Restore the explicit \
+         `.after` edges in `WorldContentPlugin::build` (issue #1183); the run \
+         order tick_trigger_pipeline -> apply_pending_scenario_loads -> \
+         apply_world_layer_changes is the one the digests were captured under."
     );
 }

@@ -1,26 +1,22 @@
 //! Builds and drives the headless Bevy app.
 //!
-//! Mirrors `wasm_init` in `src/server/bridge.rs`, minus everything that needs a
-//! window, a GPU, or a JS host. The plugin list is derived from that function's
-//! `is_automation` branch, which is the already-proven inventory of what the
-//! simulation needs when `RenderPlugin` is absent.
+//! Since issue #1218 the core plugins, the render surrogate, and the whole
+//! world-ingestion order all come from the shared [`crate::boot`] seam: this
+//! module fills a [`BootPlan`](crate::boot::BootPlan) with
+//! [`Headless`](crate::boot::BootProfile::Headless) and calls
+//! [`boot::build`](crate::boot::build), so the headless inventory can no longer
+//! drift from the two browser inventories (a drift boot's three-profile parity
+//! test guards). What stays here is the genuinely headless-only work boot has no
+//! reason to know about: the diagnostic template preload and its model-marker
+//! gate, the seed-precedence resolution, the player-hull materiel, the
+//! simulation/lobby plugins, and the frame clock, auto-start and telemetry the
+//! harness loop reads.
 
-use bevy::app::{PanicHandlerPlugin, TaskPoolPlugin};
-use bevy::asset::{AssetApp, AssetPlugin};
-use bevy::diagnostic::{DiagnosticsPlugin, FrameCountPlugin};
-use bevy::image::Image;
-use bevy::log::LogPlugin;
-use bevy::mesh::Mesh;
-use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
-use bevy::scene::ScenePlugin;
-use bevy::shader::{Shader, ShaderLoader};
-use bevy::state::app::StatesPlugin;
-use bevy::time::{TimePlugin, TimeUpdateStrategy};
-use bevy::transform::TransformPlugin;
+use bevy::time::TimeUpdateStrategy;
 
 use crate::asteroid_lifecycle::AsteroidLifecyclePlugin;
-use crate::console_bridge::{AiChatterEvent, HudStateChanged, LobbyStateChanged};
+use crate::boot::{BootError, BootPlan, BootProfile};
 use crate::entities::ai_declaration_manifest;
 use crate::entity_config::EntityConfig;
 use crate::entity_loader::TemplateLoader;
@@ -33,6 +29,7 @@ use crate::perf::tick::TickSampler;
 use crate::server_app::{add_simulation_plugins_with, SimPluginOptions};
 use crate::ship_plugin::PendingShipConfig;
 use crate::sim_rng::{SeedSource, SimRng};
+use crate::world::load::LoadError;
 use crate::world::WorldPlugin;
 
 use super::args::HeadlessArgs;
@@ -52,6 +49,29 @@ impl std::error::Error for BuildError {}
 fn read_toml(path: &str, what: &str) -> Result<String, BuildError> {
     std::fs::read_to_string(path)
         .map_err(|e| BuildError(format!("could not read {what} {path:?}: {e}")))
+}
+
+/// Fold a [`BootError`] into the [`BuildError`] shape the harness has always
+/// reported, preserving the substrings existing callers and tests assert.
+///
+/// The load-error arms keep the two special-cased messages the inline loader
+/// carried: `could not read world` (the `missing_world_file_is_a_clean_error`
+/// substring) and the `duel sides:` prefix a failing `--side-a`/`--side-b`
+/// transform reports. A blocked activation keeps the `activation blocked`
+/// wording the composition gate has always used; boot's message already names
+/// the erroring findings' categories and text, which is what the
+/// unresolvable-template test reads.
+fn map_boot_error(e: BootError) -> BuildError {
+    match e {
+        BootError::WorldLoad(LoadError::ReadFailed { path }) => {
+            BuildError(format!("could not read world {path:?}"))
+        }
+        BootError::WorldLoad(LoadError::TransformFailed { message }) => {
+            BuildError(format!("duel sides: {message}"))
+        }
+        BootError::WorldLoad(other) => BuildError(format!("world load: {other}")),
+        BootError::WorldInvalid(msg) => BuildError(format!("world activation blocked: {msg}")),
+    }
 }
 
 /// Every spawnable template under `dir`, recursively, EXCEPT the fragment tree.
@@ -278,6 +298,11 @@ fn validate_template_markers(key: &str, toml: &str, cfg: &EntityConfig) -> Vec<M
 }
 
 /// Assemble the headless app. Does not run it — see [`run`].
+///
+/// The core plugins, the render surrogate, and the whole world-ingestion order
+/// (reset → load → validate → ledger apply → eager-record → freeze → insert the
+/// world config and its compiled scripts) come from
+/// [`boot::build`](crate::boot::build); see the module docs for what stays here.
 pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // When `--side-a` is given, its first entry chooses the player ship
     // (issue #844): resolve it to a template path and use it in place of
@@ -291,7 +316,10 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     };
 
     // Templates first: `update_session_with_config` reads the cache during
-    // `Startup`, so it has to be populated before the app is built.
+    // `Startup`, so it has to be populated before the app is built. This bulk
+    // preload is deliberately NOT recorded into the content ledger (see
+    // `content_ledger`'s module docs); its job is the cache plus the marker gate
+    // below, both of which must precede the boot build.
     let template_dir = std::path::Path::new(&ship_path)
         .parent()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -300,22 +328,22 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
 
     // Model-marker contract gate (issue #758). This validates EVERY template
     // discovered in `template_dir` — not just the ones this run will actually
-    // spawn — and a single error aborts the whole build before `App::new()`.
+    // spawn — and a single error aborts the whole build before boot composes an
+    // `App`.
     //
-    // That is deliberately stricter than the parse-skip policy above (a
+    // That is deliberately stricter than the parse-skip policy in the preload (a
     // template that fails to *parse* is skipped so one bad cosmetic asteroid
-    // cannot stop a combat test). The asymmetry is the point: a parse failure
-    // is loud and self-limiting — the template simply isn't in the cache, so
+    // cannot stop a combat test). The asymmetry is the point: a parse failure is
+    // loud and self-limiting — the template simply isn't in the cache, so
     // anything that needs it fails visibly — whereas an unresolved marker is
     // silent by construction. It attaches the beam, exhaust, or camera to the
     // ship's centre and produces a plausible-looking run whose numbers are
-    // wrong. Since the run's spawn set is not known until the world and the
-    // AI have had their say, "every discovered template" is the only scope
-    // that can be checked before anything spawns.
+    // wrong. Since the run's spawn set is not known until the world and the AI
+    // have had their say, "every discovered template" is the only scope that can
+    // be checked before anything spawns.
     //
-    // Errors are folded into the returned `BuildError`; warnings are reported
-    // below, after `LogPlugin` installs a subscriber (before it, every
-    // `tracing` line goes nowhere).
+    // Errors abort now; warnings are reported below, once boot's `LogPlugin` has
+    // installed a subscriber (before it, every `tracing` line goes nowhere).
     if crate::marker_validate::has_error(&marker_findings) {
         let errors: Vec<String> = marker_findings
             .iter()
@@ -329,167 +357,92 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         )));
     }
 
-    let mut app = App::new();
-
-    app.add_plugins((
-        PanicHandlerPlugin,
-        LogPlugin {
-            // Our own categories gate the `plog!` call sites; this filter only
-            // governs bevy-internal events. Keep it quiet by default so the
-            // report is the loudest thing on stdout.
-            //
-            // Root cause of issue #840 ("--log emits nothing yet slows the
-            // run"): the plumbing here was always correct — the parser, the
-            // `LogFilterConfig` gate, this subscriber, and the `EnvFilter`
-            // targets all line up. What was missing were `plog!` *call sites*:
-            // `ai`/`power` had none, `weapons` had a single `ptrace!`, so
-            // `--log ai=debug` had nothing to print. #840 added the load-bearing
-            // sites (target changes, opened/ceased fire, power energize/brownout,
-            // damage). The slowdown is inherent, not lost output: any `debug`/
-            // `trace` directive raises `tracing`'s global max-level hint, so
-            // bevy/rapier's own dense debug/trace callsites flip from statically
-            // compiled-out to dynamically `EnvFilter`-checked every tick. That
-            // cost is the filter *running*, and it is unavoidable while the
-            // process shares one global subscriber — logs go to stderr, so it
-            // never corrupts the stdout report.
-            filter: if args.log_spec.is_empty() {
-                "warn".to_string()
-            } else {
-                format!("warn,{}", args.log_spec)
-            },
-            ..default()
-        },
-        // Single-threaded when reproducibility is asked for: with the default
-        // multithreaded executor, system *execution* order varies run to run
-        // even though the schedule graph is fixed.
-        //
-        // Necessary but not sufficient on its own — the other half is the
-        // seeded `SimRng` inserted below, which is why `--seed` turns this on.
-        // The contract is same binary, same machine.
-        if args.deterministic {
-            TaskPoolPlugin {
-                task_pool_options: bevy::app::TaskPoolOptions::with_num_threads(1),
-            }
+    // The duel side transform (issue #844), now the boot load's `raw_transform`
+    // hook. It rewrites only the raw `toml::Value` the script loader reads —
+    // regenerating the slot drivers inside `duel.toml`'s `[script]` source — and
+    // never the parsed `WorldConfig`, which the load derives from the untouched
+    // text. Attached only when `--side-a`/`--side-b` is given, so a plain
+    // `--world` run's raw value is untouched.
+    let raw_transform: Option<Box<dyn Fn(toml::Value) -> Result<toml::Value, String>>> =
+        if args.side_a.is_empty() && args.side_b.is_empty() {
+            None
         } else {
-            TaskPoolPlugin::default()
-        },
-        FrameCountPlugin,
-        TimePlugin,
-        TransformPlugin,
-        DiagnosticsPlugin,
-        AssetPlugin::default(),
-        ScenePlugin,
-        StatesPlugin,
-    ));
+            let side_a = args.side_a.clone();
+            let side_b = args.side_b.clone();
+            Some(Box::new(move |raw: toml::Value| {
+                super::duel::apply_duel_sides(
+                    raw,
+                    &side_a,
+                    &side_b,
+                    &super::duel::resolve_template,
+                    &super::duel::DuelTemplateLoader,
+                )
+                .map_err(|e| e.to_string())
+            }))
+        };
 
-    // Marker-contract warnings (issue #758). Reported HERE, not next to the
-    // error gate above: `LogPlugin::build` has only just installed the global
-    // `tracing` subscriber, and anything emitted before it is silently
-    // dropped. `warn!` rather than `info!` so the default "warn" filter above
-    // still lets these through — an unresolved default camera marker is the
-    // kind of thing a run should say out loud.
+    // The boot seam (issue #1218). `boot::build` composes the shared core, the
+    // render surrogate (the four render asset types, the three host-page bridge
+    // messages, and the lobby-state push), and runs the one world load —
+    // resetting the content ledger, reading the root and its `extra_worlds`
+    // children, validating the composition and compiling the scripts exactly
+    // once, aborting on a broken world (Headless is authoritative), applying the
+    // ledger records, eager-recording the world's declared entity templates and
+    // freezing the ledger, then inserting the `WorldConfig` and the
+    // `PreCompiledScripts` for `WorldPlugin`'s `Startup` to consume. The
+    // once-compiled set feeds both that Startup insertion and the build-time
+    // fail-fast gate boot ran, so headless no longer compiles a world's scripts
+    // twice.
+    let plan = BootPlan {
+        profile: BootProfile::Headless,
+        // Keep bevy-internal events quiet by default so the report is the
+        // loudest thing on stdout; a `--log` spec is folded in after the `warn`
+        // floor. (Issue #840: `--log` needs `plog!` call sites, not just this
+        // filter, to print anything.)
+        log_filter: if args.log_spec.is_empty() {
+            "warn".to_string()
+        } else {
+            format!("warn,{}", args.log_spec)
+        },
+        world_path: args.world_path.clone(),
+        reader: Box::new(crate::world::load::FsReader),
+        script_resolver: Box::new(crate::config_cache::production_script_resolver()),
+        // `--deterministic`/`--seed` pins the scheduler to one thread; the seeded
+        // `SimRng` inserted below is the other half. The contract is same binary,
+        // same machine.
+        single_threaded: args.deterministic,
+        raw_transform,
+    };
+    let mut app = crate::boot::build(plan).map_err(map_boot_error)?;
+
+    // Marker-contract warnings (issue #758) and the AI-declaration manifest
+    // (issue #885a), both gathered by the preload BEFORE any subscriber existed.
+    // Reported HERE, after boot's `LogPlugin::build` installed the global
+    // `tracing` subscriber: anything emitted before it is silently dropped.
+    // `warn!` for the marker findings so the default `warn` filter still lets
+    // them through; the manifest sits below it (`--log config=debug` asks for
+    // the breakdown), so a normal run pays nothing.
     for f in marker_findings.iter().filter(|f| !f.is_error()) {
         warn!(target: "assets", "marker validation [warn] {}", f.describe());
     }
-
-    // AI-declaration manifest (issue #885a), reported here for the same reason
-    // as the marker warnings above — it was gathered before the subscriber
-    // existed. Below the default `warn` filter, so it costs a normal run
-    // nothing and `--log config=debug` is what asks for it.
     ai_declarations.emit();
 
-    // Asset types and messages that `RenderPlugin` / `ViewscreenBorderPlugin`
-    // would otherwise register. Simulation systems name these types even when
-    // nothing is drawn, so they have to exist. Kept in step with the
-    // `is_automation` branch of `wasm_init`.
-    app.init_asset::<Shader>()
-        .init_asset_loader::<ShaderLoader>()
-        .init_asset::<Image>()
-        .init_asset::<Mesh>()
-        .init_asset::<StandardMaterial>()
-        .add_message::<HudStateChanged>()
-        .add_message::<LobbyStateChanged>()
-        .add_message::<AiChatterEvent>();
-
+    // Crate-side log filtering (`plog!`), separate from boot's bevy `LogPlugin`.
     app.insert_resource(args.log.clone())
         .add_plugins(LoggingPlugin);
 
-    // Issue #935: a new headless build is a new scenario/world load — reset
-    // the content ledger here, before anything is recorded into it, so a
-    // second `build_headless_app` in the same test process never inherits the
-    // previous run's files (see `content_ledger`'s reset-semantics docs).
-    crate::content_ledger::reset();
-
-    // World load (issue #1214, Track 2 A2). ONE `world::load::load` call replaces
-    // what used to be several inline steps here: the `parse_world` of the root
-    // world, the raw `toml::Value` re-parse the Rhai loader needs, the
-    // `--side-a`/`--side-b` duel transform of that raw value, and — further down —
-    // the `validate_composition` sweep plus the fail-fast script compile. It reads
-    // the root world and every `extra_worlds` child, validates the composition,
-    // and compiles the world's scripts EXACTLY ONCE. The compiled set feeds both
-    // the build-time fail-fast gate below and the runtime insertion at `Startup`
-    // (handed over as `PreCompiledScripts`), so headless no longer compiles a
-    // world's scripts twice, nor inserts a `RawWorldSource` for
-    // `compile_world_scripts` to re-parse and re-compile.
-    //
-    // `insert_world_config_resource` (a `Startup` system in `WorldPlugin`) sources
-    // `WorldConfig` from the JS bridge, which has no native equivalent — it no-ops
-    // off-browser — so the config parsed here is inserted directly below to
-    // pre-empt that.
-    let reader = crate::world::load::FsReader;
-    let script_resolver = crate::config_cache::production_script_resolver();
-
-    // Duel side transform (issue #844), now the load's `raw_transform` hook. It
-    // rewrites only the raw `toml::Value` the script loader reads — regenerating
-    // the slot drivers inside `duel.toml`'s `[script]` source — and never the
-    // parsed `WorldConfig`, which `world::load` derives from the untouched text.
-    // Attached only when `--side-a`/`--side-b` is given, so a plain `--world` run's
-    // raw value is untouched (byte-for-byte the old condition).
-    let duel_active = !args.side_a.is_empty() || !args.side_b.is_empty();
-    let duel_transform = |raw: toml::Value| -> Result<toml::Value, String> {
-        super::duel::apply_duel_sides(
-            raw,
-            &args.side_a,
-            &args.side_b,
-            &super::duel::resolve_template,
-            &super::duel::DuelTemplateLoader,
-        )
-        .map_err(|e| e.to_string())
-    };
-    let mut request = crate::world::load::LoadRequest::new(
-        args.world_path.clone(),
-        &reader,
-        &script_resolver,
-        crate::world::load::LoadPolicy::Activate,
-    );
-    if duel_active {
-        request = request.with_transform(&duel_transform);
-    }
-    let crate::world::load::LoadedWorld {
-        config: world_config,
-        scripts: compiled_scripts,
-        children: loaded_children,
-        findings: composition_findings,
-        ledger: ledger_plan,
-    } = crate::world::load::load(request).map_err(|e| match e {
-        // Preserve the substring `missing_world_file_is_a_clean_error` asserts.
-        crate::world::load::LoadError::ReadFailed { path } => {
-            BuildError(format!("could not read world {path:?}"))
-        }
-        // Preserve the `duel sides:` prefix the harness has always reported.
-        crate::world::load::LoadError::TransformFailed { message } => {
-            BuildError(format!("duel sides: {message}"))
-        }
-        other => BuildError(format!("world load: {other}")),
-    })?;
-
     // Seed precedence: `--seed`, then the world TOML's `[global] seed`, then a
-    // seed drawn from the OS. Resolved here because this is the first point at
-    // which both the CLI args and the parsed world are in scope. Inserted
-    // *after* `add_simulation_plugins_with`'s `init_resource` further down
-    // would also work — `insert_resource` wins either way — but keeping it
-    // beside the world config keeps the precedence chain readable.
-    let sim_rng = match (args.seed, world_config.global.seed) {
+    // seed drawn from the OS. The world config boot parsed and inserted is read
+    // back here — the first point at which both the CLI args and the parsed
+    // world are in scope. Inserted into the app *after*
+    // `add_simulation_plugins_with`'s `init_resource` below, so it overrides the
+    // OS-seeded default.
+    let world_seed = app
+        .world()
+        .resource::<crate::world::config::WorldConfig>()
+        .global
+        .seed;
+    let sim_rng = match (args.seed, world_seed) {
         (Some(seed), _) => SimRng::new(seed, SeedSource::Cli),
         (None, Some(seed)) => SimRng::new(seed, SeedSource::World),
         (None, None) => SimRng::random(),
@@ -499,136 +452,34 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         "headless: seed={} ({})", sim_rng.seed(), sim_rng.source().as_str()
     );
 
-    // Atomic composition validation (issue #750). `world::load` ran
-    // `validate_composition` over the effective composition (root + additive
-    // `extra_worlds`) as part of the load above; here we log its findings and
-    // abort on any error, exactly as the inline sweep did — so a broken
-    // composition leaves zero partial root-world content active.
-    //
-    // The load ran AFTER the template preload above, deliberately: headless is an
-    // authoritative host, so `validate_composition` hard-fails a `template_path`
-    // that does not resolve (issue #973), and the loader it asks is the same one
-    // the spawn will ask — the preloaded cache, then the filesystem.
-    {
-        use crate::world::validate::{has_error, Severity};
-        for f in &composition_findings {
-            let loc = f
-                .source
-                .line
-                .map(|l| format!("{}:{}", f.source.file, l))
-                .unwrap_or_else(|| f.source.file.clone());
-            info!(
-                target: "world",
-                "world validation [{}] {}: {} ({loc})",
-                match f.severity {
-                    Severity::Error => "error",
-                    Severity::Warning => "warn",
-                },
-                f.category,
-                f.message
-            );
-        }
-        if has_error(&composition_findings) {
-            let errors: Vec<String> = composition_findings
-                .iter()
-                .filter(|f| f.is_error())
-                .map(|f| {
-                    let loc = f
-                        .source
-                        .line
-                        .map(|l| format!("{}:{}", f.source.file, l))
-                        .unwrap_or_else(|| f.source.file.clone());
-                    format!("[{}] {} ({loc})", f.category, f.message)
-                })
-                .collect();
-            return Err(BuildError(format!(
-                "world composition invalid; activation blocked ({} error(s)): {}",
-                errors.len(),
-                errors.join("; ")
-            )));
-        }
-
-        // Issue #935: the root + extra-world TOML text the load read, plus the
-        // whole world's declared entity-template set (root + extra worlds),
-        // recorded into the content ledger before the `freeze` below.
-        // `LedgerPlan::apply` writes the `(path, text)` records `world::load`
-        // gathered (root first, then children — native's answer to the browser's
-        // JS-driven preload); `eager_record_world_entities` walks the declared
-        // template set from each parsed config. The content-ledger fold is
-        // path-sorted and order-independent (see `content_ledger`'s docs), so this
-        // yields the byte-identical frozen digest the inline sequence did.
-        ledger_plan.apply();
-        crate::content_ledger::eager_record_world_entities(&world_config);
-        for child in &loaded_children {
-            crate::content_ledger::eager_record_world_entities(&child.config);
-        }
-    }
-
-    app.insert_resource(world_config);
-
     // Ship config, before `LobbyPlugin`: the native twin of
     // `wasm_validate_stations`. Without it `update_session_with_config` falls
     // back to `load_ship_config_from_disk`, which returns the *battleship*
     // roster regardless of `--ship` — so every station, and therefore every
-    // backfilled AI system, would belong to the wrong hull.
-    // `read_toml` first so an unreadable ship still reports the io error it
-    // always did; composition then resolves any `includes` the hull declares
-    // (issue #869) so the native `PendingShipConfig` matches the composed hull
-    // the cache holds.
+    // backfilled AI system, would belong to the wrong hull. `read_toml` first so
+    // an unreadable ship still reports the io error it always did; composition
+    // then resolves any `includes` the hull declares (issue #869) so the native
+    // `PendingShipConfig` matches the composed hull the cache holds.
     let _ = read_toml(&ship_path, "ship")?;
     let ship_entity_config = crate::entity_includes::load_entity_config(&ship_path)
         .map_err(|e| BuildError(format!("ship {ship_path:?} failed to parse: {e}")))?;
-    // Issue #935: the player's own hull is authored content too, and it is
-    // not necessarily among `world_config.entities` (a duel side is chosen
-    // by `--ship`/`--side-a`, not authored into the world). `FsTemplateLoader`
-    // records as a side effect of resolving it — see its doc comment.
+    // Issue #935: the player's own hull is authored content too, and it is not
+    // necessarily among `world_config.entities` (a duel side is chosen by
+    // `--ship`/`--side-a`, not authored into the world), so boot's freeze of the
+    // world's declared set need not have named it. `FsTemplateLoader` records the
+    // composed hull into the content ledger as a side effect of resolving it (see
+    // its doc comment); re-freezing then folds it into the frozen digest a save
+    // is checked against, exactly as the single inline freeze did before boot
+    // owned the first one. The ledger fold is path-sorted and order-independent,
+    // so the frozen digest is byte-identical whether the hull rode in on boot's
+    // eager walk or here.
     let _ = crate::entity_loader::FsTemplateLoader.load_template(&ship_path);
+    crate::content_ledger::freeze();
     let ship_config = ship_entity_config
         .ship_config
         .ok_or_else(|| BuildError(format!("ship {ship_path:?} has no [[station]] blocks")))?;
     app.insert_resource(PendingShipConfig(ship_config));
     app.insert_resource(SelectedShipResource(ship_path.clone()));
-
-    // Script fail-fast gate (issue #984), now over the `CompiledScripts`
-    // `world::load` produced above rather than a SECOND inline compile (issue
-    // #1214). A script error aborts the build exactly as a broken composition
-    // does, so a script-error world activates zero content and never reaches a
-    // running authoritative host. The single `load_world_scripts` call inside the
-    // load already recorded the sibling-`.rhai` content and the `<world>#scripts`
-    // digest into the (not-yet-frozen) content ledger — so a script edit still
-    // folds into the frozen digest, once. The compiled set is then handed to the
-    // `Startup` `compile_world_scripts` system as `PreCompiledScripts`, which
-    // builds the runtime from it instead of compiling a second time. A script-free
-    // world's `compiled_scripts` is `None`, so no gate runs and the runtime is
-    // absent, exactly as before.
-    if let Some(compiled) = &compiled_scripts {
-        if crate::world::validate::has_error(&compiled.findings) {
-            let errors: Vec<String> = compiled
-                .findings
-                .iter()
-                .filter(|f| f.is_error())
-                .map(|f| format!("[{}] {}", f.category, f.message))
-                .collect();
-            return Err(BuildError(format!(
-                "world scripts invalid; activation blocked ({} error(s)): {}",
-                errors.len(),
-                errors.join("; ")
-            )));
-        }
-    }
-    // Hand the once-compiled set to `compile_world_scripts` at `Startup`. The
-    // ordering contract `compile_world_scripts < setup_world < spawn_world_entities`
-    // is unchanged: that system still sets the activation gate and inserts the
-    // `WorldScriptRuntime` in the same `WorldPlugin` Startup chain slot — it merely
-    // consumes this resource instead of re-reading `RawWorldSource`.
-    app.insert_resource(crate::world::server::PreCompiledScripts(compiled_scripts));
-
-    // Issue #935: the world's declared file set — scenario/extra-world TOML,
-    // every referenced entity template and its fragments, the player's hull —
-    // is now fully known. Freeze the content ledger here, before anything
-    // spawns, so the digest a save is checked against does not drift as the
-    // world streams in afterward (see `content_ledger`'s module docs).
-    crate::content_ledger::freeze();
 
     // `ConfigCachePlugin` is wasm-only; its two jobs are the template cache
     // (done above) and the faction registry, which `add_simulation_plugins`
@@ -651,23 +502,15 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     app.insert_resource(sim_rng);
     app.add_plugins(WorldPlugin);
 
-    // Frame clock. `ManualDuration` makes every `Time` clock advance by
-    // exactly `dt` per `update()` regardless of wall clock. Since issue #895
-    // the SIMULATION rate is no longer this frame rate: the sim runs in
-    // `FixedUpdate` at the world's `[global] sim_tick_hz` (the `WorldConfig`
-    // inserted above, applied by `reconcile_fixed_timestep`), and each
-    // `update()` here steps it zero or more whole logical ticks so that sim
-    // time tracks the `dt`-per-frame virtual clock. At the default
-    // `--hz 60` against the default `sim_tick_hz = 60` that is exactly one
-    // tick per frame.
-    //
-    // Rapier no longer needs telling anything here (issue #896). It used to be
-    // handed `TimestepMode::Fixed { dt: args.dt }` from this very line — the
-    // FRAME period, a different clock from the one the simulation runs on, and
-    // wrong the moment `--hz` and `sim_tick_hz` disagreed. Since #896 physics
-    // runs inside `FixedUpdate` at the authored `sim_tick_hz`, set once in
-    // `server_app::register_physics` and kept in step by
-    // `sim_tick::reconcile_fixed_timestep` like every other tick-rate consumer.
+    // Frame clock. `ManualDuration` makes every `Time` clock advance by exactly
+    // `dt` per `update()` regardless of wall clock. Since issue #895 the
+    // SIMULATION rate is no longer this frame rate: the sim runs in `FixedUpdate`
+    // at the world's `[global] sim_tick_hz`, and each `update()` here steps it
+    // zero or more whole logical ticks so that sim time tracks the
+    // `dt`-per-frame virtual clock. At the default `--hz 60` against the default
+    // `sim_tick_hz = 60` that is exactly one tick per frame. Rapier no longer
+    // needs telling anything here (issue #896): physics runs inside `FixedUpdate`
+    // at the authored `sim_tick_hz`, set once in `server_app::register_physics`.
     app.insert_resource(TimeUpdateStrategy::ManualDuration(
         std::time::Duration::from_secs_f64(args.dt),
     ));
@@ -677,18 +520,15 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
         headless_auto_start.before(crate::sim_sets::SimSet::Input),
     );
 
-    // Telemetry. `collect_outbound` and `collect_balance_events` run in
-    // `Last` and stamp each record with `Res<SimTick>` (issue #895
-    // re-review — a per-`update()` frame counter used to do this and folded
-    // multiple logical ticks into one stamp whenever `--hz` ran slower than
-    // `sim_tick_hz`); `register_sim_tick` above (`add_simulation_plugins_with`)
-    // guarantees that resource exists.
+    // Telemetry. `collect_outbound` and `collect_balance_events` run in `Last`
+    // and stamp each record with `Res<SimTick>` (issue #895); `register_sim_tick`
+    // inside `add_simulation_plugins_with` guarantees that resource exists.
     app.insert_resource(super::report::RunTelemetry {
         capture_stream: args.report_format == super::args::ReportFormat::Ndjson,
         ..Default::default()
     })
-    // Chained so an ndjson tick reads message-traffic-then-balance rather
-    // than in whatever order the executor happened to pick.
+    // Chained so an ndjson tick reads message-traffic-then-balance rather than in
+    // whatever order the executor happened to pick.
     .add_systems(
         Last,
         (

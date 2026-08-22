@@ -48,6 +48,8 @@ fn plan_with(profile: BootProfile, world: &str) -> BootPlan {
         world_path: WORLD_PATH.to_string(),
         reader: Box::new(MemoryReader::new([(WORLD_PATH, world)])),
         script_resolver: Box::new(NoScriptResolver),
+        single_threaded: false,
+        raw_transform: None,
     }
 }
 
@@ -170,6 +172,8 @@ fn an_unreadable_world_is_a_load_error_for_every_profile() {
             world_path: WORLD_PATH.to_string(),
             reader: Box::new(MemoryReader::new(std::iter::empty::<(String, String)>())),
             script_resolver: Box::new(NoScriptResolver),
+            single_threaded: false,
+            raw_transform: None,
         };
         let err = build(plan).expect_err("a missing world must be a load error");
         assert!(

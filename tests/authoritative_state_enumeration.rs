@@ -248,6 +248,15 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // baseline beside `AdmittedConsumerRegistry` below — the other build-time
     // registry populated by plugin `build()` calls.
     "project_phoenix::authoritative::StateCensus",
+    // The boot render-surrogate seam marker (issue #1218). A zero-sized
+    // `#[derive(Resource)]` that `boot::render_surrogate` inserts so boot's
+    // three-profile parity test can assert which renderer path a profile took;
+    // it now rides into the headless sim app because `build_headless_app` composes
+    // through `boot::build`. Build-time diagnostic state — inserted once as the
+    // app composes, never read by the fixed tick, never folded — so it sits on the
+    // honest baseline beside `StateCensus` above rather than being misclassified
+    // into a digest-exclusion class it does not fit.
+    "project_phoenix::boot::RenderSurrogateApplied",
     "project_phoenix::command_admission::log::CommandDelay",
     "project_phoenix::command_admission::log::CommandLog",
     "project_phoenix::command_admission::log::PendingCommands",

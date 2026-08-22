@@ -138,6 +138,21 @@ pub struct BootPlan {
     /// The sibling-`.rhai` script resolver for this target
     /// ([`crate::config_cache::production_script_resolver`] in production).
     pub script_resolver: Box<dyn ScriptResolver>,
+    /// Pin Bevy's [`TaskPoolPlugin`] to a single thread, so the executor runs
+    /// systems in a fixed order run to run.
+    ///
+    /// Only a headless `--deterministic`/`--seed` run asks for this — reproducing
+    /// a byte-identical digest needs the system execution order fixed, not just
+    /// the timestep. The browser profiles always leave it `false` (a rendered
+    /// host is not reproduced tick-for-tick, and wasm has its own pool policy).
+    pub single_threaded: bool,
+    /// Optional transform applied to the raw world `toml::Value` **before** its
+    /// scripts compile — the seam `headless::duel::apply_duel_sides` rewrites the
+    /// `--side-a`/`--side-b` slot roster through (issue #844). `None` for a plain
+    /// run and for both browser profiles; when present it is attached to the
+    /// [`LoadRequest`](crate::world::load::LoadRequest) [`ingest_world`] builds, so
+    /// the load owns the one transform hook exactly as it owns the load itself.
+    pub raw_transform: Option<Box<dyn Fn(toml::Value) -> Result<toml::Value, String>>>,
 }
 
 /// Why [`build`] could not produce an `App`.
@@ -194,7 +209,12 @@ struct RenderStackApplied;
 pub fn build(plan: BootPlan) -> Result<App, BootError> {
     let mut app = App::new();
 
-    core_plugins(&mut app, plan.profile, &plan.log_filter);
+    core_plugins(
+        &mut app,
+        plan.profile,
+        &plan.log_filter,
+        plan.single_threaded,
+    );
 
     if plan.profile.has_render_stack() {
         render_stack(&mut app);
@@ -217,7 +237,20 @@ pub fn build(plan: BootPlan) -> Result<App, BootError> {
 /// frame counting, time, transforms, diagnostics, assets, scenes and states. The
 /// browser profiles add input, a canvas window and accessibility on top; the
 /// winit event loop is added only on the browser target (see [`browser_shell`]).
-fn core_plugins(app: &mut App, profile: BootProfile, log_filter: &str) {
+///
+/// `single_threaded` pins the task pool to one thread, for a headless
+/// deterministic run — see [`BootPlan::single_threaded`].
+fn core_plugins(app: &mut App, profile: BootProfile, log_filter: &str, single_threaded: bool) {
+    // Both arms are a `TaskPoolPlugin`, so the tuple below stays one type; a
+    // deterministic run needs a fixed system execution order, which a
+    // single-threaded pool gives and the multithreaded default does not.
+    let task_pool = if single_threaded {
+        TaskPoolPlugin {
+            task_pool_options: bevy::app::TaskPoolOptions::with_num_threads(1),
+        }
+    } else {
+        TaskPoolPlugin::default()
+    };
     app.add_plugins((
         PanicHandlerPlugin,
         LogPlugin {
@@ -226,7 +259,7 @@ fn core_plugins(app: &mut App, profile: BootProfile, log_filter: &str) {
             filter: log_filter.to_string(),
             ..default()
         },
-        TaskPoolPlugin::default(),
+        task_pool,
         FrameCountPlugin,
         TimePlugin,
         TransformPlugin,
@@ -387,12 +420,17 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     crate::world::script::init_hashing_seed();
     crate::content_ledger::reset();
 
-    let request = LoadRequest::new(
+    let mut request = LoadRequest::new(
         plan.world_path.clone(),
         plan.reader.as_ref(),
         plan.script_resolver.as_ref(),
         LoadPolicy::Activate,
     );
+    // The one raw-value transform hook (headless's `--side-a`/`--side-b` duel
+    // seam). Borrowed from `plan`, which outlives this load call.
+    if let Some(transform) = &plan.raw_transform {
+        request = request.with_transform(&**transform);
+    }
     let loaded = load(request).map_err(BootError::WorldLoad)?;
 
     // The activation gate. Both the composition findings and the compiled scripts'

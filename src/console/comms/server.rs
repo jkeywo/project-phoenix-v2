@@ -661,9 +661,8 @@ pub(crate) fn handle_respond_to_message(
         // duplicate submission on the same message id cannot re-run `on_pick` —
         // which for a spawning or objective-mutating response would apply its
         // effects twice. The second submission takes the stale-submission arm
-        // above instead and flashes red. (`handle_clear_comms` still leaks
-        // `active_dialogues` for messages that are never answered — issue
-        // #1049.)
+        // above instead and flashes red. (`handle_clear_comms` also retires
+        // every UNANSWERED entry on an explicit clear — issue #1049.)
         comms.active_dialogues.remove(message_id);
 
         // Advance to the follow-up node the `on_pick` fn returned. `None` is
@@ -727,17 +726,35 @@ pub(crate) fn handle_respond_to_message(
 /// its latch re-arms through [`operate_comms_ai`]'s candidacy retirement
 /// instead. See [`has_open_hail_thread_with`].
 ///
-/// # Known leak: `active_dialogues` (issue #1049)
+/// # `active_dialogues` is HARD-cleared (issue #1049)
 ///
-/// Clearing empties the inbox and `open_hails` but NOT
-/// `CommsRuntime::active_dialogues`, so every cleared message's dialogue state
-/// stays resident for the rest of the mission — unbounded in a long scenario, and
-/// a submission against a cleared message id still resolves. Scripted threads
-/// (issue #984) inherit the leak unchanged: their `ActiveDialogue` carries a
-/// [`ScriptedDialogue`](crate::comms::content::ScriptedDialogue) and is retained
-/// the same way. Fixing it is #1049's job, deliberately not this handler's — the
-/// retention is load-bearing for the declarative follow-up path and unpicking it
-/// is a behaviour change, not a cleanup.
+/// Clearing empties `CommsRuntime::active_dialogues` alongside the inbox and
+/// `open_hails` — a full clear, not a selective prune. That is safe because
+/// nothing consumes an `active_dialogues` entry except by looking it up
+/// through `message_id` and treating a miss as an ordinary, already-handled
+/// case, never as an invariant violation:
+///
+///   * [`handle_respond_to_message`] is the only path that can advance a
+///     dialogue, and it already has a "stale submission" arm for a missing
+///     entry (already answered, never existed, or now cleared) — it rejects
+///     with `CommsResponseRejected` so the client flashes the attempted
+///     control red. A clear simply routes every open dialogue through the
+///     SAME arm a late/duplicate submission already takes.
+///   * [`operate_comms_response_ai`] skips any inbox message with no
+///     `active_dialogues` entry — it never decides about a thread that isn't
+///     there, so a clear just leaves it nothing to decide about.
+///
+/// There is also no PENDING server-side continuation that a hard clear could
+/// orphan. A scripted dialogue's only deferred work — `in_seconds` effects
+/// (`pending_delayed_actions`) and `after` callbacks (`pending_callbacks`) —
+/// never re-enters an existing `active_dialogues` entry by id; when one of
+/// them eventually queues a follow-up `open_comms` request,
+/// `open_scripted_comms_threads` mints a BRAND NEW message id and inserts a
+/// fresh entry (`comms/scripted.rs`), exactly as a live `on_pick`'s own
+/// follow-up node does (`handle_respond_to_message` below). Neither writer
+/// ever mutates or resurrects a cleared entry, so there is nothing to cancel
+/// and nothing selective to preserve — a full clear and a "prune only the
+/// entries with no pending effect" clear are the same operation here.
 pub(crate) fn handle_clear_comms(
     ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut inbox: ResMut<CommsInboxRes>,
@@ -753,6 +770,7 @@ pub(crate) fn handle_clear_comms(
         ) {
             inbox.0.clear();
             comms.open_hails.clear();
+            comms.active_dialogues.clear();
         }
     }
 }

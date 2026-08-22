@@ -2344,6 +2344,93 @@ fn a_terminal_scripted_response_ends_the_thread() {
     );
 }
 
+// -- Issue #1049: `handle_clear_comms` also empties `active_dialogues` -----
+
+/// Acceptance: seat a comms holder, open a (scripted) dialogue, issue
+/// `ClearComms`, and `active_dialogues` is empty afterward — not just the
+/// inbox and `open_hails`.
+///
+/// Also covers the "no dangling continuation" half of the acceptance
+/// criteria: a `RespondToMessage` submitted against the now-cleared message
+/// id must not silently resolve. It takes the shared router's ordinary
+/// stale-dialogue arm — the SAME arm a late/duplicate submission against an
+/// already-answered message already takes (see
+/// `a_scripted_response_runs_its_on_pick_and_injects_the_follow_up` and
+/// `stale_ai_response_is_rejected_by_the_shared_router`) — and is rejected
+/// with `CommsResponseRejected` rather than re-running `on_pick` against
+/// dropped state.
+#[test]
+fn clear_comms_empties_active_dialogues_and_a_cleared_dialogue_cannot_be_answered() {
+    let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456987";
+    let mut app = comms_test_app();
+    setup_game_with_comms(&mut app, station_uuid);
+    app.world_mut()
+        .insert_resource(crate::comms::scripted::tests::compile_fixture(
+            DIALOGUE_TREE,
+        ));
+    let id = seat_scripted_dialogue(
+        &mut app,
+        station_uuid,
+        "Axiom Station, go ahead.",
+        vec!["on_ack", "on_decline"],
+        false,
+    );
+    assert!(
+        app.world()
+            .resource::<CommsRuntime>()
+            .active_dialogues
+            .contains_key(&id),
+        "sanity: the dialogue is seated before the clear"
+    );
+
+    push_msg(
+        &mut app,
+        "comms",
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::comms_system_id(),
+            payload: crate::core::messages::SystemControlPayload::ClearComms,
+        },
+    );
+    let _ = tick(&mut app);
+
+    assert!(
+        app.world()
+            .resource::<CommsRuntime>()
+            .active_dialogues
+            .is_empty(),
+        "ClearComms must retire every active dialogue, not just the inbox \
+         and open_hails"
+    );
+
+    // No dangling continuation fires: the mid-dialogue mechanism this
+    // codebase has (a follow-up node from `on_pick`) can only ever be
+    // reached by answering the SAME message id again, so proving that path
+    // is refused is proving there is nothing left to dangle.
+    let out = respond(&mut app, &id, 0);
+    let (rejected_id, idx) = find_rejection(&out).expect(
+        "a response against a cleared dialogue must be rejected, not \
+         silently accepted",
+    );
+    assert_eq!(rejected_id, id);
+    assert_eq!(idx, 0);
+    assert!(
+        !app.world()
+            .resource::<CommsInboxRes>()
+            .0
+            .messages()
+            .iter()
+            .any(|m| m.body == "Docking clamps released."),
+        "the rejected on_pick's follow-up node must never be injected"
+    );
+    assert!(
+        app.world()
+            .resource::<CommsRuntime>()
+            .active_dialogues
+            .is_empty(),
+        "the rejected submission must not resurrect an active_dialogues entry"
+    );
+}
+
 /// The tick the responding `handle_respond_to_message` will read — what a
 /// budget must be stamped with to belong to THIS tick rather than a stale
 /// one. `advance_sim_tick` runs in `FixedLast`, so the value the handler

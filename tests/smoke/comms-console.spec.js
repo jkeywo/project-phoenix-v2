@@ -7,17 +7,19 @@ test('comms console: renders contacts and the most recent unread thread', async 
   await page.goto(CONSOLE_URL);
 
   await page.evaluate(() => {
+    // The battleship Comms console is a flat `comms`-family payload: the fields
+    // sit at the top level, exactly as buildCommsConsoleState emits them (and as
+    // tests/client/comms-console.test.js drives renderStation). Nesting them
+    // under a `comms` key is a shape the runtime never sends.
     window.__updateConsole('comms', JSON.stringify({
-      comms: {
-        messages: [
-          { id: 'demo-msg-1', sender_name: 'Outpost Theta', body: 'We are under attack', responses: ['Acknowledged'], is_read: false },
-          { id: 'demo-msg-0', sender_name: 'Relay Seven', body: 'Signal relay stable', responses: [], is_read: true },
-        ],
-        contacts: [
-          { id: 'theta', name: 'Outpost Theta', in_range: true, stance: 'friendly' },
-          { id: 'relay', name: 'Relay Seven', in_range: true, stance: 'neutral' },
-        ],
-      },
+      messages: [
+        { id: 'demo-msg-1', sender_name: 'Outpost Theta', body: 'We are under attack', responses: ['Acknowledged'], is_read: false },
+        { id: 'demo-msg-0', sender_name: 'Relay Seven', body: 'Signal relay stable', responses: [], is_read: true },
+      ],
+      contacts: [
+        { id: 'theta', name: 'Outpost Theta', in_range: true, stance: 'friendly' },
+        { id: 'relay', name: 'Relay Seven', in_range: true, stance: 'neutral' },
+      ],
     }));
   });
 
@@ -33,19 +35,17 @@ test('comms console: response buttons send respond_to_message for the active thr
     window.__sent = [];
     window.__sendAction = (json) => window.__sent.push(json);
     window.__updateConsole('comms', JSON.stringify({
-      comms: {
-        messages: [
-          {
-            id: 'dr-myst-briefing',
-            sender_name: 'Dr. Myst',
-            body: 'Ardent, this is Dr. Myst at the Research Outpost. Whatever is out there is charging.',
-            responses: ['What happens if it fires?', 'Is there anything unusual about the signal?'],
-            selected_response: null,
-            is_read: false,
-          },
-        ],
-        contacts: [{ id: 'research-uuid', name: 'Research Outpost', in_range: true, stance: 'friendly' }],
-      },
+      messages: [
+        {
+          id: 'dr-myst-briefing',
+          sender_name: 'Dr. Myst',
+          body: 'Ardent, this is Dr. Myst at the Research Outpost. Whatever is out there is charging.',
+          responses: ['What happens if it fires?', 'Is there anything unusual about the signal?'],
+          selected_response: null,
+          is_read: false,
+        },
+      ],
+      contacts: [{ id: 'research-uuid', name: 'Research Outpost', in_range: true, stance: 'friendly' }],
     }));
   });
 

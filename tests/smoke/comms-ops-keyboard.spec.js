@@ -52,16 +52,16 @@ test('Comms console: a hail is selected and answered from the keyboard, with no 
     && !!customElements.get('ph-comms-current-message'));
   await instrument(page);
 
+  // Flat `comms`-family payload — fields at the top level, as
+  // buildCommsConsoleState emits them (not nested under a `comms` key).
   await page.evaluate(() => window.__updateConsole('comms', JSON.stringify({
-    comms: {
-      contacts: [],
-      messages: [
-        {
-          id: 'hail-1', sender_name: 'RELAY STATION', body: 'Do you copy?', is_read: false,
-          responses: [{ text: 'Acknowledge', available: true, important: false }],
-        },
-      ],
-    },
+    contacts: [],
+    messages: [
+      {
+        id: 'hail-1', sender_name: 'RELAY STATION', body: 'Do you copy?', is_read: false,
+        responses: [{ text: 'Acknowledge', available: true, important: false }],
+      },
+    ],
   })));
 
   // ── Tab reaches the hail list — it is one Tab stop (AC #1) ──────────────────

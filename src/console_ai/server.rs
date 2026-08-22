@@ -38,7 +38,6 @@ use crate::simmath;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
-use crate::console_ai::shields_emit::emit_shields_ai_command;
 
 // AI rule keys — match the keys used in [[station.rating]].ai_tuning tables.
 pub const AI_RULE_TORPEDO_AUTO_FIRE: &str = "torpedo_auto_fire";
@@ -215,11 +214,11 @@ impl Plugin for ConsoleAiPlugin {
 pub(crate) fn ai_shield_focus(
     time: Res<Time>,
     world_snapshot: Res<crate::ai_plugin::WorldSnapshot>,
-    sessions: Res<crate::lobby::Sessions>,
-    // The read-only AI-host world context — flag chain, sessions, and origin
-    // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
-    // runs this host must register it (`register_ai_host_env`) or fail loudly at
-    // schedule build, so a bare `App` cannot silently diverge from production.
+    // The read-only AI-host world context — flag chain, sessions (consulted by
+    // the admission emitter), and origin stamps — behind one bare-`Res` system
+    // param (issue #1207). A fixture that runs this host must register it
+    // (`register_ai_host_env`) or fail loudly at schedule build, so a bare `App`
+    // cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
     mut ships: Query<
         (
@@ -240,6 +239,13 @@ pub(crate) fn ai_shield_focus(
     >,
 ) {
     let current_time = time.elapsed_secs();
+
+    // The AI side of the typed input path (issue #1211, which deleted the
+    // per-operator `console_ai::shields_emit` shim): the emitter binds the
+    // session table once, and each per-ship `emit` supplies the ship-specific
+    // context. It routes the SetShieldArcFocus commands through the same shared
+    // `command_admission::ai_emit` seam a human command crosses.
+    let emitter = ai_env.emitter();
 
     for (
         ship_entity,
@@ -268,12 +274,11 @@ pub(crate) fn ai_shield_focus(
             else {
                 return;
             };
-            emit_shields_ai_command(
+            emitter.emit(
                 entity_uuid,
                 sid,
                 crate::messages::SystemControlPayload::SetShieldArcFocus { focused: true },
                 control_sources,
-                &sessions,
                 ship_config,
                 admitted,
             );
@@ -474,12 +479,11 @@ pub(crate) fn ai_shield_focus(
                         .and_then(|f| crate::system_registry::shield_arc_system_id(&f.id))
                 });
                 if let Some(sid) = current_sid {
-                    emit_shields_ai_command(
+                    emitter.emit(
                         entity_uuid,
                         sid,
                         crate::messages::SystemControlPayload::SetShieldArcFocus { focused: false },
                         control_sources,
-                        &sessions,
                         ship_config,
                         &mut admitted,
                     );

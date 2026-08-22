@@ -826,6 +826,7 @@ entities:
         - "Issue #779 began that transition for the travel axes: ai_helm_thrust / ai_helm_steering now resolve a data-authored #775 policy verb catalogue (helm-engines-ai-operator / helm-steering-ai-operator) to decide WHETHER to actuate, with the continuous magnitude still sourced from the shared DesiredMotion planner fact. The plan_helm_travel geometry is unchanged here; retiring the hardcoded planner branch entirely is the coordinated tail #794."
         - "Issue #801 completed the per-axis split: each system gates on its own declared helm-thrust / helm-steering / helm-impulse system's operate_ai policy. The dead coarse helm fallbacks and helm_control_policy are deleted; a whole-helm judgement (e.g. arc-bearing) derives from the per-axis declarations via helm_axes_operate_ai, never from a coarse system."
         - "Issue #803 decoupled the decision cadence from the host frame rate: all per-axis AI helm systems run only on the shared AI-helm sim tick (see ai-helm-tick-cadence), a determinism prerequisite for P2P lockstep (PRD #620)."
+        - "Issue #1211 deleted the emit_helm_ai_command pass-through shim (helm_ai_emit.rs). ai_helm_thrust/ai_helm_steering/ai_helm_impulse now emit through the AI host spine's AiHostEnv::emitter() (ai-policy-host-spine, issue #1205) — identical payloads/token/admission gate/same-tick guarantee, still the shared command_admission::ai_emit::emit_ai_command seam — so depends_on swaps host-command-admission → ai-policy-host-spine. This operator was ALREADY a missing-observed-dependency warning before #1211 because helm_ai_emit.rs was co-owned by three helm entities (never an unambiguous per-entity edge); the swap retargets that same warning to the spine, where the admission edge is now carried unambiguously by the single-owner src/ai/host.rs."
     architecture:
       kind: service
       authority: authoritative
@@ -843,7 +844,11 @@ entities:
         - pending-arc-bearing-request-state
         - helm-ai-surfaces-frame-state
       depends_on:
-        - host-command-admission
+        # Issue #1211 deleted the per-axis emit_helm_ai_command shim; the travel
+        # axes now emit through the AI host spine's AiHostEnv::emitter(), so this
+        # operator depends on ai-policy-host-spine, which carries the single-owner
+        # observed command_admission::ai_emit edge in src/ai/host.rs.
+        - ai-policy-host-spine
       runs_in:
         - host-browser-runtime
     implementation:
@@ -854,7 +859,6 @@ entities:
         - src/ship/helm_ai/impulse.rs
         - src/ship/helm_ai/surfaces.rs
         - src/ship/helm_ai/mod.rs
-        - src/ship/helm_ai_emit.rs
         - src/ai/core.rs
       symbols:
         - build_helm_ai_surfaces_frame
@@ -862,7 +866,6 @@ entities:
         - ai_helm_steering
         - ai_helm_impulse
         - helm_axes_operate_ai
-        - emit_helm_ai_command
         - plan_helm_travel
         - decide_impulse
         - steer_toward
@@ -882,6 +885,7 @@ entities:
         - "Issue #803 deleted its private hardcoded AiLateralThrustTimer; it now runs on the shared AI-helm sim tick (see ai-helm-tick-cadence) like the other per-axis AI helm systems."
         - "Issue #780 moved the ACTUATION DECISION onto the authored #775 policy spine: HelmLateralAiPolicy (attached at spawn from [helm_console.lateral_ai]) resolves the lateral channel to the actuate_lateral_thrust mode verb over a fact snapshot seeded from the shared hazard surface (seed_helm_actuator_facts). A hold resolution emits nothing; the docking translation remains an UNCONDITIONAL sanctioned override applied before the gate. The dodge magnitude still comes from HazardAssessment.hazard_forces weighted by lateral_hazard_sensitivity — avoidance BENDS travel without swapping the doctrine (AC3)."
         - "Issue #885 (8555e336) deleted the default_lateral_ai_config synthesiser that used to stand in for an unauthored block with an unconditional actuate. Strict AI-declaration mode is now the default, so an undeclared [helm_console.lateral_ai] fails the entity load instead of being invented; every shipped hull authors the block."
+        - "Issue #1211 deleted the single-owner emit_helm_lateral_command shim (helm_lateral_emit.rs). ai_helm_lateral_thrust now emits through the AI host spine's AiHostEnv::emitter() (ai-policy-host-spine, issue #1205) — identical payloads/token/admission gate/same-tick guarantee, still the shared command_admission::ai_emit::emit_ai_command seam — so depends_on swaps host-command-admission → ai-policy-host-spine. OBSERVABILITY NOTE: helm_lateral_emit.rs was this operator's only single-owner file, so PASM had attributed a per-entity admission edge to it; its other files (lateral.rs, mod.rs, facts.rs, …) are co-owned, so the swapped dependency now reports as missing-observed — the admission edge is instead carried unambiguously by the spine's single-owner src/ai/host.rs, matching how helm-ai-operator/impulse/boost were already modelled."
     architecture:
       kind: service
       authority: authoritative
@@ -893,7 +897,11 @@ entities:
         - hazard-assessment-state
         - helm-actuator-input-state
       depends_on:
-        - host-command-admission
+        # Issue #1211 deleted the single-owner emit_helm_lateral_command shim;
+        # this operator now emits through the AI host spine's AiHostEnv::emitter()
+        # and so depends on ai-policy-host-spine, which carries the single-owner
+        # observed command_admission::ai_emit edge in src/ai/host.rs.
+        - ai-policy-host-spine
       runs_in:
         - host-browser-runtime
     implementation:
@@ -902,7 +910,6 @@ entities:
         - src/ship/helm_ai/lateral.rs
         - src/ship/helm_ai/mod.rs
         - src/ship/helm_ai/facts.rs
-        - src/ship/helm_lateral_emit.rs
         - src/ai/core.rs
         - src/ai/policy.rs
         - src/entities/config.rs
@@ -911,7 +918,6 @@ entities:
         - LateralAxis
         - HelmAxisHost
         - run_helm_axis
-        - emit_helm_lateral_command
         - FineSystemAiPolicies
         - HELM_LATERAL_CHANNEL
         - HELM_ACTUATE_LATERAL_THRUST_VERB
@@ -1015,7 +1021,7 @@ entities:
         - "Issue #779 (AC1): Engines is the first continuous fine actuator moved onto the authored #775 policy spine. The DECISION to actuate flows through HelmEnginesAiPolicy (attached at spawn from [helm_console.engines_ai]) resolving the longitudinal channel to the actuate_desired_travel mode verb, replacing the pre-#779 unconditional hardcoded branch in ai_helm_thrust."
         - "Issue #885 (8555e336) deleted the default_engines_ai_config synthesiser that used to fill an unauthored block (an unconditional actuate rule). Strict AI-declaration mode is now the default in EntityConfig::from_toml, so an undeclared block is a LOAD ERROR rather than an invented policy, and every shipped hull authors the block explicitly."
         - "Continuous value vs fixed verb (AGENTS.md #11): the mode verb carries no scalar. The forward/reverse magnitude stays sourced from DesiredMotion.desired_velocity_local, decoded by decode_thrust_from_velocity, so no geometry lives in the Bevy-free policy. A 'hold' resolution (no rule fires / explicit idle) emits nothing and the throttle coasts."
-        - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetThrust a human sets, through emit_helm_ai_command; the per-axis operate_ai gate preserves human-takeover / backfill authority. Policy is stateless, so reacquisition needs no lifecycle reset."
+        - "Human/AI symmetry (AGENTS.md #6, AC3/AC6): terminates in the same admitted SetThrust a human sets, through the AI host spine's AiHostEnv::emitter() (issue #1211 deleted the per-axis emit_helm_ai_command shim this bullet originally named; the emitter wraps the identical command_admission::ai_emit::emit_ai_command seam); the per-axis operate_ai gate preserves human-takeover / backfill authority. Policy is stateless, so reacquisition needs no lifecycle reset."
         - "Issue #883 (AC5) CLOSED the #779 empty-facts gap on this axis. ai_helm_thrust constructed AiFacts::new() literally — an EMPTY snapshot — so any fact(...) guard on the longitudinal channel validated at load and was then false for ever. It now seeds the same hazard/availability snapshot #780 gave the secondary axes PLUS the new target-relative travel facts (seed_helm_travel_facts: target_valid, range_to_target, closing_rate, bearing_to_target, speed_fraction), computed host-side from the frame merged view and ShipPhysics so policy.rs stays Bevy-free. Engines may now also declare a #882 STATE MACHINE (HelmEnginesAiPolicyState, resolved through the shared resolve_helm_channel seam); every shipped hull remains stateless and unchanged."
         - "Issue #883 also seeds this host's AVAILABILITY facts honestly. ai_helm_thrust used to pass a hardcoded false for impulse_available and boost_available while ai_policy_state_tick and ai_helm_boost read them from the ship's own ImpulseConfigResource / BoostConfigResource — the #779 empty-facts trap one fact narrower, since a longitudinal guard on fact(boost_available) validated at load and then read 0 for ever. Both are now taken from those resources, because an absent fact and a fact pinned to 0 are equally silently-wrong to a guard."
         - "Issue #883 also gave this axis a second travel arm. When the ship publishes an active HelmPassSurface, helm_motion_planner sources desired motion from the pure plan_fly_through_pass instead of plan_helm_travel: a flat authored approach/escape throttle with NO decel ramp. Only the INBOUND leg of that arm is gated on a resolvable target; the ESCAPE leg reads no target at all and runs on the frozen heading even after the target dies or leaves radar. helm_destroy was not reused or mode-flagged for this — it brakes at stop_dist and re-faces, which is a station-keeping orbit, the opposite of a pass."
@@ -1224,7 +1230,11 @@ entities:
         - authoritative-ship-motion-state
         - helm-actuator-input-state
       depends_on:
-        - host-command-admission
+        # Issue #1211 deleted the emit_helm_ai_command shim; this axis now emits
+        # through the AI host spine's AiHostEnv::emitter(), so it depends on
+        # ai-policy-host-spine, which carries the single-owner observed
+        # command_admission::ai_emit edge in src/ai/host.rs.
+        - ai-policy-host-spine
       runs_in:
         - host-browser-runtime
     implementation:
@@ -1233,7 +1243,6 @@ entities:
         - src/ship/helm_ai/impulse.rs
         - src/ship/helm_ai/mod.rs
         - src/ship/helm_ai/facts.rs
-        - src/ship/helm_ai_emit.rs
         - src/ai/core.rs
         - src/ai/policy.rs
         - src/entities/config.rs
@@ -1282,7 +1291,6 @@ entities:
         - src/ship/helm_ai/boost.rs
         - src/ship/helm_ai/facts.rs
         - src/ship/helm_ai/mod.rs
-        - src/ship/helm_ai_emit.rs
         - src/ship/helm_admission.rs
         - src/ai/policy.rs
         - src/entities/config.rs

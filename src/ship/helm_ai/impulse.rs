@@ -127,7 +127,6 @@ pub(crate) fn ai_helm_impulse(
     ai_env: crate::ai::host::AiHostEnv,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
-    sessions: Res<crate::lobby::Sessions>,
     mut ships: Query<
         (
             Entity,
@@ -198,12 +197,11 @@ pub(crate) fn ai_helm_impulse(
             &cx,
             &mut io,
         ) {
-            emit_helm_ai_command(
+            ai_env.emitter().emit(
                 entity_uuid,
                 ImpulseAxis::system_id(),
                 payload,
                 sources,
-                &sessions,
                 ship_config,
                 &mut admitted,
             );

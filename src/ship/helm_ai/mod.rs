@@ -1,10 +1,12 @@
 use bevy::prelude::*;
 
-// Vertical thrust (the AI-only fourth axis, not one of the migration's
-// dependency-modelled operators) still emits directly through the shared
-// arbiter. The player-facing per-axis operators route through their own
-// single-owner seams (`helm_ai_emit` / `helm_lateral_emit`, issue #745) so each
-// operator's command-admission dependency is a per-entity observed code edge.
+// Vertical thrust and boost (the AI-only / non-shim axes) still emit directly
+// through the shared arbiter. The player-facing per-axis operators (engines,
+// steering, impulse, lateral) route their emit through the AI host spine's
+// `AiHostEnv::emitter()` instead (issue #1211, which deleted the per-axis
+// `helm_ai_emit` / `helm_lateral_emit` pass-through shims — src/ai/host.rs now
+// carries the single-owner observed admission edge). Both paths cross the same
+// `command_admission::ai_emit::emit_ai_command` seam a human command does.
 use crate::command_admission::ai_emit::emit_ai_command;
 #[cfg(test)]
 use crate::ship::components::LastHelmInput;
@@ -16,8 +18,6 @@ use crate::ship::components::{
 use crate::ship::helm::{
     ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput, VerticalThrustInput,
 };
-use crate::ship::helm_ai_emit::emit_helm_ai_command;
-use crate::ship::helm_lateral_emit::emit_helm_lateral_command;
 use crate::ship_state::ShipPhysics;
 use crate::simulation::{ShipBoost, ShipImpulse};
 

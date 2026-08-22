@@ -597,8 +597,10 @@ pub(crate) fn build_helm_ai_surfaces_frame(
 }
 
 // The per-axis helm AI's private `emit_helm_ai_command` (issue #824 — the
-// first of the seven identical copies) is gone: every AI operator now emits
-// through `command_admission::ai_emit::emit_ai_command` (issue #738).
+// first of the seven identical copies) is gone: the travel axes now emit
+// through the AI host spine's `AiHostEnv::emitter()` (issue #1211, which
+// deleted the last per-axis pass-through shim), which itself wraps the shared
+// `command_admission::ai_emit::emit_ai_command` seam (issue #738).
 
 /// Call the pure `crate::ai::plan_helm_travel` (renamed from `operate_helm`,
 /// issue #745) with this ship's TOML-authored behaviour tuning, returning

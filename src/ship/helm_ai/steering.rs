@@ -134,7 +134,6 @@ pub(crate) fn ai_helm_steering(
     ai_env: crate::ai::host::AiHostEnv,
     frame: Res<HelmAiSurfacesFrame>,
     plan: Res<crate::ship::helm_planner::HelmMotionPlan>,
-    sessions: Res<crate::lobby::Sessions>,
     clock: Res<AiPolicyTickClock>,
     mut ships: Query<
         (
@@ -211,12 +210,11 @@ pub(crate) fn ai_helm_steering(
             &cx,
             &mut io,
         ) {
-            emit_helm_ai_command(
+            ai_env.emitter().emit(
                 entity_uuid,
                 SteeringAxis::system_id(),
                 payload,
                 sources,
-                &sessions,
                 ship_config,
                 &mut admitted,
             );

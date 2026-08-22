@@ -16,7 +16,7 @@ use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
 use crate::asteroid_lifecycle::AsteroidLifecyclePlugin;
-use crate::boot::{BootError, BootPlan, BootProfile};
+use crate::boot::{BootError, BootPlan, BootProfile, WorldIngest};
 use crate::entities::ai_declaration_manifest;
 use crate::entity_config::EntityConfig;
 use crate::entity_loader::TemplateLoader;
@@ -395,6 +395,9 @@ pub fn build_headless_app(args: &HeadlessArgs) -> Result<App, BuildError> {
     // twice.
     let plan = BootPlan {
         profile: BootProfile::Headless,
+        // Headless reads the world off the filesystem through boot's reader — the
+        // full reset→load→validate→compile→apply→freeze→insert order.
+        world_ingest: WorldIngest::FromReader,
         // Keep bevy-internal events quiet by default so the report is the
         // loudest thing on stdout; a `--log` spec is folded in after the `warn`
         // floor. (Issue #840: `--log` needs `plog!` call sites, not just this

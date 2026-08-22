@@ -9,7 +9,10 @@
 //! Everything runs off an in-memory world fixture, so no filesystem, GPU, browser
 //! or window is involved and the tests are native-`cargo test` clean.
 
-use super::{build, BootError, BootPlan, BootProfile, RenderStackApplied, RenderSurrogateApplied};
+use super::{
+    build, BootError, BootPlan, BootProfile, RenderStackApplied, RenderSurrogateApplied,
+    WorldIngest,
+};
 use bevy::prelude::*;
 
 use crate::console_bridge::{AiChatterEvent, HudStateChanged, LobbyStateChanged};
@@ -44,6 +47,7 @@ const BROKEN_SCRIPT_WORLD: &str =
 fn plan_with(profile: BootProfile, world: &str) -> BootPlan {
     BootPlan {
         profile,
+        world_ingest: WorldIngest::FromReader,
         log_filter: "warn".to_string(),
         world_path: WORLD_PATH.to_string(),
         reader: Box::new(MemoryReader::new([(WORLD_PATH, world)])),
@@ -168,6 +172,7 @@ fn an_unreadable_world_is_a_load_error_for_every_profile() {
         // A plan whose reader carries nothing at the requested path.
         let plan = BootPlan {
             profile,
+            world_ingest: WorldIngest::FromReader,
             log_filter: "warn".to_string(),
             world_path: WORLD_PATH.to_string(),
             reader: Box::new(MemoryReader::new(std::iter::empty::<(String, String)>())),
@@ -181,5 +186,36 @@ fn an_unreadable_world_is_a_load_error_for_every_profile() {
             "{label}: expected WorldLoad, got {err:?}"
         );
     }
+    crate::content_ledger::reset();
+}
+
+#[test]
+fn host_preloaded_ingest_neither_reads_the_reader_nor_inserts_the_world() {
+    use crate::world::config::WorldConfig;
+
+    // A reader carrying nothing: under `FromReader` this is the unreadable-world
+    // load error above. `HostPreloaded` must not consult it at all — the host
+    // (the browser's JS preload) already ingested the world — so the build
+    // succeeds, and boot inserts NEITHER the `WorldConfig` nor the
+    // `PreCompiledScripts` (the browser's `WorldPlugin` Startup systems own both).
+    let plan = BootPlan {
+        profile: BootProfile::BrowserAutomation,
+        world_ingest: WorldIngest::HostPreloaded,
+        log_filter: "warn".to_string(),
+        world_path: "unused-under-host-preloaded.toml".to_string(),
+        reader: Box::new(MemoryReader::new(std::iter::empty::<(String, String)>())),
+        script_resolver: Box::new(NoScriptResolver),
+        single_threaded: false,
+        raw_transform: None,
+    };
+    let app = build(plan).expect("HostPreloaded must build without reading the world");
+    assert!(
+        !app.world().contains_resource::<WorldConfig>(),
+        "HostPreloaded must not insert a WorldConfig — the browser's Startup does"
+    );
+    assert!(
+        !app.world().contains_resource::<PreCompiledScripts>(),
+        "HostPreloaded must not insert PreCompiledScripts"
+    );
     crate::content_ledger::reset();
 }

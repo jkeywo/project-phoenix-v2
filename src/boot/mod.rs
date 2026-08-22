@@ -19,12 +19,18 @@
 //! drift apart unnoticed — a drift the [three-profile parity test](self#tests)
 //! guards permanently.
 //!
-//! # Additive — nothing calls [`build`] yet
+//! # The adapters
 //!
-//! This issue introduces the module and its guard test only. The headless and
-//! `wasm_init` adapters adopt it in later issues (#1218/#1219), each behind its own
-//! evidence gate (a digest A/B for headless; a Playwright smoke for `wasm_init`).
-//! No existing boot or world-ingestion call site changes here.
+//! Both production boot paths are now thin [`build`] adapters, each adopted behind
+//! its own evidence gate: [`crate::headless::app::build_headless_app`] (#1218, a
+//! digest A/B) fills a [`BootPlan`] with [`BootProfile::Headless`] +
+//! [`WorldIngest::FromReader`]; `server::bridge::wasm_init` (#1219, a Playwright
+//! smoke) fills one with [`BootProfile::BrowserHost`] or
+//! [`BootProfile::BrowserAutomation`] + [`WorldIngest::HostPreloaded`], its two
+//! branches now differing only by that profile. Each adapter attaches the
+//! simulation/lobby/world plugins around this seam and keeps only its target-only
+//! wiring; `build` owns the shared core, the renderer axis, and the world-ingestion
+//! order.
 //!
 //! # The render surrogate vs the render stack
 //!
@@ -115,6 +121,40 @@ impl BootProfile {
 
 // ── Plan / error ─────────────────────────────────────────────────────────────
 
+/// How this profile's world reaches the ECS.
+///
+/// Orthogonal to [`BootProfile`], exactly as [`BootPlan::single_threaded`] is: the
+/// three-profile parity tests build **every** profile — the browser ones
+/// included — through [`FromReader`](WorldIngest::FromReader) over a
+/// `MemoryReader`, while the production browser boots
+/// [`HostPreloaded`](WorldIngest::HostPreloaded) because its world genuinely
+/// arrives by a different route (a JS preload) than the filesystem read headless
+/// performs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorldIngest {
+    /// Boot owns the whole load: reset the ledger, read the root and its
+    /// `extra_worlds` children through the [`BootPlan`] reader, validate the
+    /// composition, compile the scripts once, apply the ledger records
+    /// (+ native eager-record), freeze, and insert the `WorldConfig` and
+    /// `PreCompiledScripts`. Headless and the parity tests.
+    FromReader,
+    /// The host already ingested the world by another route, so boot must not run
+    /// the reader-based load at all. The browser's JS preload parses the
+    /// `WorldConfig` into a thread-local and streams the entity-template records
+    /// into the content ledger — resetting it at world-*selection* time, not here
+    /// — and `WorldPlugin`'s `Startup` systems insert the `WorldConfig`, the
+    /// `RawWorldSource`, and compile the scripts. Boot neither reads, resets, nor
+    /// inserts; it owns only the two order-critical calls the host cannot place
+    /// itself at the right moment: the Rhai hashing-seed pin (before any engine)
+    /// and the content-ledger freeze (after the preload, before anything spawns).
+    ///
+    /// The [`BootPlan`]'s `world_path`, `reader`, `script_resolver` and
+    /// `raw_transform` are unused in this mode — a `HostPreloaded` plan still
+    /// carries the target-correct values (the browser's `WasmReader` and script
+    /// resolver) for shape and future use, but [`build`] consults none of them.
+    HostPreloaded,
+}
+
 /// Everything [`build`] needs that is not implied by the [`BootProfile`].
 ///
 /// The world is supplied as a [`WorldReader`] plus a [`ScriptResolver`] rather than
@@ -128,6 +168,10 @@ impl BootProfile {
 pub struct BootPlan {
     /// Which inventory to compose.
     pub profile: BootProfile,
+    /// How this profile's world reaches the ECS — see [`WorldIngest`]. Headless
+    /// and the parity tests use [`WorldIngest::FromReader`]; the production
+    /// browser uses [`WorldIngest::HostPreloaded`].
+    pub world_ingest: WorldIngest,
     /// The `EnvFilter` string handed to [`LogPlugin`] (already `warn`-prefixed by
     /// the caller, matching both existing boot paths).
     pub log_filter: String,
@@ -185,8 +229,7 @@ impl std::error::Error for BootError {}
 // owes" means), so the observable that tells which path a profile took is a
 // dedicated zero-sized marker rather than the contract itself. The three-profile
 // parity test asserts the contract holds for all three AND that the stack marker
-// is present only for BrowserHost. Inserted into a boot-composed `App` only —
-// nothing composes via `boot::build` yet.
+// is present only for BrowserHost.
 
 /// Marks that [`render_surrogate`] ran (Headless / BrowserAutomation).
 #[derive(Resource, Debug, Default, Clone, Copy)]
@@ -200,25 +243,35 @@ struct RenderStackApplied;
 
 /// Compose an `App` for `plan`'s [`BootProfile`].
 ///
-/// The shape is the same for all three: the shared [`core_plugins`], then the
-/// renderer axis ([`render_stack`] for BrowserHost, else [`render_surrogate`]),
-/// then [`ingest_world`]. The simulation, lobby and world plugins the two existing
-/// boot paths add around this seam are the adopting adapters' to attach (#1218/
-/// #1219) — this function owns only what actually differs per profile plus the
-/// world-ingestion order.
+/// The renderer-less profiles take the shared [`core_plugins`] then
+/// [`render_surrogate`]; BrowserHost takes [`render_stack`], which owns the whole
+/// plugin stack itself because on the browser its renderer is `DefaultPlugins`, a
+/// superset of `core_plugins` (see the note below). Every profile then runs
+/// [`ingest_world`]. The simulation, lobby and world plugins the two boot paths add
+/// around this seam are the adopting adapters' to attach (#1218 headless / #1219
+/// `wasm_init`) — this function owns only what actually differs per profile plus
+/// the world-ingestion order.
 pub fn build(plan: BootPlan) -> Result<App, BootError> {
     let mut app = App::new();
 
-    core_plugins(
-        &mut app,
-        plan.profile,
-        &plan.log_filter,
-        plan.single_threaded,
-    );
-
+    // The render-stack profile's shared core rides in *with* its renderer: on the
+    // browser that renderer is `DefaultPlugins`, which is a superset of
+    // [`core_plugins`] (it carries `PanicHandlerPlugin`, `LogPlugin`, the task
+    // pool and the rest itself), so adding both would double-add those plugins and
+    // Bevy panics on a duplicate. [`render_stack`] therefore owns the whole plugin
+    // stack for BrowserHost — and calls [`core_plugins`] itself on the native
+    // parity-test target, which cannot stand up the real wgpu renderer. The two
+    // renderer-less profiles keep the original shape: the shared core, then the
+    // surrogate that stands in for a missing renderer.
     if plan.profile.has_render_stack() {
-        render_stack(&mut app);
+        render_stack(&mut app, &plan.log_filter);
     } else {
+        core_plugins(
+            &mut app,
+            plan.profile,
+            &plan.log_filter,
+            plan.single_threaded,
+        );
         render_surrogate(&mut app);
     }
 
@@ -332,29 +385,56 @@ fn render_surrogate(app: &mut App) {
 
 /// The real viewscreen renderer, for BrowserHost only.
 ///
+/// Owns the whole plugin stack for this profile (see [`build`]'s note): on the
+/// browser that is Bevy's `DefaultPlugins` — the shared core **and** the wgpu
+/// render plugins in one group — so [`core_plugins`] is *not* also called for
+/// BrowserHost.
+///
 /// The wgpu-backed render plugins are instantiated **only on the browser target**.
 /// A native build (the target the parity test runs on) cannot stand up the render
 /// stack at all — Bevy's `RenderPlugin` requests a GPU adapter and panics with none,
 /// which is the very reason the [`BrowserAutomation`](BootProfile::BrowserAutomation)
-/// inventory exists. So on native this registers the renderer's *contract* with the
-/// simulation explicitly (the same floor [`render_surrogate`] provides), which is
-/// what lets `build(BrowserHost)` compose on native and the parity test assert the
-/// shared four-asset/three-message floor.
-///
-/// The Bevy render stack itself (`DefaultPlugins`' `RenderPlugin`, which
-/// `init_asset`s the four types on the browser) is the wasm adapter's to attach in
-/// #1219; `add_message`/`init_asset` are idempotent, so the explicit registration
-/// here is a safe belt-and-braces even once that lands.
-fn render_stack(app: &mut App) {
+/// inventory exists. So on native this composes the shared core ([`core_plugins`])
+/// plus the renderer's *contract* with the simulation (the same floor
+/// [`render_surrogate`] provides), which is what lets `build(BrowserHost)` compose on
+/// native and the parity test assert the shared four-asset/three-message floor.
+fn render_stack(app: &mut App, log_filter: &str) {
     app.insert_resource(RenderStackApplied);
 
     #[cfg(target_arch = "wasm32")]
     {
-        // The real renderer: RendererPlugin plus the viewscreen border/lobby
-        // pushes. ViewscreenBorderPlugin already registers HudStateChanged,
+        // The full Bevy stack the browser host runs on, customised exactly as the
+        // pre-#1219 `wasm_init` real branch did (issue #1219): the `#canvas`
+        // window, the page's log filter, and `AssetMetaCheck::Never` — no `.meta`
+        // sidecars ship, and Cloudflare Pages (the demo host) answers a missing one
+        // with its SPA `index.html` at HTTP 200, which the default check reads as a
+        // corrupt sidecar and dies on. `DefaultPlugins` carries every plugin
+        // [`core_plugins`] would add, so this REPLACES it for BrowserHost.
+        app.add_plugins(
+            bevy::DefaultPlugins
+                .set(bevy::window::WindowPlugin {
+                    primary_window: Some(bevy::window::Window {
+                        canvas: Some("#canvas".into()),
+                        fit_canvas_to_parent: true,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(LogPlugin {
+                    filter: log_filter.to_string(),
+                    ..default()
+                })
+                .set(AssetPlugin {
+                    meta_check: bevy::asset::AssetMetaCheck::Never,
+                    ..default()
+                }),
+        );
+        // `DefaultPlugins`' `RenderPlugin` already `init_asset`s the four types, so
+        // these are the idempotent belt-and-braces the parity floor is stated in
+        // terms of. `ViewscreenBorderPlugin` already registers HudStateChanged,
         // LobbyStateChanged and `push_lobby_state`, so only the asset types and
         // AiChatterEvent are added here (the latter also rides in on ShipPlugin in
-        // the full app; add_message is idempotent).
+        // the full app; `add_message` is idempotent).
         register_render_assets(app);
         app.add_message::<AiChatterEvent>();
         app.add_plugins(crate::server::renderer::RendererPlugin)
@@ -362,6 +442,10 @@ fn render_stack(app: &mut App) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        // The parity-test target. `DefaultPlugins`' wgpu renderer would panic here,
+        // so stand up the shared core and the renderer's contract instead — a
+        // browser run never reaches this arm.
+        core_plugins(app, BootProfile::BrowserHost, log_filter, false);
         register_render_contract(app);
     }
 }
@@ -397,6 +481,12 @@ fn register_render_contract(app: &mut App) {
 /// The sole caller of [`crate::world::load::load`], and the sole owner of the
 /// content-ledger and Rhai-seed order a boot must run in.
 ///
+/// Two modes, per the plan's [`WorldIngest`]. Under
+/// [`HostPreloaded`](WorldIngest::HostPreloaded) the host loaded the world by
+/// another route (the browser's JS preload), so boot runs step 1 and then only the
+/// freeze from step 5 — it does not reset, read, or insert. The order below is the
+/// [`FromReader`](WorldIngest::FromReader) path (headless and the parity tests).
+///
 /// The order, and why it is this order:
 ///
 /// 1. [`init_hashing_seed`](crate::world::script::init_hashing_seed) — before any
@@ -417,7 +507,22 @@ fn register_render_contract(app: &mut App) {
 ///    `WorldPlugin`'s `Startup` to consume; a broken-but-not-aborted (browser) world
 ///    carries its findings through so the downstream gate blocks activation.
 fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
+    // Step 1 for both modes: the Rhai hashing-seed pin. Genuinely first, before any
+    // script engine — `set_hashing_seed` no-ops once a hash is taken. Idempotent
+    // across boots and across the browser's own earlier calls.
     crate::world::script::init_hashing_seed();
+
+    // The host already ingested the world by another route (the browser's JS
+    // preload + `WorldPlugin`'s Startup systems — see [`WorldIngest::HostPreloaded`]).
+    // Boot does not read, reset, or insert anything; it owns only the freeze that
+    // seals the content digest after the preload and before anything spawns. The
+    // host reset the ledger and streamed its records in at world-selection time, so
+    // a reset here would wipe them.
+    if matches!(plan.world_ingest, WorldIngest::HostPreloaded) {
+        crate::content_ledger::freeze();
+        return Ok(());
+    }
+
     crate::content_ledger::reset();
 
     let mut request = LoadRequest::new(

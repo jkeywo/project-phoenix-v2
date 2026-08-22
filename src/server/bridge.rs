@@ -14,6 +14,7 @@ use std::collections::HashSet;
 #[cfg(target_arch = "wasm32")]
 use {
     crate::asteroid_lifecycle::AsteroidLifecyclePlugin,
+    crate::boot::{BootPlan, BootProfile, WorldIngest},
     crate::codec::{self, JsonCodec, MessageCodec},
     crate::config_cache::ConfigCachePlugin,
     crate::console_bridge::{
@@ -25,14 +26,13 @@ use {
     },
     crate::messages::{self, DeliveryClass},
     crate::modifier_coordination::ModifierCoordinationPlugin,
-    crate::renderer::RendererPlugin,
     crate::server_app::add_simulation_plugins,
     crate::ship::config::ShipConfig,
     crate::ship_plugin::PendingShipConfig,
     crate::stations_config::ShipStations,
-    crate::viewscreen_border::ViewscreenBorderPlugin,
+    crate::world::load::WasmReader,
     crate::world::WorldPlugin,
-    bevy::{log::LogPlugin, prelude::*, DefaultPlugins},
+    bevy::{log::LogPlugin, prelude::*},
     js_sys::{Array, Function, Object, Reflect},
     std::cell::RefCell,
     wasm_bindgen::prelude::*,
@@ -580,25 +580,23 @@ pub fn wasm_validate_stations(template_path: &str, toml_str: &str) -> Result<JsV
 
 /// Called by JS on page load. Builds and runs the Bevy app.
 ///
+/// A [`boot::build`](crate::boot::build) adapter since issue #1219: the shared
+/// core, the renderer axis (the real viewscreen stack for the host, the surrogate
+/// for automation), and the world-ingestion order (the Rhai hashing-seed pin and
+/// the content-ledger freeze — the browser's world itself arrives by the JS
+/// preload, so the plan is [`WorldIngest::HostPreloaded`]) all come from
+/// [`crate::boot`]. The two branches now differ by exactly one thing — the
+/// [`BootProfile`] the WebDriver (`is_automation`) probe picks. What stays here is
+/// the genuinely browser-only wiring boot has no reason to know about: the
+/// WebDriver probe, the `?log=` URL parse, the JS ingress/egress `PreUpdate`/
+/// `PostUpdate` seams, the debug-overlay/winit/audio wiring, and the thread-local
+/// resource hand-offs.
+///
 /// In WASM, `App::run()` hands control to requestAnimationFrame and returns
 /// immediately, so this function does not block.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_init() {
-    // Fix Rhai's global hashing seed FIRST, before anything can build a script
-    // engine (issue #979, M0 spike `rhai-anonymous-function-naming`):
-    // `set_hashing_seed` silently no-ops once a hash has been taken, so it must
-    // be genuinely first on every peer. Idempotent — see `world::script`.
-    crate::world::script::init_hashing_seed();
-
-    // Issue #935: the preload sequence (`wasm_load_world` -> N x
-    // `wasm_load_config`) is finished by the time JS calls this — that is the
-    // whole point of the "preload complete" handshake `config_cache` runs.
-    // Freezing the content ledger here, before anything spawns, is what keeps
-    // the content digest independent of how far the world streams afterward:
-    // see `content_ledger`'s module docs.
-    crate::content_ledger::freeze();
-
     // Route Rust panics through console.error with a useful message + location.
     // Without this, a panic in any Bevy system traps the wasm instance and
     // every subsequent JS→WASM call surfaces as a bare "RuntimeError: memory
@@ -636,99 +634,39 @@ pub fn wasm_init() {
         format!("{},{}", LogPlugin::default().filter, log_spec)
     };
 
-    let mut app = App::new();
-    if is_automation {
-        use bevy::{
-            a11y::AccessibilityPlugin,
-            app::{PanicHandlerPlugin, TaskPoolPlugin},
-            asset::AssetPlugin,
-            diagnostic::{DiagnosticsPlugin, FrameCountPlugin},
-            input::InputPlugin,
-            log::LogPlugin,
-            scene::ScenePlugin,
-            state::app::StatesPlugin,
-            time::TimePlugin,
-            transform::TransformPlugin,
-            winit::WinitPlugin,
-        };
-        app.add_plugins((
-            PanicHandlerPlugin,
-            LogPlugin {
-                filter: log_filter.clone(),
-                ..default()
-            },
-            TaskPoolPlugin::default(),
-            FrameCountPlugin,
-            TimePlugin::default(),
-            TransformPlugin::default(),
-            DiagnosticsPlugin,
-            InputPlugin::default(),
-            bevy::window::WindowPlugin {
-                primary_window: Some(bevy::window::Window {
-                    canvas: Some("#canvas".into()),
-                    fit_canvas_to_parent: true,
-                    ..default()
-                }),
-                ..default()
-            },
-            AccessibilityPlugin,
-            AssetPlugin {
-                // No .meta sidecars ship with this project. Cloudflare Pages
-                // (the demo host) answers a missing file with its SPA
-                // index.html at HTTP 200 rather than a 404, so the default
-                // `AssetMetaCheck::Always` reads that HTML as a .meta and
-                // fails to deserialize it — killing the asset load. Never
-                // requesting the sidecar sidesteps the whole class.
-                meta_check: bevy::asset::AssetMetaCheck::Never,
-                ..default()
-            },
-            ScenePlugin::default(),
-            WinitPlugin::default(),
-            StatesPlugin,
-        ));
-        // Register asset types that simulation plugins (StarRenderPlugin,
-        // render_spawned_entities, asset_preload etc.) depend on. Without
-        // RenderPlugin these aren't auto-registered.
-        use bevy::{asset::AssetApp, image::Image, mesh::Mesh, pbr::StandardMaterial};
-        app.init_asset::<bevy::shader::Shader>()
-            .init_asset_loader::<bevy::shader::ShaderLoader>()
-            .init_asset::<Image>()
-            .init_asset::<Mesh>()
-            .init_asset::<StandardMaterial>();
-        // Register messages that non-rendering systems need. These are
-        // normally registered by ViewscreenBorderPlugin / RendererPlugin
-        // which we skip in automation mode.
-        app.add_message::<crate::console_bridge::HudStateChanged>()
-            .add_message::<crate::console_bridge::LobbyStateChanged>()
-            .add_message::<crate::console_bridge::AiChatterEvent>();
-    } else {
-        app.add_plugins(
-            DefaultPlugins
-                .set(bevy::window::WindowPlugin {
-                    primary_window: Some(bevy::window::Window {
-                        canvas: Some("#canvas".into()),
-                        fit_canvas_to_parent: true,
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(LogPlugin {
-                    filter: log_filter.clone(),
-                    ..default()
-                })
-                // No .meta sidecars ship with this project. Cloudflare Pages
-                // (the demo host) answers a missing file with its SPA
-                // index.html at HTTP 200 rather than a 404, so the default
-                // `AssetMetaCheck::Always` reads that HTML as a .meta and
-                // fails to deserialize it — the asset load dies and the
-                // preload gate stalls (issue: demo hangs ~77%). Never
-                // requesting the sidecar sidesteps the whole class.
-                .set(bevy::asset::AssetPlugin {
-                    meta_check: bevy::asset::AssetMetaCheck::Never,
-                    ..default()
-                }),
-        );
-    }
+    // The boot seam (issue #1219). Both branches are the SAME `boot::build` call —
+    // the shared core, the renderer axis (the real viewscreen stack for the host,
+    // the surrogate the automation branch used to spell out by hand), and the
+    // world-ingestion order — differing only by the `BootProfile` the WebDriver
+    // probe chose. The world itself is NOT read here: the JS preload parsed it into
+    // the config cache and `WorldPlugin`'s Startup systems insert it, so the plan is
+    // `HostPreloaded` and boot only pins the Rhai hashing seed and freezes the
+    // content ledger (both of which this function used to do inline). The
+    // `world_path`/`reader`/`script_resolver` a `HostPreloaded` plan carries are the
+    // browser's genuine ones, kept for shape and future use but consulted by no boot
+    // in this mode — see `WorldIngest::HostPreloaded`.
+    let plan = BootPlan {
+        profile: if is_automation {
+            BootProfile::BrowserAutomation
+        } else {
+            BootProfile::BrowserHost
+        },
+        world_ingest: WorldIngest::HostPreloaded,
+        log_filter,
+        world_path: get_raw_world_source()
+            .map(|(path, _)| path)
+            .unwrap_or_default(),
+        reader: Box::new(WasmReader),
+        script_resolver: Box::new(crate::config_cache::production_script_resolver()),
+        single_threaded: false,
+        raw_transform: None,
+    };
+    // `HostPreloaded` neither reads nor validates a world, so `ingest_world` cannot
+    // return `Err` for it — this `expect` documents an unreachable, not a runtime
+    // failure mode the browser could actually hit.
+    let mut app =
+        crate::boot::build(plan).expect("browser boot composes a HostPreloaded plan infallibly");
+
     app.insert_resource(log_config)
         .add_plugins(crate::logging::LoggingPlugin);
     app.add_plugins(ConfigCachePlugin)
@@ -754,18 +692,12 @@ pub fn wasm_init() {
             .unwrap_or_else(|| "assets/entities/alliance_cruiser.toml".to_string());
         app.insert_resource(SelectedShipResource(ship_path));
     }
-    if is_automation {
-        // push_lobby_state is normally registered by ViewscreenBorderPlugin,
-        // which we skip in automation mode. Register it directly so the HTML
-        // lobby panel stays updated during smoke tests.
-        app.add_systems(Update, crate::server::viewscreen_border::push_lobby_state);
-    } else {
-        app.add_plugins(RendererPlugin)
-            .add_plugins(ViewscreenBorderPlugin);
-    }
+    // The renderer axis (the real viewscreen stack for the host, the surrogate's
+    // `push_lobby_state` for automation) is now boot's — see `boot::render_stack`
+    // and `boot::render_surrogate`.
 
-    // Audio is plain data + JS callbacks with no wgpu dependency, so unlike
-    // ViewscreenBorderPlugin it is safe to register in automation mode — and
+    // Audio is plain data + JS callbacks with no wgpu dependency, so unlike the
+    // viewscreen renderer it is safe to register in automation mode — and
     // registering it in both branches means the smoke tests actually exercise
     // it. The plugin registers its own bridge messages, which the PostUpdate
     // flushes need in either branch.

@@ -171,9 +171,9 @@ pub enum FineSystemKey {
 }
 
 impl FineSystemKey {
-    /// The stable manifest key. Appears in [`EXPECTED_UNDECLARED`], so renaming
-    /// one is a visible diff over the whole worklist rather than a quiet
-    /// reshuffle.
+    /// The stable manifest key: the identifier a slot is reported under in
+    /// [`manifest_lines`] and [`strict_error`], so renaming one is a visible
+    /// diff over the whole report rather than a quiet reshuffle.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Captain => "captain",

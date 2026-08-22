@@ -47,19 +47,26 @@
 //! scenario_flag_chain_is_anchored_at_the_ships_spawning_layer` for the
 //! layering behaviour driven through a real host end to end.
 //!
-//! # Why the table is not simply hand-maintained
+//! # The flag-chain classification, after the host spine (issue #1212)
 //!
-//! A hardcoded "these hosts can, those cannot" list is drift-bait: the moment
-//! a host gains or loses its chain, the list is wrong and wrong SILENTLY —
-//! back to the failure mode being fixed. So every host below records `eval_sites`: the
-//! exact function(s) whose flag argument decides the answer. `flag_chain` is
-//! declared, but it is not the source of truth — `tests::flag_chain_matches_the_hosts_source`
-//! RE-DERIVES it by reading each of those functions out of the crate's own
-//! source and inspecting the last argument of the resolve/select call. Change a
-//! host's chain without updating its entry (or the other way round) and that
-//! test fails naming the host. A second test walks every resolve/select call
-//! site in the crate and fails on one that no host claims, so a NEW host cannot
-//! be added without appearing here either.
+//! `flag_chain` records whether a host's runtime evaluation receives a real
+//! world-flag chain. Until the [`crate::ai::host`] spine (issue #1208) every
+//! host called `resolve_channel` / `select` itself and passed its own chain
+//! argument, so this classification could drift from what a host's source
+//! actually passed — and drift SILENTLY, back to the failure mode being fixed.
+//! Two source-scanning drift tests stood in for the missing seam: one
+//! RE-DERIVED each `flag_chain` by reading the resolve/select call out of the
+//! crate's own source, and one walked every call site in the crate to catch a
+//! host that claimed none.
+//!
+//! The spine is that seam now. Resolution happens once, inside
+//! [`crate::ai::host::decide`], and the chain is built through
+//! [`crate::ai::host::AiHostEnv::flag_chain`], which holds bare `Res` and so
+//! cannot degrade to the empty chain the drift lint policed. Those two tests —
+//! and the `eval_sites` table they re-derived against — retired with #1212;
+//! `flag_chain` is now an ordinary data property, exercised through the real
+//! validators by `tests::every_host_reads_world_flags_today` and the
+//! load-rejection tests below.
 
 use crate::world::flags::{FactContext, FactId, Predicate};
 
@@ -79,8 +86,11 @@ pub enum FlagChain {
     Empty,
 }
 
-/// One runtime evaluation call site: the function whose resolve/select call
-/// fixes a host's [`FlagChain`].
+/// One named function site, pinned against the crate's own source by a drift
+/// test that reads that function out and inspects it: a host's
+/// [`history_fold`](AiHost::history_fold) site (issue #890), and the
+/// declaration attachment sites in
+/// [`crate::entities::ai_declaration_manifest`] (issue #885).
 ///
 /// `file` is crate-root-relative with forward slashes; `func` is the name as it
 /// appears after `fn` in the definition, so the drift test can find it without
@@ -104,14 +114,12 @@ pub struct AiHost {
     /// The authored block this host validates, quoted in the load error so the
     /// author knows which table to edit.
     pub block: &'static str,
-    /// The chain the host passes at runtime. Pinned against the real source by
-    /// `tests::flag_chain_matches_the_hosts_source`.
+    /// Whether the host's runtime evaluation receives a real world-flag chain,
+    /// and therefore whether `flag(...)`/`counter(...)` in its guards can ever
+    /// read true. Every shipped host is [`FlagChain::Plumbed`]; the
+    /// load-rejection in [`check_world_state`](Self::check_world_state) keeps a
+    /// future [`FlagChain::Empty`] host from reviving the silent-nothing trap.
     pub flag_chain: FlagChain,
-    /// Every function whose resolve/select call fixes `flag_chain`. More than
-    /// one when a host resolves several channels from several places; ALL of
-    /// them must agree, so a stage-2 change that plumbs one and misses another
-    /// fails the drift test rather than half-working.
-    pub eval_sites: &'static [EvalSite],
     /// Where this host advances its bounded history windows, or `None` when
     /// nothing does (issue #890).
     ///
@@ -147,17 +155,9 @@ pub struct AiHost {
 // promise to be in the same order as the validation blocks in
 // `EntityConfig::from_toml` — nothing enforces such a claim, and it was already
 // false when it was written: `COMMS_RESPONSE` is listed with the policy hosts
-// but validated last of all, after the comms SELECTOR. The drift tests below
-// iterate this slice as a SET (`BTreeSet` of blocks / eval sites), so ordering
-// here is a reading aid and never a correctness property.
-
-/// The three helm axes that may author a #882 state machine resolve their
-/// channel on either policy path, and their TRANSITIONS through the shared
-/// machine tick — three call sites, all of which must agree.
-const HELM_MACHINE_SITES: &[EvalSite] = &[
-    site("src/ship/helm_ai/mod.rs", "resolve_helm_channel"),
-    site("src/ship/helm_ai/mod.rs", "tick_policy_machine"),
-];
+// but validated last of all, after the comms SELECTOR. The tests below iterate
+// this slice as a SET (`BTreeSet` of blocks), so ordering here is a reading aid
+// and never a correctness property.
 
 /// The three helm axes that may author a #882 state machine are the only hosts
 /// that fold a bounded history window today (issue #890), and they all fold it
@@ -175,7 +175,6 @@ pub const CAPTAIN_RED_ALERT: AiHost = AiHost {
     system: "Captain",
     block: "[captain_console.ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site("src/console/captain/server.rs", "operate_captain_ai")],
     history_fold: None,
     facts: CAPTAIN_FACTS,
 };
@@ -184,7 +183,6 @@ pub const HELM_ENGINES: AiHost = AiHost {
     system: "Helm engines",
     block: "[helm_console.engines_ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: HELM_MACHINE_SITES,
     history_fold: HELM_HISTORY_FOLD,
     facts: HELM_FACTS,
 };
@@ -193,7 +191,6 @@ pub const HELM_STEERING: AiHost = AiHost {
     system: "Helm steering",
     block: "[helm_console.steering_ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: HELM_MACHINE_SITES,
     history_fold: HELM_HISTORY_FOLD,
     facts: HELM_FACTS,
 };
@@ -202,13 +199,6 @@ pub const HELM_LATERAL: AiHost = AiHost {
     system: "Helm lateral thrust",
     block: "[helm_console.lateral_ai]",
     flag_chain: FlagChain::Plumbed,
-    // Issue #1208: the three stateless actuator axes now resolve through the
-    // shared `run_helm_axis` / `decide` spine, so each pins its own flag chain
-    // in its own host body rather than through the retired `helm_policy_actuates`.
-    eval_sites: &[site(
-        "src/ship/helm_ai/lateral.rs",
-        "ai_helm_lateral_thrust",
-    )],
     history_fold: None,
     facts: HELM_FACTS,
 };
@@ -217,10 +207,6 @@ pub const HELM_VERTICAL: AiHost = AiHost {
     system: "Helm vertical thrust",
     block: "[helm_console.vertical_ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site(
-        "src/ship/helm_ai/vertical.rs",
-        "ai_helm_vertical_thrust",
-    )],
     history_fold: None,
     facts: HELM_FACTS,
 };
@@ -229,7 +215,6 @@ pub const HELM_IMPULSE: AiHost = AiHost {
     system: "Helm impulse",
     block: "[helm_console.impulse_ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site("src/ship/helm_ai/impulse.rs", "ai_helm_impulse")],
     history_fold: None,
     facts: HELM_FACTS,
 };
@@ -238,7 +223,6 @@ pub const HELM_BOOST: AiHost = AiHost {
     system: "Helm boost",
     block: "[helm_console.boost_ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: HELM_MACHINE_SITES,
     history_fold: HELM_HISTORY_FOLD,
     facts: HELM_FACTS,
 };
@@ -247,10 +231,6 @@ pub const PHASER_BANK: AiHost = AiHost {
     system: "Phaser bank",
     block: "[[weapons_console.phaser_banks]].ai",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site(
-        "src/console/weapons/beam.rs",
-        "phaser_bank_policy_fires",
-    )],
     history_fold: None,
     facts: PHASER_FACTS,
 };
@@ -259,10 +239,6 @@ pub const BLASTER_BANK: AiHost = AiHost {
     system: "Blaster bank",
     block: "[[weapons_console.blaster_banks]].ai",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site(
-        "src/console/weapons/blaster.rs",
-        "blaster_bank_policy_fires",
-    )],
     history_fold: None,
     facts: BLASTER_FACTS,
 };
@@ -271,16 +247,6 @@ pub const TORPEDO_TUBE: AiHost = AiHost {
     system: "Torpedo tube",
     block: "[[torpedoes.tubes]].ai",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[
-        site(
-            "src/console/weapons/torpedo.rs",
-            "torpedo_tube_load_policy_fires",
-        ),
-        site(
-            "src/console/weapons/torpedo.rs",
-            "torpedo_tube_launch_policy_fires",
-        ),
-    ],
     history_fold: None,
     facts: TORPEDO_TUBE_FACTS,
 };
@@ -292,10 +258,6 @@ pub const WEAPONS_DOCTRINE: AiHost = AiHost {
     system: "Weapons doctrine",
     block: "[weapons_console.ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site(
-        "src/console/weapons/mod.rs",
-        "resolve_arc_bearing_order",
-    )],
     history_fold: None,
     facts: WEAPONS_DOCTRINE_FACTS,
 };
@@ -304,20 +266,6 @@ pub const TORPEDO_MAGAZINE: AiHost = AiHost {
     system: "Torpedo magazine",
     block: "[torpedoes].ai",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[
-        site(
-            "src/console/weapons/torpedo.rs",
-            "torpedo_magazine_grant_policy_fires",
-        ),
-        // The conservation channel (issue #943) is the magazine's second axis,
-        // resolved from `handle_fire_torpedo` rather than from the claim
-        // consumer — that is what makes it symmetric across origins — but it is
-        // the SAME authored `[torpedoes].ai` block, so it belongs to this host.
-        site(
-            "src/console/weapons/torpedo.rs",
-            "torpedo_conservation_policy_fires",
-        ),
-    ],
     history_fold: None,
     facts: TORPEDO_MAGAZINE_FACTS,
 };
@@ -326,7 +274,6 @@ pub const SHIELDS_FOCUS: AiHost = AiHost {
     system: "Shields focus",
     block: "[shields_console.ai_policy]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site("src/console_ai/server.rs", "ai_shield_focus")],
     history_fold: None,
     facts: SHIELDS_FACTS,
 };
@@ -335,7 +282,6 @@ pub const POWER_ALLOCATION: AiHost = AiHost {
     system: "Power reactor",
     block: "[power.ai_policy]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site("src/console_ai/server.rs", "ai_power_allocation")],
     history_fold: None,
     facts: POWER_FACTS,
 };
@@ -344,10 +290,6 @@ pub const COMMS_RESPONSE: AiHost = AiHost {
     system: "Comms dialogue response",
     block: "[comms_console.ai]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site(
-        "src/console/comms/server.rs",
-        "operate_comms_response_ai",
-    )],
     history_fold: None,
     facts: COMMS_RESPONSE_FACTS,
 };
@@ -356,7 +298,6 @@ pub const SENSORS_SELECTOR: AiHost = AiHost {
     system: "Sensors target selector",
     block: "[sensors_console.selector]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site("src/ship/sensors.rs", "operate_sensors_ai")],
     history_fold: None,
     facts: SENSORS_SELECTOR_FACTS,
 };
@@ -365,7 +306,6 @@ pub const TACTICAL_SELECTOR: AiHost = AiHost {
     system: "Tactical target selector",
     block: "[weapons_console.selector]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site("src/console/weapons/mod.rs", "ai_target_selection")],
     history_fold: None,
     facts: TACTICAL_SELECTOR_FACTS,
 };
@@ -374,10 +314,6 @@ pub const NAVIGATION_SELECTOR: AiHost = AiHost {
     system: "Navigation target selector",
     block: "[navigation_console.selector]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site(
-        "src/console/navigation/mod.rs",
-        "operate_navigation_ai",
-    )],
     history_fold: None,
     facts: NAVIGATION_SELECTOR_FACTS,
 };
@@ -386,7 +322,6 @@ pub const REPAIR_SELECTOR: AiHost = AiHost {
     system: "Repair target selector",
     block: "[repair.selector]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site("src/console/repair/server.rs", "operate_repair_ai")],
     history_fold: None,
     facts: REPAIR_SELECTOR_FACTS,
 };
@@ -395,13 +330,12 @@ pub const COMMS_SELECTOR: AiHost = AiHost {
     system: "Comms hail selector",
     block: "[comms_console.selector]",
     flag_chain: FlagChain::Plumbed,
-    eval_sites: &[site("src/console/comms/server.rs", "operate_comms_ai")],
     history_fold: None,
     facts: COMMS_SELECTOR_FACTS,
 };
 
-/// Roll call. The drift tests iterate this, so a host added above and left out
-/// here is caught by `every_eval_site_in_the_crate_belongs_to_a_host`.
+/// Roll call. The tests below iterate this, so a host added above but left out
+/// here loses its load-time flag/history/fact validation.
 pub const AI_HOSTS: &[AiHost] = &[
     CAPTAIN_RED_ALERT,
     HELM_ENGINES,
@@ -1925,17 +1859,11 @@ impl AiHost {
         let Some(atom) = refs.first() else {
             return Ok(());
         };
-        let sites = self
-            .eval_sites
-            .iter()
-            .map(|s| format!("{}::{}", s.file, s.func))
-            .collect::<Vec<_>>()
-            .join(", ");
         Err(format!(
             "{what} references {atom}, but the {} system ({}) evaluates its AI \
-             guards with NO world-flag chain plumbed — the chain is empty at \
-             {sites} — so {atom} would read false for ever. Remove it, or plumb \
-             the flag chain into that host first (issue #891 stage 2)",
+             guards with NO world-flag chain plumbed — so {atom} would read false \
+             for ever. Remove it, or plumb the flag chain into that host first \
+             (issue #891 stage 2)",
             self.system, self.block
         ))
     }
@@ -1946,40 +1874,6 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
     use std::path::{Path, PathBuf};
-
-    /// Method-call forms of the evaluation entry points. A host's flag chain is
-    /// the last argument of whichever of these it calls.
-    ///
-    /// `resolve_channel_ranked` is `resolve_channel` plus the winning rule's
-    /// authored `priority` (issue #959) — the same scan, the same guards, the
-    /// same flag chain in the same argument position. The power host reads it so
-    /// it can rank the groups competing for the reactor's budget by the priority
-    /// their own hull file gave them.
-    const EVAL_CALLS: &[&str] = &[
-        ".resolve_channel(",
-        ".resolve_channel_ranked(",
-        ".resolve_channel_in_state(",
-        ".resolve_transition(",
-        ".select(",
-    ];
-
-    /// Files that call an evaluation entry point but host no authored content.
-    ///
-    /// `authored_ai_pins` is declared `#[cfg(test)] mod` in
-    /// `src/entities/mod.rs` (so its whole body is test code, with no in-file
-    /// `#[cfg(test)] mod tests` marker for `strip_test_module` to find), and it
-    /// drives the shipped authored blocks directly rather than hosting them. It
-    /// replaced `default_ai_policy_pins`, which sat here for the same reason,
-    /// when #885b stage 5d deleted the synthesisers that suite pinned.
-    ///
-    /// `src/ai/host.rs` is the Admission-facing AI host spine (issue #1205). Its
-    /// `decide` calls `resolve_channel` / `resolve_channel_in_state` GENERICALLY
-    /// over facts and a flag chain the CALLER seeds and hands it in a `HostTick`
-    /// — the spine owns no fact vocabulary and builds no flag chain of its own,
-    /// so there is nothing for a host-table row to pin. The seeding and the
-    /// `flag_chain` plumbing this table polices stay in each host that will call
-    /// the spine, and are pinned there.
-    const NON_HOST_FILES: &[&str] = &["src/entities/authored_ai_pins.rs", "src/ai/host.rs"];
 
     fn crate_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -2010,7 +1904,7 @@ mod tests {
     fn read_non_test_source(rel: &str) -> String {
         let path = crate_root().join(rel);
         let src = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("eval-site file {rel} must be readable: {e}"));
+            .unwrap_or_else(|e| panic!("scanned file {rel} must be readable: {e}"));
         strip_test_module(&src)
     }
 
@@ -2041,182 +1935,6 @@ mod tests {
         panic!("`{needle}` body is unbalanced");
     }
 
-    /// The parameter-list text of `fn <name>` — from the signature's opening
-    /// `(` through the matching `)`, by paren counting (the same shape as
-    /// [`function_body`], one token earlier; a `Query<(A, B), C>` tuple's own
-    /// parens balance correctly the same way nested braces do there). Lets
-    /// [`chains_in`] check which resources a chain-building host actually
-    /// DECLARES, independent of what its eval call PASSES — see `chains_in`
-    /// for the drift this closes (issue #891 review finding 3).
-    fn fn_signature<'a>(src: &'a str, func: &str) -> &'a str {
-        let needle = format!("fn {func}");
-        let start = src
-            .find(&needle)
-            .unwrap_or_else(|| panic!("no `{needle}` in the scanned source"));
-        let open = start
-            + src[start..]
-                .find('(')
-                .unwrap_or_else(|| panic!("`{needle}` has no parameter list"));
-        let mut depth = 0usize;
-        for (offset, ch) in src[open..].char_indices() {
-            match ch {
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return &src[open..open + offset + 1];
-                    }
-                }
-                _ => {}
-            }
-        }
-        panic!("`{needle}` parameter list is unbalanced");
-    }
-
-    /// The last top-level argument of the call starting at `open` (the index of
-    /// its `(`), with all whitespace squeezed out so a one-line call and a
-    /// rustfmt-exploded one compare equal.
-    ///
-    /// rustfmt writes a TRAILING comma on the exploded form, so the last
-    /// top-level comma is not necessarily the one before the last argument —
-    /// separators are collected and the last non-empty span wins.
-    fn last_argument(src: &str, open: usize) -> String {
-        let mut depth = 0usize;
-        let mut separators = vec![open];
-        let mut end = None;
-        for (offset, ch) in src[open..].char_indices() {
-            match ch {
-                '(' | '[' => depth += 1,
-                ')' | ']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = Some(open + offset);
-                        break;
-                    }
-                }
-                ',' if depth == 1 => separators.push(open + offset),
-                _ => {}
-            }
-        }
-        let mut end = end.expect("evaluation call must have balanced parentheses");
-        while let Some(sep) = separators.pop() {
-            let arg: String = src[sep + 1..end].split_whitespace().collect();
-            if !arg.is_empty() {
-                return arg;
-            }
-            end = sep;
-        }
-        String::new()
-    }
-
-    /// Every evaluation call in `body`, as the flag chain each one passes.
-    ///
-    /// A non-`&[]` last argument used to be sufficient to call a site
-    /// [`FlagChain::Plumbed`] (issue #891 review finding 3: the drift guard
-    /// this closes). That text-only rule has a hole: if the eval site BUILDS
-    /// its own chain — its body calls `entity_flag_chain` directly, the shape
-    /// every direct-system host uses (Captain, Shields, Power, the two Comms
-    /// hosts, Sensors, Tactical, Navigation, Repair) — a non-`&[]` argument
-    /// only means the source TEXT looks right. The site could still be a host
-    /// that dropped its `Option<Res<WorldContentRuntime>>` /
-    /// `Option<Res<WorldLayerMap>>` params and now calls
-    /// `entity_flag_chain(None, None, None)`, which reads empty for ever at
-    /// runtime while remaining textually non-empty. So a chain-BUILDING site
-    /// is only Plumbed when `sig` — its own signature, from [`fn_signature`]
-    /// — still declares both resources.
-    ///
-    /// Sites that instead RECEIVE an already-built chain as a `flags: &[&
-    /// FlagStore]` parameter (the three helm machine axes' `resolve_helm_channel`
-    /// / `tick_policy_machine` and the per-bank/tube/magazine `*_policy_fires`
-    /// helpers) have no resources of their own to declare — building the chain is
-    /// the CALLER's job, not theirs — so those keep the original text-only rule.
-    ///
-    /// Spine-based hosts (the three helm actuator axes since issue #1208) neither
-    /// build `entity_flag_chain` nor call an `EVAL_CALLS` resolver directly: they
-    /// hand `ai_env.flag_chain(...)` to `run_helm_axis`, which resolves inside the
-    /// exempt `crate::ai::host::decide` spine. The trailing `run_helm_axis::<`
-    /// branch below pins that chain.
-    fn chains_in(body: &str, sig: &str) -> Vec<FlagChain> {
-        let builds_own_chain = body.contains("entity_flag_chain(");
-        let declares_chain_resources = (sig
-            .contains("Option<Res<crate::world::server::WorldContentRuntime>>")
-            || sig.contains("Option<Res<WorldContentRuntime>>"))
-            && (sig.contains("Option<Res<crate::world::server::WorldLayerMap>>")
-                || sig.contains("Option<Res<WorldLayerMap>>"));
-        let can_be_plumbed = !builds_own_chain || declares_chain_resources;
-
-        let mut out = Vec::new();
-        for call in EVAL_CALLS {
-            let mut from = 0usize;
-            while let Some(hit) = body[from..].find(call) {
-                let open = from + hit + call.len() - 1;
-                let looks_non_empty = last_argument(body, open).as_str() != "&[]";
-                out.push(if looks_non_empty && can_be_plumbed {
-                    FlagChain::Plumbed
-                } else {
-                    FlagChain::Empty
-                });
-                from = open + 1;
-            }
-        }
-
-        // Spine-based hosts (issue #1208): a host that resolves through
-        // `crate::ai::host::decide` — directly, or via the six helm axes' shared
-        // `run_helm_axis` driver — has no `EVAL_CALLS` of its own in its file,
-        // because the `resolve_channel` call now lives in the exempt spine
-        // (`src/ai/host.rs`). What the host body DOES own is the flag chain it
-        // builds and hands the spine in its `HostTick` — `ai_env.flag_chain(...)`,
-        // which unlike the retired `entity_flag_chain(None, None, None)` cannot
-        // degrade to empty (`AiHostEnv` holds bare `Res`). Its presence is the
-        // plumbing: a host that builds it that way is Plumbed; one that hands the
-        // spine `&[]` has no `ai_env.flag_chain(` and reads Empty, exactly as the
-        // argument scan above would flag a dropped chain.
-        if body.contains("run_helm_axis::<") || body.contains("ai::host::decide(") {
-            out.push(if body.contains("ai_env.flag_chain(") {
-                FlagChain::Plumbed
-            } else {
-                FlagChain::Empty
-            });
-        }
-        out
-    }
-
-    /// AC: the declared classification is not hand-maintained trivia — it is
-    /// re-derived here from the hosts' own source, so plumbing a host in stage 2
-    /// and forgetting this table fails the build.
-    #[test]
-    fn flag_chain_matches_the_hosts_source() {
-        for host in AI_HOSTS {
-            for site in host.eval_sites {
-                let src = read_non_test_source(site.file);
-                let body = function_body(&src, site.func);
-                let sig = fn_signature(&src, site.func);
-                let chains = chains_in(body, sig);
-                assert!(
-                    !chains.is_empty(),
-                    "{} ({}): {}::{} declares itself this host's evaluation site \
-                     but calls none of {EVAL_CALLS:?}. Point the entry at the \
-                     function that actually resolves the policy/selector",
-                    host.system,
-                    host.block,
-                    site.file,
-                    site.func
-                );
-                for actual in chains {
-                    assert_eq!(
-                        actual, host.flag_chain,
-                        "{} ({}) declares flag_chain = {:?}, but {}::{} passes a \
-                         {:?} chain. If stage 2 just plumbed this host, flip the \
-                         entry to FlagChain::Plumbed — the load-time rejection \
-                         then stops firing for it. If it just LOST its chain, \
-                         authored flag()/counter() guards on it have gone silent.",
-                        host.system, host.block, host.flag_chain, site.file, site.func, actual
-                    );
-                }
-            }
-        }
-    }
-
     fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in std::fs::read_dir(dir).expect("src/ must be readable") {
             let path = entry.expect("readable dir entry").path();
@@ -2226,62 +1944,6 @@ mod tests {
                 out.push(path);
             }
         }
-    }
-
-    /// AC: a NEW host cannot appear without appearing in the table either.
-    ///
-    /// Walks every non-test evaluation call in the crate and requires the
-    /// enclosing function to be claimed by some host. Without this, the drift
-    /// test above would happily pass over a sixteenth silent host.
-    #[test]
-    fn every_eval_site_in_the_crate_belongs_to_a_host() {
-        let root = crate_root();
-        let claimed: BTreeSet<(&str, &str)> = AI_HOSTS
-            .iter()
-            .flat_map(|h| h.eval_sites.iter().map(|s| (s.file, s.func)))
-            .collect();
-
-        let mut files = Vec::new();
-        rust_files(&root.join("src"), &mut files);
-        let mut unclaimed: Vec<String> = Vec::new();
-        for path in files {
-            let rel = path
-                .strip_prefix(&root)
-                .expect("scanned file is under the crate root")
-                .to_string_lossy()
-                .replace('\\', "/");
-            if NON_HOST_FILES.contains(&rel.as_str()) {
-                continue;
-            }
-            let src = strip_test_module(&std::fs::read_to_string(&path).expect("readable source"));
-            for call in EVAL_CALLS {
-                let mut from = 0usize;
-                while let Some(hit) = src[from..].find(call) {
-                    let at = from + hit;
-                    from = at + call.len();
-                    // The enclosing `fn` is the last one defined before the call.
-                    let Some(fn_at) = src[..at].rfind("fn ") else {
-                        continue;
-                    };
-                    let name: String = src[fn_at + 3..]
-                        .chars()
-                        .take_while(|c| c.is_alphanumeric() || *c == '_')
-                        .collect();
-                    if !claimed.contains(&(rel.as_str(), name.as_str())) {
-                        unclaimed.push(format!("{rel}::{name}"));
-                    }
-                }
-            }
-        }
-        unclaimed.sort();
-        unclaimed.dedup();
-        assert!(
-            unclaimed.is_empty(),
-            "these functions evaluate an AI policy/selector but no AiHost claims \
-             them, so nothing pins whether flag()/counter() guards reaching them \
-             can ever read true: {unclaimed:?}. Add the host (or its extra eval \
-             site) to AI_HOSTS."
-        );
     }
 
     // ── The history fold (issue #890) ───────────────────────────────────────
@@ -2478,9 +2140,9 @@ mod tests {
 
     /// EVERY host reads world flags since #891 stage 2 — pinned as a property
     /// rather than a name list, so adding a twentieth plumbed host needs no
-    /// edit here while a host silently losing its chain still fails (both here
-    /// and in `flag_chain_matches_the_hosts_source`, which re-derives the
-    /// classification from the host's own source).
+    /// edit here while a host that declares `FlagChain::Empty` still fails,
+    /// its authored `flag()`/`counter()` guards rejected at load by
+    /// [`AiHost::check_world_state`].
     #[test]
     fn every_host_reads_world_flags_today() {
         let unplumbed: Vec<&str> = AI_HOSTS
@@ -2518,7 +2180,6 @@ mod tests {
         system: "Probe",
         block: "[probe.ai]",
         flag_chain: FlagChain::Empty,
-        eval_sites: &[site("src/nowhere.rs", "probe_resolve")],
         history_fold: None,
         // A single seeded candidate fact, so the flag()/counter() selector
         // rejection tests below can use `candidate_fact(detectable)` in their

@@ -914,6 +914,25 @@
     .sa-svg { max-width: 100%; height: auto; }
     .sa-empty { color: #6a86a0; font-size: 11px; }
 
+    /* AI doctrine-pool panel (issue #1149) — the second structured-JSON debug
+       output: per AI ship, its scored-objective pool as a candidate table with
+       the chosen directive marked. Drawn rather than printed, like the chart. */
+    #debug-content .ad-panel { white-space: normal; color: #cde; font-family: monospace; }
+    .ad-title { font-size: 12px; color: #9fd; margin-bottom: 2px; }
+    .ad-caption { font-size: 10px; color: #6a86a0; margin-bottom: 6px; }
+    .ad-ship { margin-bottom: 10px; }
+    .ad-ship-header { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin-bottom: 2px; }
+    .ad-ship-name { color: #9fd; font-weight: bold; }
+    .ad-chosen { color: #ffb347; }
+    .ad-chosen-none { color: #6a86a0; }
+    .ad-candidates { width: 100%; border-collapse: collapse; font-size: 10px; }
+    .ad-candidates th { text-align: left; color: #6a86a0; font-weight: normal; border-bottom: 1px solid #24405a; padding: 1px 4px; }
+    .ad-candidates td { padding: 1px 4px; }
+    .ad-candidate.chosen { color: #ffd; background: rgba(255, 179, 71, 0.12); }
+    .ad-candidate.mandatory .ad-c-objective::after { content: " *"; color: #ff6b6b; }
+    .ad-c-score { text-align: right; }
+    .ad-empty { color: #6a86a0; font-size: 11px; }
+
     /* ── Settings cog (issue #939) ───────────────────────────────
        Top-left, over the viewscreen. Fixed rather than docked: the shell is a
        flex row whose first child is the viewscreen, and the cog must not
@@ -3291,6 +3310,13 @@ function finishInit() {
   // the counters behind it are always-on.
   window.wasm_toggle_station_activity = wasmBindings.wasm_toggle_station_activity;
   window.wasm_get_station_activity = wasmBindings.wasm_get_station_activity;
+  // AI doctrine pool (issue #1149): the second structured-JSON debug surface. The
+  // getter returns an AiStatePayload as JSON, which the settings cog's AI-doctrine
+  // output parses and draws as a per-ship candidate table (gui/ai-doctrine-panel.js)
+  // rather than printing. The toggle flips the flag that gates the JSON publish;
+  // the pool it projects is authoritative state.
+  window.wasm_toggle_ai_doctrine = wasmBindings.wasm_toggle_ai_doctrine;
+  window.wasm_get_ai_doctrine = wasmBindings.wasm_get_ai_doctrine;
   window.wasm_toggle_god_mode = wasmBindings.wasm_toggle_god_mode;
   window.wasm_get_god_mode = wasmBindings.wasm_get_god_mode;
   window.wasm_toggle_instagib = wasmBindings.wasm_toggle_instagib;

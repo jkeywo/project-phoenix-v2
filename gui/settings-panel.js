@@ -90,6 +90,9 @@ export const CLIENT_DEBUG_FLAGS = [
   // phone still toggles the flag — the client keeps its toggle-only role even
   // where it cannot draw the surface (PRD #1144).
   { id: 'station-activity', labelId: 'settings.debug.station_activity', flag: 'StationActivity' },
+  // AI doctrine pool (issue #1149) renders only on the host viewscreen, but the
+  // phone still toggles the flag — the client keeps its toggle-only role.
+  { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', flag: 'AiDoctrine' },
 ];
 
 /**

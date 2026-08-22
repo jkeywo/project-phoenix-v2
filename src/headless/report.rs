@@ -200,6 +200,13 @@ pub struct RunReport {
     /// per-side margins (#843). Present in *every* report (AC1); draw/timeout
     /// lean on the margins (AC2).
     pub outcome_report: OutcomeReport,
+    /// The AI doctrine-pool debug surface as JSON (issue #1149, PRD #1144): each
+    /// AI ship's scored-objective pool with every candidate's score, chosen
+    /// directive and resolved target. A one-shot read-only projection off the
+    /// final world (see [`build_report`]), so a seeded sweep captures *why* the AI
+    /// went the way it did. Empty string when no projection was run (the test
+    /// constructors); rendered as `null` then.
+    pub ai_doctrine: String,
 }
 
 impl RunReport {
@@ -279,6 +286,16 @@ impl RunReport {
             "  \"damage_by_ship\": {{{}}},\n",
             ledgers_to_json(&self.damage_by_ship)
         ));
+        // The AI doctrine-pool surface (issue #1149). Already a JSON object
+        // (`codec::encode_ai_doctrine`), so it slots in verbatim; an empty string
+        // (a test constructor that ran no projection) renders as `null` so the
+        // report is always valid JSON.
+        let ai_doctrine = if self.ai_doctrine.is_empty() {
+            "null"
+        } else {
+            self.ai_doctrine.as_str()
+        };
+        s.push_str(&format!("  \"ai_doctrine\": {ai_doctrine},\n"));
         // `OutcomeReport::to_json` emits `"outcome": ..., "sides": {...}` as a
         // body, so it slots straight in as the final two report fields.
         s.push_str(&format!("  {}\n", self.outcome_report.to_json()));
@@ -410,6 +427,12 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         &entity_factions,
     );
 
+    // The AI doctrine-pool surface (issue #1149): a one-shot read-only projection
+    // off the finished world, so every headless report carries *why* the AI went
+    // the way it did — independent of the live debug flag, which drives the dock
+    // and the determinism guard rather than the report.
+    let ai_doctrine = collect_ai_doctrine_json(app, ticks);
+
     RunReport {
         ticks,
         sim_seconds,
@@ -428,8 +451,44 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         message_counts,
         damage_by_ship,
         outcome_report,
+        ai_doctrine,
     }
     .tap_stream(app, args)
+}
+
+/// Project the AI doctrine pool off the finished world into the report's JSON
+/// (issue #1149).
+///
+/// Read-only, and it runs after the sim has stopped, so it cannot perturb the
+/// run: it reads each `BehaviourSection` ship's viewscreen scored-objective pool
+/// — the same set `debug::ai_state::publish_ai_doctrine` covers live — and folds
+/// it through the shared `collect_ai_doctrine` projector so the report and the
+/// dock speak the identical schema.
+fn collect_ai_doctrine_json(app: &mut App, tick: u64) -> String {
+    use crate::server_app::ShipSystemBlackboards;
+
+    let mut q = app.world_mut().query_filtered::<(
+        &ShipSystemBlackboards,
+        Option<&EntityName>,
+        Option<&EntityUuid>,
+    ), With<crate::entities::spawner::BehaviourSection>>();
+    let ships: Vec<(
+        String,
+        Option<String>,
+        Vec<crate::core::messages::ScoredObjective>,
+    )> = q
+        .iter(app.world())
+        .map(|(blackboards, name, uuid)| {
+            (
+                name.map(|n| n.0.clone())
+                    .unwrap_or_else(|| "<unnamed>".to_string()),
+                uuid.map(|u| u.0.clone()),
+                crate::debug::ai_state::ship_scored_pool(blackboards),
+            )
+        })
+        .collect();
+    let payload = crate::debug::ai_state::collect_ai_doctrine(tick, ships);
+    crate::core::codec::encode_ai_doctrine(&payload)
 }
 
 /// Bucket ships by side relative to the `LocalShip`, sum the margins, and hand
@@ -625,6 +684,7 @@ mod tests {
                 SideMargins::new(90.0, 100.0, 200.0, 40.0, 3.0),
                 SideMargins::new(0.0, 100.0, 40.0, 200.0, 1.0),
             ),
+            ai_doctrine: String::new(),
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)
@@ -637,6 +697,9 @@ mod tests {
         assert_eq!(parsed["ship"]["damaged_systems"]["helm"], "Damaged");
         assert_eq!(parsed["message_counts"]["SimState"], 100);
         assert!(parsed["game_over_reason"].is_null());
+        // An unset doctrine surface (no projection ran) renders as null, keeping
+        // the report valid JSON (issue #1149).
+        assert!(parsed["ai_doctrine"].is_null());
         // Outcome + per-side margins are always present.
         assert_eq!(parsed["outcome"], "timeout");
         assert_eq!(parsed["sides"]["player"]["remaining_hull_fraction"], 0.9);
@@ -666,6 +729,7 @@ mod tests {
                 SideMargins::default(),
                 SideMargins::default(),
             ),
+            ai_doctrine: String::new(),
         };
         let parsed: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
         assert!(parsed["ship"].is_null());
@@ -722,6 +786,7 @@ mod tests {
                 SideMargins::default(),
                 SideMargins::default(),
             ),
+            ai_doctrine: String::new(),
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)

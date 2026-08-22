@@ -22,14 +22,16 @@
 //! *surface* (the WASM toggle export and its client route) exactly as the legacy
 //! overlays do; the counters, being invisible and inert to the sim, stay.
 
+pub mod ai_state;
 pub mod payload;
 pub mod station_activity;
 
 use bevy::prelude::*;
 
+pub use ai_state::{AiDoctrineCapture, DebugAiDoctrineEnabled};
 pub use payload::{
-    ActivitySource, StationActivityBucket, StationActivityEntry, StationActivityPayload,
-    DEBUG_SCHEMA_VERSION,
+    ActivitySource, AiStatePayload, DoctrineCandidate, DoctrineChoice, ShipDoctrine,
+    StationActivityBucket, StationActivityEntry, StationActivityPayload, DEBUG_SCHEMA_VERSION,
 };
 pub use station_activity::{
     DebugStationActivityEnabled, StationActivityCapture, StationActivityTracker,
@@ -52,7 +54,9 @@ impl Plugin for DebugPlugin {
 
         app.init_resource::<StationActivityTracker>()
             .init_resource::<DebugStationActivityEnabled>()
-            .init_resource::<StationActivityCapture>();
+            .init_resource::<StationActivityCapture>()
+            .init_resource::<DebugAiDoctrineEnabled>()
+            .init_resource::<AiDoctrineCapture>();
 
         // The observability surfaces are read-only projections nothing in the
         // fixed tick reads back, so they are digest EXCLUSIONS, not authoritative
@@ -65,10 +69,9 @@ impl Plugin for DebugPlugin {
             StateClass::Presentation,
             "debug-station-activity",
         )
-        .declare_state::<StationActivityCapture>(
-            StateClass::Presentation,
-            "debug-station-activity",
-        );
+        .declare_state::<StationActivityCapture>(StateClass::Presentation, "debug-station-activity")
+        .declare_state::<DebugAiDoctrineEnabled>(StateClass::Presentation, "debug-ai-doctrine")
+        .declare_state::<AiDoctrineCapture>(StateClass::Presentation, "debug-ai-doctrine");
 
         // Counters: always-on, after the whole tick's admission has run (the
         // same window the unrouted-command lint observes), gated only on there
@@ -87,6 +90,18 @@ impl Plugin for DebugPlugin {
                 .after(station_activity::record_station_activity)
                 .run_if(in_state(crate::core::messages::GamePhase::InProgress))
                 .run_if(|flag: Res<DebugStationActivityEnabled>| flag.0),
+        );
+
+        // AI doctrine-pool projection (issue #1149): flag-gated, after
+        // `SimSet::Broadcast` so the tick's viewscreen pool (written in
+        // `SimSet::PublishAggregate`) is final. Read-only, so it never moves the
+        // digest whether the flag is on or off.
+        app.add_systems(
+            FixedUpdate,
+            ai_state::publish_ai_doctrine
+                .after(crate::sim_sets::SimSet::Broadcast)
+                .run_if(in_state(crate::core::messages::GamePhase::InProgress))
+                .run_if(|flag: Res<DebugAiDoctrineEnabled>| flag.0),
         );
     }
 }

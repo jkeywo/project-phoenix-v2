@@ -72,6 +72,8 @@ pub enum DebugToggleKind {
     /// Station-activity chart (`debug::DebugStationActivityEnabled`), the first
     /// surface on the structured debug pipeline (issue #1145).
     StationActivity,
+    /// AI doctrine-pool panel (`debug::DebugAiDoctrineEnabled`, issue #1149).
+    AiDoctrine,
 }
 
 impl From<crate::core::messages::DebugFlag> for DebugToggleKind {
@@ -97,6 +99,7 @@ impl From<crate::core::messages::DebugFlag> for DebugToggleKind {
             DebugFlag::Entities => DebugToggleKind::Entities,
             DebugFlag::Inspector => DebugToggleKind::EntityInspector,
             DebugFlag::StationActivity => DebugToggleKind::StationActivity,
+            DebugFlag::AiDoctrine => DebugToggleKind::AiDoctrine,
         }
     }
 }
@@ -120,6 +123,7 @@ pub fn apply_pending_toggles(
     entities: &mut bool,
     entity_inspector: &mut bool,
     station_activity: &mut bool,
+    ai_doctrine: &mut bool,
 ) -> bool {
     let mut pause_changed = false;
     // Dedupe in case the same kind was queued multiple times between drains.
@@ -136,6 +140,7 @@ pub fn apply_pending_toggles(
             DebugToggleKind::Entities => *entities = !*entities,
             DebugToggleKind::EntityInspector => *entity_inspector = !*entity_inspector,
             DebugToggleKind::StationActivity => *station_activity = !*station_activity,
+            DebugToggleKind::AiDoctrine => *ai_doctrine = !*ai_doctrine,
         }
     }
     pause_changed
@@ -315,6 +320,13 @@ thread_local! {
     /// JS. Unlike its neighbours this is structured JSON, not pre-formatted text
     /// — the dock parses it and draws a chart (`gui/station-activity-chart.js`).
     static STATION_ACTIVITY_STRING: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// The AI doctrine-pool debug payload as JSON (issue #1149), written by
+    /// `debug::ai_state::publish_ai_doctrine` each tick while the AI-doctrine flag
+    /// is on. Read by `wasm_get_ai_doctrine()` from JS. Structured JSON, not
+    /// pre-formatted text — the dock parses it and draws a per-ship panel
+    /// (`gui/ai-doctrine-panel.js`).
+    static AI_DOCTRINE_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
     /// Pending force-start request from `wasm_force_start()`. Drained by
     /// `drain_force_start_input` each `PreUpdate` frame into the
@@ -1622,6 +1634,39 @@ pub fn set_station_activity_string(text: String) {
     STATION_ACTIVITY_STRING.with(|v| *v.borrow_mut() = text);
 }
 
+/// Called by JS (the settings cog's Debug/Cheat tab) to toggle the AI
+/// doctrine-pool panel at runtime (issue #1149).
+///
+/// Same transport pattern as `wasm_toggle_station_activity`: sets a pending flag
+/// consumed by `drain_debug_toggles` next `PreUpdate`, which flips
+/// `debug::DebugAiDoctrineEnabled`. The pool it projects is authoritative state;
+/// only the JSON publish is gated.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_ai_doctrine() {
+    PENDING_TOGGLES.with(|set| {
+        set.borrow_mut().insert(DebugToggleKind::AiDoctrine);
+    });
+}
+
+/// Called by JS each animation frame to read the latest AI doctrine-pool payload
+/// as JSON while the panel is visible (issue #1149).
+///
+/// Returns the raw JSON string `debug::ai_state::publish_ai_doctrine` wrote; the
+/// dock parses it and draws a per-ship panel. Empty until the first publish.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_ai_doctrine() -> String {
+    AI_DOCTRINE_STRING.with(|v| v.borrow().clone())
+}
+
+/// Called by the Bevy `publish_ai_doctrine` system to update the AI doctrine-pool
+/// JSON that JS reads via `wasm_get_ai_doctrine()`.
+#[cfg(target_arch = "wasm32")]
+pub fn set_ai_doctrine_string(text: String) {
+    AI_DOCTRINE_STRING.with(|v| *v.borrow_mut() = text);
+}
+
 /// Called by JS (lobby "Launch AI Ship" button) to start the game with no
 /// human players — all stations run under AI/backfill control.
 ///
@@ -2371,6 +2416,7 @@ fn drain_debug_toggles(
     mut entities_enabled: ResMut<crate::debug_overlay::DebugEntitiesEnabled>,
     mut entity_inspector_enabled: ResMut<crate::debug_overlay::DebugEntityInspectorEnabled>,
     mut station_activity_enabled: ResMut<crate::debug::DebugStationActivityEnabled>,
+    mut ai_doctrine_enabled: ResMut<crate::debug::DebugAiDoctrineEnabled>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
     let pending: Vec<DebugToggleKind> =
@@ -2388,6 +2434,7 @@ fn drain_debug_toggles(
         &mut entities_enabled.0,
         &mut entity_inspector_enabled.0,
         &mut station_activity_enabled.0,
+        &mut ai_doctrine_enabled.0,
     );
 
     // Region-wireframe state also lives in a thread-local (read back by
@@ -2845,6 +2892,7 @@ mod tests {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (false, false, false, false, false, false);
         let mut station_activity = false;
+        let mut ai_doctrine = false;
 
         let pause_changed = apply_pending_toggles(
             [DebugToggleKind::Regions],
@@ -2855,6 +2903,7 @@ mod tests {
             &mut entities,
             &mut inspector,
             &mut station_activity,
+            &mut ai_doctrine,
         );
 
         assert!(regions, "Regions flag should have flipped to true");
@@ -2864,6 +2913,7 @@ mod tests {
         assert!(!entities);
         assert!(!inspector);
         assert!(!station_activity);
+        assert!(!ai_doctrine);
         assert!(!pause_changed, "pause was not in this batch");
     }
 
@@ -2874,6 +2924,7 @@ mod tests {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (true, false, false, false, false, false);
         let mut station_activity = false;
+        let mut ai_doctrine = false;
 
         let pause_changed = apply_pending_toggles(
             std::iter::empty(),
@@ -2884,6 +2935,7 @@ mod tests {
             &mut entities,
             &mut inspector,
             &mut station_activity,
+            &mut ai_doctrine,
         );
 
         assert!(regions, "previous state must be preserved, not re-toggled");
@@ -2897,6 +2949,7 @@ mod tests {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (false, false, false, false, false, false);
         let mut station_activity = false;
+        let mut ai_doctrine = false;
 
         let pause_changed = apply_pending_toggles(
             [DebugToggleKind::Pause],
@@ -2907,6 +2960,7 @@ mod tests {
             &mut entities,
             &mut inspector,
             &mut station_activity,
+            &mut ai_doctrine,
         );
 
         assert!(paused);
@@ -2920,6 +2974,7 @@ mod tests {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (false, false, false, false, false, false);
         let mut station_activity = false;
+        let mut ai_doctrine = false;
 
         apply_pending_toggles(
             [
@@ -2927,6 +2982,7 @@ mod tests {
                 DebugToggleKind::Damage,
                 DebugToggleKind::EntityInspector,
                 DebugToggleKind::StationActivity,
+                DebugToggleKind::AiDoctrine,
             ],
             &mut regions,
             &mut overlay,
@@ -2935,6 +2991,7 @@ mod tests {
             &mut entities,
             &mut inspector,
             &mut station_activity,
+            &mut ai_doctrine,
         );
 
         assert!(!regions);
@@ -2944,6 +3001,7 @@ mod tests {
         assert!(!entities);
         assert!(inspector);
         assert!(station_activity);
+        assert!(ai_doctrine);
     }
 
     /// A duplicate variant appearing twice in the same batch (e.g. queued
@@ -2954,6 +3012,7 @@ mod tests {
         let (mut regions, mut overlay, mut paused, mut damage, mut entities, mut inspector) =
             (false, false, false, false, false, false);
         let mut station_activity = false;
+        let mut ai_doctrine = false;
 
         apply_pending_toggles(
             [DebugToggleKind::Entities, DebugToggleKind::Entities],
@@ -2964,6 +3023,7 @@ mod tests {
             &mut entities,
             &mut inspector,
             &mut station_activity,
+            &mut ai_doctrine,
         );
 
         assert!(entities, "should have flipped once (false -> true)");

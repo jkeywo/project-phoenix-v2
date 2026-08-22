@@ -81,6 +81,20 @@ pub fn encode_station_activity(p: &crate::debug::payload::StationActivityPayload
     serde_json::to_string(p).unwrap_or_default()
 }
 
+/// Encode an AI doctrine-pool debug payload to JSON (issue #1149, PRD #1144).
+///
+/// The single seam where `crate::debug::payload::AiStatePayload` becomes the JSON
+/// the dock panel parses (`gui/ai-doctrine-panel.js`) and the headless report
+/// embeds — AGENTS.md Key Constraint 1 keeps `serde_json` here, so
+/// `debug::ai_state::publish_ai_doctrine` and `headless::report::build_report`
+/// call this rather than serialising themselves. Returns `String` (not `Result`)
+/// for the same reason [`encode_station_activity`] does: the payload is
+/// String/int/float scalars in `Vec`s, which serde never fails to encode, so an
+/// error becomes an empty string a consumer treats as "no data yet".
+pub fn encode_ai_doctrine(p: &crate::debug::payload::AiStatePayload) -> String {
+    serde_json::to_string(p).unwrap_or_default()
+}
+
 /// Decode inbound JSON from the HTML/PeerJS bridge.
 ///
 /// The wire shape is a full `ClientMessage` — every emitter (phone consoles,
@@ -2782,6 +2796,17 @@ mod tests {
                 r#"{"type":"ToggleDebugFlag","data":{"flag":"StationActivity"}}"#,
                 "the StationActivity flag spelling must match settings-panel.js"
             );
+
+            // The AI doctrine-pool flag rides the same route (issue #1149).
+            let msg = ClientMessage::ToggleDebugFlag {
+                flag: DebugFlag::AiDoctrine,
+            };
+            assert_client_roundtrip(&JsonCodec, msg.clone());
+            assert_eq!(
+                JsonCodec.encode_client(&msg).unwrap(),
+                r#"{"type":"ToggleDebugFlag","data":{"flag":"AiDoctrine"}}"#,
+                "the AiDoctrine flag spelling must match settings-panel.js"
+            );
         }
     }
 
@@ -2818,6 +2843,51 @@ mod tests {
         );
         // Round-trips back to the same payload — the schema is stable both ways.
         let decoded: StationActivityPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    /// The AI doctrine-pool payload's JSON shape (issue #1149, PRD #1144), pinned
+    /// because `gui/ai-doctrine-panel.js` parses it by field name and the headless
+    /// report embeds it — the two must not drift. Follows the same versioned
+    /// envelope + sorted-collection contract the station-activity surface set.
+    #[test]
+    fn ai_doctrine_payload_wire_shape_is_pinned() {
+        use crate::debug::payload::{
+            AiStatePayload, DoctrineCandidate, DoctrineChoice, ShipDoctrine, DEBUG_SCHEMA_VERSION,
+        };
+
+        let payload = AiStatePayload {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            tick: 42,
+            ships: vec![ShipDoctrine {
+                ship: "Harrow".into(),
+                uuid: Some("uuid-1".into()),
+                chosen: Some(DoctrineChoice {
+                    id: "kill".into(),
+                    directive: "Destroy(Ashrender)".into(),
+                    target: Some("Ashrender".into()),
+                    score: 38.0,
+                }),
+                candidates: vec![DoctrineCandidate {
+                    id: "kill".into(),
+                    score: 38.0,
+                    source: "Doctrine".into(),
+                    relevance: vec!["Weapons".into()],
+                    directive: "Destroy(Ashrender)".into(),
+                    target: Some("Ashrender".into()),
+                    mandatory: true,
+                    status: "Active".into(),
+                }],
+            }],
+        };
+        let json = crate::core::codec::encode_ai_doctrine(&payload);
+        assert_eq!(
+            json,
+            r#"{"schema_version":1,"tick":42,"ships":[{"ship":"Harrow","uuid":"uuid-1","chosen":{"id":"kill","directive":"Destroy(Ashrender)","target":"Ashrender","score":38.0},"candidates":[{"id":"kill","score":38.0,"source":"Doctrine","relevance":["Weapons"],"directive":"Destroy(Ashrender)","target":"Ashrender","mandatory":true,"status":"Active"}]}]}"#,
+            "the AI doctrine JSON shape must match gui/ai-doctrine-panel.js"
+        );
+        // Round-trips back to the same payload — the schema is stable both ways.
+        let decoded: AiStatePayload = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, payload);
     }
 

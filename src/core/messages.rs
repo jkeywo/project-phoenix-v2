@@ -2263,6 +2263,11 @@ pub enum DebugFlag {
     /// pre-formatted text stream; the counters behind it are always-on and only
     /// the rendering is flag-gated.
     StationActivity,
+    /// AI doctrine-pool panel (`debug::DebugAiDoctrineEnabled`, issue #1149). A
+    /// JSON surface like `StationActivity`: it gates the per-ship scored-objective
+    /// pool projection the dock panel renders. The pool is authoritative state
+    /// projected read-only, so only the rendering is flag-gated.
+    AiDoctrine,
 }
 
 impl DebugFlag {
@@ -2271,13 +2276,14 @@ impl DebugFlag {
     /// A fixed slice rather than map iteration, so identical state always
     /// produces an identical message — the client's fold diffs it and the
     /// codec test pins its shape.
-    pub const ALL: [DebugFlag; 6] = [
+    pub const ALL: [DebugFlag; 7] = [
         DebugFlag::Regions,
         DebugFlag::Modifiers,
         DebugFlag::Damage,
         DebugFlag::Entities,
         DebugFlag::Inspector,
         DebugFlag::StationActivity,
+        DebugFlag::AiDoctrine,
     ];
 }
 

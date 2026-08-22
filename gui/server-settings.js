@@ -30,6 +30,7 @@
 import { t } from './strings.js';
 import { isDemoBuild } from './build-flags.js';
 import { renderStationActivityChart } from './station-activity-chart.js';
+import { renderAiDoctrinePanel } from './ai-doctrine-panel.js';
 import { TABS, visibleTabs, resolveActiveTab } from './settings-tabs.js';
 import {
   mountOverlayShell,
@@ -61,6 +62,9 @@ export const DEBUG_OUTPUTS = [
   { id: 'entities', labelId: 'settings.debug.entities', toggle: 'wasm_toggle_debug_entities', read: 'wasm_get_entity_debug_state' },
   { id: 'inspector', labelId: 'settings.debug.inspector', toggle: 'wasm_toggle_entity_inspector', read: 'wasm_get_entity_inspector' },
   { id: 'station-activity', labelId: 'settings.debug.station_activity', toggle: 'wasm_toggle_station_activity', read: 'wasm_get_station_activity', render: renderStationActivityChart },
+  // AI doctrine pool (issue #1149): the second structured-JSON surface, drawn as
+  // a per-ship candidate table rather than printed as text.
+  { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', toggle: 'wasm_toggle_ai_doctrine', read: 'wasm_get_ai_doctrine', render: renderAiDoctrinePanel },
 ];
 
 /** Cheats and world-drawing toggles, each with an authoritative read-back. */

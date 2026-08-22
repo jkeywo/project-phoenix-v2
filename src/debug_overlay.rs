@@ -167,6 +167,7 @@ pub fn drain_client_debug_flags(
     mut entities: ResMut<DebugEntitiesEnabled>,
     mut inspector: ResMut<DebugEntityInspectorEnabled>,
     mut station_activity: ResMut<crate::debug::DebugStationActivityEnabled>,
+    mut ai_doctrine: ResMut<crate::debug::DebugAiDoctrineEnabled>,
 ) {
     let mut requests: Vec<(String, crate::core::messages::DebugFlag)> = Vec::new();
     for ev in reader.read() {
@@ -196,6 +197,7 @@ pub fn drain_client_debug_flags(
         &mut entities.0,
         &mut inspector.0,
         &mut station_activity.0,
+        &mut ai_doctrine.0,
     );
     debug_assert!(
         !pause_changed,
@@ -300,6 +302,7 @@ pub fn report_debug_state(
     entities: Res<DebugEntitiesEnabled>,
     inspector: Res<DebugEntityInspectorEnabled>,
     station_activity: Res<crate::debug::DebugStationActivityEnabled>,
+    ai_doctrine: Res<crate::debug::DebugAiDoctrineEnabled>,
     god_mode: Option<Res<crate::server_app::GodMode>>,
     mut last: ResMut<LastReportedDebugState>,
     mut writer: MessageWriter<crate::lobby::OutboundMessage>,
@@ -332,6 +335,7 @@ pub fn report_debug_state(
                 DebugFlag::Entities => entities.0,
                 DebugFlag::Inspector => inspector.0,
                 DebugFlag::StationActivity => station_activity.0,
+                DebugFlag::AiDoctrine => ai_doctrine.0,
             };
             (*flag, on)
         })
@@ -1003,6 +1007,7 @@ mod tests {
             let (mut regions, mut overlay, mut paused) = (false, false, false);
             let (mut damage, mut entities, mut inspector) = (false, false, false);
             let mut station_activity = false;
+            let mut ai_doctrine = false;
             let pending =
                 admitted_flag_toggles([("phone", DebugFlag::Damage)], connected(&["phone"]));
             let pause_changed = crate::server::bridge::apply_pending_toggles(
@@ -1014,11 +1019,18 @@ mod tests {
                 &mut entities,
                 &mut inspector,
                 &mut station_activity,
+                &mut ai_doctrine,
             );
             assert!(damage, "the named flag must flip");
             assert!(!pause_changed);
             assert!(
-                !regions && !overlay && !paused && !entities && !inspector && !station_activity
+                !regions
+                    && !overlay
+                    && !paused
+                    && !entities
+                    && !inspector
+                    && !station_activity
+                    && !ai_doctrine
             );
         }
 

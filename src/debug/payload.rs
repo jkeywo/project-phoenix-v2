@@ -148,6 +148,108 @@ impl Default for StationActivityPayload {
     }
 }
 
+// ── AI-state surface: the doctrine pool per ship (issue #1149) ───────────────
+//
+// The AI observability surface. The scored-objective doctrine pool crosses the
+// wire on every ship's viewscreen blackboard each tick and is rendered nowhere
+// today; this makes it diagnostic, so a tuner can see *why* the AI picked what
+// it picked. The projector that fills these lives in `crate::debug::ai_state`;
+// the field VALUES (directive label, resolved target, chosen top directive)
+// reuse the `crate::ai::decision_trace` helpers #1146 built, so the trace a log
+// line carries and the surface a dock renders never drift.
+
+/// The AI-state debug surface's whole payload (issue #1149, PRD #1144).
+///
+/// Today it carries only the per-ship doctrine pool (`ships`). Issue #1152 adds
+/// the per-host fine-system policy view as its OWN `hosts` field alongside
+/// `ships` — the two are independent sub-surfaces of the one AI payload (the
+/// PRD's "doctrine pool plus per-host fine-system policy view"), so #1152 can
+/// grow this struct without reshaping the doctrine part or any type below it.
+///
+/// Not `Eq`: the candidate scores are `f32`. `PartialEq` is enough for the
+/// tests that compare payloads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AiStatePayload {
+    /// [`DEBUG_SCHEMA_VERSION`] at the time the host produced this payload.
+    pub schema_version: u32,
+    /// The `SimTick` at which this snapshot was projected.
+    pub tick: u64,
+    /// One entry per AI-controlled ship, sorted by `(ship, uuid)` so two hosts
+    /// folding the same world produce byte-identical JSON.
+    pub ships: Vec<ShipDoctrine>,
+    // #1152 adds `hosts: Vec<HostPolicyView>` here, after `ships`.
+}
+
+impl Default for AiStatePayload {
+    fn default() -> Self {
+        Self {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            tick: 0,
+            ships: Vec::new(),
+        }
+    }
+}
+
+/// One AI-controlled ship's doctrine-pool projection.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShipDoctrine {
+    /// The ship's display name (`EntityName`), or `"<unnamed>"`.
+    pub ship: String,
+    /// The ship's stable entity uuid, when it carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uuid: Option<String>,
+    /// The directive the ship is acting on this tick — the highest positively
+    /// scored objective that carries a real directive — or `None` when the pool
+    /// is empty or everything gated out to zero. Mirrors what the helm/weapons
+    /// AI actually serve (`decision_trace::top_directive`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chosen: Option<DoctrineChoice>,
+    /// Every candidate objective in the pool, sorted by descending score then
+    /// id, so the ordering is deterministic and the winner reads first.
+    pub candidates: Vec<DoctrineCandidate>,
+}
+
+/// The directive a ship is acting on — the resolved winner of its pool.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DoctrineChoice {
+    /// The winning objective's id.
+    pub id: String,
+    /// A compact label for the directive kind and the entity/anchor it names,
+    /// e.g. `"Destroy(Ashrender)"` (`decision_trace::directive_label`).
+    pub directive: String,
+    /// The resolved target/anchor the directive names, or `None` for a
+    /// target-less directive (`decision_trace::directive_target`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// The winner's utility score.
+    pub score: f32,
+}
+
+/// One scored candidate objective in a ship's doctrine pool.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DoctrineCandidate {
+    /// Stable objective id (`ScoredObjective::id`).
+    pub id: String,
+    /// Computed utility score (`0.0` = gated-out / inactive).
+    pub score: f32,
+    /// `"Mission"` or `"Doctrine"` — where the objective came from.
+    pub source: String,
+    /// The ship systems this directive is relevant to (`Helm`, `Weapons`, …),
+    /// as their debug names.
+    pub relevance: Vec<String>,
+    /// The directive kind and target, as a compact label
+    /// (`decision_trace::directive_label`).
+    pub directive: String,
+    /// The resolved target/anchor the directive names, or `None` for a
+    /// target-less directive (`decision_trace::directive_target`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// Whether the underlying objective is mandatory.
+    pub mandatory: bool,
+    /// The objective's status (`"Active"` / `"Completed"` / `"Failed"`).
+    pub status: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,5 +286,12 @@ mod tests {
             StationActivityPayload::default().schema_version,
             DEBUG_SCHEMA_VERSION
         );
+    }
+
+    #[test]
+    fn default_ai_state_payload_carries_the_current_schema_version() {
+        let payload = AiStatePayload::default();
+        assert_eq!(payload.schema_version, DEBUG_SCHEMA_VERSION);
+        assert!(payload.ships.is_empty());
     }
 }

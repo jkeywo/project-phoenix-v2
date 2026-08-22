@@ -2,7 +2,7 @@ use super::*;
 
 use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
-use crate::messages::SystemControlPayload;
+use crate::core::messages::SystemControlPayload;
 
 /// The **Lateral Thrust** helm axis (issue #1208): outside a docking manoeuvre,
 /// gate the `lateral` channel on the authored `actuate_lateral_thrust` mode verb
@@ -19,8 +19,8 @@ use crate::messages::SystemControlPayload;
 pub(crate) struct LateralAxis;
 
 impl HelmAxisHost for LateralAxis {
-    fn system_id() -> crate::messages::SystemId {
-        crate::system_registry::lateral_thrust_system_id()
+    fn system_id() -> crate::core::messages::SystemId {
+        crate::ship::system_registry::lateral_thrust_system_id()
     }
     const CHANNEL: &'static str = crate::entities::config::HELM_LATERAL_CHANNEL;
     const STATEFUL: bool = false;
@@ -113,11 +113,11 @@ pub(crate) fn ai_helm_lateral_thrust(
             // `crate::ai::*` fallbacks that match the serde defaults.
             Option<&crate::entities::spawner::BehaviourSection>,
             Option<&FineSystemAiPolicies>,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
     for (

@@ -18,7 +18,7 @@
 
 #[cfg(target_arch = "wasm32")]
 use {
-    crate::entity_config::EntityConfig, bevy::prelude::*, js_sys::Function,
+    crate::entities::config::EntityConfig, bevy::prelude::*, js_sys::Function,
     std::collections::VecDeque, wasm_bindgen::prelude::*,
 };
 
@@ -52,7 +52,7 @@ use bevy::prelude::Resource;
 /// the raw TOML instead, by [`drain_resolved_templates`] below, and the two
 /// feed the SAME `PENDING_QUEUE`/`IN_FLIGHT` pair so the preload-complete
 /// condition is unchanged.
-pub fn nested_template_paths(config: &crate::entity_config::EntityConfig) -> Vec<String> {
+pub fn nested_template_paths(config: &crate::entities::config::EntityConfig) -> Vec<String> {
     let mut out = Vec::new();
     if let Some(field) = &config.asteroid_field {
         for p in &field.asteroid_type_paths {
@@ -79,8 +79,8 @@ thread_local! {
     static IN_FLIGHT: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 
     /// Cache of loaded faction configs by uuid.
-    static FACTION_REGISTRY: RefCell<crate::faction::FactionRegistry> =
-        RefCell::new(crate::faction::FactionRegistry::new());
+    static FACTION_REGISTRY: RefCell<crate::ai::faction::FactionRegistry> =
+        RefCell::new(crate::ai::faction::FactionRegistry::new());
 
     /// JS callback for requesting config fetches. Set by set_config_request_callback.
     static CONFIG_REQUEST_CB: RefCell<Option<Function>> = const { RefCell::new(None) };
@@ -172,17 +172,17 @@ thread_local! {
 pub struct TemplatePreloadProgress {
     /// Fully resolved entity templates, paired with the path they were
     /// requested under (which is the config-cache key world TOML looks up).
-    pub ready: Vec<(String, crate::entity_includes::ResolvedTemplate)>,
+    pub ready: Vec<(String, crate::entities::include_resolve::ResolvedTemplate)>,
     /// Canonical fragment paths that must still be fetched. Deduplicated.
     pub fetch: Vec<String>,
     /// Composition failures. Every one of these is a load error: the entity
     /// never enters the config cache, so nothing partially composed spawns.
-    pub errors: Vec<crate::entity_includes::IncludeError>,
+    pub errors: Vec<crate::entities::include_resolve::IncludeError>,
 }
 
 /// Record the raw TOML the host delivered for `path`.
 pub fn record_raw_template(path: &str, toml_str: String) {
-    let key = crate::entity_includes::canonical_template_path(path);
+    let key = crate::entities::include_resolve::canonical_template_path(path);
     RAW_TEMPLATE_TOML.with(|m| {
         m.borrow_mut().insert(key, toml_str);
     });
@@ -195,13 +195,13 @@ pub fn record_raw_template(path: &str, toml_str: String) {
 /// resolution — and the composition validation built on it (issue #906) — works
 /// on WASM, where there is no filesystem to fall back to.
 pub fn raw_template_text(path: &str) -> Option<String> {
-    let key = crate::entity_includes::canonical_template_path(path);
+    let key = crate::entities::include_resolve::canonical_template_path(path);
     RAW_TEMPLATE_TOML.with(|m| m.borrow().get(&key).cloned())
 }
 
 /// Note that `path` was requested as an entity template, not as a fragment.
 pub fn mark_entity_template(path: &str) {
-    let canonical = crate::entity_includes::canonical_template_path(path);
+    let canonical = crate::entities::include_resolve::canonical_template_path(path);
     ENTITY_TEMPLATE_PATHS.with(|v| {
         let mut v = v.borrow_mut();
         if !v.iter().any(|(_, c)| c == &canonical) {
@@ -216,7 +216,7 @@ pub fn mark_entity_template(path: &str) {
 /// cache-membership check that stops an entity template being fetched twice
 /// would not stop a fragment shared by five hulls being fetched five times.
 pub fn is_raw_template_delivered(path: &str) -> bool {
-    let key = crate::entity_includes::canonical_template_path(path);
+    let key = crate::entities::include_resolve::canonical_template_path(path);
     RAW_TEMPLATE_TOML.with(|m| m.borrow().contains_key(&key))
 }
 
@@ -237,12 +237,12 @@ pub fn drain_resolved_templates() -> TemplatePreloadProgress {
         if already || !raw.contains_key(&canonical) {
             continue;
         }
-        match crate::entity_includes::preload_step(&canonical, &raw) {
-            Ok(crate::entity_includes::PreloadStep::Ready(resolved)) => {
+        match crate::entities::include_resolve::preload_step(&canonical, &raw) {
+            Ok(crate::entities::include_resolve::PreloadStep::Ready(resolved)) => {
                 SETTLED_TEMPLATE_PATHS.with(|s| s.borrow_mut().insert(canonical));
                 progress.ready.push((requested, *resolved));
             }
-            Ok(crate::entity_includes::PreloadStep::AwaitingIncludes(paths)) => {
+            Ok(crate::entities::include_resolve::PreloadStep::AwaitingIncludes(paths)) => {
                 for p in paths {
                     if !progress.fetch.contains(&p) {
                         progress.fetch.push(p);
@@ -885,7 +885,7 @@ pub fn request_sidecar_fetch(path: String, optional: bool) {
 
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsValue> {
-    match crate::faction::parse_faction_config(&toml_str) {
+    match crate::ai::faction::parse_faction_config(&toml_str) {
         Ok(config) => {
             FACTION_REGISTRY.with(|reg| {
                 reg.borrow_mut().insert(config);
@@ -910,7 +910,7 @@ pub fn wasm_load_faction(_path: String, toml_str: String) -> Result<JsValue, JsV
 /// built-in factions — Federation, Pirate, Harrow, Requiem — on every
 /// target, WASM included.
 #[cfg(target_arch = "wasm32")]
-pub fn get_faction_registry() -> crate::faction::FactionRegistry {
+pub fn get_faction_registry() -> crate::ai::faction::FactionRegistry {
     FACTION_REGISTRY.with(|reg| {
         if reg.borrow().is_empty() {
             for toml_str in &[
@@ -919,7 +919,7 @@ pub fn get_faction_registry() -> crate::faction::FactionRegistry {
                 include_str!("../../assets/factions/harrow.toml"),
                 include_str!("../../assets/factions/requiem.toml"),
             ] {
-                if let Ok(config) = crate::faction::parse_faction_config(toml_str) {
+                if let Ok(config) = crate::ai::faction::parse_faction_config(toml_str) {
                     reg.borrow_mut().insert(config);
                 }
             }
@@ -936,7 +936,7 @@ pub fn get_config_cache() -> ConfigCache {
 
 /// Look up a single cached entity config by template path.
 #[cfg(target_arch = "wasm32")]
-pub fn get_cached_entity_config(path: &str) -> Option<crate::entity_config::EntityConfig> {
+pub fn get_cached_entity_config(path: &str) -> Option<crate::entities::config::EntityConfig> {
     CONFIG_CACHE.with(|cache| cache.borrow().get(path).cloned())
 }
 
@@ -1003,15 +1003,15 @@ impl From<HashMap<String, EntityConfig>> for ConfigCache {
 
 /// On non-wasm, ConfigCache is just a plain HashMap (no Bevy Resource needed).
 #[cfg(not(target_arch = "wasm32"))]
-pub type ConfigCache = std::collections::HashMap<String, crate::entity_config::EntityConfig>;
+pub type ConfigCache = std::collections::HashMap<String, crate::entities::config::EntityConfig>;
 
 /// Newtype wrapper so `FactionRegistry` can be inserted as a Bevy Resource.
 #[derive(Resource)]
-pub struct FactionRegistryResource(pub crate::faction::FactionRegistry);
+pub struct FactionRegistryResource(pub crate::ai::faction::FactionRegistry);
 
 #[cfg(target_arch = "wasm32")]
 impl std::ops::Deref for FactionRegistryResource {
-    type Target = crate::faction::FactionRegistry;
+    type Target = crate::ai::faction::FactionRegistry;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -1019,7 +1019,7 @@ impl std::ops::Deref for FactionRegistryResource {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl std::ops::Deref for FactionRegistryResource {
-    type Target = crate::faction::FactionRegistry;
+    type Target = crate::ai::faction::FactionRegistry;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
@@ -1079,7 +1079,7 @@ pub fn wasm_is_preload_complete() -> bool {
 /// than the WASM side's `thread_local!` because Bevy systems run on worker
 /// threads. Unit tests that never populate it keep the previous behaviour: an
 /// empty cache, and the on-demand disk fallback in
-/// [`crate::entity_loader::WasmTemplateLoader`] does the work.
+/// [`crate::entities::loader::WasmTemplateLoader`] does the work.
 ///
 /// **This is process-global, so populating it in one test changes every other
 /// test in the same binary.** A populated cache makes
@@ -1089,7 +1089,7 @@ pub fn wasm_is_preload_complete() -> bool {
 /// integration test with its own process — see `tests/headless_runner.rs`.
 #[cfg(not(target_arch = "wasm32"))]
 static NATIVE_CONFIG_CACHE: std::sync::RwLock<
-    Option<std::collections::HashMap<String, crate::entity_config::EntityConfig>>,
+    Option<std::collections::HashMap<String, crate::entities::config::EntityConfig>>,
 > = std::sync::RwLock::new(None);
 
 /// Insert a parsed template into the native cache under `path`.
@@ -1097,7 +1097,7 @@ static NATIVE_CONFIG_CACHE: std::sync::RwLock<
 /// Keyed by the same repo-relative path the world TOML uses
 /// (`assets/entities/foo.toml`), so lookups match the WASM cache exactly.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn insert_native_config(path: String, config: crate::entity_config::EntityConfig) {
+pub fn insert_native_config(path: String, config: crate::entities::config::EntityConfig) {
     let mut guard = NATIVE_CONFIG_CACHE
         .write()
         .expect("native config cache poisoned");
@@ -1119,7 +1119,7 @@ pub fn get_config_cache() -> ConfigCache {
 /// [`insert_native_config`], at which point callers with a filesystem fallback
 /// stop hitting the disk on every spawn.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_cached_entity_config(path: &str) -> Option<crate::entity_config::EntityConfig> {
+pub fn get_cached_entity_config(path: &str) -> Option<crate::entities::config::EntityConfig> {
     NATIVE_CONFIG_CACHE
         .read()
         .expect("native config cache poisoned")
@@ -1161,15 +1161,15 @@ pub fn wasm_load_faction(_path: String, _toml_str: String) -> Result<JsValue, Js
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_faction_registry() -> crate::faction::FactionRegistry {
-    let mut registry = crate::faction::FactionRegistry::new();
+pub fn get_faction_registry() -> crate::ai::faction::FactionRegistry {
+    let mut registry = crate::ai::faction::FactionRegistry::new();
     for toml_str in &[
         include_str!("../../assets/factions/federation.toml"),
         include_str!("../../assets/factions/pirate.toml"),
         include_str!("../../assets/factions/harrow.toml"),
         include_str!("../../assets/factions/requiem.toml"),
     ] {
-        if let Ok(config) = crate::faction::parse_faction_config(toml_str) {
+        if let Ok(config) = crate::ai::faction::parse_faction_config(toml_str) {
             registry.insert(config);
         }
     }
@@ -1180,7 +1180,7 @@ pub fn get_faction_registry() -> crate::faction::FactionRegistry {
 
 #[cfg(test)]
 mod tests {
-    use crate::entity_config::EntityConfig;
+    use crate::entities::config::EntityConfig;
     use std::collections::{HashMap, HashSet, VecDeque};
 
     // ── Helper for tests ───────────────────────────────────────────────────────
@@ -1856,7 +1856,7 @@ cosmetic_type_paths = ["asteroid_cosmetic.toml"]
     fn the_browser_walk_of_the_shipped_fixture_matches_the_filesystem_walk() {
         super::clear_template_preload_state();
         const HULL: &str = "assets/entities/fragments/composed_escort.toml";
-        let native = crate::entity_includes::resolve_from_disk(HULL)
+        let native = crate::entities::include_resolve::resolve_from_disk(HULL)
             .expect("the fixture hull resolves off disk");
 
         // Simulate the browser: only the hull's own text is delivered first,

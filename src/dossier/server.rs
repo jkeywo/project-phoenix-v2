@@ -44,9 +44,11 @@
 use bevy::prelude::*;
 
 use crate::comms::server::CommsRuntime;
+use crate::core::messages::{
+    DossierBlackboard, InfrastructureSnapshot, SystemBlackboard, SystemId,
+};
 use crate::entities::spawner::{EntityId, EntityName, EntityTarget, EntityUuid, FactionComponent};
 use crate::infrastructure::InfrastructureCondition;
-use crate::messages::{DossierBlackboard, InfrastructureSnapshot, SystemBlackboard, SystemId};
 
 use super::projection::{project, DossierSubject, SubjectCondition};
 
@@ -254,9 +256,9 @@ fn contact_in_range(runtime: &CommsRuntime, uuid: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::messages::{CommsContact, DossierSnapshot, DossierValue};
     use crate::dossier::projection::{FACT_COMMITMENT_OPEN, FACT_COMMS, FACT_CONDITION};
     use crate::infrastructure::{InfrastructureConfig, InfrastructureState};
-    use crate::messages::{CommsContact, DossierSnapshot, DossierValue};
     use crate::server_app::{LocalShip, ShipSystemBlackboards};
 
     /// A bare app with the publisher and one local ship to publish onto.
@@ -426,7 +428,7 @@ mod tests {
         app.update();
         assert_eq!(
             published(&app).subjects[0].facts[0],
-            crate::messages::DossierFactSnapshot {
+            crate::core::messages::DossierFactSnapshot {
                 label: FACT_COMMS.to_string(),
                 value: DossierValue::Flag(false),
             },

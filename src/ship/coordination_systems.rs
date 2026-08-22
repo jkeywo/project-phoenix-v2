@@ -1,9 +1,8 @@
 use bevy::prelude::*;
 
 use crate::console_bridge::AiChatterEvent;
-use crate::damage::DamageTier;
+use crate::core::messages::{ClientMessage, CoordinationPayload};
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::{ClientMessage, CoordinationPayload};
 use crate::server_app::LocalShip;
 use crate::ship::components::{
     ActiveStationRatings, CoordinationEnqueue, CoordinationQueue, HelmWaypointClearance,
@@ -13,6 +12,7 @@ use crate::ship::components::{
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
 use crate::ship::coordination::QueuedCoordination;
+use crate::ship::damage::DamageTier;
 use crate::ship::helm_ai::helm_axes_operate_ai;
 
 pub fn handle_coordination_enqueue(
@@ -119,7 +119,7 @@ pub fn handle_coordination_enqueue(
 fn coarsen_repair_request(
     payload: &CoordinationPayload,
     vis: Option<&crate::console::repair::visibility::HullVisibility>,
-    viewer: Option<&crate::messages::StationId>,
+    viewer: Option<&crate::core::messages::StationId>,
 ) -> CoordinationPayload {
     let CoordinationPayload::RepairRequest {
         system_id,
@@ -298,10 +298,10 @@ pub fn resolve_human_seeking_hosts(
         );
 
         let mut resolved: std::collections::BTreeMap<
-            crate::messages::SystemId,
-            crate::messages::StationId,
+            crate::core::messages::SystemId,
+            crate::core::messages::StationId,
         > = std::collections::BTreeMap::new();
-        let mut decisions: Vec<(crate::messages::SystemId, ControlSource)> = Vec::new();
+        let mut decisions: Vec<(crate::core::messages::SystemId, ControlSource)> = Vec::new();
         for system in config.systems.iter().filter(|s| s.human_seeking) {
             match coordination::seek_human_host_in(
                 system.station.as_ref(),
@@ -406,7 +406,7 @@ pub fn process_coordination_lag(
             // Read-only, and only for the #737 popup gate below: the same
             // damage store and repair-team state machine the visibility
             // projection reads, so the popup cannot drift from the wire rule.
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::console::repair::server::ShipRepairTeams>,
             Has<LocalShip>,
         ),
@@ -417,7 +417,7 @@ pub fn process_coordination_lag(
     mut chatter_writer: MessageWriter<AiChatterEvent>,
 ) {
     let repair_id = crate::ship::system_registry::repair_system_id();
-    let shields_id = crate::system_registry::shields_system_id();
+    let shields_id = crate::ship::system_registry::shields_system_id();
     let now = time.elapsed_secs();
     for (
         ship_config,
@@ -481,8 +481,8 @@ pub fn process_coordination_lag(
                         continue;
                     };
                     outbox.0.push((
-                        crate::lobby_handler::Target::Token(token),
-                        crate::messages::ServerMessage::CoordinationPopup {
+                        crate::lobby::handler::Target::Token(token),
+                        crate::core::messages::ServerMessage::CoordinationPopup {
                             target: msg.target.clone(),
                             // The #737 gate, re-applied PER RECIPIENT. An
                             // intent advisory carries no figures of its own,
@@ -529,8 +529,8 @@ pub fn process_coordination_lag(
             // agree about who is holding Tactical. When it is false the key
             // falls through to `policy_for` exactly as before, so a human-held
             // Tactical routes unchanged.
-            let helm_key = crate::system_registry::helm_station_key();
-            let tactical_key = crate::system_registry::tactical_station_key();
+            let helm_key = crate::ship::system_registry::helm_station_key();
+            let tactical_key = crate::ship::system_registry::tactical_station_key();
             let (target_policy, target_control) = if msg.target == helm_key {
                 if helm_axes_operate_ai(control_sources) {
                     (
@@ -538,7 +538,7 @@ pub fn process_coordination_lag(
                         ControlSource::Ai,
                     )
                 } else {
-                    let rep = crate::system_registry::helm_steering_system_id();
+                    let rep = crate::ship::system_registry::helm_steering_system_id();
                     (
                         control_sources.0.policy_for(&rep),
                         control_sources.0.source_for(&rep),
@@ -729,8 +729,8 @@ pub fn process_coordination_lag(
 
                             if let Some(token) = token {
                                 outbox.0.push((
-                                    crate::lobby_handler::Target::Token(token),
-                                    crate::messages::ServerMessage::CoordinationPopup {
+                                    crate::lobby::handler::Target::Token(token),
+                                    crate::core::messages::ServerMessage::CoordinationPopup {
                                         target: msg.target.clone(),
                                         payload: coarsen_repair_request(
                                             &msg.payload,
@@ -747,8 +747,8 @@ pub fn process_coordination_lag(
                         // entitled to exact non-Core detail, so coarsen against
                         // "no station".
                         outbox.0.push((
-                            crate::lobby_handler::Target::All,
-                            crate::messages::ServerMessage::CoordinationPopup {
+                            crate::lobby::handler::Target::All,
+                            crate::core::messages::ServerMessage::CoordinationPopup {
                                 target: msg.target.clone(),
                                 payload: coarsen_repair_request(
                                     &msg.payload,
@@ -772,11 +772,11 @@ pub fn process_coordination_lag(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::control_source::ControlSource;
-    use crate::messages::SystemId;
+    use crate::core::messages::SystemId;
+    use crate::server_app::Ship;
     use crate::ship::components::LastSystemTiers;
+    use crate::ship::control_source::ControlSource;
     use crate::ship::test_support::*;
-    use crate::simulation::Ship;
 
     // ── Issue #684: Destroyed-tier alerts to Captain ─────────────────────────
 
@@ -820,7 +820,7 @@ mod tests {
             .world_mut()
             .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
         for mut cs in q.iter_mut(app.world_mut()) {
-            cs.0.set(crate::system_registry::captain_system_id(), source);
+            cs.0.set(crate::ship::system_registry::captain_system_id(), source);
         }
     }
 
@@ -957,7 +957,7 @@ mod tests {
             .filter(|(_, msg)| {
                 matches!(
                     msg,
-                    crate::messages::ServerMessage::CoordinationPopup { .. }
+                    crate::core::messages::ServerMessage::CoordinationPopup { .. }
                 )
             })
             .collect();
@@ -996,7 +996,7 @@ mod tests {
         let has_popup = outbox.0.iter().any(|(_, msg)| {
             matches!(
                 msg,
-                crate::messages::ServerMessage::CoordinationPopup { .. }
+                crate::core::messages::ServerMessage::CoordinationPopup { .. }
             )
         });
         assert!(
@@ -1048,7 +1048,7 @@ mod tests {
             app.world()
                 .resource::<Sessions>()
                 .0
-                .holder_for_station(&crate::messages::StationId("repair".into())),
+                .holder_for_station(&crate::core::messages::StationId("repair".into())),
             Some("engineer"),
             "test setup must seat a human on the station that owns `repair`"
         );
@@ -1060,7 +1060,7 @@ mod tests {
     /// therefore land in the ownerless Core bucket — the one case #737 lets
     /// through.
     fn give_ship_hull(app: &mut App, entries: &[(&str, f32)]) {
-        let hull = crate::damage::SystemHull::from_config(
+        let hull = crate::ship::damage::SystemHull::from_config(
             &entries
                 .iter()
                 .map(|(id, hp)| (SystemId((*id).into()), *hp))
@@ -1069,7 +1069,7 @@ mod tests {
         let ship = find_ship_entity(app);
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::entity_spawner::EntitySystemHull(hull));
+            .insert(crate::entities::spawner::EntitySystemHull(hull));
     }
 
     /// Put `system_id` under AI control. `route_coordination` only raises a
@@ -1091,7 +1091,7 @@ mod tests {
             .0
             .iter()
             .filter_map(|(_, msg)| match msg {
-                crate::messages::ServerMessage::CoordinationPopup {
+                crate::core::messages::ServerMessage::CoordinationPopup {
                     payload: CoordinationPayload::RepairRequest { deficit, .. },
                     ..
                 } => Some(*deficit),
@@ -1104,7 +1104,8 @@ mod tests {
     fn place_team_on_site(app: &mut App, system_id: &SystemId) {
         use crate::modifiers::repair_teams::RepairTeams;
         let mut teams = RepairTeams::new(1);
-        let mut scratch = crate::damage::SystemHull::from_config(&[(system_id.clone(), 100.0)]);
+        let mut scratch =
+            crate::ship::damage::SystemHull::from_config(&[(system_id.clone(), 100.0)]);
         scratch.set_hp(system_id, 10.0);
         teams.dispatch(0, system_id.clone(), system_id.0.clone());
         // Travel completes → `Repairing`, which is what `on_site_systems()`
@@ -1163,7 +1164,7 @@ mod tests {
             app.world()
                 .resource::<Sessions>()
                 .0
-                .holder_for_station(&crate::messages::StationId("sensors".into())),
+                .holder_for_station(&crate::core::messages::StationId("sensors".into())),
             Some("sensors"),
             "test setup must seat a human on Sensors"
         );
@@ -1205,9 +1206,9 @@ mod tests {
                 .filter(|s| {
                     matches!(
                         s.kind.as_str(),
-                        crate::system_registry::PHASER_BANK_KIND
-                            | crate::system_registry::TORPEDO_TUBE_KIND
-                            | crate::system_registry::TORPEDO_MAGAZINE_KIND
+                        crate::ship::system_registry::PHASER_BANK_KIND
+                            | crate::ship::system_registry::TORPEDO_TUBE_KIND
+                            | crate::ship::system_registry::TORPEDO_MAGAZINE_KIND
                     )
                 })
                 .map(|s| s.id.clone())
@@ -1233,7 +1234,7 @@ mod tests {
         let ship = find_ship_entity(app);
         app.world_mut().entity_mut(ship).insert((
             crate::ship_plugin::PendingTacticalFrequencyHint::default(),
-            crate::ship_state::ShipPhaserFrequency(0.1),
+            crate::ship::state::ShipPhaserFrequency(0.1),
         ));
     }
 
@@ -1270,7 +1271,7 @@ mod tests {
         let ship = find_ship_entity(app);
         app.world_mut()
             .entity_mut(ship)
-            .remove::<crate::ai_plugin::AiHighFidelity>()
+            .remove::<crate::ai::server::AiHighFidelity>()
             .insert(crate::ship::sensors::SensorsFrequencyState::default());
         {
             let mut blackboards = app
@@ -1278,9 +1279,9 @@ mod tests {
                 .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
                 .expect("ship carries system blackboards");
             blackboards.0.insert(
-                crate::system_registry::viewscreen_system_id(),
-                crate::messages::SystemBlackboard::Viewscreen(
-                    crate::messages::ViewscreenBlackboard {
+                crate::ship::system_registry::viewscreen_system_id(),
+                crate::core::messages::SystemBlackboard::Viewscreen(
+                    crate::core::messages::ViewscreenBlackboard {
                         combat_lock: Some(target_uuid.to_string()),
                         ..Default::default()
                     },
@@ -1288,8 +1289,11 @@ mod tests {
             );
         }
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(target_uuid.to_string()),
-            crate::ship::shields::ShipShields(crate::shield::ShieldSystem::default(), frequency),
+            crate::entities::spawner::EntityUuid(target_uuid.to_string()),
+            crate::ship::shields::ShipShields(
+                crate::weapons::shield::ShieldSystem::default(),
+                frequency,
+            ),
         ));
         // `FixedUpdate` (issue #895): the emitter joins the SimSet chain in
         // the schedule the chain lives in, so its `.before` edge stays real.
@@ -1322,7 +1326,7 @@ mod tests {
         let ship = find_ship_entity(app);
         assert!(
             app.world()
-                .get::<crate::ai_plugin::AiHighFidelity>(ship)
+                .get::<crate::ai::server::AiHighFidelity>(ship)
                 .is_some(),
             "this fixture is the PLAYER-ship chain: the hull must keep AiHighFidelity, \
              otherwise it is silently testing the demoted-NPC emitter instead"
@@ -1333,9 +1337,9 @@ mod tests {
                 .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
                 .expect("ship carries system blackboards");
             blackboards.0.insert(
-                crate::system_registry::viewscreen_system_id(),
-                crate::messages::SystemBlackboard::Viewscreen(
-                    crate::messages::ViewscreenBlackboard {
+                crate::ship::system_registry::viewscreen_system_id(),
+                crate::core::messages::SystemBlackboard::Viewscreen(
+                    crate::core::messages::ViewscreenBlackboard {
                         combat_lock: Some(target_uuid.to_string()),
                         ..Default::default()
                     },
@@ -1343,13 +1347,16 @@ mod tests {
             );
         }
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(target_uuid.to_string()),
-            crate::ship::shields::ShipShields(crate::shield::ShieldSystem::default(), frequency),
+            crate::entities::spawner::EntityUuid(target_uuid.to_string()),
+            crate::ship::shields::ShipShields(
+                crate::weapons::shield::ShieldSystem::default(),
+                frequency,
+            ),
         ));
         crate::ai::cadence::register_ai_cadence(app);
         app.add_systems(
             Update,
-            crate::console_ai_plugin::tick_frequency_hint_high_fidelity
+            crate::console_ai::server::tick_frequency_hint_high_fidelity
                 .in_set(crate::sim_sets::SimSet::Input)
                 .before(handle_coordination_enqueue)
                 .run_if(crate::ai::cadence::ai_tick_ready),
@@ -1362,14 +1369,14 @@ mod tests {
     fn authored_reaction_delay_runs() -> usize {
         let delay =
             crate::ship::sensors::SensorsAiConfigResource::default().frequency_hint_delay_secs;
-        let hz = crate::entity_config::GlobalConfig::default().ai_tick_hz;
+        let hz = crate::entities::config::GlobalConfig::default().ai_tick_hz;
         (delay * hz).ceil() as usize
     }
 
     fn ship_phaser_frequency(app: &mut App) -> f32 {
         let ship = find_ship_entity(app);
         app.world()
-            .get::<crate::ship_state::ShipPhaserFrequency>(ship)
+            .get::<crate::ship::state::ShipPhaserFrequency>(ship)
             .expect("ship carries a phaser frequency")
             .0
     }
@@ -1382,7 +1389,7 @@ mod tests {
             .filter(|(_, msg)| {
                 matches!(
                     msg,
-                    crate::messages::ServerMessage::CoordinationPopup { .. }
+                    crate::core::messages::ServerMessage::CoordinationPopup { .. }
                 )
             })
             .count()
@@ -1403,7 +1410,7 @@ mod tests {
                 target,
                 payload,
                 sender_label: "Sensors".into(),
-                sender_system: crate::messages::SystemId(String::new()),
+                sender_system: crate::core::messages::SystemId(String::new()),
             });
     }
 
@@ -1449,7 +1456,7 @@ mod tests {
         assert_eq!(
             get_ship_control_sources(&mut app)
                 .0
-                .source_for(&crate::system_registry::sensors_system_id()),
+                .source_for(&crate::ship::system_registry::sensors_system_id()),
             ControlSource::Human,
             "the fixture must actually leave Sensors in human hands"
         );
@@ -1504,7 +1511,7 @@ mod tests {
                 .0
                 .len()
         }
-        let target = crate::system_registry::tactical_station_key();
+        let target = crate::ship::system_registry::tactical_station_key();
         let payload = CoordinationPayload::FrequencyHint { frequency: 0.5 };
 
         // Registered non-spectator: enqueued.
@@ -1572,7 +1579,7 @@ mod tests {
         enqueue_coordination(
             &mut human_sender,
             ControlSource::Human,
-            crate::system_registry::tactical_station_key(),
+            crate::ship::system_registry::tactical_station_key(),
             CoordinationPayload::FrequencyHint { frequency: 0.83 },
         );
         tick(&mut human_sender);
@@ -1589,7 +1596,7 @@ mod tests {
         enqueue_coordination(
             &mut ai_sender,
             ControlSource::Ai,
-            crate::system_registry::tactical_station_key(),
+            crate::ship::system_registry::tactical_station_key(),
             CoordinationPayload::FrequencyHint { frequency: 0.83 },
         );
         tick(&mut ai_sender);
@@ -1630,12 +1637,12 @@ mod tests {
             .write(CoordinationEnqueue {
                 source_entity: ship,
                 sender_origin: ControlSource::Ai,
-                target: crate::system_registry::tactical_station_key(),
+                target: crate::ship::system_registry::tactical_station_key(),
                 payload: CoordinationPayload::FrequencyHint { frequency: 0.83 },
                 // A raw `chatter.sender.*` fallback that MUST be overridden by
                 // the station the sensors system resolves to.
                 sender_label: coordination::CHATTER_SENDER_SENSORS.to_string(),
-                sender_system: crate::system_registry::sensors_system_id(),
+                sender_system: crate::ship::system_registry::sensors_system_id(),
             });
         tick(&mut app);
         tick(&mut app);
@@ -1693,7 +1700,7 @@ mod tests {
         assert_eq!(
             get_ship_control_sources(&mut app)
                 .0
-                .source_for(&crate::system_registry::sensors_system_id()),
+                .source_for(&crate::ship::system_registry::sensors_system_id()),
             ControlSource::Human,
             "the fixture must actually leave Sensors in human hands"
         );
@@ -1748,7 +1755,7 @@ mod tests {
         enqueue_coordination(
             &mut app,
             ControlSource::Ai,
-            crate::system_registry::tactical_station_key(),
+            crate::ship::system_registry::tactical_station_key(),
             CoordinationPayload::FrequencyHint { frequency: 0.83 },
         );
         tick(&mut app);
@@ -1757,7 +1764,7 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         assert!(
             (app.world()
-                .get::<crate::ship_state::ShipPhaserFrequency>(ship)
+                .get::<crate::ship::state::ShipPhaserFrequency>(ship)
                 .unwrap()
                 .0
                 - 0.83)
@@ -1790,7 +1797,7 @@ mod tests {
         enqueue_coordination(
             &mut app,
             ControlSource::Ai,
-            crate::system_registry::tactical_station_key(),
+            crate::ship::system_registry::tactical_station_key(),
             CoordinationPayload::FrequencyHint { frequency: 0.83 },
         );
         tick(&mut app);
@@ -1803,8 +1810,8 @@ mod tests {
             .iter()
             .filter_map(|(target, msg)| match (target, msg) {
                 (
-                    crate::lobby_handler::Target::Token(token),
-                    crate::messages::ServerMessage::CoordinationPopup { .. },
+                    crate::lobby::handler::Target::Token(token),
+                    crate::core::messages::ServerMessage::CoordinationPopup { .. },
                 ) => Some(token.as_str()),
                 _ => None,
             })
@@ -1822,8 +1829,8 @@ mod tests {
                 .all(|(target, msg)| !matches!(
                     (target, msg),
                     (
-                        crate::lobby_handler::Target::All,
-                        crate::messages::ServerMessage::CoordinationPopup { .. },
+                        crate::lobby::handler::Target::All,
+                        crate::core::messages::ServerMessage::CoordinationPopup { .. },
                     )
                 )),
             "an addressed Tactical popup must not fall back to a broadcast"
@@ -1863,7 +1870,7 @@ mod tests {
         enqueue_coordination(
             &mut app,
             ControlSource::Human,
-            crate::system_registry::tactical_station_key(),
+            crate::ship::system_registry::tactical_station_key(),
             CoordinationPayload::FrequencyHint { frequency: 0.83 },
         );
         // Tick 1 only: the router has consumed the hint into the pending slot,
@@ -1925,7 +1932,7 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(ship)
-            .remove::<crate::ship_state::ShipPhaserFrequency>();
+            .remove::<crate::ship::state::ShipPhaserFrequency>();
         app.world_mut()
             .entity_mut(ship)
             .insert(crate::ship_plugin::PendingTacticalFrequencyHint(Some(0.83)));
@@ -1944,7 +1951,7 @@ mod tests {
         // The frequency surface appears afterwards; the stale hint must be gone.
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::ship_state::ShipPhaserFrequency(0.1));
+            .insert(crate::ship::state::ShipPhaserFrequency(0.1));
         tick(&mut app);
         assert!(
             (ship_phaser_frequency(&mut app) - 0.1).abs() < f32::EPSILON,
@@ -1971,11 +1978,11 @@ mod tests {
         enqueue_coordination(
             &mut app,
             ControlSource::Human,
-            crate::system_registry::helm_station_key(),
+            crate::ship::system_registry::helm_station_key(),
             CoordinationPayload::ArcBearingRequest {
                 uuid: target_uuid.to_string(),
                 label: "Harrow Raider".into(),
-                family: crate::messages::WeaponFamily::Phasers,
+                family: crate::core::messages::WeaponFamily::Phasers,
                 arcs: Vec::new(),
             },
         );
@@ -2042,7 +2049,7 @@ mod tests {
                 .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
             for mut cs in q.iter_mut(app.world_mut()) {
                 cs.0.set(
-                    crate::system_registry::power_reactor_system_id(),
+                    crate::ship::system_registry::power_reactor_system_id(),
                     power_source,
                 );
             }
@@ -2072,7 +2079,7 @@ mod tests {
     /// that would drive a flat battery to the lock over many ticks), and these
     /// are ROUTING tests, so the lock state is set directly rather than reached.
     fn drive_ship_into_brownout(app: &mut App) {
-        use crate::messages::PowerGroupId;
+        use crate::core::messages::PowerGroupId;
         use crate::modifiers::power_system::{
             HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
         };
@@ -2239,8 +2246,8 @@ mod tests {
             .iter()
             .filter_map(|(target, msg)| match (target, msg) {
                 (
-                    crate::lobby_handler::Target::Token(token),
-                    crate::messages::ServerMessage::CoordinationPopup {
+                    crate::lobby::handler::Target::Token(token),
+                    crate::core::messages::ServerMessage::CoordinationPopup {
                         payload: CoordinationPayload::IntentAdvisory { .. },
                         ..
                     },
@@ -2254,9 +2261,9 @@ mod tests {
         enqueue_coordination(
             app,
             sender_origin,
-            crate::system_registry::tactical_station_key(),
+            crate::ship::system_registry::tactical_station_key(),
             CoordinationPayload::IntentAdvisory {
-                kind: crate::messages::IntentKind::TargetSwitched,
+                kind: crate::core::messages::IntentKind::TargetSwitched,
                 subject: Some("Harrow Raider".into()),
                 generation: 7,
             },
@@ -2327,7 +2334,7 @@ mod tests {
             .0
             .iter()
             .filter_map(|(_, msg)| match msg {
-                crate::messages::ServerMessage::CoordinationPopup { payload, .. } => {
+                crate::core::messages::ServerMessage::CoordinationPopup { payload, .. } => {
                     Some(payload.clone())
                 }
                 _ => None,
@@ -2336,7 +2343,7 @@ mod tests {
         assert!(
             payloads.iter().all(|p| *p
                 == CoordinationPayload::IntentAdvisory {
-                    kind: crate::messages::IntentKind::TargetSwitched,
+                    kind: crate::core::messages::IntentKind::TargetSwitched,
                     subject: Some("Harrow Raider".into()),
                     generation: 7,
                 }),
@@ -2373,7 +2380,7 @@ mod tests {
             .join("assets/entities")
             .join(format!("{stem}.toml"));
         let key = path.to_string_lossy().replace('\\', "/");
-        crate::entity_includes::load_entity_config(&key)
+        crate::entities::include_resolve::load_entity_config(&key)
             .unwrap_or_else(|e| panic!("{stem} must parse: {e}"))
             .ship_config
             .unwrap_or_else(|| panic!("{stem} must declare a ShipConfig"))
@@ -2391,7 +2398,7 @@ mod tests {
             crate::ship::rating::BACKFILL_RATING.to_string()
         });
         for (idx, station) in manned.iter().enumerate() {
-            let sid = crate::messages::StationId((*station).into());
+            let sid = crate::core::messages::StationId((*station).into());
             for system in config.systems_for_station(&sid) {
                 resolver.set(system.id.clone(), ControlSource::Human);
             }
@@ -2416,7 +2423,7 @@ mod tests {
         seeking_config_app(hull_ship_config(stem), manned)
     }
 
-    fn host_of(app: &mut App, system: &crate::messages::SystemId) -> Option<String> {
+    fn host_of(app: &mut App, system: &crate::core::messages::SystemId) -> Option<String> {
         let ship = find_ship_entity(app);
         app.world()
             .entity(ship)
@@ -2425,7 +2432,7 @@ mod tests {
             .map(|s| s.0.clone())
     }
 
-    fn source_of(app: &mut App, system: &crate::messages::SystemId) -> ControlSource {
+    fn source_of(app: &mut App, system: &crate::core::messages::SystemId) -> ControlSource {
         let ship = find_ship_entity(app);
         app.world()
             .entity(ship)
@@ -2437,7 +2444,7 @@ mod tests {
 
     fn station_assignment(
         app: &mut App,
-        station: &crate::messages::StationId,
+        station: &crate::core::messages::StationId,
     ) -> crate::ship::coordination::VisitingStationAssignment {
         let ship = find_ship_entity(app);
         app.world()
@@ -2485,14 +2492,14 @@ station = "navigation"
         )
         .expect("the adapter fixture is valid authored hull data");
         let mut app = seeking_config_app(config, &["captain"]);
-        let navigation_station = crate::messages::StationId("navigation".into());
-        let navigation_system = crate::messages::SystemId("navigation".into());
+        let navigation_station = crate::core::messages::StationId("navigation".into());
+        let navigation_system = crate::core::messages::SystemId("navigation".into());
 
         tick(&mut app);
         let baseline = station_assignment(&mut app, &navigation_station);
         assert_eq!(
             baseline.host,
-            Some(crate::messages::StationId("captain".into()))
+            Some(crate::core::messages::StationId("captain".into()))
         );
         assert_eq!(baseline.rating, "Visit");
         assert_eq!(source_of(&mut app, &navigation_system), ControlSource::Ai);
@@ -2569,15 +2576,15 @@ station = "navigation"
         )
         .expect("valid authored hull data");
         let mut app = seeking_config_app(config, &["captain"]);
-        let navigation_station = crate::messages::StationId("navigation".into());
-        let navigation_system = crate::messages::SystemId("navigation".into());
+        let navigation_station = crate::core::messages::StationId("navigation".into());
+        let navigation_system = crate::core::messages::SystemId("navigation".into());
 
         // Baseline: the eligible captain (default TRUE) hosts navigation and
         // operates it as a human.
         tick(&mut app);
         assert_eq!(
             station_assignment(&mut app, &navigation_station).host,
-            Some(crate::messages::StationId("captain".into())),
+            Some(crate::core::messages::StationId("captain".into())),
             "baseline: the eligible captain hosts the visiting navigation station"
         );
         assert_eq!(
@@ -2644,14 +2651,14 @@ station = "navigation"
         )
         .expect("valid authored hull data");
         let mut app = seeking_config_app(config, &["captain"]);
-        let navigation_station = crate::messages::StationId("navigation".into());
-        let navigation_system = crate::messages::SystemId("navigation".into());
+        let navigation_station = crate::core::messages::StationId("navigation".into());
+        let navigation_system = crate::core::messages::SystemId("navigation".into());
 
         // Baseline: the present captain hosts navigation and operates it.
         tick(&mut app);
         assert_eq!(
             station_assignment(&mut app, &navigation_station).host,
-            Some(crate::messages::StationId("captain".into())),
+            Some(crate::core::messages::StationId("captain".into())),
             "baseline: the present captain hosts the visiting navigation station"
         );
         assert_eq!(
@@ -2681,7 +2688,7 @@ station = "navigation"
         tick(&mut app);
         assert_eq!(
             station_assignment(&mut app, &navigation_station).host,
-            Some(crate::messages::StationId("captain".into())),
+            Some(crate::core::messages::StationId("captain".into())),
             "leaving AFK re-includes the eligible visiting host on the next tick"
         );
         assert_eq!(
@@ -2702,12 +2709,12 @@ station = "navigation"
 
         tick(&mut app);
 
-        let navigation_station = crate::messages::StationId("navigation".into());
-        let navigation_system = crate::messages::SystemId("navigation".into());
+        let navigation_station = crate::core::messages::StationId("navigation".into());
+        let navigation_system = crate::core::messages::SystemId("navigation".into());
         let assignment = station_assignment(&mut app, &navigation_station);
         assert_eq!(
             assignment.host,
-            Some(crate::messages::StationId("tactical".into()))
+            Some(crate::core::messages::StationId("tactical".into()))
         );
         assert_eq!(
             assignment.rating, "Std",
@@ -2728,8 +2735,14 @@ station = "navigation"
         for (stem, comms_station, nav_station) in SEEKING_HULLS {
             let config = hull_ship_config(stem);
             for (system_id, expected) in [
-                (crate::system_registry::comms_system_id(), comms_station),
-                (crate::system_registry::navigation_system_id(), nav_station),
+                (
+                    crate::ship::system_registry::comms_system_id(),
+                    comms_station,
+                ),
+                (
+                    crate::ship::system_registry::navigation_system_id(),
+                    nav_station,
+                ),
             ] {
                 let system = config
                     .system(&system_id)
@@ -2739,7 +2752,7 @@ station = "navigation"
                 {
                     assert!(
                         config
-                            .station(&crate::messages::StationId(system_id.0.clone()))
+                            .station(&crate::core::messages::StationId(system_id.0.clone()))
                             .is_some_and(|station| station.human_seeking),
                         "Destroyer {:?} seeks as one complete Station",
                         system_id.0
@@ -2757,13 +2770,15 @@ station = "navigation"
                 }
                 assert_eq!(
                     crate::command_admission::station_for_system(&config, None, &system_id),
-                    Some(crate::messages::StationId((*expected).into())),
+                    Some(crate::core::messages::StationId((*expected).into())),
                     "{stem}: {:?} must resolve to its authored station",
                     system_id.0
                 );
             }
-            let naive = crate::messages::StationId(crate::system_registry::COMMS_SYSTEM_ID.into());
-            if *comms_station != crate::system_registry::COMMS_SYSTEM_ID {
+            let naive = crate::core::messages::StationId(
+                crate::ship::system_registry::COMMS_SYSTEM_ID.into(),
+            );
+            if *comms_station != crate::ship::system_registry::COMMS_SYSTEM_ID {
                 assert!(
                     config.station(&naive).is_none(),
                     "{stem}: this hull homes comms on {comms_station:?} and declares NO \
@@ -2805,7 +2820,7 @@ station = "navigation"
         );
 
         let comms = config
-            .station(&crate::messages::StationId("comms".into()))
+            .station(&crate::core::messages::StationId("comms".into()))
             .expect("the destroyer declares a comms Station");
         let order: Vec<&str> = comms.host_order.iter().map(|s| s.0.as_str()).collect();
         assert_eq!(
@@ -2853,8 +2868,8 @@ station = "navigation"
         tick(&mut app);
 
         for system_id in [
-            crate::system_registry::comms_system_id(),
-            crate::system_registry::navigation_system_id(),
+            crate::ship::system_registry::comms_system_id(),
+            crate::ship::system_registry::navigation_system_id(),
         ] {
             assert_eq!(
                 host_of(&mut app, &system_id).as_deref(),
@@ -2865,12 +2880,12 @@ station = "navigation"
             );
         }
         assert_eq!(
-            source_of(&mut app, &crate::system_registry::comms_system_id()),
+            source_of(&mut app, &crate::ship::system_registry::comms_system_id()),
             ControlSource::Human,
             "Comms remains fully human-operated for its visiting host"
         );
         assert_eq!(
-            source_of(&mut app, &crate::system_registry::navigation_system_id()),
+            source_of(&mut app, &crate::ship::system_registry::navigation_system_id()),
             ControlSource::Ai,
             "Navigation stays AUTO at its authored Simplified visiting rating without a scenario floor"
         );
@@ -2883,8 +2898,14 @@ station = "navigation"
     fn a_seeking_system_hosts_on_its_own_station_when_that_seat_is_crewed() {
         for (stem, comms_station, nav_station) in SEEKING_HULLS {
             for (system_id, owner) in [
-                (crate::system_registry::comms_system_id(), comms_station),
-                (crate::system_registry::navigation_system_id(), nav_station),
+                (
+                    crate::ship::system_registry::comms_system_id(),
+                    comms_station,
+                ),
+                (
+                    crate::ship::system_registry::navigation_system_id(),
+                    nav_station,
+                ),
             ] {
                 let mut app = seeking_app(stem, &[owner]);
                 tick(&mut app);
@@ -2913,8 +2934,8 @@ station = "navigation"
         let mut app = seeking_app("alliance_battleship", &["captain"]);
         tick(&mut app);
         for system_id in [
-            crate::system_registry::comms_system_id(),
-            crate::system_registry::navigation_system_id(),
+            crate::ship::system_registry::comms_system_id(),
+            crate::ship::system_registry::navigation_system_id(),
         ] {
             assert_eq!(
                 host_of(&mut app, &system_id).as_deref(),
@@ -2934,11 +2955,15 @@ station = "navigation"
         let mut app = seeking_app("alliance_battleship", &["captain", "comms"]);
         tick(&mut app);
         assert_eq!(
-            host_of(&mut app, &crate::system_registry::comms_system_id()).as_deref(),
+            host_of(&mut app, &crate::ship::system_registry::comms_system_id()).as_deref(),
             Some("comms"),
         );
         assert_eq!(
-            host_of(&mut app, &crate::system_registry::navigation_system_id()).as_deref(),
+            host_of(
+                &mut app,
+                &crate::ship::system_registry::navigation_system_id()
+            )
+            .as_deref(),
             Some("captain"),
             "navigation's own station is empty, so it falls through to the Captain"
         );
@@ -2973,8 +2998,8 @@ station = "navigation"
                 "{stem}: with nobody connected the resolver must be a no-op"
             );
             for system_id in [
-                crate::system_registry::comms_system_id(),
-                crate::system_registry::navigation_system_id(),
+                crate::ship::system_registry::comms_system_id(),
+                crate::ship::system_registry::navigation_system_id(),
             ] {
                 assert_eq!(
                     source_of(&mut app, &system_id),
@@ -2999,7 +3024,7 @@ station = "navigation"
     fn a_rating_event_that_backfills_the_host_station_is_re_asserted_next_tick() {
         let mut app = seeking_app("alliance_destroyer", &["captain"]);
         tick(&mut app);
-        let comms = crate::system_registry::comms_system_id();
+        let comms = crate::ship::system_registry::comms_system_id();
         assert_eq!(host_of(&mut app, &comms).as_deref(), Some("captain"));
 
         // What `handle_station_rating_change` does on a lobby event: re-apply
@@ -3036,8 +3061,8 @@ station = "navigation"
             .unwrap();
         let hosts = world.entity(ship).get::<HumanSeekingHosts>();
         let sessions = world.resource::<Sessions>();
-        let payload = crate::messages::SystemControlPayload::ClearComms;
-        let comms = crate::system_registry::comms_system_id();
+        let payload = crate::core::messages::SystemControlPayload::ClearComms;
+        let comms = crate::ship::system_registry::comms_system_id();
 
         assert!(
             crate::command_admission::is_command_authorized(
@@ -3075,8 +3100,8 @@ station = "navigation"
                 ..Default::default()
             });
         tick(&mut app);
-        let navigation = crate::system_registry::navigation_system_id();
-        let payload = crate::messages::SystemControlPayload::ClearNavigationWaypoint;
+        let navigation = crate::ship::system_registry::navigation_system_id();
+        let payload = crate::core::messages::SystemControlPayload::ClearNavigationWaypoint;
 
         let authorized = |app: &mut App, token: &str| {
             let ship = find_ship_entity(app);

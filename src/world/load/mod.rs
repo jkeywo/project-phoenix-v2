@@ -46,8 +46,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::entity_config::EntityConfig;
-use crate::entity_loader::TemplateLoader;
+use crate::entities::config::EntityConfig;
+use crate::entities::loader::TemplateLoader;
 use crate::world::config::{parse_world, WorldConfig};
 use crate::world::script::load::{load_world_scripts, CompiledScripts, ScriptResolver};
 use crate::world::validate::{validate_composition, WorldFinding, WorldSource};
@@ -85,16 +85,16 @@ impl WorldReader for FsReader {
 /// queue, firing a fetch request when it is not yet present.
 ///
 /// Mirrors `world::server::load_scenario_toml_text`'s wasm arm. Both
-/// [`pop_pending_world_toml`](crate::config_cache::pop_pending_world_toml) and
-/// [`request_world_fetch`](crate::config_cache::request_world_fetch) have native
+/// [`pop_pending_world_toml`](crate::entities::config_cache::pop_pending_world_toml) and
+/// [`request_world_fetch`](crate::entities::config_cache::request_world_fetch) have native
 /// no-op stubs, so this adapter compiles on every target (and simply reads
 /// `None` off-browser) without a `cfg` gate of its own.
 pub struct WasmReader;
 
 impl WorldReader for WasmReader {
     fn read(&self, path: &str) -> Option<String> {
-        crate::config_cache::pop_pending_world_toml(path).or_else(|| {
-            crate::config_cache::request_world_fetch(path.to_string());
+        crate::entities::config_cache::pop_pending_world_toml(path).or_else(|| {
+            crate::entities::config_cache::request_world_fetch(path.to_string());
             None
         })
     }

@@ -2,7 +2,7 @@ use super::*;
 
 use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
-use crate::messages::SystemControlPayload;
+use crate::core::messages::SystemControlPayload;
 
 /// The **Impulse** helm axis (issue #1208): gate the `impulse` channel on the
 /// authored `engage_impulse` mode verb, then — on a permit — run the doctrine
@@ -17,8 +17,8 @@ use crate::messages::SystemControlPayload;
 pub(crate) struct ImpulseAxis;
 
 impl HelmAxisHost for ImpulseAxis {
-    fn system_id() -> crate::messages::SystemId {
-        crate::system_registry::helm_impulse_system_id()
+    fn system_id() -> crate::core::messages::SystemId {
+        crate::ship::system_registry::helm_impulse_system_id()
     }
     const CHANNEL: &'static str = crate::entities::config::HELM_IMPULSE_CHANNEL;
     const STATEFUL: bool = false;
@@ -74,7 +74,9 @@ impl HelmAxisHost for ImpulseAxis {
         // TOML-authored per doctrine entry; an objective with no matching
         // doctrine entry never engages.
         let top_obj = sf.scored.iter().find(|o| {
-            o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+            o.score > 0.0
+                && o.relevance
+                    .contains(&crate::core::messages::SystemAffinity::Helm)
         });
         let use_impulse = top_obj
             .and_then(|obj| {
@@ -137,12 +139,12 @@ pub(crate) fn ai_helm_impulse(
             Option<&BoostConfigResource>,
             Option<&crate::entities::spawner::BehaviourSection>,
             Option<&FineSystemAiPolicies>,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
-            Option<&crate::ai_plugin::ObjectiveCursors>,
-            &mut crate::messages::AdmittedCommands,
+            Option<&crate::ai::server::ObjectiveCursors>,
+            &mut crate::core::messages::AdmittedCommands,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
     for (

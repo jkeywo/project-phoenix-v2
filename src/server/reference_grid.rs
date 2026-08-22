@@ -248,7 +248,8 @@ fn resolve_reference_grid_config(
         .or(NO_FALLBACK_HULL);
 
     let authored = path.and_then(|path| {
-        crate::config_cache::get_cached_entity_config(path).and_then(|config| config.reference_grid)
+        crate::entities::config_cache::get_cached_entity_config(path)
+            .and_then(|config| config.reference_grid)
     });
 
     match (&path, &authored) {
@@ -466,9 +467,9 @@ mod tests {
 
     // ── Shipped content ───────────────────────────────────────────────────
 
-    fn shipped_hull(stem: &str) -> crate::entity_config::EntityConfig {
+    fn shipped_hull(stem: &str) -> crate::entities::config::EntityConfig {
         let path = format!("assets/entities/{stem}.toml");
-        crate::entity_includes::load_entity_config(&path)
+        crate::entities::include_resolve::load_entity_config(&path)
             .unwrap_or_else(|e| panic!("{stem}.toml must compose and parse: {e}"))
     }
 

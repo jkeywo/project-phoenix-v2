@@ -2,7 +2,7 @@ use super::*;
 
 use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
-use crate::messages::SystemControlPayload;
+use crate::core::messages::SystemControlPayload;
 
 /// Per-ship runtime state for a STATEFUL Engines policy (issue #883).
 ///
@@ -29,8 +29,8 @@ pub struct HelmEnginesAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState)
 pub(crate) struct EnginesAxis;
 
 impl HelmAxisHost for EnginesAxis {
-    fn system_id() -> crate::messages::SystemId {
-        crate::system_registry::helm_thrust_system_id()
+    fn system_id() -> crate::core::messages::SystemId {
+        crate::ship::system_registry::helm_thrust_system_id()
     }
     const CHANNEL: &'static str = crate::entities::config::HELM_LONGITUDINAL_CHANNEL;
     const STATEFUL: bool = true;
@@ -106,7 +106,7 @@ pub(crate) fn ai_helm_thrust(
             &ShipSystemControlSources,
             &ShipPhysics,
             Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             // Availability of the two optional drives, seeded honestly into the
             // fact snapshot (see `EnginesAxis::seed`).
@@ -114,9 +114,9 @@ pub(crate) fn ai_helm_thrust(
             Option<&ImpulseConfigResource>,
             Option<&FineSystemAiPolicies>,
             Option<&HelmEnginesAiPolicyState>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
     for (

@@ -9,7 +9,7 @@ use bevy::prelude::*;
 
 use super::subject::{Subject, SubjectState};
 use super::ViewerArgs;
-use crate::model_rig::ModelMarkers;
+use crate::entities::model_rig::ModelMarkers;
 
 /// Length of a marker's axis cross and its direction arrow, as a fraction of
 /// the model's largest extent — so the overlay stays legible on any hull size.

@@ -12,7 +12,7 @@
 
 use bevy::prelude::warn;
 
-use crate::messages::{StationId, SystemControlPayload};
+use crate::core::messages::{StationId, SystemControlPayload};
 
 /// Maps a `SystemId` to the `StationId` whose holder is authoritative for
 /// that system's admission. Returns `None` for systems with no owning
@@ -46,7 +46,7 @@ use crate::messages::{StationId, SystemControlPayload};
 pub fn station_for_system(
     config: &crate::ship::config::ShipConfig,
     hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
-    target: &crate::messages::SystemId,
+    target: &crate::core::messages::SystemId,
 ) -> Option<StationId> {
     // Step 0: the live seek result wins over the authored station.
     if let Some(host) = hosts.and_then(|h| h.host_for(target)) {
@@ -77,7 +77,7 @@ pub fn station_for_system(
 
 pub fn is_command_authorized(
     token: &str,
-    target: &crate::messages::SystemId,
+    target: &crate::core::messages::SystemId,
     payload: &SystemControlPayload,
     control_sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
@@ -85,7 +85,7 @@ pub fn is_command_authorized(
     hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
 ) -> bool {
     // Viewscreen SetView: authority derives from the view mode's source system.
-    let effective_target = if target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID {
+    let effective_target = if target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID {
         if let SystemControlPayload::SetView { mode } = payload {
             crate::ship::viewscreen::source_system_for_view_mode(mode)
         } else {
@@ -160,7 +160,7 @@ pub fn is_command_authorized(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{RepairTarget, SystemId};
+    use crate::core::messages::{RepairTarget, SystemId};
     use crate::ship::control_source::{ControlSource, ControlSourceResolver};
     use crate::ship_plugin::ShipSystemControlSources;
 
@@ -452,7 +452,7 @@ station = "shields"
     fn toggle_god_mode_is_admitted_for_the_local_console_token() {
         assert!(is_command_authorized(
             crate::console_bridge::LOCAL_CONSOLE_TOKEN,
-            &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            &SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
             &toggle_god_mode(),
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
@@ -473,7 +473,7 @@ station = "shields"
         assert_eq!(
             is_command_authorized(
                 "t1",
-                &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+                &SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
                 &toggle_god_mode(),
                 &sources(ControlSource::Human, false),
                 &sessions_with_repair_holder("t1"),
@@ -492,7 +492,7 @@ station = "shields"
     fn toggle_god_mode_is_rejected_for_a_token_with_no_session() {
         assert!(!is_command_authorized(
             "never-identified",
-            &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            &SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
             &toggle_god_mode(),
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
@@ -532,7 +532,7 @@ station = "shields"
     fn toggle_god_mode_is_rejected_for_an_ai_token() {
         assert!(!is_command_authorized(
             "ai:backfill",
-            &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            &SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
             &toggle_god_mode(),
             &sources(ControlSource::Human, false),
             &sessions_with_repair_holder("t1"),
@@ -577,7 +577,7 @@ station = "shields"
     fn spectator_is_refused_the_debug_god_mode_route() {
         assert!(!is_command_authorized(
             "spec",
-            &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            &SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
             &toggle_god_mode(),
             &sources(ControlSource::Human, false),
             &sessions_with_spectator("spec"),
@@ -599,7 +599,7 @@ station = "shields"
         assert_eq!(
             is_command_authorized(
                 "player",
-                &SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+                &SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
                 &toggle_god_mode(),
                 &sources(ControlSource::Human, false),
                 &sessions,
@@ -672,7 +672,7 @@ station = "command"
     fn command_hosted_on_captain() -> crate::ship_plugin::HumanSeekingHosts {
         let mut map = std::collections::BTreeMap::new();
         map.insert(
-            crate::system_registry::command_system_id(),
+            crate::ship::system_registry::command_system_id(),
             StationId("captain".into()),
         );
         crate::ship_plugin::HumanSeekingHosts(map)
@@ -682,7 +682,7 @@ station = "command"
     /// actively directing the board produces; Ai is the backfilled shape.
     fn command_sources(source: ControlSource) -> ShipSystemControlSources {
         let mut resolver = ControlSourceResolver::new();
-        resolver.set(crate::system_registry::command_system_id(), source);
+        resolver.set(crate::ship::system_registry::command_system_id(), source);
         ShipSystemControlSources(resolver)
     }
 
@@ -706,7 +706,7 @@ station = "command"
     fn set_station_stance_is_admitted_for_the_resolved_command_host() {
         assert!(is_command_authorized(
             "captain-token",
-            &crate::system_registry::command_system_id(),
+            &crate::ship::system_registry::command_system_id(),
             &set_stance(),
             &command_sources(ControlSource::Human),
             &sessions_with_captain("captain-token"),
@@ -733,7 +733,7 @@ station = "command"
         };
         assert!(!is_command_authorized(
             "intruder",
-            &crate::system_registry::command_system_id(),
+            &crate::ship::system_registry::command_system_id(),
             &set_stance(),
             &command_sources(ControlSource::Human),
             &sessions,
@@ -751,7 +751,7 @@ station = "command"
         let sources = command_sources(ControlSource::Ai);
         assert!(!is_command_authorized(
             "captain-token",
-            &crate::system_registry::command_system_id(),
+            &crate::ship::system_registry::command_system_id(),
             &set_stance(),
             &sources,
             &sessions_with_captain("captain-token"),
@@ -760,7 +760,7 @@ station = "command"
         ));
         assert!(is_command_authorized(
             "ai:command",
-            &crate::system_registry::command_system_id(),
+            &crate::ship::system_registry::command_system_id(),
             &set_stance(),
             &sources,
             &sessions_with_captain("captain-token"),
@@ -826,7 +826,7 @@ station = "command"
         let hosts = {
             let mut map = std::collections::BTreeMap::new();
             map.insert(
-                crate::system_registry::command_system_id(),
+                crate::ship::system_registry::command_system_id(),
                 StationId("tactical".into()),
             );
             crate::ship_plugin::HumanSeekingHosts(map)
@@ -846,7 +846,7 @@ station = "command"
         assert!(
             !is_command_authorized(
                 "cap",
-                &crate::system_registry::command_system_id(),
+                &crate::ship::system_registry::command_system_id(),
                 &set_stance(),
                 &command_sources(ControlSource::Human),
                 &sessions,
@@ -858,7 +858,7 @@ station = "command"
         // And the relocated host IS admitted, proving the seek moved authority.
         assert!(is_command_authorized(
             "tac",
-            &crate::system_registry::command_system_id(),
+            &crate::ship::system_registry::command_system_id(),
             &set_stance(),
             &command_sources(ControlSource::Human),
             &sessions,

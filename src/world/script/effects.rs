@@ -306,7 +306,7 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
                 outcome: None,
             });
             sink.push(ActionCmd::SetNextState {
-                phase: crate::messages::GamePhase::GameOver,
+                phase: crate::core::messages::GamePhase::GameOver,
             });
         },
     );
@@ -319,21 +319,21 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
          outcome: ImmutableString|
          -> Result<(), Box<EvalAltResult>> {
             // The outcome-DECLARING end (#843). The outcome is validated through
-            // the SAME `crate::balance::Outcome::parse` the declarative `game_over`
+            // the SAME `crate::core::balance::Outcome::parse` the declarative `game_over`
             // action uses, so a scripted typo (`"victni"`) raises a Rhai error —
             // discarding this call's effects (settled decision 10) — exactly as a
             // bad `outcome = "…"` fails the declarative world load. Only
             // `victory`/`defeat` are accepted (`Outcome` has no `Draw`). Emits the
             // same two commands as the 1-arg form, reason first, differing only in
             // `outcome: Some(_)`.
-            let outcome = crate::balance::Outcome::parse(&outcome)
+            let outcome = crate::core::balance::Outcome::parse(&outcome)
                 .map_err(|e| raise(format!("game_over: {e}")))?;
             sink.push(ActionCmd::SetGameOverReason {
                 reason: reason.to_string(),
                 outcome: Some(outcome),
             });
             sink.push(ActionCmd::SetNextState {
-                phase: crate::messages::GamePhase::GameOver,
+                phase: crate::core::messages::GamePhase::GameOver,
             });
             Ok(())
         },
@@ -1212,7 +1212,7 @@ mod tests {
                     outcome: None,
                 },
                 ActionCmd::SetNextState {
-                    phase: crate::messages::GamePhase::GameOver,
+                    phase: crate::core::messages::GamePhase::GameOver,
                 },
             ]
         );
@@ -1271,10 +1271,10 @@ mod tests {
             vec![
                 ActionCmd::SetGameOverReason {
                     reason: "world.win".to_string(),
-                    outcome: Some(crate::balance::Outcome::Victory),
+                    outcome: Some(crate::core::balance::Outcome::Victory),
                 },
                 ActionCmd::SetNextState {
-                    phase: crate::messages::GamePhase::GameOver,
+                    phase: crate::core::messages::GamePhase::GameOver,
                 },
             ]
         );
@@ -1299,14 +1299,14 @@ mod tests {
             cmds[0],
             ActionCmd::SetGameOverReason {
                 reason: "world.lose".to_string(),
-                outcome: Some(crate::balance::Outcome::Defeat),
+                outcome: Some(crate::core::balance::Outcome::Defeat),
             }
         );
     }
 
     /// A scripted typo raises (discarding the call's effects, settled decision
     /// 10) exactly as a bad declarative `outcome = "…"` fails the world load —
-    /// both route through `crate::balance::Outcome::parse`.
+    /// both route through `crate::core::balance::Outcome::parse`.
     #[test]
     fn game_over_rejects_an_unknown_outcome() {
         let err = run_result(
@@ -1957,7 +1957,7 @@ mod tests {
             base_anchors: &anchors,
             factions: None,
             uuid_source: &uuid,
-            template_loader: &crate::entity_loader::WasmTemplateLoader,
+            template_loader: &crate::entities::loader::WasmTemplateLoader,
         };
         dispatch_action(action, &ctx).commands
     }

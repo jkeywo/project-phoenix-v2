@@ -8,16 +8,16 @@ use super::beam::{
 use super::blaster::BlasterSystemResource;
 use super::shared::live_entity_xz;
 use super::torpedo::TorpedoSystemResource;
-use crate::lobby::WorldResource;
-use crate::messages::{
+use crate::core::messages::{
     BlasterBankState, ModifierSlot, PhaserBankClientConfig, PhaserBankState, PhaserMode, RadarBlip,
     RadarRegion, ServerMessage, SystemBlackboard, TorpedoTubeClientConfig, TorpedoTubeState,
     WeaponsBlackboard,
 };
+use crate::lobby::WorldResource;
+use crate::server_app::AsteroidUuid;
+use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::ship_state::ShipPhysics;
-use crate::simulation::AsteroidUuid;
-use crate::torpedo::{TorpedoConfig, TorpedoSystem};
+use crate::weapons::torpedo::{TorpedoConfig, TorpedoSystem};
 
 // ── Resources ─────────────────────────────────────────────────────────────
 
@@ -104,7 +104,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
     // effective homing range are captured here; the `TorpedoTubeState` list
     // (with the readiness contract) is built below, once `target_live_pos` and
     // the offline probe are resolved.
-    let (raw_tubes, torpedo_effective_range): (Vec<crate::torpedo::TorpedoTube>, f32) = {
+    let (raw_tubes, torpedo_effective_range): (Vec<crate::weapons::torpedo::TorpedoTube>, f32) = {
         let mut q =
             world.query_filtered::<&TorpedoSystemResource, With<crate::server_app::LocalShip>>();
         q.single(world)
@@ -124,7 +124,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
     let phaser_mode = world.resource::<CurrentPhaserMode>().0;
     let phaser_frequency = {
         let mut q = world
-            .query_filtered::<&crate::ship_state::ShipPhaserFrequency, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&crate::ship::state::ShipPhaserFrequency, With<crate::server_app::LocalShip>>();
         q.single(world).ok().map(|f| f.0).unwrap_or(0.5)
     };
     let banks_config = {
@@ -148,7 +148,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             let uuid = uuid.clone();
             let mut pos = None;
             let mut entity_qs = world.query_filtered::<
-                        (&crate::entity_spawner::EntityUuid, &Transform),
+                        (&crate::entities::spawner::EntityUuid, &Transform),
                         Without<AsteroidUuid>,
                     >();
             for (u, t) in entity_qs.iter(world) {
@@ -160,7 +160,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             if pos.is_none() {
                 let mut asteroid_qs = world.query_filtered::<
                             (&AsteroidUuid, &Transform),
-                            Without<crate::entity_spawner::EntityUuid>,
+                            Without<crate::entities::spawner::EntityUuid>,
                         >();
                 for (u, t) in asteroid_qs.iter(world) {
                     if u.0 == uuid {
@@ -180,7 +180,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             let uuid = uuid.clone();
             let mut name = None;
             let mut name_qs = world.query::<(
-                &crate::entity_spawner::EntityUuid,
+                &crate::entities::spawner::EntityUuid,
                 &crate::entities::spawner::EntityName,
             )>();
             for (u, n) in name_qs.iter(world) {
@@ -202,7 +202,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
             world.query_filtered::<&ShipSystemControlSources, With<crate::server_app::LocalShip>>();
         q.single(world).ok().map(|cs| cs.0.clone())
     };
-    let ship_offline = |sysid: Option<crate::messages::SystemId>| -> bool {
+    let ship_offline = |sysid: Option<crate::core::messages::SystemId>| -> bool {
         match sysid {
             None => false,
             Some(id) => local_control
@@ -216,7 +216,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
     // Computed here where ship physics + the frozen combat-lock target position
     // are already resolved, rather than re-querying in the broadcaster.
     let blasters: Vec<BlasterBankState> = {
-        let raw: Vec<crate::blaster::BlasterSystem> = {
+        let raw: Vec<crate::weapons::blaster::BlasterSystem> = {
             let mut q = world
                 .query_filtered::<&BlasterSystemResource, With<crate::server_app::LocalShip>>();
             q.single(world)
@@ -226,8 +226,9 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         };
         raw.iter()
             .map(|b| {
-                let is_online =
-                    !ship_offline(crate::system_registry::blaster_bank_system_id(&b.config.id));
+                let is_online = !ship_offline(
+                    crate::ship::system_registry::blaster_bank_system_id(&b.config.id),
+                );
                 b.bank_state(ship_x, ship_z, ship_yaw, target_live_pos, is_online)
             })
             .collect()
@@ -244,11 +245,12 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         .iter()
         .map(|t| {
             let remaining = match &t.load_state {
-                crate::torpedo::TubeLoadState::Loading { remaining, .. }
-                | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                crate::weapons::torpedo::TubeLoadState::Loading { remaining, .. }
+                | crate::weapons::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
                 _ => 0.0,
             };
-            let is_online = !ship_offline(crate::system_registry::torpedo_tube_system_id(&t.id));
+            let is_online =
+                !ship_offline(crate::ship::system_registry::torpedo_tube_system_id(&t.id));
             let readiness = tube_readiness(
                 t,
                 torpedo_effective_range,
@@ -277,7 +279,8 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
 
     // Reach is the authored range, unscaled (issue #955).
     let banks: Vec<PhaserBankState> = if banks_config.is_empty() {
-        let effective_phaser_range = crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE;
+        let effective_phaser_range =
+            crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE;
         // Default (no-config) bank is a 180° forward arc, facing 0 — matches
         // `radar::is_fire_ready_with_range`.
         let geometry = target_live_pos.map(|(tx, tz)| {
@@ -294,9 +297,9 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
         });
         let cd = bank_cooldowns.get("").copied().unwrap_or(0.0);
         let on_cooldown = active_beam.is_bank_firing("") || cd > 0.0;
-        let is_online = !ship_offline(crate::system_registry::phaser_bank_system_id(""));
+        let is_online = !ship_offline(crate::ship::system_registry::phaser_bank_system_id(""));
         let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
-        let readiness = crate::messages::WeaponReadiness::evaluate(
+        let readiness = crate::core::messages::WeaponReadiness::evaluate(
             is_online,
             on_cooldown,
             false,
@@ -317,7 +320,7 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
                 let effective_bank_range = if b.beam_range > 0.0 {
                     b.beam_range
                 } else {
-                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                    crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 };
                 let geometry = target_live_pos.map(|(tx, tz)| {
                     crate::weapons::phaser::target_geometry(
@@ -333,9 +336,10 @@ pub fn compute_current_weapons_update(world: &mut World) -> LastWeaponsUpdate {
                 });
                 let cd = bank_cooldowns.get(b.id.as_str()).copied().unwrap_or(0.0);
                 let on_cooldown = active_beam.is_bank_firing(&b.id) || cd > 0.0;
-                let is_online = !ship_offline(crate::system_registry::phaser_bank_system_id(&b.id));
+                let is_online =
+                    !ship_offline(crate::ship::system_registry::phaser_bank_system_id(&b.id));
                 let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
-                let readiness = crate::messages::WeaponReadiness::evaluate(
+                let readiness = crate::core::messages::WeaponReadiness::evaluate(
                     is_online,
                     on_cooldown,
                     false,
@@ -430,7 +434,10 @@ pub fn weapons_update_broadcaster() -> crate::core::broadcast::SimBroadcaster {
 /// Callers in `SimSet::Publish` see the value the viewscreen aggregators wrote
 /// in `SimSet::PublishAggregate` **last** tick — the accepted one-tick lag.
 fn viewscreen_combat_lock(bbs: &crate::server_app::ShipSystemBlackboards) -> Option<String> {
-    match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+    match bbs
+        .0
+        .get(&crate::ship::system_registry::viewscreen_system_id())
+    {
         Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
         _ => None,
     }
@@ -470,14 +477,14 @@ fn build_bank_states(
     let bank_online = |bank_id: &str| -> bool {
         match (
             control_sources,
-            crate::system_registry::phaser_bank_system_id(bank_id),
+            crate::ship::system_registry::phaser_bank_system_id(bank_id),
         ) {
             (Some(cs), Some(id)) => !cs.0.is_offline(&id),
             _ => true,
         }
     };
     if combat_config.0.banks.is_empty() {
-        let effective_range = crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE;
+        let effective_range = crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE;
         // Default (no-config) bank is a 180° forward arc, facing 0 — matches
         // `radar::is_fire_ready_with_range`.
         let geometry = target_live_pos.map(|(tx, tz)| {
@@ -495,7 +502,7 @@ fn build_bank_states(
         let cd = cooldown.bank_remaining_secs("");
         let on_cooldown = beam.is_bank_firing("") || cd > 0.0;
         let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
-        let readiness = crate::messages::WeaponReadiness::evaluate(
+        let readiness = crate::core::messages::WeaponReadiness::evaluate(
             bank_online(""),
             on_cooldown,
             false,
@@ -518,7 +525,7 @@ fn build_bank_states(
                 let effective_bank_range = if b.beam_range > 0.0 {
                     b.beam_range
                 } else {
-                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                    crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 };
                 let geometry = target_live_pos.map(|(tx, tz)| {
                     crate::weapons::phaser::target_geometry(
@@ -535,7 +542,7 @@ fn build_bank_states(
                 let cd = cooldown.bank_remaining_secs(b.id.as_str());
                 let on_cooldown = beam.is_bank_firing(&b.id) || cd > 0.0;
                 let fire_ready = geometry.map(|g| g.in_range && g.in_arc).unwrap_or(false);
-                let readiness = crate::messages::WeaponReadiness::evaluate(
+                let readiness = crate::core::messages::WeaponReadiness::evaluate(
                     bank_online(&b.id),
                     on_cooldown,
                     false,
@@ -574,13 +581,13 @@ fn build_tube_states(
         .iter()
         .map(|t| {
             let remaining = match &t.load_state {
-                crate::torpedo::TubeLoadState::Loading { remaining, .. }
-                | crate::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
+                crate::weapons::torpedo::TubeLoadState::Loading { remaining, .. }
+                | crate::weapons::torpedo::TubeLoadState::Unloading { remaining, .. } => *remaining,
                 _ => 0.0,
             };
             let is_online = match (
                 control_sources,
-                crate::system_registry::torpedo_tube_system_id(&t.id),
+                crate::ship::system_registry::torpedo_tube_system_id(&t.id),
             ) {
                 (Some(cs), Some(id)) => !cs.0.is_offline(&id),
                 _ => true,
@@ -615,12 +622,12 @@ fn build_tube_states(
 /// A tube with a loaded round is gated on target range/arc; an empty tube
 /// reports `Loading` while a round is loading and `NoAmmo` otherwise.
 fn tube_readiness(
-    tube: &crate::torpedo::TorpedoTube,
+    tube: &crate::weapons::torpedo::TorpedoTube,
     effective_range: f32,
     physics: ShipPhysics,
     target_live_pos: Option<(f32, f32)>,
     is_online: bool,
-) -> crate::messages::WeaponReadiness {
+) -> crate::core::messages::WeaponReadiness {
     let geometry = target_live_pos.map(|(tx, tz)| {
         crate::weapons::phaser::target_geometry(
             tx,
@@ -635,7 +642,7 @@ fn tube_readiness(
     });
     let loading = tube.loaded_count == 0 && tube.load_state.label() == "loading";
     let no_ammo = tube.loaded_count == 0 && !loading;
-    crate::messages::WeaponReadiness::evaluate(is_online, false, loading, no_ammo, geometry)
+    crate::core::messages::WeaponReadiness::evaluate(is_online, false, loading, no_ammo, geometry)
 }
 
 /// Publish each ship's core Weapons blackboard from current sim state.
@@ -643,7 +650,7 @@ fn tube_readiness(
 /// handled globally by `broadcast_blackboard_updates` in `SimSet::Broadcast`.
 ///
 /// Writes only the console-level Weapons entry (keyed by
-/// [`crate::system_registry::tactical_station_key`]); the per-bank /
+/// [`crate::ship::system_registry::tactical_station_key`]); the per-bank /
 /// per-tube / magazine fine entries are owned by their own systems (issue
 /// #725), which recompute bank/tube state via the shared helpers rather than
 /// reading this system's output — no ordering between the four.
@@ -695,11 +702,11 @@ pub(crate) fn publish_weapons_core_blackboard(
     phaser_mode: Res<CurrentPhaserMode>,
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     entity_name_q: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         &crate::entities::spawner::EntityName,
     )>,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
     for (
         beam,
@@ -767,7 +774,7 @@ pub(crate) fn publish_weapons_core_blackboard(
         // target — but it can be read, and #698 / #700 will read it.
         let locked_target = entity_bbs
             .0
-            .get(&crate::system_registry::tactical_station_key())
+            .get(&crate::ship::system_registry::tactical_station_key())
             .and_then(|bb| match bb {
                 SystemBlackboard::Weapons(weapons) => weapons.locked_target.clone(),
                 _ => None,
@@ -827,7 +834,7 @@ pub(crate) fn publish_weapons_core_blackboard(
         // (issue #829) — they belong to the tactical-radar system now.
         let mut phaser_arcs: Vec<PhaserBankClientConfig> = Vec::new();
         let mut torpedo_arcs: Vec<TorpedoTubeClientConfig> = Vec::new();
-        let mut mode = crate::messages::PhaserMode::default();
+        let mut mode = crate::core::messages::PhaserMode::default();
 
         if is_local {
             mode = phaser_mode.0;
@@ -844,7 +851,7 @@ pub(crate) fn publish_weapons_core_blackboard(
                     .map(|b| {
                         let is_online = control_sources
                             .and_then(|cs| {
-                                crate::system_registry::blaster_bank_system_id(&b.config.id)
+                                crate::ship::system_registry::blaster_bank_system_id(&b.config.id)
                                     .map(|id| !cs.0.is_offline(&id))
                             })
                             .unwrap_or(true);
@@ -878,7 +885,7 @@ pub(crate) fn publish_weapons_core_blackboard(
         // `blackboards['tactical']` — but the key names the console, not a
         // system. Per-bank entries below keep their system-id keys.
         entity_bbs.0.insert(
-            crate::system_registry::tactical_station_key(),
+            crate::ship::system_registry::tactical_station_key(),
             SystemBlackboard::Weapons(bb),
         );
     }
@@ -926,10 +933,10 @@ pub(crate) fn publish_tactical_radar_blackboard(
     ship_config: Res<crate::lobby::server::ShipClientConfigResource>,
     world_res: Res<WorldResource>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
     entity_q: Query<
         (
-            &crate::entity_spawner::EntityUuid,
+            &crate::entities::spawner::EntityUuid,
             &Transform,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&TorpedoSystemResource>,
@@ -937,7 +944,7 @@ pub(crate) fn publish_tactical_radar_blackboard(
         Without<AsteroidUuid>,
     >,
 ) {
-    let default_registry = crate::faction::FactionRegistry::default();
+    let default_registry = crate::ai::faction::FactionRegistry::default();
     let registry = faction_registry
         .as_deref()
         .map(|r| &r.0)
@@ -959,26 +966,28 @@ pub(crate) fn publish_tactical_radar_blackboard(
         if is_local {
             // ── Radar blips ──────────────────────────────────────────────────
             let effective_tactical_range = ship_config.0.tactical_radar_range * radar_range_mult;
-            let shows: Vec<crate::entity_tags::EntityTag> = ship_config
+            let shows: Vec<crate::entities::tags::EntityTag> = ship_config
                 .0
                 .tactical_radar_shows
                 .iter()
-                .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
+                .filter_map(|s| crate::entities::tags::EntityTag::from_str(s))
                 .collect();
-            let selects: Vec<crate::entity_tags::EntityTag> = ship_config
+            let selects: Vec<crate::entities::tags::EntityTag> = ship_config
                 .0
                 .tactical_radar_selects
                 .iter()
-                .filter_map(|s| crate::entity_tags::EntityTag::from_str(s))
+                .filter_map(|s| crate::entities::tags::EntityTag::from_str(s))
                 .collect();
 
-            let entity_meta: std::collections::HashMap<&str, &crate::messages::EntitySnapshot> =
-                world_res
-                    .0
-                    .entities
-                    .iter()
-                    .map(|e| (e.uuid.as_str(), e))
-                    .collect();
+            let entity_meta: std::collections::HashMap<
+                &str,
+                &crate::core::messages::EntitySnapshot,
+            > = world_res
+                .0
+                .entities
+                .iter()
+                .map(|e| (e.uuid.as_str(), e))
+                .collect();
 
             if !shows.is_empty() && effective_tactical_range > 0.0 {
                 for (uuid_comp, transform) in asteroid_q.iter() {
@@ -1008,7 +1017,11 @@ pub(crate) fn publish_tactical_radar_blackboard(
                     // predicate the helm's hostile-arc overlay uses, so a
                     // friendly torpedo boat and this ship itself never badge.
                     let torpedo_armed = torpedoes.is_some_and(|t| !t.0.tubes.is_empty())
-                        && crate::faction::is_enemy(self_faction, faction.map(|f| f.0), registry);
+                        && crate::ai::faction::is_enemy(
+                            self_faction,
+                            faction.map(|f| f.0),
+                            registry,
+                        );
                     if let Some(b) = project_blip(
                         &uuid_comp.0,
                         transform.translation.x,
@@ -1052,8 +1065,8 @@ pub(crate) fn publish_tactical_radar_blackboard(
         }
 
         entity_bbs.0.insert(
-            crate::system_registry::tactical_radar_system_id(),
-            SystemBlackboard::TacticalRadar(crate::messages::TacticalRadarBlackboard {
+            crate::ship::system_registry::tactical_radar_system_id(),
+            SystemBlackboard::TacticalRadar(crate::core::messages::TacticalRadarBlackboard {
                 selected_target,
                 blips,
                 regions,
@@ -1091,8 +1104,8 @@ pub(crate) fn publish_phaser_bank_blackboards(
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
     for (beam, cooldown, combat_config, ship_physics, control_sources, mut entity_bbs) in
         ship_q.iter_mut()
@@ -1146,7 +1159,8 @@ pub(crate) fn publish_phaser_bank_blackboards(
         );
 
         for bank_state in &banks {
-            let Some(bank_sysid) = crate::system_registry::phaser_bank_system_id(&bank_state.id)
+            let Some(bank_sysid) =
+                crate::ship::system_registry::phaser_bank_system_id(&bank_state.id)
             else {
                 continue;
             };
@@ -1155,7 +1169,7 @@ pub(crate) fn publish_phaser_bank_blackboards(
                 .unwrap_or(true);
             entity_bbs.0.insert(
                 bank_sysid,
-                SystemBlackboard::PhaserBank(crate::messages::PhaserBankBlackboard {
+                SystemBlackboard::PhaserBank(crate::core::messages::PhaserBankBlackboard {
                     is_online,
                     on_cooldown: bank_state.on_cooldown,
                     cooldown_remaining: bank_state.cooldown_remaining,
@@ -1197,7 +1211,8 @@ pub(crate) fn publish_torpedo_tube_blackboards(
         // is unused here — pass no physics/target (default geometry).
         let tubes = build_tube_states(torpedo_sys, ShipPhysics::default(), None, control_sources);
         for tube_state in &tubes {
-            let Some(tube_sysid) = crate::system_registry::torpedo_tube_system_id(&tube_state.id)
+            let Some(tube_sysid) =
+                crate::ship::system_registry::torpedo_tube_system_id(&tube_state.id)
             else {
                 continue;
             };
@@ -1206,7 +1221,7 @@ pub(crate) fn publish_torpedo_tube_blackboards(
                 .unwrap_or(true);
             entity_bbs.0.insert(
                 tube_sysid,
-                SystemBlackboard::TorpedoTube(crate::messages::TorpedoTubeBlackboard {
+                SystemBlackboard::TorpedoTube(crate::core::messages::TorpedoTubeBlackboard {
                     is_online,
                     loaded: tube_state.loaded,
                     state: tube_state.state.clone(),
@@ -1246,13 +1261,13 @@ pub(crate) fn publish_torpedo_magazine_blackboard(
             }
         };
 
-        let magazine_sysid = crate::system_registry::torpedo_magazine_system_id();
+        let magazine_sysid = crate::ship::system_registry::torpedo_magazine_system_id();
         let magazine_online = control_sources
             .map(|cs| !cs.0.is_offline(&magazine_sysid))
             .unwrap_or(true);
         entity_bbs.0.insert(
             magazine_sysid,
-            SystemBlackboard::TorpedoMagazine(crate::messages::TorpedoMagazineBlackboard {
+            SystemBlackboard::TorpedoMagazine(crate::core::messages::TorpedoMagazineBlackboard {
                 is_online: magazine_online,
                 torpedoes_remaining: torpedo_sys.0.torpedoes_remaining,
                 capacity: torpedo_sys.0.config.count,
@@ -1291,16 +1306,16 @@ fn project_blip(
     ship_z: f32,
     ship_yaw: f32,
     effective_range: f32,
-    meta: Option<&crate::messages::EntitySnapshot>,
-    shows: &[crate::entity_tags::EntityTag],
-    selects: &[crate::entity_tags::EntityTag],
+    meta: Option<&crate::core::messages::EntitySnapshot>,
+    shows: &[crate::entities::tags::EntityTag],
+    selects: &[crate::entities::tags::EntityTag],
     torpedo_armed: bool,
 ) -> Option<RadarBlip> {
     let raw_tags: &[String] = meta.map(|e| e.tags.as_slice()).unwrap_or(&[]);
     let radius: f32 = meta.and_then(|e| e.radius).unwrap_or(0.0);
 
-    let entity_tags = crate::entity_tags::parse_tags(raw_tags);
-    if !crate::entity_tags::matches_any(&entity_tags, shows) {
+    let entity_tags = crate::entities::tags::parse_tags(raw_tags);
+    if !crate::entities::tags::matches_any(&entity_tags, shows) {
         return None;
     }
     let dx = wx - ship_x;
@@ -1319,9 +1334,9 @@ fn project_blip(
     let kind = entity_tags
         .iter()
         .find_map(|t| match t {
-            crate::entity_tags::EntityTag::Asteroid => Some("asteroid"),
-            crate::entity_tags::EntityTag::Ship => Some("ship"),
-            crate::entity_tags::EntityTag::Station => Some("station"),
+            crate::entities::tags::EntityTag::Asteroid => Some("asteroid"),
+            crate::entities::tags::EntityTag::Ship => Some("ship"),
+            crate::entities::tags::EntityTag::Station => Some("station"),
             _ => None,
         })
         .unwrap_or("unknown")
@@ -1337,9 +1352,9 @@ fn project_blip(
             entity_tags
                 .iter()
                 .find_map(|t| match t {
-                    crate::entity_tags::EntityTag::Asteroid => Some("asteroid"),
-                    crate::entity_tags::EntityTag::Ship => Some("ship"),
-                    crate::entity_tags::EntityTag::Station => Some("station"),
+                    crate::entities::tags::EntityTag::Asteroid => Some("asteroid"),
+                    crate::entities::tags::EntityTag::Ship => Some("ship"),
+                    crate::entities::tags::EntityTag::Station => Some("station"),
                     _ => None,
                 })
                 .unwrap_or("unknown")
@@ -1356,8 +1371,8 @@ fn project_blip(
 
     // Resolve target info for selectability.
     let target_tags_raw: &[String] = meta.map(|e| e.target_tags.as_slice()).unwrap_or(&[]);
-    let target_tags = crate::entity_tags::parse_tags(target_tags_raw);
-    let selectable = crate::entity_tags::matches_any(&target_tags, selects);
+    let target_tags = crate::entities::tags::parse_tags(target_tags_raw);
+    let selectable = crate::entities::tags::matches_any(&target_tags, selects);
     let threat_level = meta
         .and_then(|e| e.threat_level.as_deref())
         .map(|s| s.to_string());

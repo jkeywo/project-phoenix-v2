@@ -30,8 +30,8 @@ use std::collections::HashMap;
 
 use crate::comms::content::{response_views, ActiveDialogue, ScriptedDialogue};
 use crate::comms::server::{current_sender_in_range, CommsChannel2Event, CommsRuntime};
-use crate::entity_spawner::EntityUuid;
-use crate::messages::{CommsMessage, GamePhase};
+use crate::core::messages::{CommsMessage, GamePhase};
+use crate::entities::spawner::EntityUuid;
 use crate::world::content::WorldEvent;
 use crate::world::script::comms::{enter_node, project_node, EnterError};
 use crate::world::script::schedule::{SchedClock, TickBudget};
@@ -53,7 +53,8 @@ use crate::world::server::{
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct ScriptedCommsAux<'w> {
     id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
-    balance_events: Option<ResMut<'w, bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    balance_events:
+        Option<ResMut<'w, bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>>,
     time: Option<Res<'w, bevy::time::Time>>,
 }
 
@@ -109,17 +110,17 @@ pub(crate) fn open_scripted_comms_threads(
     mut commands: Commands,
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
-    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut game_over_reason: Option<ResMut<crate::server_app::GameOverReason>>,
     mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: crate::world::server::FactionDispatchParams,
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
-        With<crate::entity_spawner::BehaviourSection>,
+        With<crate::entities::spawner::BehaviourSection>,
     >,
     mut aux: ScriptedCommsAux,
     // The per-owner effect queues a comms root fn's script pushes onto (issue
@@ -180,7 +181,7 @@ pub(crate) fn open_scripted_comms_threads(
     // as the declarative twin (never at the effects.rs boundary, never a fallback
     // mint), and the same `WasmTemplateLoader`.
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
-    let template_loader = crate::entity_loader::WasmTemplateLoader;
+    let template_loader = crate::entities::loader::WasmTemplateLoader;
     let uuid_source = || {
         crate::world_id::mint_id_with(aux.id_mint.as_deref(), crate::world_id::IdNamespace::Entity)
     };
@@ -592,7 +593,7 @@ pub(crate) mod tests {
                 .find(|o| o.id == "reach_axiom")
                 .expect("the objective exists")
                 .status,
-            crate::messages::ObjectiveStatus::Completed,
+            crate::core::messages::ObjectiveStatus::Completed,
             "the root fn's complete_objective must reach the objective manager"
         );
         assert!(
@@ -678,7 +679,7 @@ pub(crate) mod tests {
         app.world_mut()
             .resource_mut::<CommsRuntime>()
             .contacts
-            .push(crate::messages::CommsContact {
+            .push(crate::core::messages::CommsContact {
                 uuid: "axiom-uuid".into(),
                 name: "Axiom Control".into(),
                 in_range: true,
@@ -746,7 +747,7 @@ pub(crate) mod tests {
                 .find(|o| o.id == "reach_axiom")
                 .expect("the objective exists")
                 .status,
-            crate::messages::ObjectiveStatus::Completed,
+            crate::core::messages::ObjectiveStatus::Completed,
             "the completed objective must survive the malformed return"
         );
         assert!(
@@ -840,7 +841,7 @@ pub(crate) mod tests {
     // wire and what their picks actually do to the world.
 
     use crate::comms::server::tests::{comms_test_app, push_msg, setup_game_with_comms, tick};
-    use crate::messages::{ClientMessage, ObjectiveStatus};
+    use crate::core::messages::{ClientMessage, ObjectiveStatus};
 
     const STATION_UUID: &str = "a1b2c3d4-e5f6-4789-abcd-ef0123456990";
 
@@ -930,8 +931,8 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
             app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::Hail {
                     target_uuid: STATION_UUID.into(),
                 },
             },
@@ -940,7 +941,7 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
     }
 
     /// The one message the hail delivered.
-    fn only_message(app: &App) -> crate::messages::CommsMessage {
+    fn only_message(app: &App) -> crate::core::messages::CommsMessage {
         let messages = app.world().resource::<CommsInboxRes>().0.messages();
         assert_eq!(messages.len(), 1, "the hail opens exactly one thread");
         messages[0].clone()
@@ -951,8 +952,8 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
             app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::RespondToMessage {
                     message_id: message_id.to_string(),
                     response_index,
                 },
@@ -1025,9 +1026,9 @@ fn on_decline(ctx) { ctx.effects.fail_objective("script_obj"); }
     /// its name registered for later triggers to resolve.
     #[test]
     fn a_scripted_on_pick_that_spawns_resolves_through_dispatch() {
-        crate::config_cache::insert_native_config(
+        crate::entities::config_cache::insert_native_config(
             "fixture/comms_escort.toml".to_string(),
-            crate::entity_config::EntityConfig::from_toml("").unwrap(),
+            crate::entities::config::EntityConfig::from_toml("").unwrap(),
         );
         let mut app = live_comms_app();
         setup_game_with_comms(&mut app, STATION_UUID);

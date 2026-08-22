@@ -146,7 +146,7 @@ pub fn dispatch_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repair_teams::RepairTeams;
+    use crate::modifiers::repair_teams::RepairTeams;
 
     // ── The dispatch verdict ─────────────────────────────────────────────────
 

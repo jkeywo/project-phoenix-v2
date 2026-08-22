@@ -38,7 +38,7 @@
 //! Bevy-free so it can be unit-tested directly; the applier lives in
 //! `comms::server::update_comms_range_flags`.
 
-use crate::messages::CommsContact;
+use crate::core::messages::CommsContact;
 
 /// A hailable endpoint derived from a live entity (issue #985).
 ///

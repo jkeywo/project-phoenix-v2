@@ -152,7 +152,7 @@ impl DockRefusal {
 
 /// A single dock marker in a hull's OWN frame (issue #1159): where the mate
 /// point sits on the hull and which way it faces outward. Lifted from the rig
-/// [`crate::model_rig::Marker`] vocabulary — the same `[markers.<name>]` blocks
+/// [`crate::entities::model_rig::Marker`] vocabulary — the same `[markers.<name>]` blocks
 /// that carry engines and hardpoints — with the base rig already folded in by
 /// the adapter, so these are ship-local points a `Transform` maps to world.
 #[derive(Clone, Copy, Debug, PartialEq)]

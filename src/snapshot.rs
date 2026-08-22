@@ -157,7 +157,7 @@
 //!
 //! **Identity is the cell, never the handle and never a mint.** A streamed rock's
 //! `AsteroidUuid` is `deterministic_cell_uuid(0, gx, gz, gx mod size, gz mod size)`
-//! (`crate::asteroid_lifecycle`) — a pure function of its lattice cell, because
+//! (`crate::asteroids::lifecycle`) — a pure function of its lattice cell, because
 //! ring addressing makes the slot a pure function of the cell too. Two runs of
 //! the same content name the same rock the same thing, and so does a re-stream
 //! after a resume, which is what lets absence mean "destroyed" rather than "some
@@ -185,8 +185,7 @@ use serde::{Deserialize, Serialize};
 
 use vellum_save::{Ledger, Run, Snapshot, Versions};
 
-use crate::asteroid_lifecycle::{AsteroidData, AsteroidEntityMap, AsteroidWindow};
-use crate::balance::{BalanceEvent, StampedBalanceEvent, VictimKind, WEAPON_KIND_COLLISION};
+use crate::asteroids::lifecycle::{AsteroidData, AsteroidEntityMap, AsteroidWindow};
 use crate::command_admission::log::LoggedCommand;
 use crate::comms::content::{
     ActiveDialogue, CommsDialogueNode, CommsResponse, OpenCommsRequest, ScriptedDialogue,
@@ -197,11 +196,12 @@ use crate::console::weapons::beam::{
     ActiveBeam, ActiveBeamSlot, LastShipAttacker, PhaserCooldown, TacticalRadarSelection,
 };
 use crate::console::weapons::torpedo::TorpedoSystemResource;
+use crate::core::balance::{BalanceEvent, StampedBalanceEvent, VictimKind, WEAPON_KIND_COLLISION};
+use crate::core::messages::{CommsMessage, GamePhase, SystemId, TeamSlot, WorldData};
 use crate::core::telemetry::RunTelemetry;
 use crate::dossier::evidence::EvidenceLog;
-use crate::entity_spawner::{EntityShipArcHull, EntitySystemHull, EntityUuid};
+use crate::entities::spawner::{EntityShipArcHull, EntitySystemHull, EntityUuid};
 use crate::lobby::WorldResource;
-use crate::messages::{CommsMessage, GamePhase, SystemId, TeamSlot, WorldData};
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
 use crate::ship::components::LastHelmInput;
 use crate::ship::components::RepairHumanAlerted;
@@ -216,7 +216,7 @@ use crate::ship::impulse::ImpulsePhase;
 use crate::ship::state::{ShipPhysics, ShipRedAlert, ShipWeaponsHold};
 use crate::sim_rng::{SimRng, SimRngState};
 use crate::sim_tick::SimTick;
-use crate::torpedo::{Torpedo, TubeBurstState, TubeLoadState};
+use crate::weapons::torpedo::{Torpedo, TubeBurstState, TubeLoadState};
 use crate::world::commitments::CommitmentLedger;
 use crate::world::content::WorldEvent;
 use crate::world::deadlines::DeadlineTable;
@@ -745,7 +745,7 @@ pub struct EntityState {
     /// had never seen, resolved no travel target, cleared its recovery windows
     /// and fell out of `torpedo_run` into `acquire` on the first AI tick.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub blackboards: Vec<(String, crate::messages::SystemBlackboard)>,
+    pub blackboards: Vec<(String, crate::core::messages::SystemBlackboard)>,
 }
 
 /// A ship's **weapon state machines**, named by this issue's AC2.
@@ -978,12 +978,12 @@ pub struct RepairState {
     /// Pending requests as `(station id, label, tier, deficit)`, in the
     /// severity order the queue keeps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub queue: Vec<(String, String, crate::damage::DamageTier, f32)>,
+    pub queue: Vec<(String, String, crate::ship::damage::DamageTier, f32)>,
     /// The "this crew has already been told" latch, as `(system id, tier)`
     /// sorted by id — the component is a `HashMap`, and a payload may not
     /// inherit its iteration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub alerted: Vec<(String, crate::damage::DamageTier)>,
+    pub alerted: Vec<(String, crate::ship::damage::DamageTier)>,
 }
 
 /// The Weapons→Helm **arc-bearing seam** (issues #677/#767), both halves of it.
@@ -1021,9 +1021,9 @@ pub struct ArcRequestState {
     /// after the restore.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last: Option<(
-        crate::messages::WeaponFamily,
+        crate::core::messages::WeaponFamily,
         String,
-        Vec<crate::messages::WeaponEmitterArc>,
+        Vec<crate::core::messages::WeaponEmitterArc>,
     )>,
     /// `PendingArcBearingRequest.target` — the uuid Helm is biasing to bring a
     /// weapon arc onto, or `None`.
@@ -1032,7 +1032,7 @@ pub struct ArcRequestState {
     /// `PendingArcBearingRequest.arcs` — the emitting family's usable ONLINE
     /// emitter arcs Helm folds into its steering bias and self-clears against.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_arcs: Vec<crate::messages::WeaponEmitterArc>,
+    pub pending_arcs: Vec<crate::core::messages::WeaponEmitterArc>,
 }
 
 /// A ship's **reactor allocation** — the per-group power levels, the battery
@@ -1333,7 +1333,7 @@ pub struct LayerFlags {
 /// scripted `ctx.schedule.in_seconds(n).<verb>(…)` also feeds) is **not** here.
 /// Carrying it means giving [`crate::world::config::TriggerAction`] — 22
 /// variants over `AiDirective`, `UtilityConfig`, `ObjectiveSource`,
-/// `ModifierSlot`, `IntModifierSlot` and `crate::balance::Outcome` — a serde
+/// `ModifierSlot`, `IntModifierSlot` and `crate::core::balance::Outcome` — a serde
 /// derive, which would pin six *authored-config* types' shape as save format.
 /// This module refuses that commitment everywhere else it comes up (see
 /// [`PhoenixSnapshot::game_over`], which stores `Outcome` as a label precisely
@@ -1623,7 +1623,7 @@ pub struct CommsState {
     /// already a deterministic function of the run, and it is read in that
     /// order by an actor that emits commands from it.
     ///
-    /// [`crate::messages::CommsMessage`] is the wire type and was already
+    /// [`crate::core::messages::CommsMessage`] is the wire type and was already
     /// `Serialize`/`Deserialize` - this stores it verbatim rather than
     /// projecting it, because every field on it (`is_read`, `selected_response`,
     /// `is_urgent`, `thread_id`, `sender_uuid`) is authoritative state the
@@ -2112,7 +2112,7 @@ fn world_event_from_record(row: &WorldEventRecord) -> Option<WorldEvent> {
     })
 }
 
-fn hull_rows(hull: &crate::damage::SystemHull) -> Vec<(String, f32, f32)> {
+fn hull_rows(hull: &crate::ship::damage::SystemHull) -> Vec<(String, f32, f32)> {
     hull.iter()
         .map(|(id, entry)| (id.0.clone(), entry.current, entry.max))
         .collect()
@@ -2249,7 +2249,7 @@ type WeaponRepairRow = (
     String,
     Option<WeaponState>,
     Option<RepairState>,
-    Vec<(String, crate::messages::SystemBlackboard)>,
+    Vec<(String, crate::core::messages::SystemBlackboard)>,
     Vec<(String, u32, bool)>,
 );
 
@@ -2301,13 +2301,14 @@ fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
                 .then(|| weapon_state(beam, cooldown, torpedoes, arcs, blasters, shields));
                 let repair = (teams.is_some() || queue.is_some() || alerted.is_some())
                     .then(|| repair_state(teams, queue, alerted));
-                let mut boards: Vec<(String, crate::messages::SystemBlackboard)> = blackboards
-                    .map(|b| {
-                        b.0.iter()
-                            .map(|(id, board)| (id.0.clone(), board.clone()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let mut boards: Vec<(String, crate::core::messages::SystemBlackboard)> =
+                    blackboards
+                        .map(|b| {
+                            b.0.iter()
+                                .map(|(id, board)| (id.0.clone(), board.clone()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
                 // The component is a `HashMap` on purpose (see its own docs);
                 // a payload may not inherit that order.
                 boards.sort_by(|a, b| a.0.cmp(&b.0));
@@ -2340,7 +2341,7 @@ fn capture_weapons_and_repair(world: &World) -> Vec<WeaponRepairRow> {
 fn capture_arc_requests(world: &World) -> Vec<(String, ArcRequestState)> {
     let Some(mut query) = world.try_query::<(
         &EntityUuid,
-        Option<&crate::weapons_plugin::WeaponsArcRequestState>,
+        Option<&crate::console::weapons::WeaponsArcRequestState>,
         Option<&crate::ship_plugin::PendingArcBearingRequest>,
     )>() else {
         return Vec::new();
@@ -2581,7 +2582,7 @@ fn repair_state(
     queue: Option<&RepairRequestQueue>,
     alerted: Option<&RepairHumanAlerted>,
 ) -> RepairState {
-    let mut alerted_rows: Vec<(String, crate::damage::DamageTier)> = alerted
+    let mut alerted_rows: Vec<(String, crate::ship::damage::DamageTier)> = alerted
         .map(|a| {
             a.0.iter()
                 .map(|(system, tier)| (system.clone(), *tier))
@@ -2731,7 +2732,7 @@ fn capture_scans(world: &World) -> Vec<(String, crate::science::ScanSaveState)> 
 /// most of them — return no entity rows at all.
 fn capture_spawn_origins(world: &World) -> Vec<(String, crate::world::spawn_origin::SpawnOrigin)> {
     let Some(mut query) =
-        world.try_query::<(&EntityUuid, &crate::entity_spawner::EntitySpawnOrigin)>()
+        world.try_query::<(&EntityUuid, &crate::entities::spawner::EntitySpawnOrigin)>()
     else {
         return Vec::new();
     };
@@ -2776,7 +2777,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
         Option<&EntitySystemHull>,
         Option<&ShipRedAlert>,
         Option<&ShipWeaponsHold>,
-        Option<&crate::command_plugin::ShipStationStances>,
+        Option<&crate::console::command::server::ShipStationStances>,
     )>() else {
         return Vec::new();
     };
@@ -3494,7 +3495,7 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     if let Some((reason, outcome)) = snapshot.game_over.clone() {
         let outcome = outcome
             .as_deref()
-            .and_then(|label| crate::balance::Outcome::parse(label).ok());
+            .and_then(|label| crate::core::balance::Outcome::parse(label).ok());
         world.insert_resource(GameOverReason(reason, outcome));
     }
 
@@ -3718,7 +3719,7 @@ fn restore_comms(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut Res
     };
 
     if let Some(mut inbox) = world.get_resource_mut::<CommsInboxRes>() {
-        inbox.0 = crate::comms_inbox::CommsInbox::new();
+        inbox.0 = crate::console::comms::inbox::CommsInbox::new();
         for message in &stored.inbox {
             inbox.0.inject(message.clone());
         }
@@ -3952,13 +3953,17 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         // authoritative map from the row — an empty row clears it, byte-identical
         // to a never-commanded hull. Re-wrapped into `StationId` from the sorted
         // scalar pairs the capture stored.
-        if let Some(mut stances) = entity_mut.get_mut::<crate::command_plugin::ShipStationStances>()
+        if let Some(mut stances) =
+            entity_mut.get_mut::<crate::console::command::server::ShipStationStances>()
         {
             stances.0 = row
                 .station_stances
                 .iter()
                 .map(|(station, stance)| {
-                    (crate::messages::StationId(station.clone()), stance.clone())
+                    (
+                        crate::core::messages::StationId(station.clone()),
+                        stance.clone(),
+                    )
                 })
                 .collect();
         }
@@ -3982,20 +3987,22 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
             let config = entity_mut.get::<crate::ship_plugin::ShipConfigComponent>();
             let sources = entity_mut.get::<crate::ship_plugin::ShipSystemControlSources>();
             match (config, sources) {
-                (Some(config), Some(sources)) => crate::command_plugin::command_station(&config.0)
-                    .and_then(|command| command.command_target.clone())
-                    .map(|target| {
-                        let now_ai = crate::command_plugin::station_is_ai_controlled(
-                            &config.0, &sources.0, &target,
-                        );
-                        (target, now_ai)
-                    }),
+                (Some(config), Some(sources)) => {
+                    crate::console::command::server::command_station(&config.0)
+                        .and_then(|command| command.command_target.clone())
+                        .map(|target| {
+                            let now_ai = crate::console::command::server::station_is_ai_controlled(
+                                &config.0, &sources.0, &target,
+                            );
+                            (target, now_ai)
+                        })
+                }
                 _ => None,
             }
         };
         if let Some((target, now_ai)) = reseed {
             if let Some(mut last) =
-                entity_mut.get_mut::<crate::command_plugin::LastDirectedControl>()
+                entity_mut.get_mut::<crate::console::command::server::LastDirectedControl>()
             {
                 last.0.clear();
                 last.0.insert(target, now_ai);
@@ -4095,10 +4102,10 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
         }
         if let Some(power) = &row.power {
             if let Some(mut reactor) = entity_mut.get_mut::<crate::ship::power::ShipPowerSystem>() {
-                let allocations: Vec<(crate::messages::PowerGroupId, u8)> = power
+                let allocations: Vec<(crate::core::messages::PowerGroupId, u8)> = power
                     .allocations
                     .iter()
-                    .map(|(id, level)| (crate::messages::PowerGroupId(id.clone()), *level))
+                    .map(|(id, level)| (crate::core::messages::PowerGroupId(id.clone()), *level))
                     .collect();
                 reactor
                     .0
@@ -4190,7 +4197,7 @@ fn restore_entities(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
 /// The same three steps the live spawn took, through the same two functions, so
 /// a rebuilt ship and a streamed-in one cannot come out different: resolve the
 /// template and overrides ([`SpawnOrigin::resolve`]), build the entity
-/// ([`crate::entity_spawner::spawn_entity`]), then re-declare the layer
+/// ([`crate::entities::spawner::spawn_entity`]), then re-declare the layer
 /// ownership and the placement the applier's own arm declares.
 ///
 /// `None` — and therefore a [`RestoreGap::MissingEntity`] — when the template
@@ -4217,7 +4224,7 @@ fn spawn_from_origin(
     origin: &crate::world::spawn_origin::SpawnOrigin,
 ) -> Option<Entity> {
     let mut warnings = Vec::new();
-    let config = origin.resolve(&crate::entity_loader::WasmTemplateLoader, &mut warnings);
+    let config = origin.resolve(&crate::entities::loader::WasmTemplateLoader, &mut warnings);
     for warning in &warnings {
         bevy::log::warn!(
             target: crate::logging::LogCat::World.target(),
@@ -4229,7 +4236,7 @@ fn spawn_from_origin(
     let position = Vec3::new(origin.position[0], origin.position[1], origin.position[2]);
     let entity = {
         let mut commands = world.commands();
-        crate::entity_spawner::spawn_entity(
+        crate::entities::spawner::spawn_entity(
             &mut commands,
             &config,
             position,
@@ -4263,9 +4270,9 @@ fn spawn_from_origin(
     // Put the record back on the ship it describes, so a save taken *after* this
     // resume can rebuild it again. A resumed run that could only be resumed once
     // is a continuation with an expiry date.
-    entity_mut.insert(crate::entity_spawner::EntitySpawnOrigin(origin.clone()));
+    entity_mut.insert(crate::entities::spawner::EntitySpawnOrigin(origin.clone()));
     if row.control.is_some() {
-        entity_mut.insert(crate::ai_plugin::ai_high_fidelity_components());
+        entity_mut.insert(crate::ai::server::ai_high_fidelity_components());
     }
 
     if let Some(path) = &origin.layer_path {
@@ -4478,7 +4485,7 @@ fn apply_repair(entity: &mut EntityWorldMut<'_>, stored: &RepairState) {
 /// rather than steering as though no request were outstanding.
 fn apply_arc_request(entity: &mut EntityWorldMut<'_>, stored: &ArcRequestState) {
     if let Some(mut weapons_state) =
-        entity.get_mut::<crate::weapons_plugin::WeaponsArcRequestState>()
+        entity.get_mut::<crate::console::weapons::WeaponsArcRequestState>()
     {
         weapons_state.last = stored
             .last
@@ -4581,13 +4588,13 @@ fn restore_asteroids(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
                 .push(RestoreGap::MissingAsteroid(row.uuid.clone()));
             continue;
         };
-        let config = crate::asteroid_lifecycle::rock_config(config_path);
+        let config = crate::asteroids::lifecycle::rock_config(config_path);
         let current_hp = row
             .hull
             .as_ref()
             .and_then(|rows| rows.first().map(|(_, current, _)| *current))
             .unwrap_or(config.max_hp);
-        let mut spawned = world.spawn(crate::asteroid_lifecycle::rock_bundle(
+        let mut spawned = world.spawn(crate::asteroids::lifecycle::rock_bundle(
             &row.uuid,
             &config,
             Vec3::new(row.translation[0], row.translation[1], row.translation[2]),
@@ -4601,7 +4608,7 @@ fn restore_asteroids(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
             current_hp,
         ));
         if let Some(mesh) = &config.mesh {
-            spawned.insert(crate::entity_spawner::MeshSection(mesh.clone()));
+            spawned.insert(crate::entities::spawner::MeshSection(mesh.clone()));
         }
         let entity = spawned.id();
         if let Some(mut map) = world.get_resource_mut::<AsteroidEntityMap>() {
@@ -4877,7 +4884,7 @@ impl vellum_save::Sampling for SavedGame<'_> {
 /// bootstrapped hull already has them right. A system the capture does not
 /// mention is left alone rather than zeroed — an unmentioned system is a save
 /// written against a different hull, which the content digest is what refuses.
-fn apply_hull(hull: &mut crate::damage::SystemHull, rows: &[(String, f32, f32)]) {
+fn apply_hull(hull: &mut crate::ship::damage::SystemHull, rows: &[(String, f32, f32)]) {
     for (id, current, _max) in rows {
         hull.set_hp(&SystemId(id.clone()), *current);
     }

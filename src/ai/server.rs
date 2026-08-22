@@ -20,9 +20,9 @@ pub fn anchors_from_world_config(
 }
 
 use crate::ai::lod::{evaluate_lod, LodState};
-use crate::entity_spawner::{BehaviourSection, EntityUuid};
+use crate::entities::spawner::{BehaviourSection, EntityUuid};
 use crate::server_app::{LocalShip, Ship};
-use crate::ship_state::ShipPhysics;
+use crate::ship::state::ShipPhysics;
 
 // The slower snapshot cadence that gates `build_world_snapshot` and
 // `aggregate_doctrine_blackboards` used to be a private, HARDCODED 10 Hz
@@ -189,7 +189,7 @@ pub struct AiHighFidelity;
 /// unit: there is no way to insert the marker without the components it implies.
 pub type AiHighFidelityComponents = (
     AiHighFidelity,
-    crate::console_ai_plugin::ShipFrequencyHintState,
+    crate::console_ai::server::ShipFrequencyHintState,
     crate::ship::helm::ThrustInput,
     crate::ship::helm::SteeringInput,
     crate::ship::helm::LateralThrustInput,
@@ -219,7 +219,7 @@ pub type AiHighFidelityComponents = (
 pub fn ai_high_fidelity_components() -> AiHighFidelityComponents {
     (
         AiHighFidelity,
-        crate::console_ai_plugin::ShipFrequencyHintState::default(),
+        crate::console_ai::server::ShipFrequencyHintState::default(),
         crate::ship::helm::ThrustInput::default(),
         crate::ship::helm::SteeringInput::default(),
         crate::ship::helm::LateralThrustInput::default(),
@@ -239,11 +239,11 @@ pub fn ai_high_fidelity_components() -> AiHighFidelityComponents {
 pub struct AiProfile {
     pub aggression: f32,
     pub sensor_range: f32,
-    /// See [`crate::entity_config::AiProfileConfig::low_lod_cruise_fraction`].
+    /// See [`crate::entities::config::AiProfileConfig::low_lod_cruise_fraction`].
     pub low_lod_cruise_fraction: f32,
-    /// See [`crate::entity_config::AiProfileConfig::low_lod_speed_decay_per_sec`].
+    /// See [`crate::entities::config::AiProfileConfig::low_lod_speed_decay_per_sec`].
     pub low_lod_speed_decay_per_sec: f32,
-    /// See [`crate::entity_config::AiProfileConfig::low_lod_turn_rate_fraction`].
+    /// See [`crate::entities::config::AiProfileConfig::low_lod_turn_rate_fraction`].
     pub low_lod_turn_rate_fraction: f32,
 }
 
@@ -252,10 +252,11 @@ impl Default for AiProfile {
         Self {
             aggression: 0.5,
             sensor_range: 100.0,
-            low_lod_cruise_fraction: crate::entity_config::default_low_lod_cruise_fraction(),
-            low_lod_speed_decay_per_sec: crate::entity_config::default_low_lod_speed_decay_per_sec(
+            low_lod_cruise_fraction: crate::entities::config::default_low_lod_cruise_fraction(),
+            low_lod_speed_decay_per_sec:
+                crate::entities::config::default_low_lod_speed_decay_per_sec(),
+            low_lod_turn_rate_fraction: crate::entities::config::default_low_lod_turn_rate_fraction(
             ),
-            low_lod_turn_rate_fraction: crate::entity_config::default_low_lod_turn_rate_fraction(),
         }
     }
 }
@@ -353,7 +354,7 @@ pub struct WarpOutMarker {
 /// The world plugin observes this event to evaluate `on_entity_attacked`
 /// trigger conditions without a direct dependency on the AI module.
 ///
-/// [`LastShipAttacker`]: crate::weapons_plugin::LastShipAttacker
+/// [`LastShipAttacker`]: crate::console::weapons::LastShipAttacker
 #[derive(Message, Clone, Debug)]
 pub struct AiEntityAttacked {
     pub entity_uuid: String,
@@ -411,13 +412,13 @@ pub struct WorldSnapshot {
 pub(crate) fn build_world_snapshot(
     mut snapshot: ResMut<WorldSnapshot>,
     query: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         &Transform,
-        Option<&crate::entity_spawner::EntityName>,
-        Option<&crate::entity_spawner::FactionComponent>,
-        Option<&crate::entity_spawner::EntitySystemHull>,
-        Option<&crate::entity_spawner::ColliderSection>,
-        Option<&crate::ship_state::ShipPhysics>,
+        Option<&crate::entities::spawner::EntityName>,
+        Option<&crate::entities::spawner::FactionComponent>,
+        Option<&crate::entities::spawner::EntitySystemHull>,
+        Option<&crate::entities::spawner::ColliderSection>,
+        Option<&crate::ship::state::ShipPhysics>,
         // Direct-fire reach (issue #788): the longest range this entity can put
         // unguided fire at, published as a threat fact so another ship's helm
         // can derive a safe standoff ring from it. Needs the control sources (to
@@ -425,16 +426,16 @@ pub(crate) fn build_world_snapshot(
         // range of each bank, and issue #955 took `ModifierSlot::RadarRange` out
         // of it, so this query no longer reads `ShipModifiers` at all.
         Option<&crate::ship_plugin::ShipSystemControlSources>,
-        Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
-        Option<&crate::weapons_plugin::BlasterSystemResource>,
+        Option<&crate::console::weapons::PhaserCombatConfigResource>,
+        Option<&crate::console::weapons::BlasterSystemResource>,
     )>,
     asteroids: Query<
         (
-            &crate::simulation::AsteroidUuid,
+            &crate::server_app::AsteroidUuid,
             &Transform,
-            &crate::entity_spawner::ColliderSection,
+            &crate::entities::spawner::ColliderSection,
         ),
-        With<crate::simulation::Asteroid>,
+        With<crate::server_app::Asteroid>,
     >,
 ) {
     snapshot.entities = query
@@ -579,7 +580,7 @@ pub(crate) fn build_world_snapshot(
 /// carries no direct-fire armament.
 ///
 /// The Bevy adapter for the pure
-/// [`longest_usable_direct_fire_range`](crate::weapons_plugin::longest_usable_direct_fire_range):
+/// [`longest_usable_direct_fire_range`](crate::console::weapons::longest_usable_direct_fire_range):
 /// it reads the per-bank configuration off the entity, applies the same offline
 /// gate the arc-bearing evaluation applies, and hands a flat list to the pure
 /// function. Torpedo tubes are deliberately absent — a homing round has no
@@ -591,10 +592,10 @@ pub(crate) fn build_world_snapshot(
 /// helm derives from this fact is the ring the target's guns actually hold.
 fn entity_direct_fire_range(
     control_sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
-    phasers: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
-    blasters: Option<&crate::weapons_plugin::BlasterSystemResource>,
+    phasers: Option<&crate::console::weapons::PhaserCombatConfigResource>,
+    blasters: Option<&crate::console::weapons::BlasterSystemResource>,
 ) -> f32 {
-    use crate::weapons_plugin::{longest_usable_direct_fire_range, DirectFireEmitter};
+    use crate::console::weapons::{longest_usable_direct_fire_range, DirectFireEmitter};
 
     let emitters: Vec<DirectFireEmitter> =
         entity_direct_fire_banks(control_sources, phasers, blasters)
@@ -625,8 +626,8 @@ fn entity_direct_fire_range(
 fn entity_weapon_arc_sectors(
     ship_yaw: f32,
     control_sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
-    phasers: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
-    blasters: Option<&crate::weapons_plugin::BlasterSystemResource>,
+    phasers: Option<&crate::console::weapons::PhaserCombatConfigResource>,
+    blasters: Option<&crate::console::weapons::BlasterSystemResource>,
 ) -> Vec<crate::weapons::arc_geometry::WeaponArcSector> {
     let banks: Vec<crate::weapons::arc_geometry::WeaponArcBank> =
         entity_direct_fire_banks(control_sources, phasers, blasters)
@@ -645,14 +646,14 @@ fn entity_weapon_arc_sectors(
 /// are projections of this one list.
 fn entity_direct_fire_banks(
     control_sources: Option<&crate::ship_plugin::ShipSystemControlSources>,
-    phasers: Option<&crate::weapons_plugin::PhaserCombatConfigResource>,
-    blasters: Option<&crate::weapons_plugin::BlasterSystemResource>,
+    phasers: Option<&crate::console::weapons::PhaserCombatConfigResource>,
+    blasters: Option<&crate::console::weapons::BlasterSystemResource>,
 ) -> Vec<(bool, crate::weapons::arc_geometry::WeaponArcBank)> {
     use crate::weapons::arc_geometry::WeaponArcBank;
 
     // No control sources (a bare test spawn) means nothing is known to be
     // offline, which is the same reading the arc-bearing path takes.
-    let is_offline = |sid: Option<crate::messages::SystemId>| -> bool {
+    let is_offline = |sid: Option<crate::core::messages::SystemId>| -> bool {
         match (control_sources, sid) {
             (Some(cs), Some(id)) => cs.0.is_offline(&id),
             _ => false,
@@ -667,10 +668,10 @@ fn entity_direct_fire_banks(
             let range = if b.beam_range > 0.0 {
                 b.beam_range
             } else {
-                crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
             };
             banks.push((
-                !is_offline(crate::system_registry::phaser_bank_system_id(&b.id)),
+                !is_offline(crate::ship::system_registry::phaser_bank_system_id(&b.id)),
                 WeaponArcBank {
                     facing_deg: b.facing_deg,
                     fire_arc_deg: b.fire_arc_deg,
@@ -682,7 +683,7 @@ fn entity_direct_fire_banks(
     if let Some(res) = blasters {
         for bs in &res.0 {
             banks.push((
-                !is_offline(crate::system_registry::blaster_bank_system_id(
+                !is_offline(crate::ship::system_registry::blaster_bank_system_id(
                     &bs.config.id,
                 )),
                 WeaponArcBank {
@@ -730,15 +731,15 @@ pub(crate) fn aggregate_doctrine_blackboards(
             // scenery (stars, asteroids) out — only doctrine ships and turrets
             // qualify.
             Option<&BehaviourSection>,
-            &crate::entity_spawner::EntitySystemHull,
+            &crate::entities::spawner::EntitySystemHull,
             &mut crate::server_app::ShipSystemBlackboards,
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::ship::combat_activity::RecentCombatActivity>,
-            Option<&crate::weapons_plugin::LastShipAttacker>,
+            Option<&crate::console::weapons::LastShipAttacker>,
         ),
         Or<(
             With<BehaviourSection>,
-            With<crate::entity_spawner::StaticPointDefence>,
+            With<crate::entities::spawner::StaticPointDefence>,
         )>,
     >,
 ) {
@@ -749,7 +750,7 @@ pub(crate) fn aggregate_doctrine_blackboards(
     let attacked_memory_secs = world_config
         .as_deref()
         .map(|wc| wc.global.attacked_memory_secs)
-        .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().attacked_memory_secs);
+        .unwrap_or_else(|| crate::entities::config::GlobalConfig::default().attacked_memory_secs);
     for (behaviour, hull, mut blackboards, red_alert_opt, activity_opt, last_attacker_opt) in
         &mut query
     {
@@ -865,7 +866,7 @@ pub(crate) fn aggregate_doctrine_blackboards(
             .0
             .get(&crate::ship::system_registry::tactical_radar_system_id())
         {
-            Some(crate::messages::SystemBlackboard::TacticalRadar(bb)) => {
+            Some(crate::core::messages::SystemBlackboard::TacticalRadar(bb)) => {
                 bb.selected_target.clone()
             }
             _ => None,
@@ -874,10 +875,12 @@ pub(crate) fn aggregate_doctrine_blackboards(
             .0
             .get(&crate::ship::system_registry::sensor_radar_system_id())
         {
-            Some(crate::messages::SystemBlackboard::SensorRadar(bb)) => bb.selected_target.clone(),
+            Some(crate::core::messages::SystemBlackboard::SensorRadar(bb)) => {
+                bb.selected_target.clone()
+            }
             _ => None,
         };
-        let viewscreen_bb = crate::messages::ViewscreenBlackboard {
+        let viewscreen_bb = crate::core::messages::ViewscreenBlackboard {
             red_alert,
             hull_integrity_pct: hull_fraction * 100.0,
             last_damage_taken_secs: activity_opt.and_then(|a| a.last_damage_taken),
@@ -888,10 +891,10 @@ pub(crate) fn aggregate_doctrine_blackboards(
             science_target,
         };
         blackboards.0.insert(
-            crate::messages::SystemId(
+            crate::core::messages::SystemId(
                 crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID.to_string(),
             ),
-            crate::messages::SystemBlackboard::Viewscreen(viewscreen_bb),
+            crate::core::messages::SystemBlackboard::Viewscreen(viewscreen_bb),
         );
     }
 }
@@ -989,11 +992,11 @@ fn register_ai_tokens_on_spawn(
 /// that writes the component, so the event lands on the tick after the hit —
 /// the same one-tick bridge `AttackerThisTick` gave it.
 ///
-/// [`LastShipAttacker`]: crate::weapons_plugin::LastShipAttacker
+/// [`LastShipAttacker`]: crate::console::weapons::LastShipAttacker
 fn emit_attacked_on_new_attacker(
     query: Query<
-        (&EntityUuid, &crate::weapons_plugin::LastShipAttacker),
-        Changed<crate::weapons_plugin::LastShipAttacker>,
+        (&EntityUuid, &crate::console::weapons::LastShipAttacker),
+        Changed<crate::console::weapons::LastShipAttacker>,
     >,
     mut attacked_events: MessageWriter<AiEntityAttacked>,
 ) {
@@ -1188,28 +1191,29 @@ fn active_waypoint_route(
 ) -> Option<(String, Vec<String>, bool)> {
     let bb = match blackboards
         .0
-        .get(&crate::system_registry::viewscreen_system_id())
+        .get(&crate::ship::system_registry::viewscreen_system_id())
     {
-        Some(crate::messages::SystemBlackboard::Viewscreen(v)) => v,
+        Some(crate::core::messages::SystemBlackboard::Viewscreen(v)) => v,
         _ => return None,
     };
     bb.scored_objectives
         .iter()
         .filter(|o| {
             o.score > 0.0
-                && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+                && o.relevance
+                    .contains(&crate::core::messages::SystemAffinity::Helm)
                 && matches!(
                     o.directive,
-                    crate::messages::AiDirective::Patrol { .. }
-                        | crate::messages::AiDirective::Reach { .. }
+                    crate::core::messages::AiDirective::Patrol { .. }
+                        | crate::core::messages::AiDirective::Reach { .. }
                 )
         })
         .max_by(|a, b| a.score.total_cmp(&b.score))
         .and_then(|o| match &o.directive {
-            crate::messages::AiDirective::Patrol { anchors, loop_path } => {
+            crate::core::messages::AiDirective::Patrol { anchors, loop_path } => {
                 Some((o.id.clone(), anchors.clone(), *loop_path))
             }
-            crate::messages::AiDirective::Reach { anchor } => {
+            crate::core::messages::AiDirective::Reach { anchor } => {
                 Some((o.id.clone(), vec![anchor.clone()], false))
             }
             _ => None,
@@ -1240,21 +1244,25 @@ fn active_waypoint_route(
 fn active_destroy_target(blackboards: &crate::server_app::ShipSystemBlackboards) -> Option<String> {
     let bb = match blackboards
         .0
-        .get(&crate::system_registry::viewscreen_system_id())
+        .get(&crate::ship::system_registry::viewscreen_system_id())
     {
-        Some(crate::messages::SystemBlackboard::Viewscreen(v)) => v,
+        Some(crate::core::messages::SystemBlackboard::Viewscreen(v)) => v,
         _ => return None,
     };
     bb.scored_objectives
         .iter()
         .filter(|o| {
             o.score > 0.0
-                && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
-                && matches!(o.directive, crate::messages::AiDirective::Destroy { .. })
+                && o.relevance
+                    .contains(&crate::core::messages::SystemAffinity::Helm)
+                && matches!(
+                    o.directive,
+                    crate::core::messages::AiDirective::Destroy { .. }
+                )
         })
         .max_by(|a, b| a.score.total_cmp(&b.score))
         .and_then(|o| match &o.directive {
-            crate::messages::AiDirective::Destroy { target } if !target.is_empty() => {
+            crate::core::messages::AiDirective::Destroy { target } if !target.is_empty() => {
                 Some(target.clone())
             }
             _ => None,
@@ -1520,7 +1528,7 @@ fn simulate_low_lod_ships(
             Option<&crate::entities::spawner::BehaviourSection>,
             // Needed only to keep this ship's own snapshot entry out of its own
             // hazard picture — see `low_lod_avoid_yaw`.
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
         ),
         (With<Ship>, Without<AiHighFidelity>),
     >,
@@ -1544,7 +1552,7 @@ fn simulate_low_lod_ships(
     // Every parse-time default in one place, for hulls that author no
     // `[behaviour]` block at all. Built once rather than per ship: it owns a
     // (here always empty) doctrine `Vec`.
-    let default_behaviour = crate::entity_config::BehaviourConfig::default();
+    let default_behaviour = crate::entities::config::BehaviourConfig::default();
 
     for (
         mut physics,
@@ -1867,7 +1875,7 @@ fn low_lod_objective_steer(
 /// Both are answered by steering rather than pushing: the deviation is an ANGLE
 /// off the route bearing, applied after the caller's snap and proportional to
 /// the threat, up to the hull's authored
-/// [`BehaviourConfig::low_lod_avoidance_deviation_rad`](crate::entity_config::BehaviourConfig::low_lod_avoidance_deviation_rad).
+/// [`BehaviourConfig::low_lod_avoidance_deviation_rad`](crate::entities::config::BehaviourConfig::low_lod_avoidance_deviation_rad).
 /// A ship at full threat flies the tangent — around the obstacle — and eases
 /// back onto its route as it clears. Stateless, so nothing has to be unwound
 /// — true for the route branch above, where `physics.yaw` is re-snapped to
@@ -1908,7 +1916,7 @@ fn low_lod_avoid_yaw(
     forward_speed: f32,
     self_radius: f32,
     self_uuid: uuid::Uuid,
-    behaviour: &crate::entity_config::BehaviourConfig,
+    behaviour: &crate::entities::config::BehaviourConfig,
     snapshot: Option<&WorldSnapshot>,
 ) -> f32 {
     let Some(snapshot) = snapshot else {
@@ -1986,11 +1994,11 @@ mod tests {
     fn world_snapshot_includes_field_asteroids_with_their_radius() {
         let mut app = snapshot_test_app();
         app.world_mut().spawn((
-            crate::simulation::Asteroid,
-            crate::simulation::AsteroidUuid(uuid::Uuid::new_v4().to_string()),
+            crate::server_app::Asteroid,
+            crate::server_app::AsteroidUuid(uuid::Uuid::new_v4().to_string()),
             Transform::from_xyz(30.0, 0.0, -12.0),
-            crate::entity_spawner::ColliderSection(crate::entity_config::ColliderConfig {
-                shape: crate::entity_config::ColliderShape::Ball,
+            crate::entities::spawner::ColliderSection(crate::entities::config::ColliderConfig {
+                shape: crate::entities::config::ColliderShape::Ball,
                 radius: 4.0,
                 length: 0.0,
                 half_height: None,
@@ -2025,10 +2033,10 @@ mod tests {
     /// A hull with one 200-unit phaser bank and one 320-unit blaster bank, plus
     /// the components the spawner would attach for them.
     fn armed_hull_components() -> (
-        crate::weapons_plugin::PhaserCombatConfigResource,
-        crate::weapons_plugin::BlasterSystemResource,
+        crate::console::weapons::PhaserCombatConfigResource,
+        crate::console::weapons::BlasterSystemResource,
     ) {
-        let cfg = crate::entity_config::EntityConfig::from_toml(
+        let cfg = crate::entities::config::EntityConfig::from_toml(
             // Each bank AUTHORS its open-fire policy: since #885b stage 5d
             // strict AI-declaration mode rejects a bank that declares neither a
             // policy nor an explicit idle, because nothing would be synthesised
@@ -2090,13 +2098,13 @@ verb = "fire_blaster"
             .weapons_console
             .expect("hull declares [weapons_console]");
         (
-            crate::weapons_plugin::PhaserCombatConfigResource(
-                crate::entity_config::PhaserCombatConfig::from_weapons_console(&wc),
+            crate::console::weapons::PhaserCombatConfigResource(
+                crate::entities::config::PhaserCombatConfig::from_weapons_console(&wc),
             ),
-            crate::weapons_plugin::BlasterSystemResource(
+            crate::console::weapons::BlasterSystemResource(
                 wc.blaster_banks
                     .iter()
-                    .map(|bc| crate::blaster::BlasterSystem::new(bc.to_runtime()))
+                    .map(|bc| crate::weapons::blaster::BlasterSystem::new(bc.to_runtime()))
                     .collect(),
             ),
         )
@@ -2109,7 +2117,7 @@ verb = "fire_blaster"
         let mut app = snapshot_test_app();
         let (phasers, blasters) = armed_hull_components();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
             Transform::from_xyz(0.0, 0.0, 0.0),
             phasers,
             blasters,
@@ -2151,7 +2159,7 @@ verb = "fire_blaster"
     /// crushed leg discriminate as sharply as the doubled one.
     #[test]
     fn direct_fire_reach_ignores_the_radar_range_slot() {
-        use crate::messages::ModifierSlot;
+        use crate::core::messages::ModifierSlot;
         use crate::modifiers::cache::ModifierSource;
         use crate::modifiers::{Modifier, ShipModifiers};
 
@@ -2164,7 +2172,7 @@ verb = "fire_blaster"
             let mut mods = ShipModifiers::new();
             mods.add_or_update(Modifier {
                 source: ModifierSource::SystemDamage(
-                    crate::system_registry::tactical_radar_system_id(),
+                    crate::ship::system_registry::tactical_radar_system_id(),
                 ),
                 slot: ModifierSlot::RadarRange,
                 bonus,
@@ -2183,7 +2191,7 @@ verb = "fire_blaster"
                  nothing (got x{mult})"
             );
             app.world_mut().spawn((
-                crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+                crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 phasers,
                 blasters,
@@ -2227,13 +2235,13 @@ verb = "fire_blaster"
         let (phasers, blasters) = armed_hull_components();
         let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
         sources.0.set_offline(
-            crate::system_registry::blaster_bank_system_id("lance").unwrap(),
+            crate::ship::system_registry::blaster_bank_system_id("lance").unwrap(),
             true,
         );
         let entity = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+                crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 phasers,
                 blasters,
@@ -2254,7 +2262,7 @@ verb = "fire_blaster"
             .unwrap()
             .0
             .set_offline(
-                crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+                crate::ship::system_registry::phaser_bank_system_id("fore").unwrap(),
                 true,
             );
         app.update();
@@ -2284,10 +2292,10 @@ verb = "fire_blaster"
     /// consumer reads in the simulation one. Building both here, from one yaw
     /// and through the same negation the real sync applies, is what makes these
     /// tests a statement about a ship rather than about a quaternion.
-    fn hull_pose(yaw: f32) -> (Transform, crate::ship_state::ShipPhysics) {
+    fn hull_pose(yaw: f32) -> (Transform, crate::ship::state::ShipPhysics) {
         (
             Transform::from_xyz(0.0, 0.0, 0.0).with_rotation(Quat::from_rotation_y(-yaw)),
-            crate::ship_state::ShipPhysics {
+            crate::ship::state::ShipPhysics {
                 yaw,
                 ..Default::default()
             },
@@ -2336,9 +2344,9 @@ verb = "fire_blaster"
                 crate::ship::physics_systems::sync_ship_position.before(build_world_snapshot),
             );
             app.world_mut().spawn((
-                crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+                crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
                 Transform::default(),
-                crate::ship_state::ShipPhysics {
+                crate::ship::state::ShipPhysics {
                     yaw,
                     forward_speed: 10.0,
                     ..Default::default()
@@ -2377,7 +2385,7 @@ verb = "fire_blaster"
         // Yawed 90 degrees to starboard, so a forward bank bears on +X.
         let (transform, physics) = hull_pose(std::f32::consts::FRAC_PI_2);
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
             transform,
             physics,
             phasers,
@@ -2407,11 +2415,11 @@ verb = "fire_blaster"
         let (phasers, blasters) = armed_hull_components();
         let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
         sources.0.set_offline(
-            crate::system_registry::blaster_bank_system_id("lance").unwrap(),
+            crate::ship::system_registry::blaster_bank_system_id("lance").unwrap(),
             true,
         );
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
             Transform::from_xyz(0.0, 0.0, 0.0),
             phasers,
             blasters,
@@ -2429,15 +2437,15 @@ verb = "fire_blaster"
     fn an_unarmed_entity_and_an_asteroid_publish_no_arc_sectors() {
         let mut app = snapshot_test_app();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
             Transform::from_xyz(0.0, 0.0, 0.0),
         ));
         app.world_mut().spawn((
-            crate::simulation::Asteroid,
-            crate::simulation::AsteroidUuid(uuid::Uuid::new_v4().to_string()),
+            crate::server_app::Asteroid,
+            crate::server_app::AsteroidUuid(uuid::Uuid::new_v4().to_string()),
             Transform::from_xyz(30.0, 0.0, -12.0),
-            crate::entity_spawner::ColliderSection(crate::entity_config::ColliderConfig {
-                shape: crate::entity_config::ColliderShape::Ball,
+            crate::entities::spawner::ColliderSection(crate::entities::config::ColliderConfig {
+                shape: crate::entities::config::ColliderShape::Ball,
                 radius: 4.0,
                 length: 0.0,
                 half_height: None,
@@ -2467,10 +2475,10 @@ verb = "fire_blaster"
         let own_faction = uuid::Uuid::new_v4();
         let (transform, physics) = hull_pose(std::f32::consts::FRAC_PI_2);
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
             transform,
             physics,
-            crate::entity_spawner::FactionComponent(hostile_faction),
+            crate::entities::spawner::FactionComponent(hostile_faction),
             phasers,
             blasters,
         ));
@@ -2480,14 +2488,14 @@ verb = "fire_blaster"
         assert!(!snapshot_entity.weapon_arcs.is_empty());
 
         // (a) The wire payload the helm blackboard builds.
-        let wire: Vec<crate::messages::HostileWeaponArc> =
+        let wire: Vec<crate::core::messages::HostileWeaponArc> =
             snapshot_entity.weapon_arcs.iter().map(Into::into).collect();
 
         // (b) The reduction the helm facts are seeded from, over the same
         //     snapshot entry. Observer 100 units to +X — inside the yawed
         //     hull's forward arcs.
-        let mut registry = crate::faction::FactionRegistry::new();
-        registry.insert(crate::faction::FactionConfig {
+        let mut registry = crate::ai::faction::FactionRegistry::new();
+        registry.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: own_faction,
             name: "Own".into(),
@@ -2538,10 +2546,10 @@ verb = "fire_blaster"
         let (phasers, blasters) = armed_hull_components();
         let (transform, physics) = hull_pose(std::f32::consts::FRAC_PI_2);
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
             transform,
             physics,
-            crate::entity_spawner::FactionComponent(same_faction),
+            crate::entities::spawner::FactionComponent(same_faction),
             phasers,
             blasters,
         ));
@@ -2549,8 +2557,8 @@ verb = "fire_blaster"
         let entity = app.world().resource::<WorldSnapshot>().entities[0].clone();
         assert!(!entity.weapon_arcs.is_empty(), "arcs are still published");
 
-        let mut registry = crate::faction::FactionRegistry::new();
-        registry.insert(crate::faction::FactionConfig {
+        let mut registry = crate::ai::faction::FactionRegistry::new();
+        registry.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: same_faction,
             name: "Own".into(),
@@ -2575,7 +2583,7 @@ verb = "fire_blaster"
     fn an_unarmed_entity_publishes_no_direct_fire_reach() {
         let mut app = snapshot_test_app();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
             Transform::from_xyz(0.0, 0.0, 0.0),
         ));
         app.update();
@@ -2589,15 +2597,15 @@ verb = "fire_blaster"
     fn world_snapshot_carries_both_entities_and_asteroids() {
         let mut app = snapshot_test_app();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
             Transform::from_xyz(0.0, 0.0, 0.0),
         ));
         app.world_mut().spawn((
-            crate::simulation::Asteroid,
-            crate::simulation::AsteroidUuid(uuid::Uuid::new_v4().to_string()),
+            crate::server_app::Asteroid,
+            crate::server_app::AsteroidUuid(uuid::Uuid::new_v4().to_string()),
             Transform::from_xyz(50.0, 0.0, 0.0),
-            crate::entity_spawner::ColliderSection(crate::entity_config::ColliderConfig {
-                shape: crate::entity_config::ColliderShape::Ball,
+            crate::entities::spawner::ColliderSection(crate::entities::config::ColliderConfig {
+                shape: crate::entities::config::ColliderShape::Ball,
                 radius: 2.5,
                 length: 0.0,
                 half_height: None,
@@ -2625,8 +2633,8 @@ verb = "fire_blaster"
     fn world_snapshot_publishes_authored_mobility_not_the_query_arm() {
         let mut app = snapshot_test_app();
         let ball = |radius: f32, movable: bool| {
-            crate::entity_spawner::ColliderSection(crate::entity_config::ColliderConfig {
-                shape: crate::entity_config::ColliderShape::Ball,
+            crate::entities::spawner::ColliderSection(crate::entities::config::ColliderConfig {
+                shape: crate::entities::config::ColliderShape::Ball,
                 radius,
                 length: 0.0,
                 half_height: None,
@@ -2635,23 +2643,23 @@ verb = "fire_blaster"
         };
         // A hull: authored mobile.
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
-            crate::entity_spawner::EntityName("hull".into()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityName("hull".into()),
             Transform::from_xyz(0.0, 0.0, 0.0),
             ball(5.0, true),
         ));
         // A station: same query arm, authored static.
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
-            crate::entity_spawner::EntityName("station".into()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityName("station".into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
             ball(12.0, false),
         ));
         // An entity with no collider at all falls back to the same static
         // default the TOML parser uses.
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
-            crate::entity_spawner::EntityName("bare".into()),
+            crate::entities::spawner::EntityUuid(uuid::Uuid::new_v4().to_string()),
+            crate::entities::spawner::EntityName("bare".into()),
             Transform::from_xyz(200.0, 0.0, 0.0),
         ));
 
@@ -2762,11 +2770,11 @@ verb = "fire_blaster"
 
     // ── Bevy integration tests ─────────────────────────────────────────────
 
-    use crate::config_cache::FactionRegistryResource;
-    use crate::entity_config::BehaviourConfig;
-    use crate::entity_spawner::EntityUuid;
+    use crate::core::messages::GamePhase;
+    use crate::entities::config::BehaviourConfig;
+    use crate::entities::config_cache::FactionRegistryResource;
+    use crate::entities::spawner::EntityUuid;
     use crate::lobby::LobbyPlugin;
-    use crate::messages::GamePhase;
 
     #[derive(Resource, Default)]
     struct AttackedBox(Vec<AiEntityAttacked>);
@@ -2790,7 +2798,7 @@ verb = "fire_blaster"
             .add_plugins(bevy::time::TimePlugin)
             .add_plugins(AiPlugin)
             .insert_resource(FactionRegistryResource(
-                crate::config_cache::get_faction_registry(),
+                crate::entities::config_cache::get_faction_registry(),
             ))
             .init_resource::<AttackedBox>()
             .init_resource::<DestroyedBox>()
@@ -2865,9 +2873,9 @@ verb = "fire_blaster"
     fn beam_hit(app: &mut App, entity: Entity, attacker: &str) {
         let mut e = app.world_mut().entity_mut(entity);
         let mut last = e
-            .get_mut::<crate::weapons_plugin::LastShipAttacker>()
+            .get_mut::<crate::console::weapons::LastShipAttacker>()
             .expect("ship must carry LastShipAttacker");
-        last.set_if_neq(crate::weapons_plugin::LastShipAttacker(Some(
+        last.set_if_neq(crate::console::weapons::LastShipAttacker(Some(
             attacker.to_string(),
         )));
     }
@@ -2894,7 +2902,7 @@ verb = "fire_blaster"
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid("ent-attacked-001".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
-                crate::weapons_plugin::LastShipAttacker::default(),
+                crate::console::weapons::LastShipAttacker::default(),
             ))
             .id();
 
@@ -2929,7 +2937,7 @@ verb = "fire_blaster"
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid("ent-attacked-002".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
-                crate::weapons_plugin::LastShipAttacker::default(),
+                crate::console::weapons::LastShipAttacker::default(),
             ))
             .id();
 
@@ -2965,7 +2973,7 @@ verb = "fire_blaster"
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid("ent-attacked-003".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
-                crate::weapons_plugin::LastShipAttacker::default(),
+                crate::console::weapons::LastShipAttacker::default(),
             ))
             .id();
 
@@ -2998,7 +3006,7 @@ verb = "fire_blaster"
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 EntityUuid("ent-attacked-004".to_string()),
                 BehaviourSection(BehaviourConfig::default()),
-                crate::weapons_plugin::LastShipAttacker::default(),
+                crate::console::weapons::LastShipAttacker::default(),
             ))
             .id();
 
@@ -3009,7 +3017,7 @@ verb = "fire_blaster"
         // The threat passes — the attacker record is cleared.
         app.world_mut()
             .entity_mut(entity)
-            .insert(crate::weapons_plugin::LastShipAttacker(None));
+            .insert(crate::console::weapons::LastShipAttacker(None));
         app.update();
 
         assert_eq!(
@@ -3021,11 +3029,13 @@ verb = "fire_blaster"
 
     // ── Issue #314: WorldView population from components ───────────────────
 
-    fn make_weapons_console_config(beam_range: f32) -> crate::entity_config::WeaponsConsoleConfig {
-        crate::entity_config::WeaponsConsoleConfig {
+    fn make_weapons_console_config(
+        beam_range: f32,
+    ) -> crate::entities::config::WeaponsConsoleConfig {
+        crate::entities::config::WeaponsConsoleConfig {
             torpedo_arc_color: vec![],
             power_multipliers: None,
-            phaser_banks: vec![crate::entity_config::PhaserBankConfig {
+            phaser_banks: vec![crate::entities::config::PhaserBankConfig {
                 id: "fore".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 360.0,
@@ -3049,9 +3059,9 @@ verb = "fire_blaster"
 
     #[test]
     fn self_hull_fraction_reflects_entity_console_hull() {
-        use crate::damage::SystemHull;
-        use crate::entity_spawner::EntitySystemHull;
-        use crate::messages::SystemId;
+        use crate::core::messages::SystemId;
+        use crate::entities::spawner::EntitySystemHull;
+        use crate::ship::damage::SystemHull;
 
         let mut app = build_test_app();
         app.world_mut()
@@ -3087,8 +3097,8 @@ verb = "fire_blaster"
 
     #[test]
     fn npc_beam_ready_true_when_active_beam_inactive_and_no_cooldown() {
-        use crate::entity_spawner::WeaponsConsoleSection;
-        use crate::weapons_plugin::{ActiveBeam, PhaserCooldown};
+        use crate::console::weapons::{ActiveBeam, PhaserCooldown};
+        use crate::entities::spawner::WeaponsConsoleSection;
 
         let mut app = build_test_app();
         app.world_mut()
@@ -3117,8 +3127,8 @@ verb = "fire_blaster"
 
     #[test]
     fn npc_beam_ready_false_when_cooldown_active() {
-        use crate::entity_spawner::WeaponsConsoleSection;
-        use crate::weapons_plugin::{ActiveBeam, PhaserCooldown};
+        use crate::console::weapons::{ActiveBeam, PhaserCooldown};
+        use crate::entities::spawner::WeaponsConsoleSection;
 
         let mut app = build_test_app();
         app.world_mut()
@@ -3150,8 +3160,8 @@ verb = "fire_blaster"
 
     #[test]
     fn weapons_console_section_attached_when_config_has_weapons_console() {
-        use crate::entity_config::EntityConfig;
-        use crate::entity_spawner::WeaponsConsoleSection;
+        use crate::entities::config::EntityConfig;
+        use crate::entities::spawner::WeaponsConsoleSection;
 
         let mut app = build_test_app();
 
@@ -3165,7 +3175,7 @@ verb = "fire_blaster"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -3209,7 +3219,7 @@ verb = "fire_blaster"
         };
 
         let mut commands = app.world_mut().commands();
-        let entity = crate::entity_spawner::spawn_entity(
+        let entity = crate::entities::spawner::spawn_entity(
             &mut commands,
             &config,
             bevy::math::Vec3::ZERO,
@@ -3254,11 +3264,11 @@ verb = "fire_blaster"
     /// without it the ship stays still even when Backfill AI is active.
     #[test]
     fn aggregate_doctrine_blackboards_writes_scored_helm_objective() {
-        use crate::damage::SystemHull;
-        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
-        use crate::entity_spawner::EntitySystemHull;
-        use crate::messages::{SystemAffinity, SystemId};
+        use crate::core::messages::{SystemAffinity, SystemId};
+        use crate::entities::config::{BehaviourConfig, DoctrineObjective};
+        use crate::entities::spawner::EntitySystemHull;
         use crate::server_app::ShipSystemBlackboards;
+        use crate::ship::damage::SystemHull;
         use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
         let mut app = build_test_app();
@@ -3295,11 +3305,13 @@ verb = "fire_blaster"
             .expect("entity must have ShipSystemBlackboards");
 
         let viewscreen =
-            bb.0.get(&crate::messages::SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
-                .expect("viewscreen entry must be present after aggregate_doctrine_blackboards");
+            bb.0.get(&crate::core::messages::SystemId(
+                VIEWSCREEN_SYSTEM_ID.to_string(),
+            ))
+            .expect("viewscreen entry must be present after aggregate_doctrine_blackboards");
 
         let scored = match viewscreen {
-            crate::messages::SystemBlackboard::Viewscreen(v) => &v.scored_objectives,
+            crate::core::messages::SystemBlackboard::Viewscreen(v) => &v.scored_objectives,
             _ => panic!("expected Viewscreen blackboard"),
         };
 
@@ -3323,10 +3335,10 @@ verb = "fire_blaster"
     /// `combat_lock` mirrors its tactical radar's `selected_target`.
     #[test]
     fn aggregate_publishes_combat_lock_for_a_behaviourless_point_defence() {
-        use crate::damage::SystemHull;
-        use crate::entity_spawner::{EntitySystemHull, StaticPointDefence};
-        use crate::messages::{SystemBlackboard, SystemId, TacticalRadarBlackboard};
+        use crate::core::messages::{SystemBlackboard, SystemId, TacticalRadarBlackboard};
+        use crate::entities::spawner::{EntitySystemHull, StaticPointDefence};
         use crate::server_app::ShipSystemBlackboards;
+        use crate::ship::damage::SystemHull;
         use crate::ship::system_registry::{tactical_radar_system_id, VIEWSCREEN_SYSTEM_ID};
 
         let mut app = build_test_app();
@@ -3373,14 +3385,14 @@ verb = "fire_blaster"
     /// Publish a viewscreen pool for one entity and hand back its
     /// `scored_objectives`.
     fn scored_pool_for(
-        behaviour: crate::entity_config::BehaviourConfig,
+        behaviour: crate::entities::config::BehaviourConfig,
         hull_current: f32,
         hull_max: f32,
-    ) -> Vec<crate::messages::ScoredObjective> {
-        use crate::damage::SystemHull;
-        use crate::entity_spawner::EntitySystemHull;
-        use crate::messages::SystemId;
+    ) -> Vec<crate::core::messages::ScoredObjective> {
+        use crate::core::messages::SystemId;
+        use crate::entities::spawner::EntitySystemHull;
         use crate::server_app::ShipSystemBlackboards;
+        use crate::ship::damage::SystemHull;
         use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
         let mut app = build_test_app();
@@ -3399,10 +3411,12 @@ verb = "fire_blaster"
         let bb = q.iter(app.world()).next().expect("blackboards").clone();
         match bb
             .0
-            .get(&crate::messages::SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
+            .get(&crate::core::messages::SystemId(
+                VIEWSCREEN_SYSTEM_ID.to_string(),
+            ))
             .expect("viewscreen entry")
         {
-            crate::messages::SystemBlackboard::Viewscreen(v) => v.scored_objectives.clone(),
+            crate::core::messages::SystemBlackboard::Viewscreen(v) => v.scored_objectives.clone(),
             _ => panic!("expected Viewscreen blackboard"),
         }
     }
@@ -3422,7 +3436,7 @@ verb = "fire_blaster"
         let healthy = scored_pool_for(retreat_behaviour(0.3), 100.0, 100.0);
         let hurt = scored_pool_for(retreat_behaviour(0.3), 10.0, 100.0);
 
-        let score_of = |pool: &[crate::messages::ScoredObjective], id: &str| {
+        let score_of = |pool: &[crate::core::messages::ScoredObjective], id: &str| {
             pool.iter()
                 .find(|o| o.id == id)
                 .unwrap_or_else(|| panic!("{id} must be in the pool"))
@@ -3468,7 +3482,7 @@ verb = "fire_blaster"
         let brave = scored_pool_for(retreat_behaviour(0.1), 40.0, 100.0);
         let cautious = scored_pool_for(retreat_behaviour(0.9), 40.0, 100.0);
 
-        let retreat_score = |pool: &[crate::messages::ScoredObjective]| {
+        let retreat_score = |pool: &[crate::core::messages::ScoredObjective]| {
             pool.iter()
                 .find(|o| o.id == "retreat-when-hurt")
                 .expect("retreat must be in the pool")
@@ -3513,8 +3527,8 @@ verb = "fire_blaster"
     /// ordinary always-on objective to outrank. Mirrors the shape shipped in
     /// `assets/worlds/patrol.toml`, which authors one on `raider_alpha` (#892 —
     /// it used to ship on the retired `pirate_raider.toml`).
-    fn retreat_behaviour(threshold: f32) -> crate::entity_config::BehaviourConfig {
-        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
+    fn retreat_behaviour(threshold: f32) -> crate::entities::config::BehaviourConfig {
+        use crate::entities::config::{BehaviourConfig, DoctrineObjective};
         BehaviourConfig {
             doctrine: vec![
                 DoctrineObjective {
@@ -3571,7 +3585,7 @@ verb = "fire_blaster"
     /// the whole life of the #936 bug.
     #[test]
     fn a_default_last_attacker_component_does_not_read_as_attacked() {
-        let score_of = |pool: &[crate::messages::ScoredObjective], id: &str| {
+        let score_of = |pool: &[crate::core::messages::ScoredObjective], id: &str| {
             pool.iter()
                 .find(|o| o.id == id)
                 .unwrap_or_else(|| panic!("{id} must be in the pool"))
@@ -3639,7 +3653,7 @@ verb = "fire_blaster"
     /// since `tick_beams` marks the target on every hit regardless of damage.
     #[test]
     fn shield_absorbed_hostile_fire_closes_the_assault_gate() {
-        let score_of = |pool: &[crate::messages::ScoredObjective], id: &str| {
+        let score_of = |pool: &[crate::core::messages::ScoredObjective], id: &str| {
             pool.iter()
                 .find(|o| o.id == id)
                 .unwrap_or_else(|| panic!("{id} must be in the pool"))
@@ -3672,7 +3686,7 @@ verb = "fire_blaster"
     /// permanent break-off #1010 exists to remove.
     #[test]
     fn a_ships_own_weapon_fire_does_not_read_as_being_attacked() {
-        let score_of = |pool: &[crate::messages::ScoredObjective], id: &str| {
+        let score_of = |pool: &[crate::core::messages::ScoredObjective], id: &str| {
             pool.iter()
                 .find(|o| o.id == id)
                 .unwrap_or_else(|| panic!("{id} must be in the pool"))
@@ -3718,13 +3732,13 @@ verb = "fire_blaster"
     #[test]
     fn the_assault_resumes_once_the_authored_attacked_window_elapses() {
         use crate::console::weapons::beam::LastShipAttacker;
-        use crate::damage::SystemHull;
-        use crate::entity_spawner::EntitySystemHull;
-        use crate::messages::SystemId;
+        use crate::core::messages::SystemId;
+        use crate::entities::spawner::EntitySystemHull;
         use crate::server_app::ShipSystemBlackboards;
+        use crate::ship::damage::SystemHull;
 
         let window = 2.0_f32;
-        let default_window = crate::entity_config::GlobalConfig::default().attacked_memory_secs;
+        let default_window = crate::entities::config::GlobalConfig::default().attacked_memory_secs;
         assert!(
             window < default_window,
             "the authored window must differ from the {default_window}s serde \
@@ -3844,12 +3858,12 @@ verb = "fire_blaster"
             .expect("blackboards");
         match bb
             .0
-            .get(&crate::messages::SystemId(
+            .get(&crate::core::messages::SystemId(
                 crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID.to_string(),
             ))
             .expect("viewscreen entry")
         {
-            crate::messages::SystemBlackboard::Viewscreen(v) => {
+            crate::core::messages::SystemBlackboard::Viewscreen(v) => {
                 v.scored_objectives
                     .iter()
                     .find(|o| o.id == id)
@@ -3878,15 +3892,15 @@ verb = "fire_blaster"
     /// neither component, which is a further state (`None` vs `Some(default)`
     /// vs `Some(attacker)`) and the one the pre-#936 bug hid behind.
     fn scored_pool_for_attacker(
-        behaviour: crate::entity_config::BehaviourConfig,
+        behaviour: crate::entities::config::BehaviourConfig,
         attacker: Option<&str>,
         activity: Activity,
-    ) -> Vec<crate::messages::ScoredObjective> {
+    ) -> Vec<crate::core::messages::ScoredObjective> {
         use crate::console::weapons::beam::LastShipAttacker;
-        use crate::damage::SystemHull;
-        use crate::entity_spawner::EntitySystemHull;
-        use crate::messages::SystemId;
+        use crate::core::messages::SystemId;
+        use crate::entities::spawner::EntitySystemHull;
         use crate::server_app::ShipSystemBlackboards;
+        use crate::ship::damage::SystemHull;
         use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
         let mut app = build_test_app();
@@ -3907,10 +3921,12 @@ verb = "fire_blaster"
         let bb = q.iter(app.world()).next().expect("blackboards").clone();
         match bb
             .0
-            .get(&crate::messages::SystemId(VIEWSCREEN_SYSTEM_ID.to_string()))
+            .get(&crate::core::messages::SystemId(
+                VIEWSCREEN_SYSTEM_ID.to_string(),
+            ))
             .expect("viewscreen entry")
         {
-            crate::messages::SystemBlackboard::Viewscreen(v) => v.scored_objectives.clone(),
+            crate::core::messages::SystemBlackboard::Viewscreen(v) => v.scored_objectives.clone(),
             _ => panic!("expected Viewscreen blackboard"),
         }
     }
@@ -3918,8 +3934,8 @@ verb = "fire_blaster"
     /// A raid hull shaped like the ones `combat_test.toml` spawns: the
     /// template's untargeted Destroy, plus the world's `not_attacked`-gated
     /// assault on the station.
-    fn assault_behaviour() -> crate::entity_config::BehaviourConfig {
-        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
+    fn assault_behaviour() -> crate::entities::config::BehaviourConfig {
+        use crate::entities::config::{BehaviourConfig, DoctrineObjective};
         BehaviourConfig {
             doctrine: vec![
                 DoctrineObjective {
@@ -3967,7 +3983,7 @@ verb = "fire_blaster"
     // ── LOD system tests ─────────────────────────────────────────────────────
 
     use crate::server_app::{LocalShip, Ship};
-    use crate::ship_state::ShipPhysics;
+    use crate::ship::state::ShipPhysics;
 
     /// Mirrors the production schedule: `simulate_low_lod_ships` (Physics)
     /// steers from the cursor, then `advance_objective_cursors` (Modifiers)
@@ -4050,7 +4066,7 @@ verb = "fire_blaster"
         assert!(world.get::<AiHighFidelity>(e).is_some(), "the marker");
         assert!(
             world
-                .get::<crate::console_ai_plugin::ShipFrequencyHintState>(e)
+                .get::<crate::console_ai::server::ShipFrequencyHintState>(e)
                 .is_some(),
             "frequency-hint state (issue #692)"
         );
@@ -4391,8 +4407,8 @@ verb = "fire_blaster"
                 LodTransitionTimer {
                     last_state_change_secs: 0.0,
                 },
-                BehaviourSection(crate::entity_config::BehaviourConfig {
-                    doctrine: vec![crate::entity_config::DoctrineObjective {
+                BehaviourSection(crate::entities::config::BehaviourConfig {
+                    doctrine: vec![crate::entities::config::DoctrineObjective {
                         id: "assault".into(),
                         text: "Destroy target-ship".into(),
                         directive_kind: Some("Destroy".into()),
@@ -4407,7 +4423,7 @@ verb = "fire_blaster"
                 // as the standing target `active_destroy_target` resolves.
                 blackboards_with_destroy_pool(&[("assault", 1.0, "target-ship")]),
                 crate::entities::spawner::HelmConsoleSection(
-                    crate::entity_config::EntityConfig::from_toml(
+                    crate::entities::config::EntityConfig::from_toml(
                         "[helm_console]\nmax_speed = 100.0\nmax_yaw_rate = 1.0\n",
                     )
                     .unwrap()
@@ -4479,7 +4495,7 @@ verb = "fire_blaster"
                     last_state_change_secs: 0.0,
                 },
                 crate::entities::spawner::HelmConsoleSection(
-                    crate::entity_config::EntityConfig::from_toml(
+                    crate::entities::config::EntityConfig::from_toml(
                         "[helm_console]\nmax_speed = 100.0\nmax_yaw_rate = 1.0\n",
                     )
                     .unwrap()
@@ -4561,8 +4577,8 @@ verb = "fire_blaster"
                 LodTransitionTimer {
                     last_state_change_secs: 0.0,
                 },
-                BehaviourSection(crate::entity_config::BehaviourConfig {
-                    doctrine: vec![crate::entity_config::DoctrineObjective {
+                BehaviourSection(crate::entities::config::BehaviourConfig {
+                    doctrine: vec![crate::entities::config::DoctrineObjective {
                         id: "assault-starbase".into(),
                         text: "Destroy target-ship".into(),
                         directive_kind: Some("Destroy".into()),
@@ -4582,7 +4598,7 @@ verb = "fire_blaster"
                 // would publish it for an attacked ship.
                 blackboards_with_destroy_pool(&[("assault-starbase", 0.0, "target-ship")]),
                 crate::entities::spawner::HelmConsoleSection(
-                    crate::entity_config::EntityConfig::from_toml(
+                    crate::entities::config::EntityConfig::from_toml(
                         "[helm_console]\nmax_speed = 100.0\nmax_yaw_rate = 1.0\n",
                     )
                     .unwrap()
@@ -4686,7 +4702,7 @@ verb = "fire_blaster"
                     ("assault", 1.0, "target-ship"),
                 ]),
                 crate::entities::spawner::HelmConsoleSection(
-                    crate::entity_config::EntityConfig::from_toml(
+                    crate::entities::config::EntityConfig::from_toml(
                         "[helm_console]\nmax_speed = 100.0\nmax_yaw_rate = 1.0\n",
                     )
                     .unwrap()
@@ -4780,7 +4796,7 @@ verb = "fire_blaster"
         max_yaw_rate: f32,
     ) -> crate::entities::spawner::HelmConsoleSection {
         crate::entities::spawner::HelmConsoleSection(
-            crate::entity_config::EntityConfig::from_toml(&format!(
+            crate::entities::config::EntityConfig::from_toml(&format!(
                 "[helm_console]\nmax_speed = {max_speed}\nmax_yaw_rate = {max_yaw_rate}\n"
             ))
             .unwrap()
@@ -5304,29 +5320,31 @@ verb = "fire_blaster"
     ) -> crate::server_app::ShipSystemBlackboards {
         let mut bb = crate::server_app::ShipSystemBlackboards::default();
         bb.0.insert(
-            crate::system_registry::viewscreen_system_id(),
-            crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
-                scored_objectives: vec![crate::messages::ScoredObjective {
-                    id: id.to_string(),
-                    score: 1.0,
-                    directive: crate::messages::AiDirective::Patrol {
-                        anchors: waypoints.iter().map(|w| w.to_string()).collect(),
-                        loop_path,
-                    },
-                    source: crate::messages::ObjectiveSource::Doctrine,
-                    relevance: vec![crate::messages::SystemAffinity::Helm],
-                    snapshot: crate::messages::ObjectiveSnapshot {
+            crate::ship::system_registry::viewscreen_system_id(),
+            crate::core::messages::SystemBlackboard::Viewscreen(
+                crate::core::messages::ViewscreenBlackboard {
+                    scored_objectives: vec![crate::core::messages::ScoredObjective {
                         id: id.to_string(),
-                        text: "Patrol".to_string(),
-                        text_params: Default::default(),
-                        mandatory: false,
-                        status: crate::messages::ObjectiveStatus::Active,
-                        targets: vec![],
-                        source: crate::messages::ObjectiveSource::Doctrine,
-                    },
-                }],
-                ..Default::default()
-            }),
+                        score: 1.0,
+                        directive: crate::core::messages::AiDirective::Patrol {
+                            anchors: waypoints.iter().map(|w| w.to_string()).collect(),
+                            loop_path,
+                        },
+                        source: crate::core::messages::ObjectiveSource::Doctrine,
+                        relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                        snapshot: crate::core::messages::ObjectiveSnapshot {
+                            id: id.to_string(),
+                            text: "Patrol".to_string(),
+                            text_params: Default::default(),
+                            mandatory: false,
+                            status: crate::core::messages::ObjectiveStatus::Active,
+                            targets: vec![],
+                            source: crate::core::messages::ObjectiveSource::Doctrine,
+                        },
+                    }],
+                    ..Default::default()
+                },
+            ),
         );
         bb
     }
@@ -5343,31 +5361,35 @@ verb = "fire_blaster"
     ) -> crate::server_app::ShipSystemBlackboards {
         let mut bb = crate::server_app::ShipSystemBlackboards::default();
         bb.0.insert(
-            crate::system_registry::viewscreen_system_id(),
-            crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
-                scored_objectives: entries
-                    .iter()
-                    .map(|(id, score, target)| crate::messages::ScoredObjective {
-                        id: id.to_string(),
-                        score: *score,
-                        directive: crate::messages::AiDirective::Destroy {
-                            target: target.to_string(),
-                        },
-                        source: crate::messages::ObjectiveSource::Doctrine,
-                        relevance: vec![crate::messages::SystemAffinity::Helm],
-                        snapshot: crate::messages::ObjectiveSnapshot {
-                            id: id.to_string(),
-                            text: "Destroy".to_string(),
-                            text_params: Default::default(),
-                            mandatory: false,
-                            status: crate::messages::ObjectiveStatus::Active,
-                            targets: vec![],
-                            source: crate::messages::ObjectiveSource::Doctrine,
-                        },
-                    })
-                    .collect(),
-                ..Default::default()
-            }),
+            crate::ship::system_registry::viewscreen_system_id(),
+            crate::core::messages::SystemBlackboard::Viewscreen(
+                crate::core::messages::ViewscreenBlackboard {
+                    scored_objectives: entries
+                        .iter()
+                        .map(
+                            |(id, score, target)| crate::core::messages::ScoredObjective {
+                                id: id.to_string(),
+                                score: *score,
+                                directive: crate::core::messages::AiDirective::Destroy {
+                                    target: target.to_string(),
+                                },
+                                source: crate::core::messages::ObjectiveSource::Doctrine,
+                                relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                                snapshot: crate::core::messages::ObjectiveSnapshot {
+                                    id: id.to_string(),
+                                    text: "Destroy".to_string(),
+                                    text_params: Default::default(),
+                                    mandatory: false,
+                                    status: crate::core::messages::ObjectiveStatus::Active,
+                                    targets: vec![],
+                                    source: crate::core::messages::ObjectiveSource::Doctrine,
+                                },
+                            },
+                        )
+                        .collect(),
+                    ..Default::default()
+                },
+            ),
         );
         bb
     }
@@ -5387,27 +5409,28 @@ verb = "fire_blaster"
         score: f32,
         anchor: &str,
     ) -> crate::server_app::ShipSystemBlackboards {
-        if let Some(crate::messages::SystemBlackboard::Viewscreen(v)) =
-            bb.0.get_mut(&crate::system_registry::viewscreen_system_id())
+        if let Some(crate::core::messages::SystemBlackboard::Viewscreen(v)) =
+            bb.0.get_mut(&crate::ship::system_registry::viewscreen_system_id())
         {
-            v.scored_objectives.push(crate::messages::ScoredObjective {
-                id: id.to_string(),
-                score,
-                directive: crate::messages::AiDirective::Reach {
-                    anchor: anchor.to_string(),
-                },
-                source: crate::messages::ObjectiveSource::Doctrine,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
+            v.scored_objectives
+                .push(crate::core::messages::ScoredObjective {
                     id: id.to_string(),
-                    text: "Reach".to_string(),
-                    text_params: Default::default(),
-                    mandatory: false,
-                    status: crate::messages::ObjectiveStatus::Active,
-                    targets: vec![],
-                    source: crate::messages::ObjectiveSource::Doctrine,
-                },
-            });
+                    score,
+                    directive: crate::core::messages::AiDirective::Reach {
+                        anchor: anchor.to_string(),
+                    },
+                    source: crate::core::messages::ObjectiveSource::Doctrine,
+                    relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                    snapshot: crate::core::messages::ObjectiveSnapshot {
+                        id: id.to_string(),
+                        text: "Reach".to_string(),
+                        text_params: Default::default(),
+                        mandatory: false,
+                        status: crate::core::messages::ObjectiveStatus::Active,
+                        targets: vec![],
+                        source: crate::core::messages::ObjectiveSource::Doctrine,
+                    },
+                });
         }
         bb
     }
@@ -5581,28 +5604,30 @@ verb = "fire_blaster"
 
         let mut bb = crate::server_app::ShipSystemBlackboards::default();
         bb.0.insert(
-            crate::system_registry::viewscreen_system_id(),
-            crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
-                scored_objectives: vec![crate::messages::ScoredObjective {
-                    id: "reach-dock".to_string(),
-                    score: 1.0,
-                    directive: crate::messages::AiDirective::Reach {
-                        anchor: "dock".to_string(),
-                    },
-                    source: crate::messages::ObjectiveSource::Mission,
-                    relevance: vec![crate::messages::SystemAffinity::Helm],
-                    snapshot: crate::messages::ObjectiveSnapshot {
+            crate::ship::system_registry::viewscreen_system_id(),
+            crate::core::messages::SystemBlackboard::Viewscreen(
+                crate::core::messages::ViewscreenBlackboard {
+                    scored_objectives: vec![crate::core::messages::ScoredObjective {
                         id: "reach-dock".to_string(),
-                        text: "Reach the dock".to_string(),
-                        text_params: Default::default(),
-                        mandatory: false,
-                        status: crate::messages::ObjectiveStatus::Active,
-                        targets: vec![],
-                        source: crate::messages::ObjectiveSource::Mission,
-                    },
-                }],
-                ..Default::default()
-            }),
+                        score: 1.0,
+                        directive: crate::core::messages::AiDirective::Reach {
+                            anchor: "dock".to_string(),
+                        },
+                        source: crate::core::messages::ObjectiveSource::Mission,
+                        relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                        snapshot: crate::core::messages::ObjectiveSnapshot {
+                            id: "reach-dock".to_string(),
+                            text: "Reach the dock".to_string(),
+                            text_params: Default::default(),
+                            mandatory: false,
+                            status: crate::core::messages::ObjectiveStatus::Active,
+                            targets: vec![],
+                            source: crate::core::messages::ObjectiveSource::Mission,
+                        },
+                    }],
+                    ..Default::default()
+                },
+            ),
         );
 
         // Ship sits on the dock anchor → arrived.
@@ -6144,7 +6169,7 @@ verb = "fire_blaster"
         };
         // Facing -Z at 3 u/s, so the 3-second look-ahead projects to z = -9.
         let avoid = |self_radius: f32, buffer: f32| {
-            let behaviour = crate::entity_config::BehaviourConfig {
+            let behaviour = crate::entities::config::BehaviourConfig {
                 avoidance_buffer: buffer,
                 ..Default::default()
             };
@@ -6201,7 +6226,7 @@ verb = "fire_blaster"
             }],
         };
         let avoid = |ceiling: f32| {
-            let behaviour = crate::entity_config::BehaviourConfig {
+            let behaviour = crate::entities::config::BehaviourConfig {
                 low_lod_avoidance_deviation_rad: ceiling,
                 ..Default::default()
             };

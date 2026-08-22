@@ -2,7 +2,7 @@ use crate::simmath;
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
-use crate::messages::{
+use crate::core::messages::{
     CoordinationPayload, ModifierSlot, SensorsBlackboard, SystemBlackboard, SystemControlPayload,
     SystemId,
 };
@@ -100,7 +100,7 @@ impl Plugin for ShipSensorsPlugin {
         // Admitted-command consumer (issue #833): `handle_sensors_messages`
         // reads the `sensors` system's admitted commands.
         app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::SENSORS_SYSTEM_ID,
+            crate::ship::system_registry::SENSORS_SYSTEM_ID,
         ));
         // The ONE shared AI decision cadence (issue #889), which also derives
         // the slower snapshot latch `operate_sensors_ai` gates on.
@@ -157,7 +157,7 @@ pub fn handle_sensors_messages(
     mut ship_query: Query<
         (
             Entity,
-            &crate::messages::AdmittedCommands,
+            &crate::core::messages::AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
             &mut SensorRadarSelection,
             &crate::ship_plugin::ShipSystemControlSources,
@@ -173,7 +173,7 @@ pub fn handle_sensors_messages(
     for (entity, admitted, _ship_config, mut entity_target, control_sources) in
         ship_query.iter_mut()
     {
-        for cmd in admitted.for_target(crate::system_registry::SENSORS_SYSTEM_ID) {
+        for cmd in admitted.for_target(crate::ship::system_registry::SENSORS_SYSTEM_ID) {
             let uuid = match &cmd.payload {
                 SystemControlPayload::SetScienceTarget { uuid } => uuid,
                 SystemControlPayload::ClearScienceTarget => {
@@ -198,18 +198,18 @@ pub fn handle_sensors_messages(
 
             let sender_origin = control_sources
                 .0
-                .source_for(&crate::system_registry::sensors_system_id());
+                .source_for(&crate::ship::system_registry::sensors_system_id());
 
             writer.write(CoordinationEnqueue {
                 source_entity: entity,
                 sender_origin,
-                target: crate::system_registry::tactical_station_key(),
+                target: crate::ship::system_registry::tactical_station_key(),
                 payload: CoordinationPayload::TargetDesignation {
                     uuid: uuid.clone(),
                     label,
                 },
                 sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
-                sender_system: crate::system_registry::sensors_system_id(),
+                sender_system: crate::ship::system_registry::sensors_system_id(),
             });
         }
     }
@@ -246,13 +246,13 @@ pub fn tick_sensors_frequency_hint(
             &crate::server_app::ShipSystemBlackboards,
             &crate::ship_plugin::ShipSystemControlSources,
             &mut SensorsFrequencyState,
-            Has<crate::ai_plugin::AiHighFidelity>,
+            Has<crate::ai::server::AiHighFidelity>,
         ),
         With<crate::server_app::Ship>,
     >,
     mut writer: MessageWriter<CoordinationEnqueue>,
     target_shields_q: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         &crate::ship::shields::ShipShields,
     )>,
 ) {
@@ -267,7 +267,7 @@ pub fn tick_sensors_frequency_hint(
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
         let combat_lock = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
             _ => None,
@@ -305,15 +305,15 @@ pub fn tick_sensors_frequency_hint(
 
         let sender_origin = control_sources
             .0
-            .source_for(&crate::system_registry::sensors_system_id());
+            .source_for(&crate::ship::system_registry::sensors_system_id());
 
         writer.write(CoordinationEnqueue {
             source_entity: entity,
             sender_origin,
-            target: crate::system_registry::tactical_station_key(),
+            target: crate::ship::system_registry::tactical_station_key(),
             payload: CoordinationPayload::FrequencyHint { frequency },
             sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
-            sender_system: crate::system_registry::sensors_system_id(),
+            sender_system: crate::ship::system_registry::sensors_system_id(),
         });
     }
 }
@@ -350,29 +350,29 @@ pub fn tick_sensors_threat_warning(
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     entity_positions: Query<
         (
-            &crate::entity_spawner::EntityUuid,
+            &crate::entities::spawner::EntityUuid,
             &Transform,
-            Option<&crate::entity_spawner::FactionComponent>,
+            Option<&crate::entities::spawner::FactionComponent>,
         ),
         Without<crate::server_app::Ship>,
     >,
     ship_positions: Query<
         (
-            &crate::entity_spawner::EntityUuid,
-            &crate::ship_state::ShipPhysics,
-            &crate::entity_spawner::FactionComponent,
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::state::ShipPhysics,
+            &crate::entities::spawner::FactionComponent,
         ),
         With<crate::server_app::Ship>,
     >,
     mut ships: Query<
         (
             Entity,
-            &crate::entity_spawner::EntityUuid,
-            &crate::ship_state::ShipPhysics,
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::state::ShipPhysics,
             &crate::ship_plugin::ShipSystemControlSources,
             &mut SensorsThreatState,
             &crate::modifiers::ShipModifiers,
-            Option<&crate::entity_spawner::FactionComponent>,
+            Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::ai::server::AiProfile>,
         ),
         With<crate::server_app::Ship>,
@@ -434,7 +434,7 @@ pub fn tick_sensors_threat_warning(
             let Some(other_f) = other_faction else {
                 continue;
             };
-            if !crate::faction::is_enemy(self_f_uuid, Some(*other_f), reg) {
+            if !crate::ai::faction::is_enemy(self_f_uuid, Some(*other_f), reg) {
                 continue;
             }
             let dx = ox - sx;
@@ -489,18 +489,18 @@ pub fn tick_sensors_threat_warning(
 
         let sender_origin = control_sources
             .0
-            .source_for(&crate::system_registry::sensors_system_id());
+            .source_for(&crate::ship::system_registry::sensors_system_id());
 
         writer.write(CoordinationEnqueue {
             source_entity: entity,
             sender_origin,
-            target: crate::system_registry::shields_system_id(),
+            target: crate::ship::system_registry::shields_system_id(),
             payload: CoordinationPayload::ThreatBearing {
                 bearing_rad: relative_bearing,
                 label,
             },
             sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
-            sender_system: crate::system_registry::sensors_system_id(),
+            sender_system: crate::ship::system_registry::sensors_system_id(),
         });
     }
 }
@@ -569,7 +569,7 @@ pub fn publish_sensors_blackboard(
             science_target_uuid: sensors_target.and_then(|st| st.0.clone()),
         };
         bbs.0.insert(
-            SystemId(crate::system_registry::SENSORS_SYSTEM_ID.to_string()),
+            SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string()),
             SystemBlackboard::Sensors(bb),
         );
     }
@@ -595,8 +595,8 @@ pub fn publish_sensor_radar_blackboard(
     // selection that names one resolves to `None` → no alert field (issue #749).
     alert_q: Query<
         (
-            &crate::entity_spawner::EntityUuid,
-            &crate::ship_state::ShipRedAlert,
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::state::ShipRedAlert,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -613,8 +613,8 @@ pub fn publish_sensor_radar_blackboard(
                 .map(|(_, red_alert)| red_alert.0)
         });
         bbs.0.insert(
-            crate::system_registry::sensor_radar_system_id(),
-            SystemBlackboard::SensorRadar(crate::messages::SensorRadarBlackboard {
+            crate::ship::system_registry::sensor_radar_system_id(),
+            SystemBlackboard::SensorRadar(crate::core::messages::SensorRadarBlackboard {
                 selected_target,
                 selected_target_alert,
             }),
@@ -631,16 +631,16 @@ pub fn publish_sensor_radar_blackboard(
 /// happens in the same tick — `handle_sensors_messages` applies it later
 /// this frame — so there is no one-tick queue lag on the AI sensors path.
 fn emit_sensors_ai_command(
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
-    payload: crate::messages::SystemControlPayload,
+    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
+    payload: crate::core::messages::SystemControlPayload,
     sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
     ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
-    admitted: &mut crate::messages::AdmittedCommands,
+    admitted: &mut crate::core::messages::AdmittedCommands,
 ) -> bool {
     emit_ai_command(
         entity_uuid,
-        crate::system_registry::sensors_system_id(),
+        crate::ship::system_registry::sensors_system_id(),
         payload,
         sources,
         sessions,
@@ -728,17 +728,17 @@ pub fn operate_sensors_ai(
     mut ships: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::server_app::ShipSystemBlackboards,
             &SensorRadarSelection,
-            &crate::ship_state::ShipPhysics,
+            &crate::ship::state::ShipPhysics,
             &crate::modifiers::ShipModifiers,
             Option<&crate::ai::server::AiProfile>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            Option<&crate::entity_spawner::FactionComponent>,
+            Option<&crate::entities::spawner::FactionComponent>,
             Option<&SensorsTargetSelector>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -754,7 +754,7 @@ pub fn operate_sensors_ai(
     // schedule build, so a bare `App` cannot silently diverge from production.
     ai_env: crate::ai::host::AiHostEnv,
     entity_q: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         Option<&crate::entities::spawner::EntityName>,
         &Transform,
     )>,
@@ -768,17 +768,17 @@ pub fn operate_sensors_ai(
     // mutable `AdmittedCommands` in `ships`, so no borrow conflict.
     hostile_ship_q: Query<
         (
-            &crate::entity_spawner::EntityUuid,
-            &crate::ship_state::ShipPhysics,
-            &crate::entity_spawner::FactionComponent,
+            &crate::entities::spawner::EntityUuid,
+            &crate::ship::state::ShipPhysics,
+            &crate::entities::spawner::FactionComponent,
         ),
         With<crate::server_app::Ship>,
     >,
     hostile_entity_q: Query<
         (
-            &crate::entity_spawner::EntityUuid,
+            &crate::entities::spawner::EntityUuid,
             &Transform,
-            Option<&crate::entity_spawner::FactionComponent>,
+            Option<&crate::entities::spawner::FactionComponent>,
         ),
         Without<crate::server_app::Ship>,
     >,
@@ -819,7 +819,10 @@ pub fn operate_sensors_ai(
         // human holder (or an offline system) stands the selector down. Sensors
         // resolves a data-driven SELECTOR the spine does not model, so only its
         // gate — the one step it shares with the policy hosts — routes here.
-        if !crate::ai::host::ai_operates(&sources.0, crate::system_registry::sensors_system_id()) {
+        if !crate::ai::host::ai_operates(
+            &sources.0,
+            crate::ship::system_registry::sensors_system_id(),
+        ) {
             continue;
         }
         // No authored `[sensors_console.selector]` ⇒ no component ⇒ no science
@@ -857,8 +860,8 @@ pub fn operate_sensors_ai(
         // Combat Lock read from the frozen viewscreen blackboard (#829).
         let viewscreen_bb = blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id());
-        if let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
+            .get(&crate::ship::system_registry::viewscreen_system_id());
+        if let Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) = viewscreen_bb {
             // Source: combat-lock — mirror Tactical's designated firing target.
             if let Some(target_uuid) = bb.combat_lock.as_deref() {
                 if let Some(pos) = entity_q.iter().find_map(|(u, _, tf)| {
@@ -876,7 +879,8 @@ pub fn operate_sensors_ai(
             // Resolving a name is not the same as seeing the ship, so each
             // candidate is still gated on the live horizon.
             for objective in bb.scored_objectives.iter().filter(|o| o.score > 0.0) {
-                if let crate::messages::AiDirective::Destroy { target } = &objective.directive {
+                if let crate::core::messages::AiDirective::Destroy { target } = &objective.directive
+                {
                     if target.is_empty() {
                         continue;
                     }
@@ -970,8 +974,8 @@ pub fn operate_sensors_ai(
             continue;
         }
         let payload = match decided {
-            Some(uuid) => crate::messages::SystemControlPayload::SetScienceTarget { uuid },
-            None => crate::messages::SystemControlPayload::ClearScienceTarget,
+            Some(uuid) => crate::core::messages::SystemControlPayload::SetScienceTarget { uuid },
+            None => crate::core::messages::SystemControlPayload::ClearScienceTarget,
         };
         emit_sensors_ai_command(
             entity_uuid,
@@ -993,10 +997,10 @@ pub fn operate_sensors_ai(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use crate::core::messages::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
-    use crate::messages::*;
+    use crate::server_app::{ShipImpulse, SimOutbox};
     use crate::ship::control_source::ControlSource;
-    use crate::simulation::{ShipImpulse, SimOutbox};
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -1026,7 +1030,7 @@ mod tests {
     fn seed_viewscreen_from_selection(
         mut q: Query<
             (
-                Option<&crate::weapons_plugin::TacticalRadarSelection>,
+                Option<&crate::console::weapons::TacticalRadarSelection>,
                 Option<&SensorRadarSelection>,
                 &mut crate::server_app::ShipSystemBlackboards,
             ),
@@ -1036,14 +1040,17 @@ mod tests {
         for (tac, sci, mut bbs) in q.iter_mut() {
             let combat_lock = tac.and_then(|t| t.0.clone());
             let science_target = sci.and_then(|s| s.0.clone());
-            let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+            let mut vbb = match bbs
+                .0
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+            {
                 Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
-                _ => crate::messages::ViewscreenBlackboard::default(),
+                _ => crate::core::messages::ViewscreenBlackboard::default(),
             };
             vbb.combat_lock = combat_lock;
             vbb.science_target = science_target;
             bbs.0.insert(
-                crate::system_registry::viewscreen_system_id(),
+                crate::ship::system_registry::viewscreen_system_id(),
                 SystemBlackboard::Viewscreen(vbb),
             );
         }
@@ -1082,19 +1089,19 @@ mod tests {
             )
             .add_systems(PostUpdate, (collect, collect_enqueues));
         app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             SensorRadarSelection::default(),
             // PR 7 (issue #597) — TacticalRadarSelection is now per-entity Component.
-            crate::simulation::TacticalRadarSelection::default(),
+            crate::server_app::TacticalRadarSelection::default(),
             SensorsFrequencyState::default(),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
         ));
         // One fixed step per update (issue #895): the plugin's systems run on
         // the logical tick, and each harness tick advances it once.
@@ -1122,7 +1129,7 @@ mod tests {
             out.push(OutboundMessage {
                 target,
                 msg,
-                delivery: crate::messages::DeliveryClass::Reliable,
+                delivery: crate::core::messages::DeliveryClass::Reliable,
             });
         }
         app.world_mut().resource_mut::<Outbox>().0.clear();
@@ -1196,8 +1203,8 @@ mod tests {
             &mut app,
             "sensors",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId(
-                    crate::system_registry::SENSORS_SYSTEM_ID.to_string(),
+                target: crate::core::messages::SystemId(
+                    crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string(),
                 ),
                 payload: SystemControlPayload::SetScienceTarget {
                     uuid: "asteroid-42".into(),
@@ -1215,7 +1222,7 @@ mod tests {
 
         assert_eq!(
             enqueued.target,
-            crate::system_registry::tactical_station_key(),
+            crate::ship::system_registry::tactical_station_key(),
             "TargetDesignation should be enqueued for the Tactical system"
         );
         match &enqueued.payload {
@@ -1238,8 +1245,8 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId(
-                    crate::system_registry::SENSORS_SYSTEM_ID.to_string(),
+                target: crate::core::messages::SystemId(
+                    crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string(),
                 ),
                 payload: SystemControlPayload::SetScienceTarget {
                     uuid: "asteroid-42".into(),
@@ -1261,7 +1268,7 @@ mod tests {
     fn set_local_weapons_target(app: &mut App, uuid: Option<String>) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&mut crate::server_app::TacticalRadarSelection, With<crate::server_app::LocalShip>>();
         if let Ok(mut wt) = q.single_mut(app.world_mut()) {
             wt.0 = uuid;
         }
@@ -1351,14 +1358,14 @@ mod tests {
                 .unwrap();
             app.world_mut()
                 .entity_mut(ship)
-                .insert(crate::ai_plugin::AiHighFidelity);
+                .insert(crate::ai::server::AiHighFidelity);
             {
                 let mut cs = app
                     .world_mut()
                     .entity_mut(ship)
                     .take::<crate::ship_plugin::ShipSystemControlSources>()
                     .unwrap();
-                cs.0.set(crate::system_registry::sensors_system_id(), source);
+                cs.0.set(crate::ship::system_registry::sensors_system_id(), source);
                 app.world_mut().entity_mut(ship).insert(cs);
             }
             app.world_mut().resource_mut::<EnqueueLog>().0.clear();
@@ -1399,7 +1406,7 @@ mod tests {
                     .entity_mut(ship)
                     .take::<crate::ship_plugin::ShipSystemControlSources>()
                     .unwrap();
-                cs.0.set(crate::system_registry::sensors_system_id(), source);
+                cs.0.set(crate::ship::system_registry::sensors_system_id(), source);
                 app.world_mut().entity_mut(ship).insert(cs);
             }
             app.world_mut().resource_mut::<EnqueueLog>().0.clear();
@@ -1420,7 +1427,7 @@ mod tests {
             );
             assert_eq!(
                 hint.target,
-                crate::system_registry::tactical_station_key(),
+                crate::ship::system_registry::tactical_station_key(),
                 "the hint is addressed to Tactical either way"
             );
         }
@@ -1435,13 +1442,13 @@ mod tests {
         // Human-controlled: operate_sensors_ai must do nothing.
         let mut human_resolver = ControlSourceResolver::new();
         human_resolver.set(
-            crate::system_registry::sensors_system_id(),
+            crate::ship::system_registry::sensors_system_id(),
             ControlSource::Human,
         );
         let human_sources = crate::ship_plugin::ShipSystemControlSources(human_resolver);
         let human_policy = human_sources
             .0
-            .policy_for(&crate::system_registry::sensors_system_id());
+            .policy_for(&crate::ship::system_registry::sensors_system_id());
         assert!(
             !human_policy.operate_ai,
             "human Sensors should not operate AI"
@@ -1450,13 +1457,13 @@ mod tests {
         // AI-controlled: operate_sensors_ai must gate and proceed.
         let mut ai_resolver = ControlSourceResolver::new();
         ai_resolver.set(
-            crate::system_registry::sensors_system_id(),
+            crate::ship::system_registry::sensors_system_id(),
             ControlSource::Ai,
         );
         let ai_sources = crate::ship_plugin::ShipSystemControlSources(ai_resolver);
         let ai_policy = ai_sources
             .0
-            .policy_for(&crate::system_registry::sensors_system_id());
+            .policy_for(&crate::ship::system_registry::sensors_system_id());
         assert!(
             ai_policy.operate_ai,
             "AI Sensors must gate through operate_ai"
@@ -1473,15 +1480,15 @@ mod tests {
         // Seed the faction registry so is_enemy works.
         let fed_uuid = uuid::Uuid::new_v4();
         let harrow_uuid = uuid::Uuid::new_v4();
-        let mut reg = crate::faction::FactionRegistry::new();
-        reg.insert(crate::faction::FactionConfig {
+        let mut reg = crate::ai::faction::FactionRegistry::new();
+        reg.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: fed_uuid,
             name: "Federation".into(),
             enemies: vec![harrow_uuid],
             compliance: None,
         });
-        reg.insert(crate::faction::FactionConfig {
+        reg.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: harrow_uuid,
             name: "Harrow".into(),
@@ -1498,11 +1505,11 @@ mod tests {
             .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
         let ship = ship_q.single_mut(app.world_mut()).unwrap();
         app.world_mut().entity_mut(ship).insert((
-            crate::entity_spawner::EntityUuid(ship_uuid.clone()),
+            crate::entities::spawner::EntityUuid(ship_uuid.clone()),
             SensorsThreatState::default(),
             crate::modifiers::ShipModifiers::new(),
-            crate::entity_spawner::FactionComponent(fed_uuid),
-            crate::ship_state::ShipPhysics::default(),
+            crate::entities::spawner::FactionComponent(fed_uuid),
+            crate::ship::state::ShipPhysics::default(),
         ));
 
         (app, fed_uuid, harrow_uuid)
@@ -1511,10 +1518,10 @@ mod tests {
     /// Spawn a hostile entity at the given position.
     fn spawn_hostile(app: &mut App, uuid: &str, x: f32, z: f32, faction: uuid::Uuid) {
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid.to_string()),
+            crate::entities::spawner::EntityUuid(uuid.to_string()),
             crate::entities::spawner::EntityName(format!("Hostile-{uuid}")),
             Transform::from_xyz(x, 0.0, z),
-            crate::entity_spawner::FactionComponent(faction),
+            crate::entities::spawner::FactionComponent(faction),
         ));
     }
 
@@ -1534,7 +1541,7 @@ mod tests {
 
         assert_eq!(
             threat.target,
-            crate::system_registry::shields_system_id(),
+            crate::ship::system_registry::shields_system_id(),
             "ThreatBearing should target the Shields system"
         );
         match &threat.payload {
@@ -1621,7 +1628,7 @@ mod tests {
         // Move hostile to starboard (~45°)
         let mut hostile_q = app
             .world_mut()
-            .query_filtered::<&mut Transform, With<crate::entity_spawner::EntityUuid>>();
+            .query_filtered::<&mut Transform, With<crate::entities::spawner::EntityUuid>>();
         for mut tf in hostile_q.iter_mut(app.world_mut()) {
             tf.translation.x = 200.0;
             tf.translation.z = -200.0;
@@ -1650,7 +1657,7 @@ mod tests {
 
         // Despawn the hostile (exclude the LocalShip)
         let mut hostile_q = app.world_mut().query_filtered::<Entity, (
-            With<crate::entity_spawner::EntityUuid>,
+            With<crate::entities::spawner::EntityUuid>,
             Without<crate::server_app::LocalShip>,
         )>();
         if let Some(hostile) = hostile_q.iter_mut(app.world_mut()).next() {
@@ -1709,7 +1716,7 @@ mod tests {
 
         let mut control_sources = crate::ship_plugin::ShipSystemControlSources::default();
         control_sources.0.set(
-            crate::system_registry::sensors_system_id(),
+            crate::ship::system_registry::sensors_system_id(),
             ControlSource::Ai,
         );
 
@@ -1718,15 +1725,15 @@ mod tests {
             control_sources,
             crate::server_app::ShipSystemBlackboards::default(),
             SensorRadarSelection::default(),
-            crate::simulation::TacticalRadarSelection::default(),
+            crate::server_app::TacticalRadarSelection::default(),
             // Sensors range-gate on the ship's own position and radar modifier,
             // so both must be present or the query silently matches nothing and
             // every assertion below passes vacuously.
-            crate::ship_state::ShipPhysics::default(),
+            crate::ship::state::ShipPhysics::default(),
             crate::modifiers::ShipModifiers::default(),
             // Issue #828: the AI decision flows through this ship's own
             // AdmittedCommands, applied by handle_sensors_messages.
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             // The AUTHORED Sensors selector every shipped hull carries. Since
             // #885b stage 5d there is no synthesised stand-in inside
@@ -1749,36 +1756,36 @@ mod tests {
     fn admitted_sensors_payloads(app: &mut App) -> Vec<SystemControlPayload> {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::Ship>>();
+            .query_filtered::<&crate::core::messages::AdmittedCommands, With<crate::server_app::Ship>>();
         q.single(app.world())
             .unwrap()
-            .for_target(crate::system_registry::SENSORS_SYSTEM_ID)
+            .for_target(crate::ship::system_registry::SENSORS_SYSTEM_ID)
             .map(|c| c.payload.clone())
             .collect()
     }
 
     fn insert_viewscreen_objective(app: &mut App, target_name: &str, score: f32) {
-        let viewscreen = crate::messages::ViewscreenBlackboard {
-            scored_objectives: vec![crate::messages::ScoredObjective {
+        let viewscreen = crate::core::messages::ViewscreenBlackboard {
+            scored_objectives: vec![crate::core::messages::ScoredObjective {
                 id: format!("obj-destroy-{target_name}"),
                 score,
-                directive: crate::messages::AiDirective::Destroy {
+                directive: crate::core::messages::AiDirective::Destroy {
                     target: target_name.into(),
                 },
-                source: crate::messages::ObjectiveSource::Mission,
+                source: crate::core::messages::ObjectiveSource::Mission,
                 relevance: vec![
-                    crate::messages::SystemAffinity::Helm,
-                    crate::messages::SystemAffinity::Weapons,
-                    crate::messages::SystemAffinity::Captain,
+                    crate::core::messages::SystemAffinity::Helm,
+                    crate::core::messages::SystemAffinity::Weapons,
+                    crate::core::messages::SystemAffinity::Captain,
                 ],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: format!("obj-destroy-{target_name}"),
                     text: format!("Destroy {target_name}"),
                     text_params: Default::default(),
                     mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![target_name.into()],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             }],
             ..Default::default()
@@ -1790,8 +1797,8 @@ mod tests {
             .single_mut(app.world_mut())
             .expect("Ship must have ShipSystemBlackboards");
         bbs.0.insert(
-            crate::system_registry::viewscreen_system_id(),
-            crate::messages::SystemBlackboard::Viewscreen(viewscreen),
+            crate::ship::system_registry::viewscreen_system_id(),
+            crate::core::messages::SystemBlackboard::Viewscreen(viewscreen),
         );
     }
 
@@ -1807,7 +1814,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::server_app::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(target.to_string());
         }
 
@@ -1863,7 +1870,7 @@ mod tests {
     /// range-gates on `Transform`, so a target without one is not detectable.
     fn spawn_target_at(app: &mut App, uuid: &str, x: f32, z: f32) {
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid.to_string()),
+            crate::entities::spawner::EntityUuid(uuid.to_string()),
             Transform::from_xyz(x, 0.0, z),
         ));
     }
@@ -1890,7 +1897,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::server_app::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
         }
 
@@ -1995,25 +2002,25 @@ mod tests {
     fn ai_sensors_skips_untargeted_destroy() {
         let mut app = sensors_ai_test_app();
 
-        let viewscreen = crate::messages::ViewscreenBlackboard {
-            scored_objectives: vec![crate::messages::ScoredObjective {
+        let viewscreen = crate::core::messages::ViewscreenBlackboard {
+            scored_objectives: vec![crate::core::messages::ScoredObjective {
                 id: "obj-destroy-any".into(),
                 score: 80.0,
-                directive: crate::messages::AiDirective::Destroy { target: "".into() },
-                source: crate::messages::ObjectiveSource::Doctrine,
+                directive: crate::core::messages::AiDirective::Destroy { target: "".into() },
+                source: crate::core::messages::ObjectiveSource::Doctrine,
                 relevance: vec![
-                    crate::messages::SystemAffinity::Helm,
-                    crate::messages::SystemAffinity::Weapons,
-                    crate::messages::SystemAffinity::Captain,
+                    crate::core::messages::SystemAffinity::Helm,
+                    crate::core::messages::SystemAffinity::Weapons,
+                    crate::core::messages::SystemAffinity::Captain,
                 ],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "obj-destroy-any".into(),
                     text: "Engage hostiles".into(),
                     text_params: Default::default(),
                     mandatory: false,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Doctrine,
+                    source: crate::core::messages::ObjectiveSource::Doctrine,
                 },
             }],
             ..Default::default()
@@ -2026,8 +2033,8 @@ mod tests {
                 .single_mut(app.world_mut())
                 .expect("Ship must have ShipSystemBlackboards");
             bbs.0.insert(
-                crate::system_registry::viewscreen_system_id(),
-                crate::messages::SystemBlackboard::Viewscreen(viewscreen),
+                crate::ship::system_registry::viewscreen_system_id(),
+                crate::core::messages::SystemBlackboard::Viewscreen(viewscreen),
             );
         }
 
@@ -2056,7 +2063,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::server_app::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(combat_uuid.clone());
         }
 
@@ -2086,7 +2093,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::server_app::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(dead_uuid);
         }
 
@@ -2113,7 +2120,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::server_app::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
         }
 
@@ -2157,7 +2164,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::server_app::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
         }
         tick_sensors_ai(&mut app);
@@ -2171,7 +2178,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut Transform, With<crate::entity_spawner::EntityUuid>>();
+                .query_filtered::<&mut Transform, With<crate::entities::spawner::EntityUuid>>();
             for mut tf in q.iter_mut(app.world_mut()) {
                 tf.translation.x = 50_000.0;
             }
@@ -2205,7 +2212,7 @@ mod tests {
                 .world_mut()
                 .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0.set(
-                crate::system_registry::sensors_system_id(),
+                crate::ship::system_registry::sensors_system_id(),
                 ControlSource::Human,
             );
         }
@@ -2213,7 +2220,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::server_app::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(target_uuid.clone());
         }
 
@@ -2229,11 +2236,11 @@ mod tests {
         // admission predicate under Human control.
         let mut human_sources = crate::ship_plugin::ShipSystemControlSources::default();
         human_sources.0.set(
-            crate::system_registry::sensors_system_id(),
+            crate::ship::system_registry::sensors_system_id(),
             ControlSource::Human,
         );
         let sessions = crate::lobby::Sessions(crate::lobby::session::SessionManager::new());
-        let mut admitted = crate::messages::AdmittedCommands::default();
+        let mut admitted = crate::core::messages::AdmittedCommands::default();
         assert!(
             !emit_sensors_ai_command(
                 None,
@@ -2259,7 +2266,7 @@ mod tests {
             .entity(entity)
             .get::<crate::server_app::ShipSystemBlackboards>()
             .expect("ShipSystemBlackboards");
-        let key = SystemId(crate::system_registry::SENSORS_SYSTEM_ID.to_string());
+        let key = SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string());
         match bbs.0.get(&key).expect("Sensors blackboard") {
             SystemBlackboard::Sensors(bb) => bb.clone(),
             other => panic!("expected Sensors blackboard, got {other:?}"),
@@ -2283,7 +2290,7 @@ mod tests {
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 crate::server_app::ShipSystemBlackboards::default(),
                 SensorRadarSelection(Some("npc-science-target".into())),
                 crate::ai::server::AiProfile {
@@ -2322,7 +2329,7 @@ mod tests {
         assert_eq!(local_bb.radar_selects, vec!["hostile".to_string()]);
         assert_eq!(
             local_bb.radar_range,
-            crate::messages::default_sensors_radar_range(),
+            crate::core::messages::default_sensors_radar_range(),
             "local ship keeps the console-config range"
         );
         assert_eq!(local_bb.science_target_uuid, None);
@@ -2337,7 +2344,7 @@ mod tests {
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 crate::server_app::ShipSystemBlackboards::default(),
             ))
             .id();
@@ -2346,7 +2353,7 @@ mod tests {
         let npc_bb = sensors_bb_of(&app, npc);
         assert_eq!(
             npc_bb.radar_range,
-            crate::messages::default_sensors_radar_range(),
+            crate::core::messages::default_sensors_radar_range(),
             "profile-less NPC falls back to the console config base range"
         );
         assert_eq!(
@@ -2365,15 +2372,15 @@ mod tests {
 
         let fed = uuid::Uuid::new_v4();
         let harrow = uuid::Uuid::new_v4();
-        let mut reg = crate::faction::FactionRegistry::new();
-        reg.insert(crate::faction::FactionConfig {
+        let mut reg = crate::ai::faction::FactionRegistry::new();
+        reg.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: fed,
             name: "Federation".into(),
             enemies: vec![harrow],
             compliance: None,
         });
-        reg.insert(crate::faction::FactionConfig {
+        reg.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: harrow,
             name: "Harrow".into(),
@@ -2390,7 +2397,7 @@ mod tests {
         };
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::entity_spawner::FactionComponent(fed));
+            .insert(crate::entities::spawner::FactionComponent(fed));
 
         (app, fed, harrow)
     }
@@ -2399,9 +2406,9 @@ mod tests {
     /// nearest-hostile scan filters out ids that are not canonical UUIDs).
     fn spawn_faction_contact(app: &mut App, uuid: &str, x: f32, z: f32, faction: uuid::Uuid) {
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid.to_string()),
+            crate::entities::spawner::EntityUuid(uuid.to_string()),
             Transform::from_xyz(x, 0.0, z),
-            crate::entity_spawner::FactionComponent(faction),
+            crate::entities::spawner::FactionComponent(faction),
         ));
     }
 
@@ -2410,7 +2417,7 @@ mod tests {
     fn selection_of(app: &mut App, uuid: &str) -> Option<String> {
         let mut q = app
             .world_mut()
-            .query::<(&crate::entity_spawner::EntityUuid, &SensorRadarSelection)>();
+            .query::<(&crate::entities::spawner::EntityUuid, &SensorRadarSelection)>();
         q.iter(app.world())
             .find(|(u, _)| u.0 == uuid)
             .and_then(|(_, s)| s.0.clone())
@@ -2465,7 +2472,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::simulation::TacticalRadarSelection, With<crate::server_app::Ship>>();
+                .query_filtered::<&mut crate::server_app::TacticalRadarSelection, With<crate::server_app::Ship>>();
             q.single_mut(app.world_mut()).unwrap().0 = Some(locked.clone());
         }
 
@@ -2483,9 +2490,9 @@ mod tests {
     /// hostile falls outside it and is dropped. AC: horizon damage scaling.
     #[test]
     fn ai_sensors_drops_hostile_when_sensor_radar_damage_shrinks_horizon() {
-        use crate::damage::{ConsoleTierConfig, SystemHull};
-        use crate::entity_spawner::EntitySystemHull;
-        use crate::system_registry::sensor_radar_system_id;
+        use crate::entities::spawner::EntitySystemHull;
+        use crate::ship::damage::{ConsoleTierConfig, SystemHull};
+        use crate::ship::system_registry::sensor_radar_system_id;
         use bevy::ecs::system::RunSystemOnce;
 
         let (mut app, _fed, harrow) = sensors_ai_test_app_with_factions();
@@ -2557,7 +2564,7 @@ mod tests {
         let hostile_entity = {
             let mut q = app
                 .world_mut()
-                .query::<(Entity, &crate::entity_spawner::EntityUuid)>();
+                .query::<(Entity, &crate::entities::spawner::EntityUuid)>();
             q.iter(app.world())
                 .find(|(_, u)| u.0 == enemy)
                 .map(|(e, _)| e)
@@ -2596,31 +2603,31 @@ mod tests {
             let ship_a = q.single(app.world()).unwrap();
             app.world_mut()
                 .entity_mut(ship_a)
-                .insert(crate::entity_spawner::EntityUuid(ship_a_uuid.clone()));
+                .insert(crate::entities::spawner::EntityUuid(ship_a_uuid.clone()));
         }
 
         // Ship B, same faction, 1000 units away on +X.
         let ship_b_uuid = uuid::Uuid::new_v4().to_string();
         let mut control_sources = crate::ship_plugin::ShipSystemControlSources::default();
         control_sources.0.set(
-            crate::system_registry::sensors_system_id(),
+            crate::ship::system_registry::sensors_system_id(),
             ControlSource::Ai,
         );
         app.world_mut().spawn((
             crate::server_app::Ship,
-            crate::entity_spawner::EntityUuid(ship_b_uuid.clone()),
+            crate::entities::spawner::EntityUuid(ship_b_uuid.clone()),
             control_sources,
             crate::server_app::ShipSystemBlackboards::default(),
             SensorRadarSelection::default(),
-            crate::simulation::TacticalRadarSelection::default(),
-            crate::ship_state::ShipPhysics {
+            crate::server_app::TacticalRadarSelection::default(),
+            crate::ship::state::ShipPhysics {
                 x: 1000.0,
                 ..Default::default()
             },
             crate::modifiers::ShipModifiers::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
-            crate::entity_spawner::FactionComponent(fed),
+            crate::entities::spawner::FactionComponent(fed),
             // Ship B needs its own authored selector, same as ship A: the
             // declaration is per-entity and there is no synthesised fallback.
             SensorsTargetSelector {
@@ -2719,7 +2726,7 @@ mod tests {
     /// uses. Here an AI ship independently designates its nearest hostile.
     #[test]
     fn ai_sensors_selection_drives_target_designation_advisory() {
-        use crate::messages::CoordinationPayload;
+        use crate::core::messages::CoordinationPayload;
         let (mut app, _fed, harrow) = sensors_ai_test_app_with_factions();
         // The advisory is emitted by `handle_sensors_messages`; add a sink.
         app.init_resource::<EnqueueLog>().add_systems(
@@ -2773,7 +2780,7 @@ mod tests {
             .get::<crate::server_app::ShipSystemBlackboards>()
             .and_then(|bbs| {
                 bbs.0
-                    .get(&crate::system_registry::sensor_radar_system_id())
+                    .get(&crate::ship::system_registry::sensor_radar_system_id())
                     .cloned()
             }) {
             Some(SystemBlackboard::SensorRadar(bb)) => bb.selected_target_alert,
@@ -2806,8 +2813,8 @@ mod tests {
         // A capable ship target, currently at red alert.
         app.world_mut().spawn((
             crate::server_app::Ship,
-            crate::entity_spawner::EntityUuid("enemy-1".into()),
-            crate::ship_state::ShipRedAlert(true),
+            crate::entities::spawner::EntityUuid("enemy-1".into()),
+            crate::ship::state::ShipRedAlert(true),
         ));
         set_selection(&mut app, scanner, Some("enemy-1"));
         app.update();
@@ -2824,8 +2831,8 @@ mod tests {
         // Capable but not alerted — the distinct Some(false) case.
         app.world_mut().spawn((
             crate::server_app::Ship,
-            crate::entity_spawner::EntityUuid("enemy-2".into()),
-            crate::ship_state::ShipRedAlert(false),
+            crate::entities::spawner::EntityUuid("enemy-2".into()),
+            crate::ship::state::ShipRedAlert(false),
         ));
         set_selection(&mut app, scanner, Some("enemy-2"));
         app.update();
@@ -2842,7 +2849,7 @@ mod tests {
         // An asteroid: carries a uuid but NOT ShipRedAlert and NOT the Ship
         // marker → no capability → no alert field (the no-leak boundary).
         app.world_mut()
-            .spawn(crate::entity_spawner::EntityUuid("asteroid-9".into()));
+            .spawn(crate::entities::spawner::EntityUuid("asteroid-9".into()));
         set_selection(&mut app, scanner, Some("asteroid-9"));
         app.update();
         assert_eq!(

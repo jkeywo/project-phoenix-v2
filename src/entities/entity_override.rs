@@ -74,7 +74,7 @@ pub enum ArrayRule {
 ///
 /// [`merge_entity_config_toml`] keeps the two-argument shape and the
 /// instance-override policy, so every caller that was right before stays right
-/// and unedited; only [`crate::entity_includes`] opts into the other policy.
+/// and unedited; only [`crate::entities::include_resolve`] opts into the other policy.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MergePolicy {
     /// A world's per-instance `[[entity]].overrides` merging onto a resolved
@@ -890,7 +890,7 @@ target_speed = 0.9
                  reconcile ({policy:?})"
             );
         }
-        let parsed = crate::entity_config::EntityConfig::from_toml(
+        let parsed = crate::entities::config::EntityConfig::from_toml(
             "[behaviour]\n[[behaviour.state]]\nname = \"patrol\"\n",
         );
         assert!(
@@ -1272,13 +1272,13 @@ kind = "power_reactor"
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_tombstone_in_a_world_override_fails_against_the_real_hull() {
-        use crate::entity_loader::{apply_overrides, TemplateLoader};
+        use crate::entities::loader::{apply_overrides, TemplateLoader};
 
         const HULL: &str = "assets/entities/ship_harrow_patrol.toml";
-        let hull = crate::entity_loader::FsTemplateLoader
+        let hull = crate::entities::loader::FsTemplateLoader
             .load_template(HULL)
             .unwrap_or_else(|| panic!("{HULL} must load — this test is about the MERGE"));
-        let doctrine_ids = |c: &crate::entity_config::EntityConfig| -> Vec<String> {
+        let doctrine_ids = |c: &crate::entities::config::EntityConfig| -> Vec<String> {
             c.behaviour
                 .as_ref()
                 .map(|b| b.doctrine.iter().map(|d| d.id.clone()).collect())

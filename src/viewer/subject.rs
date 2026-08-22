@@ -20,10 +20,10 @@
 use bevy::prelude::*;
 
 use crate::entities::celestial_visual::{insert_planet_visual, insert_star_visual};
+use crate::entities::config::{EntityConfig, MeshShape};
 use crate::entities::glb_visual::{spawn_glb_visual, GlbSpawnOutcome, PendingSceneHandle};
-use crate::entity_config::{EntityConfig, MeshShape};
-use crate::entity_planet::{PlanetCloudMaterial, PlanetSurfaceMaterial};
-use crate::entity_star::{StarHaloMaterial, StarSurfaceMaterial};
+use crate::entities::planet::{PlanetCloudMaterial, PlanetSurfaceMaterial};
+use crate::entities::star::{StarHaloMaterial, StarSurfaceMaterial};
 
 use super::ViewerArgs;
 
@@ -408,10 +408,10 @@ fn fetch_toml(path: &str) -> Option<String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        crate::config_cache::take_pending_sidecar_toml(path).or_else(|| {
+        crate::entities::config_cache::take_pending_sidecar_toml(path).or_else(|| {
             // Not optional: this reads the entity TOML `?entity=` names, which
             // the caller asked for by name and which therefore ought to exist.
-            crate::config_cache::request_sidecar_fetch(path.to_string(), false);
+            crate::entities::config_cache::request_sidecar_fetch(path.to_string(), false);
             None
         })
     }

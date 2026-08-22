@@ -1,16 +1,16 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
+use crate::core::messages::{GamePhase, ModifierSlot, ServerMessage};
 use crate::debug_overlay::{DamageLog, DamageLogEntry};
-use crate::entity_spawner::{EntityUuid, RegionEffectsSection, RegionShapeSection};
+use crate::entities::spawner::{EntityUuid, RegionEffectsSection, RegionShapeSection};
 use crate::lobby::Target;
-use crate::messages::{GamePhase, ModifierSlot, ServerMessage};
 use crate::modifiers::ShipModifiers;
-use crate::region_effects::RegionEffectKind;
+use crate::regions::effects::RegionEffectKind;
+use crate::server_app::GameOverReason;
+use crate::server_app::{LocalShip, ShipImpulse};
 use crate::server_app::{Ship, SimOutbox};
-use crate::ship_state::ShipPhysics;
-use crate::simulation::GameOverReason;
-use crate::simulation::{LocalShip, ShipImpulse};
+use crate::ship::state::ShipPhysics;
 
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
@@ -178,11 +178,11 @@ fn apply_damage_zone_damage(
     mut ship_query: Query<
         (
             Entity,
-            &mut crate::entity_spawner::EntitySystemHull,
-            Option<&mut crate::simulation::ShipShields>,
+            &mut crate::entities::spawner::EntitySystemHull,
+            Option<&mut crate::server_app::ShipShields>,
             Option<&EntityUuid>,
             Has<LocalShip>,
-            Option<&mut crate::entity_spawner::EntityShipArcHull>,
+            Option<&mut crate::entities::spawner::EntityShipArcHull>,
         ),
         With<Ship>,
     >,
@@ -191,11 +191,13 @@ fn apply_damage_zone_damage(
     mut game_over_reason: Option<ResMut<GameOverReason>>,
     mut damage_log: Option<ResMut<DamageLog>>,
     mut destroyed_events: Option<
-        ResMut<bevy::ecs::message::Messages<crate::ai_plugin::AiEntityDestroyed>>,
+        ResMut<bevy::ecs::message::Messages<crate::ai::server::AiEntityDestroyed>>,
     >,
     mut world: Option<ResMut<crate::lobby::WorldResource>>,
     mut commands: Commands,
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
     sim_rng: Option<Res<crate::sim_rng::SimRng>>,
     // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
     // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
@@ -255,14 +257,14 @@ fn apply_damage_zone_damage(
                 continue;
             };
             for effect in &effects.0 {
-                let crate::region_effects::RegionEffectKind::DamageZone { dps, shield_pierce } =
+                let crate::regions::effects::RegionEffectKind::DamageZone { dps, shield_pierce } =
                     effect
                 else {
                     continue;
                 };
                 let total_damage = dps * dt;
                 let (pierced, absorbed) =
-                    crate::damage::split_damage_for_pierce(total_damage, *shield_pierce);
+                    crate::ship::damage::split_damage_for_pierce(total_damage, *shield_pierce);
 
                 // Absorbed portion: distribute uniformly across all shield
                 // facings (regions have no bearing). Any shield leak adds
@@ -290,8 +292,11 @@ fn apply_damage_zone_damage(
                         sim_rng.as_deref(),
                         crate::sim_rng::SimStream::RegionDamage,
                         |rng| {
-                            let result =
-                                crate::damage::apply_hull_damage(&mut hull.0, hull_amount, rng);
+                            let result = crate::ship::damage::apply_hull_damage(
+                                &mut hull.0,
+                                hull_amount,
+                                rng,
+                            );
                             // Distribute the same absorbed amount across
                             // per-arc hull (issue #514). Skipped for NPCs (no
                             // `EntityShipArcHull`).
@@ -310,13 +315,13 @@ fn apply_damage_zone_damage(
                 // LocalShip. Skipped for a ship with no `EntityUuid` — there
                 // is no identity to key a ledger on.
                 if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
-                    msgs.write(crate::balance::BalanceEvent::DamageApplied {
+                    msgs.write(crate::core::balance::BalanceEvent::DamageApplied {
                         attacker: None,
                         victim: uuid.0.clone(),
                         // A damage zone only ever ticks ships; asteroids carry
                         // no hull the zone could touch.
-                        victim_kind: crate::balance::VictimKind::Ship,
-                        weapon: crate::balance::WEAPON_KIND_REGION.to_string(),
+                        victim_kind: crate::core::balance::VictimKind::Ship,
+                        weapon: crate::core::balance::WEAPON_KIND_REGION.to_string(),
                         amount: total_damage,
                         shield_absorbed: shield_amount,
                         hull_damage: hull_applied,
@@ -389,7 +394,7 @@ fn apply_damage_zone_damage(
                                 reason.0 = Some("server.game_over.ship_destroyed".into());
                                 // The LocalShip died → defeat (#843), latched
                                 // under the same first-write guard as the reason.
-                                reason.1 = Some(crate::balance::Outcome::Defeat);
+                                reason.1 = Some(crate::core::balance::Outcome::Defeat);
                                 // EntityDestroyed for the player death, once
                                 // (guarded by the first reason write). A damage
                                 // zone has no shooter → no killer. Shares the
@@ -399,10 +404,12 @@ fn apply_damage_zone_damage(
                                 if let (Some(msgs), Some(uuid)) =
                                     (balance_events.as_mut(), ship_uuid)
                                 {
-                                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
-                                        victim: uuid.0.clone(),
-                                        killer: None,
-                                    });
+                                    msgs.write(
+                                        crate::core::balance::BalanceEvent::EntityDestroyed {
+                                            victim: uuid.0.clone(),
+                                            killer: None,
+                                        },
+                                    );
                                 }
                             }
                         }
@@ -418,7 +425,7 @@ fn apply_damage_zone_damage(
                             world.0.entities.retain(|e| e.uuid != uuid.0);
                         }
                         if let Some(ref mut msgs) = destroyed_events {
-                            msgs.write(crate::ai_plugin::AiEntityDestroyed {
+                            msgs.write(crate::ai::server::AiEntityDestroyed {
                                 entity_uuid: uuid.0.clone(),
                             });
                         }
@@ -436,7 +443,7 @@ fn apply_damage_zone_damage(
                         // EntityDestroyed for the NPC death, co-located with the
                         // AiEntityDestroyed write. Damage zone → no killer.
                         if let Some(msgs) = balance_events.as_mut() {
-                            msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                            msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
                                 victim: uuid.0.clone(),
                                 killer: None,
                             });
@@ -506,7 +513,7 @@ pub(crate) fn handle_slow_zone_speed_clamp(
     if !has_slow {
         return;
     }
-    let base_max = crate::ship_physics::ShipPhysicsConfig::new().max_speed;
+    let base_max = crate::ship::physics::ShipPhysicsConfig::new().max_speed;
     let default_modifiers;
     let modifiers: &ShipModifiers = match modifiers_q.get(ev.subject) {
         Ok(m) => m,
@@ -531,16 +538,16 @@ pub(crate) fn handle_slow_zone_speed_clamp(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::damage::SystemHull;
-    use crate::entity_config::EntityConfig;
-    use crate::entity_spawner::spawn_entity;
-    use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
-    use crate::messages::ModifierSlot;
+    use crate::core::messages::ModifierSlot;
+    use crate::entities::config::EntityConfig;
+    use crate::entities::spawner::spawn_entity;
     use crate::modifiers::ShipModifiers;
-    use crate::region_effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
-    use crate::region_shape::RegionShape;
-    use crate::ship_physics::ShipPhysicsConfig;
-    use crate::simulation::ShipImpulse;
+    use crate::regions::effects::{BlocksImpulseEffect, RadarDampeningEffect, SlowZoneEffect};
+    use crate::regions::shape::RegionShape;
+    use crate::server_app::ShipImpulse;
+    use crate::ship::damage::SystemHull;
+    use crate::ship::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
+    use crate::ship::physics::ShipPhysicsConfig;
 
     /// Build a minimal Bevy app with the real `RegionPlugin`, one fixed
     /// simulation step per `update()` (issue #895).
@@ -555,9 +562,9 @@ mod tests {
         // Spawn the ship entity with ShipPhysics and ShipModifiers so region systems can query it.
         app.world_mut().spawn((
             LocalShip,
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             Transform::default(),
-            crate::ship_state::ShipPhysics::default(),
+            crate::ship::state::ShipPhysics::default(),
             ShipModifiers::new(),
         ));
         app
@@ -581,7 +588,7 @@ mod tests {
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -647,7 +654,7 @@ mod tests {
     fn set_ship_pos(app: &mut App, x: f32, z: f32) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::ship_state::ShipPhysics, With<LocalShip>>();
+            .query_filtered::<&mut crate::ship::state::ShipPhysics, With<LocalShip>>();
         let mut physics = q
             .single_mut(app.world_mut())
             .expect("expected LocalShip with ShipPhysics");
@@ -793,13 +800,13 @@ mod tests {
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Damage Zone tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-    use crate::region_effects::{DamageZoneEffect, RegionEffectsConfig as EffectsCfg};
+    use crate::regions::effects::{DamageZoneEffect, RegionEffectsConfig as EffectsCfg};
     use std::time::Duration;
 
     fn ship_hull_hp(app: &mut App) -> f32 {
         let hull = app
             .world_mut()
-            .query_filtered::<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>()
+            .query_filtered::<&crate::entities::spawner::EntitySystemHull, With<LocalShip>>()
             .single(app.world())
             .unwrap()
             .0
@@ -815,22 +822,22 @@ mod tests {
         // for the NPC-destruction path (PRD #597 PR 9). They're written only
         // when a non-LocalShip ship dies inside a damage zone, but the
         // MessageWriter and Resource must be registered up-front.
-        app.add_message::<crate::ai_plugin::AiEntityDestroyed>();
+        app.add_message::<crate::ai::server::AiEntityDestroyed>();
         app.init_resource::<crate::lobby::WorldResource>();
-        use crate::shield::{ShieldConfig, ShieldSystem};
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
         let hull_config = &[
-            (crate::messages::SystemId("helm".into()), 25.0),
-            (crate::messages::SystemId("tactical".into()), 25.0),
-            (crate::messages::SystemId("power".into()), 25.0),
-            (crate::messages::SystemId("shields".into()), 25.0),
+            (crate::core::messages::SystemId("helm".into()), 25.0),
+            (crate::core::messages::SystemId("tactical".into()), 25.0),
+            (crate::core::messages::SystemId("power".into()), 25.0),
+            (crate::core::messages::SystemId("shields".into()), 25.0),
         ];
         app.world_mut().spawn((
             LocalShip,
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             Transform::default(),
-            crate::ship_state::ShipPhysics::default(),
-            crate::simulation::ShipShields(ShieldSystem::new(&ShieldConfig::default()), 0.5),
-            crate::entity_spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
+            crate::ship::state::ShipPhysics::default(),
+            crate::server_app::ShipShields(ShieldSystem::new(&ShieldConfig::default()), 0.5),
+            crate::entities::spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
             ShipModifiers::new(),
         ));
         app
@@ -842,9 +849,9 @@ mod tests {
             .add_plugins(RegionPlugin);
         app.world_mut().spawn((
             LocalShip,
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             Transform::default(),
-            crate::ship_state::ShipPhysics::default(),
+            crate::ship::state::ShipPhysics::default(),
             ShipImpulse::default(),
             ShipModifiers::new(),
         ));
@@ -883,7 +890,7 @@ mod tests {
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -961,7 +968,7 @@ mod tests {
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -1056,8 +1063,8 @@ mod tests {
     fn damage_zone_bypasses_shields() {
         let mut app = damage_test_app();
         // Override shields with custom config via entity component
-        use crate::shield::{ShieldConfig, ShieldSystem};
-        use crate::simulation::ShipShields;
+        use crate::server_app::ShipShields;
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
@@ -1092,8 +1099,8 @@ mod tests {
     #[test]
     fn damage_zone_partial_pierce_splits_70_30() {
         let mut app = damage_test_app();
-        use crate::shield::{ShieldConfig, ShieldSystem};
-        use crate::simulation::ShipShields;
+        use crate::server_app::ShipShields;
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
@@ -1132,8 +1139,8 @@ mod tests {
     #[test]
     fn damage_zone_zero_pierce_routes_all_to_shields() {
         let mut app = damage_test_app();
-        use crate::shield::{ShieldConfig, ShieldSystem};
-        use crate::simulation::ShipShields;
+        use crate::server_app::ShipShields;
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
@@ -1193,8 +1200,8 @@ mod tests {
     /// should decrease.
     #[test]
     fn npc_ship_in_damage_zone_takes_hull_damage() {
-        use crate::damage::SystemHull;
-        use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+        use crate::entities::spawner::{EntitySystemHull, EntityUuid};
+        use crate::ship::damage::SystemHull;
 
         let mut app = damage_test_app();
 
@@ -1204,14 +1211,14 @@ mod tests {
 
         // Spawn an NPC ship at the origin with the Ship marker but no
         // LocalShip. Its EntitySystemHull starts at 100 HP.
-        let npc_hull_config = &[(crate::messages::SystemId("captain".into()), 100.0)];
+        let npc_hull_config = &[(crate::core::messages::SystemId("captain".into()), 100.0)];
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 EntityUuid("npc-damage-zone".to_string()),
                 Transform::from_xyz(0.0, 0.0, 0.0),
-                crate::ship_state::ShipPhysics {
+                crate::ship::state::ShipPhysics {
                     x: 0.0,
                     z: 0.0,
                     ..Default::default()
@@ -1355,9 +1362,9 @@ mod tests {
         let _npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 Transform::default(),
-                crate::ship_state::ShipPhysics {
+                crate::ship::state::ShipPhysics {
                     x: 80.0,
                     z: 0.0,
                     ..Default::default()
@@ -1383,12 +1390,12 @@ mod tests {
         // `RegionEntered` first.
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(RegionPlugin)
-            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin);
+            .add_plugins(crate::modifiers::coordination::ModifierCoordinationPlugin);
         app.world_mut().spawn((
             LocalShip,
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             Transform::default(),
-            crate::ship_state::ShipPhysics::default(),
+            crate::ship::state::ShipPhysics::default(),
             ShipModifiers::new(),
         ));
         app
@@ -1417,7 +1424,7 @@ mod tests {
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -1565,12 +1572,12 @@ mod tests {
         // `RegionEntered` first.
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(RegionPlugin)
-            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin);
+            .add_plugins(crate::modifiers::coordination::ModifierCoordinationPlugin);
         app.world_mut().spawn((
             LocalShip,
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             Transform::default(),
-            crate::ship_state::ShipPhysics::default(),
+            crate::ship::state::ShipPhysics::default(),
             ShipModifiers::new(),
         ));
         app
@@ -1584,7 +1591,7 @@ mod tests {
         thrust_modifier: Option<f32>,
         yaw_rate_modifier: Option<f32>,
     ) -> Entity {
-        use crate::region_effects::RegionEffectsConfig as EffectsCfg;
+        use crate::regions::effects::RegionEffectsConfig as EffectsCfg;
         let config = EntityConfig {
             reference_grid: None,
             name: None,
@@ -1594,7 +1601,7 @@ mod tests {
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -1713,18 +1720,18 @@ mod tests {
         check_modifier(&mut app, ModifierSlot::MaxYawRate, 1.0);
     }
 
-    fn get_ship_physics(app: &mut App) -> crate::ship_state::ShipPhysics {
+    fn get_ship_physics(app: &mut App) -> crate::ship::state::ShipPhysics {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::ship_state::ShipPhysics, With<LocalShip>>();
+            .query_filtered::<&crate::ship::state::ShipPhysics, With<LocalShip>>();
         *q.single(app.world())
             .expect("expected LocalShip with ShipPhysics")
     }
 
-    fn set_physics(app: &mut App, f: impl FnOnce(&mut crate::ship_state::ShipPhysics)) {
+    fn set_physics(app: &mut App, f: impl FnOnce(&mut crate::ship::state::ShipPhysics)) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::ship_state::ShipPhysics, With<LocalShip>>();
+            .query_filtered::<&mut crate::ship::state::ShipPhysics, With<LocalShip>>();
         let mut p = q
             .single_mut(app.world_mut())
             .expect("expected LocalShip with ShipPhysics");
@@ -1836,7 +1843,7 @@ mod tests {
         // ship_query.single_mut() on With<Ship>. With NPCs having Ship marker,
         // single_mut() returns Err and the clamp silently no-ops for the player.
         // After fix: uses trigger.event().subject so the entering entity is always clamped.
-        use crate::ship_state::ShipPhysics;
+        use crate::ship::state::ShipPhysics;
 
         let mut app = slow_zone_test_app();
 
@@ -1849,7 +1856,7 @@ mod tests {
         // Spawn a second NPC ship (now has Ship marker). Before the fix this made
         // single_mut() return Err and the player would not be clamped.
         app.world_mut().spawn((
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             Transform::from_xyz(200.0, 0.0, 0.0), // outside the zone
             ShipPhysics {
                 forward_speed: 50.0,
@@ -1875,7 +1882,7 @@ mod tests {
     /// `ShipModifiers` component — while the player's speed is untouched.
     #[test]
     fn slow_zone_slows_npc_ship() {
-        use crate::ship_state::ShipPhysics;
+        use crate::ship::state::ShipPhysics;
 
         let mut app = slow_zone_test_app();
 
@@ -1893,7 +1900,7 @@ mod tests {
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 Transform::from_xyz(10.0, 0.0, 0.0),
                 ShipPhysics {
                     x: 10.0,
@@ -1917,7 +1924,7 @@ mod tests {
             .expect("NPC must retain ShipPhysics")
             .forward_speed;
         let expected_clamped =
-            crate::ship_physics::ShipPhysicsConfig::new().max_speed * (1.0 / 1.5);
+            crate::ship::physics::ShipPhysicsConfig::new().max_speed * (1.0 / 1.5);
         assert!(
             (npc_speed - expected_clamped).abs() < 0.5,
             "NPC entering slow zone must be clamped to ~{}, got {}",
@@ -1936,8 +1943,8 @@ mod tests {
 
     // Ã¢â€â‚¬Ã¢â€â‚¬ Flag effect tests (CommsJam / SensorBlind) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
-    use crate::messages::FlagKind;
-    use crate::region_effects::{CommsJamEffect, SensorBlindEffect};
+    use crate::core::messages::FlagKind;
+    use crate::regions::effects::{CommsJamEffect, SensorBlindEffect};
 
     fn flag_test_app() -> App {
         let mut app = App::new();
@@ -1947,12 +1954,12 @@ mod tests {
         // `RegionEntered` first.
         app.add_plugins(bevy::time::TimePlugin)
             .add_plugins(RegionPlugin)
-            .add_plugins(crate::modifier_coordination::ModifierCoordinationPlugin);
+            .add_plugins(crate::modifiers::coordination::ModifierCoordinationPlugin);
         app.world_mut().spawn((
             LocalShip,
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             Transform::default(),
-            crate::ship_state::ShipPhysics::default(),
+            crate::ship::state::ShipPhysics::default(),
             ShipModifiers::new(),
         ));
         app
@@ -1969,7 +1976,7 @@ mod tests {
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2037,7 +2044,7 @@ mod tests {
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,

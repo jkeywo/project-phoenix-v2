@@ -3,7 +3,7 @@
 //! Authored entity TOMLs name *rig markers* (`marker = "phasers_fore"`,
 //! `markers = ["engine_port", …]`) that must exist in the model rig sidecar
 //! selected by the entity's `[mesh] model` + `variant`
-//! ([`crate::model_rig::sidecar_path`]). Until this module existed every
+//! ([`crate::entities::model_rig::sidecar_path`]). Until this module existed every
 //! resolution path was a silent `Option` fallback: a misspelled marker simply
 //! attached the beam/exhaust/camera to the ship centre and nobody found out.
 //!
@@ -54,7 +54,7 @@
 //!
 //! **Gap: the WASM host.** The shipped game runs in the browser, where rig
 //! sidecars arrive *asynchronously* from JS
-//! ([`crate::config_cache::wasm_push_sidecar_toml`]) some frames after the
+//! ([`crate::entities::config_cache::wasm_push_sidecar_toml`]) some frames after the
 //! template is parsed. There is no point in that boot at which every sidecar
 //! is known, so nothing validates before `glb_visual` attaches. A hand-edited
 //! entity TOML shipped past the editor and past CI would therefore still fall
@@ -73,8 +73,8 @@
 
 use std::collections::HashSet;
 
-use crate::entity_config::EntityConfig;
-use crate::model_rig::ModelRig;
+use crate::entities::config::EntityConfig;
+use crate::entities::model_rig::ModelRig;
 use crate::world::validate::{line_of, Severity, SourceLocation};
 
 /// Reserved marker-name prefix for camera viewpoints. The captain console

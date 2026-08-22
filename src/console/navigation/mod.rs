@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
-use crate::messages::{
+use crate::core::messages::{
     AdmittedCommands, NavigationBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
     WaypointSnapshot,
 };
@@ -344,9 +344,9 @@ fn issue_navigate_to_clearance(
                 // post-admission enqueuer, never from the wire path.
                 sender_origin: control_sources
                     .0
-                    .source_for(&crate::system_registry::navigation_system_id()),
-                target: crate::system_registry::helm_station_key(),
-                payload: crate::messages::CoordinationPayload::NavigateTo {
+                    .source_for(&crate::ship::system_registry::navigation_system_id()),
+                target: crate::ship::system_registry::helm_station_key(),
+                payload: crate::core::messages::CoordinationPayload::NavigateTo {
                     generation,
                     // Coords for the chatter popup's display only (issue #977);
                     // the Helm latches on `generation` and reads the waypoint
@@ -355,7 +355,7 @@ fn issue_navigate_to_clearance(
                     z: snapshot.z,
                 },
                 sender_label: crate::ship::coordination::CHATTER_SENDER_NAVIGATION.to_string(),
-                sender_system: crate::system_registry::navigation_system_id(),
+                sender_system: crate::ship::system_registry::navigation_system_id(),
             });
             state.issued_generation = Some(generation);
         }
@@ -382,7 +382,7 @@ fn make_waypoint_mode(x: f32, z: f32, source_uuid: Option<&str>) -> WaypointMode
 /// ship so both player and NPC waypoints track their anchors.
 fn refresh_anchored_waypoint(
     mut waypoint_q: Query<&mut NavigationWaypoint, With<crate::server_app::Ship>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform)>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform)>,
 ) {
     for mut waypoint in waypoint_q.iter_mut() {
         let Some(WaypointMode::Anchored {
@@ -434,8 +434,8 @@ fn publish_navigation_blackboard(
     // stays a pure publisher; the state itself is advanced by
     // `civilian::tick_civilian_traffic` in `SimSet::Input`.
     civilians_q: Query<(
-        &crate::entity_spawner::EntityUuid,
-        Option<&crate::entity_spawner::EntityName>,
+        &crate::entities::spawner::EntityUuid,
+        Option<&crate::entities::spawner::EntityName>,
         &crate::civilian::CivilianTraffic,
     )>,
     mut ship_q: Query<
@@ -488,14 +488,14 @@ fn publish_navigation_blackboard(
 /// rows jump under the operator's finger.
 fn civilian_traffic_rows(
     civilians: &Query<(
-        &crate::entity_spawner::EntityUuid,
-        Option<&crate::entity_spawner::EntityName>,
+        &crate::entities::spawner::EntityUuid,
+        Option<&crate::entities::spawner::EntityName>,
         &crate::civilian::CivilianTraffic,
     )>,
     world_config: Option<&crate::world::config::WorldConfig>,
-) -> Vec<crate::messages::CivilianTrafficSnapshot> {
+) -> Vec<crate::core::messages::CivilianTrafficSnapshot> {
     use crate::civilian::CivilianOrder;
-    let mut rows: Vec<crate::messages::CivilianTrafficSnapshot> = civilians
+    let mut rows: Vec<crate::core::messages::CivilianTrafficSnapshot> = civilians
         .iter()
         .map(|(uuid, name, traffic)| {
             let state = &traffic.0;
@@ -517,7 +517,7 @@ fn civilian_traffic_rows(
                     },
                 ),
             };
-            crate::messages::CivilianTrafficSnapshot {
+            crate::core::messages::CivilianTrafficSnapshot {
                 uuid: uuid.0.clone(),
                 name: name.map(|n| n.0.clone()).unwrap_or_default(),
                 route,
@@ -591,15 +591,15 @@ pub fn operate_navigation_ai(
         &crate::ship_plugin::ShipSystemControlSources,
         &crate::server_app::ShipSystemBlackboards,
         &NavigationWaypoint,
-        &crate::ship_state::ShipPhysics,
-        Option<&crate::entity_spawner::EntityUuid>,
-        Option<&crate::ai_plugin::ObjectiveCursors>,
+        &crate::ship::state::ShipPhysics,
+        Option<&crate::entities::spawner::EntityUuid>,
+        Option<&crate::ai::server::ObjectiveCursors>,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&NavigationTargetSelector>,
-        &mut crate::messages::AdmittedCommands,
+        &mut crate::core::messages::AdmittedCommands,
     )>,
     entities: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
     )>,
@@ -643,8 +643,10 @@ pub fn operate_navigation_ai(
         // Navigation resolves a data-driven SELECTOR the spine does not model, so
         // only its gate — the one step it shares with the policy hosts — routes
         // here.
-        if !crate::ai::host::ai_operates(&sources.0, crate::system_registry::navigation_system_id())
-        {
+        if !crate::ai::host::ai_operates(
+            &sources.0,
+            crate::ship::system_registry::navigation_system_id(),
+        ) {
             continue;
         }
         // No authored `[navigation_console.selector]` ⇒ no component ⇒ no
@@ -654,11 +656,13 @@ pub fn operate_navigation_ai(
             continue;
         };
 
-        let scored: Vec<crate::messages::ScoredObjective> = match blackboards
+        let scored: Vec<crate::core::messages::ScoredObjective> = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
+                bb.scored_objectives.clone()
+            }
             _ => vec![],
         };
 
@@ -681,7 +685,9 @@ pub fn operate_navigation_ai(
         let top = scored
             .iter()
             .filter(|o| {
-                o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm)
+                o.score > 0.0
+                    && o.relevance
+                        .contains(&crate::core::messages::SystemAffinity::Helm)
             })
             .max_by(|a, b| {
                 a.score
@@ -701,8 +707,8 @@ pub fn operate_navigation_ai(
                 // what the hull does once it arrives. Sharing the arm is what
                 // makes a civilian's berthing approach the same code path a
                 // warship's attack run already uses.
-                crate::messages::AiDirective::Destroy { target }
-                | crate::messages::AiDirective::Dock { target }
+                crate::core::messages::AiDirective::Destroy { target }
+                | crate::core::messages::AiDirective::Dock { target }
                     if !target.is_empty() =>
                 {
                     if let Some((uuid, pos)) = resolve_destroy_target(
@@ -724,8 +730,8 @@ pub fn operate_navigation_ai(
                 // Reach / Retreat name a fixed world anchor: a `Free` waypoint
                 // keyed on a stable position-derived synthetic UUID (anchors are
                 // positions, not entities, so there is no real UUID to key on).
-                crate::messages::AiDirective::Reach { anchor }
-                | crate::messages::AiDirective::Retreat { anchor }
+                crate::core::messages::AiDirective::Reach { anchor }
+                | crate::core::messages::AiDirective::Retreat { anchor }
                     if !anchor.is_empty() =>
                 {
                     if let Some(pos) = anchor_pos(&world_config, anchor) {
@@ -744,7 +750,7 @@ pub fn operate_navigation_ai(
                 // `anchors[0]` (issue #702): the cursor is the objective's own
                 // record of where it is on its route — the same one `helm_patrol`
                 // steers from — so Navigation and Helm agree on the current leg.
-                crate::messages::AiDirective::Patrol { anchors, loop_path } => {
+                crate::core::messages::AiDirective::Patrol { anchors, loop_path } => {
                     let index = cursors
                         .and_then(|c| {
                             c.0.iter()
@@ -871,7 +877,7 @@ pub fn operate_navigation_ai(
 /// through the shared [`crate::command_admission::validate_and_admit`] seam,
 /// using this ship's own `ai:<uuid>` token (mirrors `emit_sensors_ai_command`).
 fn emit_navigation_ai_command(
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
     payload: SystemControlPayload,
     sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
@@ -880,7 +886,7 @@ fn emit_navigation_ai_command(
 ) -> bool {
     emit_ai_command(
         entity_uuid,
-        crate::system_registry::navigation_system_id(),
+        crate::ship::system_registry::navigation_system_id(),
         payload,
         sources,
         sessions,
@@ -977,8 +983,8 @@ fn anchor_pos(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use crate::core::messages::{ClientMessage, ServerMessage};
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
-    use crate::messages::{ClientMessage, ServerMessage};
     use crate::server_app::{
         sim_state_broadcaster, LastBroadcastEntityPositions, LastBroadcastHull,
         LastBroadcastShields, ShipImpulse,
@@ -1022,7 +1028,7 @@ mod tests {
             .add_plugins(NavigationPlugin)
             .add_plugins(sim_state_broadcaster())
             .add_plugins(crate::server_app::sim_outbox_broadcaster())
-            .init_resource::<crate::simulation::SimOutbox>()
+            .init_resource::<crate::server_app::SimOutbox>()
             .add_systems(
                 FixedUpdate,
                 crate::server_app::broadcast_blackboard_updates
@@ -1030,26 +1036,26 @@ mod tests {
             )
             .init_resource::<Outbox>()
             .init_resource::<LastBroadcastEntityPositions>()
-            .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
+            .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .add_message::<crate::ship_plugin::CoordinationEnqueue>()
             .add_systems(PostUpdate, collect);
         // Spawn the player ship entity so handle_navigation_waypoint can query it.
         app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
-            crate::simulation::ShipSystemBlackboards::default(),
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
+            crate::server_app::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             // PR 7 (issue #597) — NavigationWaypoint is now a per-entity Component.
             NavigationWaypoint::default(),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
             crate::modifiers::ShipModifiers::new(),
-            crate::ship_state::ShipPhysics::default(),
+            crate::ship::state::ShipPhysics::default(),
             // The AUTHORED `[navigation_console.selector]` block every shipped
             // hull carries. Since #885b stage 5d `operate_navigation_ai` has no
             // synthesised fallback — a ship with no selector ranks nothing — so
@@ -1147,11 +1153,11 @@ mod tests {
 
     fn latest_navigation_blackboard(
         out: &[OutboundMessage],
-    ) -> Option<crate::messages::NavigationBlackboard> {
+    ) -> Option<crate::core::messages::NavigationBlackboard> {
         out.iter().rev().find_map(|m| match &m.msg {
             ServerMessage::BlackboardUpdate { updates } => {
                 updates.iter().find_map(|(_, bb)| match bb {
-                    crate::messages::SystemBlackboard::Navigation(nav) => Some(nav.clone()),
+                    crate::core::messages::SystemBlackboard::Navigation(nav) => Some(nav.clone()),
                     _ => None,
                 })
             }
@@ -1172,7 +1178,7 @@ mod tests {
         // `broadcast_blackboard_updates` is diffed, so an unchanged picture is
         // deliberately not re-sent and the control below would have nothing to
         // look at.
-        fn local_blackboard(app: &mut App) -> crate::messages::NavigationBlackboard {
+        fn local_blackboard(app: &mut App) -> crate::core::messages::NavigationBlackboard {
             let mut q = app.world_mut().query_filtered::<
                 &crate::server_app::ShipSystemBlackboards,
                 With<crate::server_app::LocalShip>,
@@ -1182,7 +1188,7 @@ mod tests {
                 .next()
                 .expect("the local ship publishes");
             match bbs.0.get(&SystemId(NAVIGATION_SYSTEM_ID.to_string())) {
-                Some(crate::messages::SystemBlackboard::Navigation(nav)) => nav.clone(),
+                Some(crate::core::messages::SystemBlackboard::Navigation(nav)) => nav.clone(),
                 other => panic!("expected a navigation blackboard, got {other:?}"),
             }
         }
@@ -1215,8 +1221,8 @@ mod tests {
         state.advance(0, true, &disposition, 60.0);
         state.advance(0, true, &disposition, 60.0);
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("civ-1".into()),
-            crate::entity_spawner::EntityName("world.entity.hauler_kestrel.name".into()),
+            crate::entities::spawner::EntityUuid("civ-1".into()),
+            crate::entities::spawner::EntityName("world.entity.hauler_kestrel.name".into()),
             CivilianTraffic(state),
         ));
 
@@ -1252,7 +1258,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 120.0,
                     z: -45.0,
@@ -1270,7 +1276,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::ClearNavigationWaypoint,
             },
         );
@@ -1287,7 +1293,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 5.0,
                     z: 6.0,
@@ -1308,7 +1314,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: f32::NAN,
                     z: 1.0,
@@ -1329,7 +1335,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 10.0,
                     z: 20.0,
@@ -1352,7 +1358,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::ClearNavigationWaypoint,
             },
         );
@@ -1372,7 +1378,7 @@ mod tests {
         let target = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid(target_uuid.into()),
+                crate::entities::spawner::EntityUuid(target_uuid.into()),
                 Transform::from_xyz(50.0, 0.0, -100.0),
             ))
             .id();
@@ -1383,7 +1389,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 50.0,
                     z: -100.0,
@@ -1428,7 +1434,7 @@ mod tests {
         let target = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid(target_uuid.into()),
+                crate::entities::spawner::EntityUuid(target_uuid.into()),
                 Transform::from_xyz(10.0, 0.0, 20.0),
             ))
             .id();
@@ -1437,7 +1443,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 10.0,
                     z: 20.0,
@@ -1465,7 +1471,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 1.0,
                     z: 2.0,
@@ -1492,7 +1498,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 200.0,
                     z: -80.0,
@@ -1510,7 +1516,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::ClearNavigationWaypoint,
             },
         );
@@ -1528,7 +1534,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 5.0,
                     z: 6.0,
@@ -1563,7 +1569,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 99.0,
                     z: 99.0,
@@ -1588,7 +1594,7 @@ mod tests {
         let target = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid(target_uuid.into()),
+                crate::entities::spawner::EntityUuid(target_uuid.into()),
                 Transform::from_xyz(30.0, 0.0, -60.0),
             ))
             .id();
@@ -1597,7 +1603,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 30.0,
                     z: -60.0,
@@ -1639,7 +1645,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 15.0,
                     z: 25.0,
@@ -1663,7 +1669,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 5.0,
                     z: 5.0,
@@ -1676,7 +1682,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::ClearNavigationWaypoint,
             },
         );
@@ -1692,15 +1698,15 @@ mod tests {
     ) {
         let mut q = app.world_mut().query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>();
         for mut cs in q.iter_mut(app.world_mut()) {
-            cs.0.set(crate::system_registry::navigation_system_id(), source);
+            cs.0.set(crate::ship::system_registry::navigation_system_id(), source);
         }
     }
 
     fn inject_viewscreen_objective(
         app: &mut App,
-        objectives: Vec<crate::messages::ScoredObjective>,
+        objectives: Vec<crate::core::messages::ScoredObjective>,
     ) {
-        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        use crate::core::messages::{SystemBlackboard, ViewscreenBlackboard};
         use crate::server_app::ShipSystemBlackboards;
 
         let bb = ViewscreenBlackboard {
@@ -1712,7 +1718,7 @@ mod tests {
             .query_filtered::<&mut ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         if let Ok(mut bbs) = q.single_mut(app.world_mut()) {
             bbs.0.insert(
-                crate::system_registry::viewscreen_system_id(),
+                crate::ship::system_registry::viewscreen_system_id(),
                 SystemBlackboard::Viewscreen(bb),
             );
         }
@@ -1720,7 +1726,7 @@ mod tests {
 
     fn spawn_test_entity(app: &mut App, uuid: &str, x: f32, z: f32) {
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid.into()),
+            crate::entities::spawner::EntityUuid(uuid.into()),
             Transform::from_xyz(x, 0.0, z),
         ));
     }
@@ -1757,25 +1763,25 @@ mod tests {
         // Inject Destroy objective with score > 0.
         inject_viewscreen_objective(
             &mut app,
-            vec![crate::messages::ScoredObjective {
+            vec![crate::core::messages::ScoredObjective {
                 id: "destroy-test".into(),
                 score: 80.0,
-                directive: crate::messages::AiDirective::Destroy {
+                directive: crate::core::messages::AiDirective::Destroy {
                     target: "target-entity".into(),
                 },
-                source: crate::messages::ObjectiveSource::Mission,
+                source: crate::core::messages::ObjectiveSource::Mission,
                 relevance: vec![
-                    crate::messages::SystemAffinity::Helm,
-                    crate::messages::SystemAffinity::Weapons,
+                    crate::core::messages::SystemAffinity::Helm,
+                    crate::core::messages::SystemAffinity::Weapons,
                 ],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "destroy-test".into(),
                     text: "Destroy target".into(),
                     text_params: Default::default(),
                     mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec!["target-entity".into()],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             }],
         );
@@ -1805,7 +1811,7 @@ mod tests {
         let nav_to = coords.iter().find(|c| {
             matches!(
                 &c.payload,
-                crate::messages::CoordinationPayload::NavigateTo { .. }
+                crate::core::messages::CoordinationPayload::NavigateTo { .. }
             )
         });
         assert!(nav_to.is_some(), "expected NavigateTo coordination event");
@@ -1826,22 +1832,22 @@ mod tests {
 
         inject_viewscreen_objective(
             &mut app,
-            vec![crate::messages::ScoredObjective {
+            vec![crate::core::messages::ScoredObjective {
                 id: "reach-test".into(),
                 score: 70.0,
-                directive: crate::messages::AiDirective::Reach {
+                directive: crate::core::messages::AiDirective::Reach {
                     anchor: "base".into(),
                 },
-                source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                source: crate::core::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "reach-test".into(),
                     text: "Reach base".into(),
                     text_params: Default::default(),
                     mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             }],
         );
@@ -1863,11 +1869,11 @@ mod tests {
         let nav_to = coords.iter().find(|c| {
             matches!(
                 &c.payload,
-                crate::messages::CoordinationPayload::NavigateTo { .. }
+                crate::core::messages::CoordinationPayload::NavigateTo { .. }
             )
         });
         assert!(nav_to.is_some(), "expected NavigateTo coordination event");
-        if let Some(crate::messages::CoordinationPayload::NavigateTo { generation, x, z }) =
+        if let Some(crate::core::messages::CoordinationPayload::NavigateTo { generation, x, z }) =
             nav_to.map(|c| &c.payload)
         {
             // The generation is the navigation contract the Helm latches on; it
@@ -1906,22 +1912,22 @@ mod tests {
         app.world_mut().insert_resource(wc);
         inject_viewscreen_objective(
             &mut app,
-            vec![crate::messages::ScoredObjective {
+            vec![crate::core::messages::ScoredObjective {
                 id: "reach-test".into(),
                 score: 70.0,
-                directive: crate::messages::AiDirective::Reach {
+                directive: crate::core::messages::AiDirective::Reach {
                     anchor: "base".into(),
                 },
-                source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                source: crate::core::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "reach-test".into(),
                     text: "Reach base".into(),
                     text_params: Default::default(),
                     mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             }],
         );
@@ -1936,7 +1942,7 @@ mod tests {
                 .filter(|c| {
                     matches!(
                         &c.payload,
-                        crate::messages::CoordinationPayload::NavigateTo { .. }
+                        crate::core::messages::CoordinationPayload::NavigateTo { .. }
                     )
                 })
                 .count();
@@ -1962,7 +1968,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 120.0,
                     z: -45.0,
@@ -1978,7 +1984,7 @@ mod tests {
                 .filter(|c| {
                     matches!(
                         &c.payload,
-                        crate::messages::CoordinationPayload::NavigateTo { .. }
+                        crate::core::messages::CoordinationPayload::NavigateTo { .. }
                     )
                 })
                 .count();
@@ -2007,7 +2013,7 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
+                target: crate::core::messages::SystemId("navigation".into()),
                 payload: SystemControlPayload::SetNavigationWaypoint {
                     x: 120.0,
                     z: -45.0,
@@ -2028,18 +2034,22 @@ mod tests {
             .find(|c| {
                 matches!(
                     &c.payload,
-                    crate::messages::CoordinationPayload::NavigateTo { .. }
+                    crate::core::messages::CoordinationPayload::NavigateTo { .. }
                 )
             })
             .expect(
                 "a human-set waypoint must enqueue the same NavigateTo clearance the AI path does",
             );
-        assert_eq!(nav_to.target, crate::system_registry::helm_station_key());
+        assert_eq!(
+            nav_to.target,
+            crate::ship::system_registry::helm_station_key()
+        );
         assert_eq!(
             nav_to.sender_origin,
             crate::ship::control_source::ControlSource::Human
         );
-        let crate::messages::CoordinationPayload::NavigateTo { generation, .. } = &nav_to.payload
+        let crate::core::messages::CoordinationPayload::NavigateTo { generation, .. } =
+            &nav_to.payload
         else {
             unreachable!()
         };
@@ -2063,23 +2073,23 @@ mod tests {
 
         inject_viewscreen_objective(
             &mut app,
-            vec![crate::messages::ScoredObjective {
+            vec![crate::core::messages::ScoredObjective {
                 id: "patrol-test".into(),
                 score: 60.0,
-                directive: crate::messages::AiDirective::Patrol {
+                directive: crate::core::messages::AiDirective::Patrol {
                     anchors: vec!["patrol_pt".into()],
                     loop_path: true,
                 },
-                source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                source: crate::core::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "patrol-test".into(),
                     text: "Patrol area".into(),
                     text_params: Default::default(),
                     mandatory: false,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             }],
         );
@@ -2118,23 +2128,23 @@ mod tests {
 
         inject_viewscreen_objective(
             &mut app,
-            vec![crate::messages::ScoredObjective {
+            vec![crate::core::messages::ScoredObjective {
                 id: "patrol-test".into(),
                 score: 60.0,
-                directive: crate::messages::AiDirective::Patrol {
+                directive: crate::core::messages::AiDirective::Patrol {
                     anchors: vec!["leg_a".into(), "leg_b".into()],
                     loop_path: true,
                 },
-                source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                source: crate::core::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "patrol-test".into(),
                     text: "Patrol area".into(),
                     text_params: Default::default(),
                     mandatory: false,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             }],
         );
@@ -2160,7 +2170,7 @@ mod tests {
         assert_eq!(cursor.index(), 1, "precondition: cursor must name leg_b");
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::ai_plugin::ObjectiveCursors(vec![cursor]));
+            .insert(crate::ai::server::ObjectiveCursors(vec![cursor]));
 
         tick(&mut app);
 
@@ -2211,22 +2221,22 @@ mod tests {
     fn inject_destroy_objective(app: &mut App, target: &str) {
         inject_viewscreen_objective(
             app,
-            vec![crate::messages::ScoredObjective {
+            vec![crate::core::messages::ScoredObjective {
                 id: "destroy-far".into(),
                 score: 80.0,
-                directive: crate::messages::AiDirective::Destroy {
+                directive: crate::core::messages::AiDirective::Destroy {
                     target: target.into(),
                 },
-                source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                source: crate::core::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "destroy-far".into(),
                     text: "Destroy far target".into(),
                     text_params: Default::default(),
                     mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![target.into()],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             }],
         );
@@ -2269,7 +2279,7 @@ mod tests {
 
         let uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(uuid.clone()),
+            crate::entities::spawner::EntityUuid(uuid.clone()),
             crate::entities::spawner::EntityName("Starbase Alpha".into()),
             Transform::from_xyz(500.0, 0.0, 100.0),
         ));
@@ -2324,22 +2334,22 @@ mod tests {
 
         inject_viewscreen_objective(
             &mut app,
-            vec![crate::messages::ScoredObjective {
+            vec![crate::core::messages::ScoredObjective {
                 id: "reach-human".into(),
                 score: 50.0,
-                directive: crate::messages::AiDirective::Reach {
+                directive: crate::core::messages::AiDirective::Reach {
                     anchor: "some_anchor".into(),
                 },
-                source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                source: crate::core::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "reach-human".into(),
                     text: "Reach".into(),
                     text_params: Default::default(),
                     mandatory: false,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             }],
         );
@@ -2360,13 +2370,13 @@ mod tests {
 
         let mut ai_resolver = ControlSourceResolver::new();
         ai_resolver.set(
-            crate::system_registry::navigation_system_id(),
+            crate::ship::system_registry::navigation_system_id(),
             ControlSource::Ai,
         );
         let ai_sources = ShipSystemControlSources(ai_resolver);
         let policy = ai_sources
             .0
-            .policy_for(&crate::system_registry::navigation_system_id());
+            .policy_for(&crate::ship::system_registry::navigation_system_id());
         assert!(
             policy.operate_ai,
             "AI Navigation must gate through operate_ai"
@@ -2375,13 +2385,13 @@ mod tests {
         // Human-controlled navigation must not operate AI.
         let mut human_resolver = ControlSourceResolver::new();
         human_resolver.set(
-            crate::system_registry::navigation_system_id(),
+            crate::ship::system_registry::navigation_system_id(),
             ControlSource::Human,
         );
         let human_sources = ShipSystemControlSources(human_resolver);
         let human_policy = human_sources
             .0
-            .policy_for(&crate::system_registry::navigation_system_id());
+            .policy_for(&crate::ship::system_registry::navigation_system_id());
         assert!(
             !human_policy.operate_ai,
             "Human Navigation must not operate AI"
@@ -2405,22 +2415,22 @@ mod tests {
         app.world_mut().insert_resource(wc);
 
         let reach = |anchor: &str| {
-            vec![crate::messages::ScoredObjective {
+            vec![crate::core::messages::ScoredObjective {
                 id: "reach".into(),
                 score: 70.0,
-                directive: crate::messages::AiDirective::Reach {
+                directive: crate::core::messages::AiDirective::Reach {
                     anchor: anchor.into(),
                 },
-                source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                source: crate::core::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "reach".into(),
                     text: "Reach".into(),
                     text_params: Default::default(),
                     mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             }]
         };
@@ -2596,7 +2606,7 @@ mod tests {
         let contact = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid("contact-despawn".into()),
+                crate::entities::spawner::EntityUuid("contact-despawn".into()),
                 Transform::from_xyz(150.0, 0.0, 40.0),
             ))
             .id();
@@ -2637,7 +2647,7 @@ mod tests {
         let ship = world
             .spawn((
                 crate::server_app::LocalShip,
-                crate::ship_state::ShipPhysics {
+                crate::ship::state::ShipPhysics {
                     x: 0.0,
                     y: 5.0,
                     z: 0.0,
@@ -2656,14 +2666,14 @@ mod tests {
 
         // Mirror `drain_teleport_to_waypoint`'s query + apply.
         let mut q = world.query_filtered::<(
-            &mut crate::ship_state::ShipPhysics,
+            &mut crate::ship::state::ShipPhysics,
             &NavigationWaypoint,
         ), With<crate::server_app::LocalShip>>();
         for (mut physics, waypoint) in q.iter_mut(&mut world) {
             assert!(apply_teleport_to_waypoint(&mut physics, waypoint));
         }
 
-        let physics = world.get::<crate::ship_state::ShipPhysics>(ship).unwrap();
+        let physics = world.get::<crate::ship::state::ShipPhysics>(ship).unwrap();
         assert_eq!(physics.x, 111.0);
         assert_eq!(physics.z, 222.0);
         assert_eq!(physics.y, 5.0, "altitude must be preserved");
@@ -2679,7 +2689,7 @@ mod tests {
         let ship = world
             .spawn((
                 crate::server_app::LocalShip,
-                crate::ship_state::ShipPhysics {
+                crate::ship::state::ShipPhysics {
                     x: 3.0,
                     y: 1.0,
                     z: 4.0,
@@ -2697,14 +2707,14 @@ mod tests {
             .is_none());
 
         let mut q = world.query_filtered::<(
-            &mut crate::ship_state::ShipPhysics,
+            &mut crate::ship::state::ShipPhysics,
             &NavigationWaypoint,
         ), With<crate::server_app::LocalShip>>();
         for (mut physics, waypoint) in q.iter_mut(&mut world) {
             assert!(!apply_teleport_to_waypoint(&mut physics, waypoint));
         }
 
-        let physics = world.get::<crate::ship_state::ShipPhysics>(ship).unwrap();
+        let physics = world.get::<crate::ship::state::ShipPhysics>(ship).unwrap();
         assert_eq!((physics.x, physics.y, physics.z), (3.0, 1.0, 4.0));
     }
 }

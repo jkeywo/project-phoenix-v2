@@ -93,7 +93,7 @@ pub struct HostState<'a> {
 
 /// The immutable per-tick inputs [`decide`] resolves a policy against.
 ///
-/// Hand-buildable with no `App`: a test constructs the [`SystemId`](crate::messages::SystemId)
+/// Hand-buildable with no `App`: a test constructs the [`SystemId`](crate::core::messages::SystemId)
 /// it wants gated, the channel it wants resolved, a seeded [`AiFacts`], a flag
 /// chain (often empty), and — for a stateful policy — a [`HostState`]. The host
 /// builds the same value from live components each tick.
@@ -102,7 +102,7 @@ pub struct HostTick<'a> {
     /// The fine system being operated. Gates the Control Source: [`decide`]
     /// returns [`HostOutcome::NotAiOperated`] unless
     /// `sources.policy_for(&system).operate_ai`.
-    pub system: crate::messages::SystemId,
+    pub system: crate::core::messages::SystemId,
     /// The output channel to resolve on the policy this tick (e.g. `"red_alert"`,
     /// `"yaw"`, a power-group id).
     pub channel: &'a str,
@@ -186,7 +186,10 @@ pub fn decide<'p>(
 /// returns whether the AI may proceed. Routing it here keeps that gate in the
 /// spine for the selector/ranked hosts too, rather than hand-inlined as a
 /// twenty-second copy of `policy_for(sid).operate_ai`.
-pub fn ai_operates(sources: &ControlSourceResolver, system: crate::messages::SystemId) -> bool {
+pub fn ai_operates(
+    sources: &ControlSourceResolver,
+    system: crate::core::messages::SystemId,
+) -> bool {
     let facts = AiFacts::new();
     let tick = HostTick {
         system,
@@ -314,12 +317,12 @@ impl AiEmitter<'_> {
     #[allow(clippy::too_many_arguments)]
     pub fn emit(
         &self,
-        entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
-        target: crate::messages::SystemId,
-        payload: crate::messages::SystemControlPayload,
+        entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
+        target: crate::core::messages::SystemId,
+        payload: crate::core::messages::SystemControlPayload,
         sources: &crate::ship_plugin::ShipSystemControlSources,
         ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
-        admitted: &mut crate::messages::AdmittedCommands,
+        admitted: &mut crate::core::messages::AdmittedCommands,
     ) -> bool {
         emit_ai_command(
             entity_uuid,
@@ -359,7 +362,7 @@ pub fn register_ai_host_env(app: &mut App) {
 mod tests {
     use super::*;
     use crate::ai::policy::AiPolicyRule;
-    use crate::messages::SystemId;
+    use crate::core::messages::SystemId;
     use crate::ship::control_source::ControlSource;
     use crate::world::flags::parse_predicate;
 

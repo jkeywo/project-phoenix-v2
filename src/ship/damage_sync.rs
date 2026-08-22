@@ -1,11 +1,11 @@
 use bevy::prelude::*;
 
-use crate::damage::DamageTier;
-use crate::messages::CoordinationPayload;
+use crate::core::messages::CoordinationPayload;
 use crate::ship::components::{
     CoordinationEnqueue, LastSystemTiers, RepairHumanAlerted, ShipConfigComponent,
     ShipSystemControlSources,
 };
+use crate::ship::damage::DamageTier;
 
 // ── Damage-tier → control gate sync ──────────────────────────────────────────
 
@@ -13,7 +13,7 @@ use crate::ship::components::{
 /// the current damage tiers of each system in the ship hull.
 ///
 /// Runs in `SimSet::Damage` (after hull damage is applied). For every ship that
-/// carries both an [`EntitySystemHull`](crate::entity_spawner::EntitySystemHull)
+/// carries both an [`EntitySystemHull`](crate::entities::spawner::EntitySystemHull)
 /// (wrapping [`SystemHull`]) and `ShipSystemControlSources`:
 ///
 /// - Systems in `Disabled` or `Destroyed` tier: their corresponding `SystemId`
@@ -37,8 +37,8 @@ use crate::ship::components::{
 /// iteration and picks `EntitySystemHull` as the single source of truth.
 pub fn sync_console_damage_tiers(
     mut ships: Query<(
-        &crate::entity_spawner::EntitySystemHull,
-        Option<&crate::entity_spawner::EntityShipArcHull>,
+        &crate::entities::spawner::EntitySystemHull,
+        Option<&crate::entities::spawner::EntityShipArcHull>,
         &mut ShipSystemControlSources,
     )>,
 ) {
@@ -59,7 +59,7 @@ pub fn sync_console_damage_tiers(
         if let Some(arc_hull_component) = arc_hull_opt {
             let arc_hull = &arc_hull_component.0;
             for (arc_id, _entry) in arc_hull.iter() {
-                let Some(sid) = crate::system_registry::shield_arc_system_id(arc_id) else {
+                let Some(sid) = crate::ship::system_registry::shield_arc_system_id(arc_id) else {
                     continue;
                 };
                 let tier = arc_hull.tier_for(arc_id);
@@ -94,25 +94,27 @@ pub fn sync_console_damage_tiers(
 pub fn detect_damage_tier_crossings(
     mut ships: Query<(
         Entity,
-        &crate::entity_spawner::EntitySystemHull,
+        &crate::entities::spawner::EntitySystemHull,
         &mut LastSystemTiers,
         &ShipConfigComponent,
         &ShipSystemControlSources,
         Option<&mut RepairHumanAlerted>,
-        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&crate::entities::spawner::EntityUuid>,
         // Issue #893: the ship's own standing Tactical target lock. `Option`
         // because not every bare-`App` fixture in this crate spawns one.
-        Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+        Option<&mut crate::console::weapons::TacticalRadarSelection>,
         // Out of red alert, ANY fresh damage is reported (not just a tier
         // crossing) — see the `current_tier == prev_tier` branch below.
         // `Option` because not every bare-`App` fixture spawns one; absent
         // reads as "not at red alert" (report freely).
-        Option<&crate::ship_state::ShipRedAlert>,
+        Option<&crate::ship::state::ShipRedAlert>,
     )>,
     mut coord_writer: MessageWriter<CoordinationEnqueue>,
     // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
     // that never registered the message still pass parameter validation.
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
 ) {
     for (
         entity,
@@ -144,7 +146,7 @@ pub fn detect_damage_tier_crossings(
             // there is no identity to key a ledger on.
             if current_tier != prev_tier {
                 if let (Some(ref mut msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
-                    msgs.write(crate::balance::BalanceEvent::SystemTierCrossed {
+                    msgs.write(crate::core::balance::BalanceEvent::SystemTierCrossed {
                         ship: uuid.0.clone(),
                         system_id: system_id.0.clone(),
                         from_tier: format!("{prev_tier:?}"),
@@ -174,7 +176,7 @@ pub fn detect_damage_tier_crossings(
                     // untouched; this is the companion half for the lock the
                     // ship already held when the radar went dark, which that
                     // gate never revisited.
-                    if system_id.0 == crate::system_registry::TACTICAL_RADAR_SYSTEM_ID {
+                    if system_id.0 == crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID {
                         if let Some(lock) = tactical_lock.as_deref_mut() {
                             lock.0 = None;
                         }
@@ -271,7 +273,7 @@ pub fn detect_damage_tier_crossings(
         // still a ship that cannot fire, so keying disarm off the emitters
         // reports the true "can't attack" moment.
         if let (Some(ref mut msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
-            let emitters: Vec<&crate::messages::SystemId> = config
+            let emitters: Vec<&crate::core::messages::SystemId> = config
                 .0
                 .systems
                 .iter()
@@ -294,7 +296,7 @@ pub fn detect_damage_tier_crossings(
                     )
                 });
                 if now_disarmed && !prev_disarmed {
-                    msgs.write(crate::balance::BalanceEvent::Disarmed {
+                    msgs.write(crate::core::balance::BalanceEvent::Disarmed {
                         ship: uuid.0.clone(),
                     });
                 }
@@ -315,24 +317,24 @@ pub fn detect_damage_tier_crossings(
 /// an enabling system (phaser control, torpedo magazine). Used by the
 /// `Disarmed` detector to decide when a ship can no longer attack.
 fn is_weapon_emitter_kind(kind: &str) -> bool {
-    kind == crate::system_registry::PHASER_BANK_KIND
-        || kind == crate::system_registry::TORPEDO_TUBE_KIND
-        || kind == crate::system_registry::BLASTER_BANK_KIND
+    kind == crate::ship::system_registry::PHASER_BANK_KIND
+        || kind == crate::ship::system_registry::TORPEDO_TUBE_KIND
+        || kind == crate::ship::system_registry::BLASTER_BANK_KIND
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control_source::ControlTickPolicy;
     use crate::lobby::LobbyPlugin;
     use crate::modifiers::ShipModifiers;
+    use crate::server_app::{LocalShip, Ship, ShipBoost, ShipImpulse};
     use crate::ship::components::{
         ActiveStationRatings, CoordinationQueue, HelmWaypointClearance, LastHelmInput,
     };
+    use crate::ship::control_source::ControlTickPolicy;
+    use crate::ship::state::ShipPhysics;
     use crate::ship::test_support::*;
     use crate::ship_plugin::ShipPlugin;
-    use crate::ship_state::ShipPhysics;
-    use crate::simulation::{LocalShip, Ship, ShipBoost, ShipImpulse};
 
     // ── sync_console_damage_tiers integration tests ───────────────────────────
 
@@ -346,10 +348,10 @@ mod tests {
             .expect("Ship with ShipSystemControlSources");
         sources
             .0
-            .policy_for(&crate::messages::SystemId(system_id.into()))
+            .policy_for(&crate::core::messages::SystemId(system_id.into()))
     }
 
-    fn set_hp(app: &mut App, system_id: crate::messages::SystemId, hp: f32) {
+    fn set_hp(app: &mut App, system_id: crate::core::messages::SystemId, hp: f32) {
         let ship = app
             .world_mut()
             .query_filtered::<Entity, With<LocalShip>>()
@@ -357,7 +359,7 @@ mod tests {
             .unwrap();
         let mut binding = app.world_mut().entity_mut(ship);
         let mut hull_component = binding
-            .get_mut::<crate::entity_spawner::EntitySystemHull>()
+            .get_mut::<crate::entities::spawner::EntitySystemHull>()
             .unwrap();
         // Wipe then restore to exact HP.
         hull_component
@@ -371,7 +373,11 @@ mod tests {
         let mut app = test_app();
         // Helm console max_hp = 25. Disabled threshold = 25 % = 6.25 HP.
         // Set Helm to 5 HP (below disabled threshold) → Disabled tier.
-        set_hp(&mut app, crate::messages::SystemId("helm".into()), 5.0);
+        set_hp(
+            &mut app,
+            crate::core::messages::SystemId("helm".into()),
+            5.0,
+        );
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -386,7 +392,11 @@ mod tests {
     fn destroyed_console_gates_human_and_ai_input() {
         let mut app = test_app();
         // Wipe helm to 0 HP → Destroyed tier.
-        set_hp(&mut app, crate::messages::SystemId("helm".into()), 0.0);
+        set_hp(
+            &mut app,
+            crate::core::messages::SystemId("helm".into()),
+            0.0,
+        );
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -401,13 +411,21 @@ mod tests {
     fn restored_console_re_enables_input() {
         let mut app = test_app();
         // First disable helm.
-        set_hp(&mut app, crate::messages::SystemId("helm".into()), 5.0);
+        set_hp(
+            &mut app,
+            crate::core::messages::SystemId("helm".into()),
+            5.0,
+        );
         tick(&mut app);
         // Verify it is gated.
         assert!(!get_policy(&mut app, "helm").accept_human_input);
 
         // Now restore to operational HP.
-        set_hp(&mut app, crate::messages::SystemId("helm".into()), 25.0);
+        set_hp(
+            &mut app,
+            crate::core::messages::SystemId("helm".into()),
+            25.0,
+        );
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -422,7 +440,11 @@ mod tests {
         let mut app = test_app();
         // Helm at 50% = 12.5 HP → Damaged tier (25 % < 50 % < 75 %).
         // Damaged tier must NOT block input — only Disabled and Destroyed do.
-        set_hp(&mut app, crate::messages::SystemId("helm".into()), 12.5);
+        set_hp(
+            &mut app,
+            crate::core::messages::SystemId("helm".into()),
+            12.5,
+        );
         tick(&mut app);
 
         let policy = get_policy(&mut app, "helm");
@@ -439,7 +461,7 @@ mod tests {
         // Zero out the port engine HP (destroyed tier).
         set_console_hp_direct(
             &mut app,
-            crate::messages::SystemId("helm-engine-port".into()),
+            crate::core::messages::SystemId("helm-engine-port".into()),
             0.0,
         );
         tick(&mut app);
@@ -455,7 +477,7 @@ mod tests {
             .entity(ship)
             .get::<ShipSystemControlSources>()
             .unwrap();
-        let port_id = crate::system_registry::helm_engine_port_system_id();
+        let port_id = crate::ship::system_registry::helm_engine_port_system_id();
         assert!(
             control_sources.0.is_offline(&port_id),
             "helm-engine-port should be in offline_systems when HP = 0"
@@ -478,7 +500,7 @@ mod tests {
     #[test]
     fn sync_damage_tiers_keeps_disabled_system_offline_across_ticks() {
         let mut app = test_app();
-        let helm_sid = crate::messages::SystemId("helm".into());
+        let helm_sid = crate::core::messages::SystemId("helm".into());
 
         // Damage the helm system to 0 HP (Destroyed tier).
         {
@@ -489,7 +511,7 @@ mod tests {
                 .unwrap();
             let mut entity_mut = app.world_mut().entity_mut(ship);
             let mut hull = entity_mut
-                .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                .get_mut::<crate::entities::spawner::EntitySystemHull>()
                 .unwrap();
             hull.0.set_hp(&helm_sid, 0.0);
         }
@@ -593,7 +615,7 @@ mod tests {
         let mut app_one = make_app();
         set_console_hp_direct(
             &mut app_one,
-            crate::messages::SystemId("helm-engine-port".into()),
+            crate::core::messages::SystemId("helm-engine-port".into()),
             0.0,
         );
         tick(&mut app_one); // let Damage tier propagate
@@ -634,11 +656,17 @@ mod tests {
             std::time::Duration::from_millis(200),
         );
         let hull_config = &[
-            (crate::messages::SystemId("helm".into()), 25.0_f32),
-            (crate::messages::SystemId("tactical".into()), 25.0),
-            (crate::messages::SystemId("power-reactor".into()), 15.0),
-            (crate::messages::SystemId("power-battery".into()), 10.0),
-            (crate::messages::SystemId("shields".into()), 25.0),
+            (crate::core::messages::SystemId("helm".into()), 25.0_f32),
+            (crate::core::messages::SystemId("tactical".into()), 25.0),
+            (
+                crate::core::messages::SystemId("power-reactor".into()),
+                15.0,
+            ),
+            (
+                crate::core::messages::SystemId("power-battery".into()),
+                10.0,
+            ),
+            (crate::core::messages::SystemId("shields".into()), 25.0),
         ];
         let ship = app
             .world_mut()
@@ -651,14 +679,17 @@ mod tests {
                 ShipSystemControlSources::default(),
                 ActiveStationRatings::default(),
                 CoordinationQueue::default(),
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                    hull_config,
-                )),
+                crate::entities::spawner::EntitySystemHull(
+                    crate::ship::damage::SystemHull::from_config(hull_config),
+                ),
                 LastHelmInput::default(),
-                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
-                ShipImpulse(crate::impulse::ImpulseState::new()),
+                crate::server_app::ShipShields(
+                    crate::weapons::shield::ShieldSystem::default(),
+                    0.5,
+                ),
+                ShipImpulse(crate::ship::impulse::ImpulseState::new()),
             ))
             .id();
         app.world_mut()
@@ -672,7 +703,7 @@ mod tests {
         let mut app = test_app_with_power_hull();
         set_console_hp_direct(
             &mut app,
-            crate::messages::SystemId("power-reactor".into()),
+            crate::core::messages::SystemId("power-reactor".into()),
             0.0,
         );
         tick(&mut app);
@@ -687,7 +718,7 @@ mod tests {
             .entity(ship)
             .get::<ShipSystemControlSources>()
             .unwrap();
-        let reactor_id = crate::system_registry::power_reactor_system_id();
+        let reactor_id = crate::ship::system_registry::power_reactor_system_id();
         assert!(
             control_sources.0.is_offline(&reactor_id),
             "power-reactor should be in offline_systems when its hull HP is 0 (Disabled/Destroyed)"
@@ -699,7 +730,7 @@ mod tests {
         let mut app = test_app_with_power_hull();
         set_console_hp_direct(
             &mut app,
-            crate::messages::SystemId("power-battery".into()),
+            crate::core::messages::SystemId("power-battery".into()),
             0.0,
         );
         tick(&mut app);
@@ -714,7 +745,7 @@ mod tests {
             .entity(ship)
             .get::<ShipSystemControlSources>()
             .unwrap();
-        let battery_id = crate::system_registry::power_battery_system_id();
+        let battery_id = crate::ship::system_registry::power_battery_system_id();
         assert!(
             control_sources.0.is_offline(&battery_id),
             "power-battery should be in offline_systems when its hull HP is 0 (Disabled/Destroyed)"
@@ -738,11 +769,11 @@ mod tests {
             std::time::Duration::from_millis(200),
         );
 
-        let tc = crate::damage::ConsoleTierConfig::default();
-        let arc_hull = crate::damage::ShipArcHull::from_entries(vec![
+        let tc = crate::ship::damage::ConsoleTierConfig::default();
+        let arc_hull = crate::ship::damage::ShipArcHull::from_entries(vec![
             (
                 "fore".into(),
-                crate::damage::ArcHullEntry {
+                crate::ship::damage::ArcHullEntry {
                     current: 10.0,
                     max: 10.0,
                     tier_config: tc,
@@ -750,14 +781,14 @@ mod tests {
             ),
             (
                 "aft".into(),
-                crate::damage::ArcHullEntry {
+                crate::ship::damage::ArcHullEntry {
                     current: 10.0,
                     max: 10.0,
                     tier_config: tc,
                 },
             ),
         ]);
-        let hull_config = &[(crate::messages::SystemId("helm".into()), 25.0_f32)];
+        let hull_config = &[(crate::core::messages::SystemId("helm".into()), 25.0_f32)];
         let ship = app
             .world_mut()
             .spawn((
@@ -769,22 +800,25 @@ mod tests {
                 ShipSystemControlSources::default(),
                 ActiveStationRatings::default(),
                 CoordinationQueue::default(),
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
-                crate::ai_plugin::AiHighFidelity,
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                    hull_config,
-                )),
+                crate::ai::server::AiHighFidelity,
+                crate::entities::spawner::EntitySystemHull(
+                    crate::ship::damage::SystemHull::from_config(hull_config),
+                ),
                 LastHelmInput::default(),
-                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
+                crate::server_app::ShipShields(
+                    crate::weapons::shield::ShieldSystem::default(),
+                    0.5,
+                ),
             ))
             .id();
         app.world_mut().entity_mut(ship).insert((
             ShipModifiers::new(),
             ShipBoost::default(),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
-            crate::console_ai_plugin::ShipFrequencyHintState::default(),
-            crate::entity_spawner::EntityShipArcHull(arc_hull),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
+            crate::console_ai::server::ShipFrequencyHintState::default(),
+            crate::entities::spawner::EntityShipArcHull(arc_hull),
         ));
         app.world_mut().entity_mut(ship).insert((
             crate::ship::helm::ThrustInput::default(),
@@ -795,10 +829,10 @@ mod tests {
             crate::ship::helm::BoostCommand::default(),
             // The console-owned surfaces the AI helm derives its goals from
             // (issue #702) — see `HelmAiSurfaces`.
-            crate::weapons_plugin::TacticalRadarSelection::default(),
-            crate::navigation_plugin::NavigationWaypoint::default(),
+            crate::console::weapons::TacticalRadarSelection::default(),
+            crate::console::navigation::NavigationWaypoint::default(),
             HelmWaypointClearance::default(),
-            crate::ai_plugin::ObjectiveCursors::default(),
+            crate::ai::server::ObjectiveCursors::default(),
         ));
         app
     }
@@ -815,7 +849,7 @@ mod tests {
                 .unwrap();
             let mut entity_mut = app.world_mut().entity_mut(ship);
             let mut arc_hull = entity_mut
-                .get_mut::<crate::entity_spawner::EntityShipArcHull>()
+                .get_mut::<crate::entities::spawner::EntityShipArcHull>()
                 .unwrap();
             arc_hull.0.set_hp("fore", 0.0);
         }
@@ -831,12 +865,12 @@ mod tests {
             .entity(ship)
             .get::<ShipSystemControlSources>()
             .unwrap();
-        let fore_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        let fore_sid = crate::ship::system_registry::shield_arc_system_id("fore").expect("fore");
         assert!(
             cs.0.is_offline(&fore_sid),
             "shield-arc-fore must be in offline_systems when its arc HP is 0"
         );
-        let aft_sid = crate::system_registry::shield_arc_system_id("aft").expect("aft");
+        let aft_sid = crate::ship::system_registry::shield_arc_system_id("aft").expect("aft");
         assert!(
             !cs.0.is_offline(&aft_sid),
             "shield-arc-aft must NOT be in offline_systems (still at full HP)"
@@ -855,7 +889,7 @@ mod tests {
                 .unwrap();
             let mut entity_mut = app.world_mut().entity_mut(ship);
             let mut arc_hull = entity_mut
-                .get_mut::<crate::entity_spawner::EntityShipArcHull>()
+                .get_mut::<crate::entities::spawner::EntityShipArcHull>()
                 .unwrap();
             arc_hull.0.set_hp("fore", 0.0);
         }
@@ -869,7 +903,7 @@ mod tests {
                 .unwrap();
             let mut entity_mut = app.world_mut().entity_mut(ship);
             let mut arc_hull = entity_mut
-                .get_mut::<crate::entity_spawner::EntityShipArcHull>()
+                .get_mut::<crate::entities::spawner::EntityShipArcHull>()
                 .unwrap();
             arc_hull.0.set_hp("fore", 10.0);
         }
@@ -884,7 +918,7 @@ mod tests {
             .entity(ship)
             .get::<ShipSystemControlSources>()
             .unwrap();
-        let fore_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        let fore_sid = crate::ship::system_registry::shield_arc_system_id("fore").expect("fore");
         assert!(
             !cs.0.is_offline(&fore_sid),
             "shield-arc-fore must be removed from offline_systems after repair"
@@ -898,8 +932,8 @@ mod tests {
     /// keyed on that ship — guarding the unconditional, all-ships convention.
     #[test]
     fn weapon_system_destruction_emits_tier_crossed_and_disarmed_for_a_non_local_ship() {
-        use crate::balance::BalanceEvent;
-        use crate::messages::SystemId;
+        use crate::core::balance::BalanceEvent;
+        use crate::core::messages::SystemId;
         use bevy::ecs::message::Messages;
 
         let mut app = App::new();
@@ -918,7 +952,7 @@ mod tests {
             .systems
             .push(crate::ship::config::SystemInstanceConfig {
                 id: SystemId("phaser-fore".into()),
-                kind: crate::system_registry::PHASER_BANK_KIND.into(),
+                kind: crate::ship::system_registry::PHASER_BANK_KIND.into(),
                 station: None,
                 ai_only: false,
                 human_seeking: false,
@@ -928,13 +962,15 @@ mod tests {
                 config: None,
             });
 
-        let hull =
-            crate::damage::SystemHull::from_config(&[(SystemId("phaser-fore".into()), 100.0)]);
+        let hull = crate::ship::damage::SystemHull::from_config(&[(
+            SystemId("phaser-fore".into()),
+            100.0,
+        )]);
         let ship = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid("raider".into()),
-                crate::entity_spawner::EntitySystemHull(hull),
+                crate::entities::spawner::EntityUuid("raider".into()),
+                crate::entities::spawner::EntitySystemHull(hull),
                 LastSystemTiers::default(),
                 config,
                 ShipSystemControlSources::default(),
@@ -951,7 +987,7 @@ mod tests {
         {
             let mut e = app.world_mut().entity_mut(ship);
             let mut hull = e
-                .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                .get_mut::<crate::entities::spawner::EntitySystemHull>()
                 .unwrap();
             hull.0.set_hp(&SystemId("phaser-fore".into()), 0.0);
         }
@@ -986,15 +1022,15 @@ mod tests {
     /// break BOTH iterations, not just one.
     #[test]
     fn destroying_the_tactical_radar_clears_the_lock_for_either_origin() {
+        use crate::console::weapons::TacticalRadarSelection;
         use crate::ship::control_source::ControlSource;
-        use crate::weapons_plugin::TacticalRadarSelection;
 
         for origin in [ControlSource::Human, ControlSource::Ai] {
             let mut app = App::new();
             app.add_message::<CoordinationEnqueue>();
 
-            let radar_id = crate::system_registry::tactical_radar_system_id();
-            let hull = crate::damage::SystemHull::from_config(&[(radar_id.clone(), 15.0)]);
+            let radar_id = crate::ship::system_registry::tactical_radar_system_id();
+            let hull = crate::ship::damage::SystemHull::from_config(&[(radar_id.clone(), 15.0)]);
 
             let mut sources = ShipSystemControlSources::default();
             sources.0.set(radar_id.clone(), origin);
@@ -1002,8 +1038,8 @@ mod tests {
             let ship = app
                 .world_mut()
                 .spawn((
-                    crate::entity_spawner::EntityUuid("raider".into()),
-                    crate::entity_spawner::EntitySystemHull(hull),
+                    crate::entities::spawner::EntityUuid("raider".into()),
+                    crate::entities::spawner::EntitySystemHull(hull),
                     LastSystemTiers::default(),
                     ShipConfigComponent::default(),
                     sources,
@@ -1018,7 +1054,7 @@ mod tests {
             {
                 let mut e = app.world_mut().entity_mut(ship);
                 let mut hull = e
-                    .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                    .get_mut::<crate::entities::spawner::EntitySystemHull>()
                     .unwrap();
                 hull.0.set_hp(&radar_id, 0.0);
             }
@@ -1045,19 +1081,19 @@ mod tests {
     /// drop-lock transition #893 decided on.
     #[test]
     fn a_merely_disabled_tactical_radar_does_not_clear_the_lock() {
-        use crate::weapons_plugin::TacticalRadarSelection;
+        use crate::console::weapons::TacticalRadarSelection;
 
         let mut app = App::new();
         app.add_message::<CoordinationEnqueue>();
 
-        let radar_id = crate::system_registry::tactical_radar_system_id();
-        let hull = crate::damage::SystemHull::from_config(&[(radar_id.clone(), 100.0)]);
+        let radar_id = crate::ship::system_registry::tactical_radar_system_id();
+        let hull = crate::ship::damage::SystemHull::from_config(&[(radar_id.clone(), 100.0)]);
 
         let ship = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid("raider".into()),
-                crate::entity_spawner::EntitySystemHull(hull),
+                crate::entities::spawner::EntityUuid("raider".into()),
+                crate::entities::spawner::EntitySystemHull(hull),
                 LastSystemTiers::default(),
                 ShipConfigComponent::default(),
                 ShipSystemControlSources::default(),
@@ -1072,7 +1108,7 @@ mod tests {
         {
             let mut e = app.world_mut().entity_mut(ship);
             let mut hull = e
-                .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                .get_mut::<crate::entities::spawner::EntitySystemHull>()
                 .unwrap();
             hull.0.set_hp(&radar_id, 20.0);
         }
@@ -1105,7 +1141,7 @@ mod tests {
     /// requests and nothing else (#830 removed the raw hull poll).
     #[test]
     fn a_one_hit_destruction_files_a_repair_request_as_well_as_the_alert() {
-        use crate::messages::SystemId;
+        use crate::core::messages::SystemId;
         use bevy::ecs::message::Messages;
 
         let mut app = App::new();
@@ -1121,7 +1157,7 @@ mod tests {
             .push(crate::ship::config::SystemInstanceConfig {
                 id: sid.clone(),
                 kind: "generic".into(),
-                station: Some(crate::messages::StationId("helm".into())),
+                station: Some(crate::core::messages::StationId("helm".into())),
                 ai_only: false,
                 human_seeking: false,
                 seek_order: Vec::new(),
@@ -1130,12 +1166,12 @@ mod tests {
                 config: None,
             });
 
-        let hull = crate::damage::SystemHull::from_config(&[(sid.clone(), 100.0)]);
+        let hull = crate::ship::damage::SystemHull::from_config(&[(sid.clone(), 100.0)]);
         let ship = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid("raider".into()),
-                crate::entity_spawner::EntitySystemHull(hull),
+                crate::entities::spawner::EntityUuid("raider".into()),
+                crate::entities::spawner::EntitySystemHull(hull),
                 LastSystemTiers::default(),
                 config,
                 ShipSystemControlSources::default(),
@@ -1153,7 +1189,7 @@ mod tests {
         {
             let mut e = app.world_mut().entity_mut(ship);
             let mut hull = e
-                .get_mut::<crate::entity_spawner::EntitySystemHull>()
+                .get_mut::<crate::entities::spawner::EntitySystemHull>()
                 .unwrap();
             hull.0.set_hp(&sid, 0.0);
         }

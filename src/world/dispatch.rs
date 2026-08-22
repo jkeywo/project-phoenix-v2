@@ -48,11 +48,11 @@
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::entity_config::EntityConfig;
-use crate::entity_loader::TemplateLoader;
-use crate::faction::FactionRegistry;
-use crate::messages::FlagKind;
-use crate::messages::{AiDirective, GamePhase, ModifierSlot, ObjectiveSource};
+use crate::ai::faction::FactionRegistry;
+use crate::core::messages::FlagKind;
+use crate::core::messages::{AiDirective, GamePhase, ModifierSlot, ObjectiveSource};
+use crate::entities::config::EntityConfig;
+use crate::entities::loader::TemplateLoader;
 use crate::modifiers::IntModifierSlot;
 use crate::objectives::UtilityConfig;
 use crate::world::config::TriggerAction;
@@ -190,7 +190,7 @@ pub enum ActionCmd {
         /// Station while this objective is active (issue #1110). `None` for
         /// objectives that contribute no stance.
         command_stance: Option<(
-            crate::messages::StationId,
+            crate::core::messages::StationId,
             crate::ship::config::StationStanceConfig,
         )>,
         /// Sub-world layer that authored the trigger adding this objective, or
@@ -341,14 +341,14 @@ pub enum ActionCmd {
         slot: IntModifierSlot,
     },
     /// Write the game-over reason resource — reason string plus the declared
-    /// [`Outcome`](crate::balance::Outcome) (#843, `None` for an undeclared
+    /// [`Outcome`](crate::core::balance::Outcome) (#843, `None` for an undeclared
     /// scripted end).
     ///
     /// Always emitted *before* `SetNextState` — `OnEnter(GamePhase::GameOver)`
     /// reads the reason, so the ordering is load-bearing.
     SetGameOverReason {
         reason: String,
-        outcome: Option<crate::balance::Outcome>,
+        outcome: Option<crate::core::balance::Outcome>,
     },
     /// Queue a game-phase transition.
     SetNextState { phase: GamePhase },
@@ -1132,7 +1132,7 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 // consequence is the same (the template spawns unchanged) and
                 // because the one thing that must not happen to a subtractive
                 // marker is silence.
-                let merged = crate::entity_override::merge_entity_config_toml(
+                let merged = crate::entities::entity_override::merge_entity_config_toml(
                     &template_value,
                     overrides_val,
                 );
@@ -1177,7 +1177,7 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 // here would change what every shipped world already means.
                 let outcome = merged.and_then(|merged| {
                     let merged_str = toml::to_string(&merged).unwrap_or_default();
-                    crate::entity_config::EntityConfig::from_toml(&merged_str)
+                    crate::entities::config::EntityConfig::from_toml(&merged_str)
                         .map_err(|e| e.to_string())
                 });
                 match outcome {
@@ -1237,7 +1237,7 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::faction::FactionConfig;
+    use crate::ai::faction::FactionConfig;
     use crate::world::load::MemoryTemplateLoader;
 
     /// Deterministic stand-in for `entity_loader::assign_uuid()`.
@@ -1265,7 +1265,7 @@ mod tests {
         EntityConfig {
             name: Some("Harrow Destroyer".to_string()),
             tags: vec!["npc".to_string()],
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             ..Default::default()
         }
     }
@@ -3562,7 +3562,7 @@ mod tests {
             out.warnings
         );
         assert!(
-            out.warnings[0].contains(crate::entity_override::REMOVE_KEY),
+            out.warnings[0].contains(crate::entities::entity_override::REMOVE_KEY),
             "the warning must name the marker so the author can find it, got {:?}",
             out.warnings[0]
         );

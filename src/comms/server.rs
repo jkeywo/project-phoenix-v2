@@ -18,14 +18,14 @@ use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
 use crate::comms::content::ActiveDialogue;
-use crate::comms_inbox::CommsInbox;
+use crate::console::comms::inbox::CommsInbox;
 use crate::console::comms::server::{
     handle_clear_comms, handle_comms_channel2, handle_hail, handle_respond_to_message,
     handle_show_on_screen,
 };
+use crate::core::messages::{CommsContact, CommsMessage, ServerMessage, StationId, ViewMode};
 use crate::lobby::{Sessions, Target};
-use crate::messages::{CommsContact, CommsMessage, ServerMessage, StationId, ViewMode};
-use crate::simulation::SimOutbox;
+use crate::server_app::SimOutbox;
 use crate::world::server::ObjectiveManagerRes;
 
 // -- Resources ---------------------------------------------------------------
@@ -144,7 +144,7 @@ impl Plugin for CommsWorldPlugin {
         // (`handle_hail` / `handle_respond_to_message` / `handle_clear_comms`)
         // all read the `comms` system's admitted commands.
         app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::COMMS_SYSTEM_ID,
+            crate::ship::system_registry::COMMS_SYSTEM_ID,
         ));
         app.init_resource::<CommsRuntime>()
             .init_resource::<CommsInboxRes>()
@@ -155,7 +155,7 @@ impl Plugin for CommsWorldPlugin {
                 init_comms_runtime.after(crate::world::server::init_world_runtime),
             )
             .add_systems(
-                OnEnter(crate::messages::GamePhase::InProgress),
+                OnEnter(crate::core::messages::GamePhase::InProgress),
                 mark_comms_dirty_on_game_start,
             )
             .add_systems(
@@ -289,7 +289,7 @@ pub(crate) fn current_sender_in_range(comms: &CommsRuntime, sender_uuid: &str) -
 fn auto_clear_on_screen_message(
     mut on_screen: ResMut<OnScreenMessage>,
     inbox: Res<CommsInboxRes>,
-    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
 ) {
     if on_screen.0.is_none() {
         return;
@@ -297,8 +297,8 @@ fn auto_clear_on_screen_message(
     let current_view = view_mode_q
         .single()
         .map(|vm| vm.view_mode.clone())
-        .unwrap_or(crate::messages::ViewMode::Camera(
-            crate::messages::CameraView::default(),
+        .unwrap_or(crate::core::messages::ViewMode::Camera(
+            crate::core::messages::CameraView::default(),
         ));
     // If the captain (or anyone) has switched away from Comms view, clear.
     if !matches!(current_view, ViewMode::Comms) {
@@ -351,7 +351,7 @@ pub(crate) fn update_comms_range_flags(
     mut comms: ResMut<CommsRuntime>,
     ship_q: Query<
         (&Transform, Option<&crate::comms::CommsRange>),
-        With<crate::simulation::LocalShip>,
+        With<crate::server_app::LocalShip>,
     >,
     entity_q: Query<(
         &crate::entities::spawner::EntityUuid,
@@ -504,7 +504,7 @@ pub(crate) fn broadcast_comms_state(
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::ship_plugin::HumanSeekingHosts>,
         ),
-        With<crate::simulation::LocalShip>,
+        With<crate::server_app::LocalShip>,
     >,
     mut comms: ResMut<CommsRuntime>,
     mut inbox: ResMut<CommsInboxRes>,
@@ -527,10 +527,10 @@ pub(crate) fn broadcast_comms_state(
             crate::command_admission::station_for_system(
                 &c.0,
                 seeking_hosts,
-                &crate::system_registry::comms_system_id(),
+                &crate::ship::system_registry::comms_system_id(),
             )
         })
-        .unwrap_or_else(|| StationId(crate::system_registry::COMMS_SYSTEM_ID.into()));
+        .unwrap_or_else(|| StationId(crate::ship::system_registry::COMMS_SYSTEM_ID.into()));
     let comms_token = sessions
         .0
         .holder_for_station(&comms_station)
@@ -598,8 +598,8 @@ pub(crate) fn broadcast_comms_state(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::core::messages::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
-    use crate::messages::*;
     use crate::world::server::tests::ai_trigger_test_app;
     use crate::world::server::{broadcast_objective_summary, WorldContentRuntime};
 
@@ -651,13 +651,13 @@ pub(crate) mod tests {
             std::time::Duration::from_millis(1),
         );
         app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             // The AUTHORED Comms console AI pair every shipped hull carries.
             // Since #885b stage 5d neither host has a synthesised fallback, so a
             // fixture whose subject is the AI answering (or being refused by)
@@ -694,7 +694,7 @@ pub(crate) mod tests {
             msgs.push(OutboundMessage {
                 target,
                 msg,
-                delivery: crate::messages::DeliveryClass::Reliable,
+                delivery: crate::core::messages::DeliveryClass::Reliable,
             });
         }
         app.world_mut().resource_mut::<Outbox>().0.clear();
@@ -766,7 +766,7 @@ pub(crate) mod tests {
     fn comms_state_marks_contact_out_of_range_when_ship_too_far() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "station-uuid-range-far";
         let mut app = comms_test_app();
@@ -778,7 +778,7 @@ pub(crate) mod tests {
             .world_mut()
             .spawn((
                 Ship,
-                crate::simulation::LocalShip,
+                crate::server_app::LocalShip,
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 CommsRange(100.0),
             ))
@@ -857,7 +857,7 @@ pub(crate) mod tests {
     fn despawning_a_hailed_entity_prunes_the_open_hail_record() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "station-uuid-open-hail-prune";
         let mut app = comms_test_app();
@@ -865,7 +865,7 @@ pub(crate) mod tests {
 
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(100.0),
         ));
@@ -883,8 +883,8 @@ pub(crate) mod tests {
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::Hail {
                     target_uuid: station_uuid.into(),
                 },
             },
@@ -919,14 +919,14 @@ pub(crate) mod tests {
     fn a_same_tick_clear_wins_over_a_hail() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "station-uuid-same-tick-clear";
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, station_uuid);
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(100.0),
         ));
@@ -941,8 +941,8 @@ pub(crate) mod tests {
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::Hail {
                     target_uuid: station_uuid.into(),
                 },
             },
@@ -951,8 +951,8 @@ pub(crate) mod tests {
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::ClearComms,
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::ClearComms,
             },
         );
         let _ = tick(&mut app);
@@ -968,7 +968,7 @@ pub(crate) mod tests {
     fn comms_state_marks_contact_in_range_when_ship_close() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "station-uuid-range-near";
         let mut app = comms_test_app();
@@ -976,7 +976,7 @@ pub(crate) mod tests {
 
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
@@ -1042,7 +1042,7 @@ pub(crate) mod tests {
     fn comms_state_projects_important_and_available_onto_responses() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456761";
         let mut app = comms_test_app();
@@ -1050,7 +1050,7 @@ pub(crate) mod tests {
 
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(100.0),
         ));
@@ -1146,13 +1146,13 @@ pub(crate) mod tests {
     fn a_comms_range_entity_without_the_opt_in_is_not_a_contact() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::{EntityName, EntityUuid};
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, "declared-station");
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
@@ -1185,13 +1185,13 @@ pub(crate) mod tests {
     fn a_hailable_entity_joins_the_roster_labelled_from_its_entity_name() {
         use crate::comms::{CommsHailable, CommsRange};
         use crate::entities::spawner::{EntityName, EntityUuid};
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, "declared-station");
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
@@ -1229,13 +1229,13 @@ pub(crate) mod tests {
     fn an_entity_derived_contact_uses_its_authored_display_name_and_range_stamp() {
         use crate::comms::{CommsHailable, CommsRange};
         use crate::entities::spawner::{EntityName, EntityUuid};
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, "declared-station");
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(100.0),
         ));
@@ -1268,13 +1268,13 @@ pub(crate) mod tests {
     fn an_entity_derived_contact_appears_on_spawn_and_drops_on_despawn() {
         use crate::comms::{CommsHailable, CommsRange};
         use crate::entities::spawner::{EntityName, EntityUuid};
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, "declared-station");
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
@@ -1329,7 +1329,7 @@ pub(crate) mod tests {
     fn a_seated_contact_wins_the_uuid_collision_with_its_entity() {
         use crate::comms::{CommsHailable, CommsRange};
         use crate::entities::spawner::{EntityName, EntityUuid};
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let mut app = comms_test_app();
         // `setup_game_with_comms` seats the contact named "Starbase Alpha" for
@@ -1337,7 +1337,7 @@ pub(crate) mod tests {
         setup_game_with_comms(&mut app, "starbase-uuid");
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
@@ -1366,13 +1366,13 @@ pub(crate) mod tests {
     fn entity_derived_contacts_are_appended_in_deterministic_order() {
         use crate::comms::{CommsHailable, CommsRange};
         use crate::entities::spawner::{EntityName, EntityUuid};
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let mut app = comms_test_app();
         setup_game_with_comms(&mut app, "declared-station");
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
@@ -1414,7 +1414,7 @@ pub(crate) mod tests {
     #[test]
     fn contact_without_comms_range_entity_is_pruned_from_broadcast() {
         use crate::comms::CommsRange;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let bogus_uuid = "no-such-entity";
         let mut app = comms_test_app();
@@ -1424,7 +1424,7 @@ pub(crate) mod tests {
         // entity with `bogus_uuid` + CommsRange.
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
@@ -1454,7 +1454,7 @@ pub(crate) mod tests {
     fn entity_despawn_flips_sender_in_range_to_false() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         // Use a real UUID4 so the non-UUID synthetic-sender exception introduced
         // for `_self` / "Starcorp Command" does not suppress the range flip.
@@ -1464,7 +1464,7 @@ pub(crate) mod tests {
 
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(1000.0),
         ));
@@ -1483,8 +1483,8 @@ pub(crate) mod tests {
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::Hail {
                     target_uuid: station_uuid.into(),
                 },
             },
@@ -1518,7 +1518,7 @@ pub(crate) mod tests {
     fn multiple_entities_have_independent_range_flags() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let near_uuid = "near-1";
         let far_uuid = "far-1";
@@ -1537,7 +1537,7 @@ pub(crate) mod tests {
 
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
@@ -1582,7 +1582,7 @@ pub(crate) mod tests {
     fn range_flip_triggers_fresh_broadcast() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "station-flip";
         let mut app = comms_test_app();
@@ -1592,7 +1592,7 @@ pub(crate) mod tests {
             .world_mut()
             .spawn((
                 Ship,
-                crate::simulation::LocalShip,
+                crate::server_app::LocalShip,
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 CommsRange(500.0),
             ))
@@ -1631,7 +1631,7 @@ pub(crate) mod tests {
     fn ship_despawn_mid_game_keeps_gates_closed() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "station-ship-despawn";
         let mut app = comms_test_app();
@@ -1641,7 +1641,7 @@ pub(crate) mod tests {
             .world_mut()
             .spawn((
                 Ship,
-                crate::simulation::LocalShip,
+                crate::server_app::LocalShip,
                 Transform::from_xyz(0.0, 0.0, 0.0),
                 CommsRange(1000.0),
             ))
@@ -1739,12 +1739,12 @@ pub(crate) mod tests {
         {
             let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
             sources.0.set(
-                crate::system_registry::comms_system_id(),
-                crate::control_source::ControlSource::Ai,
+                crate::ship::system_registry::comms_system_id(),
+                crate::ship::control_source::ControlSource::Ai,
             );
             app.world_mut().spawn((
-                crate::simulation::Ship,
-                crate::simulation::LocalShip,
+                crate::server_app::Ship,
+                crate::server_app::LocalShip,
                 sources,
             ));
         }

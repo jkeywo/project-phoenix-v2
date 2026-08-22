@@ -6,9 +6,9 @@
 //!
 //! The Bevy orchestrator lives in `console_ai_plugin`.
 
-use crate::shield::ShieldFacingSnapshot;
 use crate::ship::shields::DamageRecord;
-use crate::torpedo::TorpedoTubeId;
+use crate::weapons::shield::ShieldFacingSnapshot;
+use crate::weapons::torpedo::TorpedoTubeId;
 
 // ── Frequency hint state ───────────────────────────────────────────────────
 
@@ -537,7 +537,7 @@ pub fn tick_shield_focus_ai(input: &ShieldFocusAiInput) -> ShieldFocusAiOutput {
 /// state before calling this, so the policy evaluates over real readings while
 /// `policy.rs` stays free of ECS types.
 pub fn seed_shields_focus_facts(
-    facings: &[crate::shield::ShieldFacingSnapshot],
+    facings: &[crate::weapons::shield::ShieldFacingSnapshot],
     damage_history: &[Vec<DamageRecord>],
     damage_window_secs: f32,
     min_damage_window_secs: f32,
@@ -1064,7 +1064,7 @@ mod tests {
 
     // ── Shields AI ────────────────────────────────────────────────────────
 
-    use crate::shield::ShieldFacingSnapshot;
+    use crate::weapons::shield::ShieldFacingSnapshot;
 
     fn make_snap(label: &str, hp: i32, max_hp: i32, focused: bool) -> ShieldFacingSnapshot {
         ShieldFacingSnapshot {

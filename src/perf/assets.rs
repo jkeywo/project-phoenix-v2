@@ -152,7 +152,7 @@ fn mesh_sidecar(text: &str) -> Option<String> {
         .get("model")
         .and_then(|m| m.as_str())
         .filter(|m| m.ends_with(".glb"))?;
-    Some(crate::model_rig::sidecar_path(
+    Some(crate::entities::model_rig::sidecar_path(
         model,
         mesh.get("variant").and_then(|v| v.as_str()),
     ))

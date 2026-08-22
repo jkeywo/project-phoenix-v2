@@ -1,5 +1,5 @@
-use crate::messages::FlagKind;
-pub use crate::messages::{ModifierSlot, ModifierSource};
+use crate::core::messages::FlagKind;
+pub use crate::core::messages::{ModifierSlot, ModifierSource};
 use bevy::prelude::Component;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -654,7 +654,7 @@ mod tests {
     fn power_group_source_uses_group_id() {
         let mut mods = ShipModifiers::new();
         mods.add_or_update(ms(
-            ModifierSource::PowerGroup(crate::messages::PowerGroupId("sensors".into())),
+            ModifierSource::PowerGroup(crate::core::messages::PowerGroupId("sensors".into())),
             ModifierSlot::RadarRange,
             1.0,
         ));
@@ -842,7 +842,7 @@ mod tests {
 
     // ── Flag API tests ─────────────────────────────────────────────────────
 
-    use crate::messages::FlagKind;
+    use crate::core::messages::FlagKind;
 
     #[test]
     fn single_source_adds_flag() {

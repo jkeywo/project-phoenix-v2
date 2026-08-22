@@ -8,6 +8,7 @@ use bevy::prelude::*;
 // carries the single-owner observed admission edge). Both paths cross the same
 // `command_admission::ai_emit::emit_ai_command` seam a human command does.
 use crate::command_admission::ai_emit::emit_ai_command;
+use crate::server_app::{ShipBoost, ShipImpulse};
 #[cfg(test)]
 use crate::ship::components::LastHelmInput;
 use crate::ship::components::{
@@ -18,8 +19,7 @@ use crate::ship::components::{
 use crate::ship::helm::{
     ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput, VerticalThrustInput,
 };
-use crate::ship_state::ShipPhysics;
-use crate::simulation::{ShipBoost, ShipImpulse};
+use crate::ship::state::ShipPhysics;
 
 // The shared fixed-rate AI sim tick (issues #803, #889) used to live here as a
 // helm-private `AiHelmTickTimer`/`AiHelmTickReady` pair. It was never
@@ -64,14 +64,14 @@ pub use self::surfaces::*;
 pub(crate) use self::vertical::*;
 
 /// Per-ship map of the helm fine-system AI **policies**, keyed by each fine
-/// system's [`SystemId`](crate::messages::SystemId) (issue #1209). Built at spawn
+/// system's [`SystemId`](crate::core::messages::SystemId) (issue #1209). Built at spawn
 /// from the authored `[helm_console.*_ai]` blocks — one entry per block the hull
 /// declares — collapsing the six former `Helm*AiPolicy` newtypes
 /// (`HelmEnginesAiPolicy`, `HelmSteeringAiPolicy`, `HelmLateralAiPolicy`,
 /// `HelmVerticalAiPolicy`, `HelmImpulseAiPolicy`, `HelmBoostAiPolicy`) into one
 /// keyed component — the same shape the weapon banks use
-/// ([`PhaserBankAiPolicies`](crate::weapons_plugin::PhaserBankAiPolicies) /
-/// [`TorpedoTubeAiPolicies`](crate::weapons_plugin::TorpedoTubeAiPolicies)).
+/// ([`PhaserBankAiPolicies`](crate::console::weapons::PhaserBankAiPolicies) /
+/// [`TorpedoTubeAiPolicies`](crate::console::weapons::TorpedoTubeAiPolicies)).
 ///
 /// A `BTreeMap` for order-stable iteration: each axis host reads only its OWN
 /// policy by its [`HelmAxisHost::system_id`], so the map is never iterated on the
@@ -86,7 +86,7 @@ pub(crate) use self::vertical::*;
 /// authored policy is neither — so collapsing them would confuse two lifetimes.
 #[derive(Component, Default, Clone, Debug)]
 pub struct FineSystemAiPolicies(
-    pub std::collections::BTreeMap<crate::messages::SystemId, crate::ai::policy::AiPolicy>,
+    pub std::collections::BTreeMap<crate::core::messages::SystemId, crate::ai::policy::AiPolicy>,
 );
 
 /// True when the AI helm is flying this ship: both stick axes
@@ -96,11 +96,11 @@ pub struct FineSystemAiPolicies(
 pub(crate) fn helm_axes_operate_ai(sources: &ShipSystemControlSources) -> bool {
     sources
         .0
-        .policy_for(&crate::system_registry::helm_thrust_system_id())
+        .policy_for(&crate::ship::system_registry::helm_thrust_system_id())
         .operate_ai
         && sources
             .0
-            .policy_for(&crate::system_registry::helm_steering_system_id())
+            .policy_for(&crate::ship::system_registry::helm_steering_system_id())
             .operate_ai
 }
 
@@ -135,7 +135,9 @@ pub(crate) fn detect_reached_objective_completion(
         ),
         With<crate::server_app::Ship>,
     >,
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
 ) {
     let Some(mut objectives) = objectives else {
         return;
@@ -154,11 +156,13 @@ pub(crate) fn detect_reached_objective_completion(
             .map(|b| b.0.waypoint_arrival_radius)
             .unwrap_or(crate::ai::WAYPOINT_ARRIVAL_RADIUS);
 
-        let scored: Vec<crate::messages::ScoredObjective> = match blackboards
+        let scored: Vec<crate::core::messages::ScoredObjective> = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
+                bb.scored_objectives.clone()
+            }
             _ => continue,
         };
 
@@ -166,7 +170,7 @@ pub(crate) fn detect_reached_objective_completion(
             if obj.score <= 0.0 {
                 continue;
             }
-            let crate::messages::AiDirective::Reach { anchor } = &obj.directive else {
+            let crate::core::messages::AiDirective::Reach { anchor } = &obj.directive else {
                 continue;
             };
             let Some(&target) = anchors.get(anchor.as_str()) else {
@@ -179,7 +183,7 @@ pub(crate) fn detect_reached_objective_completion(
                 // at a shared anchor (idempotent complete) emit once (issue #841).
                 if objectives.0.complete(&obj.snapshot.id) {
                     if let Some(ref mut msgs) = balance_events {
-                        msgs.write(crate::balance::BalanceEvent::ObjectiveCompleted {
+                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveCompleted {
                             objective_id: obj.snapshot.id.clone(),
                         });
                     }
@@ -404,24 +408,24 @@ pub(crate) fn ai_policy_state_tick(
             // question — `handle_fire_torpedo` appends to `in_flight` and
             // `tick_torpedo_lifecycle` removes from it, both in `SimSet::Physics`
             // — so `ship_plugin` pins this system after both of them.
-            Option<&crate::weapons_plugin::TorpedoSystemResource>,
+            Option<&crate::console::weapons::TorpedoSystemResource>,
             // This ship's OWN blaster banks (issue #792), read for their authored
             // `range`/`projectile_speed` alone. Bank CONFIG never changes at
             // runtime, so unlike the tubes above this carries no ordering
             // question — no system in the schedule writes the field this reads.
-            Option<&crate::weapons_plugin::BlasterSystemResource>,
+            Option<&crate::console::weapons::BlasterSystemResource>,
             // The SHIP field of the orbit-direction composite key.
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             HelmPolicyRuntime,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
     // Every entity a target uuid could name, for the facing-shield reading
     // (issue #791). The same shape `ai_torpedo_auto_fire` resolves its own
     // striking arc through, and read-only, so it conflicts with nothing the
     // ship query above mutates.
     targets: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         &Transform,
         Option<&crate::ship::shields::ShipShields>,
         Option<&ShipPhysics>,
@@ -430,7 +434,9 @@ pub(crate) fn ai_policy_state_tick(
     // than `MessageWriter` for the same reason the objective tracer above uses
     // it: a bare-`App` fixture that never registered the message must not fail
     // parameter validation.
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
     // The last doctrine phase reported per ship, so the tracer emits once per
     // observed change (including the initial phase on the first gated tick)
     // rather than once per tick.
@@ -440,7 +446,7 @@ pub(crate) fn ai_policy_state_tick(
     let hz = world_config
         .as_deref()
         .map(|wc| wc.global.ai_tick_hz)
-        .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().ai_tick_hz);
+        .unwrap_or_else(|| crate::entities::config::GlobalConfig::default().ai_tick_hz);
     if hz > 0.0 {
         clock.0 += 1.0 / hz as f64;
     }
@@ -471,10 +477,12 @@ pub(crate) fn ai_policy_state_tick(
         // omits either block at load, so a ship missing one takes no helm AI
         // action rather than being handed a policy nobody wrote. Both are read
         // out of the ship's one keyed `FineSystemAiPolicies` map (issue #1209).
-        let engines_policy =
-            fine_policies.and_then(|p| p.0.get(&crate::system_registry::helm_thrust_system_id()));
-        let steering_policy =
-            fine_policies.and_then(|p| p.0.get(&crate::system_registry::helm_steering_system_id()));
+        let engines_policy = fine_policies.and_then(|p| {
+            p.0.get(&crate::ship::system_registry::helm_thrust_system_id())
+        });
+        let steering_policy = fine_policies.and_then(|p| {
+            p.0.get(&crate::ship::system_registry::helm_steering_system_id())
+        });
         let (Some(engines_policy), Some(steering_policy)) = (engines_policy, steering_policy)
         else {
             continue;
@@ -540,7 +548,7 @@ pub(crate) fn ai_policy_state_tick(
             &mut runtime.engines.0,
             sources
                 .0
-                .policy_for(&crate::system_registry::helm_thrust_system_id())
+                .policy_for(&crate::ship::system_registry::helm_thrust_system_id())
                 .operate_ai,
             &facts,
             travel_target,
@@ -563,7 +571,7 @@ pub(crate) fn ai_policy_state_tick(
                 && last_reported_phase.get(&entity).map(String::as_str) != Some(phase.as_str())
             {
                 if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), entity_uuid) {
-                    msgs.write(crate::balance::BalanceEvent::DoctrinePhaseChanged {
+                    msgs.write(crate::core::balance::BalanceEvent::DoctrinePhaseChanged {
                         ship: uuid.0.clone(),
                         phase: phase.clone(),
                     });
@@ -578,7 +586,7 @@ pub(crate) fn ai_policy_state_tick(
             &mut runtime.steering.0,
             sources
                 .0
-                .policy_for(&crate::system_registry::helm_steering_system_id())
+                .policy_for(&crate::ship::system_registry::helm_steering_system_id())
                 .operate_ai,
             &facts,
             travel_target,
@@ -655,11 +663,12 @@ pub(crate) fn ai_policy_state_tick(
         // for the same reason as above: no declaration, no automation.
         let boost_operable = sources
             .0
-            .policy_for(&crate::system_registry::helm_boost_system_id())
+            .policy_for(&crate::ship::system_registry::helm_boost_system_id())
             .operate_ai
             && boost_cfg.map(|c| c.enabled).unwrap_or(false);
-        let boost_policy =
-            fine_policies.and_then(|p| p.0.get(&crate::system_registry::helm_boost_system_id()));
+        let boost_policy = fine_policies.and_then(|p| {
+            p.0.get(&crate::ship::system_registry::helm_boost_system_id())
+        });
         let entered = boost_policy.and_then(|boost_policy| {
             tick_policy_machine(
                 boost_policy,
@@ -973,7 +982,7 @@ pub(crate) struct HelmAxisCtx<'a> {
     /// The authored `[helm_capability]` section (vertical movement mode/limits).
     pub(crate) capability: Option<&'a crate::entities::spawner::HelmCapabilitySection>,
     /// This ship's per-objective patrol cursors, for target resolution.
-    pub(crate) cursors: Option<&'a crate::ai_plugin::ObjectiveCursors>,
+    pub(crate) cursors: Option<&'a crate::ai::server::ObjectiveCursors>,
 }
 
 /// The policy/state/mutable-scratch a [`HelmAxisHost::act`] reads to actuate
@@ -997,7 +1006,7 @@ pub(crate) struct HelmAxisIo<'a> {
 /// Boost — collapse the six near-identical hosts behind [`run_helm_axis`].
 pub(crate) trait HelmAxisHost {
     /// The fine system whose Control Source gates this axis.
-    fn system_id() -> crate::messages::SystemId;
+    fn system_id() -> crate::core::messages::SystemId;
     /// The single output channel this axis resolves its mode verb on.
     const CHANNEL: &'static str;
     /// Whether this axis's policy may run the #882 state machine. Stateful axes
@@ -1017,7 +1026,7 @@ pub(crate) trait HelmAxisHost {
     /// today only the Lateral axis's docking translation. `Some` emits it and
     /// skips the policy path for the tick; the default is `None`. It runs AFTER
     /// the Control-Source gate, so a human-held axis overrides nothing.
-    fn pre_override(_cx: &HelmAxisCtx) -> Option<crate::messages::SystemControlPayload> {
+    fn pre_override(_cx: &HelmAxisCtx) -> Option<crate::core::messages::SystemControlPayload> {
         None
     }
 
@@ -1032,7 +1041,7 @@ pub(crate) trait HelmAxisHost {
         outcome: crate::ai::host::HostOutcome,
         cx: &HelmAxisCtx,
         io: &mut HelmAxisIo,
-    ) -> Option<crate::messages::SystemControlPayload>;
+    ) -> Option<crate::core::messages::SystemControlPayload>;
 }
 
 /// Resolve one helm axis's verdict through the shared [`decide`] spine, choosing
@@ -1135,7 +1144,7 @@ fn run_helm_axis<H: HelmAxisHost>(
     flags: &[&crate::world::flags::FlagStore],
     cx: &HelmAxisCtx,
     io: &mut HelmAxisIo,
-) -> Option<crate::messages::SystemControlPayload> {
+) -> Option<crate::core::messages::SystemControlPayload> {
     let facts = H::seed(cx);
     let outcome = helm_axis_outcome::<H>(sources, policy, state, &facts, now, flags);
     // Gate — the ONE place a human/offline axis suppresses the AI.
@@ -1156,14 +1165,14 @@ fn run_helm_axis<H: HelmAxisHost>(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::control_source::{ControlSource, ControlSourceResolver};
-    use crate::messages::{ClientMessage, InterSystemPayload, InterSystemQueue};
+    use crate::core::messages::{ClientMessage, InterSystemPayload, InterSystemQueue};
+    use crate::server_app::Ship;
     use crate::ship::components::ShipConfigComponent;
     use crate::ship::components::HELM_AI_MAX_DT_SECS;
+    use crate::ship::control_source::{ControlSource, ControlSourceResolver};
+    use crate::ship::physics::ShipPhysicsConfig;
     use crate::ship::test_support::*;
-    use crate::ship_physics::ShipPhysicsConfig;
     use crate::simmath;
-    use crate::simulation::Ship;
 
     // ── Table-driven per-axis wiring guard (issue #1208) ──────────────────────
     //
@@ -1197,7 +1206,7 @@ mod tests {
     }
 
     /// AI on `system`, human on everything else.
-    fn wiring_ai_sources(system: crate::messages::SystemId) -> ShipSystemControlSources {
+    fn wiring_ai_sources(system: crate::core::messages::SystemId) -> ShipSystemControlSources {
         let mut resolver = ControlSourceResolver::new();
         resolver.set(system, ControlSource::Ai);
         ShipSystemControlSources(resolver)
@@ -1255,7 +1264,7 @@ mod tests {
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut target = entity
-            .get_mut::<crate::weapons_plugin::TacticalRadarSelection>()
+            .get_mut::<crate::console::weapons::TacticalRadarSelection>()
             .expect("ship must carry TacticalRadarSelection");
         target.0 = Some(uuid.to_string());
     }
@@ -1263,14 +1272,14 @@ mod tests {
     /// Give this ship a Navigation waypoint *and* the Channel-3 clearance to
     /// fly it, as `operate_navigation_ai` → `process_coordination_lag` would
     /// once the order came due (issue #702). Returns the waypoint's generation.
-    use crate::navigation_plugin::WaypointMode;
+    use crate::console::navigation::WaypointMode;
 
     fn set_cleared_nav_waypoint(app: &mut App, x: f32, z: f32) -> u64 {
         let ship = find_ship_entity(app);
         let generation = {
             let mut entity = app.world_mut().entity_mut(ship);
             let mut waypoint = entity
-                .get_mut::<crate::navigation_plugin::NavigationWaypoint>()
+                .get_mut::<crate::console::navigation::NavigationWaypoint>()
                 .expect("ship must carry NavigationWaypoint");
             waypoint.set(WaypointMode::Free { x, z });
             waypoint.generation()
@@ -1287,7 +1296,7 @@ mod tests {
 
     // ── Per-axis helm AI (issue #701) ──────────────────────────────────────
 
-    fn get_impulse_command(app: &mut App) -> crate::impulse::ImpulsePhase {
+    fn get_impulse_command(app: &mut App) -> crate::ship::impulse::ImpulsePhase {
         app.world_mut()
             .query_filtered::<&ImpulseCommand, With<Ship>>()
             .single(app.world())
@@ -1295,7 +1304,7 @@ mod tests {
             .0
     }
 
-    fn set_impulse_command(app: &mut App, phase: crate::impulse::ImpulsePhase) {
+    fn set_impulse_command(app: &mut App, phase: crate::ship::impulse::ImpulsePhase) {
         let ship = find_ship_entity(app);
         app.world_mut()
             .entity_mut(ship)
@@ -1316,9 +1325,9 @@ mod tests {
     /// derives `Default`, which zeroes them rather than applying their serde
     /// `default =` values; a zero `target_speed` would silently pin the helm's
     /// throttle at 0 alongside whatever the test meant to measure.
-    fn impulse_doctrine(objective_id: &str) -> crate::entity_config::BehaviourConfig {
-        crate::entity_config::BehaviourConfig {
-            doctrine: vec![crate::entity_config::DoctrineObjective {
+    fn impulse_doctrine(objective_id: &str) -> crate::entities::config::BehaviourConfig {
+        crate::entities::config::BehaviourConfig {
+            doctrine: vec![crate::entities::config::DoctrineObjective {
                 id: objective_id.into(),
                 use_impulse: Some(true),
                 target_speed: 0.8,
@@ -1335,7 +1344,7 @@ mod tests {
     /// the writer of the `ImpulseCommand` these tests measure, and now simply
     /// isolates the axis. The shipped-hull test below exercises the everything-AI
     /// case.
-    fn impulse_ai_app(objective: crate::messages::ScoredObjective) -> App {
+    fn impulse_ai_app(objective: crate::core::messages::ScoredObjective) -> App {
         let mut app = test_app();
         let objective_id = objective.id.clone();
         set_ship_blackboard_objectives(&mut app, vec![objective]);
@@ -1347,7 +1356,7 @@ mod tests {
         set_helm_control_source(&mut app, ControlSource::Human);
         set_fine_control_source(
             &mut app,
-            crate::system_registry::helm_impulse_system_id(),
+            crate::ship::system_registry::helm_impulse_system_id(),
             ControlSource::Ai,
         );
         app
@@ -1371,7 +1380,7 @@ mod tests {
     /// uncomposed hulls alike.
     fn resolver_from_shipped_hull(stem: &str) -> ControlSourceResolver {
         let path = format!("assets/entities/{stem}.toml");
-        let config = crate::entity_includes::load_entity_config(&path)
+        let config = crate::entities::include_resolve::load_entity_config(&path)
             .unwrap_or_else(|e| panic!("shipped hull {stem} must compose and parse: {e}"));
         let ship_config = config
             .ship_config
@@ -1424,24 +1433,27 @@ mod tests {
             "ship_requiem_courier",
         ];
 
-        let axes: [(&str, crate::messages::SystemId); 5] = [
+        let axes: [(&str, crate::core::messages::SystemId); 5] = [
             (
                 "helm-thrust",
-                crate::system_registry::helm_thrust_system_id(),
+                crate::ship::system_registry::helm_thrust_system_id(),
             ),
             (
                 "helm-steering",
-                crate::system_registry::helm_steering_system_id(),
+                crate::ship::system_registry::helm_steering_system_id(),
             ),
             (
                 "helm-impulse",
-                crate::system_registry::helm_impulse_system_id(),
+                crate::ship::system_registry::helm_impulse_system_id(),
             ),
             (
                 "helm-lateral-thrust",
-                crate::system_registry::lateral_thrust_system_id(),
+                crate::ship::system_registry::lateral_thrust_system_id(),
             ),
-            ("helm-boost", crate::system_registry::helm_boost_system_id()),
+            (
+                "helm-boost",
+                crate::ship::system_registry::helm_boost_system_id(),
+            ),
         ];
 
         for hull in hulls {
@@ -1452,8 +1464,8 @@ mod tests {
             // (the kind is unregistered), but pin the resolver view too.
             assert!(
                 !resolver
-                    .policy_for(&crate::messages::SystemId(
-                        crate::system_registry::HELM_STATION_ID.to_string()
+                    .policy_for(&crate::core::messages::SystemId(
+                        crate::ship::system_registry::HELM_STATION_ID.to_string()
                     ))
                     .operate_ai,
                 "{hull} must NOT declare a coarse `helm` system (#801)"
@@ -1505,14 +1517,14 @@ mod tests {
         // The declaration itself — what #800 adds, and what was missing.
         assert!(
             resolver
-                .policy_for(&crate::system_registry::helm_thrust_system_id())
+                .policy_for(&crate::ship::system_registry::helm_thrust_system_id())
                 .operate_ai,
             "the shipped hull must declare helm-thrust, or ai_helm_thrust is dormant \
              in shipped content"
         );
         assert!(
             resolver
-                .policy_for(&crate::system_registry::helm_steering_system_id())
+                .policy_for(&crate::ship::system_registry::helm_steering_system_id())
                 .operate_ai,
             "the shipped hull must declare helm-steering, or ai_helm_steering is dormant \
              in shipped content"
@@ -1576,11 +1588,11 @@ mod tests {
         // axes undeclared and therefore Human by default.
         let mut pre_800 = shipped.clone();
         pre_800.set(
-            crate::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
             ControlSource::Human,
         );
         pre_800.set(
-            crate::system_registry::helm_steering_system_id(),
+            crate::ship::system_registry::helm_steering_system_id(),
             ControlSource::Human,
         );
 
@@ -1616,7 +1628,7 @@ mod tests {
         // steering (before any arc-bearing bias) is ~0.
         let destroy_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityUuid(destroy_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(0.0, 0.0, -1000.0),
         ));
@@ -1624,7 +1636,7 @@ mod tests {
         runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
         app.insert_resource(runtime);
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 5000.0,
                 ..Default::default()
             },
@@ -1636,7 +1648,7 @@ mod tests {
         // bias can only be attributed to the pending request.
         let bearing_uuid = uuid::Uuid::new_v4();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(bearing_uuid.to_string()),
+            crate::entities::spawner::EntityUuid(bearing_uuid.to_string()),
             crate::entities::spawner::EntityName("Bearing Contact".into()),
             Transform::from_xyz(200.0, 0.0, -1.0),
         ));
@@ -1647,7 +1659,7 @@ mod tests {
                 target: Some(bearing_uuid),
                 // Fore bank, narrow arc, ample range: the far-starboard target is
                 // in reach but well out of arc, so steering must bias to bear.
-                arcs: vec![crate::messages::WeaponEmitterArc {
+                arcs: vec![crate::core::messages::WeaponEmitterArc {
                     facing_deg: 0.0,
                     arc_deg: 30.0,
                     range: 5000.0,
@@ -1755,7 +1767,7 @@ mod tests {
         set_helm_control_source(&mut app, ControlSource::Human);
         set_fine_control_source(
             &mut app,
-            crate::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
             ControlSource::Ai,
         );
         tick(&mut app);
@@ -1786,7 +1798,7 @@ mod tests {
     fn set_fine_policy(
         app: &mut App,
         ship: Entity,
-        system: crate::messages::SystemId,
+        system: crate::core::messages::SystemId,
         policy: crate::ai::policy::AiPolicy,
     ) {
         let mut map = app
@@ -1802,25 +1814,25 @@ mod tests {
 
     /// Attach an authored Engines policy to the ship (overriding the spawn
     /// default the hosts fall back to).
-    fn attach_engines_policy(app: &mut App, cfg: crate::entity_config::FineSystemAiConfigToml) {
+    fn attach_engines_policy(app: &mut App, cfg: crate::entities::config::FineSystemAiConfigToml) {
         let ship = find_ship_entity(app);
         let policy = cfg.to_policy().expect("engines policy resolves");
         set_fine_policy(
             app,
             ship,
-            crate::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
             policy,
         );
     }
 
     /// Attach an authored Steering policy to the ship.
-    fn attach_steering_policy(app: &mut App, cfg: crate::entity_config::FineSystemAiConfigToml) {
+    fn attach_steering_policy(app: &mut App, cfg: crate::entities::config::FineSystemAiConfigToml) {
         let ship = find_ship_entity(app);
         let policy = cfg.to_policy().expect("steering policy resolves");
         set_fine_policy(
             app,
             ship,
-            crate::system_registry::helm_steering_system_id(),
+            crate::ship::system_registry::helm_steering_system_id(),
             policy,
         );
     }
@@ -1896,15 +1908,15 @@ mod tests {
         app.insert_resource(world_config_with_anchor(anchor, [100.0, 0.0, 0.0]));
         set_per_axis_helm_ai(&mut app);
 
-        let hold = crate::entity_config::FineSystemAiConfigToml {
+        let hold = crate::entities::config::FineSystemAiConfigToml {
             evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
-            rule: vec![crate::entity_config::FineSystemAiRuleToml {
+            rule: vec![crate::entities::config::FineSystemAiRuleToml {
                 priority: 0,
-                channel: crate::entity_config::HELM_LONGITUDINAL_CHANNEL.into(),
+                channel: crate::entities::config::HELM_LONGITUDINAL_CHANNEL.into(),
                 when: "false".into(),
-                verb: crate::entity_config::HELM_ACTUATE_DESIRED_TRAVEL_VERB.into(),
+                verb: crate::entities::config::HELM_ACTUATE_DESIRED_TRAVEL_VERB.into(),
                 value: false,
                 level: 0,
                 response_index: 0,
@@ -1939,7 +1951,7 @@ mod tests {
         set_per_axis_helm_ai(&mut app);
         attach_steering_policy(
             &mut app,
-            crate::entity_config::FineSystemAiConfigToml {
+            crate::entities::config::FineSystemAiConfigToml {
                 idle: true,
                 ..Default::default()
             },
@@ -2059,7 +2071,7 @@ mod tests {
         );
 
         let queue = app.world().resource::<InterSystemQueue>();
-        let port_id = crate::system_registry::helm_engine_port_system_id();
+        let port_id = crate::ship::system_registry::helm_engine_port_system_id();
         let msgs: Vec<_> = queue.for_target(port_id.0.as_str()).collect();
         assert!(
             !msgs.is_empty(),
@@ -2191,7 +2203,7 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(ship)
-            .remove::<crate::ai_plugin::AiHighFidelity>();
+            .remove::<crate::ai::server::AiHighFidelity>();
 
         tick(&mut app);
 
@@ -2223,7 +2235,7 @@ mod tests {
 
         assert_eq!(
             get_impulse_command(&mut app),
-            crate::impulse::ImpulsePhase::Charging,
+            crate::ship::impulse::ImpulsePhase::Charging,
             "ai_helm_impulse must command a charge toward a distant anchor dead ahead"
         );
     }
@@ -2238,7 +2250,7 @@ mod tests {
         app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, -500.0]));
         set_fine_control_source(
             &mut app,
-            crate::system_registry::helm_impulse_system_id(),
+            crate::ship::system_registry::helm_impulse_system_id(),
             ControlSource::Human,
         );
 
@@ -2246,7 +2258,7 @@ mod tests {
 
         assert_eq!(
             get_impulse_command(&mut app),
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             "helm-impulse under human control must not be commanded by ai_helm_impulse"
         );
     }
@@ -2261,16 +2273,16 @@ mod tests {
         // 20 units out — inside the 40-unit `cancel_distance`.
         app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, -20.0]));
         // `decide_impulse` only cancels from a non-Idle phase.
-        let mut state = crate::impulse::ImpulseState::new();
+        let mut state = crate::ship::impulse::ImpulseState::new();
         state.start_charge();
         set_ship_impulse(&mut app, state);
-        set_impulse_command(&mut app, crate::impulse::ImpulsePhase::Charging);
+        set_impulse_command(&mut app, crate::ship::impulse::ImpulsePhase::Charging);
 
         tick(&mut app);
 
         assert_eq!(
             get_impulse_command(&mut app),
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             "ai_helm_impulse must cancel the charge once the target is inside \
              cancel_distance; still Charging means it never wrote"
         );
@@ -2287,13 +2299,13 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(ship)
-            .remove::<crate::ai_plugin::AiHighFidelity>();
+            .remove::<crate::ai::server::AiHighFidelity>();
 
         tick(&mut app);
 
         assert_eq!(
             get_impulse_command(&mut app),
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             "ai_helm_impulse must not touch a ship without AiHighFidelity"
         );
     }
@@ -2321,10 +2333,10 @@ mod tests {
         // Inside cancel_distance with a charge running: the one geometry where
         // a system that ignored the objective gate would visibly cancel.
         app.insert_resource(world_config_with_anchor(anchor, [0.0, 0.0, -20.0]));
-        let mut state = crate::impulse::ImpulseState::new();
+        let mut state = crate::ship::impulse::ImpulseState::new();
         state.start_charge();
         set_ship_impulse(&mut app, state);
-        set_impulse_command(&mut app, crate::impulse::ImpulsePhase::Charging);
+        set_impulse_command(&mut app, crate::ship::impulse::ImpulsePhase::Charging);
         // Same objective, scored dead: `has_helm_objective` requires score > 0.
         set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective(anchor, 0.0)]);
 
@@ -2332,7 +2344,7 @@ mod tests {
 
         assert_eq!(
             get_impulse_command(&mut app),
-            crate::impulse::ImpulsePhase::Charging,
+            crate::ship::impulse::ImpulsePhase::Charging,
             "with no live Helm objective ai_helm_impulse must leave ImpulseCommand \
              untouched, as the monolith does"
         );
@@ -2350,8 +2362,8 @@ mod tests {
         // authored field flipped.
         set_behaviour_section(
             &mut app,
-            crate::entity_config::BehaviourConfig {
-                doctrine: vec![crate::entity_config::DoctrineObjective {
+            crate::entities::config::BehaviourConfig {
+                doctrine: vec![crate::entities::config::DoctrineObjective {
                     id: "reach-station-alpha".into(),
                     use_impulse: Some(false),
                     target_speed: 0.8,
@@ -2366,7 +2378,7 @@ mod tests {
 
         assert_eq!(
             get_impulse_command(&mut app),
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             "[[behaviour.doctrine]] use_impulse = false must veto the engage that \
              ai_helm_impulse_engages_toward_a_distant_target_ahead proves is otherwise \
              reachable from this geometry"
@@ -2412,16 +2424,16 @@ mod tests {
         // load-bearing: it put `operate_helm_ai` in the tick as the committer
         // this system had to run ahead of. There is no committer now.)
         set_helm_control_source(&mut app, ControlSource::Ai);
-        let mut state = crate::impulse::ImpulseState::new();
+        let mut state = crate::ship::impulse::ImpulseState::new();
         state.start_charge();
         set_ship_impulse(&mut app, state);
-        set_impulse_command(&mut app, crate::impulse::ImpulsePhase::Charging);
+        set_impulse_command(&mut app, crate::ship::impulse::ImpulsePhase::Charging);
 
         tick(&mut app);
 
         assert_eq!(
             get_impulse_command(&mut app),
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             "ai_helm_impulse must resolve its target from this tick's advance (wp-b, \
              underfoot) — still Charging means it replayed the decision on memory \
              operate_helm_ai had already committed and skipped a leg to wp-c"
@@ -2440,7 +2452,7 @@ mod tests {
         let resolver = resolver_from_shipped_hull("alliance_cruiser");
         assert!(
             resolver
-                .policy_for(&crate::system_registry::helm_impulse_system_id())
+                .policy_for(&crate::ship::system_registry::helm_impulse_system_id())
                 .operate_ai,
             "the shipped hull must declare helm-impulse, or ai_helm_impulse is dormant \
              in shipped content"
@@ -2456,7 +2468,7 @@ mod tests {
 
         assert_eq!(
             get_impulse_command(&mut app),
-            crate::impulse::ImpulsePhase::Charging,
+            crate::ship::impulse::ImpulsePhase::Charging,
             "ai_helm_impulse must drive a shipped hull's impulse decision \
              (operate_helm_ai stands down from it here)"
         );
@@ -2469,7 +2481,7 @@ mod tests {
     /// stationary ship so the look-ahead cannot also move. Any nonzero lateral
     /// is this obstacle and nothing else.
     fn lateral_dodge_app() -> App {
-        let mut app = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+        let mut app = lateral_thrust_ai_app(Some(crate::entities::config::BehaviourConfig {
             avoidance_buffer: 60.0,
             ..Default::default()
         }));
@@ -2513,7 +2525,7 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(ship)
-            .remove::<crate::ai_plugin::AiHighFidelity>();
+            .remove::<crate::ai::server::AiHighFidelity>();
 
         tick_twice(&mut app);
 
@@ -2602,7 +2614,7 @@ mod tests {
         crate::ship::test_support::discard_stale_overstep(app);
         app.world_mut().resource_mut::<Time<Fixed>>().set_timestep(
             crate::sim_tick::sim_tick_period(
-                crate::entity_config::GlobalConfig::default().ai_tick_hz,
+                crate::entities::config::GlobalConfig::default().ai_tick_hz,
             ),
         );
         app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
@@ -2734,10 +2746,10 @@ mod tests {
         let counts = count_sim_tick_runs(
             &mut app,
             |app| {
-                set_ship_impulse(app, crate::impulse::ImpulseState::new());
-                set_impulse_command(app, crate::impulse::ImpulsePhase::Idle);
+                set_ship_impulse(app, crate::ship::impulse::ImpulseState::new());
+                set_impulse_command(app, crate::ship::impulse::ImpulsePhase::Idle);
             },
-            |app| get_impulse_command(app) == crate::impulse::ImpulsePhase::Charging,
+            |app| get_impulse_command(app) == crate::ship::impulse::ImpulsePhase::Charging,
         );
         assert_shared_sim_tick_cadence("ai_helm_impulse", counts);
     }
@@ -2800,7 +2812,7 @@ mod tests {
         let resolver = resolver_from_shipped_hull("alliance_cruiser");
         assert!(
             resolver
-                .policy_for(&crate::system_registry::lateral_thrust_system_id())
+                .policy_for(&crate::ship::system_registry::lateral_thrust_system_id())
                 .operate_ai,
             "the shipped hull must declare helm-lateral-thrust, or ai_helm_lateral_thrust \
              is dormant in shipped content"
@@ -2838,11 +2850,13 @@ mod tests {
 
         // #801: "helm" is not a system; seeding it (the C dimension) must
         // have no influence on any writer — which is what this test proves.
-        let coarse = crate::messages::SystemId(crate::system_registry::HELM_STATION_ID.to_string());
-        let thrust = crate::system_registry::helm_thrust_system_id();
-        let steering = crate::system_registry::helm_steering_system_id();
-        let lateral = crate::system_registry::lateral_thrust_system_id();
-        let impulse = crate::system_registry::helm_impulse_system_id();
+        let coarse = crate::core::messages::SystemId(
+            crate::ship::system_registry::HELM_STATION_ID.to_string(),
+        );
+        let thrust = crate::ship::system_registry::helm_thrust_system_id();
+        let steering = crate::ship::system_registry::helm_steering_system_id();
+        let lateral = crate::ship::system_registry::lateral_thrust_system_id();
+        let impulse = crate::ship::system_registry::helm_impulse_system_id();
 
         let all = [
             ControlSource::Human,
@@ -3002,15 +3016,15 @@ mod tests {
 
     fn set_ship_blackboard_objectives(
         app: &mut App,
-        objectives: Vec<crate::messages::ScoredObjective>,
+        objectives: Vec<crate::core::messages::ScoredObjective>,
     ) {
-        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        use crate::core::messages::{SystemBlackboard, ViewscreenBlackboard};
         let vb = ViewscreenBlackboard {
             scored_objectives: objectives,
             ..Default::default()
         };
         let entry = (
-            crate::system_registry::viewscreen_system_id(),
+            crate::ship::system_registry::viewscreen_system_id(),
             SystemBlackboard::Viewscreen(vb),
         );
         let mut q = app
@@ -3041,9 +3055,9 @@ mod tests {
             .expect("expected Ship with ShipSystemBlackboards");
         match bbs
             .0
-            .get_mut(&crate::system_registry::viewscreen_system_id())
+            .get_mut(&crate::ship::system_registry::viewscreen_system_id())
         {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => {
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
                 bb.combat_lock = Some(uuid.to_string());
             }
             _ => panic!("set the viewscreen blackboard's objectives before its combat lock"),
@@ -3178,7 +3192,7 @@ mod tests {
         let mut app = test_app();
         let target_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(target_uuid.clone()),
+            crate::entities::spawner::EntityUuid(target_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
         ));
@@ -3208,7 +3222,7 @@ mod tests {
         let target_uuid = uuid::Uuid::new_v4().to_string();
         // Hostile is 100 units away.
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(target_uuid.clone()),
+            crate::entities::spawner::EntityUuid(target_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
         ));
@@ -3217,7 +3231,7 @@ mod tests {
         app.insert_resource(runtime);
         // Radar range (10.0) is far shorter than the hostile's distance (100.0).
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 10.0,
                 ..Default::default()
             },
@@ -3241,7 +3255,7 @@ mod tests {
         let target_uuid = uuid::Uuid::new_v4().to_string();
         // Hostile is 100 units away.
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(target_uuid.clone()),
+            crate::entities::spawner::EntityUuid(target_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(100.0, 0.0, 0.0),
         ));
@@ -3251,7 +3265,7 @@ mod tests {
         app.insert_resource(runtime);
         // Radar range (500.0) comfortably covers the hostile's distance (100.0).
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 500.0,
                 ..Default::default()
             },
@@ -3287,7 +3301,7 @@ mod tests {
         // pursuit steering (before any arc-bearing bias) is ~0.
         let destroy_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityUuid(destroy_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(0.0, 0.0, -1000.0),
         ));
@@ -3296,7 +3310,7 @@ mod tests {
         runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
         app.insert_resource(runtime);
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 5000.0,
                 ..Default::default()
             },
@@ -3309,7 +3323,7 @@ mod tests {
         // steering bias can only be attributed to the pending request.
         let bearing_uuid = uuid::Uuid::new_v4();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(bearing_uuid.to_string()),
+            crate::entities::spawner::EntityUuid(bearing_uuid.to_string()),
             crate::entities::spawner::EntityName("Bearing Contact".into()),
             Transform::from_xyz(200.0, 0.0, -1.0),
         ));
@@ -3318,7 +3332,7 @@ mod tests {
             .entity_mut(ship)
             .insert(PendingArcBearingRequest {
                 target: Some(bearing_uuid),
-                arcs: vec![crate::messages::WeaponEmitterArc {
+                arcs: vec![crate::core::messages::WeaponEmitterArc {
                     facing_deg: 0.0,
                     arc_deg: 30.0,
                     range: 5000.0,
@@ -3345,7 +3359,7 @@ mod tests {
         let mut app = test_app();
         let destroy_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityUuid(destroy_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(0.0, 0.0, -1000.0),
         ));
@@ -3353,7 +3367,7 @@ mod tests {
         runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
         app.insert_resource(runtime);
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 5000.0,
                 ..Default::default()
             },
@@ -3366,7 +3380,7 @@ mod tests {
         // wide-arc fore bank already bears on it.
         let bearing_uuid = uuid::Uuid::new_v4();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(bearing_uuid.to_string()),
+            crate::entities::spawner::EntityUuid(bearing_uuid.to_string()),
             crate::entities::spawner::EntityName("Bearing Contact".into()),
             Transform::from_xyz(0.0, 0.0, -200.0),
         ));
@@ -3378,7 +3392,7 @@ mod tests {
             .entity_mut(ship)
             .insert(PendingArcBearingRequest {
                 target: Some(bearing_uuid),
-                arcs: vec![crate::messages::WeaponEmitterArc {
+                arcs: vec![crate::core::messages::WeaponEmitterArc {
                     facing_deg: 0.0,
                     arc_deg: 30.0,
                     range: 500.0,
@@ -3406,7 +3420,7 @@ mod tests {
         let mut app = test_app();
         let destroy_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityUuid(destroy_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(0.0, 0.0, -1000.0),
         ));
@@ -3414,7 +3428,7 @@ mod tests {
         runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
         app.insert_resource(runtime);
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 5000.0,
                 ..Default::default()
             },
@@ -3426,7 +3440,7 @@ mod tests {
         // arc's range (range 50, target ~200 away) — out of reach entirely.
         let bearing_uuid = uuid::Uuid::new_v4();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(bearing_uuid.to_string()),
+            crate::entities::spawner::EntityUuid(bearing_uuid.to_string()),
             crate::entities::spawner::EntityName("Bearing Contact".into()),
             Transform::from_xyz(200.0, 0.0, -1.0),
         ));
@@ -3435,7 +3449,7 @@ mod tests {
             .entity_mut(ship)
             .insert(PendingArcBearingRequest {
                 target: Some(bearing_uuid),
-                arcs: vec![crate::messages::WeaponEmitterArc {
+                arcs: vec![crate::core::messages::WeaponEmitterArc {
                     facing_deg: 0.0,
                     arc_deg: 30.0,
                     range: 50.0,
@@ -3459,7 +3473,7 @@ mod tests {
         let mut app = test_app();
         let destroy_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityUuid(destroy_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(0.0, 0.0, -1000.0),
         ));
@@ -3467,7 +3481,7 @@ mod tests {
         runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
         app.insert_resource(runtime);
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 5000.0,
                 ..Default::default()
             },
@@ -3483,7 +3497,7 @@ mod tests {
             .entity_mut(ship)
             .insert(PendingArcBearingRequest {
                 target: Some(stale_uuid),
-                arcs: vec![crate::messages::WeaponEmitterArc {
+                arcs: vec![crate::core::messages::WeaponEmitterArc {
                     facing_deg: 0.0,
                     arc_deg: 30.0,
                     range: 5000.0,
@@ -3515,7 +3529,7 @@ mod tests {
         // steady forward throttle, so any change is attributable to the request.
         let destroy_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityUuid(destroy_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(0.0, 0.0, -1000.0),
         ));
@@ -3524,7 +3538,7 @@ mod tests {
         runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
         app.insert_resource(runtime);
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 5000.0,
                 ..Default::default()
             },
@@ -3535,7 +3549,7 @@ mod tests {
         // A hostile well off to starboard is the arc-bearing target.
         let bearing_uuid = uuid::Uuid::new_v4();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(bearing_uuid.to_string()),
+            crate::entities::spawner::EntityUuid(bearing_uuid.to_string()),
             crate::entities::spawner::EntityName("Bearing Contact".into()),
             Transform::from_xyz(200.0, 0.0, -1.0),
         ));
@@ -3544,7 +3558,7 @@ mod tests {
             .entity_mut(ship)
             .insert(PendingArcBearingRequest {
                 target: Some(bearing_uuid),
-                arcs: vec![crate::messages::WeaponEmitterArc {
+                arcs: vec![crate::core::messages::WeaponEmitterArc {
                     facing_deg: 0.0,
                     arc_deg: 30.0,
                     range: 5000.0,
@@ -3606,13 +3620,13 @@ mod tests {
         let mut app = test_app();
         let destroy_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(destroy_uuid.clone()),
+            crate::entities::spawner::EntityUuid(destroy_uuid.clone()),
             crate::entities::spawner::EntityName("Harrow Destroyer".into()),
             Transform::from_xyz(0.0, 0.0, -4000.0),
         ));
         let dock_uuid = uuid::Uuid::new_v4();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(dock_uuid.to_string()),
+            crate::entities::spawner::EntityUuid(dock_uuid.to_string()),
             crate::entities::spawner::EntityName("Axiom Station Dock".into()),
             Transform::from_xyz(dock_pos[0], dock_pos[1], dock_pos[2]),
         ));
@@ -3621,7 +3635,7 @@ mod tests {
         runtime.name_to_uuid.insert("wave_1".into(), destroy_uuid);
         app.insert_resource(runtime);
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 5000.0,
                 ..Default::default()
             },
@@ -3786,7 +3800,7 @@ mod tests {
     fn helm_ai_stays_zero_when_destroy_target_missing() {
         let mut app = test_app();
         // Blackboard has a Destroy directive, but no live entity resolves to it.
-        use crate::messages::{
+        use crate::core::messages::{
             AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
             SystemAffinity,
         };
@@ -3826,7 +3840,7 @@ mod tests {
 
     #[test]
     fn detect_reach_completion_marks_objective_complete() {
-        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::core::messages::{AiDirective, ObjectiveSource};
         use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::world::server::ObjectiveManagerRes;
 
@@ -3861,7 +3875,7 @@ mod tests {
             .into_iter()
             .find(|o| o.id == "reach-dock-alpha");
         assert!(
-            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Completed)
+            obj.map(|o| o.status == crate::core::messages::ObjectiveStatus::Completed)
                 .unwrap_or(false),
             "Reach objective should be completed when ship is within arrival radius"
         );
@@ -3880,7 +3894,7 @@ mod tests {
     /// idempotency guard (deleting `if complete()` would double-emit here).
     #[test]
     fn detect_reach_completion_emits_objective_completed_once() {
-        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::core::messages::{AiDirective, ObjectiveSource};
         use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::world::server::ObjectiveManagerRes;
         use bevy::ecs::message::Messages;
@@ -3889,7 +3903,7 @@ mod tests {
         // Register the balance sink the emission site writes to. `init_resource`
         // (not `add_message`) so no per-frame double-buffer swap can drop the
         // first-tick message before the second-tick idempotency read.
-        app.init_resource::<Messages<crate::balance::BalanceEvent>>();
+        app.init_resource::<Messages<crate::core::balance::BalanceEvent>>();
 
         let anchor = "dock-alpha";
         // Anchor at origin — the ship also starts at origin (distance == 0).
@@ -3913,22 +3927,22 @@ mod tests {
 
         let mut cursor = app
             .world()
-            .resource::<Messages<crate::balance::BalanceEvent>>()
+            .resource::<Messages<crate::core::balance::BalanceEvent>>()
             .get_cursor();
 
         tick(&mut app);
 
         let messages = app
             .world()
-            .resource::<Messages<crate::balance::BalanceEvent>>();
-        let first: Vec<&crate::balance::BalanceEvent> = cursor.read(messages).collect();
+            .resource::<Messages<crate::core::balance::BalanceEvent>>();
+        let first: Vec<&crate::core::balance::BalanceEvent> = cursor.read(messages).collect();
         assert_eq!(
             first.len(),
             1,
             "arrival must emit exactly one balance event, got {first:?}"
         );
         match first[0] {
-            crate::balance::BalanceEvent::ObjectiveCompleted { objective_id } => {
+            crate::core::balance::BalanceEvent::ObjectiveCompleted { objective_id } => {
                 assert_eq!(objective_id, "reach-dock-alpha");
             }
             other => panic!("expected ObjectiveCompleted, got {other:?}"),
@@ -3938,8 +3952,8 @@ mod tests {
 
         let messages = app
             .world()
-            .resource::<Messages<crate::balance::BalanceEvent>>();
-        let second: Vec<&crate::balance::BalanceEvent> = cursor.read(messages).collect();
+            .resource::<Messages<crate::core::balance::BalanceEvent>>();
+        let second: Vec<&crate::core::balance::BalanceEvent> = cursor.read(messages).collect();
         assert!(
             second.is_empty(),
             "re-completing an already-Completed objective must not emit again; got {second:?}"
@@ -3957,7 +3971,7 @@ mod tests {
     /// is cleared to fly it.
     #[test]
     fn cleared_nav_waypoint_returns_the_waypoint_when_the_clearance_matches() {
-        let waypoint = crate::navigation_plugin::NavigationWaypoint::new(WaypointMode::Free {
+        let waypoint = crate::console::navigation::NavigationWaypoint::new(WaypointMode::Free {
             x: 5.0,
             z: -7.0,
         });
@@ -3978,10 +3992,11 @@ mod tests {
     /// waypoint straight through, so only the first order would ever be delayed.
     #[test]
     fn cleared_nav_waypoint_withholds_a_waypoint_newer_than_the_clearance() {
-        let mut waypoint = crate::navigation_plugin::NavigationWaypoint::new(WaypointMode::Free {
-            x: 5.0,
-            z: -7.0,
-        });
+        let mut waypoint =
+            crate::console::navigation::NavigationWaypoint::new(WaypointMode::Free {
+                x: 5.0,
+                z: -7.0,
+            });
         // The Helm was cleared for this one, and is flying it.
         let clearance = HelmWaypointClearance(Some(waypoint.generation()));
         assert!(cleared_nav_waypoint(Some(&waypoint), Some(&clearance)).is_some());
@@ -4007,7 +4022,7 @@ mod tests {
     /// A ship never cleared for anything follows nothing.
     #[test]
     fn cleared_nav_waypoint_is_none_without_a_clearance() {
-        let waypoint = crate::navigation_plugin::NavigationWaypoint::new(WaypointMode::Free {
+        let waypoint = crate::console::navigation::NavigationWaypoint::new(WaypointMode::Free {
             x: 5.0,
             z: -7.0,
         });
@@ -4053,7 +4068,7 @@ mod tests {
                 let ship = find_ship_entity(&mut app);
                 let mut entity = app.world_mut().entity_mut(ship);
                 let mut waypoint = entity
-                    .get_mut::<crate::navigation_plugin::NavigationWaypoint>()
+                    .get_mut::<crate::console::navigation::NavigationWaypoint>()
                     .expect("ship must carry NavigationWaypoint");
                 waypoint.set(WaypointMode::Free { x: 0.0, z: -900.0 });
             }
@@ -4090,7 +4105,7 @@ mod tests {
         // The waypoint write path lives in NavigationPlugin
         // (`handle_navigation_waypoint`); its blackboard publisher needs the
         // client-config resource.
-        app.add_plugins(crate::navigation_plugin::NavigationPlugin)
+        app.add_plugins(crate::console::navigation::NavigationPlugin)
             .init_resource::<crate::lobby::server::ShipClientConfigResource>();
 
         // A human captain + navigation officer, game started; the Helm
@@ -4151,8 +4166,8 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
-                payload: crate::messages::SystemControlPayload::SetNavigationWaypoint {
+                target: crate::core::messages::SystemId("navigation".into()),
+                payload: crate::core::messages::SystemControlPayload::SetNavigationWaypoint {
                     x: 0.0,
                     z: -900.0,
                     source_uuid: None,
@@ -4165,13 +4180,13 @@ mod tests {
         let generation = app
             .world()
             .entity(ship)
-            .get::<crate::navigation_plugin::NavigationWaypoint>()
+            .get::<crate::console::navigation::NavigationWaypoint>()
             .expect("ship must carry NavigationWaypoint")
             .generation();
         assert!(
             app.world()
                 .entity(ship)
-                .get::<crate::navigation_plugin::NavigationWaypoint>()
+                .get::<crate::console::navigation::NavigationWaypoint>()
                 .and_then(|w| w.snapshot())
                 .is_some(),
             "the admitted SetNavigationWaypoint must set the shared waypoint"
@@ -4234,7 +4249,7 @@ mod tests {
     #[test]
     fn waypoint_set_while_helm_human_is_flown_once_helm_flips_to_ai() {
         let mut app = test_app();
-        app.add_plugins(crate::navigation_plugin::NavigationPlugin)
+        app.add_plugins(crate::console::navigation::NavigationPlugin)
             .init_resource::<crate::lobby::server::ShipClientConfigResource>();
 
         // A human captain + navigation officer, game started. The helm axes
@@ -4293,8 +4308,8 @@ mod tests {
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("navigation".into()),
-                payload: crate::messages::SystemControlPayload::SetNavigationWaypoint {
+                target: crate::core::messages::SystemId("navigation".into()),
+                payload: crate::core::messages::SystemControlPayload::SetNavigationWaypoint {
                     x: 0.0,
                     z: -900.0,
                     source_uuid: None,
@@ -4307,7 +4322,7 @@ mod tests {
         let generation = app
             .world()
             .entity(ship)
-            .get::<crate::navigation_plugin::NavigationWaypoint>()
+            .get::<crate::console::navigation::NavigationWaypoint>()
             .expect("ship must carry NavigationWaypoint")
             .generation();
 
@@ -4413,7 +4428,7 @@ mod tests {
                 let ship = find_ship_entity(&mut app);
                 app.world_mut().entity_mut(ship).insert(
                     crate::entities::spawner::BehaviourSection(
-                        crate::entity_config::BehaviourConfig {
+                        crate::entities::config::BehaviourConfig {
                             waypoint_arrival_radius: radius,
                             ..Default::default()
                         },
@@ -4479,7 +4494,7 @@ mod tests {
         });
     }
 
-    fn set_behaviour_section(app: &mut App, behaviour: crate::entity_config::BehaviourConfig) {
+    fn set_behaviour_section(app: &mut App, behaviour: crate::entities::config::BehaviourConfig) {
         let ship = find_ship_entity(app);
         app.world_mut()
             .entity_mut(ship)
@@ -4499,7 +4514,7 @@ mod tests {
     /// #703 the coarse helm's state no longer gates the system, but these tests
     /// keep it human so the monolith cannot be the writer of the dodge they
     /// measure.
-    fn lateral_thrust_ai_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+    fn lateral_thrust_ai_app(behaviour: Option<crate::entities::config::BehaviourConfig>) -> App {
         let mut app = test_app();
         set_helm_control_source(&mut app, ControlSource::Human);
         {
@@ -4508,7 +4523,7 @@ mod tests {
                 .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
             for mut cs in q.iter_mut(app.world_mut()) {
                 cs.0.set(
-                    crate::system_registry::lateral_thrust_system_id(),
+                    crate::ship::system_registry::lateral_thrust_system_id(),
                     ControlSource::Ai,
                 );
             }
@@ -4542,10 +4557,11 @@ mod tests {
             "with the default 5-unit buffer a 40-unit-distant obstacle is not a threat"
         );
 
-        let mut authored_app = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
-            avoidance_buffer: 60.0,
-            ..Default::default()
-        }));
+        let mut authored_app =
+            lateral_thrust_ai_app(Some(crate::entities::config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                ..Default::default()
+            }));
         snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
         tick_twice(&mut authored_app);
         assert!(
@@ -4566,7 +4582,7 @@ mod tests {
         // a 2-unit lateral offset to give the dodge a defined sign.
         let obstacle = [2.0, 0.0, -100.0];
 
-        fn moving_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+        fn moving_app(behaviour: Option<crate::entities::config::BehaviourConfig>) -> App {
             let mut app = lateral_thrust_ai_app(behaviour);
             let mut physics = get_ship_physics(&mut app);
             physics.forward_speed = 10.0;
@@ -4590,7 +4606,7 @@ mod tests {
              100 is not yet a threat"
         );
 
-        let mut authored_app = moving_app(Some(crate::entity_config::BehaviourConfig {
+        let mut authored_app = moving_app(Some(crate::entities::config::BehaviourConfig {
             avoidance_look_ahead_secs: 10.0,
             ..Default::default()
         }));
@@ -4644,8 +4660,8 @@ mod tests {
         app.world_mut()
             .entity_mut(ship)
             .insert(crate::entities::spawner::ColliderSection(
-                crate::entity_config::ColliderConfig {
-                    shape: crate::entity_config::ColliderShape::Ball,
+                crate::entities::config::ColliderConfig {
+                    shape: crate::entities::config::ColliderShape::Ball,
                     radius,
                     length: 0.0,
                     half_height: None,
@@ -4665,7 +4681,7 @@ mod tests {
         // Starboard bow (+X), dead-ahead-ish down -Z. Stationary ship, so the
         // obstacle's own (absent) motion cannot confound the sign.
         let obstacle = [4.0, 0.0, -40.0];
-        let mut app = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+        let mut app = lateral_thrust_ai_app(Some(crate::entities::config::BehaviourConfig {
             avoidance_buffer: 60.0,
             ..Default::default()
         }));
@@ -4720,10 +4736,11 @@ mod tests {
         let obstacle = [4.0, 0.0, -40.0];
 
         // Default sensitivity (1.0): the in-range obstacle dodges.
-        let mut responsive = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
-            avoidance_buffer: 60.0,
-            ..Default::default()
-        }));
+        let mut responsive =
+            lateral_thrust_ai_app(Some(crate::entities::config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                ..Default::default()
+            }));
         snapshot_with_obstacle(&mut responsive, obstacle, 1.0);
         tick_twice(&mut responsive);
         assert!(
@@ -4732,7 +4749,7 @@ mod tests {
         );
 
         // Sensitivity 0: the same shared hazard force is weighted to nothing.
-        let mut muted = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+        let mut muted = lateral_thrust_ai_app(Some(crate::entities::config::BehaviourConfig {
             avoidance_buffer: 60.0,
             lateral_hazard_sensitivity: 0.0,
             ..Default::default()
@@ -4763,7 +4780,7 @@ mod tests {
         // obstacle rates 1.
         let obstacle = [4.0, 0.0, -40.0];
         let ignoring = || {
-            Some(crate::entity_config::BehaviourConfig {
+            Some(crate::entities::config::BehaviourConfig {
                 avoidance_buffer: 60.0,
                 // Ignore any MOBILE hazard whose size rating is below self's
                 // (10 × 1.0 = 10); the obstacle rates 1.
@@ -4772,7 +4789,7 @@ mod tests {
             })
         };
 
-        let mut dodges = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+        let mut dodges = lateral_thrust_ai_app(Some(crate::entities::config::BehaviourConfig {
             avoidance_buffer: 60.0,
             ..Default::default()
         }));
@@ -4812,10 +4829,10 @@ mod tests {
     // ── Vertical thrust AI (issue #744) ──────────────────────────────────
 
     fn capability_with_mode(
-        mode: crate::entity_config::VerticalMovementMode,
+        mode: crate::entities::config::VerticalMovementMode,
         max_vertical_offset: f32,
-    ) -> crate::entity_config::HelmCapabilityConfig {
-        crate::entity_config::HelmCapabilityConfig {
+    ) -> crate::entities::config::HelmCapabilityConfig {
+        crate::entities::config::HelmCapabilityConfig {
             vertical_movement_mode: mode,
             max_vertical_offset,
             ..Default::default()
@@ -4826,8 +4843,8 @@ mod tests {
     /// capability. The helm proper stays human so only the vertical-thrust
     /// operator can ever write the vertical axis (issue #744).
     fn vertical_thrust_ai_app(
-        capability: crate::entity_config::HelmCapabilityConfig,
-        behaviour: Option<crate::entity_config::BehaviourConfig>,
+        capability: crate::entities::config::HelmCapabilityConfig,
+        behaviour: Option<crate::entities::config::BehaviourConfig>,
     ) -> App {
         let mut app = test_app();
         set_helm_control_source(&mut app, ControlSource::Human);
@@ -4837,7 +4854,7 @@ mod tests {
                 .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
             for mut cs in q.iter_mut(app.world_mut()) {
                 cs.0.set(
-                    crate::system_registry::vertical_thrust_system_id(),
+                    crate::ship::system_registry::vertical_thrust_system_id(),
                     ControlSource::Ai,
                 );
             }
@@ -4869,14 +4886,14 @@ mod tests {
     #[test]
     fn vertical_thrust_ai_responds_to_moving_hazard_not_static() {
         let obstacle = [4.0, 0.0, -40.0];
-        let behaviour = crate::entity_config::BehaviourConfig {
+        let behaviour = crate::entities::config::BehaviourConfig {
             avoidance_buffer: 60.0,
             ..Default::default()
         };
 
         // Static hazard, in range: no vertical response.
         let mut static_app = vertical_thrust_ai_app(
-            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+            capability_with_mode(crate::entities::config::VerticalMovementMode::Bounded, 30.0),
             Some(behaviour.clone()),
         );
         snapshot_with_obstacle(&mut static_app, obstacle, 1.0);
@@ -4889,7 +4906,7 @@ mod tests {
 
         // Moving hazard, same spot and range: the ship climbs to dodge.
         let mut moving_app = vertical_thrust_ai_app(
-            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
+            capability_with_mode(crate::entities::config::VerticalMovementMode::Bounded, 30.0),
             Some(behaviour),
         );
         snapshot_with_moving_obstacle(&mut moving_app, obstacle, 1.0, 0.0, 0.0);
@@ -4908,8 +4925,8 @@ mod tests {
         let obstacle = [4.0, 0.0, -40.0];
 
         let mut muted = vertical_thrust_ai_app(
-            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
-            Some(crate::entity_config::BehaviourConfig {
+            capability_with_mode(crate::entities::config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entities::config::BehaviourConfig {
                 avoidance_buffer: 60.0,
                 vertical_hazard_sensitivity: 0.0,
                 ..Default::default()
@@ -4930,14 +4947,14 @@ mod tests {
     /// and Full3D keeps climbing past that cap.
     #[test]
     fn vertical_movement_modes_diverge_under_a_moving_hazard() {
-        use crate::entity_config::VerticalMovementMode;
+        use crate::entities::config::VerticalMovementMode;
         let obstacle = [4.0, 0.0, -40.0];
         const BOUNDED_OFFSET: f32 = 2.0;
 
         fn final_y(mode: VerticalMovementMode, obstacle: [f32; 3], offset: f32) -> f32 {
             let mut app = vertical_thrust_ai_app(
                 capability_with_mode(mode, offset),
-                Some(crate::entity_config::BehaviourConfig {
+                Some(crate::entities::config::BehaviourConfig {
                     avoidance_buffer: 60.0,
                     ..Default::default()
                 }),
@@ -4987,8 +5004,8 @@ mod tests {
     fn bounded_vertical_returns_to_cruise_after_hazard_clears() {
         let obstacle = [4.0, 0.0, -40.0];
         let mut app = vertical_thrust_ai_app(
-            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
-            Some(crate::entity_config::BehaviourConfig {
+            capability_with_mode(crate::entities::config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entities::config::BehaviourConfig {
                 avoidance_buffer: 60.0,
                 ..Default::default()
             }),
@@ -5027,7 +5044,7 @@ mod tests {
         set_fine_policy(
             app,
             ship,
-            crate::system_registry::vertical_thrust_system_id(),
+            crate::ship::system_registry::vertical_thrust_system_id(),
             policy,
         );
     }
@@ -5037,7 +5054,7 @@ mod tests {
         set_fine_policy(
             app,
             ship,
-            crate::system_registry::lateral_thrust_system_id(),
+            crate::ship::system_registry::lateral_thrust_system_id(),
             policy,
         );
     }
@@ -5073,8 +5090,8 @@ mod tests {
     fn vertical_fact_guard_fires_only_once_hazard_fact_is_seeded() {
         // Guard needs threat > 0.1. No hazard → fact seeds 0.0 → hold at cruise.
         let mut calm = vertical_thrust_ai_app(
-            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
-            Some(crate::entity_config::BehaviourConfig {
+            capability_with_mode(crate::entities::config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entities::config::BehaviourConfig {
                 avoidance_buffer: 60.0,
                 ..Default::default()
             }),
@@ -5092,8 +5109,8 @@ mod tests {
 
         // Same policy, now a moving hazard seeds a nonzero threat → guard fires.
         let mut threatened = vertical_thrust_ai_app(
-            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
-            Some(crate::entity_config::BehaviourConfig {
+            capability_with_mode(crate::entities::config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entities::config::BehaviourConfig {
                 avoidance_buffer: 60.0,
                 ..Default::default()
             }),
@@ -5115,8 +5132,8 @@ mod tests {
     #[test]
     fn vertical_actuator_holds_under_never_firing_policy() {
         let mut app = vertical_thrust_ai_app(
-            capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
-            Some(crate::entity_config::BehaviourConfig {
+            capability_with_mode(crate::entities::config::VerticalMovementMode::Bounded, 30.0),
+            Some(crate::entities::config::BehaviourConfig {
                 avoidance_buffer: 60.0,
                 ..Default::default()
             }),
@@ -5177,8 +5194,8 @@ mod tests {
     fn snapshot_with_obstacle_and_hostile(app: &mut App, bearing: bool) {
         let hostile_faction = uuid::Uuid::new_v4();
         let own_faction = uuid::Uuid::new_v4();
-        let mut registry = crate::faction::FactionRegistry::new();
-        registry.insert(crate::faction::FactionConfig {
+        let mut registry = crate::ai::faction::FactionRegistry::new();
+        registry.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: own_faction,
             name: "Own".into(),
@@ -5295,7 +5312,7 @@ mod tests {
         set_fine_policy(
             app,
             ship,
-            crate::system_registry::helm_impulse_system_id(),
+            crate::ship::system_registry::helm_impulse_system_id(),
             policy,
         );
     }
@@ -5356,8 +5373,8 @@ mod tests {
         };
         let vertical_app = || {
             vertical_thrust_ai_app(
-                capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
-                Some(crate::entity_config::BehaviourConfig {
+                capability_with_mode(crate::entities::config::VerticalMovementMode::Bounded, 30.0),
+                Some(crate::entities::config::BehaviourConfig {
                     avoidance_buffer: 60.0,
                     ..Default::default()
                 }),
@@ -5407,7 +5424,7 @@ mod tests {
         tick(&mut bearing);
         assert_eq!(
             get_impulse_command(&mut bearing),
-            crate::impulse::ImpulsePhase::Charging,
+            crate::ship::impulse::ImpulsePhase::Charging,
             "an impulse policy guarded on fact(hostile_arc_exposure) must permit \
              the engage while a hostile's arcs bear; Idle means the fact never \
              reached this host's snapshot and the guard read absent"
@@ -5420,7 +5437,7 @@ mod tests {
         tick(&mut clear);
         assert_eq!(
             get_impulse_command(&mut clear),
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             "the same policy must hold the drive when the same hostile's arcs \
              point away — otherwise the first assertion proves only that the \
              geometry engages, not that the guard read the fact"
@@ -5754,7 +5771,7 @@ mod tests {
         set_ship_blackboard_objectives(&mut app, vec![patrol_scored_objective(vec!["wp0"], 20.0)]);
         set_behaviour_section(
             &mut app,
-            crate::entity_config::BehaviourConfig {
+            crate::entities::config::BehaviourConfig {
                 avoidance_buffer: 60.0,
                 ..Default::default()
             },
@@ -5770,7 +5787,7 @@ mod tests {
             set_fine_policy(
                 &mut app,
                 ship,
-                crate::system_registry::helm_boost_system_id(),
+                crate::ship::system_registry::helm_boost_system_id(),
                 policy,
             );
         }
@@ -5891,7 +5908,7 @@ mod tests {
             set_fine_policy(
                 &mut app,
                 ship,
-                crate::system_registry::helm_thrust_system_id(),
+                crate::ship::system_registry::helm_thrust_system_id(),
                 flag_gated_helm_policy(
                     crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
                     crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
@@ -5931,7 +5948,7 @@ mod tests {
             set_fine_policy(
                 &mut app,
                 ship,
-                crate::system_registry::helm_steering_system_id(),
+                crate::ship::system_registry::helm_steering_system_id(),
                 flag_gated_helm_policy(
                     crate::entities::config::HELM_YAW_CHANNEL,
                     crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
@@ -5999,8 +6016,8 @@ mod tests {
     fn helm_vertical_flag_guard_reads_the_world_in_both_directions() {
         let vertical_app = || {
             vertical_thrust_ai_app(
-                capability_with_mode(crate::entity_config::VerticalMovementMode::Bounded, 30.0),
-                Some(crate::entity_config::BehaviourConfig {
+                capability_with_mode(crate::entities::config::VerticalMovementMode::Bounded, 30.0),
+                Some(crate::entities::config::BehaviourConfig {
                     avoidance_buffer: 60.0,
                     ..Default::default()
                 }),
@@ -6060,7 +6077,7 @@ mod tests {
         tick(&mut held);
         assert_eq!(
             get_impulse_command(&mut held),
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             "with the world flag clear the impulse guard must read false and hold"
         );
 
@@ -6077,7 +6094,7 @@ mod tests {
         tick(&mut fired);
         assert_eq!(
             get_impulse_command(&mut fired),
-            crate::impulse::ImpulsePhase::Charging,
+            crate::ship::impulse::ImpulsePhase::Charging,
             "with the world flag set the same impulse guard must command the charge"
         );
     }
@@ -6258,7 +6275,7 @@ when = "state_time >= param(surge_dwell_secs)"
             after > before,
             "the tick-derived policy clock must advance on gated ticks"
         );
-        let period = 1.0 / crate::entity_config::GlobalConfig::default().ai_tick_hz as f64;
+        let period = 1.0 / crate::entities::config::GlobalConfig::default().ai_tick_hz as f64;
         let advanced = after - before;
         assert!(
             (advanced % period).abs() < 1e-9 || ((advanced % period) - period).abs() < 1e-9,
@@ -6321,7 +6338,7 @@ when = "state_time >= param(surge_dwell_secs)"
     /// latch — so this is the number of SHARED ticks, whatever the frame rate
     /// or the number of `app.update()` calls it took to reach them.
     fn shared_ai_ticks(app: &App) -> usize {
-        let period = 1.0 / crate::entity_config::GlobalConfig::default().ai_tick_hz as f64;
+        let period = 1.0 / crate::entities::config::GlobalConfig::default().ai_tick_hz as f64;
         (app.world().resource::<AiPolicyTickClock>().0 / period).round() as usize
     }
 
@@ -6570,7 +6587,7 @@ verb = "engage_boost"
         assert!(
             app.world()
                 .entity(ship)
-                .get::<crate::simulation::LocalShip>()
+                .get::<crate::server_app::LocalShip>()
                 .is_some(),
             "this is the player-ship spawn shape, not an NPC's"
         );
@@ -6742,7 +6759,7 @@ verb = "engage_boost"
         set_ship_blackboard_objectives(&mut app, vec![reach_scored_objective("far-ahead", 8.0)]);
         set_behaviour_section(
             &mut app,
-            crate::entity_config::BehaviourConfig {
+            crate::entities::config::BehaviourConfig {
                 avoidance_buffer: 60.0,
                 imminent_collision_facing_threshold: imminent_threshold,
                 ..Default::default()
@@ -6799,7 +6816,7 @@ verb = "engage_boost"
     #[test]
     fn avoidance_bends_travel_without_changing_doctrine() {
         fn forward_throttle_and_dodge(with_hazard: bool) -> (f32, f32) {
-            let mut app = lateral_thrust_ai_app(Some(crate::entity_config::BehaviourConfig {
+            let mut app = lateral_thrust_ai_app(Some(crate::entities::config::BehaviourConfig {
                 avoidance_buffer: 60.0,
                 ..Default::default()
             }));
@@ -6864,7 +6881,7 @@ verb = "engage_boost"
         tick(&mut app);
         assert_eq!(
             get_impulse_command(&mut app),
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             "no ImpulseConfigResource means no impulse capability — no charge"
         );
     }
@@ -6874,7 +6891,7 @@ verb = "engage_boost"
     /// deadband at zero and any nonzero `SteeringInput` is avoidance and
     /// nothing else. `avoidance_steering` ignores ships slower than
     /// `AVOIDANCE_MIN_SPEED`, hence the explicit forward speed.
-    fn helm_ai_steering_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+    fn helm_ai_steering_app(behaviour: Option<crate::entities::config::BehaviourConfig>) -> App {
         let mut app = test_app();
         set_helm_control_source(&mut app, ControlSource::Ai);
         app.insert_resource(world_config_with_anchor("far-ahead", [0.0, 0.0, -900.0]));
@@ -6916,10 +6933,11 @@ verb = "engage_boost"
              is dead ahead, so steering stays in the deadband"
         );
 
-        let mut authored_app = helm_ai_steering_app(Some(crate::entity_config::BehaviourConfig {
-            avoidance_buffer: 60.0,
-            ..Default::default()
-        }));
+        let mut authored_app =
+            helm_ai_steering_app(Some(crate::entities::config::BehaviourConfig {
+                avoidance_buffer: 60.0,
+                ..Default::default()
+            }));
         snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
         tick(&mut authored_app);
         assert!(
@@ -6949,10 +6967,11 @@ verb = "engage_boost"
             "the default 3 s horizon does not reach the obstacle at 100 units"
         );
 
-        let mut authored_app = helm_ai_steering_app(Some(crate::entity_config::BehaviourConfig {
-            avoidance_look_ahead_secs: 10.0,
-            ..Default::default()
-        }));
+        let mut authored_app =
+            helm_ai_steering_app(Some(crate::entities::config::BehaviourConfig {
+                avoidance_look_ahead_secs: 10.0,
+                ..Default::default()
+            }));
         snapshot_with_obstacle(&mut authored_app, obstacle, 1.0);
         tick(&mut authored_app);
         assert!(
@@ -6978,7 +6997,7 @@ verb = "engage_boost"
     /// projects the ship by `forward_speed * avoidance_look_ahead_secs`, so a
     /// stationary ship collapses that projection onto its own position and makes
     /// the look-ahead term unobservable no matter what value is passed.
-    fn helm_ai_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+    fn helm_ai_app(behaviour: Option<crate::entities::config::BehaviourConfig>) -> App {
         let mut app = test_app();
         set_helm_control_source(&mut app, ControlSource::Ai);
         let mut cfg = crate::world::config::WorldConfig::default();
@@ -7028,7 +7047,7 @@ verb = "engage_boost"
              projected path and is not a threat"
         );
 
-        let mut authored_app = helm_ai_app(Some(crate::entity_config::BehaviourConfig {
+        let mut authored_app = helm_ai_app(Some(crate::entities::config::BehaviourConfig {
             avoidance_buffer: 60.0,
             ..Default::default()
         }));
@@ -7069,7 +7088,7 @@ verb = "engage_boost"
              100 is not yet a threat"
         );
 
-        let mut authored_app = helm_ai_app(Some(crate::entity_config::BehaviourConfig {
+        let mut authored_app = helm_ai_app(Some(crate::entities::config::BehaviourConfig {
             avoidance_look_ahead_secs: 10.0,
             ..Default::default()
         }));
@@ -7088,7 +7107,7 @@ verb = "engage_boost"
     /// no `[behaviour]` section at all.
     #[test]
     fn helm_ai_honours_toml_authored_nav_handoff_speed() {
-        fn nav_goal_app(behaviour: Option<crate::entity_config::BehaviourConfig>) -> App {
+        fn nav_goal_app(behaviour: Option<crate::entities::config::BehaviourConfig>) -> App {
             let mut app = test_app();
             set_helm_control_source(&mut app, ControlSource::Ai);
             // A Helm-relevant objective must exist (an empty pool makes
@@ -7127,7 +7146,7 @@ verb = "engage_boost"
         );
         assert!(
             (thrust(&mut nav_goal_app(Some(
-                crate::entity_config::BehaviourConfig {
+                crate::entities::config::BehaviourConfig {
                     nav_handoff_speed: 0.25,
                     ..Default::default()
                 }
@@ -7143,7 +7162,7 @@ verb = "engage_boost"
     /// other site that judged arrival against the hardcoded constant.
     #[test]
     fn detect_reach_completion_honours_toml_authored_arrival_radius() {
-        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::core::messages::{AiDirective, ObjectiveSource};
         use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::world::server::ObjectiveManagerRes;
 
@@ -7158,7 +7177,7 @@ verb = "engage_boost"
                 let ship = find_ship_entity(&mut app);
                 app.world_mut().entity_mut(ship).insert(
                     crate::entities::spawner::BehaviourSection(
-                        crate::entity_config::BehaviourConfig {
+                        crate::entities::config::BehaviourConfig {
                             waypoint_arrival_radius: radius,
                             ..Default::default()
                         },
@@ -7182,7 +7201,7 @@ verb = "engage_boost"
             app
         }
 
-        fn status(app: &App) -> Option<crate::messages::ObjectiveStatus> {
+        fn status(app: &App) -> Option<crate::core::messages::ObjectiveStatus> {
             app.world()
                 .resource::<ObjectiveManagerRes>()
                 .0
@@ -7194,19 +7213,19 @@ verb = "engage_boost"
 
         assert_eq!(
             status(&reach_app(None)),
-            Some(crate::messages::ObjectiveStatus::Active),
+            Some(crate::core::messages::ObjectiveStatus::Active),
             "the default arrival radius must not count 100 units away as reached"
         );
         assert_eq!(
             status(&reach_app(Some(150.0))),
-            Some(crate::messages::ObjectiveStatus::Completed),
+            Some(crate::core::messages::ObjectiveStatus::Completed),
             "a TOML-widened arrival radius must complete the Reach objective"
         );
     }
 
     #[test]
     fn detect_reach_completion_does_not_complete_when_far() {
-        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::core::messages::{AiDirective, ObjectiveSource};
         use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::world::server::ObjectiveManagerRes;
 
@@ -7240,7 +7259,7 @@ verb = "engage_boost"
             .into_iter()
             .find(|o| o.id == "reach-dock-far");
         assert!(
-            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Active)
+            obj.map(|o| o.status == crate::core::messages::ObjectiveStatus::Active)
                 .unwrap_or(false),
             "Reach objective must remain Active when ship is far from the anchor"
         );
@@ -7248,7 +7267,7 @@ verb = "engage_boost"
 
     #[test]
     fn detect_reach_completion_does_not_complete_when_helm_human() {
-        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::core::messages::{AiDirective, ObjectiveSource};
         use crate::objectives::{ObjectiveManager, UtilityConfig};
         use crate::world::server::ObjectiveManagerRes;
 
@@ -7281,7 +7300,7 @@ verb = "engage_boost"
             .into_iter()
             .find(|o| o.id == "reach-dock-beta");
         assert!(
-            obj.map(|o| o.status == crate::messages::ObjectiveStatus::Active)
+            obj.map(|o| o.status == crate::core::messages::ObjectiveStatus::Active)
                 .unwrap_or(false),
             "Reach completion must not fire when helm is human-controlled"
         );
@@ -7298,8 +7317,8 @@ verb = "engage_boost"
 
         let mut resolver = ControlSourceResolver::new();
         for system_id in [
-            crate::system_registry::helm_thrust_system_id(),
-            crate::system_registry::helm_steering_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_steering_system_id(),
         ] {
             resolver.set(system_id, ControlSource::Ai);
         }
@@ -7311,7 +7330,7 @@ verb = "engage_boost"
         assert!(
             !sources
                 .0
-                .policy_for(&crate::system_registry::helm_thrust_system_id())
+                .policy_for(&crate::ship::system_registry::helm_thrust_system_id())
                 .accept_human_input,
             "an NPC hull must not accept human helm input"
         );
@@ -7328,7 +7347,7 @@ verb = "engage_boost"
 
         let mut resolver = ControlSourceResolver::new();
         resolver.set(
-            crate::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
             ControlSource::Ai,
         );
         let sources = ShipSystemControlSources(resolver);
@@ -7339,11 +7358,11 @@ verb = "engage_boost"
 
         let mut resolver = ControlSourceResolver::new();
         resolver.set(
-            crate::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
             ControlSource::Ai,
         );
         resolver.set(
-            crate::system_registry::helm_steering_system_id(),
+            crate::ship::system_registry::helm_steering_system_id(),
             ControlSource::Ai,
         );
         let sources = ShipSystemControlSources(resolver);
@@ -7363,7 +7382,7 @@ verb = "engage_boost"
         // Give the ship a Destroy objective (non-Reach) pointing at an entity.
         let target_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(target_uuid.clone()),
+            crate::entities::spawner::EntityUuid(target_uuid.clone()),
             crate::entities::spawner::EntityName("enemy_fighter".into()),
             Transform::from_xyz(80.0, 0.0, 0.0),
         ));
@@ -7404,7 +7423,7 @@ verb = "engage_boost"
         let mut app = test_app();
         let target_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid(target_uuid),
+            crate::entities::spawner::EntityUuid(target_uuid),
             crate::entities::spawner::EntityName("enemy_fighter".into()),
             Transform::from_xyz(80.0, 0.0, 0.0),
         ));
@@ -7519,7 +7538,7 @@ verb = "engage_boost"
     /// entry has not been published (low-LOD / missing-entry).
     #[test]
     fn helm_ai_radar_range_prefers_the_npc_blackboard_entry() {
-        let helm_config = crate::entity_config::EntityConfig::from_toml(
+        let helm_config = crate::entities::config::EntityConfig::from_toml(
             "[helm_console]\nmax_speed = 30.0\n\n[helm_console.radar]\nrange = 800.0\nshows = [\"ship\"]\n",
         )
         .unwrap()
@@ -7531,8 +7550,8 @@ verb = "engage_boost"
         // NPCs): the live, damage-scaled value wins.
         let mut bbs = crate::server_app::ShipSystemBlackboards::default();
         bbs.0.insert(
-            crate::system_registry::helm_station_key(),
-            crate::messages::SystemBlackboard::Helm(crate::messages::HelmBlackboard {
+            crate::ship::system_registry::helm_station_key(),
+            crate::core::messages::SystemBlackboard::Helm(crate::core::messages::HelmBlackboard {
                 radar_range: 400.0,
                 ..Default::default()
             }),
@@ -7568,12 +7587,14 @@ verb = "engage_boost"
 
     const BOGEY: &str = "bogey";
 
-    fn destroyer_hull() -> crate::entity_config::EntityConfig {
-        crate::entity_config::EntityConfig::from_toml(
-            crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_destroyer.toml")
-                .expect("ship_harrow_destroyer must resolve")
-                .toml
-                .as_str(),
+    fn destroyer_hull() -> crate::entities::config::EntityConfig {
+        crate::entities::config::EntityConfig::from_toml(
+            crate::entities::include_resolve::resolve_from_disk(
+                "assets/entities/ship_harrow_destroyer.toml",
+            )
+            .expect("ship_harrow_destroyer must resolve")
+            .toml
+            .as_str(),
         )
         .expect("the shipped destroyer hull must parse")
     }
@@ -7633,14 +7654,16 @@ verb = "engage_boost"
             .expect("hull declares [helm_console.boost]");
         let ship = find_ship_entity(&mut app);
         app.world_mut().entity_mut(ship).insert((
-            crate::ship_plugin::ShipPhysicsConfigResource(crate::ship_physics::ShipPhysicsConfig {
-                max_speed: hc.max_speed,
-                max_reverse_speed: hc.max_reverse_speed,
-                acceleration: hc.acceleration,
-                deceleration: hc.deceleration,
-                max_yaw_rate: hc.max_yaw_rate,
-                ..crate::ship_physics::ShipPhysicsConfig::new()
-            }),
+            crate::ship_plugin::ShipPhysicsConfigResource(
+                crate::ship::physics::ShipPhysicsConfig {
+                    max_speed: hc.max_speed,
+                    max_reverse_speed: hc.max_reverse_speed,
+                    acceleration: hc.acceleration,
+                    deceleration: hc.deceleration,
+                    max_yaw_rate: hc.max_yaw_rate,
+                    ..crate::ship::physics::ShipPhysicsConfig::new()
+                },
+            ),
             BoostConfigResource {
                 enabled: true,
                 multiplier: boost.multiplier,
@@ -7655,15 +7678,15 @@ verb = "engage_boost"
         // the per-axis newtypes overrode one axis at a time before #1209.
         for (system_id, policy) in [
             (
-                crate::system_registry::helm_thrust_system_id(),
+                crate::ship::system_registry::helm_thrust_system_id(),
                 hc.engines_ai.as_ref().unwrap().to_policy().unwrap(),
             ),
             (
-                crate::system_registry::helm_steering_system_id(),
+                crate::ship::system_registry::helm_steering_system_id(),
                 hc.steering_ai.as_ref().unwrap().to_policy().unwrap(),
             ),
             (
-                crate::system_registry::helm_boost_system_id(),
+                crate::ship::system_registry::helm_boost_system_id(),
                 hc.boost_ai.as_ref().unwrap().to_policy().unwrap(),
             ),
         ] {
@@ -7802,27 +7825,27 @@ verb = "engage_boost"
         // Register the balance sink the tracer writes to. `init_resource` (not
         // `add_message`) so no per-frame double-buffer swap drops events
         // between cursor reads — same trick as the objective-tracer test.
-        app.init_resource::<Messages<crate::balance::BalanceEvent>>();
+        app.init_resource::<Messages<crate::core::balance::BalanceEvent>>();
         // The tracer names ships by uuid; the bare fixture ship has none.
         let ship = find_ship_entity(&mut app);
         let ship_uuid = uuid::Uuid::new_v4().to_string();
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::entity_spawner::EntityUuid(ship_uuid.clone()));
+            .insert(crate::entities::spawner::EntityUuid(ship_uuid.clone()));
 
         let mut cursor = app
             .world()
-            .resource::<Messages<crate::balance::BalanceEvent>>()
+            .resource::<Messages<crate::core::balance::BalanceEvent>>()
             .get_cursor();
         // Reads every DoctrinePhaseChanged since the last call, as (ship, phase).
         let mut drain_phases = |app: &mut App| -> Vec<(String, String)> {
             let messages = app
                 .world()
-                .resource::<Messages<crate::balance::BalanceEvent>>();
+                .resource::<Messages<crate::core::balance::BalanceEvent>>();
             cursor
                 .read(messages)
                 .filter_map(|e| match e {
-                    crate::balance::BalanceEvent::DoctrinePhaseChanged { ship, phase } => {
+                    crate::core::balance::BalanceEvent::DoctrinePhaseChanged { ship, phase } => {
                         Some((ship.clone(), phase.clone()))
                     }
                     _ => None,
@@ -8042,7 +8065,7 @@ verb = "engage_boost"
             .entity_mut(ship)
             .insert(PendingArcBearingRequest {
                 target: Some(target),
-                arcs: vec![crate::messages::WeaponEmitterArc {
+                arcs: vec![crate::core::messages::WeaponEmitterArc {
                     facing_deg: 0.0,
                     arc_deg: 90.0,
                     range: 500.0,
@@ -8232,7 +8255,7 @@ verb = "engage_boost"
     /// `ai_helm_steering` in `SimSet::Physics`, so the clear lands too late to
     /// affect the tick it's consumed in — callers tick once more to observe a
     /// cleared `PendingArcBearingRequest` reflected in steering.
-    fn withdraw_fore_arc_request(app: &mut App, family: crate::messages::WeaponFamily) {
+    fn withdraw_fore_arc_request(app: &mut App, family: crate::core::messages::WeaponFamily) {
         let ship = find_ship_entity(app);
         {
             let mut cfg = app
@@ -8246,10 +8269,10 @@ verb = "engage_boost"
             .write(crate::ship_plugin::CoordinationEnqueue {
                 source_entity: ship,
                 sender_origin: ControlSource::Ai,
-                target: crate::system_registry::helm_station_key(),
-                payload: crate::messages::CoordinationPayload::ArcBearingWithdraw { family },
+                target: crate::ship::system_registry::helm_station_key(),
+                payload: crate::core::messages::CoordinationPayload::ArcBearingWithdraw { family },
                 sender_label: "Weapons".to_string(),
-                sender_system: crate::messages::SystemId(String::new()),
+                sender_system: crate::core::messages::SystemId(String::new()),
             });
         tick(app);
     }
@@ -8311,7 +8334,7 @@ verb = "engage_boost"
 
         // The torpedo tubes that raised this request just ran dry: withdraw
         // it, exactly as `tick_weapons_arc_request` now does on its own.
-        withdraw_fore_arc_request(&mut app, crate::messages::WeaponFamily::Torpedoes);
+        withdraw_fore_arc_request(&mut app, crate::core::messages::WeaponFamily::Torpedoes);
         assert!(
             !arc_request_stands(&mut app),
             "the withdrawal must clear PendingArcBearingRequest"
@@ -8623,7 +8646,7 @@ verb = "engage_boost"
     /// that one axis and leaves the others' shipped defaults, exactly as the
     /// per-axis newtype insert did) and boost capability present or absent.
     fn availability_fact_app(
-        axis: crate::messages::SystemId,
+        axis: crate::core::messages::SystemId,
         policy: crate::ai::policy::AiPolicy,
         boost_enabled: Option<bool>,
     ) -> App {
@@ -8655,7 +8678,7 @@ verb = "engage_boost"
     fn a_travel_axis_guard_reads_the_real_boost_availability() {
         // ── Engines ─────────────────────────────────────────────────────────
         let mut available = availability_fact_app(
-            crate::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
             boost_availability_gated_policy(
                 crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
@@ -8671,7 +8694,7 @@ verb = "engage_boost"
         );
 
         let mut unavailable = availability_fact_app(
-            crate::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
             boost_availability_gated_policy(
                 crate::entities::config::HELM_LONGITUDINAL_CHANNEL,
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredTravel,
@@ -8688,7 +8711,7 @@ verb = "engage_boost"
 
         // ── Steering ────────────────────────────────────────────────────────
         let mut available = availability_fact_app(
-            crate::system_registry::helm_steering_system_id(),
+            crate::ship::system_registry::helm_steering_system_id(),
             boost_availability_gated_policy(
                 crate::entities::config::HELM_YAW_CHANNEL,
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
@@ -8704,7 +8727,7 @@ verb = "engage_boost"
         );
 
         let mut unavailable = availability_fact_app(
-            crate::system_registry::helm_steering_system_id(),
+            crate::ship::system_registry::helm_steering_system_id(),
             boost_availability_gated_policy(
                 crate::entities::config::HELM_YAW_CHANNEL,
                 crate::ai::policy::AiPolicyVerb::ActuateDesiredFacing,
@@ -8767,11 +8790,11 @@ verb = "engage_boost"
     /// The three fine systems whose control sources gate the destroyer's three
     /// authored machines: thrust gates Engines, steering gates Steering, boost
     /// gates Boost.
-    fn helm_actuator_system_ids() -> [crate::messages::SystemId; 3] {
+    fn helm_actuator_system_ids() -> [crate::core::messages::SystemId; 3] {
         [
-            crate::system_registry::helm_thrust_system_id(),
-            crate::system_registry::helm_steering_system_id(),
-            crate::system_registry::helm_boost_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_steering_system_id(),
+            crate::ship::system_registry::helm_boost_system_id(),
         ]
     }
 
@@ -8791,10 +8814,10 @@ verb = "engage_boost"
     /// the offline set and the policy gate are all production code from there on.
     fn model_the_helm_actuators_in_the_hull(app: &mut App) {
         let ship = find_ship_entity(app);
-        let mut config: Vec<(crate::messages::SystemId, f32)> = app
+        let mut config: Vec<(crate::core::messages::SystemId, f32)> = app
             .world()
             .entity(ship)
-            .get::<crate::entity_spawner::EntitySystemHull>()
+            .get::<crate::entities::spawner::EntitySystemHull>()
             .expect("the fixture ship carries a system hull")
             .0
             .entries()
@@ -8807,31 +8830,31 @@ verb = "engage_boost"
         );
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::entity_spawner::EntitySystemHull(
-                crate::damage::SystemHull::from_config(&config),
+            .insert(crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&config),
             ));
     }
 
     /// Shoot `system_id` down into the `Disabled` tier — below the disabled
     /// threshold but not to zero, because `Destroyed` is unrepairable and the
     /// second half of the test repairs.
-    fn shoot_out(app: &mut App, system_id: &crate::messages::SystemId) {
+    fn shoot_out(app: &mut App, system_id: &crate::core::messages::SystemId) {
         set_console_hp_direct(app, system_id.clone(), HELM_ACTUATOR_MAX_HP * 0.1);
     }
 
     /// Repair `system_id` back to full through the same `SystemHull::restore`
     /// the repair-team tick calls.
-    fn repair_fully(app: &mut App, system_id: &crate::messages::SystemId) {
+    fn repair_fully(app: &mut App, system_id: &crate::core::messages::SystemId) {
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut hull = entity
-            .get_mut::<crate::entity_spawner::EntitySystemHull>()
+            .get_mut::<crate::entities::spawner::EntitySystemHull>()
             .expect("the fixture ship carries a system hull");
         hull.0.restore(system_id, HELM_ACTUATOR_MAX_HP);
     }
 
     /// Whether the damage sync has this system in `offline_systems`.
-    fn is_damage_offline(app: &mut App, system_id: &crate::messages::SystemId) -> bool {
+    fn is_damage_offline(app: &mut App, system_id: &crate::core::messages::SystemId) -> bool {
         let ship = find_ship_entity(app);
         app.world()
             .entity(ship)
@@ -9311,7 +9334,7 @@ verb = "engage_boost"
             let entity = find_ship_entity(&mut app);
             app.world_mut()
                 .entity_mut(entity)
-                .insert(crate::entity_spawner::EntityUuid(ship.to_string()));
+                .insert(crate::entities::spawner::EntityUuid(ship.to_string()));
             set_armed_bogey(&mut app, bogey, [0.0, 0.0, -200.0], BOGEY_DIRECT_FIRE_REACH);
             place_ship(&mut app, 0.0, 0.0, 0.0, 20.0);
             tick_twice(&mut app);
@@ -10107,12 +10130,14 @@ verb = "engage_boost"
     // the range changes over time, and pinning the pose would make that claim
     // untestable.
 
-    fn cruiser_hull() -> crate::entity_config::EntityConfig {
-        crate::entity_config::EntityConfig::from_toml(
-            crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_cruiser.toml")
-                .expect("ship_harrow_cruiser must resolve")
-                .toml
-                .as_str(),
+    fn cruiser_hull() -> crate::entities::config::EntityConfig {
+        crate::entities::config::EntityConfig::from_toml(
+            crate::entities::include_resolve::resolve_from_disk(
+                "assets/entities/ship_harrow_cruiser.toml",
+            )
+            .expect("ship_harrow_cruiser must resolve")
+            .toml
+            .as_str(),
         )
         .expect("the shipped cruiser hull must parse")
     }
@@ -10163,24 +10188,24 @@ verb = "engage_boost"
         app.world_mut()
             .entity_mut(ship)
             .insert((crate::ship_plugin::ShipPhysicsConfigResource(
-                crate::ship_physics::ShipPhysicsConfig {
+                crate::ship::physics::ShipPhysicsConfig {
                     max_speed: hc.max_speed,
                     max_reverse_speed: hc.max_reverse_speed,
                     acceleration: hc.acceleration,
                     deceleration: hc.deceleration,
                     max_yaw_rate: hc.max_yaw_rate,
-                    ..crate::ship_physics::ShipPhysicsConfig::new()
+                    ..crate::ship::physics::ShipPhysicsConfig::new()
                 },
             ),));
         // Override just Engines/Steering in the ship's keyed `FineSystemAiPolicies`
         // map, MERGING into the shipped defaults `test_app` attached (issue #1209).
         for (system_id, policy) in [
             (
-                crate::system_registry::helm_thrust_system_id(),
+                crate::ship::system_registry::helm_thrust_system_id(),
                 hc.engines_ai.as_ref().unwrap().to_policy().unwrap(),
             ),
             (
-                crate::system_registry::helm_steering_system_id(),
+                crate::ship::system_registry::helm_steering_system_id(),
                 hc.steering_ai.as_ref().unwrap().to_policy().unwrap(),
             ),
         ] {
@@ -10554,7 +10579,7 @@ verb = "engage_boost"
             let entity = find_ship_entity(&mut app);
             app.world_mut()
                 .entity_mut(entity)
-                .insert(crate::entity_spawner::EntityUuid(ship.to_string()));
+                .insert(crate::entities::spawner::EntityUuid(ship.to_string()));
             place_ship(&mut app, 0.0, -ring, std::f32::consts::FRAC_PI_2, 9.0);
             tick_twice(&mut app);
             assert_eq!(steering_state(&mut app), "orbit");
@@ -10768,8 +10793,8 @@ verb = "engage_boost"
         let ship = find_ship_entity(app);
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::weapons_plugin::TorpedoSystemResource(
-                crate::torpedo::TorpedoSystem::from_configs(
+            .insert(crate::console::weapons::TorpedoSystemResource(
+                crate::weapons::torpedo::TorpedoSystem::from_configs(
                     &torpedoes.tubes,
                     torpedoes.to_runtime(),
                 ),
@@ -10787,9 +10812,12 @@ verb = "engage_boost"
     fn spawn_bogey_entity(app: &mut App, uuid: uuid::Uuid, pos: [f32; 3]) -> Entity {
         app.world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid(uuid.to_string()),
+                crate::entities::spawner::EntityUuid(uuid.to_string()),
                 Transform::from_xyz(pos[0], pos[1], pos[2]),
-                crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
+                crate::server_app::ShipShields(
+                    crate::weapons::shield::ShieldSystem::default(),
+                    0.5,
+                ),
             ))
             .id()
     }
@@ -10810,9 +10838,9 @@ verb = "engage_boost"
             .expect("bogey carries a Transform");
         let shields = app
             .world()
-            .get::<crate::simulation::ShipShields>(bogey)
+            .get::<crate::server_app::ShipShields>(bogey)
             .expect("bogey carries ShipShields");
-        let incoming = crate::shield::attacker_bearing_relative(
+        let incoming = crate::weapons::shield::attacker_bearing_relative(
             pose.x,
             pose.z,
             transform.translation.x,
@@ -10826,7 +10854,7 @@ verb = "engage_boost"
     fn set_bogey_arc_online(app: &mut App, bogey: Entity, index: usize, online: bool) {
         let mut shields = app
             .world_mut()
-            .get_mut::<crate::simulation::ShipShields>(bogey)
+            .get_mut::<crate::server_app::ShipShields>(bogey)
             .expect("bogey carries ShipShields");
         shields.0.facings[index].offline_remaining = if online { 0.0 } else { 30.0 };
     }
@@ -10839,23 +10867,26 @@ verb = "engage_boost"
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut torpedoes = entity
-            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .get_mut::<crate::console::weapons::TorpedoSystemResource>()
             .expect("the cruiser carries a torpedo system");
         torpedoes.0.in_flight.clear();
         for i in 0..n {
-            torpedoes.0.in_flight.push(crate::torpedo::Torpedo {
-                uuid: format!("salvo-{i}"),
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-                heading: 0.0,
-                pitch: 0.0,
-                lifespan_remaining: 5.0,
-                target_uuid: None,
-                source_uuid: None,
-                tube_id: "bow_port".into(),
-                shield_pierce: 0.0,
-            });
+            torpedoes
+                .0
+                .in_flight
+                .push(crate::weapons::torpedo::Torpedo {
+                    uuid: format!("salvo-{i}"),
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    heading: 0.0,
+                    pitch: 0.0,
+                    lifespan_remaining: 5.0,
+                    target_uuid: None,
+                    source_uuid: None,
+                    tube_id: "bow_port".into(),
+                    shield_pierce: 0.0,
+                });
         }
     }
 
@@ -10873,13 +10904,13 @@ verb = "engage_boost"
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut torpedoes = entity
-            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .get_mut::<crate::console::weapons::TorpedoSystemResource>()
             .expect("the cruiser carries a torpedo system");
         let mut drawn = 0;
         for tube in &mut torpedoes.0.tubes {
             drawn += tube.volley_max.saturating_sub(tube.loaded_count);
             tube.loaded_count = tube.volley_max;
-            tube.load_state = crate::torpedo::TubeLoadState::Unloaded;
+            tube.load_state = crate::weapons::torpedo::TubeLoadState::Unloaded;
         }
         torpedoes.0.torpedoes_remaining = torpedoes.0.torpedoes_remaining.saturating_sub(drawn);
     }
@@ -10890,11 +10921,11 @@ verb = "engage_boost"
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut torpedoes = entity
-            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .get_mut::<crate::console::weapons::TorpedoSystemResource>()
             .expect("the cruiser carries a torpedo system");
         for tube in &mut torpedoes.0.tubes {
             tube.loaded_count = 0;
-            tube.load_state = crate::torpedo::TubeLoadState::Unloaded;
+            tube.load_state = crate::weapons::torpedo::TubeLoadState::Unloaded;
         }
     }
 
@@ -11031,7 +11062,7 @@ verb = "engage_boost"
         // Knock out every OTHER arc.
         let arcs = app
             .world()
-            .get::<crate::simulation::ShipShields>(bogey)
+            .get::<crate::server_app::ShipShields>(bogey)
             .expect("bogey carries ShipShields")
             .0
             .facings
@@ -11062,12 +11093,12 @@ verb = "engage_boost"
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut torpedoes = entity
-            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .get_mut::<crate::console::weapons::TorpedoSystemResource>()
             .expect("the cruiser carries a torpedo system");
         torpedoes.0.torpedoes_remaining = 0;
         for tube in &mut torpedoes.0.tubes {
             tube.loaded_count = 0;
-            tube.load_state = crate::torpedo::TubeLoadState::Unloaded;
+            tube.load_state = crate::weapons::torpedo::TubeLoadState::Unloaded;
         }
     }
 
@@ -11077,7 +11108,7 @@ verb = "engage_boost"
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut torpedoes = entity
-            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .get_mut::<crate::console::weapons::TorpedoSystemResource>()
             .expect("the cruiser carries a torpedo system");
         torpedoes.0.torpedoes_remaining = rounds;
     }
@@ -11093,7 +11124,7 @@ verb = "engage_boost"
             .expect("the cruiser carries control sources");
         sources
             .0
-            .set_offline(crate::messages::SystemId(system_id.into()), true);
+            .set_offline(crate::core::messages::SystemId(system_id.into()), true);
     }
 
     /// The doctrine-quality guard #790's premise depends on: a cruiser that
@@ -11211,7 +11242,7 @@ verb = "engage_boost"
         let (mut app, _uuid, bogey) = opportunity_app();
         app.world_mut()
             .entity_mut(bogey)
-            .remove::<crate::simulation::ShipShields>();
+            .remove::<crate::server_app::ShipShields>();
         tick_twice(&mut app);
         assert_eq!(
             steering_state(&mut app),
@@ -11369,7 +11400,7 @@ verb = "engage_boost"
     /// the doctrine reads.
     fn torpedoes_in_flight(app: &mut App) -> usize {
         app.world_mut()
-            .query::<&crate::weapons_plugin::TorpedoSystemResource>()
+            .query::<&crate::console::weapons::TorpedoSystemResource>()
             .single(app.world())
             .expect("the cruiser carries a torpedo system")
             .0
@@ -11431,13 +11462,13 @@ verb = "engage_boost"
     /// Deliberately not [`set_torpedoes_in_flight`], which writes `in_flight`
     /// directly and so stages a salvo that is fully airborne from its first tick.
     /// A real burst launch is not: round 0 of each tube goes immediately and the
-    /// rest are left as a [`crate::torpedo::TubeBurstState`] waiting on
+    /// rest are left as a [`crate::weapons::torpedo::TubeBurstState`] waiting on
     /// `burst_interval_secs`. Returns `(airborne, owed)`.
     fn launch_a_real_salvo(app: &mut App) -> (usize, u32) {
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut torpedoes = entity
-            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .get_mut::<crate::console::weapons::TorpedoSystemResource>()
             .expect("the cruiser carries a torpedo system");
         let ids: Vec<String> = torpedoes.0.tubes.iter().map(|t| t.id.clone()).collect();
         for id in &ids {
@@ -11446,7 +11477,10 @@ verb = "engage_boost"
                     .0
                     .launch(id, format!("salvo-{id}"), 0.0, 0.0, 0.0, 0.0, None, None);
             assert!(
-                matches!(result, crate::torpedo::LaunchResult::Launched { .. }),
+                matches!(
+                    result,
+                    crate::weapons::torpedo::LaunchResult::Launched { .. }
+                ),
                 "precondition: tube '{id}' must have a volley loaded to fire, got {result:?}"
             );
         }
@@ -11460,7 +11494,7 @@ verb = "engage_boost"
     fn torpedoes_pending(app: &mut App) -> u32 {
         let ship = find_ship_entity(app);
         app.world()
-            .get::<crate::weapons_plugin::TorpedoSystemResource>(ship)
+            .get::<crate::console::weapons::TorpedoSystemResource>(ship)
             .expect("the cruiser carries a torpedo system")
             .0
             .burst_states
@@ -11476,7 +11510,7 @@ verb = "engage_boost"
         let ship = find_ship_entity(app);
         let torpedoes = app
             .world()
-            .get::<crate::weapons_plugin::TorpedoSystemResource>(ship)
+            .get::<crate::console::weapons::TorpedoSystemResource>(ship)
             .expect("the cruiser carries a torpedo system");
         !torpedoes.0.tubes.is_empty()
             && torpedoes
@@ -11494,7 +11528,7 @@ verb = "engage_boost"
         let ship = find_ship_entity(app);
         let mut entity = app.world_mut().entity_mut(ship);
         let mut torpedoes = entity
-            .get_mut::<crate::weapons_plugin::TorpedoSystemResource>()
+            .get_mut::<crate::console::weapons::TorpedoSystemResource>()
             .expect("the cruiser carries a torpedo system");
         let mut n = 0_u32;
         torpedoes
@@ -11623,7 +11657,7 @@ verb = "engage_boost"
         // statement about what the TARGET carries, not about the cruiser.
         app.world_mut()
             .entity_mut(bogey)
-            .remove::<crate::simulation::ShipShields>();
+            .remove::<crate::server_app::ShipShields>();
         tick_twice(&mut app);
 
         // The opportunity opens, and it opens permanently: nothing about this
@@ -11808,7 +11842,7 @@ verb = "engage_boost"
             let entity = find_ship_entity(&mut app);
             app.world_mut()
                 .entity_mut(entity)
-                .insert(crate::entity_spawner::EntityUuid(
+                .insert(crate::entities::spawner::EntityUuid(
                     uuid::Uuid::from_u128(0x9111_2222_3333_4444_5555_6666_7777_8888).to_string(),
                 ));
             // Re-enter the ring once under this seed so the "before" reading is
@@ -11906,12 +11940,14 @@ verb = "engage_boost"
     // "holds station" is only observable as a range that stops changing, and
     // "pivots onto a lead" is only observable as a bearing that converges on one.
 
-    fn warhawk_hull() -> crate::entity_config::EntityConfig {
-        crate::entity_config::EntityConfig::from_toml(
-            crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
-                .expect("ship_harrow_warhawk must resolve")
-                .toml
-                .as_str(),
+    fn warhawk_hull() -> crate::entities::config::EntityConfig {
+        crate::entities::config::EntityConfig::from_toml(
+            crate::entities::include_resolve::resolve_from_disk(
+                "assets/entities/ship_harrow_warhawk.toml",
+            )
+            .expect("ship_harrow_warhawk must resolve")
+            .toml
+            .as_str(),
         )
         .expect("the shipped battleship hull must parse")
     }
@@ -11929,7 +11965,7 @@ verb = "engage_boost"
 
     /// The bolt whose flight speed the artillery hold leads by — the hull's
     /// longest-reaching blaster bank, resolved exactly as the host resolves it.
-    fn warhawk_artillery_bank() -> crate::entity_config::BlasterBankConfig {
+    fn warhawk_artillery_bank() -> crate::entities::config::BlasterBankConfig {
         let cfg = warhawk_hull();
         let wc = cfg
             .weapons_console
@@ -11997,25 +12033,27 @@ verb = "engage_boost"
                 .remove(*name)
                 .unwrap_or_else(|| panic!("the shipped hull must author `{name}` to omit it"));
         }
-        let banks: Vec<crate::blaster::BlasterSystem> = cfg
+        let banks: Vec<crate::weapons::blaster::BlasterSystem> = cfg
             .weapons_console
             .as_ref()
             .expect("hull declares [weapons_console]")
             .blaster_banks
             .iter()
-            .map(|b| crate::blaster::BlasterSystem::new(b.to_runtime()))
+            .map(|b| crate::weapons::blaster::BlasterSystem::new(b.to_runtime()))
             .collect();
         let ship = find_ship_entity(&mut app);
         app.world_mut().entity_mut(ship).insert((
-            crate::ship_plugin::ShipPhysicsConfigResource(crate::ship_physics::ShipPhysicsConfig {
-                max_speed: hc.max_speed,
-                max_reverse_speed: hc.max_reverse_speed,
-                acceleration: hc.acceleration,
-                deceleration: hc.deceleration,
-                max_yaw_rate: hc.max_yaw_rate,
-                ..crate::ship_physics::ShipPhysicsConfig::new()
-            }),
-            crate::weapons_plugin::BlasterSystemResource(banks),
+            crate::ship_plugin::ShipPhysicsConfigResource(
+                crate::ship::physics::ShipPhysicsConfig {
+                    max_speed: hc.max_speed,
+                    max_reverse_speed: hc.max_reverse_speed,
+                    acceleration: hc.acceleration,
+                    deceleration: hc.deceleration,
+                    max_yaw_rate: hc.max_yaw_rate,
+                    ..crate::ship::physics::ShipPhysicsConfig::new()
+                },
+            ),
+            crate::console::weapons::BlasterSystemResource(banks),
             ImpulseConfigResource {
                 charge_duration: hc.impulse_charge_duration,
                 speed_multiplier: hc.impulse_speed_multiplier,
@@ -12026,7 +12064,7 @@ verb = "engage_boost"
                     .helm_capability
                     .as_ref()
                     .map(|cap| cap.impulse.steering_multiplier)
-                    .unwrap_or(crate::impulse::IMPULSE_STEERING_MULTIPLIER_DEFAULT),
+                    .unwrap_or(crate::ship::impulse::IMPULSE_STEERING_MULTIPLIER_DEFAULT),
             },
         ));
         // Override Engines/Steering/Impulse in the ship's keyed
@@ -12036,15 +12074,15 @@ verb = "engage_boost"
         // just lands in the map now rather than in its own component.
         for (system_id, policy) in [
             (
-                crate::system_registry::helm_thrust_system_id(),
+                crate::ship::system_registry::helm_thrust_system_id(),
                 hc.engines_ai.as_ref().unwrap().to_policy().unwrap(),
             ),
             (
-                crate::system_registry::helm_steering_system_id(),
+                crate::ship::system_registry::helm_steering_system_id(),
                 hc.steering_ai.as_ref().unwrap().to_policy().unwrap(),
             ),
             (
-                crate::system_registry::helm_impulse_system_id(),
+                crate::ship::system_registry::helm_impulse_system_id(),
                 hc.impulse_ai
                     .as_ref()
                     .expect("the hull authors `[helm_console.impulse_ai]`")
@@ -12062,8 +12100,8 @@ verb = "engage_boost"
         // this hull.
         set_behaviour_section(
             &mut app,
-            crate::entity_config::BehaviourConfig {
-                doctrine: vec![crate::entity_config::DoctrineObjective {
+            crate::entities::config::BehaviourConfig {
+                doctrine: vec![crate::entities::config::DoctrineObjective {
                     id: objective.id.clone(),
                     directive_kind: Some("Destroy".into()),
                     base_priority: 80.0,
@@ -12319,7 +12357,7 @@ verb = "engage_boost"
         for _ in 0..((60.0 / HELM_AI_MAX_DT_SECS).ceil() as usize) {
             tick(&mut app);
             let phase = get_ship_impulse(&mut app).phase;
-            if phase != crate::impulse::ImpulsePhase::Idle && drive_ever_engaged.is_none() {
+            if phase != crate::ship::impulse::ImpulsePhase::Idle && drive_ever_engaged.is_none() {
                 drive_ever_engaged = Some((phase, range_to_bogey(&mut app)));
             }
         }

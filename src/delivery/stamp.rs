@@ -5,7 +5,7 @@
 //! numbers, and all three already existed before this module — it names them
 //! together rather than inventing a version scheme:
 //!
-//! * `protocol` — [`crate::messages::PROTOCOL_VERSION`], the revision of the
+//! * `protocol` — [`crate::core::messages::PROTOCOL_VERSION`], the revision of the
 //!   `ClientMessage`/`ServerMessage` wire vocabulary. Compiled in, so a running
 //!   client's protocol can only ever be learned at request time.
 //! * `content_id` / `content_epoch` — the `[content]` block of the scenario
@@ -29,7 +29,7 @@
 //!
 //! Pure: no Bevy, no I/O, no target gates.
 
-use crate::messages::PROTOCOL_VERSION;
+use crate::core::messages::PROTOCOL_VERSION;
 use crate::world::manifest::{parse_content_identity, ContentIdentity};
 
 /// Who a host (or a client) claims to be.

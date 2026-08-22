@@ -13,7 +13,7 @@
 
 use bevy::prelude::*;
 
-use crate::entity_planet::{PlanetLightingOverride, AMBIENT_FLOOR};
+use crate::entities::planet::{PlanetLightingOverride, AMBIENT_FLOOR};
 use crate::render_setup::default_ambient_light;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

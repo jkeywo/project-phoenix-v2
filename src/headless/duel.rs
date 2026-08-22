@@ -436,7 +436,7 @@ pub fn apply_duel_sides(
     side_a: &[String],
     side_b: &[String],
     resolve: &impl Fn(&str) -> Result<String, DuelError>,
-    templates: &dyn crate::entity_loader::TemplateLoader,
+    templates: &dyn crate::entities::loader::TemplateLoader,
 ) -> Result<toml::Value, DuelError> {
     if side_a.len() > MAX_SIDE {
         return Err(DuelError::TooManyShips {
@@ -572,9 +572,9 @@ pub fn resolve_template(name: &str) -> Result<String, DuelError> {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DuelTemplateLoader;
 
-impl crate::entity_loader::TemplateLoader for DuelTemplateLoader {
-    fn load_template(&self, path: &str) -> Option<crate::entity_config::EntityConfig> {
-        crate::entity_includes::resolve_from_disk(path)
+impl crate::entities::loader::TemplateLoader for DuelTemplateLoader {
+    fn load_template(&self, path: &str) -> Option<crate::entities::config::EntityConfig> {
+        crate::entities::include_resolve::resolve_from_disk(path)
             .ok()?
             .parse()
             .ok()
@@ -675,7 +675,7 @@ fn spawn_side_a_2(ctx) { spawn_slot(ctx, "side_a_2", "assets/entities/placeholde
             |loader, (path, behaviour)| {
                 loader.with_template(
                     *path,
-                    crate::entity_config::EntityConfig {
+                    crate::entities::config::EntityConfig {
                         behaviour: Some(toml::from_str(behaviour).expect("fixture parses")),
                         ..Default::default()
                     },

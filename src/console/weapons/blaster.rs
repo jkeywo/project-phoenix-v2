@@ -1,6 +1,6 @@
 //! Blaster systems (issue #631), extracted from `server.rs` (issue #726).
 //!
-//! Note: `crate::blaster::BlasterSystem` (the pure-Rust bank model in
+//! Note: `crate::weapons::blaster::BlasterSystem` (the pure-Rust bank model in
 //! `src/weapons/blaster.rs`) is a different module from this file — this one
 //! holds the Bevy systems and the ECS wrapper resource.
 
@@ -9,8 +9,8 @@ use bevy::prelude::*;
 
 use super::shared::{any_blaster_bank_operates_ai, live_entity_xz, system_is_registered};
 use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIUS};
+use crate::core::messages::{GamePhase, ServerMessage, SystemBlackboard, SystemControlPayload};
 use crate::lobby::{Sessions, Target, WorldResource};
-use crate::messages::{GamePhase, ServerMessage, SystemBlackboard, SystemControlPayload};
 
 /// This ship's **Combat Lock** from its frozen viewscreen blackboard (issue
 /// #829): the ship-wide target every weapons firing path reads, in place of the
@@ -20,16 +20,16 @@ fn blaster_combat_lock(
 ) -> Option<String> {
     match blackboards?
         .0
-        .get(&crate::system_registry::viewscreen_system_id())
+        .get(&crate::ship::system_registry::viewscreen_system_id())
     {
         Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
         _ => None,
     }
 }
-use crate::model_rig::ModelMarkers;
+use crate::entities::model_rig::ModelMarkers;
+use crate::server_app::{AsteroidUuid, GameOverReason, SimOutbox};
+use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::ship_state::ShipPhysics;
-use crate::simulation::{AsteroidUuid, GameOverReason, SimOutbox};
 
 /// Wraps the pure-Rust blaster system(s) so they can be used as a Bevy
 /// component on each ship entity (issue #631).
@@ -37,30 +37,33 @@ use crate::simulation::{AsteroidUuid, GameOverReason, SimOutbox};
 /// Each element corresponds to one `[[weapons_console.blaster_banks]]` entry.
 /// A ship with no blaster banks will have an empty `Vec`.
 #[derive(Resource, Component, Clone, Default)]
-pub struct BlasterSystemResource(pub Vec<crate::blaster::BlasterSystem>);
+pub struct BlasterSystemResource(pub Vec<crate::weapons::blaster::BlasterSystem>);
 
 /// Per-ship map of each blaster bank's inline stateless open-fire policy
 /// (issue #781), keyed by `BlasterBankConfig.id`. The blaster twin of
-/// [`crate::weapons_plugin::PhaserBankAiPolicies`]: built at spawn from each
+/// [`crate::console::weapons::PhaserBankAiPolicies`]: built at spawn from each
 /// bank's authored `ai` block, falling back to the canonical
 /// [`crate::entities::config::default_blaster_bank_ai_config`] (unconditional
 /// fire) so a bank without an authored policy keeps auto-firing exactly as before
 /// (AC1). Read by [`tick_blaster_auto_fire`].
 #[derive(Component, Default, Clone, Debug)]
 pub struct BlasterBankAiPolicies(
-    pub std::collections::HashMap<crate::entity_config::BlasterBankId, crate::ai::policy::AiPolicy>,
+    pub  std::collections::HashMap<
+        crate::entities::config::BlasterBankId,
+        crate::ai::policy::AiPolicy,
+    >,
 );
 
 /// Seed the per-tick policy fact snapshot for one blaster bank's open-fire
 /// decision (issue #781), the blaster twin of
-/// [`crate::weapons_plugin::seed_phaser_bank_facts`]. Closes the #779 empty-facts
+/// [`crate::console::weapons::seed_phaser_bank_facts`]. Closes the #779 empty-facts
 /// edge for blaster banks: the host resolves the bank's live readiness before
 /// calling this, so a `fact(...)` guard evaluates over real per-bank state while
 /// `policy.rs` stays Bevy-free.
 /// `posture` carries the SHIP-WIDE readings — the alert added by issue #872 and
 /// the weapons hold added by issue #1041; see
-/// [`crate::weapons_plugin::seed_phaser_bank_facts`] and
-/// [`crate::weapons_plugin::WeaponsAlertPosture`] for the contract. Seeded
+/// [`crate::console::weapons::seed_phaser_bank_facts`] and
+/// [`crate::console::weapons::WeaponsAlertPosture`] for the contract. Seeded
 /// unconditionally so an authored guard reads a real `0.0`, never an absent
 /// fact.
 pub fn seed_blaster_bank_facts(
@@ -69,7 +72,7 @@ pub fn seed_blaster_bank_facts(
     cooldown_remaining: f32,
     in_range: bool,
     in_arc: bool,
-    posture: crate::weapons_plugin::WeaponsAlertPosture,
+    posture: crate::console::weapons::WeaponsAlertPosture,
 ) -> crate::world::flags::AiFacts {
     use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
@@ -127,12 +130,12 @@ pub(crate) fn handle_fire_blaster(
             &ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
             &mut BlasterSystemResource,
-            &crate::messages::AdmittedCommands,
+            &crate::core::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
     for (control_sources, physics, blackboards_opt, mut blaster_res, admitted) in ship_q.iter_mut()
     {
@@ -152,7 +155,7 @@ pub(crate) fn handle_fire_blaster(
             // and comparing — never by inverting the string (the mapping folds
             // `_` to `-`, so the inverse is lossy).
             let Some(bank_id) = blaster_res.0.iter().find_map(|b| {
-                crate::system_registry::blaster_bank_system_id(&b.config.id)
+                crate::ship::system_registry::blaster_bank_system_id(&b.config.id)
                     .filter(|id| id == &cmd.target)
                     .map(|_| b.config.id.clone())
             }) else {
@@ -163,7 +166,7 @@ pub(crate) fn handle_fire_blaster(
             // Admission already gated the token identity, so — like
             // `handle_fire_phaser` — this only checks operability, with no
             // human-vs-AI branch below this point.
-            let bank_system_id = crate::system_registry::blaster_bank_system_id(&bank_id)
+            let bank_system_id = crate::ship::system_registry::blaster_bank_system_id(&bank_id)
                 .filter(|id| system_is_registered(control_sources, id));
             let policy = match &bank_system_id {
                 Some(id) => control_sources.0.policy_for(id),
@@ -256,21 +259,21 @@ pub(crate) fn tick_blaster_auto_fire(
     mut ship_q: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &ShipPhysics,
             Option<&crate::server_app::ShipSystemBlackboards>,
             &BlasterSystemResource,
             Option<&BlasterBankAiPolicies>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
             // Issue #872: this ship's own red-alert state, seeded as a typed
             // fact for the bank's authored fire predicate. `Option<&_>` for
             // bare-`App` fixtures; absent reads `false`.
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
             // Issue #1041: the captain's weapons hold, folded with the alert
             // above into the one `red_alert` fact the authored gate reads.
-            Option<&crate::ship_state::ShipWeaponsHold>,
+            Option<&crate::ship::state::ShipWeaponsHold>,
             // Issue #1107: the ship's Command stance selections, so a directed
             // AI weapons Station's stance decides the fire posture in place of
             // the ship's own Red Alert. Absent reads as no direction.
@@ -278,8 +281,8 @@ pub(crate) fn tick_blaster_auto_fire(
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     crate::ptrace!(
@@ -319,7 +322,7 @@ pub(crate) fn tick_blaster_auto_fire(
                 red_alert_opt.is_some_and(|r| r.0),
             )
         });
-        let posture = crate::weapons_plugin::WeaponsAlertPosture::from_parts(
+        let posture = crate::console::weapons::WeaponsAlertPosture::from_parts(
             red_alert_opt,
             weapons_hold_opt,
             stance_override,
@@ -334,7 +337,7 @@ pub(crate) fn tick_blaster_auto_fire(
             // same per-bank fine ids the fire loop uses. No coarse
             // `tactical` fallback (issue #801).
             None => blaster_res.0.iter().any(|bank| {
-                crate::system_registry::blaster_bank_system_id(&bank.config.id)
+                crate::ship::system_registry::blaster_bank_system_id(&bank.config.id)
                     .is_some_and(|id| control_sources.0.policy_for(&id).operate_ai)
             }),
         };
@@ -358,7 +361,8 @@ pub(crate) fn tick_blaster_auto_fire(
             // Per-bank fine-system gate — skip banks whose fine system is not
             // AI-operated (offline/human), so one bank firing never depends on
             // another's control source.
-            if let Some(bank_sid) = crate::system_registry::blaster_bank_system_id(&bank.config.id)
+            if let Some(bank_sid) =
+                crate::ship::system_registry::blaster_bank_system_id(&bank.config.id)
             {
                 // Per-bank Control-Source gate through the shared AI host spine
                 // (issue #1208): skip offline/human banks. The per-bank FIRE
@@ -408,13 +412,14 @@ pub(crate) fn tick_blaster_auto_fire(
         // (AC5/AC7). `handle_fire_blaster` (Physics) consumes these and
         // dispatches the volley, converging with the human origin.
         for bank_id in banks_to_fire {
-            let Some(target) = crate::system_registry::blaster_bank_system_id(&bank_id) else {
+            let Some(target) = crate::ship::system_registry::blaster_bank_system_id(&bank_id)
+            else {
                 continue;
             };
             crate::command_admission::ai_emit::emit_ai_command(
                 entity_uuid,
                 target,
-                crate::messages::SystemControlPayload::ChargeBlasterStart,
+                crate::core::messages::SystemControlPayload::ChargeBlasterStart,
                 control_sources,
                 &sessions,
                 ship_config_opt,
@@ -464,7 +469,7 @@ pub(crate) fn tick_blaster_system(
         // p0 — the firing pass: every ship that carries blaster banks.
         Query<
             (
-                Option<&crate::entity_spawner::EntityUuid>,
+                Option<&crate::entities::spawner::EntityUuid>,
                 &Transform,
                 Option<&ModelMarkers>,
                 &mut ShipPhysics,
@@ -476,17 +481,19 @@ pub(crate) fn tick_blaster_system(
         // p1 — the velocity pass: EVERY ship, blaster-carrying or not. A ship
         // with no `EntityUuid` can never be a combat lock, so it is filtered
         // by the query rather than skipped in the body.
-        Query<(&crate::entity_spawner::EntityUuid, &ShipPhysics), With<crate::server_app::Ship>>,
+        Query<(&crate::entities::spawner::EntityUuid, &ShipPhysics), With<crate::server_app::Ship>>,
     )>,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     mut outbox: ResMut<SimOutbox>,
     #[cfg(feature = "server")] mut shake_state: Option<
         ResMut<crate::server::viewscreen_border::ShakeState>,
     >,
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
     // Projectile ids are minted from the tick-scoped counter (issue #907): an
     // id that is a function of RNG draw order is stable within one seeded
     // instance but not across two. `Option<Res<_>>` for the same reason as
@@ -631,10 +638,10 @@ pub(crate) fn tick_blaster_system(
                 // Balance tracer: the blaster bolt left the ship. Unconditional
                 // — all ships, all builds. Blank uuid → `None`.
                 if let Some(ref mut msgs) = balance_events {
-                    msgs.write(crate::balance::BalanceEvent::WeaponFired {
+                    msgs.write(crate::core::balance::BalanceEvent::WeaponFired {
                         shooter: Some(source_uuid.clone()).filter(|u| !u.is_empty()),
                         weapon: bank_id.clone(),
-                        kind: crate::balance::FIRED_KIND_BLASTER.to_string(),
+                        kind: crate::core::balance::FIRED_KIND_BLASTER.to_string(),
                     });
                 }
                 outbox.0.push((
@@ -661,15 +668,15 @@ pub(crate) fn tick_blaster_system(
 /// `build_torpedo_target_snapshot`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_blaster_hits(
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     mut hit_target_q: Query<(
         Entity,
         Option<&AsteroidUuid>,
-        Option<&crate::entity_spawner::EntityUuid>,
-        &mut crate::entity_spawner::EntitySystemHull,
+        Option<&crate::entities::spawner::EntityUuid>,
+        &mut crate::entities::spawner::EntitySystemHull,
         Option<&mut crate::ship::shields::ShipShields>,
-        Option<&mut crate::entity_spawner::EntityShipArcHull>,
+        Option<&mut crate::entities::spawner::EntityShipArcHull>,
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
     )>,
     // `Entity` + `EntityUuid` ride along so the shooter walk below can be
@@ -679,7 +686,7 @@ pub(crate) fn handle_blaster_hits(
     mut blaster_res_q: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &mut BlasterSystemResource,
         ),
         With<crate::server_app::Ship>,
@@ -689,13 +696,13 @@ pub(crate) fn handle_blaster_hits(
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
     mut world: ResMut<WorldResource>,
-    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    mut destroyed_events: MessageWriter<crate::ai::server::AiEntityDestroyed>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
-    collider_q: Query<&crate::entity_spawner::ColliderSection>,
+    collider_q: Query<&crate::entities::spawner::ColliderSection>,
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
-    mut balance_events: Option<ResMut<Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<ResMut<Messages<crate::core::balance::BalanceEvent>>>,
     // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
     // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
     mut tracked: Option<ResMut<crate::server_app::TrackedEntities>>,
@@ -837,7 +844,7 @@ pub(crate) fn handle_blaster_hits(
             let shield_amount = if let Some(ref mut shields) = shield_comp {
                 let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
                 if !all_offline {
-                    let (pierced, absorbed) = crate::damage::split_damage_for_pierce(
+                    let (pierced, absorbed) = crate::ship::damage::split_damage_for_pierce(
                         det.damage as f32,
                         det.shield_pierce,
                     );
@@ -864,8 +871,11 @@ pub(crate) fn handle_blaster_hits(
                     sim_rng.as_deref(),
                     crate::sim_rng::SimStream::BlasterDamage,
                     |rng| {
-                        let result =
-                            crate::damage::apply_hull_damage(&mut hull_comp.0, hull_damage, rng);
+                        let result = crate::ship::damage::apply_hull_damage(
+                            &mut hull_comp.0,
+                            hull_damage,
+                            rng,
+                        );
                         if let Some(ref mut ah) = arc_hull {
                             ah.0.apply_damage(result.0, rng);
                         }
@@ -892,7 +902,7 @@ pub(crate) fn handle_blaster_hits(
                                 reason.0 = Some("server.game_over.ship_destroyed".into());
                                 // The LocalShip died → defeat (#843), latched
                                 // under the same first-write guard as the reason.
-                                reason.1 = Some(crate::balance::Outcome::Defeat);
+                                reason.1 = Some(crate::core::balance::Outcome::Defeat);
                                 // EntityDestroyed for the player death, once
                                 // (guarded by the first reason write). Killer =
                                 // the blaster's shooter (issue #841). Shares the
@@ -900,10 +910,12 @@ pub(crate) fn handle_blaster_hits(
                                 // `SetGameOverReason`; see the beam death site
                                 // for why that coupling is accepted.
                                 if let Some(ref mut msgs) = balance_events {
-                                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
-                                        victim: det.target_uuid.clone(),
-                                        killer: det.source_uuid.clone(),
-                                    });
+                                    msgs.write(
+                                        crate::core::balance::BalanceEvent::EntityDestroyed {
+                                            victim: det.target_uuid.clone(),
+                                            killer: det.source_uuid.clone(),
+                                        },
+                                    );
                                 }
                             }
                         }
@@ -931,7 +943,7 @@ pub(crate) fn handle_blaster_hits(
                             },
                         ));
                     } else {
-                        destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
+                        destroyed_events.write(crate::ai::server::AiEntityDestroyed {
                             entity_uuid: det.target_uuid.clone(),
                         });
                         let radius = collider_q
@@ -956,7 +968,7 @@ pub(crate) fn handle_blaster_hits(
                         // the AiEntityDestroyed write (exactly once). Killer =
                         // the firing ship (issue #841).
                         if let Some(ref mut msgs) = balance_events {
-                            msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                            msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
                                 victim: det.target_uuid.clone(),
                                 killer: det.source_uuid.clone(),
                             });
@@ -993,13 +1005,13 @@ pub(crate) fn handle_blaster_hits(
             }
 
             if let Some(ref mut msgs) = balance_events {
-                msgs.write(crate::balance::BalanceEvent::DamageApplied {
+                msgs.write(crate::core::balance::BalanceEvent::DamageApplied {
                     attacker: det.source_uuid.clone(),
                     victim: det.target_uuid.clone(),
                     victim_kind: if ast_uuid.is_some() {
-                        crate::balance::VictimKind::Asteroid
+                        crate::core::balance::VictimKind::Asteroid
                     } else {
-                        crate::balance::VictimKind::Ship
+                        crate::core::balance::VictimKind::Ship
                     },
                     weapon: det.bank_id.clone(),
                     amount: det.damage as f32,
@@ -1021,10 +1033,12 @@ pub(crate) fn handle_blaster_hits(
                                 .map(|f| !f.is_online())
                                 .unwrap_or(false);
                             if now_offline {
-                                msgs.write(crate::balance::BalanceEvent::ShieldArcCollapsed {
-                                    ship: det.target_uuid.clone(),
-                                    arc_id: id.clone(),
-                                });
+                                msgs.write(
+                                    crate::core::balance::BalanceEvent::ShieldArcCollapsed {
+                                        ship: det.target_uuid.clone(),
+                                        arc_id: id.clone(),
+                                    },
+                                );
                             }
                         }
                     }

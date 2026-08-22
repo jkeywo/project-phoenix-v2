@@ -14,7 +14,7 @@
 //! fallback config, and the validation call are all unchanged from the copies
 //! it replaces.
 
-/// The token an AI operator on a ship with no [`crate::entity_spawner::EntityUuid`]
+/// The token an AI operator on a ship with no [`crate::entities::spawner::EntityUuid`]
 /// emits under.
 ///
 /// Deliberately *not* registered in `crate::ai::server::AiTokenRegistry`: an
@@ -25,9 +25,9 @@
 pub const AI_BACKFILL_TOKEN: &str = "ai:backfill";
 
 /// Build the `ai:` token for one ship's AI operator: `ai:<uuid>` when the
-/// entity carries an [`crate::entity_spawner::EntityUuid`], else
+/// entity carries an [`crate::entities::spawner::EntityUuid`], else
 /// [`AI_BACKFILL_TOKEN`].
-pub fn ai_token_for(entity_uuid: Option<&crate::entity_spawner::EntityUuid>) -> String {
+pub fn ai_token_for(entity_uuid: Option<&crate::entities::spawner::EntityUuid>) -> String {
     entity_uuid
         .map(|u| format!("ai:{}", u.0))
         .unwrap_or_else(|| AI_BACKFILL_TOKEN.to_string())
@@ -47,13 +47,13 @@ pub fn ai_token_for(entity_uuid: Option<&crate::entity_spawner::EntityUuid>) -> 
 /// stands in, which grants no station tenure and so only ever admits `ai:`
 /// tokens on systems whose control source already says `operate_ai`.
 pub fn emit_ai_command(
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
-    target: crate::messages::SystemId,
-    payload: crate::messages::SystemControlPayload,
+    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
+    target: crate::core::messages::SystemId,
+    payload: crate::core::messages::SystemControlPayload,
     sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
     ship_config: Option<&crate::ship_plugin::ShipConfigComponent>,
-    admitted: &mut crate::messages::AdmittedCommands,
+    admitted: &mut crate::core::messages::AdmittedCommands,
 ) -> bool {
     let token = ai_token_for(entity_uuid);
     let default_config;
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn ai_token_uses_the_entity_uuid_when_present() {
-        let uuid = crate::entity_spawner::EntityUuid("abc-123".to_string());
+        let uuid = crate::entities::spawner::EntityUuid("abc-123".to_string());
         assert_eq!(ai_token_for(Some(&uuid)), "ai:abc-123");
     }
 

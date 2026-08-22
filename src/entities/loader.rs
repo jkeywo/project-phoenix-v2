@@ -1,7 +1,7 @@
 // Pure module: resolve an WorldEntity into a concrete EntityConfig.
 // No Bevy dependency — fully unit-testable on native.
 
-use crate::entity_config::EntityConfig;
+use crate::entities::config::EntityConfig;
 use crate::world::config::WorldEntity;
 
 // A cache-only `resolve_entity(&WorldEntity, &ConfigCache)` lived here. It is
@@ -37,7 +37,7 @@ use crate::world::config::WorldEntity;
 /// tombstone is rejected outright (issue #911): that marker is a
 /// fragment-composition feature, and an instance override that writes one would
 /// otherwise be a silent no-op — see
-/// [`crate::entity_override::reject_unhonoured_removals`].
+/// [`crate::entities::entity_override::reject_unhonoured_removals`].
 pub fn apply_overrides(
     template: &EntityConfig,
     overrides: &toml::Value,
@@ -46,8 +46,9 @@ pub fn apply_overrides(
         .to_toml_value()
         .map_err(|e| format!("template serialise error: {e}"))?;
 
-    let merged = crate::entity_override::merge_entity_config_toml(&template_value, overrides)
-        .map_err(|e| format!("override rejected: {e}"))?;
+    let merged =
+        crate::entities::entity_override::merge_entity_config_toml(&template_value, overrides)
+            .map_err(|e| format!("override rejected: {e}"))?;
     let merged_str =
         toml::to_string(&merged).map_err(|e| format!("merged serialise error: {e}"))?;
     EntityConfig::from_toml(&merged_str).map_err(|e| format!("merged parse error: {e:?}"))
@@ -89,7 +90,7 @@ pub trait TemplateLoader {
     /// This is the named authority condition
     /// [`crate::world::validate`] gates its `unresolvable-template` error on,
     /// and the direct twin of
-    /// [`crate::entity_includes::FragmentSource::absence_is_final`] one layer
+    /// [`crate::entities::include_resolve::FragmentSource::absence_is_final`] one layer
     /// down (parsed configs rather than raw fragment text).
     ///
     /// # Which hosts are authoritative, and why
@@ -130,7 +131,7 @@ pub struct FsTemplateLoader;
 #[cfg(not(target_arch = "wasm32"))]
 impl TemplateLoader for FsTemplateLoader {
     fn load_template(&self, path: &str) -> Option<EntityConfig> {
-        let resolved = crate::entity_includes::resolve_from_disk(path).ok()?;
+        let resolved = crate::entities::include_resolve::resolve_from_disk(path).ok()?;
         // Issue #935: record the byte-stable composed document — the same
         // shape `config_cache::wasm_load_config` records on wasm — so an edit
         // to this template OR any fragment it includes moves the content
@@ -164,7 +165,7 @@ impl TemplateLoader for WasmTemplateLoader {
     fn load_template(&self, path: &str) -> Option<EntityConfig> {
         // Single-path lookup, not `get_config_cache()` — the latter clones the
         // entire cache map on every call.
-        if let Some(config) = crate::config_cache::get_cached_entity_config(path) {
+        if let Some(config) = crate::entities::config_cache::get_cached_entity_config(path) {
             return Some(config);
         }
 
@@ -189,7 +190,7 @@ impl TemplateLoader for WasmTemplateLoader {
 }
 
 /// The template lookup a `[[entity]]` spawn actually performs: one caller-held
-/// [`crate::config_cache::ConfigCache`] first, then the host loader behind it
+/// [`crate::entities::config_cache::ConfigCache`] first, then the host loader behind it
 /// (issue #973).
 ///
 /// # Why this type exists rather than two ad-hoc lookups
@@ -212,7 +213,7 @@ impl TemplateLoader for WasmTemplateLoader {
 pub struct SpawnTemplateLoader<'a> {
     /// The cache the spawn will read — the global one at `Startup`, a layer's
     /// own when a layer is spawning.
-    pub cache: &'a crate::config_cache::ConfigCache,
+    pub cache: &'a crate::entities::config_cache::ConfigCache,
     /// What the host can serve behind that cache. Production passes
     /// [`WasmTemplateLoader`].
     pub host: &'a dyn TemplateLoader,
@@ -267,7 +268,7 @@ impl TemplateLoader for SpawnTemplateLoader<'_> {
 /// enough to say so (see [`TemplateLoader::absence_is_final`]).
 pub fn template_is_asteroid_field(
     path: &str,
-    config_cache: &crate::config_cache::ConfigCache,
+    config_cache: &crate::entities::config_cache::ConfigCache,
     host: &dyn TemplateLoader,
 ) -> bool {
     SpawnTemplateLoader {
@@ -296,7 +297,7 @@ pub fn template_is_asteroid_field(
 /// either before anything spawns.
 pub fn resolve_entity_via(
     entity_inst: &WorldEntity,
-    config_cache: &crate::config_cache::ConfigCache,
+    config_cache: &crate::entities::config_cache::ConfigCache,
     host: &dyn TemplateLoader,
 ) -> Result<EntityConfig, String> {
     let loader = SpawnTemplateLoader {
@@ -321,8 +322,8 @@ pub fn resolve_entity_via(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config_cache::ConfigCache;
-    use crate::entity_config::EntityConfig;
+    use crate::entities::config::EntityConfig;
+    use crate::entities::config_cache::ConfigCache;
     use crate::world::load::MemoryTemplateLoader;
     use std::collections::HashMap;
 
@@ -337,7 +338,7 @@ mod tests {
     /// and calling `from_toml` on it would silently start asserting on
     /// unresolved text the day the hull declares `includes`.
     fn cache_from_disk(path: &str) -> ConfigCache {
-        let config = crate::entity_includes::load_entity_config(path)
+        let config = crate::entities::include_resolve::load_entity_config(path)
             .unwrap_or_else(|e| panic!("{path} must compose and parse: {e}"));
         let mut m = HashMap::new();
         m.insert(path.to_string(), config);

@@ -6,15 +6,15 @@ pub mod torpedo;
 
 use bevy::prelude::*;
 
-use crate::entity_spawner::FactionComponent;
-use crate::messages::{
+use crate::core::messages::{
     CoordinationPayload, ModifierSlot, SystemBlackboard, WeaponEmitterArc, WeaponFamily,
     WeaponTargetGeometry, WeaponsBlackboard,
 };
+use crate::entities::spawner::FactionComponent;
+use crate::server_app::AsteroidUuid;
+use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::{CoordinationEnqueue, ShipSystemControlSources};
-use crate::ship_state::ShipPhysics;
-use crate::simulation::AsteroidUuid;
-use crate::torpedo::{TorpedoConfig, TorpedoSystem};
+use crate::weapons::torpedo::{TorpedoConfig, TorpedoSystem};
 
 /// Delay before NPC tactical AI auto-matches phaser frequency to the locked
 /// target's shield frequency (seconds). Defined here as a tuning constant
@@ -40,7 +40,7 @@ pub struct PhaserRenderConfig {
 impl Default for PhaserRenderConfig {
     fn default() -> Self {
         Self {
-            beam_color: crate::beam_render::DEFAULT_BEAM_COLOR,
+            beam_color: crate::weapons::beam_render::DEFAULT_BEAM_COLOR,
             beam_range: 40.0,
         }
     }
@@ -92,10 +92,10 @@ impl Plugin for WeaponsPlugin {
         // routed admitted consumer. The `torpedo-tube-*` prefix also covers
         // `SetTorpedoVolleyTarget`.
         app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::TACTICAL_RADAR_SYSTEM_ID,
+            crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::PHASER_CONTROL_SYSTEM_ID,
+            crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::prefix("torpedo-tube-"))
         .register_admitted_consumer(ConsumerMatcher::prefix("phaser-"))
@@ -103,7 +103,7 @@ impl Plugin for WeaponsPlugin {
         // human's `ChargeBlasterStart` and the AI decider's emitted one travel
         // as admitted `blaster-{bank}` commands consumed by `handle_fire_blaster`.
         .register_admitted_consumer(ConsumerMatcher::prefix("blaster-"));
-        app.init_resource::<crate::messages::InterSystemQueue>();
+        app.init_resource::<crate::core::messages::InterSystemQueue>();
         // The ONE shared AI decision cadence (issue #889): the three AI
         // deciders registered below (`ai_phaser_auto_fire`,
         // `ai_target_selection`, `tick_blaster_auto_fire`) were ungated, i.e.
@@ -399,7 +399,7 @@ pub struct WeaponsDoctrineAiPolicy(pub crate::ai::policy::AiPolicy);
 ///
 /// * `target_facing_shields` — HP of the one arc a round from this ship would
 ///   strike, resolved through the target's own arc router
-///   ([`crate::shield::ShieldSystem::hp_facing_attacker`]), so this snapshot and
+///   ([`crate::weapons::shield::ShieldSystem::hp_facing_attacker`]), so this snapshot and
 ///   the tube's own launch guard ask the same question of the same number. It is
 ///   what makes "lead with the tubes once the screen is down" authorable, and it
 ///   was previously seeded for torpedo tubes ALONE — a phaser or blaster guard
@@ -478,9 +478,9 @@ pub fn seed_weapons_doctrine_facts(
 /// always did; the committed world anchors are the standing proof.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WeaponsAlertPosture {
-    /// This ship's own [`crate::ship_state::ShipRedAlert`].
+    /// This ship's own [`crate::ship::state::ShipRedAlert`].
     pub red_alert: bool,
-    /// This ship's own [`crate::ship_state::ShipWeaponsHold`].
+    /// This ship's own [`crate::ship::state::ShipWeaponsHold`].
     pub weapons_hold: bool,
     /// A Command stance directing this weapons Station's alert posture (issue
     /// #1107), overriding the ship's own Red Alert for the fire gate. `None`
@@ -505,8 +505,8 @@ impl WeaponsAlertPosture {
     /// used before #1041, so a bare-`App` fixture that spawns neither behaves
     /// exactly as it did.
     pub fn from_components(
-        red_alert: Option<&crate::ship_state::ShipRedAlert>,
-        weapons_hold: Option<&crate::ship_state::ShipWeaponsHold>,
+        red_alert: Option<&crate::ship::state::ShipRedAlert>,
+        weapons_hold: Option<&crate::ship::state::ShipWeaponsHold>,
     ) -> Self {
         Self::from_parts(red_alert, weapons_hold, None)
     }
@@ -515,8 +515,8 @@ impl WeaponsAlertPosture {
     /// override (issue #1107). `stance_high_alert: None` is exactly
     /// `from_components`, so every pre-#1107 call site keeps its behaviour.
     pub fn from_parts(
-        red_alert: Option<&crate::ship_state::ShipRedAlert>,
-        weapons_hold: Option<&crate::ship_state::ShipWeaponsHold>,
+        red_alert: Option<&crate::ship::state::ShipRedAlert>,
+        weapons_hold: Option<&crate::ship::state::ShipWeaponsHold>,
         stance_high_alert: Option<bool>,
     ) -> Self {
         Self {
@@ -650,14 +650,14 @@ fn evaluate_family_arc_request(emitters: &[EmitterArcInput]) -> Option<Vec<Weapo
         // Cooldown/loading are intentionally `false`: arc-bearing is a facing
         // request, not a timing one. `no_ammo` stands in for "unusable" (an
         // empty torpedo tube) so it classifies as `NoAmmo`, never `OutOfArc`.
-        let readiness = crate::messages::WeaponReadiness::evaluate(
+        let readiness = crate::core::messages::WeaponReadiness::evaluate(
             e.online,
             false,
             false,
             !e.usable,
             Some(e.geometry),
         );
-        if readiness.blocking_reason == crate::messages::WeaponBlockReason::OutOfArc {
+        if readiness.blocking_reason == crate::core::messages::WeaponBlockReason::OutOfArc {
             has_out_of_arc_in_range = true;
         }
         if readiness.ready {
@@ -764,16 +764,16 @@ fn tick_weapons_arc_request(
             Option<&blaster::BlasterSystemResource>,
             Option<&torpedo::TorpedoSystemResource>,
             Option<&WeaponsDoctrineAiPolicy>,
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
             // The restraint lever (issue #1041). `Option` for the same reason
             // as the alert beside it: a bare-`App` fixture spawns neither.
-            Option<&crate::ship_state::ShipWeaponsHold>,
+            Option<&crate::ship::state::ShipWeaponsHold>,
             &mut WeaponsArcRequestState,
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     entity_name_q: Query<(
         &crate::entities::spawner::EntityUuid,
         &crate::entities::spawner::EntityName,
@@ -784,14 +784,14 @@ fn tick_weapons_arc_request(
     // with the other Weapons systems and has no business growing a shield
     // lookup.
     target_shield_q: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         &crate::ship::shields::ShipShields,
         Option<&ShipPhysics>,
         &Transform,
     )>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
-    use crate::entity_config::PhaserCombatConfig;
+    use crate::entities::config::PhaserCombatConfig;
 
     for (
         ship_entity,
@@ -810,9 +810,9 @@ fn tick_weapons_arc_request(
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
         let combat_lock = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
             _ => None,
         };
         let Some(target_uuid) = combat_lock else {
@@ -824,7 +824,7 @@ fn tick_weapons_arc_request(
             continue;
         };
 
-        let is_offline = |sid: Option<crate::messages::SystemId>| -> bool {
+        let is_offline = |sid: Option<crate::core::messages::SystemId>| -> bool {
             match sid {
                 Some(id) => control_sources.0.is_offline(&id),
                 None => false,
@@ -861,9 +861,9 @@ fn tick_weapons_arc_request(
                             PhaserCombatConfig::DEFAULT_PHASER_RANGE
                         };
                         EmitterArcInput {
-                            online: !is_offline(crate::system_registry::phaser_bank_system_id(
-                                &b.id,
-                            )),
+                            online: !is_offline(
+                                crate::ship::system_registry::phaser_bank_system_id(&b.id),
+                            ),
                             usable: true,
                             facing_deg: b.facing_deg,
                             arc_deg: b.auto_arc_deg,
@@ -883,9 +883,9 @@ fn tick_weapons_arc_request(
                     .map(|bs| {
                         let c = &bs.config;
                         EmitterArcInput {
-                            online: !is_offline(crate::system_registry::blaster_bank_system_id(
-                                &c.id,
-                            )),
+                            online: !is_offline(
+                                crate::ship::system_registry::blaster_bank_system_id(&c.id),
+                            ),
                             usable: true,
                             facing_deg: c.facing_deg,
                             arc_deg: c.fire_arc_deg,
@@ -906,7 +906,9 @@ fn tick_weapons_arc_request(
                     .tubes
                     .iter()
                     .map(|t| EmitterArcInput {
-                        online: !is_offline(crate::system_registry::torpedo_tube_system_id(&t.id)),
+                        online: !is_offline(crate::ship::system_registry::torpedo_tube_system_id(
+                            &t.id,
+                        )),
                         usable: t.loaded_count > 0,
                         facing_deg: t.facing_deg,
                         arc_deg: t.fire_arc_deg,
@@ -1011,7 +1013,7 @@ fn tick_weapons_arc_request(
                     writer.write(CoordinationEnqueue {
                         source_entity: ship_entity,
                         sender_origin,
-                        target: crate::system_registry::helm_station_key(),
+                        target: crate::ship::system_registry::helm_station_key(),
                         payload: CoordinationPayload::ArcBearingWithdraw {
                             family: withdrawn_family,
                         },
@@ -1049,7 +1051,7 @@ fn tick_weapons_arc_request(
         writer.write(CoordinationEnqueue {
             source_entity: ship_entity,
             sender_origin,
-            target: crate::system_registry::helm_station_key(),
+            target: crate::ship::system_registry::helm_station_key(),
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: target_uuid,
                 label,
@@ -1071,17 +1073,17 @@ fn arc_request_sender_system(
     family: WeaponFamily,
     blaster_opt: Option<&blaster::BlasterSystemResource>,
     torpedo_opt: Option<&torpedo::TorpedoSystemResource>,
-) -> crate::messages::SystemId {
+) -> crate::core::messages::SystemId {
     match family {
-        WeaponFamily::Phasers => crate::system_registry::phaser_fore_system_id(),
+        WeaponFamily::Phasers => crate::ship::system_registry::phaser_fore_system_id(),
         WeaponFamily::Blasters => blaster_opt
             .and_then(|res| res.0.first())
-            .and_then(|bs| crate::system_registry::blaster_bank_system_id(&bs.config.id))
-            .unwrap_or_else(crate::system_registry::phaser_fore_system_id),
+            .and_then(|bs| crate::ship::system_registry::blaster_bank_system_id(&bs.config.id))
+            .unwrap_or_else(crate::ship::system_registry::phaser_fore_system_id),
         WeaponFamily::Torpedoes => torpedo_opt
             .and_then(|res| res.0.tubes.first())
-            .and_then(|t| crate::system_registry::torpedo_tube_system_id(&t.id))
-            .unwrap_or_else(crate::system_registry::phaser_fore_system_id),
+            .and_then(|t| crate::ship::system_registry::torpedo_tube_system_id(&t.id))
+            .unwrap_or_else(crate::ship::system_registry::phaser_fore_system_id),
     }
 }
 
@@ -1134,7 +1136,7 @@ fn record_locked_target_decision(
 ) {
     let entry = blackboards
         .0
-        .entry(crate::system_registry::tactical_station_key())
+        .entry(crate::ship::system_registry::tactical_station_key())
         .or_insert_with(|| SystemBlackboard::Weapons(WeaponsBlackboard::default()));
     if let SystemBlackboard::Weapons(weapons) = entry {
         weapons.locked_target = value;
@@ -1150,7 +1152,7 @@ fn record_locked_target_decision(
 fn clear_locked_target_if_present(blackboards: &mut crate::server_app::ShipSystemBlackboards) {
     if let Some(SystemBlackboard::Weapons(weapons)) = blackboards
         .0
-        .get_mut(&crate::system_registry::tactical_station_key())
+        .get_mut(&crate::ship::system_registry::tactical_station_key())
     {
         weapons.locked_target = None;
     }
@@ -1283,15 +1285,15 @@ fn ai_target_selection(
             &LastShipAttacker,
             &ShipPhysics,
             &TacticalRadarSelection,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
             &mut crate::server_app::ShipSystemBlackboards,
             Option<&crate::modifiers::ShipModifiers>,
-            Option<&crate::entity_spawner::WeaponsConsoleSection>,
+            Option<&crate::entities::spawner::WeaponsConsoleSection>,
             // Self identity + faction, for the nearest-hostile tier (#703):
             // the UUID excludes self from the scan, the faction decides who
             // counts as hostile. Both `Option` because minimal test spawns
             // omit them; a ship with no faction acquires nothing this way.
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&FactionComponent>,
             // Per-ship data-driven Tactical target selector (issue #777).
             // `Option` so bare-`App` fixtures without an attached component fall
@@ -1303,11 +1305,11 @@ fn ai_target_selection(
             // A turret whose whole purpose is to shoot the nearest hostile its
             // radar can see needs that source without a doctrine, so it licenses
             // the source directly (mirrors the `hostile_scan_q` `Or<>` filter).
-            Has<crate::entity_spawner::StaticPointDefence>,
+            Has<crate::entities::spawner::StaticPointDefence>,
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::simulation::Asteroid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), With<crate::server_app::Asteroid>>,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
@@ -1318,11 +1320,11 @@ fn ai_target_selection(
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     other_ships_q: Query<
         (
-            &crate::entity_spawner::EntityUuid,
+            &crate::entities::spawner::EntityUuid,
             &Transform,
             Option<&crate::entities::spawner::EntityName>,
         ),
-        Without<crate::simulation::Asteroid>,
+        Without<crate::server_app::Asteroid>,
     >,
     // The tier-4 scan surface, deliberately narrower than `other_ships_q`.
     // That query is `Without<Asteroid>`, which is wide enough for resolving an
@@ -1348,18 +1350,18 @@ fn ai_target_selection(
     // decides who is IN the scan, not who reads as hostile.
     hostile_scan_q: Query<
         (
-            &crate::entity_spawner::EntityUuid,
+            &crate::entities::spawner::EntityUuid,
             &Transform,
             Option<&FactionComponent>,
         ),
         Or<(
             With<crate::server_app::Ship>,
-            With<crate::entity_spawner::StaticPointDefence>,
+            With<crate::entities::spawner::StaticPointDefence>,
         )>,
     >,
 ) {
-    let registry_default = crate::faction::FactionRegistry::default();
-    let registry: &crate::faction::FactionRegistry = faction_registry
+    let registry_default = crate::ai::faction::FactionRegistry::default();
+    let registry: &crate::ai::faction::FactionRegistry = faction_registry
         .as_deref()
         .map(|r| &r.0)
         .unwrap_or(&registry_default);
@@ -1436,7 +1438,7 @@ fn ai_target_selection(
         // one step it shares with the policy hosts — routes here.
         let radar_operates_ai = crate::ai::host::ai_operates(
             &control_sources.0,
-            crate::system_registry::tactical_radar_system_id(),
+            crate::ship::system_registry::tactical_radar_system_id(),
         );
         if radar_idle || !radar_operates_ai {
             clear_locked_target_if_present(&mut blackboards);
@@ -1521,7 +1523,7 @@ fn ai_target_selection(
         // here. Cloned to own it before the mutable blackboard write below.
         let science_target: Option<String> = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(SystemBlackboard::Viewscreen(vbb)) => vbb.science_target.clone(),
             _ => None,
@@ -1536,7 +1538,7 @@ fn ai_target_selection(
             let target_faction = hostile_scan_q.iter().find_map(|(u, _, faction)| {
                 (u.0 == uuid).then_some(faction.map(|f| f.0)).flatten()
             });
-            crate::faction::is_enemy(self_faction_uuid, target_faction, registry)
+            crate::ai::faction::is_enemy(self_faction_uuid, target_faction, registry)
         };
 
         // Build a candidate for `uuid` from `source_fact`, pre-filtered to the
@@ -1565,7 +1567,7 @@ fn ai_target_selection(
         // Nearest faction-hostile (issue #703), delegating the faction verdict
         // and distance ordering to `ai::core::find_nearest_hostile` over a
         // `WorldView` built here rather than open-coding "hostile"/"nearest".
-        let nearest_hostile = |registry: &crate::faction::FactionRegistry| -> Option<String> {
+        let nearest_hostile = |registry: &crate::ai::faction::FactionRegistry| -> Option<String> {
             let self_faction_uuid = self_faction.map(|f| f.0)?;
             let self_uuid_str = self_uuid.map(|u| u.0.as_str()).unwrap_or("");
             let entities: Vec<crate::ai::AiWorldEntity> = hostile_scan_q
@@ -1746,8 +1748,8 @@ fn ai_target_selection(
             // above already skipped — belt and braces, not a second policy.
             crate::command_admission::ai_emit::emit_ai_command(
                 self_uuid,
-                crate::system_registry::tactical_radar_system_id(),
-                crate::messages::SystemControlPayload::SetTarget {
+                crate::ship::system_registry::tactical_radar_system_id(),
+                crate::core::messages::SystemControlPayload::SetTarget {
                     uuid: selected.unwrap_or_default(),
                 },
                 control_sources,
@@ -1767,7 +1769,7 @@ fn ai_target_selection(
 fn tick_npc_auto_match_frequency(
     time: Res<Time>,
     target_shields_q: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         Option<&crate::ship::shields::ShipShields>,
     )>,
     mut ship_q: Query<(
@@ -1775,8 +1777,8 @@ fn tick_npc_auto_match_frequency(
         &ShipSystemControlSources,
         &crate::ship_plugin::ShipConfigComponent,
         &crate::server_app::ShipSystemBlackboards,
-        &mut crate::ship_state::ShipPhaserFrequency,
-        Has<crate::ai_plugin::AiHighFidelity>,
+        &mut crate::ship::state::ShipPhaserFrequency,
+        Has<crate::ai::server::AiHighFidelity>,
     )>,
     mut states: ResMut<NpcFrequencyMatchStates>,
 ) {
@@ -1804,9 +1806,9 @@ fn tick_npc_auto_match_frequency(
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
         let locked_target = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
             _ => None,
         };
         let target_frequency = locked_target
@@ -1882,7 +1884,7 @@ pub(crate) fn apply_tactical_frequency_hint(
     mut ship_q: Query<
         (
             &mut crate::ship_plugin::PendingTacticalFrequencyHint,
-            Option<&mut crate::ship_state::ShipPhaserFrequency>,
+            Option<&mut crate::ship::state::ShipPhaserFrequency>,
             Option<&crate::ship_plugin::ShipSystemControlSources>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
         ),
@@ -1911,20 +1913,20 @@ fn top_destroy_objective_target(
 ) -> Option<&str> {
     let bb = blackboards?
         .0
-        .get(&crate::system_registry::viewscreen_system_id())?;
-    let crate::messages::SystemBlackboard::Viewscreen(viewscreen) = bb else {
+        .get(&crate::ship::system_registry::viewscreen_system_id())?;
+    let crate::core::messages::SystemBlackboard::Viewscreen(viewscreen) = bb else {
         return None;
     };
     viewscreen.scored_objectives.iter().find_map(|objective| {
         if objective.score <= 0.0
             || !objective
                 .relevance
-                .contains(&crate::messages::SystemAffinity::Weapons)
+                .contains(&crate::core::messages::SystemAffinity::Weapons)
         {
             return None;
         }
         match &objective.directive {
-            crate::messages::AiDirective::Destroy { target } => Some(target.as_str()),
+            crate::core::messages::AiDirective::Destroy { target } => Some(target.as_str()),
             _ => None,
         }
     })
@@ -1948,8 +1950,8 @@ fn top_operate_objective_target(
 ) -> Option<&str> {
     let bb = blackboards?
         .0
-        .get(&crate::system_registry::viewscreen_system_id())?;
-    let crate::messages::SystemBlackboard::Viewscreen(viewscreen) = bb else {
+        .get(&crate::ship::system_registry::viewscreen_system_id())?;
+    let crate::core::messages::SystemBlackboard::Viewscreen(viewscreen) = bb else {
         return None;
     };
     viewscreen.scored_objectives.iter().find_map(|objective| {
@@ -1957,10 +1959,10 @@ fn top_operate_objective_target(
             return None;
         }
         match &objective.directive {
-            crate::messages::AiDirective::Tow { target }
-            | crate::messages::AiDirective::Stabilise { target }
-            | crate::messages::AiDirective::Escort { target }
-            | crate::messages::AiDirective::FieldRepair { target } => Some(target.as_str()),
+            crate::core::messages::AiDirective::Tow { target }
+            | crate::core::messages::AiDirective::Stabilise { target }
+            | crate::core::messages::AiDirective::Escort { target }
+            | crate::core::messages::AiDirective::FieldRepair { target } => Some(target.as_str()),
             _ => None,
         }
     })
@@ -1971,11 +1973,11 @@ fn resolve_objective_target_uuid(
     runtime: Option<&crate::world::server::WorldContentRuntime>,
     targetable_q: &Query<
         (
-            &crate::entity_spawner::EntityUuid,
+            &crate::entities::spawner::EntityUuid,
             &Transform,
             Option<&crate::entities::spawner::EntityName>,
         ),
-        Without<crate::simulation::Asteroid>,
+        Without<crate::server_app::Asteroid>,
     >,
 ) -> Option<String> {
     runtime

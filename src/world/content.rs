@@ -1792,7 +1792,7 @@ mod tests {
                 flags.set_flag_value(name, *value);
             }
             TriggerAction::GameOver {
-                outcome: Some(crate::balance::Outcome::Victory),
+                outcome: Some(crate::core::balance::Outcome::Victory),
                 ..
             } if run.victory_at.is_none() => {
                 run.victory_at = Some(elapsed);

@@ -24,10 +24,10 @@ use bevy::asset::LoadState;
 use bevy::prelude::*;
 
 use crate::core::messages::{GamePhase, ServerMessage};
-use crate::entity_config::EntityConfig;
+use crate::entities::config::EntityConfig;
+use crate::entities::model_rig::sidecar_path;
 use crate::lobby::server::LobbyOutbox;
 use crate::lobby::Target;
-use crate::model_rig::sidecar_path;
 use crate::world::config::{parse_world, WorldConfig};
 
 // ── AssetManifest ──────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ fn discover_entity_config_assets(config: &EntityConfig, manifest: &mut AssetMani
     }
     // Planet textures
     if let Some(ref planet) = config.planet {
-        for entry in crate::entity_planet::planet_texture_paths(planet) {
+        for entry in crate::entities::planet::planet_texture_paths(planet) {
             if !manifest.planet_textures.contains(&entry) {
                 manifest.planet_textures.push(entry);
             }
@@ -168,7 +168,7 @@ pub fn discover_sidecar_lod_assets(
     if sidecar_toml.trim().is_empty() {
         return;
     }
-    let rig = match crate::model_rig::ModelRig::from_toml(sidecar_toml) {
+    let rig = match crate::entities::model_rig::ModelRig::from_toml(sidecar_toml) {
         Ok(rig) => rig,
         Err(e) => {
             bevy::log::error!(
@@ -181,14 +181,14 @@ pub fn discover_sidecar_lod_assets(
     if rig.lod.is_empty() {
         return;
     }
-    let own_variant = crate::model_rig::sidecar_variant(path);
+    let own_variant = crate::entities::model_rig::sidecar_variant(path);
 
     // Known distance -> just the level `select_lod` would pick for it: the
     // rest of the ladder warms in the background once the game is running
     // (see the doc comment above). Unknown distance -> the whole ladder, same
     // as before this feature.
     let wanted: Vec<usize> = match distance {
-        Some(d) => vec![crate::entity_config::select_lod(&rig.lod, d, None)],
+        Some(d) => vec![crate::entities::config::select_lod(&rig.lod, d, None)],
         None => (0..rig.lod.len()).collect(),
     };
 
@@ -214,7 +214,7 @@ pub fn discover_sidecar_lod_assets(
         // no file and no wait.
         if matches!(
             level.tier_rig,
-            Some(crate::entity_config::TierRig::Identity)
+            Some(crate::entities::config::TierRig::Identity)
         ) {
             continue;
         }
@@ -607,7 +607,7 @@ pub fn begin_asset_preload(
         return;
     };
 
-    let config_cache = crate::config_cache::get_config_cache();
+    let config_cache = crate::entities::config_cache::get_config_cache();
     bevy::log::info!(
         "asset_preload: config_cache has {} entries; starting asset discovery",
         config_cache.len()
@@ -654,7 +654,7 @@ pub fn begin_asset_preload(
     // go through the shared loader so the sRGB/sampler settings match the
     // renderer's (Bevy keeps the settings of the first load of a path).
     for (path, srgb) in &manifest.planet_textures {
-        let handle = crate::entity_planet::load_planet_image(&asset_server, path, *srgb);
+        let handle = crate::entities::planet::load_planet_image(&asset_server, path, *srgb);
         icon_handles.push((path.clone(), handle));
     }
 
@@ -664,7 +664,7 @@ pub fn begin_asset_preload(
     // supposed to exist and a 404 on one is worth reporting.
     #[cfg(target_arch = "wasm32")]
     for sc_path in &manifest.sidecars {
-        crate::config_cache::request_sidecar_fetch(sc_path.clone(), false);
+        crate::entities::config_cache::request_sidecar_fetch(sc_path.clone(), false);
     }
 
     let mut seen_worlds = HashSet::new();
@@ -673,7 +673,7 @@ pub fn begin_asset_preload(
     // Request sub-world TOML fetches
     for world_path in &pending_worlds {
         #[cfg(target_arch = "wasm32")]
-        crate::config_cache::request_world_fetch(world_path.clone());
+        crate::entities::config_cache::request_world_fetch(world_path.clone());
         #[cfg(not(target_arch = "wasm32"))]
         {
             // On native we can read the file synchronously right now
@@ -705,7 +705,7 @@ pub fn begin_asset_preload(
                 }
                 for (path, srgb) in &manifest_mut.planet_textures {
                     let handle =
-                        crate::entity_planet::load_planet_image(&asset_server, path, *srgb);
+                        crate::entities::planet::load_planet_image(&asset_server, path, *srgb);
                     icon_handles.push((path.clone(), handle));
                 }
                 manifest.glb_models.extend(manifest_mut.glb_models);
@@ -800,7 +800,7 @@ pub fn poll_asset_preload(
     let mut still_pending = Vec::new();
     let mut newly_delivered = Vec::new();
     for path in &preload.pending_sidecars {
-        if crate::config_cache::is_pending_sidecar_delivered(path) {
+        if crate::entities::config_cache::is_pending_sidecar_delivered(path) {
             newly_delivered.push(path.clone());
         } else {
             still_pending.push(path.clone());
@@ -814,7 +814,7 @@ pub fn poll_asset_preload(
     // so each sidecar is expanded exactly once. `take_pending_sidecar_toml` is
     // non-destructive, so this never steals the TOML from the renderer.
     for path in newly_delivered {
-        let Some(toml_str) = crate::config_cache::take_pending_sidecar_toml(&path) else {
+        let Some(toml_str) = crate::entities::config_cache::take_pending_sidecar_toml(&path) else {
             continue;
         };
         let mut ladder = AssetManifest::default();
@@ -835,7 +835,7 @@ pub fn poll_asset_preload(
                 // so what is left either declared one (it is there) or predates
                 // the declaration entirely (mod-pack content), and for that
                 // second case a missing tier sidecar is worth the word it costs.
-                crate::config_cache::request_sidecar_fetch(sc_path.clone(), false);
+                crate::entities::config_cache::request_sidecar_fetch(sc_path.clone(), false);
                 preload.pending_sidecars.push(sc_path.clone());
             }
         }
@@ -856,12 +856,14 @@ pub fn poll_asset_preload(
 
         let pending_sub_worlds = preload.pending_sub_worlds.clone();
         for world_path in &pending_sub_worlds {
-            if let Some(toml_str) = crate::config_cache::pop_pending_world_toml(world_path) {
+            if let Some(toml_str) =
+                crate::entities::config_cache::pop_pending_world_toml(world_path)
+            {
                 let mut manifest = AssetManifest::default();
-                let cache = crate::config_cache::get_config_cache();
+                let cache = crate::entities::config_cache::get_config_cache();
                 let cache_ref: &std::collections::HashMap<
                     String,
-                    crate::entity_config::EntityConfig,
+                    crate::entities::config::EntityConfig,
                 > = &*cache;
                 let player_start = preload.player_start;
                 // A single reborrow so the two field-level `&mut`s below split
@@ -911,7 +913,7 @@ pub fn poll_asset_preload(
             preload.icon_handles.push((icon_path.clone(), handle));
         }
         for (path, srgb) in &new_planet_textures {
-            let handle = crate::entity_planet::load_planet_image(&asset_server, path, *srgb);
+            let handle = crate::entities::planet::load_planet_image(&asset_server, path, *srgb);
             preload.icon_handles.push((path.clone(), handle));
         }
         for sc_path in &new_sidecars {
@@ -921,13 +923,13 @@ pub fn poll_asset_preload(
             // a pending entry that can never be popped (JS delivers the TOML once).
             if preload.registered_sidecars.insert(sc_path.clone()) {
                 // Not optional, for the reason the base-world walk above is not.
-                crate::config_cache::request_sidecar_fetch(sc_path.clone(), false);
+                crate::entities::config_cache::request_sidecar_fetch(sc_path.clone(), false);
                 preload.pending_sidecars.push(sc_path.clone());
             }
         }
         for w_path in &new_sub_worlds {
             if !preload.pending_sub_worlds.contains(w_path) {
-                crate::config_cache::request_world_fetch(w_path.clone());
+                crate::entities::config_cache::request_world_fetch(w_path.clone());
                 preload.pending_sub_worlds.push(w_path.clone());
             }
         }
@@ -1086,7 +1088,7 @@ pub fn auto_transition_from_loading(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity_config::*;
+    use crate::entities::config::*;
 
     #[test]
     fn icon_asset_path_capitalizes_first_letter() {
@@ -1695,10 +1697,10 @@ shape = "sphere"
         config_cache.insert(
             "assets/entities/outpost.toml".to_string(),
             EntityConfig {
-                mesh: Some(crate::entity_config::MeshConfig {
+                mesh: Some(crate::entities::config::MeshConfig {
                     model: Some("assets/models/outpost.glb".into()),
                     variant: None,
-                    shape: crate::entity_config::MeshShape::Sphere,
+                    shape: crate::entities::config::MeshShape::Sphere,
                     colour: vec![],
                     radius: 1.0,
                     size: None,
@@ -1748,10 +1750,10 @@ shape = "sphere"
         config_cache.insert(
             "assets/entities/outpost.toml".to_string(),
             EntityConfig {
-                mesh: Some(crate::entity_config::MeshConfig {
+                mesh: Some(crate::entities::config::MeshConfig {
                     model: Some("assets/models/outpost.glb".into()),
                     variant: None,
-                    shape: crate::entity_config::MeshShape::Sphere,
+                    shape: crate::entities::config::MeshShape::Sphere,
                     colour: vec![],
                     radius: 1.0,
                     size: None,

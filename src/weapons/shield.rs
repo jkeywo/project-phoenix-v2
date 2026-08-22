@@ -281,7 +281,7 @@ impl ShieldFacing {
     /// [`Self::tick`] with the regen rate scaled by `regen_scale` (issue #952).
     ///
     /// `1.0` is the arc's authored `regen_per_sec`. The scale is
-    /// [`crate::messages::ModifierSlot::ShieldRegen`], driven by the `shields`
+    /// [`crate::core::messages::ModifierSlot::ShieldRegen`], driven by the `shields`
     /// power group. It deliberately does NOT touch the OFFLINE timer: how long
     /// a collapsed facing stays down is the arc's authored `offline_duration`
     /// and a damage-control property, not something the reactor buys.
@@ -814,7 +814,7 @@ impl ShieldSystem {
 
     /// [`Self::tick`] with every facing's regen rate scaled by `regen_scale`
     /// (issue #952 — the `shields` power group's
-    /// [`crate::messages::ModifierSlot::ShieldRegen`]).
+    /// [`crate::core::messages::ModifierSlot::ShieldRegen`]).
     ///
     /// Focus DECAY is left unscaled: it is the cost of having concentrated the
     /// grid somewhere, and letting reactor power soften it would turn the focus
@@ -1468,9 +1468,10 @@ mod tests {
     fn shield_system_reflects_battleship_toml_shields_console_base_block() {
         // Through the resolver (issue #876): this hull is COMPOSED, so its baked
         // bytes are no longer the document `spawn_game_start_entities` reads.
-        let config =
-            crate::entity_includes::load_entity_config("assets/entities/alliance_battleship.toml")
-                .expect("alliance_battleship.toml must compose and parse");
+        let config = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_battleship.toml",
+        )
+        .expect("alliance_battleship.toml must compose and parse");
         let base = config
             .shields_console
             .expect("alliance_battleship must declare [shields_console]")

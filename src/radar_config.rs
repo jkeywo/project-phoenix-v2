@@ -6,7 +6,7 @@
 //
 // This module has no Bevy dependency — it is fully unit-testable on native.
 
-use crate::entity_tags::EntityTag;
+use crate::entities::tags::EntityTag;
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// Configuration for a single radar instance.

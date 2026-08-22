@@ -26,15 +26,15 @@ use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-use crate::damage::DamageTier;
-use crate::dock::mating::{nearest_viable_pair, DockConfig, DockMarker, DockRefusal, Pose};
-use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
-use crate::messages::{
+use crate::core::messages::{
     DockBlackboard, PowerGroupId, SystemAffinity, SystemBlackboard, SystemControlPayload, SystemId,
 };
+use crate::dock::mating::{nearest_viable_pair, DockConfig, DockMarker, DockRefusal, Pose};
+use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid};
+use crate::ship::damage::DamageTier;
 use crate::ship::power::{power_level_for, ShipPowerSystem};
 use crate::ship::state::ShipPhysics;
-use crate::system_registry::{dock_system_id, DOCK_SYSTEM_ID};
+use crate::ship::system_registry::{dock_system_id, DOCK_SYSTEM_ID};
 use crate::world::server::WorldContentRuntime;
 
 /// One hull's dock markers, resolved into the hull's OWN frame at spawn (issue
@@ -44,7 +44,7 @@ use crate::world::server::WorldContentRuntime;
 /// rig sidecar declared `dock`-prefixed `[markers.<name>]` blocks. The base rig
 /// is folded in once here, so each marker is a ship-local point a live
 /// `Transform` maps to world — the same composition
-/// [`crate::model_rig::ModelMarkers::resolve_world_position`] performs, done
+/// [`crate::entities::model_rig::ModelMarkers::resolve_world_position`] performs, done
 /// once at spawn so the fixed tick never re-reads the sidecar. A hull that
 /// declares no dock markers carries no `DockMarkers` and can never be docked
 /// with.
@@ -239,7 +239,7 @@ impl Plugin for DockPlugin {
 /// published last tick; `Undock` ends the mate and starts the backing manoeuvre.
 pub fn handle_dock_commands(
     mut ships: Query<(
-        &crate::messages::AdmittedCommands,
+        &crate::core::messages::AdmittedCommands,
         &Transform,
         &mut DockControl,
     )>,
@@ -323,7 +323,7 @@ pub fn operate_dock_ai(
         &DockControl,
         &crate::server_app::ShipSystemBlackboards,
         Has<DockAiEngaged>,
-        &mut crate::messages::AdmittedCommands,
+        &mut crate::core::messages::AdmittedCommands,
     )>,
 ) {
     for (entity, uuid, sources, config, dock, blackboards, host_engaged, mut admitted) in
@@ -334,7 +334,7 @@ pub fn operate_dock_ai(
         }
         let directive_target: Option<String> = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,
@@ -794,9 +794,9 @@ pub fn dock_blackboard_key() -> SystemId {
 /// here so the stored markers are ship-local, and they are sorted by name so the
 /// nearest-pair indices are stable across hosts. Returns an empty vec when the
 /// sidecar declares no dock markers — the hull can then never be docked with.
-pub fn resolve_dock_markers(rig: &crate::model_rig::ModelRig) -> DockMarkers {
+pub fn resolve_dock_markers(rig: &crate::entities::model_rig::ModelRig) -> DockMarkers {
     let base = rig.base_bevy_transform();
-    let mut named: Vec<(&String, &crate::model_rig::Marker)> = rig
+    let mut named: Vec<(&String, &crate::entities::model_rig::Marker)> = rig
         .markers
         .iter()
         .filter(|(name, _)| name.starts_with(DOCK_MARKER_PREFIX))
@@ -877,7 +877,7 @@ mod tests {
 
     #[test]
     fn resolve_dock_markers_takes_only_dock_prefixed_markers_in_order() {
-        let rig = crate::model_rig::ModelRig::from_toml(
+        let rig = crate::entities::model_rig::ModelRig::from_toml(
             r#"
             [markers.dock_fore]
             position = [0.0, 0.0, -5.0]
@@ -900,7 +900,7 @@ mod tests {
 
     #[test]
     fn a_rig_with_no_dock_markers_resolves_empty() {
-        let rig = crate::model_rig::ModelRig::from_toml(
+        let rig = crate::entities::model_rig::ModelRig::from_toml(
             r#"
             [markers.engine_port]
             position = [-1.0, 0.0, 3.0]

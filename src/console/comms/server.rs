@@ -8,15 +8,15 @@
 use crate::ship_plugin::ShipSystemControlSources;
 use bevy::prelude::*;
 
-use crate::messages::{CommsBlackboard, ObjectiveSnapshot, SystemBlackboard, SystemId};
+use crate::core::messages::{CommsBlackboard, ObjectiveSnapshot, SystemBlackboard, SystemId};
 use crate::world::server::{ObjectiveManagerRes, WorldContentRuntime};
 
 use crate::comms::content::ActiveDialogue;
 use crate::comms::server::{
     current_sender_in_range, CommsChannel2Event, CommsInboxRes, CommsRuntime, OnScreenMessage,
 };
-use crate::entity_spawner::EntityUuid;
-use crate::messages::{CommsMessage, GamePhase};
+use crate::core::messages::{CommsMessage, GamePhase};
+use crate::entities::spawner::EntityUuid;
 use crate::world::content::WorldEvent;
 use crate::world::server::{EffectQueues, ShipModifiersParams, WorldLayerParams};
 
@@ -80,8 +80,8 @@ fn publish_comms_blackboard(
     // does, so it needs red-alert + hull to evaluate zero-gates / modifiers.
     local_conditions_q: Query<
         (
-            Option<&crate::ship_state::ShipRedAlert>,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::ship::state::ShipRedAlert>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -188,7 +188,7 @@ fn publish_comms_blackboard(
         host_station: None,
     };
 
-    let comms_key = SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string());
+    let comms_key = SystemId(crate::ship::system_registry::COMMS_SYSTEM_ID.to_string());
     for (is_local, mut bbs, hosts) in ship_q.iter_mut() {
         let mut bb = if is_local {
             local_bb.clone()
@@ -207,16 +207,16 @@ fn publish_comms_blackboard(
 /// Range-gates the hail, records it on `CommsRuntime::open_hails`, and emits
 /// `WorldEvent::Hailed` so a scripted `on_hailed` handler can answer it.
 pub(crate) fn handle_hail(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
+    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
     };
-    for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
         let target_uuid = match &cmd.payload {
-            crate::messages::SystemControlPayload::Hail { target_uuid } => target_uuid,
+            crate::core::messages::SystemControlPayload::Hail { target_uuid } => target_uuid,
             _ => continue,
         };
 
@@ -263,13 +263,14 @@ pub(crate) fn handle_hail(
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct CommsRespondAux<'w> {
     sessions: Res<'w, crate::lobby::Sessions>,
-    outbox: ResMut<'w, crate::simulation::SimOutbox>,
+    outbox: ResMut<'w, crate::server_app::SimOutbox>,
     /// The tick-scoped id mint (issue #907): spawned-entity ids for the shared
     /// dispatch pass, and the follow-up message ids minted below it. Replaces
     /// the seeded `SimRng` this bundle used to carry — nothing in this system
     /// draws a random number any more, it only mints identities.
     id_mint: Option<Res<'w, crate::world_id::WorldIdMint>>,
-    balance_events: Option<ResMut<'w, bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    balance_events:
+        Option<ResMut<'w, bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>>,
     /// The Rhai runtime a scripted thread's `on_pick` fn runs on, plus the tick
     /// its deferred work is stamped against (issue #984). Bundled here rather
     /// than added as system params because the system is already at Bevy's
@@ -290,7 +291,7 @@ pub(crate) struct CommsRespondAux<'w> {
 pub(crate) fn handle_respond_to_message(
     ship_query: Query<
         (
-            &crate::messages::AdmittedCommands,
+            &crate::core::messages::AdmittedCommands,
             // The comms rejection channel is addressed to whoever is HOSTING
             // the comms system (issue #984), which on the destroyer is the
             // Tactical seat and on the courier the Captain's — resolved, never
@@ -298,7 +299,7 @@ pub(crate) fn handle_respond_to_message(
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::ship_plugin::HumanSeekingHosts>,
         ),
-        With<crate::simulation::LocalShip>,
+        With<crate::server_app::LocalShip>,
     >,
     mut runtime: ResMut<WorldContentRuntime>,
     mut comms: ResMut<CommsRuntime>,
@@ -309,14 +310,14 @@ pub(crate) fn handle_respond_to_message(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
-        With<crate::entity_spawner::BehaviourSection>,
+        With<crate::entities::spawner::BehaviourSection>,
     >,
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
-    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut game_over_reason: Option<ResMut<crate::server_app::GameOverReason>>,
     mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: crate::world::server::FactionDispatchParams,
@@ -342,11 +343,11 @@ pub(crate) fn handle_respond_to_message(
             crate::command_admission::station_for_system(
                 &c.0,
                 seeking_hosts,
-                &crate::system_registry::comms_system_id(),
+                &crate::ship::system_registry::comms_system_id(),
             )
         })
         .unwrap_or_else(|| {
-            crate::messages::StationId(crate::system_registry::COMMS_SYSTEM_ID.into())
+            crate::core::messages::StationId(crate::ship::system_registry::COMMS_SYSTEM_ID.into())
         });
     let comms_token = aux
         .sessions
@@ -355,20 +356,20 @@ pub(crate) fn handle_respond_to_message(
         .map(|t| t.to_string());
     // Helper: push a `CommsResponseRejected` for the attempted control so the
     // client can flash it red. A no-op when no comms holder is seated.
-    let reject = |outbox: &mut crate::simulation::SimOutbox, message_id: &str, idx: usize| {
+    let reject = |outbox: &mut crate::server_app::SimOutbox, message_id: &str, idx: usize| {
         if let Some(token) = comms_token.as_deref() {
             outbox.0.push((
                 crate::lobby::Target::Token(token.to_string()),
-                crate::messages::ServerMessage::CommsResponseRejected {
+                crate::core::messages::ServerMessage::CommsResponseRejected {
                     message_id: message_id.to_string(),
                     response_index: idx,
                 },
             ));
         }
     };
-    for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
         let (message_id, response_index) = match &cmd.payload {
-            crate::messages::SystemControlPayload::RespondToMessage {
+            crate::core::messages::SystemControlPayload::RespondToMessage {
                 message_id,
                 response_index,
             } => (message_id, response_index),
@@ -453,7 +454,7 @@ pub(crate) fn handle_respond_to_message(
         // use (issue #715): built once per system run, config cache first,
         // filesystem fallback on native. Collapses comms's old three-message
         // cfg-split loader (cache / native-fs / wasm) into this one path.
-        let template_loader = crate::entity_loader::WasmTemplateLoader;
+        let template_loader = crate::entities::loader::WasmTemplateLoader;
         // Seeded, for the same reason the trigger pipeline is: a spawned
         // entity's UUID keys the balance ledgers in the headless report.
         let uuid_source = || {
@@ -738,17 +739,17 @@ pub(crate) fn handle_respond_to_message(
 /// retention is load-bearing for the declarative follow-up path and unpicking it
 /// is a behaviour change, not a cleanup.
 pub(crate) fn handle_clear_comms(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
+    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut inbox: ResMut<CommsInboxRes>,
     mut comms: ResMut<CommsRuntime>,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
     };
-    for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
         if matches!(
             cmd.payload,
-            crate::messages::SystemControlPayload::ClearComms
+            crate::core::messages::SystemControlPayload::ClearComms
         ) {
             inbox.0.clear();
             comms.open_hails.clear();
@@ -761,12 +762,12 @@ pub(crate) fn handle_clear_comms(
 /// Looks up the message in the inbox, stores it in `OnScreenMessage`, and
 /// pushes `ViewMode::Comms` so the viewscreen switches to the comms overlay.
 pub(crate) fn handle_show_on_screen(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<crate::simulation::LocalShip>>,
+    ship_query: Query<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>,
     inbox: Res<CommsInboxRes>,
     mut on_screen: ResMut<OnScreenMessage>,
     mut view_mode_q: Query<
-        &mut crate::ship_state::ShipViewMode,
-        With<crate::simulation::LocalShip>,
+        &mut crate::ship::state::ShipViewMode,
+        With<crate::server_app::LocalShip>,
     >,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
@@ -775,18 +776,21 @@ pub(crate) fn handle_show_on_screen(
     let Some(mut vm) = view_mode_q.iter_mut().next() else {
         return;
     };
-    for cmd in admitted.for_target(crate::system_registry::COMMS_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::ship::system_registry::COMMS_SYSTEM_ID) {
         let show_message_id: Option<&String> = match &cmd.payload {
-            crate::messages::SystemControlPayload::ShowOnScreen { message_id } => Some(message_id),
+            crate::core::messages::SystemControlPayload::ShowOnScreen { message_id } => {
+                Some(message_id)
+            }
             _ => None,
         };
         if let Some(message_id) = show_message_id {
             if let Some(msg) = inbox.0.messages().into_iter().find(|m| &m.id == message_id) {
-                let already_on_screen = matches!(vm.view_mode, crate::messages::ViewMode::Comms)
-                    && on_screen
-                        .0
-                        .as_ref()
-                        .is_some_and(|displayed| displayed.id == msg.id);
+                let already_on_screen =
+                    matches!(vm.view_mode, crate::core::messages::ViewMode::Comms)
+                        && on_screen
+                            .0
+                            .as_ref()
+                            .is_some_and(|displayed| displayed.id == msg.id);
                 if already_on_screen {
                     on_screen.0 = None;
                     vm.restore_captain_view();
@@ -800,8 +804,8 @@ pub(crate) fn handle_show_on_screen(
                     // switching to a different on-screen message) must NOT call
                     // it, otherwise the overlay would be dismissed instead of
                     // updated.
-                    if !matches!(vm.view_mode, crate::messages::ViewMode::Comms) {
-                        vm.show_view_mode(crate::messages::ViewMode::Comms);
+                    if !matches!(vm.view_mode, crate::core::messages::ViewMode::Comms) {
+                        vm.show_view_mode(crate::core::messages::ViewMode::Comms);
                     }
                 }
             }
@@ -938,7 +942,7 @@ pub struct CommsResponseAiCadence(pub u32);
 /// at load. `to_selector`/`to_policy` cannot fail for an authored block: both
 /// were validated in `EntityConfig::from_toml`.
 pub fn comms_console_ai_components(
-    config: &crate::entity_config::EntityConfig,
+    config: &crate::entities::config::EntityConfig,
 ) -> (
     Option<CommsTargetSelector>,
     Option<CommsResponseAiPolicy>,
@@ -1122,12 +1126,13 @@ pub fn seed_comms_response_facts(reading: &CommsResponseReading) -> crate::world
 /// unavailable, Operational and Damaged as available. Ships with no hull
 /// tracker (bare-`App` fixtures, entities that never took damage modelling) are
 /// treated as available, matching the other AI hosts' hull fallbacks.
-fn comms_system_available(hull: Option<&crate::entity_spawner::EntitySystemHull>) -> bool {
+fn comms_system_available(hull: Option<&crate::entities::spawner::EntitySystemHull>) -> bool {
     let Some(hull) = hull else {
         return true;
     };
     !matches!(
-        hull.0.tier_for(&crate::system_registry::comms_system_id()),
+        hull.0
+            .tier_for(&crate::ship::system_registry::comms_system_id()),
         crate::ship::damage::DamageTier::Disabled | crate::ship::damage::DamageTier::Destroyed
     )
 }
@@ -1346,9 +1351,9 @@ pub fn operate_comms_ai(
             Option<&EntityUuid>,
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            &mut crate::messages::AdmittedCommands,
-            Option<&crate::ship_state::ShipRedAlert>,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            &mut crate::core::messages::AdmittedCommands,
+            Option<&crate::ship::state::ShipRedAlert>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&CommsTargetSelector>,
         ),
         With<crate::server_app::LocalShip>,
@@ -1372,7 +1377,10 @@ pub fn operate_comms_ai(
         // Comms hail selection resolves a data-driven SELECTOR the spine does not
         // model, so only its gate — the one step it shares with the policy hosts —
         // routes here.
-        if !crate::ai::host::ai_operates(&sources.0, crate::system_registry::comms_system_id()) {
+        if !crate::ai::host::ai_operates(
+            &sources.0,
+            crate::ship::system_registry::comms_system_id(),
+        ) {
             continue;
         }
         // No authored `[comms_console.selector]` ⇒ no component ⇒ no hail
@@ -1422,11 +1430,11 @@ pub fn operate_comms_ai(
             for scored in mgr.0.scored_pool(&conditions) {
                 if !scored
                     .relevance
-                    .contains(&crate::messages::SystemAffinity::Comms)
+                    .contains(&crate::core::messages::SystemAffinity::Comms)
                 {
                     continue;
                 }
-                let crate::messages::AiDirective::Hail { target } = &scored.directive else {
+                let crate::core::messages::AiDirective::Hail { target } = &scored.directive else {
                     continue;
                 };
                 if scored.score <= 0.0 {
@@ -1585,8 +1593,8 @@ pub fn operate_comms_ai(
 
         let admitted_ok = crate::command_admission::ai_emit::emit_ai_command(
             entity_uuid,
-            crate::system_registry::comms_system_id(),
-            crate::messages::SystemControlPayload::Hail {
+            crate::ship::system_registry::comms_system_id(),
+            crate::core::messages::SystemControlPayload::Hail {
                 target_uuid: target_uuid.clone(),
             },
             sources,
@@ -1677,9 +1685,9 @@ pub fn operate_comms_response_ai(
             Option<&EntityUuid>,
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            &mut crate::messages::AdmittedCommands,
-            Option<&crate::ship_state::ShipRedAlert>,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            &mut crate::core::messages::AdmittedCommands,
+            Option<&crate::ship::state::ShipRedAlert>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&CommsResponseAiPolicy>,
             Option<&CommsResponseAiCadence>,
             // The authored ship `power_rating` lives on the CO-LOCATED selector
@@ -1778,7 +1786,7 @@ pub fn operate_comms_response_ai(
             // (`NotAiOperated`), an undeclared ship (`Undeclared`) or a no-rule
             // tick (`Held`) all leave the dialogue open this tick.
             let tick = crate::ai::host::HostTick {
-                system: crate::system_registry::comms_system_id(),
+                system: crate::ship::system_registry::comms_system_id(),
                 channel: crate::entities::config::COMMS_RESPOND_CHANNEL,
                 facts: &facts,
                 flags: &flag_chain,
@@ -1810,8 +1818,8 @@ pub fn operate_comms_response_ai(
 
             let admitted_ok = crate::command_admission::ai_emit::emit_ai_command(
                 entity_uuid,
-                crate::system_registry::comms_system_id(),
-                crate::messages::SystemControlPayload::RespondToMessage {
+                crate::ship::system_registry::comms_system_id(),
+                crate::core::messages::SystemControlPayload::RespondToMessage {
                     message_id: message.id.clone(),
                     response_index: index,
                 },
@@ -1878,7 +1886,7 @@ fn resolve_hail_target(
 mod tests {
     use super::*;
     use crate::comms::server::CommsInboxRes;
-    use crate::messages::CommsMessage;
+    use crate::core::messages::CommsMessage;
     use crate::server_app::{LocalShip, Ship, ShipSystemBlackboards};
 
     fn msg(id: &str) -> CommsMessage {
@@ -1889,7 +1897,7 @@ mod tests {
             subject: "Test".into(),
             body: "Body text".into(),
             body_params: Default::default(),
-            responses: vec![crate::messages::CommsResponseView {
+            responses: vec![crate::core::messages::CommsResponseView {
                 text: "OK".into(),
                 important: false,
                 available: true,
@@ -1924,7 +1932,7 @@ mod tests {
         let bbs = q
             .single(app.world())
             .expect("no LocalShip with ShipSystemBlackboards");
-        let key = SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string());
+        let key = SystemId(crate::ship::system_registry::COMMS_SYSTEM_ID.to_string());
         let SystemBlackboard::Comms(bb) =
             bbs.0.get(&key).expect("comms blackboard missing").clone()
         else {
@@ -1937,7 +1945,7 @@ mod tests {
 
     #[test]
     fn comms_bb_hides_zero_score_doctrine_objective() {
-        use crate::messages::{AiDirective, ObjectiveSource};
+        use crate::core::messages::{AiDirective, ObjectiveSource};
         use crate::objectives::{ObjectiveManager, UtilityConfig, ZeroGateCondition};
         let mut app = test_app();
         let mut mgr = ObjectiveManager::new();
@@ -2012,7 +2020,7 @@ mod tests {
             .inject(msg("m1"));
         app.update();
 
-        let key = SystemId(crate::system_registry::COMMS_SYSTEM_ID.to_string());
+        let key = SystemId(crate::ship::system_registry::COMMS_SYSTEM_ID.to_string());
         let npc_bbs = app
             .world()
             .entity(npc)
@@ -2043,11 +2051,14 @@ mod tests {
         use crate::ship_plugin::ShipSystemControlSources;
 
         let mut ai_resolver = ControlSourceResolver::new();
-        ai_resolver.set(crate::system_registry::comms_system_id(), ControlSource::Ai);
+        ai_resolver.set(
+            crate::ship::system_registry::comms_system_id(),
+            ControlSource::Ai,
+        );
         let ai_sources = ShipSystemControlSources(ai_resolver);
         let ai_policy = ai_sources
             .0
-            .policy_for(&crate::system_registry::comms_system_id());
+            .policy_for(&crate::ship::system_registry::comms_system_id());
         assert!(
             ai_policy.operate_ai,
             "AI Comms must gate through operate_ai"
@@ -2055,19 +2066,21 @@ mod tests {
 
         let mut human_resolver = ControlSourceResolver::new();
         human_resolver.set(
-            crate::system_registry::comms_system_id(),
+            crate::ship::system_registry::comms_system_id(),
             ControlSource::Human,
         );
         let human_sources = ShipSystemControlSources(human_resolver);
         let human_policy = human_sources
             .0
-            .policy_for(&crate::system_registry::comms_system_id());
+            .policy_for(&crate::ship::system_registry::comms_system_id());
         assert!(!human_policy.operate_ai, "Human Comms must not operate AI");
     }
 
     // ── Backfill Comms AI hail execution (issue #753) ──────────────────────
 
-    use crate::messages::{AdmittedCommands, AiDirective, ObjectiveSource, SystemControlPayload};
+    use crate::core::messages::{
+        AdmittedCommands, AiDirective, ObjectiveSource, SystemControlPayload,
+    };
     use crate::objectives::{ObjectiveManager, UtilityConfig, ZeroGateCondition};
     use crate::ship::control_source::{ControlSource, ControlSourceResolver};
 
@@ -2091,7 +2104,10 @@ mod tests {
         .add_systems(Update, operate_comms_ai);
 
         let mut resolver = ControlSourceResolver::new();
-        resolver.set(crate::system_registry::comms_system_id(), comms_source);
+        resolver.set(
+            crate::ship::system_registry::comms_system_id(),
+            comms_source,
+        );
         app.world_mut().spawn((
             crate::server_app::Ship,
             crate::server_app::LocalShip,
@@ -2141,7 +2157,7 @@ mod tests {
             .query_filtered::<&AdmittedCommands, With<crate::server_app::LocalShip>>();
         let admitted = q.single(app.world()).expect("LocalShip admitted commands");
         admitted
-            .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+            .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
             .filter_map(|cmd| match &cmd.payload {
                 SystemControlPayload::Hail { target_uuid } => Some(target_uuid.clone()),
                 _ => None,
@@ -2205,7 +2221,7 @@ mod tests {
             .query_filtered::<&AdmittedCommands, With<crate::server_app::LocalShip>>();
         let admitted = q.single(app.world()).unwrap();
         let ai_payloads: Vec<_> = admitted
-            .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+            .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
             .map(|cmd| cmd.payload.clone())
             .collect();
         assert_eq!(
@@ -2358,7 +2374,10 @@ mod tests {
         register_name(&mut app, "Station Alpha", "station-alpha-uuid");
 
         let mut npc_resolver = ControlSourceResolver::new();
-        npc_resolver.set(crate::system_registry::comms_system_id(), ControlSource::Ai);
+        npc_resolver.set(
+            crate::ship::system_registry::comms_system_id(),
+            ControlSource::Ai,
+        );
         let npc = app
             .world_mut()
             .spawn((
@@ -2391,7 +2410,7 @@ mod tests {
         let npc_admitted = app.world().entity(npc).get::<AdmittedCommands>().unwrap();
         assert_eq!(
             npc_admitted
-                .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+                .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
                 .count(),
             0,
             "a non-local ship must not be contaminated by the local ship's comms hail"
@@ -2466,7 +2485,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<CommsRuntime>()
             .contacts
-            .push(crate::messages::CommsContact {
+            .push(crate::core::messages::CommsContact {
                 uuid: "lonely-contact-uuid".into(),
                 name: "Lonely Outpost".into(),
                 in_range: true,
@@ -2610,7 +2629,7 @@ mod tests {
     /// admission. Used to prove that the anti-respam latch re-arms ONCE on an
     /// explicit, externally-driven clear — and not on its own.
     fn admit_clear_comms(app: &mut App) {
-        use crate::messages::AdmittedCommand;
+        use crate::core::messages::AdmittedCommand;
         let mut q = app
             .world_mut()
             .query_filtered::<&mut AdmittedCommands, With<crate::server_app::LocalShip>>();
@@ -2618,7 +2637,7 @@ mod tests {
             .unwrap()
             .0
             .push(AdmittedCommand {
-                target: crate::system_registry::comms_system_id(),
+                target: crate::ship::system_registry::comms_system_id(),
                 payload: SystemControlPayload::ClearComms,
                 response_token: None,
             });
@@ -3121,8 +3140,8 @@ mod tests {
 
     /// An `EntitySystemHull` whose Comms fine system reads
     /// `DamageTier::Destroyed` through the real tier derivation (`current == 0`).
-    fn destroyed_comms_hull() -> crate::entity_spawner::EntitySystemHull {
-        let comms = crate::system_registry::comms_system_id();
+    fn destroyed_comms_hull() -> crate::entities::spawner::EntitySystemHull {
+        let comms = crate::ship::system_registry::comms_system_id();
         let mut hull = crate::ship::damage::SystemHull::from_config(&[(comms.clone(), 100.0)]);
         hull.set_hp(&comms, 0.0);
         assert_eq!(
@@ -3130,7 +3149,7 @@ mod tests {
             crate::ship::damage::DamageTier::Destroyed,
             "fixture must actually destroy the Comms system"
         );
-        crate::entity_spawner::EntitySystemHull(hull)
+        crate::entities::spawner::EntitySystemHull(hull)
     }
 
     // -- handle_respond_to_message: comms-response action dispatch parity ---
@@ -3142,7 +3161,7 @@ mod tests {
     // `pub(crate)`) and is imported here rather than duplicated.
     use crate::comms::content::{CommsDialogueNode, CommsResponse};
     use crate::comms::server::tests::{comms_test_app, push_msg, setup_game_with_comms, tick};
-    use crate::messages::{ClientMessage, ServerMessage};
+    use crate::core::messages::{ClientMessage, ServerMessage};
 
     // -- PRD #397 fix 2: comms-response action dispatch parity ----------------
     //
@@ -3194,11 +3213,11 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::LocalShip>>();
-            q.single_mut(app.world_mut())
-                .unwrap()
-                .0
-                .set(crate::system_registry::comms_system_id(), ControlSource::Ai);
+                .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+            q.single_mut(app.world_mut()).unwrap().0.set(
+                crate::ship::system_registry::comms_system_id(),
+                ControlSource::Ai,
+            );
         }
 
         let id = seat_scripted_dialogue(
@@ -3252,7 +3271,7 @@ mod tests {
             .query_filtered::<&AdmittedCommands, With<crate::server_app::LocalShip>>();
         let admitted = q.single(app.world()).unwrap();
         let payloads: Vec<_> = admitted
-            .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+            .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
             .map(|cmd| cmd.payload.clone())
             .collect();
         assert_eq!(
@@ -3280,7 +3299,7 @@ mod tests {
         let admitted = q.single(app.world()).unwrap();
         assert_eq!(
             admitted
-                .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+                .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
                 .count(),
             0,
             "a human-operated Comms console must not emit an AI response"
@@ -3337,11 +3356,11 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::LocalShip>>();
-            q.single_mut(app.world_mut())
-                .unwrap()
-                .0
-                .set(crate::system_registry::comms_system_id(), ControlSource::Ai);
+                .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::LocalShip>>();
+            q.single_mut(app.world_mut()).unwrap().0.set(
+                crate::ship::system_registry::comms_system_id(),
+                ControlSource::Ai,
+            );
         }
 
         // Next tick the AI decides, the saboteur retires the dialogue, and the
@@ -3383,7 +3402,10 @@ mod tests {
         .add_systems(Update, operate_comms_response_ai);
 
         let mut resolver = ControlSourceResolver::new();
-        resolver.set(crate::system_registry::comms_system_id(), comms_source);
+        resolver.set(
+            crate::ship::system_registry::comms_system_id(),
+            comms_source,
+        );
         app.world_mut().spawn((
             crate::server_app::Ship,
             crate::server_app::LocalShip,
@@ -3501,7 +3523,7 @@ mod tests {
             let admitted = q.single(app.world()).unwrap();
             assert_eq!(
                 admitted
-                    .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+                    .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
                     .count(),
                 0,
                 "an authored flag gate that reads false must hold the response"
@@ -3525,7 +3547,7 @@ mod tests {
                 .query_filtered::<&AdmittedCommands, With<crate::server_app::LocalShip>>();
             let admitted = q.single(app.world()).unwrap();
             let payloads: Vec<_> = admitted
-                .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+                .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
                 .map(|cmd| cmd.payload.clone())
                 .collect();
             assert_eq!(
@@ -3559,7 +3581,7 @@ mod tests {
             assert_eq!(
                 q.single(app.world())
                     .unwrap()
-                    .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+                    .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
                     .count(),
                 1
             );
@@ -3583,7 +3605,7 @@ mod tests {
         assert_eq!(
             q.single(app.world())
                 .unwrap()
-                .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+                .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
                 .count(),
             0,
             "an answered message must not be answered again"
@@ -3597,7 +3619,7 @@ mod tests {
             .query_filtered::<&AdmittedCommands, With<crate::server_app::LocalShip>>();
         q.single(app.world())
             .unwrap()
-            .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+            .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
             .filter(|cmd| matches!(cmd.payload, SystemControlPayload::RespondToMessage { .. }))
             .count()
     }
@@ -3681,7 +3703,7 @@ mod tests {
     /// component: if the helper stopped reading `[comms_console]`, or stopped
     /// carrying `power_rating`, they fail.
     fn attach_comms_console_ai_from_toml(app: &mut App, toml: &str) {
-        let config = crate::entity_config::EntityConfig::from_toml(toml)
+        let config = crate::entities::config::EntityConfig::from_toml(toml)
             .expect("the fixture template must parse and validate");
         let (selector, policy, cadence) = comms_console_ai_components(&config);
         let entity = {
@@ -3830,7 +3852,7 @@ response_index = 1
         let indices: Vec<usize> = q
             .single(app.world())
             .unwrap()
-            .for_target(crate::system_registry::COMMS_SYSTEM_ID)
+            .for_target(crate::ship::system_registry::COMMS_SYSTEM_ID)
             .filter_map(|cmd| match &cmd.payload {
                 SystemControlPayload::RespondToMessage { response_index, .. } => {
                     Some(*response_index)
@@ -3861,7 +3883,7 @@ response_index = 1
         app.world_mut()
             .resource_mut::<CommsRuntime>()
             .contacts
-            .push(crate::messages::CommsContact {
+            .push(crate::core::messages::CommsContact {
                 uuid: "lonely-contact-uuid".into(),
                 name: "Lonely Outpost".into(),
                 in_range: true,
@@ -3928,8 +3950,8 @@ weight = 100.0
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::RespondToMessage {
                     message_id: "no-such-message".into(),
                     response_index: 3,
                 },
@@ -3949,7 +3971,7 @@ weight = 100.0
     fn out_of_range_response_is_rejected() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "a1b2c3d4-e5f6-4789-abcd-ef0123456012";
         let mut app = comms_test_app();
@@ -3957,7 +3979,7 @@ weight = 100.0
 
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(100.0),
         ));
@@ -3991,8 +4013,8 @@ weight = 100.0
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::RespondToMessage {
                     message_id: msg_id.clone(),
                     response_index: 0,
                 },
@@ -4070,8 +4092,8 @@ weight = 100.0
             app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::RespondToMessage {
                     message_id: message_id.to_string(),
                     response_index,
                 },
@@ -4128,7 +4150,7 @@ weight = 100.0
                 .find(|o| o.id == "reach_axiom")
                 .expect("the objective exists")
                 .status,
-            crate::messages::ObjectiveStatus::Completed,
+            crate::core::messages::ObjectiveStatus::Completed,
             "the on_pick fn's effects must reach the shared apply path"
         );
 
@@ -4205,7 +4227,7 @@ weight = 100.0
                 .find(|o| o.id == "reach_axiom")
                 .expect("the objective exists")
                 .status,
-            crate::messages::ObjectiveStatus::Failed,
+            crate::core::messages::ObjectiveStatus::Failed,
         );
         assert_eq!(
             app.world().resource::<CommsInboxRes>().0.messages().len(),
@@ -4280,7 +4302,7 @@ weight = 100.0
                 .find(|o| o.id == "reach_axiom")
                 .expect("the objective exists")
                 .status,
-            crate::messages::ObjectiveStatus::Active,
+            crate::core::messages::ObjectiveStatus::Active,
             "and the refused pick must have applied nothing"
         );
         assert_eq!(
@@ -4337,7 +4359,7 @@ weight = 100.0
                 .find(|o| o.id == "reach_axiom")
                 .expect("the objective exists")
                 .status,
-            crate::messages::ObjectiveStatus::Completed,
+            crate::core::messages::ObjectiveStatus::Completed,
             "the pick runs on a fresh budget"
         );
         // And the charge landed on THIS tick's budget, adopted by the reset.
@@ -4425,7 +4447,7 @@ weight = 100.0
                 .find(|o| o.id == "reach_axiom")
                 .expect("the objective exists")
                 .status,
-            crate::messages::ObjectiveStatus::Completed,
+            crate::core::messages::ObjectiveStatus::Completed,
             "the completed objective must survive the malformed return"
         );
         assert!(
@@ -4571,8 +4593,8 @@ weight = 100.0
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::Hail {
                     target_uuid: station_uuid.into(),
                 },
             },
@@ -4594,11 +4616,11 @@ weight = 100.0
 
         // Set comms system to AI control (blocks human input).
         {
-            let mut q = app.world_mut().query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>();
+            let mut q = app.world_mut().query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::Ship>>();
             for mut sources in q.iter_mut(app.world_mut()) {
                 sources.0.set(
-                    crate::system_registry::comms_system_id(),
-                    crate::control_source::ControlSource::Ai,
+                    crate::ship::system_registry::comms_system_id(),
+                    crate::ship::control_source::ControlSource::Ai,
                 );
             }
         }
@@ -4607,8 +4629,8 @@ weight = 100.0
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::Hail {
                     target_uuid: station_uuid.into(),
                 },
             },
@@ -4657,8 +4679,8 @@ weight = 100.0
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::ClearComms,
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::ClearComms,
             },
         );
         let out = tick(&mut app);
@@ -4728,7 +4750,7 @@ weight = 100.0
     fn server_rejects_hail_when_target_out_of_range() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "station-out-of-range-hail";
         let mut app = comms_test_app();
@@ -4736,7 +4758,7 @@ weight = 100.0
 
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(100.0),
         ));
@@ -4753,8 +4775,8 @@ weight = 100.0
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::Hail {
                     target_uuid: station_uuid.into(),
                 },
             },
@@ -4774,7 +4796,7 @@ weight = 100.0
     fn server_rejects_respond_when_sender_out_of_range() {
         use crate::comms::CommsRange;
         use crate::entities::spawner::EntityUuid;
-        use crate::simulation::Ship;
+        use crate::server_app::Ship;
 
         let station_uuid = "station-respond-oor";
         let mut app = comms_test_app();
@@ -4794,7 +4816,7 @@ weight = 100.0
         // respond.
         app.world_mut().spawn((
             Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             Transform::from_xyz(0.0, 0.0, 0.0),
             CommsRange(500.0),
         ));
@@ -4828,8 +4850,8 @@ weight = 100.0
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::RespondToMessage {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::RespondToMessage {
                     message_id: msg_id.clone(),
                     response_index: 0,
                 },
@@ -4847,7 +4869,7 @@ weight = 100.0
                 .find(|o| o.id == "reach_axiom")
                 .expect("the objective exists")
                 .status,
-            crate::messages::ObjectiveStatus::Active,
+            crate::core::messages::ObjectiveStatus::Active,
             "out-of-range Respond must not run the response's on_pick fn"
         );
     }
@@ -4864,8 +4886,8 @@ weight = 100.0
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
-                payload: crate::messages::SystemControlPayload::Hail {
+                target: crate::ship::system_registry::comms_system_id(),
+                payload: crate::core::messages::SystemControlPayload::Hail {
                     target_uuid: station_uuid.to_string(),
                 },
             },

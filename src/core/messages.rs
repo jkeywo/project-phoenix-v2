@@ -1,7 +1,7 @@
-use crate::damage::DamageTier;
-pub use crate::entity_tags::EntityTag;
+pub use crate::entities::tags::EntityTag;
+use crate::lobby::stations_config::ShipStations;
+use crate::ship::damage::DamageTier;
 pub use crate::ship::manual::ShipManualWire;
-use crate::stations_config::ShipStations;
 use bevy::prelude::States;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -147,7 +147,7 @@ pub struct SystemHullStatus {
     pub current: f32,
     pub max_hp: f32,
     /// Derived damage tier for this system.
-    pub tier: crate::damage::DamageTier,
+    pub tier: crate::ship::damage::DamageTier,
     /// Active debuff magnitude for this system (0.0 when Operational or
     /// Destroyed, tier_config.debuff_magnitude when Damaged or Disabled).
     #[serde(default)]
@@ -2230,7 +2230,7 @@ pub enum ClientMessage {
 
 /// One host-page debug overlay a settings menu can flip (issue #940).
 ///
-/// Mirrors the diagnostic half of `crate::bridge::DebugToggleKind` — that enum
+/// Mirrors the diagnostic half of `crate::server::bridge::DebugToggleKind` — that enum
 /// is the host page's local pending-toggle vocabulary and this is its wire
 /// form, with a `From<DebugFlag>` conversion between them so the two cannot
 /// drift into different flag sets.
@@ -2355,7 +2355,7 @@ pub enum CoordinationPayload {
     /// the English `label` Rust used to compose. No navigation logic reads them.
     /// See [`NavigationWaypoint::generation`].
     ///
-    /// [`NavigationWaypoint::generation`]: crate::navigation_plugin::NavigationWaypoint::generation
+    /// [`NavigationWaypoint::generation`]: crate::console::navigation::NavigationWaypoint::generation
     NavigateTo { generation: u64, x: f32, z: f32 },
     /// A system has crossed to a worse damage tier and needs repair (issue #682).
     ///
@@ -2769,13 +2769,13 @@ pub enum ServerMessage {
     GameOver {
         reason: String,
         /// The authored side of the ending: `"victory"`, `"defeat"`, or
-        /// absent. This is [`crate::balance::Outcome::as_str`] off the
+        /// absent. This is [`crate::core::balance::Outcome::as_str`] off the
         /// `GameOverReason` latch — the flag a scenario declares on its
         /// `game_over` action and the built-in player-death sites set — and
         /// NOT a guess made from `reason`.
         ///
         /// It travels as an `Option<String>` rather than the enum because
-        /// `Outcome` is deliberately not `Serialize` (`crate::balance`): the
+        /// `Outcome` is deliberately not `Serialize` (`crate::core::balance`): the
         /// two labels are already this project's report vocabulary, and
         /// spelling them here keeps a wire-visible variant order from becoming
         /// pinned surface. `None` means the ending declared no side — an
@@ -3012,7 +3012,7 @@ pub struct RadarBlip {
     /// bird has tubes at all.
     ///
     /// Hostility is resolved server-side against the observing ship's faction
-    /// (`crate::faction::is_enemy`), the same predicate the helm's hostile-arc
+    /// (`crate::ai::faction::is_enemy`), the same predicate the helm's hostile-arc
     /// overlay uses, so a friendly torpedo boat — and the player's own ship —
     /// never badges itself.
     ///
@@ -3192,11 +3192,11 @@ pub struct CaptainBlackboard {
 }
 
 fn default_red_alert_system_id() -> SystemId {
-    crate::system_registry::red_alert_system_id()
+    crate::ship::system_registry::red_alert_system_id()
 }
 
 fn default_viewscreen_system_id() -> SystemId {
-    crate::system_registry::viewscreen_system_id()
+    crate::ship::system_registry::viewscreen_system_id()
 }
 
 impl Default for CaptainBlackboard {
@@ -3273,7 +3273,7 @@ pub struct CommandStanceOption {
 }
 
 fn default_command_system_id() -> SystemId {
-    crate::system_registry::command_system_id()
+    crate::ship::system_registry::command_system_id()
 }
 
 impl Default for CommandBlackboard {
@@ -4226,7 +4226,7 @@ pub struct PowerGroupEntry {
     /// (issue #1004).
     ///
     /// A display floor, not an engine one: `PowerSystem` clamps every group to
-    /// [`crate::power_system::GROUP_LEVEL_MIN`] whatever a hull authors here, so
+    /// [`crate::modifiers::power_system::GROUP_LEVEL_MIN`] whatever a hull authors here, so
     /// this field changes what the panel paints and nothing about what an
     /// officer may command. Without it the client fell back to `0` and drew a
     /// phantom rung the server can never occupy — three groups showing nine

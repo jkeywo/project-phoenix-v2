@@ -2444,7 +2444,7 @@ mod tests {
     /// only text `EntityConfig::from_toml` accepts, since the raw file now
     /// carries an `includes` key the parser rejects.
     fn cruiser() -> String {
-        crate::entity_includes::resolve_from_disk("assets/entities/alliance_cruiser.toml")
+        crate::entities::include_resolve::resolve_from_disk("assets/entities/alliance_cruiser.toml")
             .expect("alliance_cruiser must compose")
             .toml
     }
@@ -2545,9 +2545,11 @@ mod tests {
     /// has composed its movement doctrine out of the fragment library since issue
     /// #878 and the guards mutated below are authored in the fragment now.
     fn destroyer() -> String {
-        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_destroyer.toml")
-            .expect("ship_harrow_destroyer must resolve")
-            .toml
+        crate::entities::include_resolve::resolve_from_disk(
+            "assets/entities/ship_harrow_destroyer.toml",
+        )
+        .expect("ship_harrow_destroyer must resolve")
+        .toml
     }
 
     /// The destroyer's own re-entry gate, which #788 could only express as a

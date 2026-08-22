@@ -25,7 +25,7 @@ pub fn update_combat_activity(
     time: Res<Time>,
     mut ships: Query<
         (
-            &crate::entity_spawner::EntitySystemHull,
+            &crate::entities::spawner::EntitySystemHull,
             &mut RecentCombatActivity,
             &mut crate::server_app::WeaponFiredThisTick,
             &mut crate::server_app::ShipAttackedThisTick,
@@ -63,9 +63,9 @@ pub fn update_combat_activity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::SystemHull;
-    use crate::messages::SystemId;
+    use crate::core::messages::SystemId;
     use crate::server_app::{Ship, ShipAttackedThisTick, WeaponFiredThisTick};
+    use crate::ship::damage::SystemHull;
 
     fn app_with_hull(hull: SystemHull) -> (App, Entity) {
         let mut app = App::new();
@@ -75,7 +75,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Ship,
-                crate::entity_spawner::EntitySystemHull(hull),
+                crate::entities::spawner::EntitySystemHull(hull),
                 RecentCombatActivity::default(),
                 WeaponFiredThisTick::default(),
                 ShipAttackedThisTick::default(),

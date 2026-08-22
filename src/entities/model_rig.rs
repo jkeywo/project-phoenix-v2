@@ -48,12 +48,12 @@
 //! whichever template spawns it. `[[lod]]` therefore lives here, beside the
 //! `.glb` it decimates, and the entity's `[mesh]` only names the model. Entity
 //! TOML that still authors `[[mesh.lod]]` is rejected at parse with a message
-//! pointing at this file — see [`crate::entity_config::EntityConfig::from_toml`].
+//! pointing at this file — see [`crate::entities::config::EntityConfig::from_toml`].
 //!
 //! # Regenerating a ladder (issue #919)
 //! A level whose `.glb` was decimated out of another one carries the parameters
 //! that produced it in a `[lod.generate]` sub-table
-//! ([`crate::entity_config::LodGeneration`]), so the sidecar declares not just
+//! ([`crate::entities::config::LodGeneration`]), so the sidecar declares not just
 //! *which* files the ladder uses but *how they come back*:
 //! `node scripts/generate-lods.mjs <model>` reads exactly these blocks. The
 //! engine ignores every one of those keys — they are build-time provenance —
@@ -190,13 +190,13 @@ pub struct ModelRig {
     /// When non-empty, an entity whose `[mesh]` names this model is NOT
     /// rendered from its flat `[mesh]` fields; the renderer picks a level each
     /// frame from the camera distance (see
-    /// [`crate::entity_config::select_lod`]) and builds that level instead.
+    /// [`crate::entities::config::select_lod`]) and builds that level instead.
     /// Fields a level omits fall back to the *entity's* flat `[mesh]` fields
     /// (`colour`/`radius`/`emissive`/`size`/`minor_radius`/`variant`), so one
     /// shared ladder still renders differently-tinted rocks correctly.
     /// Empty (the default) means "no ladder" — the flat `[mesh]` renders as-is.
     #[serde(default)]
-    pub lod: Vec<crate::entity_config::LodLevel>,
+    pub lod: Vec<crate::entities::config::LodLevel>,
 }
 
 impl ModelRig {
@@ -568,9 +568,10 @@ position = [-0.25, -0.1, -0.25]
     fn alliance_destroyer_omni_bank_marker_resolves_in_sidecar() {
         // Through the include resolver (issue #906) so the linkage claim keeps
         // holding once the hull is composed.
-        let cfg =
-            crate::entity_includes::load_entity_config("assets/entities/alliance_destroyer.toml")
-                .expect("alliance_destroyer must compose and parse");
+        let cfg = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_destroyer.toml",
+        )
+        .expect("alliance_destroyer must compose and parse");
 
         // The omni bank links to a marker.
         let weapons = cfg
@@ -636,7 +637,7 @@ shape = "sphere"
         assert_eq!(rig.lod[2].max_distance, None);
         assert_eq!(
             rig.lod[2].shape,
-            Some(crate::entity_config::MeshShape::Sphere)
+            Some(crate::entities::config::MeshShape::Sphere)
         );
     }
 
@@ -733,7 +734,7 @@ shape = "sphere"
     /// resolves to does — with every level's GLB present on disk.
     #[test]
     fn a_shipped_asteroid_reads_its_ladder_from_its_sidecar() {
-        let cfg = crate::entity_includes::load_entity_config(
+        let cfg = crate::entities::include_resolve::load_entity_config(
             "assets/entities/asteroid_common_1_large.toml",
         )
         .expect("asteroid template must parse");
@@ -762,7 +763,7 @@ shape = "sphere"
         );
 
         // Switching behaviour over the ported chain, at the authored distances.
-        use crate::entity_config::select_lod;
+        use crate::entities::config::select_lod;
         for (distance, expected) in [
             (0.0, 0),
             (14.9, 0),

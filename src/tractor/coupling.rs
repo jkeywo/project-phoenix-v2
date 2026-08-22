@@ -610,7 +610,7 @@ mod tests {
         // the penalty it exacts is exactly that mass's point on the curve — no
         // special case for "unauthored".
         let c = curve();
-        let default_mass = crate::entity_config::DEFAULT_ENTITY_MASS;
+        let default_mass = crate::entities::config::DEFAULT_ENTITY_MASS;
         let expected = c.max_penalty * default_mass / (default_mass + c.half_penalty_mass);
         assert!((tow_load_penalty(default_mass, &c) - expected).abs() < 1e-6);
         // DEFAULT_ENTITY_MASS (10_000) sits right at this curve's knee, so it is

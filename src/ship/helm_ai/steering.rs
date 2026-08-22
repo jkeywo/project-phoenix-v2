@@ -2,7 +2,7 @@ use super::*;
 
 use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
-use crate::messages::SystemControlPayload;
+use crate::core::messages::SystemControlPayload;
 
 /// Per-ship runtime state for a STATEFUL Steering policy (issue #883). The
 /// Steering twin of [`HelmEnginesAiPolicyState`]; this is the one whose current
@@ -34,8 +34,8 @@ pub struct HelmSteeringAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState
 pub(crate) struct SteeringAxis;
 
 impl HelmAxisHost for SteeringAxis {
-    fn system_id() -> crate::messages::SystemId {
-        crate::system_registry::helm_steering_system_id()
+    fn system_id() -> crate::core::messages::SystemId {
+        crate::ship::system_registry::helm_steering_system_id()
     }
     const CHANNEL: &'static str = crate::entities::config::HELM_YAW_CHANNEL;
     const STATEFUL: bool = true;
@@ -141,7 +141,7 @@ pub(crate) fn ai_helm_steering(
             &ShipSystemControlSources,
             &ShipPhysics,
             Option<&crate::ship_plugin::ShipPhysicsConfigResource>,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
             // Availability of the two optional drives — see `ai_helm_thrust`.
             Option<&BoostConfigResource>,
@@ -149,9 +149,9 @@ pub(crate) fn ai_helm_steering(
             Option<&FineSystemAiPolicies>,
             Option<&HelmSteeringAiPolicyState>,
             Option<&mut PendingArcBearingRequest>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
     for (

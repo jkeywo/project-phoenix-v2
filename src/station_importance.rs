@@ -1,7 +1,7 @@
 //! Pure Rust host-derived per-Station importance (issue #1101).
 //!
 //! No Bevy dependency. Owns the authoritative importance state the Hero Bar
-//! renders and the [`SimSnapshot`](crate::messages::SimSnapshot) carries, kept
+//! renders and the [`SimSnapshot`](crate::core::messages::SimSnapshot) carries, kept
 //! strictly apart from health. Two flags with DISTINCT lifecycles:
 //!
 //! - `unread` — a **one-off** event (an objective completing/failing off-screen
@@ -24,7 +24,7 @@
 //! Bevy resource, an ingest pass folds objectives + Red Alert into it, and the
 //! `StationVisited` drain calls [`StationImportance::visit`].
 
-use crate::messages::{ObjectiveStatus, StationId, StationImportanceSnapshot};
+use crate::core::messages::{ObjectiveStatus, StationId, StationImportanceSnapshot};
 use std::collections::{HashMap, HashSet};
 
 /// The two independent importance flags for one Station.

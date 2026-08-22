@@ -26,8 +26,8 @@
 
 use bevy::prelude::*;
 
+use crate::core::messages::ClientMessage;
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::ClientMessage;
 use crate::server_app::LocalShip;
 
 pub mod ai_emit;
@@ -66,7 +66,7 @@ pub struct AdmissionPlugin;
 
 impl Plugin for AdmissionPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::messages::InterSystemQueue>()
+        app.init_resource::<crate::core::messages::InterSystemQueue>()
             .init_resource::<crate::ai::server::AiTokenRegistry>()
             .configure_sets(
                 FixedUpdate,
@@ -137,7 +137,7 @@ pub fn register_admission_seam(app: &mut App, gate: AdmissionGate) {
         AdmissionGate::InProgressOnly => {
             app.add_systems(
                 FixedUpdate,
-                systems.run_if(in_state(crate::messages::GamePhase::InProgress)),
+                systems.run_if(in_state(crate::core::messages::GamePhase::InProgress)),
             );
         }
         AdmissionGate::EveryTick => {
@@ -146,7 +146,7 @@ pub fn register_admission_seam(app: &mut App, gate: AdmissionGate) {
     }
 }
 
-pub(crate) fn clear_inter_system_queue(mut queue: ResMut<crate::messages::InterSystemQueue>) {
+pub(crate) fn clear_inter_system_queue(mut queue: ResMut<crate::core::messages::InterSystemQueue>) {
     queue.0.clear();
 }
 
@@ -175,12 +175,12 @@ pub(crate) fn clear_inter_system_queue(mut queue: ResMut<crate::messages::InterS
 /// map in hand.
 pub fn validate_and_admit(
     token: &str,
-    target: crate::messages::SystemId,
-    payload: crate::messages::SystemControlPayload,
+    target: crate::core::messages::SystemId,
+    payload: crate::core::messages::SystemControlPayload,
     control_sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &Sessions,
     config: &crate::ship::config::ShipConfig,
-    admitted: &mut crate::messages::AdmittedCommands,
+    admitted: &mut crate::core::messages::AdmittedCommands,
 ) -> bool {
     match validate_command(
         token,
@@ -212,13 +212,13 @@ pub fn validate_and_admit(
 /// `AdmittedCommand` — the property #824 introduced `validate_and_admit` for.
 pub fn validate_command(
     token: &str,
-    target: crate::messages::SystemId,
-    payload: crate::messages::SystemControlPayload,
+    target: crate::core::messages::SystemId,
+    payload: crate::core::messages::SystemControlPayload,
     control_sources: &crate::ship_plugin::ShipSystemControlSources,
     sessions: &Sessions,
     config: &crate::ship::config::ShipConfig,
     hosts: Option<&crate::ship_plugin::HumanSeekingHosts>,
-) -> Option<crate::messages::AdmittedCommand> {
+) -> Option<crate::core::messages::AdmittedCommand> {
     if !is_command_authorized(
         token,
         &target,
@@ -230,7 +230,7 @@ pub fn validate_command(
     ) {
         return None;
     }
-    Some(crate::messages::AdmittedCommand {
+    Some(crate::core::messages::AdmittedCommand {
         target,
         payload,
         response_token: Some(token.to_string()),
@@ -285,10 +285,10 @@ pub fn admit_system_commands(
     mut ship_query: Query<(
         Entity,
         &crate::ship_plugin::ShipSystemControlSources,
-        &mut crate::messages::AdmittedCommands,
+        &mut crate::core::messages::AdmittedCommands,
         &crate::ship_plugin::ShipConfigComponent,
         Has<LocalShip>,
-        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&crate::entities::spawner::EntityUuid>,
         // The human-seeking host map (issue #984), absent on a hull that
         // authors no `human_seeking` system and on any ship before
         // `resolve_human_seeking_hosts` has run once.
@@ -407,10 +407,10 @@ pub fn admit_system_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lobby::LobbyPlugin;
-    use crate::messages::{
+    use crate::core::messages::{
         AdmittedCommands, RepairTarget, StationId, SystemControlPayload, SystemId,
     };
+    use crate::lobby::LobbyPlugin;
     use crate::ship::control_source::{ControlSource, ControlSourceResolver};
     use crate::ship::test_support::{drive_one_fixed_step_per_update, TEST_TICK};
     use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
@@ -486,7 +486,7 @@ station = "repair"
                 AdmittedCommands::default(),
                 ShipConfigComponent(config()),
                 sources(source),
-                crate::entity_spawner::EntityUuid(SHIP_UUID.into()),
+                crate::entities::spawner::EntityUuid(SHIP_UUID.into()),
             ))
             .id();
         (app, ship)

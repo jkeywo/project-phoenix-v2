@@ -19,8 +19,8 @@ use bevy::{
     shader::ShaderRef,
 };
 
-use crate::entity_config::PlanetConfig;
-use crate::entity_spawner::StarSection;
+use crate::entities::config::PlanetConfig;
+use crate::entities::spawner::StarSection;
 
 const PLANET_SURFACE_SHADER: &str = "shaders/planet_surface.wgsl";
 const PLANET_CLOUDS_SHADER: &str = "shaders/planet_clouds.wgsl";
@@ -378,7 +378,9 @@ fn update_planet_materials(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity_config::{PlanetAtmosphereConfig, PlanetCloudsConfig, PlanetSurfaceConfig};
+    use crate::entities::config::{
+        PlanetAtmosphereConfig, PlanetCloudsConfig, PlanetSurfaceConfig,
+    };
 
     fn full_config() -> PlanetConfig {
         PlanetConfig {

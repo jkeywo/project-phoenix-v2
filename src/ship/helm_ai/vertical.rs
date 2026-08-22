@@ -2,7 +2,7 @@ use super::*;
 
 use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
-use crate::messages::SystemControlPayload;
+use crate::core::messages::SystemControlPayload;
 
 /// The **Vertical Thrust** helm axis (issue #1208, issue #744): gate the
 /// `vertical` channel on the `actuate_vertical_thrust` mode verb and, on a fire,
@@ -19,12 +19,12 @@ use crate::messages::SystemControlPayload;
 /// weighted by the hull's authored `vertical_hazard_sensitivity`, so a static
 /// obstacle never drives a vertical dodge.
 ///
-/// [`VerticalMovementMode`]: crate::entity_config::VerticalMovementMode
+/// [`VerticalMovementMode`]: crate::entities::config::VerticalMovementMode
 pub(crate) struct VerticalAxis;
 
 impl HelmAxisHost for VerticalAxis {
-    fn system_id() -> crate::messages::SystemId {
-        crate::system_registry::vertical_thrust_system_id()
+    fn system_id() -> crate::core::messages::SystemId {
+        crate::ship::system_registry::vertical_thrust_system_id()
     }
     const CHANNEL: &'static str = crate::entities::config::HELM_VERTICAL_CHANNEL;
     const STATEFUL: bool = false;
@@ -52,7 +52,7 @@ impl HelmAxisHost for VerticalAxis {
         cx: &HelmAxisCtx,
         _io: &mut HelmAxisIo,
     ) -> Option<SystemControlPayload> {
-        use crate::entity_config::VerticalMovementMode;
+        use crate::entities::config::VerticalMovementMode;
         match outcome {
             HostOutcome::Act(verb) if Self::accepts(verb) => {}
             _ => return None,
@@ -143,11 +143,11 @@ pub(crate) fn ai_helm_vertical_thrust(
             Option<&crate::entities::spawner::BehaviourSection>,
             Option<&crate::entities::spawner::HelmCapabilitySection>,
             Option<&FineSystemAiPolicies>,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
     for (

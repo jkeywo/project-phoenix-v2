@@ -1,4 +1,4 @@
-use crate::messages::StationId;
+use crate::core::messages::StationId;
 use bevy::prelude::Resource;
 use std::collections::HashMap;
 

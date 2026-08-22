@@ -2,14 +2,14 @@ use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::damage::DamageTier;
-use crate::messages::ModifierSlot;
-use crate::messages::{
+use crate::core::messages::ModifierSlot;
+use crate::core::messages::{
     QueueEntryPreview, RepairBlackboard, ServerMessage, SystemBlackboard, SystemHullStatus,
     SystemId, TeamSlot,
 };
+use crate::modifiers::repair_teams::RepairTeams;
 use crate::modifiers::ShipModifiers;
-use crate::repair_teams::RepairTeams;
+use crate::ship::damage::DamageTier;
 use crate::ship::system_registry::{repair_system_id, REPAIR_SYSTEM_ID};
 use crate::ship_plugin::ShipSystemControlSources;
 
@@ -224,15 +224,17 @@ pub fn tick_repair_teams(
         (
             Option<&mut ShipRepairTeams>,
             &ShipModifiers,
-            &mut crate::entity_spawner::EntitySystemHull,
-            Option<&crate::entity_spawner::EntityUuid>,
+            &mut crate::entities::spawner::EntitySystemHull,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
         ),
         With<crate::server_app::Ship>,
     >,
     // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
     // that never registered the message still pass parameter validation.
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
 ) {
     let dt = time.delta_secs();
 
@@ -252,7 +254,7 @@ pub fn tick_repair_teams(
         let restored = hull.0.total_current() - before;
         if restored > 0.0 {
             if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
-                msgs.write(crate::balance::BalanceEvent::RepairApplied {
+                msgs.write(crate::core::balance::BalanceEvent::RepairApplied {
                     ship: uuid.0.clone(),
                     hp: restored,
                 });
@@ -274,7 +276,7 @@ fn publish_repair_blackboard(
     mut ship_q: Query<
         (
             Option<&ShipRepairTeams>,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&RepairRequestQueue>,
             // External repair-team dispatch (issue #1161). Present only on a
             // hull that authored `[repair.external_dispatch]`; a hull without it
@@ -289,7 +291,7 @@ fn publish_repair_blackboard(
     // English crosses the wire, exactly as the tractor publisher reports its
     // coupled target's name.
     named: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         &crate::entities::spawner::EntityName,
     )>,
 ) {
@@ -299,7 +301,8 @@ fn publish_repair_blackboard(
         let teams: &ShipRepairTeams = match teams_opt {
             Some(t) => t,
             None => {
-                default_teams = ShipRepairTeams(crate::repair_teams::RepairTeams::default());
+                default_teams =
+                    ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::default());
                 &default_teams
             }
         };
@@ -409,7 +412,7 @@ fn publish_repair_blackboard(
 
 pub fn all_systems_in_station_are_operational(
     station_id: &str,
-    hull: &crate::damage::SystemHull,
+    hull: &crate::ship::damage::SystemHull,
     config: &crate::ship::config::ShipConfig,
 ) -> bool {
     let systems_in_station: Vec<_> = config
@@ -431,7 +434,7 @@ pub fn all_systems_in_station_are_operational(
 
 // ── Authored repair-target ranking (issue #785) ────────────────────────────────
 
-/// The candidate key standing for [`crate::messages::RepairTarget::Core`] — the
+/// The candidate key standing for [`crate::core::messages::RepairTarget::Core`] — the
 /// ownerless ship-wide repair bucket. Selector candidate identity is a plain
 /// `String` (nothing requires a real UUID), so Repair keys candidates on the
 /// STATION ID and the winning key IS the dispatch target. This is the one key
@@ -598,7 +601,7 @@ pub fn seed_repair_self_facts(
 fn committed_station_for_slot(
     slot: &TeamSlot,
     config: &crate::ship_plugin::ShipConfigComponent,
-    hull: &crate::damage::SystemHull,
+    hull: &crate::ship::damage::SystemHull,
 ) -> Option<String> {
     let system_id = match slot {
         TeamSlot::Travelling { system_id, .. } | TeamSlot::Repairing { system_id, .. } => {
@@ -629,7 +632,7 @@ fn committed_station_for_slot(
 /// worst_system_damage_fraction, system_count)`.
 fn station_damage_readings(
     station_id: &str,
-    hull: &crate::damage::SystemHull,
+    hull: &crate::ship::damage::SystemHull,
     config: &crate::ship_plugin::ShipConfigComponent,
 ) -> (f32, f32, usize) {
     let mut total_max = 0.0_f32;
@@ -758,20 +761,20 @@ pub fn operate_repair_ai(
     mut ships: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &ShipSystemControlSources,
             Option<&ShipRepairTeams>,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&mut RepairRequestQueue>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&RepairTargetSelector>,
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
             // The external repair-dispatch record (issue #1161), read for the
             // one question it answers here: how many of this ship's teams are
             // held abroad against a designated target, and so unavailable to the
             // hull's own damage-control sweep (AGENTS.md rule 6).
             Option<&super::external_server::ExternalRepairDispatch>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -1037,13 +1040,15 @@ pub fn operate_repair_ai(
             };
 
             let target = if winner == REPAIR_CORE_BUCKET_KEY {
-                crate::messages::RepairTarget::Core
+                crate::core::messages::RepairTarget::Core
             } else {
-                crate::messages::RepairTarget::Station(crate::messages::StationId(winner.clone()))
+                crate::core::messages::RepairTarget::Station(crate::core::messages::StationId(
+                    winner.clone(),
+                ))
             };
             emit_repair_ai_command(
                 entity_uuid,
-                crate::messages::SystemControlPayload::DispatchRepairTeam {
+                crate::core::messages::SystemControlPayload::DispatchRepairTeam {
                     team_idx: team_idx as u8,
                     target,
                 },
@@ -1061,16 +1066,16 @@ pub fn operate_repair_ai(
 /// shared [`crate::command_admission::validate_and_admit`] seam, using this
 /// ship's own `ai:<uuid>` token (mirrors `emit_sensors_ai_command`).
 fn emit_repair_ai_command(
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
-    payload: crate::messages::SystemControlPayload,
+    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
+    payload: crate::core::messages::SystemControlPayload,
     sources: &ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
     config: &crate::ship_plugin::ShipConfigComponent,
-    admitted: &mut crate::messages::AdmittedCommands,
+    admitted: &mut crate::core::messages::AdmittedCommands,
 ) -> bool {
     emit_ai_command(
         entity_uuid,
-        crate::system_registry::repair_system_id(),
+        crate::ship::system_registry::repair_system_id(),
         payload,
         sources,
         sessions,
@@ -1082,13 +1087,13 @@ fn emit_repair_ai_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::SystemHull;
+    use crate::core::messages::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
-    use crate::messages::*;
-    use crate::shield::ShieldSystem;
+    use crate::server_app::SimOutbox;
+    use crate::server_app::{ShipImpulse, ShipShields};
+    use crate::ship::damage::SystemHull;
     use crate::ship_plugin::ShipSystemControlSources;
-    use crate::simulation::SimOutbox;
-    use crate::simulation::{ShipImpulse, ShipShields};
+    use crate::weapons::shield::ShieldSystem;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -1144,17 +1149,17 @@ mod tests {
             (SystemId("core".into()), 50.0),
         ];
         app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
-            crate::entity_spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
+            crate::entities::spawner::EntitySystemHull(SystemHull::from_config(hull_config)),
             crate::server_app::ShipSystemBlackboards::default(),
             ShipShields(ShieldSystem::default(), 0.5),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
             crate::modifiers::ShipModifiers::new(),
             RepairRequestQueue::default(),
             // Nested tuple to keep the outer bundle within Bevy's 15-arity limit.
@@ -1163,7 +1168,7 @@ mod tests {
             (
                 crate::ship_plugin::RepairHumanAlerted::default(),
                 crate::ship_plugin::LastSystemTiers::default(),
-                ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)),
+                ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(2)),
                 // The AUTHORED `[repair.selector]` block every shipped hull
                 // carries. Since #885b stage 5d `operate_repair_ai` has no
                 // synthesised fallback — a ship with no selector dispatches
@@ -1185,7 +1190,7 @@ mod tests {
     fn local_teams(app: &mut App) -> ShipRepairTeams {
         let mut q = app
             .world_mut()
-            .query_filtered::<&ShipRepairTeams, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&ShipRepairTeams, With<crate::server_app::LocalShip>>();
         q.single(app.world())
             .expect("LocalShip must carry ShipRepairTeams")
             .clone()
@@ -1195,7 +1200,7 @@ mod tests {
     fn dispatch_local(app: &mut App, idx: usize, sid: SystemId, name: &str) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut ShipRepairTeams, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&mut ShipRepairTeams, With<crate::server_app::LocalShip>>();
         q.single_mut(app.world_mut())
             .expect("LocalShip must carry ShipRepairTeams")
             .0
@@ -1234,12 +1239,12 @@ mod tests {
         let local_ship = {
             let mut q = app
                 .world_mut()
-                .query_filtered::<Entity, With<crate::simulation::LocalShip>>();
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
             q.single(app.world()).expect("one LocalShip")
         };
         let mut rows: Vec<(SystemId, f32)> = app
             .world()
-            .get::<crate::entity_spawner::EntitySystemHull>(local_ship)
+            .get::<crate::entities::spawner::EntitySystemHull>(local_ship)
             .expect("LocalShip must carry EntitySystemHull")
             .0
             .iter()
@@ -1259,13 +1264,13 @@ mod tests {
         }
         app.world_mut()
             .entity_mut(local_ship)
-            .insert(crate::entity_spawner::EntitySystemHull(hull));
+            .insert(crate::entities::spawner::EntitySystemHull(hull));
     }
 
     fn repair_bb(app: &mut App) -> RepairBlackboard {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::server_app::ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&crate::server_app::ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         let bbs = q
             .single(app.world())
             .expect("LocalShip must have ShipSystemBlackboards");
@@ -1293,7 +1298,7 @@ mod tests {
             out.push(OutboundMessage {
                 target,
                 msg,
-                delivery: crate::messages::DeliveryClass::Reliable,
+                delivery: crate::core::messages::DeliveryClass::Reliable,
             });
         }
         app.world_mut().resource_mut::<Outbox>().0.clear();
@@ -1343,12 +1348,12 @@ mod tests {
     fn team_is_travelling(teams: &ShipRepairTeams, idx: usize) -> bool {
         matches!(
             teams.0.slots()[idx],
-            crate::messages::TeamSlot::Travelling { .. }
+            crate::core::messages::TeamSlot::Travelling { .. }
         )
     }
 
     fn team_is_idle(teams: &ShipRepairTeams, idx: usize) -> bool {
-        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Idle)
+        matches!(teams.0.slots()[idx], crate::core::messages::TeamSlot::Idle)
     }
 
     // ── Dispatch tests ──────────────────────────────────────────────────────
@@ -1363,7 +1368,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
                     target: RepairTarget::Station(StationId("helm".into())),
@@ -1390,7 +1395,7 @@ mod tests {
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
                     target: RepairTarget::Station(StationId("helm".into())),
@@ -1416,21 +1421,23 @@ mod tests {
         let local_ship = {
             let mut query = app
                 .world_mut()
-                .query_filtered::<Entity, With<crate::simulation::LocalShip>>();
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
             query
                 .single(app.world())
                 .expect("test fixture must contain one LocalShip")
         };
         app.world_mut()
             .entity_mut(local_ship)
-            .insert(ShipRepairTeams(crate::repair_teams::RepairTeams::default()));
+            .insert(ShipRepairTeams(
+                crate::modifiers::repair_teams::RepairTeams::default(),
+            ));
 
         let damaged_system = SystemId("helm-engine-port".into());
         let hp_before = 10.0;
         {
             let mut query = app.world_mut().query_filtered::<
-                &mut crate::entity_spawner::EntitySystemHull,
-                With<crate::simulation::LocalShip>,
+                &mut crate::entities::spawner::EntitySystemHull,
+                With<crate::server_app::LocalShip>,
             >();
             let mut hull = query
                 .single_mut(app.world_mut())
@@ -1466,8 +1473,8 @@ mod tests {
         }
 
         let mut query = app.world_mut().query_filtered::<
-            &crate::entity_spawner::EntitySystemHull,
-            With<crate::simulation::LocalShip>,
+            &crate::entities::spawner::EntitySystemHull,
+            With<crate::server_app::LocalShip>,
         >();
         let hull = query
             .single(app.world())
@@ -1495,7 +1502,7 @@ mod tests {
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
                     target: RepairTarget::Station(StationId("helm".into())),
@@ -1507,7 +1514,7 @@ mod tests {
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 1,
                     target: RepairTarget::Station(StationId("tactical".into())),
@@ -1521,7 +1528,7 @@ mod tests {
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
                     target: RepairTarget::Station(StationId("power".into())),
@@ -1534,7 +1541,7 @@ mod tests {
         // team 0 should be Returning (redirected), team 1 still Travelling
         assert!(matches!(
             &teams.0.slots()[0],
-            crate::messages::TeamSlot::Returning { .. }
+            crate::core::messages::TeamSlot::Returning { .. }
         ));
         assert!(team_is_travelling(&teams, 1));
     }
@@ -1550,7 +1557,7 @@ mod tests {
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
                     target: RepairTarget::Station(StationId("helm".into())),
@@ -1562,7 +1569,7 @@ mod tests {
 
         let has_repair_state = out1.iter().chain(out2.iter()).any(|m| {
             matches!(&m.msg, ServerMessage::RepairState { teams } if
-                teams.iter().any(|t| matches!(t, crate::messages::TeamSlot::Travelling { .. })))
+                teams.iter().any(|t| matches!(t, crate::core::messages::TeamSlot::Travelling { .. })))
         });
         assert!(
             has_repair_state,
@@ -1583,7 +1590,7 @@ mod tests {
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
                     target: RepairTarget::Station(StationId("helm".into())),
@@ -1609,7 +1616,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
                     target: RepairTarget::Station(StationId("helm".into())),
@@ -1648,7 +1655,7 @@ mod tests {
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
                     target: RepairTarget::Station(StationId("helm".into())),
@@ -1673,7 +1680,7 @@ mod tests {
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
                     target: RepairTarget::Core,
@@ -1699,14 +1706,15 @@ mod tests {
     fn repair_teams_resource_reflects_battleship_toml_repair_block() {
         // Through the resolver (issue #876): this hull is COMPOSED, so its baked
         // bytes are no longer the document `spawn_game_start_entities` reads.
-        let config =
-            crate::entity_includes::load_entity_config("assets/entities/alliance_battleship.toml")
-                .expect("alliance_battleship.toml must compose and parse");
+        let config = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_battleship.toml",
+        )
+        .expect("alliance_battleship.toml must compose and parse");
         let rc = config
             .repair
             .expect("alliance_battleship must declare [repair]");
         let timings = rc.to_runtime();
-        let teams = crate::repair_teams::RepairTeams::new_with_timings(2, timings);
+        let teams = crate::modifiers::repair_teams::RepairTeams::new_with_timings(2, timings);
         assert_eq!(teams.timings().travel_duration, rc.travel_duration_secs);
         assert_eq!(
             teams.timings().repair_rate_hp_per_sec,
@@ -1714,7 +1722,7 @@ mod tests {
         );
         // And the runtime defaults still match (until someone intentionally
         // diverges them).
-        let baseline = crate::repair_teams::RepairTimings::default();
+        let baseline = crate::modifiers::repair_teams::RepairTimings::default();
         assert_eq!(teams.timings().travel_duration, baseline.travel_duration);
         assert_eq!(
             teams.timings().repair_rate_hp_per_sec,
@@ -1794,8 +1802,8 @@ mod tests {
     /// that runs the production copy.
     #[test]
     fn queue_entry_retained_when_all_systems_destroyed() {
-        use crate::damage::SystemHull;
         use crate::ship::config::{ShipConfig, SystemInstanceConfig};
+        use crate::ship::damage::SystemHull;
 
         let station_id = "helm";
         let system_id = SystemId("helm".into());
@@ -1823,7 +1831,7 @@ mod tests {
         rq.entries.push(RepairQueueEntry {
             station_id: station_id.into(),
             station_label: "Helm".into(),
-            tier: crate::damage::DamageTier::Disabled,
+            tier: crate::ship::damage::DamageTier::Disabled,
             deficit: 25.0,
         });
         assert_eq!(rq.entries.len(), 1, "entry must be present before retain");
@@ -1831,7 +1839,7 @@ mod tests {
         hull.set_hp(&system_id, 0.0);
         assert_eq!(
             hull.tier_for(&system_id),
-            crate::damage::DamageTier::Destroyed,
+            crate::ship::damage::DamageTier::Destroyed,
             "system must be Destroyed after set_hp(0)"
         );
 
@@ -1842,7 +1850,7 @@ mod tests {
                 .filter(|s| {
                     s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
                 })
-                .any(|s| hull.tier_for(&s.id) != crate::damage::DamageTier::Operational)
+                .any(|s| hull.tier_for(&s.id) != crate::ship::damage::DamageTier::Operational)
         });
 
         assert_eq!(
@@ -1861,7 +1869,7 @@ mod tests {
                 .filter(|s| {
                     s.station.as_ref().map(|st| st.0.as_str()) == Some(entry.station_id.as_str())
                 })
-                .any(|s| hull.tier_for(&s.id) != crate::damage::DamageTier::Operational)
+                .any(|s| hull.tier_for(&s.id) != crate::ship::damage::DamageTier::Operational)
         });
         assert!(
             rq.entries.is_empty(),
@@ -1877,24 +1885,24 @@ mod tests {
 
         let mut ai_resolver = ControlSourceResolver::new();
         ai_resolver.set(
-            crate::system_registry::repair_system_id(),
+            crate::ship::system_registry::repair_system_id(),
             ControlSource::Ai,
         );
         let ai_sources = ShipSystemControlSources(ai_resolver);
         let policy = ai_sources
             .0
-            .policy_for(&crate::system_registry::repair_system_id());
+            .policy_for(&crate::ship::system_registry::repair_system_id());
         assert!(policy.operate_ai, "AI Repair must gate through operate_ai");
 
         let mut human_resolver = ControlSourceResolver::new();
         human_resolver.set(
-            crate::system_registry::repair_system_id(),
+            crate::ship::system_registry::repair_system_id(),
             ControlSource::Human,
         );
         let human_sources = ShipSystemControlSources(human_resolver);
         let human_policy = human_sources
             .0
-            .policy_for(&crate::system_registry::repair_system_id());
+            .policy_for(&crate::ship::system_registry::repair_system_id());
         assert!(!human_policy.operate_ai, "human Repair must not operate AI");
     }
 
@@ -1955,7 +1963,7 @@ mod tests {
     }
 
     /// Test-only mirror of admission's per-tick `AdmittedCommands` clear.
-    fn clear_admitted_commands(mut q: Query<&mut crate::messages::AdmittedCommands>) {
+    fn clear_admitted_commands(mut q: Query<&mut crate::core::messages::AdmittedCommands>) {
         for mut admitted in q.iter_mut() {
             admitted.0.clear();
         }
@@ -1975,7 +1983,7 @@ mod tests {
         resolver.set(repair_system_id(), source);
 
         let mut hull =
-            crate::damage::SystemHull::from_config(&[(SystemId("helm".into()), 100.0_f32)]);
+            crate::ship::damage::SystemHull::from_config(&[(SystemId("helm".into()), 100.0_f32)]);
         let mut rng = crate::sim_rng::unseeded_test_rng();
         hull.apply_damage(damage, &mut rng);
 
@@ -1990,14 +1998,14 @@ mod tests {
         app.world_mut()
             .spawn((
                 crate::server_app::Ship,
-                crate::entity_spawner::EntityUuid("npc-repair-1".into()),
+                crate::entities::spawner::EntityUuid("npc-repair-1".into()),
                 ShipSystemControlSources(resolver),
-                ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)),
-                crate::entity_spawner::EntitySystemHull(hull),
+                ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(2)),
+                crate::entities::spawner::EntitySystemHull(hull),
                 crate::modifiers::ShipModifiers::new(),
                 queue,
                 npc_repair_config(),
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 // The AUTHORED `[repair.selector]` block: since #885b stage 5d
                 // an NPC with no selector component ranks nothing and dispatches
                 // no team.
@@ -2057,7 +2065,7 @@ mod tests {
         );
         let hp_before = app
             .world()
-            .get::<crate::entity_spawner::EntitySystemHull>(npc)
+            .get::<crate::entities::spawner::EntitySystemHull>(npc)
             .unwrap()
             .0
             .total_current();
@@ -2069,7 +2077,7 @@ mod tests {
 
         let hp_after = app
             .world()
-            .get::<crate::entity_spawner::EntitySystemHull>(npc)
+            .get::<crate::entities::spawner::EntitySystemHull>(npc)
             .expect("NPC must still have hull component")
             .0
             .total_current();
@@ -2092,7 +2100,7 @@ mod tests {
         let sources = ShipSystemControlSources(resolver);
         let sessions = crate::lobby::Sessions(crate::lobby::session::SessionManager::new());
         let config = npc_repair_config();
-        let mut admitted = crate::messages::AdmittedCommands::default();
+        let mut admitted = crate::core::messages::AdmittedCommands::default();
 
         let admitted_ok = crate::command_admission::validate_and_admit(
             "ai:npc-repair-1",
@@ -2455,7 +2463,7 @@ mod tests {
         let mut resolver = ControlSourceResolver::new();
         resolver.set(repair_system_id(), source);
 
-        let mut hull = crate::damage::SystemHull::from_config(&[
+        let mut hull = crate::ship::damage::SystemHull::from_config(&[
             (SystemId("alpha-sys".into()), 100.0_f32),
             (SystemId("bravo-sys".into()), 100.0_f32),
         ]);
@@ -2487,14 +2495,14 @@ mod tests {
             .world_mut()
             .spawn((
                 crate::server_app::Ship,
-                crate::entity_spawner::EntityUuid("npc-repair-2".into()),
+                crate::entities::spawner::EntityUuid("npc-repair-2".into()),
                 ShipSystemControlSources(resolver),
-                ShipRepairTeams(crate::repair_teams::RepairTeams::new(teams)),
-                crate::entity_spawner::EntitySystemHull(hull),
+                ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(teams)),
+                crate::entities::spawner::EntitySystemHull(hull),
                 crate::modifiers::ShipModifiers::new(),
                 queue,
                 two_station_config(),
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 // The AUTHORED `[repair.selector]` block, unless the caller
                 // supplies its own below. Since #885b stage 5d there is no host
                 // fallback: a ship with no selector component dispatches nothing.
@@ -2729,7 +2737,7 @@ mod tests {
 
         // Heal alpha outright, then tick: the entry must vanish.
         app.world_mut()
-            .get_mut::<crate::entity_spawner::EntitySystemHull>(npc)
+            .get_mut::<crate::entities::spawner::EntitySystemHull>(npc)
             .unwrap()
             .0
             .set_hp(&SystemId("alpha-sys".into()), 100.0);
@@ -2746,7 +2754,7 @@ mod tests {
 
         // Free every team and tick again: nothing is eligible, so nothing is sent.
         app.world_mut().get_mut::<ShipRepairTeams>(npc).unwrap().0 =
-            crate::repair_teams::RepairTeams::new(1);
+            crate::modifiers::repair_teams::RepairTeams::new(1);
         app.update();
         assert!(
             team_systems(&app, npc).iter().all(|s| s.is_none()),
@@ -2848,7 +2856,7 @@ mod tests {
         );
         let before = app
             .world()
-            .get::<crate::entity_spawner::EntitySystemHull>(npc)
+            .get::<crate::entities::spawner::EntitySystemHull>(npc)
             .unwrap()
             .0
             .current_for(&SystemId("bravo-sys".into()))
@@ -2858,7 +2866,7 @@ mod tests {
         }
         let after = app
             .world()
-            .get::<crate::entity_spawner::EntitySystemHull>(npc)
+            .get::<crate::entities::spawner::EntitySystemHull>(npc)
             .unwrap()
             .0
             .current_for(&SystemId("bravo-sys".into()))
@@ -2895,7 +2903,7 @@ mod tests {
         // The ownerless `core` hull entry at 10/100 → Disabled, damage fraction
         // 0.90, deficit 90. Same tier, so only the deficit ladder separates
         // them — and only if the core candidate carries its real hull reading.
-        let mut hull = crate::damage::SystemHull::from_config(&[
+        let mut hull = crate::ship::damage::SystemHull::from_config(&[
             (SystemId("helm-sys".into()), 100.0_f32),
             (SystemId(REPAIR_CORE_BUCKET_KEY.into()), 100.0_f32),
         ]);
@@ -2949,14 +2957,14 @@ mod tests {
             .world_mut()
             .spawn((
                 crate::server_app::Ship,
-                crate::entity_spawner::EntityUuid("npc-repair-core".into()),
+                crate::entities::spawner::EntityUuid("npc-repair-core".into()),
                 ShipSystemControlSources(resolver),
-                ShipRepairTeams(crate::repair_teams::RepairTeams::new(1)),
-                crate::entity_spawner::EntitySystemHull(hull),
+                ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(1)),
+                crate::entities::spawner::EntitySystemHull(hull),
                 crate::modifiers::ShipModifiers::new(),
                 queue,
                 config,
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 // The AUTHORED `[repair.selector]` block — the deficit ladder
                 // under test lives in it, and since #885b stage 5d nothing
                 // supplies one for a ship that carries no component.
@@ -3002,7 +3010,7 @@ mod tests {
             crate::ship::control_source::ControlSource::Ai,
         );
 
-        let mut hull = crate::damage::SystemHull::from_config(&[
+        let mut hull = crate::ship::damage::SystemHull::from_config(&[
             (SystemId(REPAIR_CORE_BUCKET_KEY.into()), 20.0_f32),
             (SystemId("science".into()), science_max),
             (SystemId("helm-sys".into()), 20.0),
@@ -3041,14 +3049,14 @@ mod tests {
         app.world_mut()
             .spawn((
                 crate::server_app::Ship,
-                crate::entity_spawner::EntityUuid("npc-two-ownerless".into()),
+                crate::entities::spawner::EntityUuid("npc-two-ownerless".into()),
                 ShipSystemControlSources(resolver),
-                ShipRepairTeams(crate::repair_teams::RepairTeams::new(team_count)),
-                crate::entity_spawner::EntitySystemHull(hull),
+                ShipRepairTeams(crate::modifiers::repair_teams::RepairTeams::new(team_count)),
+                crate::entities::spawner::EntitySystemHull(hull),
                 crate::modifiers::ShipModifiers::new(),
                 queue,
                 config,
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 RepairTargetSelector {
                     selector: crate::entities::authored_ai_pins::shipped_selector_toml("repair")
                         .to_selector()
@@ -3109,7 +3117,7 @@ mod tests {
 
         let hull = &app
             .world()
-            .get::<crate::entity_spawner::EntitySystemHull>(npc)
+            .get::<crate::entities::spawner::EntitySystemHull>(npc)
             .expect("hull")
             .0;
         assert!(
@@ -3250,7 +3258,7 @@ mod tests {
         );
         assert_eq!(
             app.world()
-                .get::<crate::entity_spawner::EntitySystemHull>(npc)
+                .get::<crate::entities::spawner::EntitySystemHull>(npc)
                 .unwrap()
                 .0
                 .tier_for(&SystemId("alpha-sys".into())),
@@ -3331,8 +3339,8 @@ mod tests {
         let destroyed = SystemId("helm-engine-port".into());
         {
             let mut query = app.world_mut().query_filtered::<
-                &mut crate::entity_spawner::EntitySystemHull,
-                With<crate::simulation::LocalShip>,
+                &mut crate::entities::spawner::EntitySystemHull,
+                With<crate::server_app::LocalShip>,
             >();
             let mut hull = query
                 .single_mut(app.world_mut())
@@ -3375,8 +3383,8 @@ mod tests {
         }
 
         let mut query = app.world_mut().query_filtered::<
-            &crate::entity_spawner::EntitySystemHull,
-            With<crate::simulation::LocalShip>,
+            &crate::entities::spawner::EntitySystemHull,
+            With<crate::server_app::LocalShip>,
         >();
         let hull = query
             .single(app.world())
@@ -3414,18 +3422,19 @@ mod tests {
             let local_ship = {
                 let mut query = app
                     .world_mut()
-                    .query_filtered::<Entity, With<crate::simulation::LocalShip>>();
+                    .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
                 query.single(app.world()).expect("one LocalShip")
             };
             // Rebuild the hull so it carries both helm engines.
-            app.world_mut()
-                .entity_mut(local_ship)
-                .insert(crate::entity_spawner::EntitySystemHull(
-                    SystemHull::from_config(&[(first.clone(), 10.0), (second.clone(), 10.0)]),
-                ));
+            app.world_mut().entity_mut(local_ship).insert(
+                crate::entities::spawner::EntitySystemHull(SystemHull::from_config(&[
+                    (first.clone(), 10.0),
+                    (second.clone(), 10.0),
+                ])),
+            );
             let mut hull = app
                 .world_mut()
-                .get_mut::<crate::entity_spawner::EntitySystemHull>(local_ship)
+                .get_mut::<crate::entities::spawner::EntitySystemHull>(local_ship)
                 .unwrap();
             hull.0.set_hp(&first, 1.0);
             hull.0.set_hp(&second, 0.0);

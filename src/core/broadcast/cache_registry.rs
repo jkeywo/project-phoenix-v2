@@ -35,7 +35,7 @@
 //! [`LastBroadcastEntityPositions`], [`LastBroadcastEntityHealth`],
 //! [`LastBroadcastHull`], [`LastBroadcastShields`],
 //! [`LastBroadcastBlackboards`]. They are re-exported from `server_app` (and
-//! transitively `crate::simulation`) so existing `ResMut<LastBroadcastX>`
+//! transitively `crate::server_app`) so existing `ResMut<LastBroadcastX>`
 //! system parameters across the codebase are unaffected by the move.
 //!
 //! The sixth cache, `LastWeaponsUpdate` (`src/console/weapons/mod.rs`),
@@ -63,8 +63,8 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use crate::core::messages::{ServerMessage, ShieldFacingStatus, SystemBlackboard, SystemId};
 use crate::lobby::Target;
-use crate::messages::{ServerMessage, ShieldFacingStatus, SystemBlackboard, SystemId};
 
 // ── Cache resources ─────────────────────────────────────────────────────────
 
@@ -201,10 +201,10 @@ pub fn prune(
 /// still diffs normally instead of being forced to re-send to everyone.
 pub fn resync_for_token(world: &mut World, token: &str) {
     use crate::console::weapons::compute_current_weapons_update;
+    use crate::core::messages::StationId;
     use crate::lobby::Sessions;
-    use crate::messages::StationId;
+    use crate::server_app::{LocalShip, ShipSystemBlackboards, SimOutbox};
     use crate::ship::shields::ShipShields;
-    use crate::simulation::{LocalShip, ShipSystemBlackboards, SimOutbox};
 
     let target = Target::Token(token.to_string());
     let mut messages: Vec<ServerMessage> = Vec::new();
@@ -285,7 +285,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
             .single(world)
             .ok()
             .and_then(|c| c.0.weapons_station())
-            .unwrap_or_else(|| StationId(crate::system_registry::TACTICAL_STATION_ID.into()));
+            .unwrap_or_else(|| StationId(crate::ship::system_registry::TACTICAL_STATION_ID.into()));
         let holds_tactical = world
             .resource::<Sessions>()
             .0
@@ -317,7 +317,7 @@ pub fn resync_for_token(world: &mut World, token: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::simulation::{LocalShip, ShipSystemBlackboards, SimOutbox};
+    use crate::server_app::{LocalShip, ShipSystemBlackboards, SimOutbox};
 
     #[test]
     fn reset_all_zeroes_every_cache() {
@@ -325,12 +325,12 @@ mod tests {
         hull.0.insert(
             "token-1".into(),
             crate::console::repair::visibility::HullProjection {
-                entries: vec![crate::messages::SystemHullStatus {
+                entries: vec![crate::core::messages::SystemHullStatus {
                     system_id: SystemId("helm".into()),
                     display_name: "Helm".into(),
                     current: 10.0,
                     max_hp: 25.0,
-                    tier: crate::damage::DamageTier::Damaged,
+                    tier: crate::ship::damage::DamageTier::Damaged,
                     debuff_magnitude: 0.5,
                 }],
                 aggregate_fraction: Some(0.4),
@@ -364,7 +364,7 @@ mod tests {
         let mut blackboards = LastBroadcastBlackboards::default();
         blackboards.0.insert(
             SystemId("helm".into()),
-            SystemBlackboard::Helm(crate::messages::HelmBlackboard {
+            SystemBlackboard::Helm(crate::core::messages::HelmBlackboard {
                 yaw: 1.0,
                 forward_speed: 1.0,
                 x: 1.0,
@@ -530,19 +530,22 @@ mod tests {
     fn resync_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(crate::lobby::LobbyPlugin);
-        app.init_resource::<crate::simulation::SimOutbox>();
+        app.init_resource::<crate::server_app::SimOutbox>();
         let ship = app
             .world_mut()
             .spawn((
-                crate::simulation::LocalShip,
-                crate::simulation::ShipSystemBlackboards::default(),
+                crate::server_app::LocalShip,
+                crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship::shields::ShipShields(
                     crate::weapons::shield::ShieldSystem::default(),
                     0.5,
                 ),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
-                    (SystemId("helm".into()), 25.0),
-                ])),
+                crate::entities::spawner::EntitySystemHull(
+                    crate::ship::damage::SystemHull::from_config(&[(
+                        SystemId("helm".into()),
+                        25.0,
+                    )]),
+                ),
             ))
             .id();
         let _ = ship;
@@ -560,7 +563,7 @@ mod tests {
             if let Ok(mut bbs) = q.single_mut(app.world_mut()) {
                 bbs.0.insert(
                     SystemId("helm".into()),
-                    SystemBlackboard::Helm(crate::messages::HelmBlackboard {
+                    SystemBlackboard::Helm(crate::core::messages::HelmBlackboard {
                         yaw: 0.0,
                         forward_speed: 0.0,
                         x: 0.0,
@@ -614,7 +617,7 @@ mod tests {
             .0
             .insert(
                 SystemId("helm".into()),
-                SystemBlackboard::Helm(crate::messages::HelmBlackboard {
+                SystemBlackboard::Helm(crate::core::messages::HelmBlackboard {
                     yaw: 5.0,
                     forward_speed: 5.0,
                     x: 5.0,
@@ -637,19 +640,21 @@ mod tests {
         let cache = app.world().resource::<LastBroadcastBlackboards>();
         assert_eq!(
             cache.0.get(&SystemId("helm".into())),
-            Some(&SystemBlackboard::Helm(crate::messages::HelmBlackboard {
-                yaw: 5.0,
-                forward_speed: 5.0,
-                x: 5.0,
-                z: 5.0,
-                impulse_charge: 5.0,
-                boost_battery: 5.0,
-                boost_active: true,
-                boost_enabled: true,
-                radar_range: 0.0,
-                lateral_speed: 0.0,
-                hostile_weapon_arcs: Vec::new(),
-            })),
+            Some(&SystemBlackboard::Helm(
+                crate::core::messages::HelmBlackboard {
+                    yaw: 5.0,
+                    forward_speed: 5.0,
+                    x: 5.0,
+                    z: 5.0,
+                    impulse_charge: 5.0,
+                    boost_battery: 5.0,
+                    boost_active: true,
+                    boost_enabled: true,
+                    radar_range: 0.0,
+                    lateral_speed: 0.0,
+                    hostile_weapon_arcs: Vec::new(),
+                }
+            )),
             "resync_for_token must not mutate the shared LastBroadcastBlackboards cache"
         );
     }
@@ -665,12 +670,12 @@ mod tests {
         use crate::console::weapons::{
             CurrentPhaserMode, PhaserCombatConfigResource, TorpedoSystemResource,
         };
+        use crate::core::messages::StationId;
         use crate::lobby::Sessions;
-        use crate::messages::StationId;
         use crate::weapons::torpedo::{TorpedoConfig, TorpedoSystem};
 
         let mut app = resync_test_app();
-        app.insert_resource(CurrentPhaserMode(crate::messages::PhaserMode::Manual));
+        app.insert_resource(CurrentPhaserMode(crate::core::messages::PhaserMode::Manual));
         app.world_mut()
             .resource_mut::<Sessions>()
             .0
@@ -696,7 +701,7 @@ mod tests {
         // in `SimSet::PublishAggregate`; here we write the aggregated fact
         // directly, merging so the other resync fixtures' entries survive.
         {
-            use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+            use crate::core::messages::{SystemBlackboard, ViewscreenBlackboard};
             let mut bbs = app
                 .world_mut()
                 .get_mut::<crate::server_app::ShipSystemBlackboards>(ship)
@@ -747,7 +752,7 @@ mod tests {
         );
         assert_eq!(
             phaser_mode,
-            crate::messages::PhaserMode::Manual,
+            crate::core::messages::PhaserMode::Manual,
             "WeaponsUpdate resync must reflect the ship's current phaser mode"
         );
     }
@@ -791,7 +796,7 @@ mod tests {
             banks: vec![],
             tubes: vec![],
             torpedo_count: 7,
-            phaser_mode: crate::messages::PhaserMode::Auto,
+            phaser_mode: crate::core::messages::PhaserMode::Auto,
             blasters: vec![],
             phaser_frequency: 0.5,
         };

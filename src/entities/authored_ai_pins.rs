@@ -104,7 +104,7 @@ fn entity_stems() -> Vec<String> {
 fn entity(stem: &str) -> EntityConfig {
     let path = crate_root().join(format!("assets/entities/{stem}.toml"));
     let key = path.to_string_lossy().replace('\\', "/");
-    crate::entity_includes::load_entity_config(&key)
+    crate::entities::include_resolve::load_entity_config(&key)
         .unwrap_or_else(|e| panic!("{stem} must load: {e}"))
 }
 
@@ -940,7 +940,7 @@ fn captain_guard_truth_table() {
 fn cruiser_toml() -> String {
     let path = crate_root().join("assets/entities/alliance_cruiser.toml");
     let key = path.to_string_lossy().replace('\\', "/");
-    crate::entity_includes::resolve_from_disk(&key)
+    crate::entities::include_resolve::resolve_from_disk(&key)
         .expect("alliance_cruiser must compose")
         .toml
 }
@@ -3034,7 +3034,7 @@ fn weapons_fire_guard_truth_table() {
 /// `0 >= 0`.
 #[test]
 fn a_weapons_hold_closes_every_shipped_fire_gate() {
-    use crate::weapons_plugin::{WeaponsAlertPosture, WEAPONS_HOLD_ALERT_FACT};
+    use crate::console::weapons::{WeaponsAlertPosture, WEAPONS_HOLD_ALERT_FACT};
 
     let held = WeaponsAlertPosture {
         red_alert: true,
@@ -3149,7 +3149,7 @@ fn a_weapons_hold_closes_every_shipped_fire_gate() {
 fn the_fleet_baseline_arc_order_is_unconditional_on_facts() {
     let p = fleet_baseline_policy("weapons_doctrine");
     let order =
-        |snapshot: &AiFacts| crate::weapons_plugin::resolve_arc_bearing_order(&p, snapshot, &[]);
+        |snapshot: &AiFacts| crate::console::weapons::resolve_arc_bearing_order(&p, snapshot, &[]);
 
     let baseline = order(&facts(&[]));
     assert!(
@@ -3184,7 +3184,7 @@ fn the_fleet_baseline_arc_order_is_unconditional_on_facts() {
 /// conditional promotion rather than a permanently different ship.
 #[test]
 fn the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap() {
-    use crate::messages::WeaponFamily::{Blasters, Phasers, Torpedoes};
+    use crate::core::messages::WeaponFamily::{Blasters, Phasers, Torpedoes};
     let hull = entity("ship_harrow_cruiser");
     let p = policy(
         hull.weapons_console
@@ -3195,7 +3195,7 @@ fn the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap() {
             .expect("…and authors `[weapons_console.ai]`"),
     );
     let order = |hp: f64| {
-        crate::weapons_plugin::resolve_arc_bearing_order(
+        crate::console::weapons::resolve_arc_bearing_order(
             &p,
             &facts(&[("target_facing_shields", hp), ("red_alert", 1.0)]),
             &[],
@@ -3224,7 +3224,7 @@ fn the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap() {
          departure is exactly the promotion and nothing else."
     );
     assert_eq!(
-        crate::weapons_plugin::resolve_arc_bearing_order(&p, &facts(&[]), &[]),
+        crate::console::weapons::resolve_arc_bearing_order(&p, &facts(&[]), &[]),
         vec![Phasers, Blasters, Torpedoes],
         "with NO striking-arc reading at all the promotion's guard reads false and \
          the hull falls back to the baseline. The doctrine fails CLOSED, so a \
@@ -3233,7 +3233,7 @@ fn the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap() {
     );
     assert_ne!(
         order(0.0),
-        crate::weapons_plugin::resolve_arc_bearing_order(
+        crate::console::weapons::resolve_arc_bearing_order(
             &fleet_baseline_policy("weapons_doctrine"),
             &facts(&[("target_facing_shields", 0.0), ("red_alert", 1.0)]),
             &[],

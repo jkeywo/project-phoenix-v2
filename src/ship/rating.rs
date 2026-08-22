@@ -1,4 +1,4 @@
-use crate::messages::{StationId, SystemId};
+use crate::core::messages::{StationId, SystemId};
 use crate::ship::config::{ShipConfig, StationConfig};
 use crate::ship::control_source::ControlSource;
 use crate::ship::control_source::ControlSourceResolver;
@@ -511,7 +511,7 @@ power_group = "ops"
             // Through the include resolver (issue #906) so this keeps covering
             // a hull once it is composed.
             let key = path.to_string_lossy().replace('\\', "/");
-            let config = crate::entity_includes::load_entity_config(&key)
+            let config = crate::entities::include_resolve::load_entity_config(&key)
                 .unwrap_or_else(|e| panic!("{stem} must parse: {e}"));
             let Some(ship_config) = config.ship_config.as_ref() else {
                 continue; // scenery: no stations, no systems, nothing to seed

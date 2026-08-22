@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
+use crate::core::messages::ClientMessage;
 use crate::lobby::{InboundMessage, Sessions};
-use crate::messages::ClientMessage;
 use crate::server_app::LocalShip;
 use crate::ship::components::{
     ActiveStationRatings, ShipConfigComponent, ShipSystemControlSources,
@@ -51,8 +51,8 @@ pub fn handle_station_rating_change(
                 .insert(station_id.clone(), rating_name.clone());
 
             outbox.0.push((
-                crate::lobby_handler::Target::All,
-                crate::messages::ServerMessage::RatingChanged {
+                crate::lobby::handler::Target::All,
+                crate::core::messages::ServerMessage::RatingChanged {
                     station_id,
                     rating_name: rating_name.clone(),
                 },
@@ -64,10 +64,10 @@ pub fn handle_station_rating_change(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control_source::ControlSource;
-    use crate::messages::StationId;
+    use crate::core::messages::StationId;
+    use crate::server_app::Ship;
+    use crate::ship::control_source::ControlSource;
     use crate::ship::test_support::*;
-    use crate::simulation::Ship;
 
     // ── Station Rating tests ─────────────────────────────────────────────
 
@@ -159,7 +159,7 @@ station = "helm"
         assert_eq!(
             sources
                 .0
-                .source_for(&crate::system_registry::red_alert_system_id()),
+                .source_for(&crate::ship::system_registry::red_alert_system_id()),
             ControlSource::Ai
         );
     }
@@ -182,7 +182,7 @@ station = "helm"
         assert_eq!(
             sources
                 .0
-                .source_for(&crate::system_registry::red_alert_system_id()),
+                .source_for(&crate::ship::system_registry::red_alert_system_id()),
             ControlSource::Human
         );
     }
@@ -205,14 +205,14 @@ station = "helm"
         assert_eq!(
             sources
                 .0
-                .source_for(&crate::system_registry::red_alert_system_id()),
+                .source_for(&crate::ship::system_registry::red_alert_system_id()),
             ControlSource::Ai
         );
         // viewscreen is now owned by the captain station, so backfill must automate it too.
         assert_eq!(
             sources
                 .0
-                .source_for(&crate::system_registry::viewscreen_system_id()),
+                .source_for(&crate::ship::system_registry::viewscreen_system_id()),
             ControlSource::Ai,
             "backfill should also automate the captain-owned viewscreen system"
         );
@@ -239,7 +239,7 @@ station = "helm"
         assert_eq!(
             sources
                 .0
-                .source_for(&crate::system_registry::red_alert_system_id()),
+                .source_for(&crate::ship::system_registry::red_alert_system_id()),
             ControlSource::Human
         );
     }
@@ -286,7 +286,7 @@ station = "helm"
         let has_rating_changed = outbox.0.iter().any(|(_, msg)| {
             matches!(
                 msg,
-                crate::messages::ServerMessage::RatingChanged {
+                crate::core::messages::ServerMessage::RatingChanged {
                     station_id,
                     rating_name,
                 } if station_id.0 == "captain" && rating_name == "Assisted"

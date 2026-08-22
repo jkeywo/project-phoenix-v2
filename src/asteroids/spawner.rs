@@ -1,7 +1,7 @@
 // Pure Rust module for generating asteroid positions in a donut-shaped field.
 // No Bevy, no physics engine — input → output design for isolated unit testing.
 
-use crate::entity_config::{AsteroidFieldShape, AsteroidTypeRef, GridConfig};
+use crate::entities::config::{AsteroidFieldShape, AsteroidTypeRef, GridConfig};
 use crate::simmath;
 use rand::rngs::StdRng;
 use rand::Rng;
@@ -163,7 +163,7 @@ impl FieldContribution {
     /// Build a contribution from an authored `[asteroid_field]` config.
     /// Returns `None` for fields without a `[asteroid_field.grid]` block —
     /// legacy donut-only fields never streamed and still do not.
-    pub fn from_config(cfg: &crate::entity_config::AsteroidFieldConfig) -> Option<Self> {
+    pub fn from_config(cfg: &crate::entities::config::AsteroidFieldConfig) -> Option<Self> {
         let grid = cfg.grid.clone()?;
         Some(Self {
             weight: cfg.weight,

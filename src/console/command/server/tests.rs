@@ -7,7 +7,7 @@
 //! wire round-trip are pinned in `command_admission`/`core::codec`.
 
 use super::*;
-use crate::messages::{
+use crate::core::messages::{
     AdmittedCommand, AdmittedCommands, StationId, SystemControlPayload, SystemId,
 };
 use crate::ship::control_source::ControlSource;
@@ -115,7 +115,7 @@ fn spawn_ship(app: &mut App, tactical_ai: bool, command_ai: bool) -> Entity {
         },
     );
     sources.0.set(
-        crate::system_registry::command_system_id(),
+        crate::ship::system_registry::command_system_id(),
         if command_ai {
             ControlSource::Ai
         } else {
@@ -130,7 +130,7 @@ fn spawn_ship(app: &mut App, tactical_ai: bool, command_ai: bool) -> Entity {
             AdmittedCommands::default(),
             ShipStationStances::default(),
             LastDirectedControl::default(),
-            crate::ship_state::ShipRedAlert::default(),
+            crate::ship::state::ShipRedAlert::default(),
             crate::server_app::ShipSystemBlackboards::default(),
         ))
         .id()
@@ -154,7 +154,7 @@ fn set_tactical_ai(app: &mut App, ship: Entity, ai: bool) {
 fn set_red_alert(app: &mut App, ship: Entity, active: bool) {
     app.world_mut()
         .entity_mut(ship)
-        .get_mut::<crate::ship_state::ShipRedAlert>()
+        .get_mut::<crate::ship::state::ShipRedAlert>()
         .unwrap()
         .0 = active;
 }
@@ -204,7 +204,7 @@ fn clear_objective_stances(app: &mut App) {
 }
 
 /// The full published Command blackboard for `ship`.
-fn command_bb(app: &App, ship: Entity) -> crate::messages::CommandBlackboard {
+fn command_bb(app: &App, ship: Entity) -> crate::core::messages::CommandBlackboard {
     let bbs = app
         .world()
         .entity(ship)
@@ -213,7 +213,7 @@ fn command_bb(app: &App, ship: Entity) -> crate::messages::CommandBlackboard {
     let SystemBlackboard::Command(bb) = bbs
         .0
         .get(&SystemId(
-            crate::system_registry::COMMAND_SYSTEM_ID.to_string(),
+            crate::ship::system_registry::COMMAND_SYSTEM_ID.to_string(),
         ))
         .expect("a command blackboard is published")
     else {
@@ -242,7 +242,7 @@ fn published_selected_stance(app: &mut App, ship: Entity) -> String {
     let SystemBlackboard::Command(bb) = bbs
         .0
         .get(&SystemId(
-            crate::system_registry::COMMAND_SYSTEM_ID.to_string(),
+            crate::ship::system_registry::COMMAND_SYSTEM_ID.to_string(),
         ))
         .expect("a command blackboard is published")
     else {
@@ -255,7 +255,7 @@ fn set_admitted(app: &mut App, ship: Entity, station: &str, stance: &str) {
     let mut admitted = app.world_mut().entity_mut(ship);
     let mut cmds = admitted.get_mut::<AdmittedCommands>().unwrap();
     cmds.0.push(AdmittedCommand {
-        target: crate::system_registry::command_system_id(),
+        target: crate::ship::system_registry::command_system_id(),
         payload: SystemControlPayload::SetStationStance {
             station: StationId(station.into()),
             stance: stance.into(),
@@ -391,7 +391,7 @@ fn a_human_taking_command_sees_the_ai_intent_and_overrides_it() {
         .unwrap()
         .0
         .set(
-            crate::system_registry::command_system_id(),
+            crate::ship::system_registry::command_system_id(),
             ControlSource::Human,
         );
     set_admitted(&mut app, ship, "tactical", "hold");
@@ -475,7 +475,7 @@ fn changing_alert_switches_a_stored_neutral_but_not_a_standard_stance() {
 
     app.world_mut()
         .entity_mut(ship)
-        .get_mut::<crate::ship_state::ShipRedAlert>()
+        .get_mut::<crate::ship::state::ShipRedAlert>()
         .unwrap()
         .0 = true;
     app.world_mut()
@@ -496,7 +496,7 @@ fn changing_alert_switches_a_stored_neutral_but_not_a_standard_stance() {
         .insert(tactical(), "hold".into());
     app.world_mut()
         .entity_mut(ship)
-        .get_mut::<crate::ship_state::ShipRedAlert>()
+        .get_mut::<crate::ship::state::ShipRedAlert>()
         .unwrap()
         .0 = false;
     app.world_mut()
@@ -699,7 +699,7 @@ fn the_blackboard_lists_the_directed_station_and_its_stances() {
     let SystemBlackboard::Command(bb) = bbs
         .0
         .get(&SystemId(
-            crate::system_registry::COMMAND_SYSTEM_ID.to_string(),
+            crate::ship::system_registry::COMMAND_SYSTEM_ID.to_string(),
         ))
         .expect("a command blackboard is published")
     else {
@@ -728,7 +728,7 @@ fn the_blackboard_marks_the_station_off_the_board_when_human_held() {
     let SystemBlackboard::Command(bb) = bbs
         .0
         .get(&SystemId(
-            crate::system_registry::COMMAND_SYSTEM_ID.to_string(),
+            crate::ship::system_registry::COMMAND_SYSTEM_ID.to_string(),
         ))
         .unwrap()
     else {
@@ -758,7 +758,7 @@ fn a_direct_claim_of_the_directed_station_preserves_the_stored_stance_and_digest
     // on `EntityUuid`; an unminted hull would fold nothing here).
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::entity_spawner::EntityUuid(
+        .insert(crate::entities::spawner::EntityUuid(
             crate::world_id::WorldId::new(crate::world_id::IdNamespace::Entity, 1, 1).render(),
         ));
 
@@ -1066,9 +1066,9 @@ fn author_objective_stance(app: &mut App, id: &str, station: &str, stance: Stati
             std::collections::BTreeMap::new(),
             false,
             Vec::new(),
-            crate::messages::AiDirective::default(),
+            crate::core::messages::AiDirective::default(),
             crate::objectives::UtilityConfig::default(),
-            crate::messages::ObjectiveSource::default(),
+            crate::core::messages::ObjectiveSource::default(),
             Some((StationId(station.into()), stance)),
         );
 }

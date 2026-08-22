@@ -32,7 +32,7 @@
 //! `coarsen_repair_request` per recipient, so a ship-wide broadcast cannot
 //! become a way around the gate for any payload that does carry a number.
 
-use crate::messages::IntentKind;
+use crate::core::messages::IntentKind;
 
 /// One backfilled seat's decision state at one AI decision tick.
 ///

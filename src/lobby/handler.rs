@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
-use crate::messages::{
+use crate::core::messages::{
     GamePhase, GameState, ServerMessage, ShipClientConfig, StationId, WorldData,
 };
-use crate::session::SessionManager;
+use crate::lobby::session::SessionManager;
+use crate::lobby::stations_config::{get_station, ShipStations};
 use crate::ship::config::ShipConfig;
 use crate::ship::control_source::ControlSourceResolver;
 use crate::ship::rating;
-use crate::stations_config::{get_station, ShipStations};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
@@ -1032,9 +1032,9 @@ pub fn process_disconnect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{ClientMessage, EntitySnapshot, StationId, WorldData};
+    use crate::core::messages::{ClientMessage, EntitySnapshot, StationId, WorldData};
+    use crate::lobby::stations_config::{ShipStations, StationDef};
     use crate::ship::control_source::ControlSourceResolver;
-    use crate::stations_config::{ShipStations, StationDef};
 
     /// Test-only dispatch matching the former production `process_message`
     /// signature. Production now routes each `ClientMessage` lobby variant
@@ -1676,7 +1676,7 @@ max_level = 4
         assert_eq!(station_name, Some("Captain".to_string()));
         assert_eq!(
             station_id,
-            Some(crate::messages::StationId("captain".into()))
+            Some(crate::core::messages::StationId("captain".into()))
         );
     }
 
@@ -3097,8 +3097,8 @@ max_level = 4
     fn control_system_in_lobby_produces_no_output() {
         let mut sessions = sessions_with("t1", "Alice");
         let msg = ClientMessage::ControlSystem {
-            target: crate::system_registry::helm_thrust_system_id(),
-            payload: crate::messages::SystemControlPayload::SetThrust { value: 0.5 },
+            target: crate::ship::system_registry::helm_thrust_system_id(),
+            payload: crate::core::messages::SystemControlPayload::SetThrust { value: 0.5 },
         };
         let result = pm("t1", &msg, &mut sessions, GamePhase::Lobby, None);
         assert!(result.outbound.is_empty());

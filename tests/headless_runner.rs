@@ -19,19 +19,20 @@ mod common;
 
 use bevy::prelude::*;
 use common::SimFixture;
-use project_phoenix::ai_plugin::AiHighFidelity;
-use project_phoenix::balance::RunOutcome;
+use project_phoenix::ai::server::AiHighFidelity;
+use project_phoenix::core::balance::RunOutcome;
+use project_phoenix::core::messages::GamePhase;
 use project_phoenix::headless::args::ticks_for_sim_seconds;
 use project_phoenix::headless::{build_headless_app, build_report, run, HeadlessArgs};
-use project_phoenix::messages::GamePhase;
 use project_phoenix::server_app::LocalShip;
 
 #[test]
 fn axiom_station_defence_config_parses() {
-    let source =
-        project_phoenix::entity_includes::resolve_from_disk("assets/entities/station_axiom.toml")
-            .expect("Axiom Station template should resolve");
-    let config = project_phoenix::entity_config::EntityConfig::from_toml(&source.toml)
+    let source = project_phoenix::entities::include_resolve::resolve_from_disk(
+        "assets/entities/station_axiom.toml",
+    )
+    .expect("Axiom Station template should resolve");
+    let config = project_phoenix::entities::config::EntityConfig::from_toml(&source.toml)
         .expect("Axiom Station's autonomous defence should be a valid entity config");
     assert!(
         config.is_static_point_defence(),
@@ -133,8 +134,8 @@ fn player_game_start_spawn_attaches_the_comms_and_repair_ai_components() {
     let mut app = build_headless_app(&args).expect("app should build");
     run(&mut app, args.max_ticks);
 
-    let cruiser: project_phoenix::entity_config::EntityConfig =
-        project_phoenix::entity_includes::load_entity_config(
+    let cruiser: project_phoenix::entities::config::EntityConfig =
+        project_phoenix::entities::include_resolve::load_entity_config(
             "assets/entities/alliance_cruiser.toml",
         )
         .expect("the cruiser template must compose and parse");
@@ -185,8 +186,8 @@ fn player_game_start_spawn_attaches_the_comms_and_repair_ai_components() {
 /// it, which is the property the shipped worlds' unmoved digests rest on.
 #[test]
 fn a_worlds_player_ship_overrides_apply_to_the_lobby_selected_hull() {
-    use project_phoenix::entity_config::{DoctrineObjective, EntityConfig};
-    use project_phoenix::entity_spawner::BehaviourSection;
+    use project_phoenix::entities::config::{DoctrineObjective, EntityConfig};
+    use project_phoenix::entities::spawner::BehaviourSection;
 
     fn doctrine<'a>(pool: &'a [DoctrineObjective], id: &str) -> &'a DoctrineObjective {
         pool.iter()
@@ -221,7 +222,7 @@ fn a_worlds_player_ship_overrides_apply_to_the_lobby_selected_hull() {
          only have come from the world's `[entity.overrides.*]`"
     );
 
-    let cruiser: EntityConfig = project_phoenix::entity_includes::load_entity_config(
+    let cruiser: EntityConfig = project_phoenix::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_cruiser.toml",
     )
     .expect("the cruiser template must compose and parse");
@@ -621,11 +622,11 @@ fn the_duel_keeps_fighting_for_the_whole_run() {
 /// at 0"), which is a different bug (ship death) wearing this one's clothes.
 #[test]
 fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_memory() {
-    use project_phoenix::damage::DamageTier;
-    use project_phoenix::entity_spawner::EntitySystemHull;
-    use project_phoenix::simulation::Ship;
-    use project_phoenix::system_registry::tactical_radar_system_id;
-    use project_phoenix::weapons_plugin::TacticalRadarSelection;
+    use project_phoenix::console::weapons::TacticalRadarSelection;
+    use project_phoenix::entities::spawner::EntitySystemHull;
+    use project_phoenix::server_app::Ship;
+    use project_phoenix::ship::damage::DamageTier;
+    use project_phoenix::ship::system_registry::tactical_radar_system_id;
 
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
@@ -707,7 +708,7 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
     // The one ship that is not the player — the world spawns exactly one NPC.
     fn hostile_hull_tier(
         app: &mut App,
-        radar_id: &project_phoenix::messages::SystemId,
+        radar_id: &project_phoenix::core::messages::SystemId,
     ) -> DamageTier {
         let mut q = app
             .world_mut()
@@ -741,7 +742,8 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
         let player_uuid = {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&project_phoenix::entity_spawner::EntityUuid, With<LocalShip>>();
+                .query_filtered::<&project_phoenix::entities::spawner::EntityUuid, With<LocalShip>>(
+                );
             q.single(app.world()).expect("player uuid").0.clone()
         };
         let report = build_report(app, args, 0.0);
@@ -855,10 +857,10 @@ fn destroying_the_tactical_radar_stops_the_ship_firing_instead_of_shooting_its_m
 #[test]
 #[ignore]
 fn scratch_seed_sweep_probe_radar_kill() {
-    use project_phoenix::damage::DamageTier;
-    use project_phoenix::entity_spawner::EntitySystemHull;
-    use project_phoenix::simulation::Ship;
-    use project_phoenix::system_registry::tactical_radar_system_id;
+    use project_phoenix::entities::spawner::EntitySystemHull;
+    use project_phoenix::server_app::Ship;
+    use project_phoenix::ship::damage::DamageTier;
+    use project_phoenix::ship::system_registry::tactical_radar_system_id;
 
     let dt = 1.0 / 30.0;
     let radar_id = tactical_radar_system_id();
@@ -984,7 +986,7 @@ fn scenario_declared_victory_classifies_as_victory() {
 /// would pass with the flag never having moved at all.
 #[test]
 fn an_infrastructure_threshold_flips_its_flag_in_both_directions_in_a_real_run() {
-    use project_phoenix::entity_spawner::EntityName;
+    use project_phoenix::entities::spawner::EntityName;
     use project_phoenix::infrastructure::InfrastructureCondition;
     use project_phoenix::world::server::WorldContentRuntime;
 
@@ -1146,7 +1148,7 @@ fn an_infrastructure_threshold_flips_its_flag_in_both_directions_in_a_real_run()
 #[test]
 fn civilian_orders_walk_the_compliance_machine_while_the_lane_keeps_being_flown() {
     use project_phoenix::civilian::{CivilianTraffic, ComplianceState, REASON_UNABLE};
-    use project_phoenix::entity_spawner::{BehaviourSection, EntityName};
+    use project_phoenix::entities::spawner::{BehaviourSection, EntityName};
 
     const KESTREL: &str = "world.entity.hauler_kestrel.name";
     const WREN: &str = "world.entity.hauler_wren.name";
@@ -1589,7 +1591,7 @@ fn a_scripted_destroy_chains_its_triggers_off_the_removal() {
 /// the player, never authored in a template that NPC copies also read.
 #[test]
 fn player_game_start_spawn_injects_player_identity_onto_local_ship_only() {
-    use project_phoenix::entity_spawner::{EntityTagsSection, RadarAppearanceSection};
+    use project_phoenix::entities::spawner::{EntityTagsSection, RadarAppearanceSection};
 
     let args = test_args();
     let mut app = build_headless_app(&args).expect("app should build");
@@ -1754,7 +1756,7 @@ fn balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves() {
 /// the damage.
 #[test]
 fn backfilled_player_hull_proactively_engages_on_template_doctrine() {
-    use project_phoenix::entity_spawner::{BehaviourSection, EntityName};
+    use project_phoenix::entities::spawner::{BehaviourSection, EntityName};
 
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
@@ -1908,7 +1910,7 @@ fn same_hull_duel_is_behaviourally_symmetric_across_seeds() {
 /// assertions below are tuned against are identical.
 #[test]
 fn requiem_courier_reaches_its_destination_anchor() {
-    use project_phoenix::entity_spawner::EntityName;
+    use project_phoenix::entities::spawner::EntityName;
 
     let dt = 1.0 / 30.0;
     let args = HeadlessArgs {
@@ -2198,7 +2200,7 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
 /// the pure evaluator test in `world::content`.
 #[test]
 fn combat_test_spawns_its_waves_on_the_clock_in_a_real_run() {
-    use project_phoenix::entity_spawner::EntityName;
+    use project_phoenix::entities::spawner::EntityName;
     use project_phoenix::world::server::WorldContentRuntime;
 
     let dt = 1.0 / 30.0;
@@ -2466,7 +2468,7 @@ fn combat_test_wave_clock_measures_from_mission_start_not_app_boot() {
 /// it sits below admission where the origin is already gone.
 #[test]
 fn combat_test_paces_the_player_magazine_against_the_whole_eight_wave_threat() {
-    use project_phoenix::weapons_plugin::TorpedoSystemResource;
+    use project_phoenix::console::weapons::TorpedoSystemResource;
     use project_phoenix::world::server::WorldContentRuntime;
 
     let dt = 1.0 / 30.0;
@@ -2793,7 +2795,7 @@ fn the_harrow_battleship_fires_its_artillery_in_a_real_run() {
 /// is flown, ~40 when the drive is flying the hull.
 #[test]
 fn the_harrow_battleship_takes_up_its_artillery_standoff_in_a_real_run() {
-    use project_phoenix::entity_config::EntityConfig;
+    use project_phoenix::entities::config::EntityConfig;
     use project_phoenix::server_app::{Ship, ShipImpulse};
     use project_phoenix::ship_plugin::ImpulseConfigResource;
 
@@ -2816,7 +2818,7 @@ fn the_harrow_battleship_takes_up_its_artillery_standoff_in_a_real_run() {
     // The hull's own authored band, so this asserts against content rather than
     // against numbers restated here.
     let hull = EntityConfig::from_toml(
-        project_phoenix::entity_includes::resolve_from_disk(
+        project_phoenix::entities::include_resolve::resolve_from_disk(
             "assets/entities/ship_harrow_warhawk.toml",
         )
         .expect("ship_harrow_warhawk must resolve")
@@ -2922,10 +2924,10 @@ fn the_harrow_battleship_takes_up_its_artillery_standoff_in_a_real_run() {
 /// `fore` is not also the name of one of its guns.
 #[test]
 fn the_harrow_battleship_takes_its_close_defence_opportunities_in_a_real_run() {
-    use project_phoenix::entity_config::EntityConfig;
+    use project_phoenix::entities::config::EntityConfig;
 
     let hull = EntityConfig::from_toml(
-        project_phoenix::entity_includes::resolve_from_disk(
+        project_phoenix::entities::include_resolve::resolve_from_disk(
             "assets/entities/ship_harrow_warhawk.toml",
         )
         .expect("ship_harrow_warhawk must resolve")
@@ -3573,8 +3575,8 @@ fn an_unmanned_npc_hull_is_fully_backfilled_on_every_station() {
 #[test]
 fn a_human_can_take_an_npc_hull_tactical_seat() {
     use project_phoenix::command_admission::is_command_authorized;
+    use project_phoenix::core::messages::{StationId, SystemControlPayload, SystemId};
     use project_phoenix::lobby::Sessions;
-    use project_phoenix::messages::{StationId, SystemControlPayload, SystemId};
 
     let args = test_args();
     let mut app = build_headless_app(&args).expect("app should build");
@@ -3601,7 +3603,7 @@ fn a_human_can_take_an_npc_hull_tactical_seat() {
     );
 
     // A human token that has claimed the Tactical seat.
-    let mut sessions = Sessions(project_phoenix::session::SessionManager::new());
+    let mut sessions = Sessions(project_phoenix::lobby::session::SessionManager::new());
     sessions
         .0
         .register("player-token".into(), "Rook".into())
@@ -3799,7 +3801,7 @@ fn the_composed_player_destroyer_boots_backfilled_and_flies() {
 /// which inputs a real composed hull actually presents. Only a live tick can.
 #[test]
 fn a_targeted_destroy_objective_does_not_cancel_the_hulls_own_attack_pass() {
-    use project_phoenix::navigation_plugin::NavigationWaypoint;
+    use project_phoenix::console::navigation::NavigationWaypoint;
     use project_phoenix::ship::helm_ai::HelmPassSurface;
 
     let dt = 1.0 / 30.0;
@@ -3936,7 +3938,7 @@ fn the_composed_destroyer_passes_breaks_off_and_passes_again() {
     // The authored trigger range this hull commits a run inside of, read off the
     // shipped template through the real (include-resolving) load path rather
     // than restated here, so a retune in TOML retunes this test with it.
-    let commit_range = project_phoenix::entity_includes::load_entity_config(
+    let commit_range = project_phoenix::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_destroyer.toml",
     )
     .expect("the shipped destroyer resolves")
@@ -4784,12 +4786,12 @@ fn a_world_flag_drives_a_backfilled_doctrine_in_a_real_run() {
 /// nothing the reactor does touches this slot, for the whole run or ever.
 #[test]
 fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel() {
-    use project_phoenix::messages::ModifierSlot;
+    use project_phoenix::core::messages::ModifierSlot;
     use project_phoenix::modifiers::ShipModifiers;
 
     // The authored numbers this test is about, read off the shipped hull rather
     // than restated — a retune of a bank retunes the assertion with it.
-    let hull = project_phoenix::entity_includes::load_entity_config(
+    let hull = project_phoenix::entities::include_resolve::load_entity_config(
         "assets/entities/alliance_cruiser.toml",
     )
     .expect("the shipped cruiser composes");
@@ -4846,7 +4848,7 @@ fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel()
     let dampen_at = args.max_ticks / 3;
     let amplify_at = (args.max_ticks * 2) / 3;
     let drive_radar_slot = |app: &mut App, bonus: f32| {
-        use project_phoenix::messages::ModifierSource;
+        use project_phoenix::core::messages::ModifierSource;
         use project_phoenix::modifiers::Modifier;
         let mut q = app
             .world_mut()
@@ -4873,7 +4875,8 @@ fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel()
         if local_uuid.is_none() {
             let mut uuid_q = app
                 .world_mut()
-                .query_filtered::<&project_phoenix::entity_spawner::EntityUuid, With<LocalShip>>();
+                .query_filtered::<&project_phoenix::entities::spawner::EntityUuid, With<LocalShip>>(
+                );
             local_uuid = uuid_q
                 .single(app.world())
                 .ok()
@@ -4977,9 +4980,11 @@ fn a_cruisers_phaser_reach_never_leaves_its_authored_beam_range_in_a_live_duel()
 /// of the ladder, so the probe insists that at least one reactor crossed it.
 #[test]
 fn neither_reactor_reaches_the_exhaustion_lock_across_a_seeded_duel() {
-    use project_phoenix::entity_config::{POWER_HELM_RESERVE_PARAM, POWER_WEAPONS_RESERVE_PARAM};
+    use project_phoenix::entities::config::{
+        POWER_HELM_RESERVE_PARAM, POWER_WEAPONS_RESERVE_PARAM,
+    };
+    use project_phoenix::server_app::Ship;
     use project_phoenix::ship::power::{PowerAiPolicy, PowerConfigResource, ShipPowerSystem};
-    use project_phoenix::simulation::Ship;
     use std::collections::BTreeMap;
 
     let dt = 1.0 / 30.0;
@@ -5160,11 +5165,11 @@ fn neither_reactor_reaches_the_exhaustion_lock_across_a_seeded_duel() {
 /// correct behaviour and a tighter bound would forbid them.
 #[test]
 fn a_helm_power_level_holds_instead_of_strobing_at_the_thrust_threshold() {
-    use project_phoenix::entity_spawner::EntityName;
-    use project_phoenix::messages::PowerGroupId;
+    use project_phoenix::core::messages::PowerGroupId;
+    use project_phoenix::entities::spawner::EntityName;
     use project_phoenix::modifiers::power_system::HELM_POWER_GROUP;
+    use project_phoenix::server_app::Ship;
     use project_phoenix::ship::power::ShipPowerSystem;
-    use project_phoenix::simulation::Ship;
     use std::collections::BTreeMap;
 
     /// Minimum ticks a helm level must hold before it may move again. Anything
@@ -5356,8 +5361,8 @@ fn the_logical_tick_follows_the_authored_rate_not_the_frame_rate() {
 /// command takes (AGENTS.md #6).
 #[test]
 fn command_admission_moves_with_the_logical_tick_not_the_frame() {
+    use project_phoenix::core::messages::{AdmittedCommands, ClientMessage, SystemControlPayload};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{AdmittedCommands, ClientMessage, SystemControlPayload};
     use project_phoenix::sim_tick::SimTick;
 
     const PROBE_TOKEN: &str = "ai:admission-probe";
@@ -5824,7 +5829,7 @@ fn the_deterministic_build_runs_rapier_serially() {
 #[test]
 fn an_ai_crewed_run_records_no_commands() {
     use project_phoenix::command_admission::CommandLog;
-    use project_phoenix::messages::AdmittedCommands;
+    use project_phoenix::core::messages::AdmittedCommands;
 
     /// Every command that sat in any ship's `AdmittedCommands`, summed over
     /// every tick of the run.
@@ -5877,8 +5882,8 @@ fn an_ai_crewed_run_records_no_commands() {
 fn a_runs_log_records_every_boundary_command_in_tick_order() {
     use project_phoenix::command_admission::ai_emit::AI_BACKFILL_TOKEN;
     use project_phoenix::command_admission::CommandLog;
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload, SystemId};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemControlPayload, SystemId};
     use project_phoenix::sim_tick::SimTick;
 
     fn send(app: &mut App, active: bool) {
@@ -5973,8 +5978,8 @@ fn a_runs_log_records_every_boundary_command_in_tick_order() {
 fn a_second_round_starts_a_fresh_command_log() {
     use project_phoenix::command_admission::ai_emit::AI_BACKFILL_TOKEN;
     use project_phoenix::command_admission::{CommandLog, PendingCommands};
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload, SystemId};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemControlPayload, SystemId};
 
     let args = HeadlessArgs {
         max_ticks: 200,
@@ -6072,7 +6077,7 @@ fn the_preload_caches_subdirectory_templates_but_never_the_fragment_tree() {
     // preload, and the preload's product is the process-global cache below.
     let _app = build_headless_app(&args).expect("app should build");
 
-    let cache = project_phoenix::config_cache::get_config_cache();
+    let cache = project_phoenix::entities::config_cache::get_config_cache();
 
     assert!(
         cache.contains_key("assets/entities/test/rng_coverage_lancer.toml"),
@@ -6153,8 +6158,8 @@ fn the_preload_caches_subdirectory_templates_but_never_the_fragment_tree() {
 #[test]
 fn a_hull_never_ends_a_tick_inside_a_huge_asteroid() {
     use bevy::prelude::Transform;
+    use project_phoenix::entities::spawner::ColliderSection;
     use project_phoenix::entities::spawner::HelmConsoleSection;
-    use project_phoenix::entity_spawner::ColliderSection;
     use project_phoenix::server_app::Ship;
 
     /// Two ticks of travel at a hull's OWN authored top speed — the window in
@@ -6576,7 +6581,7 @@ fn a_slipped_deadline_fires_at_its_new_tick_and_a_cancelled_one_never_fires() {
             bbs.0
                 .values()
                 .find_map(|bb| match bb {
-                    project_phoenix::messages::SystemBlackboard::Captain(c) => Some(c),
+                    project_phoenix::core::messages::SystemBlackboard::Captain(c) => Some(c),
                     _ => None,
                 })
                 .filter(|c| !c.deadlines.is_empty())
@@ -6868,10 +6873,10 @@ fn move_named_to(app: &mut bevy::prelude::App, name: &str, position: bevy::prelu
 /// against and the two gates it authors.
 #[test]
 fn the_dossier_channel_carries_what_the_crew_know_and_not_what_they_do_not() {
+    use project_phoenix::core::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
     use project_phoenix::dossier::{
         dossier_blackboard_key, FACT_COMMITMENT_OPEN, FACT_COMMS, FACT_CONDITION, FACT_FACTION,
     };
-    use project_phoenix::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
     use project_phoenix::server_app::ShipSystemBlackboards;
 
     let dt = 1.0 / 60.0;
@@ -6912,7 +6917,7 @@ fn the_dossier_channel_carries_what_the_crew_know_and_not_what_they_do_not() {
     fn names(bb: &DossierBlackboard) -> Vec<&str> {
         bb.subjects.iter().map(|d| d.name.as_str()).collect()
     }
-    fn labels(d: &project_phoenix::messages::DossierSnapshot) -> Vec<&str> {
+    fn labels(d: &project_phoenix::core::messages::DossierSnapshot) -> Vec<&str> {
         d.facts.iter().map(|f| f.label.as_str()).collect()
     }
 
@@ -7229,7 +7234,7 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
             bbs.0
                 .values()
                 .find_map(|bb| match bb {
-                    project_phoenix::messages::SystemBlackboard::Captain(c) => Some(c),
+                    project_phoenix::core::messages::SystemBlackboard::Captain(c) => Some(c),
                     _ => None,
                 })
                 .filter(|c| !c.deadlines.is_empty())
@@ -7435,8 +7440,8 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
 /// The probe world's own header carries the authored timeline.
 #[test]
 fn a_scan_and_a_dialogue_admission_both_land_on_one_fact_sheet_with_their_provenance() {
+    use project_phoenix::core::messages::{DossierBlackboard, SystemBlackboard};
     use project_phoenix::dossier::{dossier_blackboard_key, FACT_CONDITION};
-    use project_phoenix::messages::{DossierBlackboard, SystemBlackboard};
     use project_phoenix::server_app::ShipSystemBlackboards;
     use project_phoenix::world::server::WorldContentRuntime;
 
@@ -7698,7 +7703,7 @@ fn the_strike_no_longer_throttles_the_crews_external_work() {
     skyway_system_cmd(
         &mut app,
         project_phoenix::ship::system_registry::REPAIR_SYSTEM_ID,
-        project_phoenix::messages::SystemControlPayload::RecallExternalRepair,
+        project_phoenix::core::messages::SystemControlPayload::RecallExternalRepair,
     );
     let control_before = condition_of(&mut app, DEPOT_A);
     skyway_move(&mut app, ship, bevy::prelude::Vec3::new(620.0, 0.0, -180.0));
@@ -7783,8 +7788,8 @@ fn place_scanner_at(app: &mut App, x: f32) {
 /// arrive: the message is drained per frame in `PreUpdate`, admitted before
 /// `SimSet::Input`, and consumed in `SimSet::Modifiers` of the same tick.
 fn ask_for_scan(app: &mut App, uuid: &str) {
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemControlPayload};
 
     app.world_mut()
         .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
@@ -7802,8 +7807,8 @@ fn ask_for_scan(app: &mut App, uuid: &str) {
 
 /// The scan channel as the local ship publishes it — the payload a console
 /// renders, never the component behind it.
-fn published_scan(app: &mut App) -> project_phoenix::messages::ScanBlackboard {
-    use project_phoenix::messages::SystemBlackboard;
+fn published_scan(app: &mut App) -> project_phoenix::core::messages::ScanBlackboard {
+    use project_phoenix::core::messages::SystemBlackboard;
     use project_phoenix::server_app::ShipSystemBlackboards;
 
     let mut q = app
@@ -8113,7 +8118,7 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
         .expect("the crew's hull");
     app.world_mut()
         .entity_mut(ship)
-        .remove::<project_phoenix::comms_plugin::CommsResponseAiPolicy>();
+        .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
 
     // The survey falls due at an authored 90 s; the limit is generous so the
     // tuning pass (#1044) can lengthen the act without touching this test.
@@ -8159,7 +8164,7 @@ fn skyway_flag(app: &bevy::prelude::App, name: &str) -> i64 {
 fn skyway_messages(
     app: &bevy::prelude::App,
     sender: &str,
-) -> Vec<project_phoenix::messages::CommsMessage> {
+) -> Vec<project_phoenix::core::messages::CommsMessage> {
     let uuid = app
         .world()
         .resource::<project_phoenix::world::server::WorldContentRuntime>()
@@ -8180,14 +8185,14 @@ fn skyway_messages(
 fn skyway_open_node(
     app: &bevy::prelude::App,
     sender: &str,
-) -> project_phoenix::messages::CommsMessage {
+) -> project_phoenix::core::messages::CommsMessage {
     skyway_messages(app, sender)
         .into_iter()
         .rfind(|m| m.selected_response.is_none() && !m.responses.is_empty())
         .unwrap_or_else(|| panic!("no open dialogue node from {sender}"))
 }
 
-fn skyway_options(msg: &project_phoenix::messages::CommsMessage) -> Vec<String> {
+fn skyway_options(msg: &project_phoenix::core::messages::CommsMessage) -> Vec<String> {
     msg.responses.iter().map(|r| r.text.clone()).collect()
 }
 
@@ -8199,8 +8204,8 @@ fn skyway_options(msg: &project_phoenix::messages::CommsMessage) -> Vec<String> 
 /// tree is that which options are offered depends on the world, so a hard-coded
 /// index would be asserting the opposite of what the slice is for.
 fn skyway_pick(app: &mut bevy::prelude::App, sender: &str, text: &str) {
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemControlPayload};
 
     let msg = skyway_open_node(app, sender);
     let index = msg
@@ -8218,7 +8223,7 @@ fn skyway_pick(app: &mut bevy::prelude::App, sender: &str, text: &str) {
         .write(InboundMessage {
             token: SKYWAY_TOKEN.into(),
             msg: ClientMessage::ControlSystem {
-                target: project_phoenix::system_registry::comms_system_id(),
+                target: project_phoenix::ship::system_registry::comms_system_id(),
                 payload: SystemControlPayload::RespondToMessage {
                     message_id: msg.id.clone(),
                     response_index: index,
@@ -9497,8 +9502,8 @@ fn the_diff_falls_out_of_the_condition_and_the_crews_own_reading_and_nothing_els
 /// them are the projection's, off the same published snapshot the scan read.
 #[test]
 fn the_recorded_claim_and_the_finding_that_breaks_it_are_both_on_the_fact_sheet() {
+    use project_phoenix::core::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
     use project_phoenix::dossier::{dossier_blackboard_key, FACT_CONDITION};
-    use project_phoenix::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
     use project_phoenix::server_app::ShipSystemBlackboards;
 
     let dt = 1.0 / 60.0;
@@ -9767,8 +9772,8 @@ fn a_crew_who_never_scan_the_rung_find_nothing_and_are_blocked_by_nothing() {
 /// claims as a live condition fact off #1025's own published snapshot.
 #[test]
 fn the_ladder_b_panel_shows_the_recorded_standard_failing_beside_the_claim() {
+    use project_phoenix::core::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
     use project_phoenix::dossier::{dossier_blackboard_key, FACT_CONDITION};
-    use project_phoenix::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
     use project_phoenix::server_app::ShipSystemBlackboards;
 
     let (mut app, ship) = skyway_at_act_two();
@@ -10724,7 +10729,7 @@ const SKYWAY_WARNINGS: [(&str, &str, &str); 3] = [
 fn skyway_captain_deadline(
     app: &mut bevy::prelude::App,
     id: &str,
-) -> project_phoenix::messages::DeadlineSnapshot {
+) -> project_phoenix::core::messages::DeadlineSnapshot {
     let mut q = app
         .world_mut()
         .query::<&project_phoenix::server_app::ShipSystemBlackboards>();
@@ -10733,7 +10738,7 @@ fn skyway_captain_deadline(
             bbs.0
                 .values()
                 .find_map(|bb| match bb {
-                    project_phoenix::messages::SystemBlackboard::Captain(c) => Some(c),
+                    project_phoenix::core::messages::SystemBlackboard::Captain(c) => Some(c),
                     _ => None,
                 })
                 .and_then(|c| c.deadlines.iter().find(|d| d.id == id).cloned())
@@ -10835,10 +10840,10 @@ fn skyway_set_lock(
 fn skyway_system_cmd(
     app: &mut bevy::prelude::App,
     system_id: &str,
-    payload: project_phoenix::messages::SystemControlPayload,
+    payload: project_phoenix::core::messages::SystemControlPayload,
 ) {
+    use project_phoenix::core::messages::{ClientMessage, SystemId};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemId};
     app.world_mut()
         .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
         .write(InboundMessage {
@@ -10858,7 +10863,7 @@ fn skyway_system_cmd(
 /// `skyway_start_op(Tow|Stabilise, …)` — the crew set off from close aboard and
 /// hold, and what a completed hold LEAVES BEHIND is the recovered condition.
 fn skyway_engage_tractor(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity, target: &str) {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
     let uuid = skyway_uuid(app, target);
     skyway_set_lock(app, ship, Some(uuid));
     skyway_system_cmd(
@@ -10871,7 +10876,7 @@ fn skyway_engage_tractor(app: &mut bevy::prelude::App, ship: bevy::prelude::Enti
 /// Stand the tractor hold down (issue #1165 S11b), so the crew can take the next
 /// craft on the line.
 fn skyway_release_tractor(app: &mut bevy::prelude::App) {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
     skyway_system_cmd(
         app,
         project_phoenix::ship::system_registry::TRACTOR_SYSTEM_ID,
@@ -10883,7 +10888,7 @@ fn skyway_release_tractor(app: &mut bevy::prelude::App) {
 /// lock the structure and dispatch a repair team, which raises the target's own
 /// condition track (#1161) across the threshold the scenario reads.
 fn skyway_dispatch_repair(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity, target: &str) {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
     let uuid = skyway_uuid(app, target);
     skyway_set_lock(app, ship, Some(uuid));
     skyway_system_cmd(
@@ -11159,7 +11164,7 @@ fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_ep
     );
     assert!(
         app.world()
-            .resource::<project_phoenix::simulation::GameOverReason>()
+            .resource::<project_phoenix::server_app::GameOverReason>()
             .0
             .is_none(),
         "…and nothing latched a game-over reason. The crew's hull dying is the other \
@@ -11468,7 +11473,7 @@ fn falling_skyway_losing_the_ship_is_a_hard_fail_and_writes_none_of_the_head_s_f
         if !spent && sim_t > band_at + 1.0 {
             let mut hull = app
                 .world_mut()
-                .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(ship)
+                .get_mut::<project_phoenix::entities::spawner::EntitySystemHull>(ship)
                 .expect("the crew's hull has systems");
             let spend = hull.0.total_current() - 12.0;
             hull.0.apply_damage(spend, &mut rng);
@@ -11497,9 +11502,9 @@ fn falling_skyway_losing_the_ship_is_a_hard_fail_and_writes_none_of_the_head_s_f
     // handler wrote it, and no scenario handler could.
     assert_eq!(
         app.world()
-            .resource::<project_phoenix::simulation::GameOverReason>()
+            .resource::<project_phoenix::server_app::GameOverReason>()
             .1,
-        Some(project_phoenix::balance::Outcome::Defeat),
+        Some(project_phoenix::core::balance::Outcome::Defeat),
         "the hard fail latches the ENGINE's own defeat"
     );
     let flags = &app.world().resource::<WorldContentRuntime>().flags;
@@ -11803,8 +11808,8 @@ fn window_capacity_of(app: &mut bevy::prelude::App, entity: &str, id: &str) -> i
 /// simulation holds and no console shows is not a number the crew have — so it
 /// is read through the published projection rather than off the component.
 fn window_panel_rows(app: &mut bevy::prelude::App) -> Vec<(String, i64)> {
+    use project_phoenix::core::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
     use project_phoenix::dossier::dossier_blackboard_key;
-    use project_phoenix::messages::{DossierBlackboard, DossierValue, SystemBlackboard};
     use project_phoenix::server_app::ShipSystemBlackboards;
 
     let mut q = app
@@ -11919,7 +11924,7 @@ fn window_ship(app: &mut bevy::prelude::App) -> (bevy::prelude::Entity, String) 
 fn window_countdown(
     app: &mut bevy::prelude::App,
     id: &str,
-) -> Option<project_phoenix::messages::DeadlineSnapshot> {
+) -> Option<project_phoenix::core::messages::DeadlineSnapshot> {
     let mut q = app
         .world_mut()
         .query::<&project_phoenix::server_app::ShipSystemBlackboards>();
@@ -11929,7 +11934,7 @@ fn window_countdown(
             bbs.0
                 .values()
                 .find_map(|bb| match bb {
-                    project_phoenix::messages::SystemBlackboard::Captain(c) => Some(c),
+                    project_phoenix::core::messages::SystemBlackboard::Captain(c) => Some(c),
                     _ => None,
                 })
                 .filter(|c| !c.deadlines.is_empty())
@@ -13951,9 +13956,9 @@ fn set_tractor_lock(app: &mut App, uuid: Option<String>) {
 /// Send an engage/release through the real admission path and give it the ticks
 /// to arrive (drained in `PreUpdate`, admitted before `SimSet::Input`, consumed
 /// and evaluated in `SimSet::Modifiers` of the same tick).
-fn send_tractor(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+fn send_tractor(app: &mut App, payload: project_phoenix::core::messages::SystemControlPayload) {
+    use project_phoenix::core::messages::{ClientMessage, SystemId};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemId};
     app.world_mut()
         .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
         .write(InboundMessage {
@@ -13969,7 +13974,7 @@ fn send_tractor(app: &mut App, payload: project_phoenix::messages::SystemControl
 /// Reset the operator to the origin and the derelict 80 units off, then engage
 /// against it — the clean holding state each interruption starts from.
 fn reengage_holding(app: &mut App, derelict_uuid: &str) {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
     send_tractor(app, SystemControlPayload::ReleaseTractor);
     place_operator(app, Vec3::ZERO);
     move_named_to(app, DERELICT, Vec3::new(80.0, 0.0, 0.0));
@@ -13991,7 +13996,7 @@ fn cut_tractor_power(app: &mut App) {
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the tug has a power system");
     let _ = ps.0.set_group_allocation(
-        &project_phoenix::messages::PowerGroupId("tractor".into()),
+        &project_phoenix::core::messages::PowerGroupId("tractor".into()),
         1,
     );
 }
@@ -14004,7 +14009,7 @@ fn restore_tractor_power(app: &mut App) {
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the tug has a power system");
     let _ = ps.0.set_group_allocation(
-        &project_phoenix::messages::PowerGroupId("tractor".into()),
+        &project_phoenix::core::messages::PowerGroupId("tractor".into()),
         2,
     );
 }
@@ -14014,10 +14019,12 @@ fn disable_tractor(app: &mut App) {
     let op = tractor_operator(app);
     let mut hull = app
         .world_mut()
-        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .get_mut::<project_phoenix::entities::spawner::EntitySystemHull>(op)
         .expect("the tug has a hull");
-    hull.0
-        .set_hp(&project_phoenix::messages::SystemId("tractor".into()), 1.0);
+    hull.0.set_hp(
+        &project_phoenix::core::messages::SystemId("tractor".into()),
+        1.0,
+    );
 }
 
 /// Restore the tractor system to full HP (a Disabled system stops accepting AI
@@ -14026,10 +14033,12 @@ fn repair_tractor(app: &mut App) {
     let op = tractor_operator(app);
     let mut hull = app
         .world_mut()
-        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .get_mut::<project_phoenix::entities::spawner::EntitySystemHull>(op)
         .expect("the tug has a hull");
-    hull.0
-        .set_hp(&project_phoenix::messages::SystemId("tractor".into()), 30.0);
+    hull.0.set_hp(
+        &project_phoenix::core::messages::SystemId("tractor".into()),
+        30.0,
+    );
 }
 
 /// Author a mission objective carrying `directive` onto the running world's
@@ -14040,7 +14049,7 @@ fn add_operate_objective_tractor(
     app: &mut App,
     id: &str,
     targets: Vec<String>,
-    directive: project_phoenix::messages::AiDirective,
+    directive: project_phoenix::core::messages::AiDirective,
 ) {
     use project_phoenix::objectives::UtilityConfig;
     let mut mgr = app
@@ -14056,7 +14065,7 @@ fn add_operate_objective_tractor(
             base_priority: 80.0,
             ..Default::default()
         },
-        project_phoenix::messages::ObjectiveSource::Mission,
+        project_phoenix::core::messages::ObjectiveSource::Mission,
     );
 }
 
@@ -14069,10 +14078,10 @@ fn add_operate_objective_tractor(
 fn admitted_tractor_command(
     app: &mut App,
 ) -> Option<(
-    project_phoenix::messages::SystemId,
-    project_phoenix::messages::SystemControlPayload,
+    project_phoenix::core::messages::SystemId,
+    project_phoenix::core::messages::SystemControlPayload,
 )> {
-    use project_phoenix::messages::AdmittedCommands;
+    use project_phoenix::core::messages::AdmittedCommands;
     let op = tractor_operator(app);
     app.world()
         .get::<AdmittedCommands>(op)?
@@ -14089,8 +14098,8 @@ fn run_capturing_tractor_command(
     app: &mut App,
     total_ticks: u32,
 ) -> Option<(
-    project_phoenix::messages::SystemId,
-    project_phoenix::messages::SystemControlPayload,
+    project_phoenix::core::messages::SystemId,
+    project_phoenix::core::messages::SystemControlPayload,
 )> {
     let mut captured = None;
     for _ in 0..total_ticks {
@@ -14111,7 +14120,9 @@ fn run_capturing_tractor_command(
 /// Nothing downstream may tell them apart.
 #[test]
 fn a_console_and_an_ai_tractor_engage_are_byte_identical_with_one_digest() {
-    use project_phoenix::messages::{AiDirective, ClientMessage, SystemControlPayload, SystemId};
+    use project_phoenix::core::messages::{
+        AiDirective, ClientMessage, SystemControlPayload, SystemId,
+    };
 
     let dt = 1.0 / 60.0;
     let tow = || AiDirective::Tow {
@@ -14179,7 +14190,7 @@ fn a_console_and_an_ai_tractor_engage_are_byte_identical_with_one_digest() {
 /// `ai_target_selection_runs_on_the_shared_ai_tick_not_per_frame`.
 #[test]
 fn operate_tractor_ai_runs_on_the_shared_ai_tick_not_per_frame() {
-    use project_phoenix::messages::{AiDirective, SystemControlPayload};
+    use project_phoenix::core::messages::{AiDirective, SystemControlPayload};
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&tractor_args(dt)).expect("app should build");
@@ -14255,7 +14266,7 @@ fn operate_tractor_ai_runs_on_the_shared_ai_tick_not_per_frame() {
 /// backfilled Engineering engages the beam autonomously and the derelict is held.
 #[test]
 fn a_full_ai_run_completes_a_tow_against_the_named_derelict() {
-    use project_phoenix::messages::AiDirective;
+    use project_phoenix::core::messages::AiDirective;
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&tractor_args(dt)).expect("app should build");
@@ -14307,7 +14318,7 @@ fn a_full_ai_run_completes_a_tow_against_the_named_derelict() {
 /// D2-tested selector path exactly as in the tow test above.
 #[test]
 fn a_full_ai_run_stabilises_a_failing_structure_against_the_named_target() {
-    use project_phoenix::messages::AiDirective;
+    use project_phoenix::core::messages::AiDirective;
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&held_response_args(dt)).expect("app should build");
@@ -14350,7 +14361,7 @@ fn a_full_ai_run_stabilises_a_failing_structure_against_the_named_target() {
 /// interruption (lock lost / release / out of range / power lost / disabled).
 #[test]
 fn a_tractor_holds_a_derelict_on_the_rig_and_every_interruption_drops_it() {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
     use project_phoenix::tractor::TractorRefusal;
 
     let dt = 1.0 / 60.0;
@@ -14594,7 +14605,7 @@ fn reset_operator_to_rest(app: &mut App) {
 /// releasing it recovers the speed — the mass-derived helm penalty end to end.
 #[test]
 fn a_heavy_tow_drops_the_operators_achieved_speed_and_release_recovers_it() {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&tractor_args(dt)).expect("app should build");
@@ -14725,7 +14736,7 @@ fn structure_flag(app: &mut App, name: &str, flag: &str) -> Option<bool> {
 /// release. Progress lives on the structure's OWN condition track.
 #[test]
 fn holding_a_failing_structure_arrests_its_decline_and_releasing_resumes_it() {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&held_response_args(dt)).expect("app should build");
@@ -14896,9 +14907,9 @@ fn move_berth(app: &mut App, position: Vec3) {
 /// Send a dock/undock through the real admission path and give it the ticks to
 /// arrive (drained in `PreUpdate`, admitted before `SimSet::Input`, consumed in
 /// `SimSet::Modifiers` of the same tick).
-fn send_dock(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+fn send_dock(app: &mut App, payload: project_phoenix::core::messages::SystemControlPayload) {
+    use project_phoenix::core::messages::{ClientMessage, SystemId};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemId};
     app.world_mut()
         .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
         .write(InboundMessage {
@@ -14918,8 +14929,10 @@ fn cut_dock_power(app: &mut App) {
         .world_mut()
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the probe has a power system");
-    let _ =
-        ps.0.set_group_allocation(&project_phoenix::messages::PowerGroupId("dock".into()), 1);
+    let _ = ps.0.set_group_allocation(
+        &project_phoenix::core::messages::PowerGroupId("dock".into()),
+        1,
+    );
 }
 
 fn restore_dock_power(app: &mut App) {
@@ -14928,35 +14941,41 @@ fn restore_dock_power(app: &mut App) {
         .world_mut()
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the probe has a power system");
-    let _ =
-        ps.0.set_group_allocation(&project_phoenix::messages::PowerGroupId("dock".into()), 2);
+    let _ = ps.0.set_group_allocation(
+        &project_phoenix::core::messages::PowerGroupId("dock".into()),
+        2,
+    );
 }
 
 fn disable_dock(app: &mut App) {
     let op = dock_operator(app);
     let mut hull = app
         .world_mut()
-        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .get_mut::<project_phoenix::entities::spawner::EntitySystemHull>(op)
         .expect("the probe has a hull");
-    hull.0
-        .set_hp(&project_phoenix::messages::SystemId("dock".into()), 1.0);
+    hull.0.set_hp(
+        &project_phoenix::core::messages::SystemId("dock".into()),
+        1.0,
+    );
 }
 
 fn repair_dock(app: &mut App) {
     let op = dock_operator(app);
     let mut hull = app
         .world_mut()
-        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .get_mut::<project_phoenix::entities::spawner::EntitySystemHull>(op)
         .expect("the probe has a hull");
-    hull.0
-        .set_hp(&project_phoenix::messages::SystemId("dock".into()), 30.0);
+    hull.0.set_hp(
+        &project_phoenix::core::messages::SystemId("dock".into()),
+        30.0,
+    );
 }
 
 /// Reset the probe to the origin and the berth 100 units to starboard, engage,
 /// and fly the manoeuvre to completion — the clean docked state each interruption
 /// starts from.
 fn redock(app: &mut App) {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
     // Clear any prior state and settle the two hulls back into their start pose.
     send_dock(app, SystemControlPayload::Undock);
     place_dock_operator(app, Vec3::ZERO);
@@ -14976,8 +14995,8 @@ fn redock(app: &mut App) {
 /// dock cleanly. Also: the docked relationship folds and survives a resume.
 #[test]
 fn two_hulls_reach_a_mated_dock_separate_on_undock_and_every_interruption_ends_it() {
+    use project_phoenix::core::messages::SystemControlPayload;
     use project_phoenix::dock::DockRefusal;
-    use project_phoenix::messages::SystemControlPayload;
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&dock_args(dt)).expect("app should build");
@@ -15187,9 +15206,9 @@ fn operator_free_team_count(app: &mut App) -> usize {
 /// Send a dispatch/recall through the real admission path and give it the ticks
 /// to arrive (drained in `PreUpdate`, admitted before `SimSet::Input`, consumed
 /// in `SimSet::Input` of the same tick).
-fn send_repair(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+fn send_repair(app: &mut App, payload: project_phoenix::core::messages::SystemControlPayload) {
+    use project_phoenix::core::messages::{ClientMessage, SystemId};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemId};
     app.world_mut()
         .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
         .write(InboundMessage {
@@ -15216,7 +15235,7 @@ fn send_repair(app: &mut App, payload: project_phoenix::messages::SystemControlP
 /// team autonomously.
 #[test]
 fn a_full_ai_run_completes_a_field_repair_against_the_named_ally() {
-    use project_phoenix::messages::AiDirective;
+    use project_phoenix::core::messages::AiDirective;
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&external_repair_args(dt)).expect("app should build");
@@ -15263,7 +15282,7 @@ fn a_full_ai_run_completes_a_field_repair_against_the_named_ally() {
 #[test]
 fn a_dispatched_team_raises_an_allys_condition_while_the_hulls_own_repairs_slow() {
     use project_phoenix::console::repair::ExternalRepairRefusal;
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&external_repair_args(dt)).expect("app should build");
@@ -15384,7 +15403,7 @@ fn a_dispatched_team_raises_an_allys_condition_while_the_hulls_own_repairs_slow(
 #[test]
 fn dispatching_with_no_target_or_out_of_range_is_refused_with_a_shown_reason() {
     use project_phoenix::console::repair::ExternalRepairRefusal;
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&external_repair_args(dt)).expect("app should build");
@@ -15507,9 +15526,12 @@ fn fuel_of(app: &mut App, entity: Entity) -> i64 {
 }
 
 /// Send a dock/undock through the real admission path (Helm's seat).
-fn send_umbilical_dock(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+fn send_umbilical_dock(
+    app: &mut App,
+    payload: project_phoenix::core::messages::SystemControlPayload,
+) {
+    use project_phoenix::core::messages::{ClientMessage, SystemId};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemId};
     app.world_mut()
         .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
         .write(InboundMessage {
@@ -15523,9 +15545,12 @@ fn send_umbilical_dock(app: &mut App, payload: project_phoenix::messages::System
 }
 
 /// Send a start/stop through the real admission path (Engineering's seat).
-fn send_umbilical_flow(app: &mut App, payload: project_phoenix::messages::SystemControlPayload) {
+fn send_umbilical_flow(
+    app: &mut App,
+    payload: project_phoenix::core::messages::SystemControlPayload,
+) {
+    use project_phoenix::core::messages::{ClientMessage, SystemId};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemId};
     app.world_mut()
         .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
         .write(InboundMessage {
@@ -15547,7 +15572,7 @@ fn cut_umbilical_power(app: &mut App) {
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the probe has a power system");
     let _ = ps.0.set_group_allocation(
-        &project_phoenix::messages::PowerGroupId("umbilical".into()),
+        &project_phoenix::core::messages::PowerGroupId("umbilical".into()),
         1,
     );
 }
@@ -15559,7 +15584,7 @@ fn restore_umbilical_power(app: &mut App) {
         .get_mut::<project_phoenix::ship::power::ShipPowerSystem>(op)
         .expect("the probe has a power system");
     let _ = ps.0.set_group_allocation(
-        &project_phoenix::messages::PowerGroupId("umbilical".into()),
+        &project_phoenix::core::messages::PowerGroupId("umbilical".into()),
         2,
     );
 }
@@ -15568,10 +15593,10 @@ fn disable_umbilical(app: &mut App) {
     let op = umbilical_operator(app);
     let mut hull = app
         .world_mut()
-        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .get_mut::<project_phoenix::entities::spawner::EntitySystemHull>(op)
         .expect("the probe has a hull");
     hull.0.set_hp(
-        &project_phoenix::messages::SystemId("umbilical".into()),
+        &project_phoenix::core::messages::SystemId("umbilical".into()),
         1.0,
     );
 }
@@ -15580,10 +15605,10 @@ fn repair_umbilical(app: &mut App) {
     let op = umbilical_operator(app);
     let mut hull = app
         .world_mut()
-        .get_mut::<project_phoenix::entity_spawner::EntitySystemHull>(op)
+        .get_mut::<project_phoenix::entities::spawner::EntitySystemHull>(op)
         .expect("the probe has a hull");
     hull.0.set_hp(
-        &project_phoenix::messages::SystemId("umbilical".into()),
+        &project_phoenix::core::messages::SystemId("umbilical".into()),
         30.0,
     );
 }
@@ -15592,7 +15617,7 @@ fn repair_umbilical(app: &mut App) {
 /// dock, and fly the manoeuvre to completion — the clean docked state each
 /// interruption starts from.
 fn umbilical_redock(app: &mut App) {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
     // Stop the flow and undock, then run long enough for the ship to back fully
     // clear so any in-progress `undock_target` clears — a lingering one would
     // steer the ship away from the berth the moment we re-issue Dock.
@@ -15620,7 +15645,7 @@ fn add_operate_objective(
     app: &mut App,
     id: &str,
     targets: Vec<String>,
-    directive: project_phoenix::messages::AiDirective,
+    directive: project_phoenix::core::messages::AiDirective,
 ) {
     use project_phoenix::objectives::UtilityConfig;
     let mut mgr = app
@@ -15637,7 +15662,7 @@ fn add_operate_objective(
             base_priority: 80.0,
             ..Default::default()
         },
-        project_phoenix::messages::ObjectiveSource::Mission,
+        project_phoenix::core::messages::ObjectiveSource::Mission,
     );
 }
 
@@ -15652,7 +15677,7 @@ fn add_operate_objective(
 /// hosts on the shared admission path.
 #[test]
 fn a_full_ai_run_completes_a_transfer_against_the_named_depot() {
-    use project_phoenix::messages::AiDirective;
+    use project_phoenix::core::messages::AiDirective;
 
     let dt = 1.0 / 60.0;
     let mut app = build_headless_app(&umbilical_args(dt)).expect("app should build");
@@ -15702,7 +15727,7 @@ fn a_full_ai_run_completes_a_transfer_against_the_named_depot() {
 /// moved. Also: the running flag folds and survives a snapshot resume.
 #[test]
 fn capacity_moves_between_two_docked_hulls_and_stops_on_undock_power_loss_and_damage() {
-    use project_phoenix::messages::SystemControlPayload;
+    use project_phoenix::core::messages::SystemControlPayload;
     use project_phoenix::umbilical::UmbilicalRefusal;
 
     let dt = 1.0 / 60.0;
@@ -16252,7 +16277,7 @@ struct SilentCrewRun {
 /// objective is completed (dropped from the scored pool) before the next, freeing
 /// the lock — the crew finishing one external job before starting the next.
 fn run_silent_crew(app: &mut App) -> SilentCrewRun {
-    use project_phoenix::messages::AiDirective;
+    use project_phoenix::core::messages::AiDirective;
 
     let mut digests = Vec::new();
     run(app, 60);

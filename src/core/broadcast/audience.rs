@@ -1,6 +1,6 @@
-use crate::lobby_handler::Target;
-use crate::messages::{StationId, SystemId};
-use crate::session::SessionManager;
+use crate::core::messages::{StationId, SystemId};
+use crate::lobby::handler::Target;
+use crate::lobby::session::SessionManager;
 use crate::ship::config::ShipConfig;
 
 /// Who receives a broadcast message.
@@ -62,7 +62,7 @@ impl Audience {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{PowerGroupId, StationId, SystemId};
+    use crate::core::messages::{PowerGroupId, StationId, SystemId};
     use crate::ship::config::{PowerGroupConfig, StationConfig, SystemInstanceConfig};
 
     fn ship_config() -> ShipConfig {

@@ -23,10 +23,10 @@
 use bevy::prelude::*;
 use project_phoenix::command_admission::ai_emit::AI_BACKFILL_TOKEN;
 use project_phoenix::command_admission::{CommandLog, ShipKey};
-use project_phoenix::entity_spawner::EntityUuid;
+use project_phoenix::core::messages::{ClientMessage, SystemControlPayload, SystemId};
+use project_phoenix::entities::spawner::EntityUuid;
 use project_phoenix::headless::{build_headless_app, build_report, HeadlessArgs};
 use project_phoenix::lobby::InboundMessage;
-use project_phoenix::messages::{ClientMessage, SystemControlPayload, SystemId};
 use project_phoenix::server_app::LocalShip;
 use project_phoenix::sim_tick::SimTick;
 use std::collections::VecDeque;
@@ -46,7 +46,7 @@ type Injection = (u64, SystemId, SystemControlPayload);
 /// script is driven by the player ship's Backfill AI, which answers to
 /// `AI_BACKFILL_TOKEN`.
 fn token_for(target: &SystemId) -> &'static str {
-    if target.0 == project_phoenix::system_registry::GOD_MODE_SYSTEM_ID {
+    if target.0 == project_phoenix::ship::system_registry::GOD_MODE_SYSTEM_ID {
         project_phoenix::console_bridge::LOCAL_CONSOLE_TOKEN
     } else {
         AI_BACKFILL_TOKEN
@@ -201,7 +201,7 @@ fn a_seed_and_its_command_log_reproduce_the_run() {
         // the helm/red-alert commands the log already carried before #900.
         (
             230,
-            SystemId(project_phoenix::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            SystemId(project_phoenix::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
             SystemControlPayload::ToggleGodMode,
         ),
     ]);

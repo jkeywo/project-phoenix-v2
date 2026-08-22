@@ -1,4 +1,4 @@
-use crate::messages::{CameraView, ViewMode};
+use crate::core::messages::{CameraView, ViewMode};
 use crate::ship::viewscreen::{source_system_for_view_mode, ViewscreenArbiter, ViewscreenRequest};
 use bevy::prelude::Component;
 
@@ -83,7 +83,7 @@ pub struct ShipRedAlert(pub bool);
 /// The tactical restraint lever. Red Alert is binary and stays binary: this is a
 /// second, independent state layered *under* it, so a captain can be at
 /// stations, shields up, guns cold. It is set with the same explicit
-/// [`SetWeaponsHold`](crate::messages::SystemControlPayload::SetWeaponsHold)
+/// [`SetWeaponsHold`](crate::core::messages::SystemControlPayload::SetWeaponsHold)
 /// command on the same `red-alert` admitted-command target the alert itself uses
 /// — one console control source governs the ship's whole firing posture, and an
 /// NPC whose Red Alert system is AI-run can be ordered to hold through exactly
@@ -94,7 +94,7 @@ pub struct ShipRedAlert(pub bool);
 /// It adds NO doctrine vocabulary. Every armed hull in the fleet gates its guns
 /// on one authored predicate — `fact(red_alert) >= param(min_alert_to_fire)` —
 /// and this state is composed into the *value* of that fact at the fire hosts,
-/// through [`WeaponsAlertPosture`](crate::weapons_plugin::WeaponsAlertPosture).
+/// through [`WeaponsAlertPosture`](crate::console::weapons::WeaponsAlertPosture).
 /// Held, the fact reads below every authorable floor; released, it reads exactly
 /// the `1.0`/`0.0` it always did. See that type for the full argument.
 ///
@@ -159,7 +159,11 @@ impl ShipViewMode {
         self.request_view_mode_from(requester, mode);
     }
 
-    pub fn request_view_mode_from(&mut self, requester: crate::messages::SystemId, mode: ViewMode) {
+    pub fn request_view_mode_from(
+        &mut self,
+        requester: crate::core::messages::SystemId,
+        mode: ViewMode,
+    ) {
         let resolution = self
             .viewscreen
             .apply_channel_2(ViewscreenRequest { requester, mode });

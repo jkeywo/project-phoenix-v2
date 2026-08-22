@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::core::broadcast::broadcaster::{dispatch, BroadcastKind, Broadcaster};
-use crate::messages::{DeliveryClass, GamePhase};
+use crate::core::messages::{DeliveryClass, GamePhase};
 
 /// Marker for the lobby broadcast phase.
 ///
@@ -46,8 +46,8 @@ mod tests {
     use super::*;
     use crate::core::broadcast::audience::Audience;
     use crate::core::broadcast::cadence::Cadence;
+    use crate::core::messages::{GamePhase, ServerMessage};
     use crate::lobby::{LobbyPlugin, OutboundMessage};
-    use crate::messages::{GamePhase, ServerMessage};
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);

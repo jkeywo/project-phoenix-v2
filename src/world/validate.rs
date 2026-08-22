@@ -33,8 +33,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::entity_includes::FragmentSource;
-use crate::entity_loader::TemplateLoader;
+use crate::entities::include_resolve::FragmentSource;
+use crate::entities::loader::TemplateLoader;
 use crate::world::config::{TriggerAction, WorldConfig, WorldEntity};
 
 /// Severity of a [`WorldFinding`].
@@ -555,7 +555,7 @@ fn collect_spawned_instances(config: &WorldConfig) -> Vec<SpawnedInstance<'_>> {
 ///   entries (`probe_artillery_standoff.toml` adds one by override). Judging
 ///   the raw template would validate content no scenario runs.
 /// * Which fields count as anchors is asked of
-///   [`crate::ai_core::parse_doctrine_directive`], the same function the
+///   [`crate::ai::core::parse_doctrine_directive`], the same function the
 ///   runtime flies, rather than re-derived from the `directive_*` field names.
 ///   A third copy of that table is how the courier's `directive_anchors`-on-a-
 ///   `Reach` survived in the first place.
@@ -580,7 +580,7 @@ fn doctrine_anchor_refs(
     };
     let config = match inst.overrides {
         None => template,
-        Some(overrides) => match crate::entity_loader::apply_overrides(&template, overrides) {
+        Some(overrides) => match crate::entities::loader::apply_overrides(&template, overrides) {
             Ok(merged) => merged,
             Err(_) => return Vec::new(),
         },
@@ -591,12 +591,12 @@ fn doctrine_anchor_refs(
 
     let mut out = Vec::new();
     for entry in &behaviour.doctrine {
-        match crate::ai_core::parse_doctrine_directive(entry) {
-            crate::messages::AiDirective::Patrol { anchors, .. } => {
+        match crate::ai::core::parse_doctrine_directive(entry) {
+            crate::core::messages::AiDirective::Patrol { anchors, .. } => {
                 out.extend(anchors.into_iter().map(|a| (a, "Patrol")));
             }
-            crate::messages::AiDirective::Reach { anchor } => out.push((anchor, "Reach")),
-            crate::messages::AiDirective::Retreat { anchor } => out.push((anchor, "Retreat")),
+            crate::core::messages::AiDirective::Reach { anchor } => out.push((anchor, "Reach")),
+            crate::core::messages::AiDirective::Retreat { anchor } => out.push((anchor, "Retreat")),
             _ => {}
         }
     }
@@ -717,7 +717,7 @@ fn civilian_route_ref(inst: &SpawnedInstance, loader: &dyn TemplateLoader) -> Op
     let template = loader.load_template(inst.template_path)?;
     let config = match inst.overrides {
         None => template,
-        Some(overrides) => crate::entity_loader::apply_overrides(&template, overrides).ok()?,
+        Some(overrides) => crate::entities::loader::apply_overrides(&template, overrides).ok()?,
     };
     config
         .civilian
@@ -826,7 +826,7 @@ fn validate_civilian_routes_in(
 /// A template that declares `includes` has said it is incomplete on its own.
 /// Spawning it from the fragments that happened to resolve would put a
 /// half-assembled hull in the world, which is the one outcome composition must
-/// never produce. [`crate::entity_includes::IncludeError`] has no warning
+/// never produce. [`crate::entities::include_resolve::IncludeError`] has no warning
 /// severity for the same reason.
 ///
 /// The finding's `source` is the resolver's own: the file that *declared* the
@@ -846,13 +846,13 @@ fn validate_template_composition_in(
         // keying on the raw string would let two spellings of one hull produce
         // two findings for one broken include, which is exactly the duplication
         // this set exists to prevent.
-        if !seen.insert(crate::entity_includes::canonical_template_path(
+        if !seen.insert(crate::entities::include_resolve::canonical_template_path(
             inst.template_path,
         )) {
             continue;
         }
         let Some(mut finding) =
-            crate::entity_includes::composition_finding(inst.template_path, fragments)
+            crate::entities::include_resolve::composition_finding(inst.template_path, fragments)
         else {
             continue;
         };
@@ -866,7 +866,7 @@ fn validate_template_composition_in(
 }
 
 /// Reject an `[[entity]]` (or `spawn_entity` action) that
-/// [`crate::entity_loader::resolve_entity_via`] would return `Err` for — the
+/// [`crate::entities::loader::resolve_entity_via`] would return `Err` for — the
 /// template does not resolve, or its `overrides` do not merge (issue #973).
 ///
 /// # Why this is an ERROR and never a warning
@@ -928,7 +928,7 @@ fn validate_template_composition_in(
 /// A template *path* cannot be decided without asking somebody for the
 /// template, and not every host can answer; the condition is named rather than
 /// implied by a `cfg`: [`TemplateLoader::absence_is_final`], the exact twin of
-/// [`crate::entity_includes::FragmentSource::absence_is_final`] one layer down.
+/// [`crate::entities::include_resolve::FragmentSource::absence_is_final`] one layer down.
 ///
 /// * **Hard-fails**: native hosts — headless (`FsTemplateLoader`, and
 ///   `WasmTemplateLoader` through its filesystem fallback) and every fixture
@@ -949,7 +949,7 @@ fn validate_template_composition_in(
 /// # Why "validation passed" means "the spawn will resolve it"
 ///
 /// The loader handed here is the one the spawn will consult —
-/// [`crate::entity_loader::SpawnTemplateLoader`] over the very
+/// [`crate::entities::loader::SpawnTemplateLoader`] over the very
 /// `ConfigCache` the spawn reads (see `world::server::world_activation_blocked`).
 /// Before #973 the two disagreed: validation asked `WasmTemplateLoader`
 /// (filesystem fallback on native) while spawning asked the cache alone, so on
@@ -980,7 +980,7 @@ fn validate_template_resolution_in(
             if !absence_is_final {
                 continue;
             }
-            if !seen.insert(crate::entity_includes::canonical_template_path(
+            if !seen.insert(crate::entities::include_resolve::canonical_template_path(
                 inst.template_path,
             )) {
                 continue;
@@ -1010,7 +1010,7 @@ fn validate_template_resolution_in(
         let Some(overrides) = inst.overrides else {
             continue;
         };
-        match crate::entity_loader::apply_overrides(&template, overrides) {
+        match crate::entities::loader::apply_overrides(&template, overrides) {
             Ok(_merged) => {
                 // The merge succeeded, but "succeeded" only means the merged
                 // document re-parses — see `validate_override_table_presence`
@@ -1047,7 +1047,7 @@ fn validate_template_resolution_in(
 ///
 /// # The foot-gun
 ///
-/// [`crate::entity_loader::apply_overrides`] deep-merges an override onto the
+/// [`crate::entities::loader::apply_overrides`] deep-merges an override onto the
 /// template's serialised document (`EntityConfig::to_toml_value`); when the
 /// template's own field is `None`, its key is simply absent from that
 /// document, so the merge does not refuse the override or merge it into
@@ -1099,7 +1099,7 @@ fn validate_template_resolution_in(
 /// `workforce` or the next table by name.
 fn validate_override_table_presence(
     inst: &SpawnedInstance,
-    template: &crate::entity_config::EntityConfig,
+    template: &crate::entities::config::EntityConfig,
     overrides: &toml::Value,
     src: &WorldSource,
 ) -> Vec<WorldFinding> {
@@ -1297,11 +1297,11 @@ pub fn validate_relative_to(path: &str, toml: &str, config: &WorldConfig) -> Vec
 /// whole composition at build time and aborts before `Startup` runs at all.
 ///
 /// `fragments` is the include-fragment source; every caller in the Bevy app
-/// passes [`crate::entity_includes::HostFragmentSource`], and tests pass a
+/// passes [`crate::entities::include_resolve::HostFragmentSource`], and tests pass a
 /// fixture.
 ///
 /// `templates` is the parsed-template source (issue #973). The Bevy caller
-/// passes [`crate::entity_loader::SpawnTemplateLoader`] built over the exact
+/// passes [`crate::entities::loader::SpawnTemplateLoader`] built over the exact
 /// `ConfigCache` the spawn about to be gated will read, so this gate answers
 /// the question that spawn will ask rather than a similar one.
 pub fn activation_findings(
@@ -1353,18 +1353,18 @@ pub fn activation_findings(
 /// [`validate_doctrine_anchors_in`].
 ///
 /// Entity templates are resolved through the standard
-/// [`crate::entity_loader::WasmTemplateLoader`] (preloaded config cache first,
+/// [`crate::entities::loader::WasmTemplateLoader`] (preloaded config cache first,
 /// filesystem fallback on native). Callers holding content the loader cannot
 /// see — a mod pack's own `assets/entities/*.toml`, say — use
 /// [`validate_composition_with`].
 pub fn validate_composition(root: &WorldSource, children: &[WorldSource]) -> Vec<WorldFinding> {
-    validate_composition_with(root, children, &crate::entity_loader::WasmTemplateLoader)
+    validate_composition_with(root, children, &crate::entities::loader::WasmTemplateLoader)
 }
 
 /// [`validate_composition`] with an explicit entity-template source.
 ///
 /// Include fragments still come from the host source
-/// ([`crate::entity_includes::HostFragmentSource`]) — a `TemplateLoader` serves
+/// ([`crate::entities::include_resolve::HostFragmentSource`]) — a `TemplateLoader` serves
 /// parsed configs and cannot serve raw fragment text. Use
 /// [`validate_composition_with_fragments`] to control both.
 pub fn validate_composition_with(
@@ -1376,7 +1376,7 @@ pub fn validate_composition_with(
         root,
         children,
         template_loader,
-        &crate::entity_includes::HostFragmentSource,
+        &crate::entities::include_resolve::HostFragmentSource,
     )
 }
 
@@ -2389,8 +2389,8 @@ transform = { relative_to = "nobody", offset = [1.0, 0.0, 0.0] }
 "#);
         let findings = activation_findings(
             &config,
-            &crate::entity_includes::HostFragmentSource,
-            &crate::entity_loader::WasmTemplateLoader,
+            &crate::entities::include_resolve::HostFragmentSource,
+            &crate::entities::loader::WasmTemplateLoader,
         );
         assert!(
             findings
@@ -2693,7 +2693,7 @@ name = "ghost"
 "#);
         let findings = activation_findings(
             &config,
-            &crate::entity_includes::HostFragmentSource,
+            &crate::entities::include_resolve::HostFragmentSource,
             &patroller_templates(),
         );
         assert!(
@@ -2706,7 +2706,7 @@ name = "ghost"
         // …and stays silent through the same gate on a blind host.
         let findings = activation_findings(
             &config,
-            &crate::entity_includes::HostFragmentSource,
+            &crate::entities::include_resolve::HostFragmentSource,
             &blind_templates(),
         );
         assert!(
@@ -2873,7 +2873,7 @@ name = "ghost"
         ));
         let findings = activation_findings(
             &config,
-            &crate::entity_includes::HostFragmentSource,
+            &crate::entities::include_resolve::HostFragmentSource,
             &patroller_templates(),
         );
         assert!(
@@ -2993,7 +2993,7 @@ name = "ghost"
         ));
         let findings = activation_findings(
             &config,
-            &crate::entity_includes::HostFragmentSource,
+            &crate::entities::include_resolve::HostFragmentSource,
             &patroller_templates(),
         );
         assert!(
@@ -3015,7 +3015,7 @@ name = "ghost"
     /// itself, not pinned here.
     #[test]
     fn evidence_and_corroborate_overrides_never_warn_override_absent_table() {
-        let loader = crate::entity_loader::WasmTemplateLoader;
+        let loader = crate::entities::loader::WasmTemplateLoader;
         for name in ["probe_evidence.toml", "probe_corroborate.toml"] {
             let path_str = format!("assets/worlds/{name}");
             let toml = std::fs::read_to_string(&path_str).expect("shipped world readable");

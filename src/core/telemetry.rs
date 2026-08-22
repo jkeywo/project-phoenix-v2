@@ -26,7 +26,7 @@
 use bevy::prelude::Resource;
 use std::collections::BTreeMap;
 
-use crate::balance::StampedBalanceEvent;
+use crate::core::balance::StampedBalanceEvent;
 
 /// Accumulates everything the exit summary needs, tick by tick.
 ///

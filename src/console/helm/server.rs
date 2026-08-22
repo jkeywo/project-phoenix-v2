@@ -1,17 +1,17 @@
 use bevy::prelude::*;
 
-use crate::damage::DamageTier;
-use crate::messages::{
+use crate::core::messages::{
     HelmBlackboard, HelmEngineBlackboard, HelmLateralThrustBlackboard, InterSystemPayload,
     InterSystemQueue, ModifierSlot, SystemBlackboard, SystemId,
 };
 use crate::server_app::{ShipBoost, ShipImpulse};
-use crate::ship_plugin::BoostConfigResource;
-use crate::ship_state::ShipPhysics;
-use crate::system_registry::{
+use crate::ship::damage::DamageTier;
+use crate::ship::state::ShipPhysics;
+use crate::ship::system_registry::{
     helm_engine_port_system_id, helm_engine_starboard_system_id, helm_station_key,
     lateral_thrust_system_id,
 };
+use crate::ship_plugin::BoostConfigResource;
 
 pub struct HelmPlugin;
 
@@ -79,20 +79,20 @@ fn publish_helm_blackboard(
             Option<&BoostConfigResource>,
             Option<&ShipImpulse>,
             Option<&ShipBoost>,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::ship_plugin::LastHelmInput>,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::entities::spawner::HelmConsoleSection>,
             Option<&crate::ship_plugin::ShipSystemControlSources>,
             &mut crate::server_app::ShipSystemBlackboards,
-            Has<crate::simulation::LocalShip>,
+            Has<crate::server_app::LocalShip>,
             Option<&crate::entities::spawner::FactionComponent>,
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::Ship>,
     >,
 ) {
-    let default_registry = crate::faction::FactionRegistry::default();
+    let default_registry = crate::ai::faction::FactionRegistry::default();
     let registry = faction_registry
         .as_deref()
         .map(|r| &r.0)
@@ -167,7 +167,7 @@ fn publish_helm_blackboard(
                         .filter(|e| {
                             e.faction
                                 .map(|ef| {
-                                    crate::faction::is_enemy(self_faction, Some(ef), registry)
+                                    crate::ai::faction::is_enemy(self_faction, Some(ef), registry)
                                 })
                                 .unwrap_or(false)
                         })
@@ -178,7 +178,7 @@ fn publish_helm_blackboard(
                             let dz = e.position[2] - physics.z;
                             dx * dx + dz * dz <= radar_range * radar_range
                         })
-                        .map(|e| crate::messages::HostileWeaponArcContact {
+                        .map(|e| crate::core::messages::HostileWeaponArcContact {
                             uuid: e.uuid.to_string(),
                             x: e.position[0],
                             z: e.position[2],
@@ -292,9 +292,9 @@ fn publish_helm_blackboard(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boost::BoostState;
-    use crate::messages::SystemBlackboard;
+    use crate::core::messages::SystemBlackboard;
     use crate::server_app::ShipSystemBlackboards;
+    use crate::ship::boost::BoostState;
 
     fn base_app() -> App {
         let mut app = App::new();
@@ -304,8 +304,8 @@ mod tests {
         app.insert_resource(crate::lobby::server::ShipClientConfigResource::default());
         // Spawn a LocalShip entity with components so the system can query it.
         app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
             ShipPhysics::default(),
             ShipSystemBlackboards::default(),
             ShipImpulse::default(),
@@ -323,13 +323,13 @@ mod tests {
         let toml_str = format!(
             "[helm_console]\nmax_speed = 30.0\n\n[helm_console.radar]\nrange = {radar_range}\nshows = [\"ship\"]\n"
         );
-        let helm_config = crate::entity_config::EntityConfig::from_toml(&toml_str)
+        let helm_config = crate::entities::config::EntityConfig::from_toml(&toml_str)
             .expect("helm_console TOML must parse")
             .helm_console
             .expect("helm_console section must be present");
         app.world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 ShipPhysics {
                     x: 42.0,
                     z: -17.0,
@@ -343,11 +343,11 @@ mod tests {
     }
 
     /// Helper: read the helm blackboard from the LocalShip entity's ShipSystemBlackboards component.
-    fn get_helm_blackboard(app: &mut App) -> crate::messages::HelmBlackboard {
+    fn get_helm_blackboard(app: &mut App) -> crate::core::messages::HelmBlackboard {
         let key = helm_station_key();
         let mut q = app
             .world_mut()
-            .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
         let SystemBlackboard::Helm(bb) = bbs
             .0
@@ -373,15 +373,15 @@ mod tests {
         app.init_resource::<InterSystemQueue>();
         app.insert_resource(crate::lobby::server::ShipClientConfigResource::default());
 
-        let mut registry = crate::faction::FactionRegistry::new();
-        registry.insert(crate::faction::FactionConfig {
+        let mut registry = crate::ai::faction::FactionRegistry::new();
+        registry.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: OWN_FACTION,
             name: "Own".into(),
             enemies: vec![ENEMY_FACTION],
             compliance: None,
         });
-        registry.insert(crate::faction::FactionConfig {
+        registry.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: ENEMY_FACTION,
             name: "Enemy".into(),
@@ -442,7 +442,7 @@ mod tests {
         });
 
         let mut ship = app.world_mut().spawn((
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             ShipPhysics::default(),
             ShipSystemBlackboards::default(),
             ShipImpulse::default(),
@@ -450,15 +450,15 @@ mod tests {
             crate::modifiers::ShipModifiers::new(),
             crate::ship_plugin::LastHelmInput::default(),
             crate::entities::spawner::FactionComponent(OWN_FACTION),
-            crate::ship_state::ShipRedAlert(red_alert),
+            crate::ship::state::ShipRedAlert(red_alert),
         ));
         if local {
-            ship.insert(crate::simulation::LocalShip);
+            ship.insert(crate::server_app::LocalShip);
         }
         app
     }
 
-    fn helm_bb_only(app: &mut App) -> crate::messages::HelmBlackboard {
+    fn helm_bb_only(app: &mut App) -> crate::core::messages::HelmBlackboard {
         let key = helm_station_key();
         let mut q = app.world_mut().query::<&ShipSystemBlackboards>();
         let bbs = q.single(app.world()).unwrap();
@@ -522,7 +522,7 @@ mod tests {
         let key = helm_station_key();
         let mut q = app
             .world_mut()
-            .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
         assert!(
             bbs.0.contains_key(&key),
@@ -536,7 +536,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut ShipPhysics, With<crate::simulation::LocalShip>>();
+                .query_filtered::<&mut ShipPhysics, With<crate::server_app::LocalShip>>();
             let mut physics = q.single_mut(app.world_mut()).unwrap();
             physics.x = 100.0;
             physics.z = -200.0;
@@ -558,7 +558,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut ShipImpulse, With<crate::simulation::LocalShip>>();
+                .query_filtered::<&mut ShipImpulse, With<crate::server_app::LocalShip>>();
             let mut imp = q
                 .single_mut(app.world_mut())
                 .expect("LocalShip must have ShipImpulse");
@@ -576,7 +576,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<Entity, With<crate::simulation::LocalShip>>();
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
             let ship = q.single_mut(app.world_mut()).unwrap();
             app.world_mut()
                 .entity_mut(ship)
@@ -591,7 +591,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut ShipBoost, With<crate::simulation::LocalShip>>();
+                .query_filtered::<&mut ShipBoost, With<crate::server_app::LocalShip>>();
             let mut boost = q
                 .single_mut(app.world_mut())
                 .expect("LocalShip must have ShipBoost");
@@ -628,7 +628,7 @@ mod tests {
         let key = helm_engine_port_system_id();
         let mut q = app
             .world_mut()
-            .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
         assert!(
             bbs.0.contains_key(&key),
@@ -644,7 +644,7 @@ mod tests {
         let key = helm_engine_starboard_system_id();
         let mut q = app
             .world_mut()
-            .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
         assert!(
             bbs.0.contains_key(&key),
@@ -660,7 +660,7 @@ mod tests {
         let key = helm_engine_port_system_id();
         let mut q = app
             .world_mut()
-            .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
         let SystemBlackboard::HelmEngine(engine_bb) = bbs
             .0
@@ -683,7 +683,7 @@ mod tests {
         {
             let ship = app
                 .world_mut()
-                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
                 .single(app.world())
                 .unwrap();
             app.world_mut()
@@ -699,7 +699,7 @@ mod tests {
         let key = helm_engine_port_system_id();
         let mut q = app
             .world_mut()
-            .query_filtered::<&ShipSystemBlackboards, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
         let bbs = q.single(app.world()).unwrap();
         let SystemBlackboard::HelmEngine(engine_bb) = bbs
             .0
@@ -717,7 +717,7 @@ mod tests {
 
     // ── Per-entity publish tests (issue #824) ──────────────────────────────
 
-    fn helm_bb_of(app: &mut App, entity: Entity) -> crate::messages::HelmBlackboard {
+    fn helm_bb_of(app: &mut App, entity: Entity) -> crate::core::messages::HelmBlackboard {
         let bbs = app
             .world()
             .entity(entity)
@@ -769,7 +769,7 @@ mod tests {
             // damaged helm-radar: a -0.5 bonus is a 0.5 multiplier.
             modifiers.add_or_update(crate::modifiers::Modifier {
                 source: crate::modifiers::cache::ModifierSource::SystemDamage(
-                    crate::system_registry::helm_radar_system_id(),
+                    crate::ship::system_registry::helm_radar_system_id(),
                 ),
                 slot: ModifierSlot::HelmRadarRange,
                 bonus: -0.5,
@@ -805,7 +805,7 @@ mod tests {
     fn local_ship_radar_range_still_comes_from_client_config() {
         let mut app = base_app();
         app.insert_resource(crate::lobby::server::ShipClientConfigResource(
-            crate::messages::ShipClientConfig {
+            crate::core::messages::ShipClientConfig {
                 helm_radar_range: 123.0,
                 ..Default::default()
             },
@@ -815,7 +815,7 @@ mod tests {
 
         let local = app
             .world_mut()
-            .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
             .single(app.world())
             .unwrap();
         let local_bb = helm_bb_of(&mut app, local);

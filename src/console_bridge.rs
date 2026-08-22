@@ -56,7 +56,7 @@ pub struct AiChatterEvent {
     /// — mirrors the popup's raw target so host and phone agree).
     pub to_label: String,
     /// The typed coordination payload the client renders into a sentence.
-    pub payload: crate::messages::CoordinationPayload,
+    pub payload: crate::core::messages::CoordinationPayload,
 }
 
 /// Emitted once by `server::audio::push_audio_config` when the local ship

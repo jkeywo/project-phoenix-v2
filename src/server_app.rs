@@ -3,41 +3,41 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::lobby::{LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
-use crate::messages::{
+use crate::core::messages::{
     DeliveryClass, EntitySnapshot, GamePhase, ServerMessage, ShieldFacingStatus, StationId,
 };
-use crate::shield::ShieldSystem;
+use crate::lobby::{LobbyOutbox, OutboundMessage, Sessions, Target, WorldResource};
+use crate::weapons::shield::ShieldSystem;
 
-use crate::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage};
 use crate::debug_overlay::{DamageLog, DamageLogEntry};
-use crate::shield::attacker_bearing_relative;
+use crate::ship::damage::{apply_damage_with_shields, apply_hull_damage, collision_damage};
+use crate::weapons::shield::attacker_bearing_relative;
 use bevy_rapier3d::prelude::ReadRapierContext;
-// Re-export ShipPhysics so `crate::simulation::ShipPhysics` and
+// Re-export ShipPhysics so `crate::server_app::ShipPhysics` and
 // `crate::server_app::ShipPhysics` both resolve.
-pub use crate::ship_state::ShipPhysics as ShipPhysicsComponent;
+pub use crate::ship::state::ShipPhysics as ShipPhysicsComponent;
 
-use crate::entity_spawner::{
+use crate::core::messages::ModifierSlot;
+use crate::entities::spawner::{
     AsteroidFieldSection, BehaviourSection, ColliderSection, EntityId, EntityName,
     EntityTagsSection, EntityUuid, FactionComponent, MeshSection, RadarAppearanceSection,
     RegionShapeSection,
 };
-use crate::impulse::ImpulseState;
-use crate::messages::ModifierSlot;
 use crate::modifiers::ShipModifiers;
+use crate::ship::impulse::ImpulseState;
 use crate::world::server::ObjectiveManagerRes;
 use std::collections::{BTreeMap, HashMap};
 
 // â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-pub use crate::weapons_plugin::{
+pub use crate::console::weapons::{
     weapons_update_broadcaster, ActiveBeam, AsteroidDestroyedVfx, CurrentPhaserMode,
     LastShipAttacker, LastWeaponsUpdate, PhaserCooldown, PhaserRenderConfig,
     TacticalRadarSelection, TorpedoSystemResource,
 };
 
-pub use crate::repair_plugin::{repair_state_broadcaster, ShipRepairTeams};
+pub use crate::console::repair::server::{repair_state_broadcaster, ShipRepairTeams};
 
-pub use crate::power_plugin::{
+pub use crate::ship::power::{
     power_state_broadcaster, PowerConfigResource, PowerMultiplierResource, ShipPowerSystem,
 };
 
@@ -141,7 +141,7 @@ pub use crate::ship::shields::ShipShields;
 /// source of truth; no Resource fallback). Both spawn paths insert a
 /// `ShipBoost::default()` Component on every ship.
 #[derive(Component, Default)]
-pub struct ShipBoost(pub crate::boost::BoostState);
+pub struct ShipBoost(pub crate::ship::boost::BoostState);
 
 /// Per-ship marker set to `true` by phaser/torpedo fire systems when that
 /// ship's weapon actually fires this tick. Reset to `false` by
@@ -175,7 +175,7 @@ pub struct ShipAttackedThisTick(pub bool);
 /// damage outcomes has to live in the authoritative simulation (so it is part
 /// of the digest, per #894) rather than out-of-band host memory. Flipped only
 /// by [`apply_god_mode_toggle`] consuming an admitted `ToggleGodMode` command
-/// on [`crate::system_registry::GOD_MODE_SYSTEM_ID`] — never written directly
+/// on [`crate::ship::system_registry::GOD_MODE_SYSTEM_ID`] — never written directly
 /// from `bridge`'s wasm exports — so the toggle carries a tick, lands in the
 /// command log, and a replay reproduces it exactly.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -271,16 +271,16 @@ impl CaptainPriorityBoost {
 /// `LocalShip`'s own `AdmittedCommands`, so an NPC's `AdmittedCommands` never
 /// carries this command.
 fn apply_god_mode_toggle(
-    ship_query: Query<&crate::messages::AdmittedCommands, With<LocalShip>>,
+    ship_query: Query<&crate::core::messages::AdmittedCommands, With<LocalShip>>,
     mut god_mode: ResMut<GodMode>,
 ) {
     let Some(admitted) = ship_query.iter().next() else {
         return;
     };
-    for cmd in admitted.for_target(crate::system_registry::GOD_MODE_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::ship::system_registry::GOD_MODE_SYSTEM_ID) {
         if matches!(
             cmd.payload,
-            crate::messages::SystemControlPayload::ToggleGodMode
+            crate::core::messages::SystemControlPayload::ToggleGodMode
         ) {
             god_mode.0 = !god_mode.0;
         }
@@ -288,7 +288,7 @@ fn apply_god_mode_toggle(
 }
 
 /// Carries the reason string — and, since #843, the structured
-/// [`Outcome`](crate::balance::Outcome) — when the game ends. Set before
+/// [`Outcome`](crate::core::balance::Outcome) — when the game ends. Set before
 /// transitioning to `GamePhase::GameOver`. The `OnEnter(GameOver)` system reads
 /// `.0` and broadcasts the reason to all clients; the headless exit report
 /// reads `.1` to classify victory vs defeat without string-matching the
@@ -300,7 +300,10 @@ fn apply_god_mode_toggle(
 /// action, or `None` for an undeclared scripted end (the classifier defaults
 /// that to victory).
 #[derive(Resource, Default)]
-pub struct GameOverReason(pub Option<String>, pub Option<crate::balance::Outcome>);
+pub struct GameOverReason(
+    pub Option<String>,
+    pub Option<crate::core::balance::Outcome>,
+);
 
 /// Prevents `handle_collisions` from applying damage every frame while the
 /// ship is in contact. After damage is applied once, a 1-second cooldown
@@ -335,7 +338,7 @@ pub struct SimOutbox(pub Vec<(Target, ServerMessage)>);
 /// single module that knows about all six delta caches (the sixth,
 /// `LastWeaponsUpdate`, stays in `console::weapons`) and owns
 /// `reset_all` / `resync_for_token` / `prune`. Re-exported here so existing
-/// `crate::server_app::LastBroadcastX` / `crate::simulation::LastBroadcastX`
+/// `crate::server_app::LastBroadcastX` / `crate::server_app::LastBroadcastX`
 /// references are unaffected by the move.
 pub use crate::core::broadcast::cache_registry::{
     LastBroadcastBlackboards, LastBroadcastEntityHealth, LastBroadcastEntityPositions,
@@ -390,7 +393,7 @@ pub struct WorldAndTracked<'w> {
 /// validation.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct PlayerDeathLatch<'w> {
-    pub next_state: Option<ResMut<'w, NextState<crate::messages::GamePhase>>>,
+    pub next_state: Option<ResMut<'w, NextState<crate::core::messages::GamePhase>>>,
     pub reason: Option<ResMut<'w, GameOverReason>>,
 }
 
@@ -442,7 +445,10 @@ impl SimRngAndLog<'_> {
 /// everywhere it is written.
 #[derive(Component, Default, Clone)]
 pub struct ShipSystemBlackboards(
-    pub std::collections::HashMap<crate::messages::SystemId, crate::messages::SystemBlackboard>,
+    pub  std::collections::HashMap<
+        crate::core::messages::SystemId,
+        crate::core::messages::SystemBlackboard,
+    >,
 );
 
 // ── Plugin ───────────────────────────────────────────────────────────────────
@@ -534,46 +540,46 @@ pub enum RegistrationOrder {
 /// unchanged either way.
 const SIM_SET_PLUGIN_REGISTRARS: [fn(&mut App); 14] = [
     |app| {
-        app.add_plugins(crate::region_plugin::RegionPlugin);
+        app.add_plugins(crate::regions::server::RegionPlugin);
     },
     |app| {
-        app.add_plugins(crate::console_ai_plugin::ConsoleAiPlugin);
+        app.add_plugins(crate::console_ai::server::ConsoleAiPlugin);
     },
     |app| {
-        app.add_plugins(crate::ai_plugin::AiPlugin);
+        app.add_plugins(crate::ai::server::AiPlugin);
     },
     |app| {
-        app.add_plugins(crate::captain_plugin::CaptainPlugin);
+        app.add_plugins(crate::console::captain::server::CaptainPlugin);
     },
     |app| {
-        app.add_plugins(crate::command_plugin::CommandPlugin);
+        app.add_plugins(crate::console::command::server::CommandPlugin);
     },
     |app| {
-        app.add_plugins(crate::helm_plugin::HelmPlugin);
+        app.add_plugins(crate::console::helm::server::HelmPlugin);
     },
     |app| {
         app.add_plugins(crate::ship_plugin::ShipPlugin);
     },
     |app| {
-        app.add_plugins(crate::weapons_plugin::WeaponsPlugin);
+        app.add_plugins(crate::console::weapons::WeaponsPlugin);
     },
     |app| {
-        app.add_plugins(crate::repair_plugin::RepairPlugin);
+        app.add_plugins(crate::console::repair::server::RepairPlugin);
     },
     |app| {
-        app.add_plugins(crate::power_plugin::ShipPowerPlugin);
+        app.add_plugins(crate::ship::power::ShipPowerPlugin);
     },
     |app| {
-        app.add_plugins(crate::shields_plugin::ShipShieldsPlugin);
+        app.add_plugins(crate::ship::shields::ShipShieldsPlugin);
     },
     |app| {
-        app.add_plugins(crate::sensors_plugin::ShipSensorsPlugin);
+        app.add_plugins(crate::ship::sensors::ShipSensorsPlugin);
     },
     |app| {
-        app.add_plugins(crate::navigation_plugin::NavigationPlugin);
+        app.add_plugins(crate::console::navigation::NavigationPlugin);
     },
     |app| {
-        app.add_plugins(crate::comms_plugin::CommsConsolePlugin);
+        app.add_plugins(crate::console::comms::server::CommsConsolePlugin);
     },
 ];
 
@@ -657,7 +663,7 @@ fn register_physics(app: &mut App) {
     // rapier dt call site in `reconcile_fixed_timestep`.
     app.insert_resource(TimestepMode::Fixed {
         dt: crate::sim_tick::sim_tick_period(
-            crate::entity_config::GlobalConfig::default().sim_tick_hz,
+            crate::entities::config::GlobalConfig::default().sim_tick_hz,
         )
         .as_secs_f32(),
         substeps: 1,
@@ -691,7 +697,9 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     // `First`, before the fixed loop runs) applies the authored rate once a
     // `WorldConfig` exists.
     app.insert_resource(Time::<Fixed>::from_duration(
-        crate::sim_tick::sim_tick_period(crate::entity_config::GlobalConfig::default().sim_tick_hz),
+        crate::sim_tick::sim_tick_period(
+            crate::entities::config::GlobalConfig::default().sim_tick_hz,
+        ),
     ));
     crate::sim_tick::register_sim_tick(app);
     app.add_systems(First, crate::sim_tick::reconcile_fixed_timestep);
@@ -770,7 +778,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             )
             // Cleared-at-fold: real inter-system-message state, but structurally
             // empty by the `RenderInterp` fold point on every correct instance.
-            .declare_state::<crate::messages::InterSystemQueue>(
+            .declare_state::<crate::core::messages::InterSystemQueue>(
                 StateClass::ClearedAtFold,
                 "inter-system-message-state",
             )
@@ -1107,14 +1115,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         // Balance telemetry. Registered here (not behind `headless`) so the
         // chokepoints can emit unconditionally — only the *collection* is
         // headless-only.
-        .add_message::<crate::balance::BalanceEvent>()
+        .add_message::<crate::core::balance::BalanceEvent>()
         .init_resource::<CaptainPriorityBoost>()
         // The sim's one source of randomness. `init_resource` draws an OS seed, so
         // an unconfigured app (browser host, unit tests) behaves as it always did;
         // headless overrides it with a configured one via `insert_resource`.
         .init_resource::<crate::sim_rng::SimRng>()
-        .insert_resource(crate::config_cache::FactionRegistryResource(
-            crate::config_cache::get_faction_registry(),
+        .insert_resource(crate::entities::config_cache::FactionRegistryResource(
+            crate::entities::config_cache::get_faction_registry(),
         ))
         .init_resource::<WorldResource>()
         .init_resource::<WorldSetupBroadcast>()
@@ -1125,7 +1133,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .init_resource::<LastBroadcastHull>()
         .init_resource::<LastBroadcastShields>()
         .init_resource::<LastBroadcastBlackboards>()
-        .init_resource::<crate::messages::InterSystemQueue>()
+        .init_resource::<crate::core::messages::InterSystemQueue>()
         // `handle_collisions` (registered below, in SimSet::Damage) writes this,
         // so the simulation owns it. `DebugOverlayPlugin` also init_resource's it
         // — idempotent — but that plugin is absent headless, and the sim must not
@@ -1237,7 +1245,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::GOD_MODE_SYSTEM_ID,
+            crate::ship::system_registry::GOD_MODE_SYSTEM_ID,
         ));
     }
     app.add_systems(
@@ -1329,17 +1337,17 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     )
     .add_systems(
         FixedUpdate,
-        crate::modifier_coordination::translate_power_modifiers
+        crate::modifiers::coordination::translate_power_modifiers
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
         FixedUpdate,
-        crate::modifier_coordination::translate_impulse_modifiers
+        crate::modifiers::coordination::translate_impulse_modifiers
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
         FixedUpdate,
-        crate::modifier_coordination::apply_radar_damage_modifiers
+        crate::modifiers::coordination::apply_radar_damage_modifiers
             .in_set(crate::sim_sets::SimSet::Modifiers),
     )
     .add_systems(
@@ -1356,7 +1364,7 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             // developing combat). Pin the LocalShip writer to run *after* the
             // doctrine writer so it can MERGE the two objective pools (scenario ∪
             // template doctrine) instead of one silently erasing the other.
-            publish_viewscreen_blackboard.after(crate::ai_plugin::aggregate_doctrine_blackboards),
+            publish_viewscreen_blackboard.after(crate::ai::server::aggregate_doctrine_blackboards),
         )
             .in_set(crate::sim_sets::SimSet::PublishAggregate),
     )
@@ -1366,8 +1374,8 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
     .add_plugins(sim_outbox_broadcaster());
 
     if opts.render {
-        app.add_plugins(crate::entity_star::StarRenderPlugin)
-            .add_plugins(crate::entity_planet::PlanetRenderPlugin)
+        app.add_plugins(crate::entities::star::StarRenderPlugin)
+            .add_plugins(crate::entities::planet::PlanetRenderPlugin)
             .init_resource::<ProceduralMeshCache>()
             // The authored `[render]` calibration (PRD #1023). Initialised to
             // its own defaults here so the LOD swap always has one, and
@@ -1461,7 +1469,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
         // `crate::console::repair::visibility`.
         crate::console::repair::visibility::push_hull_updates(world);
 
-        let snapshot = crate::messages::SimSnapshot {
+        let snapshot = crate::core::messages::SimSnapshot {
             entity_states,
             station_hosts,
             station_health,
@@ -1474,7 +1482,7 @@ pub fn sim_state_broadcaster() -> SimBroadcaster {
 
 fn build_control_source_snapshots(
     world: &mut World,
-) -> BTreeMap<crate::messages::SystemId, String> {
+) -> BTreeMap<crate::core::messages::SystemId, String> {
     let mut query =
         world.query_filtered::<&crate::ship_plugin::ShipSystemControlSources, With<LocalShip>>();
     query
@@ -1512,12 +1520,17 @@ fn build_control_source_snapshots(
 /// ship spawns.
 fn build_station_health_snapshots(
     world: &mut World,
-) -> Vec<crate::messages::StationHealthSnapshot> {
+) -> Vec<crate::core::messages::StationHealthSnapshot> {
     crate::console::repair::visibility::hull_visibility(world)
         .map(|vis| {
             vis.station_fractions()
                 .into_iter()
-                .map(|(station, health)| crate::messages::StationHealthSnapshot { station, health })
+                .map(
+                    |(station, health)| crate::core::messages::StationHealthSnapshot {
+                        station,
+                        health,
+                    },
+                )
                 .collect()
         })
         .unwrap_or_default()
@@ -1549,10 +1562,10 @@ pub struct StationImportanceRes(pub crate::station_importance::StationImportance
 /// Authored-TOML importance is a deliberate future seam and is NOT built here.
 fn ingest_station_importance(world: &mut World) {
     use crate::console::repair::visibility::CORE_BUCKET_ID;
-    use crate::messages::{StationId, SystemId};
+    use crate::core::messages::{StationId, SystemId};
 
     // Objectives as (id, targets, status) — empty on an `App` with no manager.
-    let objectives: Vec<(String, Vec<String>, crate::messages::ObjectiveStatus)> = world
+    let objectives: Vec<(String, Vec<String>, crate::core::messages::ObjectiveStatus)> = world
         .get_resource::<crate::world::server::ObjectiveManagerRes>()
         .map(|m| {
             m.0.sorted_snapshots()
@@ -1564,7 +1577,7 @@ fn ingest_station_importance(world: &mut World) {
 
     // Red Alert on the local ship, if it has spawned.
     let red_alert = {
-        let mut q = world.query_filtered::<&crate::ship_state::ShipRedAlert, With<LocalShip>>();
+        let mut q = world.query_filtered::<&crate::ship::state::ShipRedAlert, With<LocalShip>>();
         q.iter(world).next().map(|r| r.0).unwrap_or(false)
     };
 
@@ -1573,7 +1586,7 @@ fn ingest_station_importance(world: &mut World) {
     let vis = crate::console::repair::visibility::hull_visibility(world);
     let core = StationId(CORE_BUCKET_ID.to_string());
 
-    let attributed: Vec<(String, StationId, crate::messages::ObjectiveStatus)> = objectives
+    let attributed: Vec<(String, StationId, crate::core::messages::ObjectiveStatus)> = objectives
         .into_iter()
         .map(|(id, targets, status)| {
             let station = vis
@@ -1608,7 +1621,7 @@ fn ingest_station_importance(world: &mut World) {
 /// Empty before the resource is registered.
 fn build_station_importance_snapshots(
     world: &mut World,
-) -> Vec<crate::messages::StationImportanceSnapshot> {
+) -> Vec<crate::core::messages::StationImportanceSnapshot> {
     world
         .get_resource::<StationImportanceRes>()
         .map(|res| res.0.snapshots())
@@ -1634,7 +1647,7 @@ fn drain_station_visited(
         return;
     };
     for ev in reader.read() {
-        if let crate::messages::ClientMessage::StationVisited { station } = &ev.msg {
+        if let crate::core::messages::ClientMessage::StationVisited { station } = &ev.msg {
             // Only a connected player's visit counts — same authority gate the
             // debug drains apply.
             if sessions.0.players().iter().any(|p| p.token == ev.token) {
@@ -1644,7 +1657,9 @@ fn drain_station_visited(
     }
 }
 
-fn build_station_host_snapshots(world: &mut World) -> Vec<crate::messages::StationHostSnapshot> {
+fn build_station_host_snapshots(
+    world: &mut World,
+) -> Vec<crate::core::messages::StationHostSnapshot> {
     let mut query =
         world.query_filtered::<&crate::ship_plugin::VisitingStationHosts, With<LocalShip>>();
     query
@@ -1654,7 +1669,7 @@ fn build_station_host_snapshots(world: &mut World) -> Vec<crate::messages::Stati
             hosts
                 .0
                 .iter()
-                .map(|assignment| crate::messages::StationHostSnapshot {
+                .map(|assignment| crate::core::messages::StationHostSnapshot {
                     station: assignment.station.clone(),
                     host: assignment.host.clone(),
                     rating: assignment.rating.clone(),
@@ -1672,7 +1687,9 @@ fn build_station_host_snapshots(world: &mut World) -> Vec<crate::messages::Stati
 /// module below, which pins the shield-detail payload population directly
 /// (target with shields -> `shields`/`shield_freq` present; entity with none
 /// -> absent) without needing a full multi-tick cadence fixture.
-fn build_sim_state_entity_states(world: &mut World) -> Vec<crate::messages::EntityStateSnapshot> {
+fn build_sim_state_entity_states(
+    world: &mut World,
+) -> Vec<crate::core::messages::EntityStateSnapshot> {
     // ── Asteroids: position/yaw never changes — omit from per-tick payload.
     // The client already has asteroid positions from WorldSetup/AsteroidSpawned.
     // Health fields are delta-compressed: only emitted when changed since last tick.
@@ -1680,13 +1697,13 @@ fn build_sim_state_entity_states(world: &mut World) -> Vec<crate::messages::Enti
         String,
         Option<f32>,
         Option<f32>,
-        Option<Vec<crate::messages::ShieldFacingStatus>>,
+        Option<Vec<crate::core::messages::ShieldFacingStatus>>,
         Option<f32>,
     );
     let asteroid_raw: Vec<AsteroidRaw> = {
         let mut q = world.query::<(
             &AsteroidUuid,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::ship::shields::ShipShields>,
         )>();
         q.iter(world)
@@ -1734,7 +1751,7 @@ fn build_sim_state_entity_states(world: &mut World) -> Vec<crate::messages::Enti
             })
             .collect()
     };
-    let asteroid_states: Vec<crate::messages::EntityStateSnapshot> = {
+    let asteroid_states: Vec<crate::core::messages::EntityStateSnapshot> = {
         let mut health_cache = world.resource_mut::<LastBroadcastEntityHealth>();
         asteroid_raw
             .into_iter()
@@ -1769,7 +1786,7 @@ fn build_sim_state_entity_states(world: &mut World) -> Vec<crate::messages::Enti
                             shield_freq,
                         ),
                     );
-                    Some(crate::messages::EntityStateSnapshot {
+                    Some(crate::core::messages::EntityStateSnapshot {
                         uuid,
                         position: None,
                         yaw: None,
@@ -1793,14 +1810,14 @@ fn build_sim_state_entity_states(world: &mut World) -> Vec<crate::messages::Enti
         f32,
         Option<f32>,
         Option<f32>,
-        Option<Vec<crate::messages::ShieldFacingStatus>>,
+        Option<Vec<crate::core::messages::ShieldFacingStatus>>,
         Option<f32>,
     );
     let npc_raw: Vec<NpcRaw> = {
         let mut q = world.query_filtered::<(
             &Transform,
             &EntityUuid,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::ship::shields::ShipShields>,
         ), Without<Asteroid>>();
         q.iter(world)
@@ -1847,7 +1864,7 @@ fn build_sim_state_entity_states(world: &mut World) -> Vec<crate::messages::Enti
     // hull/shield suppressed when the f32 value is identical to last tick.
     const POS_THRESHOLD_SQ: f32 = 0.0001; // 0.01 world-unit radius
     const YAW_THRESHOLD: f32 = 0.001; // ~0.057 degrees
-    let npc_states: Vec<crate::messages::EntityStateSnapshot> = {
+    let npc_states: Vec<crate::core::messages::EntityStateSnapshot> = {
         // Borrow position cache, then health cache separately (both mut).
         // Collect diffs first to avoid holding multiple mut borrows.
         type NpcDiff = (
@@ -1856,7 +1873,7 @@ fn build_sim_state_entity_states(world: &mut World) -> Vec<crate::messages::Enti
             Option<f32>,
             Option<f32>,
             Option<f32>,
-            Option<Vec<crate::messages::ShieldFacingStatus>>,
+            Option<Vec<crate::core::messages::ShieldFacingStatus>>,
             Option<f32>,
         );
         let diffs: Vec<NpcDiff> = {
@@ -1949,7 +1966,7 @@ fn build_sim_state_entity_states(world: &mut World) -> Vec<crate::messages::Enti
                             ),
                         );
                     }
-                    Some(crate::messages::EntityStateSnapshot {
+                    Some(crate::core::messages::EntityStateSnapshot {
                         uuid,
                         position: out_pos,
                         yaw: out_yaw,
@@ -2096,8 +2113,8 @@ fn clear_last_attacker_on_death(
 /// would still only remember one entity's last state.
 fn clear_last_attacker_on_red_alert_off(
     mut attacker_q: Query<
-        (&mut LastShipAttacker, &crate::ship_state::ShipRedAlert),
-        Changed<crate::ship_state::ShipRedAlert>,
+        (&mut LastShipAttacker, &crate::ship::state::ShipRedAlert),
+        Changed<crate::ship::state::ShipRedAlert>,
     >,
 ) {
     for (mut attacker, ra) in &mut attacker_q {
@@ -2145,22 +2162,22 @@ fn clear_last_attacker_on_red_alert_off(
 fn publish_viewscreen_blackboard(
     time: Res<Time>,
     world_config: Option<Res<crate::world::config::WorldConfig>>,
-    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
-    local_uuid_q: Query<&crate::entity_spawner::EntityUuid, With<LocalShip>>,
+    hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<LocalShip>>,
+    local_uuid_q: Query<&crate::entities::spawner::EntityUuid, With<LocalShip>>,
     objectives: Option<Res<ObjectiveManagerRes>>,
     boost: Option<Res<CaptainPriorityBoost>>,
     mut ship_blackboards_q: Query<
         (
             &mut ShipSystemBlackboards,
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::ship::combat_activity::RecentCombatActivity>,
-            Option<&crate::weapons_plugin::LastShipAttacker>,
+            Option<&crate::console::weapons::LastShipAttacker>,
             Option<&crate::entities::spawner::BehaviourSection>,
         ),
         With<LocalShip>,
     >,
 ) {
-    use crate::messages::{SystemBlackboard, SystemId, ViewscreenBlackboard};
+    use crate::core::messages::{SystemBlackboard, SystemId, ViewscreenBlackboard};
     use crate::objectives::WorldConditions;
     use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
@@ -2248,7 +2265,9 @@ fn publish_viewscreen_blackboard(
         let attacked_memory_secs = world_config
             .as_deref()
             .map(|wc| wc.global.attacked_memory_secs)
-            .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().attacked_memory_secs);
+            .unwrap_or_else(|| {
+                crate::entities::config::GlobalConfig::default().attacked_memory_secs
+            });
         let doctrine_conditions = WorldConditions {
             red_alert,
             hull_fraction: hull_integrity_pct / 100.0,
@@ -2314,7 +2333,9 @@ fn publish_viewscreen_blackboard(
 /// so bare-`App` fixtures without the message registered still validate.
 fn emit_phase_change_balance_events(
     mut reader: MessageReader<bevy::state::state::StateTransitionEvent<GamePhase>>,
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
 ) {
     let Some(msgs) = balance_events.as_mut() else {
         return;
@@ -2327,7 +2348,7 @@ fn emit_phase_change_balance_events(
             Some(p) => format!("{p:?}"),
             None => "None".to_string(),
         };
-        msgs.write(crate::balance::BalanceEvent::PhaseChanged {
+        msgs.write(crate::core::balance::BalanceEvent::PhaseChanged {
             from: fmt(&ev.exited),
             to: fmt(&ev.entered),
         });
@@ -2385,14 +2406,14 @@ fn handle_collisions(
             Entity,
             &mut ShipPhysicsComponent,
             &mut CollisionCooldown,
-            &mut crate::entity_spawner::EntitySystemHull,
+            &mut crate::entities::spawner::EntitySystemHull,
             Option<&mut ShipShields>,
             Option<&ShipModifiers>,
             Option<&EntityUuid>,
             Option<&ColliderSection>,
             Has<LocalShip>,
             Option<&mut ShipImpulse>,
-            Option<&mut crate::entity_spawner::EntityShipArcHull>,
+            Option<&mut crate::entities::spawner::EntityShipArcHull>,
         ),
         With<Ship>,
     >,
@@ -2401,12 +2422,14 @@ fn handle_collisions(
     mut next_state: ResMut<NextState<GamePhase>>,
     mut game_over_reason: ResMut<GameOverReason>,
     mut damage_log: ResMut<DamageLog>,
-    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    mut destroyed_events: MessageWriter<crate::ai::server::AiEntityDestroyed>,
     mut world: ResMut<WorldResource>,
     mut commands: Commands,
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
     // See `tick_beams_apply_damage` (issue #838): forget the killed uuid from
     // the registry so the reconcile sweep does not re-emit `EntityDespawned`.
     mut tracked: Option<ResMut<TrackedEntities>>,
@@ -2598,7 +2621,8 @@ fn handle_collisions(
         // pierced fraction goes straight to hull; the absorbed fraction
         // is mitigated by the facing shield quadrant (any leak adds to
         // hull damage).
-        let (pierced, absorbed) = crate::damage::split_damage_for_pierce(damage, shield_pierce);
+        let (pierced, absorbed) =
+            crate::ship::damage::split_damage_for_pierce(damage, shield_pierce);
         let mut total_hull = pierced;
         let mut shield_amount = 0.0;
 
@@ -2699,13 +2723,13 @@ fn handle_collisions(
         // Skipped for a ship with no `EntityUuid`, which has no identity the
         // report could key a ledger on.
         if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
-            msgs.write(crate::balance::BalanceEvent::DamageApplied {
+            msgs.write(crate::core::balance::BalanceEvent::DamageApplied {
                 attacker: None,
                 victim: uuid.0.clone(),
                 // Only ships run this collision path; the asteroid is the
                 // thing collided *with*, and takes no damage from it.
-                victim_kind: crate::balance::VictimKind::Ship,
-                weapon: crate::balance::WEAPON_KIND_COLLISION.to_string(),
+                victim_kind: crate::core::balance::VictimKind::Ship,
+                weapon: crate::core::balance::WEAPON_KIND_COLLISION.to_string(),
                 amount: damage,
                 shield_absorbed: shield_absorbed_for_balance,
                 hull_damage: hull_applied,
@@ -2734,14 +2758,14 @@ fn handle_collisions(
                     game_over_reason.0 = Some("server.game_over.ship_destroyed".into());
                     // The LocalShip died → this run is a defeat (#843). Latched
                     // alongside the reason under the same first-write guard.
-                    game_over_reason.1 = Some(crate::balance::Outcome::Defeat);
+                    game_over_reason.1 = Some(crate::core::balance::Outcome::Defeat);
                     // EntityDestroyed for the player death, once (guarded by the
                     // first reason write). Environmental death → no killer.
                     // Shares the `GameOverReason` latch with a scenario's
                     // `SetGameOverReason`; see the beam death site (console/
                     // weapons/beam.rs) for why that coupling is accepted.
                     if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
-                        msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                        msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
                             victim: uuid.0.clone(),
                             killer: None,
                         });
@@ -2754,7 +2778,7 @@ fn handle_collisions(
             // triggers and clients update consistently.
             if let Some(uuid) = ship_uuid {
                 world.0.entities.retain(|e| e.uuid != uuid.0);
-                destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
+                destroyed_events.write(crate::ai::server::AiEntityDestroyed {
                     entity_uuid: uuid.0.clone(),
                 });
                 outbox.0.push((
@@ -2769,7 +2793,7 @@ fn handle_collisions(
                 // EntityDestroyed for the NPC death, co-located with the
                 // AiEntityDestroyed write. Environmental death → no killer.
                 if let Some(msgs) = balance_events.as_mut() {
-                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                    msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
                         victim: uuid.0.clone(),
                         killer: None,
                     });
@@ -2937,7 +2961,10 @@ pub fn broadcast_blackboard_updates(
 
     world.init_resource::<visibility::LastVisibleRepairBlackboard>();
 
-    let mut updates: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> = {
+    let mut updates: Vec<(
+        crate::core::messages::SystemId,
+        crate::core::messages::SystemBlackboard,
+    )> = {
         let q = bb_query.get_or_insert_with(|| {
             world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>()
         });
@@ -2945,7 +2972,10 @@ pub fn broadcast_blackboard_updates(
             return;
         };
         let last = world.resource::<LastBroadcastBlackboards>();
-        let mut changed: Vec<(crate::messages::SystemId, crate::messages::SystemBlackboard)> =
+        let mut changed: Vec<(
+            crate::core::messages::SystemId,
+            crate::core::messages::SystemBlackboard,
+        )> =
             bb.0.iter()
                 .filter(|(id, bb)| last.0.get(*id) != Some(*bb))
                 .map(|(id, bb)| (id.clone(), bb.clone()))
@@ -2991,13 +3021,14 @@ pub fn broadcast_blackboard_updates(
     if stations_changed
         && !updates
             .iter()
-            .any(|(_, bb)| matches!(bb, crate::messages::SystemBlackboard::Repair(_)))
+            .any(|(_, bb)| matches!(bb, crate::core::messages::SystemBlackboard::Repair(_)))
     {
         let mut q = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
         if let Some(bb) = q.iter(world).next() {
-            if let Some((id, repair)) =
-                bb.0.iter()
-                    .find(|(_, bb)| matches!(bb, crate::messages::SystemBlackboard::Repair(_)))
+            if let Some((id, repair)) = bb
+                .0
+                .iter()
+                .find(|(_, bb)| matches!(bb, crate::core::messages::SystemBlackboard::Repair(_)))
             {
                 updates.push((id.clone(), repair.clone()));
             }
@@ -3102,7 +3133,7 @@ fn upsert_world_entity(world: &mut WorldResource, snapshot: EntitySnapshot) {
 fn snapshot_from_entity_config(
     uuid: String,
     id: Option<String>,
-    config: &crate::entity_config::EntityConfig,
+    config: &crate::entities::config::EntityConfig,
     position: Vec3,
 ) -> EntitySnapshot {
     let mut snapshot = EntitySnapshot {
@@ -3146,7 +3177,7 @@ fn snapshot_from_entity_config(
     // before the entity exists — which is also the only moment its condition is
     // guaranteed to be its authored starting value.
     if let Some(infrastructure) = &config.infrastructure {
-        snapshot.infrastructure = crate::messages::InfrastructureSnapshot::from_state(
+        snapshot.infrastructure = crate::core::messages::InfrastructureSnapshot::from_state(
             &crate::infrastructure::InfrastructureState::from_config(infrastructure),
         );
     }
@@ -3191,8 +3222,8 @@ fn reconcile_runtime_entities(
             Option<&EntityTagsSection>,
             Option<&RadarAppearanceSection>,
             Option<&AsteroidFieldSection>,
-            Option<&crate::entity_spawner::EntitySystemHull>,
-            Option<&crate::entity_spawner::EntityTarget>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntityTarget>,
             Option<&crate::ship::shields::ShipShields>,
             Option<&crate::infrastructure::InfrastructureCondition>,
         ),
@@ -3210,7 +3241,7 @@ fn reconcile_runtime_entities(
             obj.0
                 .sorted_snapshots()
                 .into_iter()
-                .filter(|s| s.status == crate::messages::ObjectiveStatus::Active)
+                .filter(|s| s.status == crate::core::messages::ObjectiveStatus::Active)
                 .flat_map(|s| s.targets)
                 .collect()
         })
@@ -3223,7 +3254,7 @@ fn reconcile_runtime_entities(
 
     /// Serialise a `RegionShape` to the wire string (snake_case variant name).
     fn shape_to_wire(shape: &RegionShapeSection) -> String {
-        use crate::region_shape::RegionShape;
+        use crate::regions::shape::RegionShape;
         match &shape.0 {
             RegionShape::Sphere { .. } => "sphere",
             RegionShape::Box { .. } => "box",
@@ -3279,8 +3310,9 @@ fn reconcile_runtime_entities(
                     shield_fraction,
                     // Issue #1025: minted from the LIVE track, so a structure
                     // reported after it degraded is reported as it now is.
-                    infrastructure: infrastructure
-                        .and_then(|i| crate::messages::InfrastructureSnapshot::from_state(&i.0)),
+                    infrastructure: infrastructure.and_then(|i| {
+                        crate::core::messages::InfrastructureSnapshot::from_state(&i.0)
+                    }),
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,
@@ -3293,15 +3325,15 @@ fn reconcile_runtime_entities(
                     snapshot.shape = Some(shape_to_wire(shape));
                     if snapshot.radius.is_none() {
                         match &shape.0 {
-                            crate::region_shape::RegionShape::Sphere { radius } => {
+                            crate::regions::shape::RegionShape::Sphere { radius } => {
                                 snapshot.radius = Some(*radius);
                             }
-                            crate::region_shape::RegionShape::Box { half_extents, .. } => {
+                            crate::regions::shape::RegionShape::Box { half_extents, .. } => {
                                 let max_he = half_extents[0].max(half_extents[2]);
                                 snapshot.radius = Some(max_he);
                                 snapshot.half_extents = Some(*half_extents);
                             }
-                            crate::region_shape::RegionShape::Torus {
+                            crate::regions::shape::RegionShape::Torus {
                                 inner_radius,
                                 outer_radius,
                             } => {
@@ -3404,8 +3436,9 @@ fn reconcile_runtime_entities(
                     shield_fraction,
                     // Issue #1025: minted from the LIVE track, so a structure
                     // reported after it degraded is reported as it now is.
-                    infrastructure: infrastructure
-                        .and_then(|i| crate::messages::InfrastructureSnapshot::from_state(&i.0)),
+                    infrastructure: infrastructure.and_then(|i| {
+                        crate::core::messages::InfrastructureSnapshot::from_state(&i.0)
+                    }),
                     position: Some([
                         transform.translation.x,
                         transform.translation.y,
@@ -3418,15 +3451,15 @@ fn reconcile_runtime_entities(
                     snapshot.shape = Some(shape_to_wire(shape));
                     if snapshot.radius.is_none() {
                         match &shape.0 {
-                            crate::region_shape::RegionShape::Sphere { radius } => {
+                            crate::regions::shape::RegionShape::Sphere { radius } => {
                                 snapshot.radius = Some(*radius);
                             }
-                            crate::region_shape::RegionShape::Box { half_extents, .. } => {
+                            crate::regions::shape::RegionShape::Box { half_extents, .. } => {
                                 let max_he = half_extents[0].max(half_extents[2]);
                                 snapshot.radius = Some(max_he);
                                 snapshot.half_extents = Some(*half_extents);
                             }
-                            crate::region_shape::RegionShape::Torus {
+                            crate::regions::shape::RegionShape::Torus {
                                 inner_radius,
                                 outer_radius,
                             } => {
@@ -3517,7 +3550,7 @@ fn setup_world(
         return;
     };
 
-    let config_cache = crate::config_cache::get_config_cache();
+    let config_cache = crate::entities::config_cache::get_config_cache();
     spawn_anonymous_entities_internal(
         &mut commands,
         &mut world,
@@ -3538,7 +3571,7 @@ pub(crate) fn spawn_anonymous_entities_internal(
     commands: &mut Commands,
     world: &mut WorldResource,
     world_config: &crate::world::config::WorldConfig,
-    config_cache: &crate::config_cache::ConfigCache,
+    config_cache: &crate::entities::config_cache::ConfigCache,
     id_mint: Option<&crate::world_id::WorldIdMint>,
 ) -> usize {
     // Atomic-activation guard (issues #750/#752/#906/#969/#973). This system owns one
@@ -3572,20 +3605,20 @@ pub(crate) fn spawn_anonymous_entities_internal(
         // narrower than the spawn double-spawns or mis-routes an entry rather
         // than dropping it. See `entity_loader::template_is_asteroid_field`.
         let is_unified = crate::world::config::is_owned_by_unified_pipeline(entity_inst, |path| {
-            crate::entity_loader::template_is_asteroid_field(
+            crate::entities::loader::template_is_asteroid_field(
                 path,
                 config_cache,
-                &crate::entity_loader::WasmTemplateLoader,
+                &crate::entities::loader::WasmTemplateLoader,
             )
         });
         if is_unified {
             continue;
         }
 
-        let config = match crate::entity_loader::resolve_entity_via(
+        let config = match crate::entities::loader::resolve_entity_via(
             entity_inst,
             config_cache,
-            &crate::entity_loader::WasmTemplateLoader,
+            &crate::entities::loader::WasmTemplateLoader,
         ) {
             Ok(c) => c,
             Err(e) => {
@@ -3611,7 +3644,7 @@ pub(crate) fn spawn_anonymous_entities_internal(
             }
         };
 
-        crate::entity_spawner::spawn_entity(
+        crate::entities::spawner::spawn_entity(
             commands,
             &config,
             pos,
@@ -3651,17 +3684,17 @@ fn player_spawn_rotation_yaw(rot: [f32; 3]) -> (bevy::math::Quat, f32) {
 /// template.
 fn player_ship_identity(
     template_tags: &[String],
-    template_radar: Option<&crate::entity_config::RadarAppearanceConfig>,
-) -> (Vec<String>, crate::entity_config::RadarAppearanceConfig) {
+    template_radar: Option<&crate::entities::config::RadarAppearanceConfig>,
+) -> (Vec<String>, crate::entities::config::RadarAppearanceConfig) {
     let mut tags = template_tags.to_vec();
-    let player_tag = crate::entity_tags::EntityTag::Player.as_str();
+    let player_tag = crate::entities::tags::EntityTag::Player.as_str();
     if !tags.iter().any(|t| t == player_tag) {
         tags.push(player_tag.to_string());
     }
     let mut radar =
         template_radar
             .cloned()
-            .unwrap_or(crate::entity_config::RadarAppearanceConfig {
+            .unwrap_or(crate::entities::config::RadarAppearanceConfig {
                 icon: None,
                 colour: None,
                 size: None,
@@ -3693,7 +3726,7 @@ fn player_ship_identity(
 ///   was never the rule the run flew.
 ///
 /// So the overrides are re-applied **onto the picked hull**, through
-/// [`crate::entity_loader::apply_overrides`] — the same merge the validator
+/// [`crate::entities::loader::apply_overrides`] — the same merge the validator
 /// itself runs (`world::validate`) and the same one `resolve_entity_via`
 /// performs for every other `[[entity]]`. One merge, one set of semantics; a
 /// second implementation here would be a second set of answers about
@@ -3724,17 +3757,17 @@ fn player_ship_identity(
 /// without, so this logs and falls back to the unmodified selection — today's
 /// behaviour — rather than dropping the player's hull.
 fn player_hull_config(
-    world_row: crate::entity_config::EntityConfig,
+    world_row: crate::entities::config::EntityConfig,
     overrides: Option<&toml::Value>,
-    selected: Option<&crate::entity_config::EntityConfig>,
-) -> crate::entity_config::EntityConfig {
+    selected: Option<&crate::entities::config::EntityConfig>,
+) -> crate::entities::config::EntityConfig {
     let Some(selected) = selected else {
         return world_row;
     };
     let Some(overrides) = overrides else {
         return selected.clone();
     };
-    match crate::entity_loader::apply_overrides(selected, overrides) {
+    match crate::entities::loader::apply_overrides(selected, overrides) {
         Ok(merged) => merged,
         Err(e) => {
             bevy::log::error!(
@@ -3767,7 +3800,7 @@ fn spawn_game_start_entities(
         None => return,
     };
 
-    let config_cache = crate::config_cache::get_config_cache();
+    let config_cache = crate::entities::config_cache::get_config_cache();
 
     let mut ship_spawned = false;
     let named_positions = crate::world::config::build_named_entity_positions(mc);
@@ -3783,10 +3816,10 @@ fn spawn_game_start_entities(
                 continue;
             }
         }
-        let config = match crate::entity_loader::resolve_entity_via(
+        let config = match crate::entities::loader::resolve_entity_via(
             entity_inst,
             &config_cache,
-            &crate::entity_loader::WasmTemplateLoader,
+            &crate::entities::loader::WasmTemplateLoader,
         ) {
             Ok(c) => c,
             Err(e) => {
@@ -3878,7 +3911,7 @@ fn spawn_game_start_entities(
                 None
             };
 
-        let spawned = crate::entity_spawner::spawn_entity(
+        let spawned = crate::entities::spawner::spawn_entity(
             &mut commands,
             &config,
             pos,
@@ -3916,7 +3949,7 @@ fn spawn_game_start_entities(
             // authored groups beyond the canonical three (e.g. `ops`) are
             // allocatable. Empty for a config with no `[power_groups.*]`.
             let power_group_seed =
-                crate::power_plugin::authored_power_group_seed(&ship_config.0.power_groups);
+                crate::ship::power::authored_power_group_seed(&ship_config.0.power_groups);
             let (initial_control_sources, initial_active_ratings) = {
                 // The shared boot-seeding path (issue #871) — the same
                 // `seed_boot_ratings` `entities::spawner` calls for every other
@@ -3974,7 +4007,7 @@ fn spawn_game_start_entities(
                 // here again is how #785's RepairTargetSelector, #786's
                 // CommsTargetSelector and #882's HelmBoostAiPolicyState each
                 // silently missed the player ship.
-                .insert(crate::ai_plugin::ai_high_fidelity_components())
+                .insert(crate::ai::server::ai_high_fidelity_components())
                 .insert(ShipSystemBlackboards::default())
                 .insert(ship_config)
                 .insert(initial_control_sources)
@@ -3992,7 +4025,7 @@ fn spawn_game_start_entities(
                 // shipped — would leave the whole feature dead on the only
                 // hull it exists for.
                 .insert(crate::ship_plugin::ShipIntentNarration::default())
-                .insert(crate::messages::AdmittedCommands::default())
+                .insert(crate::core::messages::AdmittedCommands::default())
                 .insert(ShipPhysicsComponent {
                     x: pos.x,
                     z: pos.z,
@@ -4008,17 +4041,17 @@ fn spawn_game_start_entities(
                 // no cursor component, `helm_patrol` had no route position to
                 // steer from and `advance_objective_cursors` had nothing to
                 // advance (issue #702).
-                .insert(crate::ai_plugin::ObjectiveCursors::default())
-                .insert(crate::weapons_plugin::TacticalRadarSelection::default())
-                .insert(crate::weapons_plugin::ActiveBeam::default())
-                .insert(crate::weapons_plugin::PhaserCooldown::default())
-                .insert(crate::weapons_plugin::WeaponsArcRequestState::default())
-                .insert(crate::sensors_plugin::SensorRadarSelection::default())
-                .insert(crate::ship_state::ShipRedAlert::default())
-                .insert(crate::ship_state::ShipViewMode::default())
-                .insert(crate::ship_state::ShipPhaserFrequency::default())
-                .insert(crate::navigation_plugin::NavigationWaypoint::default())
-                .insert(crate::power_plugin::ShipPowerSystem(
+                .insert(crate::ai::server::ObjectiveCursors::default())
+                .insert(crate::console::weapons::TacticalRadarSelection::default())
+                .insert(crate::console::weapons::ActiveBeam::default())
+                .insert(crate::console::weapons::PhaserCooldown::default())
+                .insert(crate::console::weapons::WeaponsArcRequestState::default())
+                .insert(crate::ship::sensors::SensorRadarSelection::default())
+                .insert(crate::ship::state::ShipRedAlert::default())
+                .insert(crate::ship::state::ShipViewMode::default())
+                .insert(crate::ship::state::ShipPhaserFrequency::default())
+                .insert(crate::console::navigation::NavigationWaypoint::default())
+                .insert(crate::ship::power::ShipPowerSystem(
                     crate::modifiers::power_system::PowerSystem::from_authored_groups(
                         &crate::modifiers::power_system::PowerConfig::default(),
                         &power_group_seed,
@@ -4052,7 +4085,7 @@ fn spawn_game_start_entities(
                 .insert(crate::ship::combat_activity::RecentCombatActivity::default())
                 .insert(WeaponFiredThisTick::default())
                 .insert(ShipAttackedThisTick::default())
-                .insert(crate::weapons_plugin::LastShipAttacker::default());
+                .insert(crate::console::weapons::LastShipAttacker::default());
 
             // Inject player identity (the `player` tag + `playerShip` radar
             // icon) HERE, on the one ship the local player flies — not in the
@@ -4089,9 +4122,11 @@ fn spawn_game_start_entities(
                     .filter(|&n| n > 0)
                     .unwrap_or(2);
                 let timings = repair.map(|rc| rc.to_runtime()).unwrap_or_default();
-                let teams = ShipRepairTeams(crate::repair_teams::RepairTeams::new_with_timings(
-                    team_count, timings,
-                ));
+                let teams = ShipRepairTeams(
+                    crate::modifiers::repair_teams::RepairTeams::new_with_timings(
+                        team_count, timings,
+                    ),
+                );
                 // Per-entity component only (issue #830 retired the global Resource).
                 commands.entity(spawned).insert(teams);
             }
@@ -4117,7 +4152,7 @@ fn spawn_game_start_entities(
                     .map(|a| a.frequency)
                     .unwrap_or(sc.frequency);
                 let mut shields = ShipShields(shield_system, freq);
-                shields.0.focus_config = crate::shield::ShieldFocusConfig {
+                shields.0.focus_config = crate::weapons::shield::ShieldFocusConfig {
                     bonus_max_hp: sc.focus_bonus_max_hp,
                     bonus_regen: sc.focus_bonus_regen,
                     penalty_max_hp: sc.focus_penalty_max_hp,
@@ -4128,7 +4163,7 @@ fn spawn_game_start_entities(
                 };
                 commands.entity(spawned).insert(shields);
             } else if !config.shield_arcs.is_empty() {
-                let ship_wide = crate::shield::ShieldConfig::default();
+                let ship_wide = crate::weapons::shield::ShieldConfig::default();
                 let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
                 let freq = config
                     .shield_arcs
@@ -4234,7 +4269,7 @@ fn spawn_game_start_entities(
             {
                 commands
                     .entity(spawned)
-                    .insert(crate::weapons_plugin::TacticalTargetSelector {
+                    .insert(crate::console::weapons::TacticalTargetSelector {
                         selector: s.to_selector().unwrap_or_default(),
                         power_rating: config.power_rating.map(|r| r as f32),
                         // AC6 (issue #781): explicit radar idle from `[weapons_console]
@@ -4311,7 +4346,7 @@ fn spawn_game_start_entities(
             if let Some(ai) = config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
                 commands
                     .entity(spawned)
-                    .insert(crate::captain_plugin::CaptainAiPolicy(
+                    .insert(crate::console::captain::server::CaptainAiPolicy(
                         ai.to_policy().unwrap_or_default(),
                     ));
             }
@@ -4322,9 +4357,9 @@ fn spawn_game_start_entities(
             // ONE keyed `FineSystemAiPolicies` map, one entry per authored block,
             // driving `ai_helm_thrust` / `ai_helm_steering` / the secondary hosts.
             if let Some(hc) = config.helm_console.as_ref() {
-                use crate::system_registry as sr;
+                use crate::ship::system_registry as sr;
                 let mut fine_policies: std::collections::BTreeMap<
-                    crate::messages::SystemId,
+                    crate::core::messages::SystemId,
                     crate::ai::policy::AiPolicy,
                 > = std::collections::BTreeMap::new();
                 for (block, system_id) in [
@@ -4357,17 +4392,17 @@ fn spawn_game_start_entities(
             // `offline_systems` when an arc's hull HP drops into the
             // Disabled/Destroyed tier.
             if !config.shield_arcs.is_empty() {
-                let arc_entries: Vec<(String, crate::damage::ArcHullEntry)> = config
+                let arc_entries: Vec<(String, crate::ship::damage::ArcHullEntry)> = config
                     .shield_arcs
                     .iter()
                     .filter(|a| a.hull_max_hp > 0.0)
                     .map(|a| {
                         (
                             a.id.clone(),
-                            crate::damage::ArcHullEntry {
+                            crate::ship::damage::ArcHullEntry {
                                 current: a.hull_max_hp,
                                 max: a.hull_max_hp,
-                                tier_config: crate::damage::ConsoleTierConfig {
+                                tier_config: crate::ship::damage::ConsoleTierConfig {
                                     damaged_threshold_pct: a.hull_damaged_threshold_pct,
                                     disabled_threshold_pct: a.hull_disabled_threshold_pct,
                                     debuff_magnitude: a.hull_debuff_magnitude,
@@ -4379,15 +4414,15 @@ fn spawn_game_start_entities(
                 if !arc_entries.is_empty() {
                     commands
                         .entity(spawned)
-                        .insert(crate::entity_spawner::EntityShipArcHull(
-                            crate::damage::ShipArcHull::from_entries(arc_entries),
+                        .insert(crate::entities::spawner::EntityShipArcHull(
+                            crate::ship::damage::ShipArcHull::from_entries(arc_entries),
                         ));
                 }
             }
 
             if let Some(wc) = &config.weapons_console {
                 let first_bank = wc.phaser_banks.first();
-                let beam_color = crate::beam_render::resolve_beam_color(
+                let beam_color = crate::weapons::beam_render::resolve_beam_color(
                     first_bank.map(|b| &b.beam_color).unwrap_or(&vec![]),
                 );
                 let beam_range = first_bank
@@ -4414,8 +4449,8 @@ fn spawn_game_start_entities(
                 // `cooldown_secs`; before this slice those were only
                 // honoured by the NPC phaser path. Now the player path
                 // also reads them via the PhaserCombatConfig resource.
-                let combat_cfg = crate::weapons_plugin::PhaserCombatConfigResource(
-                    crate::entity_config::PhaserCombatConfig::from_weapons_console(wc),
+                let combat_cfg = crate::console::weapons::PhaserCombatConfigResource(
+                    crate::entities::config::PhaserCombatConfig::from_weapons_console(wc),
                 );
                 // Insert as per-entity component AND global resource (dual-write migration).
                 commands.entity(spawned).insert(combat_cfg.clone());
@@ -4446,7 +4481,7 @@ fn spawn_game_start_entities(
                     .collect();
                 commands
                     .entity(spawned)
-                    .insert(crate::weapons_plugin::PhaserBankAiPolicies(
+                    .insert(crate::console::weapons::PhaserBankAiPolicies(
                         phaser_bank_policies,
                     ));
                 // The ship-level WEAPONS DOCTRINE (issue #956) — the player-ship
@@ -4456,7 +4491,7 @@ fn spawn_game_start_entities(
                 // player-path-forgotten failure #785/#786/#882 each shipped.
                 if let Some(ai) = wc.ai.as_ref() {
                     commands.entity(spawned).insert(
-                        crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+                        crate::console::weapons::WeaponsDoctrineAiPolicy(
                             ai.to_policy().unwrap_or_default(),
                         ),
                     );
@@ -4473,18 +4508,16 @@ fn spawn_game_start_entities(
                             Some((b.id.clone(), ai.to_policy().unwrap_or_default()))
                         })
                         .collect();
-                    commands
-                        .entity(spawned)
-                        .insert(crate::weapons_plugin::BlasterBankAiPolicies(
-                            blaster_bank_policies,
-                        ));
+                    commands.entity(spawned).insert(
+                        crate::console::weapons::BlasterBankAiPolicies(blaster_bank_policies),
+                    );
                 }
             } else {
                 // No [weapons_console] block — insert defaults so the entity-component
                 // path always finds a value on the LocalShip entity.
                 commands
                     .entity(spawned)
-                    .insert(crate::weapons_plugin::PhaserCombatConfigResource::default());
+                    .insert(crate::console::weapons::PhaserCombatConfigResource::default());
                 commands
                     .entity(spawned)
                     .insert(PhaserRenderConfig::default());
@@ -4499,11 +4532,11 @@ fn spawn_game_start_entities(
             if let Some(tc) = &config.torpedoes {
                 let runtime_config = tc.to_runtime();
                 let torpedo_system = if !tc.tubes.is_empty() {
-                    crate::torpedo::TorpedoSystem::from_configs(&tc.tubes, runtime_config)
+                    crate::weapons::torpedo::TorpedoSystem::from_configs(&tc.tubes, runtime_config)
                 } else {
-                    crate::torpedo::TorpedoSystem::new(runtime_config)
+                    crate::weapons::torpedo::TorpedoSystem::new(runtime_config)
                 };
-                let torpedo_res = crate::weapons_plugin::TorpedoSystemResource(torpedo_system);
+                let torpedo_res = crate::console::weapons::TorpedoSystemResource(torpedo_system);
                 // Insert as per-entity component AND global resource (dual-write migration).
                 commands.insert_resource(torpedo_res.clone());
                 commands.entity(spawned).insert(torpedo_res);
@@ -4524,10 +4557,12 @@ fn spawn_game_start_entities(
                         .collect();
                 commands
                     .entity(spawned)
-                    .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(tube_policies));
+                    .insert(crate::console::weapons::TorpedoTubeAiPolicies(
+                        tube_policies,
+                    ));
                 if let Some(ai) = tc.ai.as_ref() {
                     commands.entity(spawned).insert(
-                        crate::weapons_plugin::TorpedoMagazineAiPolicy(
+                        crate::console::weapons::TorpedoMagazineAiPolicy(
                             ai.to_policy().unwrap_or_default(),
                         ),
                     );
@@ -4540,7 +4575,7 @@ fn spawn_game_start_entities(
             // inserts a defaulted `PowerConfigResource` for). Dual-writes
             // the global Resource for legacy readers.
             let power_config = if let Some(pc) = &config.power {
-                PowerConfigResource(crate::power_system::PowerConfig {
+                PowerConfigResource(crate::modifiers::power_system::PowerConfig {
                     capacity: pc.capacity,
                     rates: pc.rates,
                     sustainable_total: pc.sustainable_total,
@@ -4552,7 +4587,7 @@ fn spawn_game_start_entities(
             };
             commands
                 .entity(spawned)
-                .insert(crate::power_plugin::ShipPowerSystem(
+                .insert(crate::ship::power::ShipPowerSystem(
                     crate::modifiers::power_system::PowerSystem::from_authored_groups(
                         &power_config.0,
                         &power_group_seed,
@@ -4579,26 +4614,34 @@ fn spawn_game_start_entities(
             // Power multipliers
             let defaults = [-0.5, 0.0, 0.25, 0.5];
             let mut multipliers: std::collections::HashMap<
-                crate::messages::PowerGroupId,
+                crate::core::messages::PowerGroupId,
                 [f32; 4],
             > = std::collections::HashMap::from([
                 (
-                    crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                    crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                    ),
                     defaults,
                 ),
                 (
-                    crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
+                    crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                    ),
                     defaults,
                 ),
                 (
-                    crate::messages::PowerGroupId(crate::power_system::SHIELDS_POWER_GROUP.into()),
+                    crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
+                    ),
                     defaults,
                 ),
             ]);
             if let Some(hc) = &config.helm_console {
                 if let Some(pm) = hc.power_multipliers {
                     multipliers.insert(
-                        crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                        crate::core::messages::PowerGroupId(
+                            crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                        ),
                         pm,
                     );
                 }
@@ -4606,8 +4649,8 @@ fn spawn_game_start_entities(
             if let Some(wc) = &config.weapons_console {
                 if let Some(pm) = wc.power_multipliers {
                     multipliers.insert(
-                        crate::messages::PowerGroupId(
-                            crate::power_system::WEAPONS_POWER_GROUP.into(),
+                        crate::core::messages::PowerGroupId(
+                            crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
                         ),
                         pm,
                     );
@@ -4617,8 +4660,8 @@ fn spawn_game_start_entities(
                 if let Some(pm) = sc.power_multipliers {
                     // shields_console power drives ModifierSlot::ShieldRegen (#952)
                     multipliers.insert(
-                        crate::messages::PowerGroupId(
-                            crate::power_system::SHIELDS_POWER_GROUP.into(),
+                        crate::core::messages::PowerGroupId(
+                            crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
                         ),
                         pm,
                     );
@@ -4637,7 +4680,7 @@ fn spawn_game_start_entities(
                 config
                     .helm_console
                     .as_ref()
-                    .map(|hc| crate::ship_physics::ShipPhysicsConfig {
+                    .map(|hc| crate::ship::physics::ShipPhysicsConfig {
                         max_speed: hc.max_speed,
                         max_reverse_speed: hc.max_reverse_speed,
                         acceleration: hc.acceleration,
@@ -4656,10 +4699,10 @@ fn spawn_game_start_entities(
                             .unwrap_or(15.0),
                         // Vertical axis (issue #744): no dedicated helm_console
                         // TOML yet, so take the ShipPhysicsConfig defaults.
-                        ..crate::ship_physics::ShipPhysicsConfig::new()
+                        ..crate::ship::physics::ShipPhysicsConfig::new()
                     });
             let physics_cfg_resource = crate::ship_plugin::ShipPhysicsConfigResource(
-                physics_cfg.unwrap_or(crate::ship_physics::ShipPhysicsConfig::new()),
+                physics_cfg.unwrap_or(crate::ship::physics::ShipPhysicsConfig::new()),
             );
             commands.insert_resource(physics_cfg_resource.clone());
             commands.entity(spawned).insert(physics_cfg_resource);
@@ -4829,7 +4872,7 @@ pub(crate) struct ProceduralMeshCache {
 
 /// A procedural LOD level's own rotation, as a quaternion. Identity when the
 /// level declares none.
-fn level_rotation(level: &crate::entity_config::LodLevel) -> Quat {
+fn level_rotation(level: &crate::entities::config::LodLevel) -> Quat {
     level
         .rotation
         .map(|r| Quat::from_euler(EulerRot::XYZ, r[0], r[1], r[2]))
@@ -4844,14 +4887,14 @@ pub(crate) fn procedural_mesh_material(
     cache: &mut ProceduralMeshCache,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    shape: crate::entity_config::MeshShape,
+    shape: crate::entities::config::MeshShape,
     radius: f32,
     size: Option<[f32; 3]>,
     minor_radius: f32,
     colour: &[f32],
     emissive_mul: f32,
 ) -> (Handle<Mesh>, Handle<StandardMaterial>) {
-    use crate::entity_config::MeshShape;
+    use crate::entities::config::MeshShape;
 
     let (shape_id, size_for_key) = match shape {
         MeshShape::Sphere => (0u8, [0.0; 3]),
@@ -4923,11 +4966,11 @@ pub(crate) fn procedural_mesh_material(
 #[derive(Component)]
 struct MeshLods {
     /// Ordered near→far LOD levels copied from the model's rig sidecar
-    /// ([`crate::model_rig::ModelRig::lod`], issue #914).
-    levels: Vec<crate::entity_config::LodLevel>,
+    /// ([`crate::entities::model_rig::ModelRig::lod`], issue #914).
+    levels: Vec<crate::entities::config::LodLevel>,
     /// Flat mesh config supplying fallback fields (colour/radius/emissive/size/
     /// minor_radius) and the shared `variant` for levels that omit them.
-    base: crate::entity_config::MeshConfig,
+    base: crate::entities::config::MeshConfig,
     /// The primary model sidecar's `[base].scale`. Every LOD tier of one model
     /// shares the SAME base sidecar (`ModelRig::lod`), but each tier's own GLB
     /// resolves its OWN sidecar in `spawn_glb_visual` — so only the near tier,
@@ -5016,10 +5059,10 @@ fn render_spawned_entities(
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut star_surface_materials: ResMut<Assets<crate::entity_star::StarSurfaceMaterial>>,
-    mut star_halo_materials: ResMut<Assets<crate::entity_star::StarHaloMaterial>>,
-    mut planet_surface_materials: ResMut<Assets<crate::entity_planet::PlanetSurfaceMaterial>>,
-    mut planet_cloud_materials: ResMut<Assets<crate::entity_planet::PlanetCloudMaterial>>,
+    mut star_surface_materials: ResMut<Assets<crate::entities::star::StarSurfaceMaterial>>,
+    mut star_halo_materials: ResMut<Assets<crate::entities::star::StarHaloMaterial>>,
+    mut planet_surface_materials: ResMut<Assets<crate::entities::planet::PlanetSurfaceMaterial>>,
+    mut planet_cloud_materials: ResMut<Assets<crate::entities::planet::PlanetCloudMaterial>>,
     mut proc_cache: ResMut<ProceduralMeshCache>,
     scenes: Res<Assets<bevy::scene::Scene>>,
     tuning: Option<Res<crate::render_setup::RenderTuning>>,
@@ -5028,12 +5071,12 @@ fn render_spawned_entities(
         (
             Entity,
             &Transform,
-            Option<&crate::entity_spawner::MeshSection>,
-            Option<&crate::entity_spawner::StarSection>,
-            Option<&crate::entity_spawner::PlanetSection>,
-            Option<&crate::entity_spawner::Lights>,
+            Option<&crate::entities::spawner::MeshSection>,
+            Option<&crate::entities::spawner::StarSection>,
+            Option<&crate::entities::spawner::PlanetSection>,
+            Option<&crate::entities::spawner::Lights>,
             Option<&PendingSceneHandle>,
-            Option<&crate::simulation::LocalShip>,
+            Option<&crate::server_app::LocalShip>,
         ),
         Without<RenderProcessed>,
     >,
@@ -5207,7 +5250,7 @@ fn render_spawned_entities(
 /// Distance-based LOD driver. For each entity carrying a [`MeshLods`] component,
 /// computes the 3-D distance from the [`GameCamera`](crate::server::renderer::GameCamera)
 /// to the entity, selects the appropriate level via
-/// [`crate::entity_config::select_lod`] (with hysteresis), and — when the chosen
+/// [`crate::entities::config::select_lod`] (with hysteresis), and — when the chosen
 /// level differs from the current one — tears down the old visual and builds the
 /// new one through the same helpers the flat renderer uses.
 ///
@@ -5241,7 +5284,7 @@ fn update_mesh_lod(
         Option<&PendingSceneHandle>,
     )>,
 ) {
-    use crate::entity_config::select_lod;
+    use crate::entities::config::select_lod;
 
     // No camera → nothing to measure distance against; try again next frame.
     let Some(cam_tf) = camera.iter().next() else {
@@ -5440,7 +5483,7 @@ fn update_mesh_lod(
             // races a freshly-inserted marker map.
             commands
                 .entity(entity)
-                .remove::<crate::model_rig::ModelMarkers>();
+                .remove::<crate::entities::model_rig::ModelMarkers>();
             // The mesh goes on a CHILD, as a GLB level's `SceneRoot` does, so
             // the level can carry its own rotation. Rotating the entity itself
             // is not available: an entity's rotation is simulation state, and
@@ -5483,7 +5526,7 @@ fn update_mesh_lod(
             );
             commands
                 .entity(entity)
-                .remove::<crate::model_rig::ModelMarkers>();
+                .remove::<crate::entities::model_rig::ModelMarkers>();
             let child = crate::entities::billboard::spawn_billboard_child(
                 &mut commands,
                 &mut meshes,
@@ -5512,9 +5555,9 @@ fn update_mesh_lod(
 
 fn insert_light(
     ec: &mut bevy::ecs::system::EntityCommands,
-    light: &crate::entity_config::LightConfig,
+    light: &crate::entities::config::LightConfig,
 ) {
-    use crate::entity_config::LightKind;
+    use crate::entities::config::LightKind;
     let color = Color::srgb(light.colour[0], light.colour[1], light.colour[2]);
     match light.kind {
         LightKind::Point => {
@@ -5539,9 +5582,9 @@ fn insert_light(
 
 fn spawn_child_light(
     parent: &mut bevy::ecs::relationship::RelatedSpawnerCommands<ChildOf>,
-    light: &crate::entity_config::LightConfig,
+    light: &crate::entities::config::LightConfig,
 ) {
-    use crate::entity_config::LightKind;
+    use crate::entities::config::LightKind;
     let color = Color::srgb(light.colour[0], light.colour[1], light.colour[2]);
     match light.kind {
         LightKind::Point => {
@@ -5594,11 +5637,11 @@ fn face_player_lights(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::collision_damage;
+    use crate::console::weapons::BEAM_DAMAGE_PER_SEC;
+    use crate::core::messages::*;
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
-    use crate::messages::*;
+    use crate::ship::damage::collision_damage;
     use crate::ship_plugin::handle_impulse_messages;
-    use crate::weapons_plugin::BEAM_DAMAGE_PER_SEC;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -5664,7 +5707,7 @@ mod tests {
         let mut world = World::new();
         world.init_resource::<StationImportanceRes>();
         let ship = world
-            .spawn((LocalShip, crate::ship_state::ShipRedAlert(true)))
+            .spawn((LocalShip, crate::ship::state::ShipRedAlert(true)))
             .id();
 
         // A raised Red Alert is a continuing critical condition on the core bucket.
@@ -5694,7 +5737,7 @@ mod tests {
         // It clears only when Red Alert is lowered.
         world
             .entity_mut(ship)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = false;
         ingest_station_importance(&mut world);
@@ -5713,7 +5756,7 @@ mod tests {
         // is a wholly separate wire field/builder, so it cannot interfere.
         let mut world = World::new();
         world.init_resource::<StationImportanceRes>();
-        world.spawn((LocalShip, crate::ship_state::ShipRedAlert(true)));
+        world.spawn((LocalShip, crate::ship::state::ShipRedAlert(true)));
         let mut objectives = crate::world::server::ObjectiveManagerRes::default();
         objectives.0.add("rescue", "objective.rescue", true, vec![]);
         objectives.0.complete("rescue");
@@ -5752,7 +5795,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Messages<InboundMessage>>();
         app.init_resource::<StationImportanceRes>();
-        let mut sessions = crate::lobby::Sessions(crate::session::SessionManager::new());
+        let mut sessions = crate::lobby::Sessions(crate::lobby::session::SessionManager::new());
         sessions.0.register("tok".into(), "Ada".into()).unwrap();
         app.insert_resource(sessions);
         app.add_systems(Update, drain_station_visited);
@@ -5886,11 +5929,11 @@ mod tests {
 
         /// The flat `[mesh]` a `MeshLods` falls back to. Retirement reads none
         /// of it, so the values only have to be legal.
-        fn bare_mesh_config() -> crate::entity_config::MeshConfig {
-            crate::entity_config::MeshConfig {
+        fn bare_mesh_config() -> crate::entities::config::MeshConfig {
+            crate::entities::config::MeshConfig {
                 model: None,
                 variant: None,
-                shape: crate::entity_config::MeshShape::Sphere,
+                shape: crate::entities::config::MeshShape::Sphere,
                 colour: vec![0.5, 0.5, 0.5],
                 radius: 1.0,
                 size: None,
@@ -6108,14 +6151,14 @@ station = "pilot"
     fn seed_viewscreen_from_selection(
         mut q: Query<
             (
-                Option<&crate::weapons_plugin::TacticalRadarSelection>,
-                Option<&crate::sensors_plugin::SensorRadarSelection>,
+                Option<&crate::console::weapons::TacticalRadarSelection>,
+                Option<&crate::ship::sensors::SensorRadarSelection>,
                 &mut ShipSystemBlackboards,
             ),
             With<Ship>,
         >,
     ) {
-        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        use crate::core::messages::{SystemBlackboard, ViewscreenBlackboard};
         for (tac, sci, mut bbs) in q.iter_mut() {
             let combat_lock = tac.and_then(|t| t.0.clone());
             let science_target = sci.and_then(|s| s.0.clone());
@@ -6180,17 +6223,17 @@ station = "pilot"
         .init_resource::<LastBroadcastHull>()
         .init_resource::<LastBroadcastShields>()
         .init_resource::<LastBroadcastBlackboards>()
-        .init_resource::<crate::messages::InterSystemQueue>()
+        .init_resource::<crate::core::messages::InterSystemQueue>()
         .init_resource::<crate::ai::server::AiTokenRegistry>()
         .init_resource::<Outbox>()
-        .add_message::<crate::ai_plugin::AiEntityDestroyed>()
-        .add_plugins(crate::captain_plugin::CaptainPlugin)
-        .add_plugins(crate::weapons_plugin::WeaponsPlugin)
-        .add_plugins(crate::repair_plugin::RepairPlugin)
-        .add_plugins(crate::power_plugin::ShipPowerPlugin)
-        .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
-        .add_plugins(crate::sensors_plugin::ShipSensorsPlugin)
-        .add_plugins(crate::comms_plugin::CommsConsolePlugin)
+        .add_message::<crate::ai::server::AiEntityDestroyed>()
+        .add_plugins(crate::console::captain::server::CaptainPlugin)
+        .add_plugins(crate::console::weapons::WeaponsPlugin)
+        .add_plugins(crate::console::repair::server::RepairPlugin)
+        .add_plugins(crate::ship::power::ShipPowerPlugin)
+        .add_plugins(crate::ship::shields::ShipShieldsPlugin)
+        .add_plugins(crate::ship::sensors::ShipSensorsPlugin)
+        .add_plugins(crate::console::comms::server::CommsConsolePlugin)
         .add_systems(
             OnEnter(GamePhase::InProgress),
             reset_broadcast_caches_on_start,
@@ -6209,13 +6252,13 @@ station = "pilot"
         )
         .add_systems(
             FixedUpdate,
-            crate::modifier_coordination::translate_power_modifiers
-                .after(crate::power_plugin::handle_power_messages)
-                .after(crate::power_plugin::tick_power_system),
+            crate::modifiers::coordination::translate_power_modifiers
+                .after(crate::ship::power::handle_power_messages)
+                .after(crate::ship::power::tick_power_system),
         )
         .add_systems(
             FixedUpdate,
-            crate::modifier_coordination::translate_impulse_modifiers
+            crate::modifiers::coordination::translate_impulse_modifiers
                 .after(handle_impulse_messages),
         )
         .add_systems(
@@ -6242,26 +6285,28 @@ station = "pilot"
         let ship = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
-                crate::simulation::LocalShip,
-                crate::simulation::ShipSystemBlackboards::default(),
+                crate::server_app::Ship,
+                crate::server_app::LocalShip,
+                crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 crate::ship_plugin::ShipSystemControlSources::default(),
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 ShipShields(ShieldSystem::default(), 0.5),
                 ShipPhysicsComponent::default(),
-                crate::ship_state::ShipRedAlert::default(),
-                crate::ship_state::ShipViewMode::default(),
-                crate::ship_state::ShipPhaserFrequency::default(),
+                crate::ship::state::ShipRedAlert::default(),
+                crate::ship::state::ShipViewMode::default(),
+                crate::ship::state::ShipPhaserFrequency::default(),
                 bevy::prelude::Transform::default(),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
-                    (SystemId("helm".into()), 25.0),
-                    (SystemId("tactical".into()), 25.0),
-                    (SystemId("power".into()), 25.0),
-                    (SystemId("shields".into()), 25.0),
-                ])),
+                crate::entities::spawner::EntitySystemHull(
+                    crate::ship::damage::SystemHull::from_config(&[
+                        (SystemId("helm".into()), 25.0),
+                        (SystemId("tactical".into()), 25.0),
+                        (SystemId("power".into()), 25.0),
+                        (SystemId("shields".into()), 25.0),
+                    ]),
+                ),
             ))
             .id();
         // Insert per-entity components (Bundle limit).
@@ -6269,17 +6314,19 @@ station = "pilot"
             ShipImpulse::default(),
             ShipBoost::default(),
             crate::modifiers::ShipModifiers::new(),
-            crate::weapons_plugin::TorpedoSystemResource(crate::torpedo::TorpedoSystem::new(
-                crate::torpedo::TorpedoConfig::default(),
-            )),
-            crate::weapons_plugin::PhaserCombatConfigResource::default(),
+            crate::console::weapons::TorpedoSystemResource(
+                crate::weapons::torpedo::TorpedoSystem::new(
+                    crate::weapons::torpedo::TorpedoConfig::default(),
+                ),
+            ),
+            crate::console::weapons::PhaserCombatConfigResource::default(),
             PhaserRenderConfig::default(),
             // PR 7 (issue #597) — per-entity beam / target / cooldown / sensors / waypoint.
-            crate::weapons_plugin::TacticalRadarSelection::default(),
-            crate::weapons_plugin::ActiveBeam::default(),
-            crate::weapons_plugin::PhaserCooldown::default(),
-            crate::sensors_plugin::SensorRadarSelection::default(),
-            crate::navigation_plugin::NavigationWaypoint::default(),
+            crate::console::weapons::TacticalRadarSelection::default(),
+            crate::console::weapons::ActiveBeam::default(),
+            crate::console::weapons::PhaserCooldown::default(),
+            crate::ship::sensors::SensorRadarSelection::default(),
+            crate::console::navigation::NavigationWaypoint::default(),
             crate::ship::power::PowerBrownoutState::default(),
         ));
         app.insert_resource(ShipEntity(ship));
@@ -6294,7 +6341,7 @@ station = "pilot"
     fn get_weapons_target(app: &mut App) -> Option<String> {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::weapons_plugin::TacticalRadarSelection, With<LocalShip>>();
+            .query_filtered::<&crate::console::weapons::TacticalRadarSelection, With<LocalShip>>();
         q.single(app.world()).ok().and_then(|wt| wt.0.clone())
     }
 
@@ -6311,15 +6358,15 @@ station = "pilot"
         let entity = q.single_mut(app.world_mut()).expect("LocalShip");
         app.world_mut()
             .entity_mut(entity)
-            .insert(crate::entity_spawner::WeaponsConsoleSection(
-                crate::entity_config::WeaponsConsoleConfig {
+            .insert(crate::entities::spawner::WeaponsConsoleSection(
+                crate::entities::config::WeaponsConsoleConfig {
                     torpedo_arc_color: vec![],
                     power_multipliers: None,
                     phaser_banks: vec![],
                     blaster_banks: vec![],
                     radar: Some(crate::radar_config::RadarConfig {
                         range,
-                        shows: vec![crate::entity_tags::EntityTag::Ship],
+                        shows: vec![crate::entities::tags::EntityTag::Ship],
                         selects: vec![],
                     }),
                     selector: None,
@@ -6335,7 +6382,7 @@ station = "pilot"
     fn get_active_beam_target(app: &mut App) -> Option<String> {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+            .query_filtered::<&crate::console::weapons::ActiveBeam, With<LocalShip>>();
         q.single(app.world())
             .ok()
             .and_then(|b| b.any_target().map(str::to_string))
@@ -6348,7 +6395,7 @@ station = "pilot"
     fn live_beam_banks(app: &mut App) -> Vec<String> {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+            .query_filtered::<&crate::console::weapons::ActiveBeam, With<LocalShip>>();
         q.single(app.world())
             .ok()
             .map(|b| b.live_banks().map(|(k, _)| k.clone()).collect())
@@ -6359,7 +6406,7 @@ station = "pilot"
         let banks = live_beam_banks(app);
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+            .query_filtered::<&mut crate::console::weapons::ActiveBeam, With<LocalShip>>();
         if let Ok(mut b) = q.single_mut(app.world_mut()) {
             match uuid {
                 None => {
@@ -6383,7 +6430,7 @@ station = "pilot"
         let banks = live_beam_banks(app);
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+            .query_filtered::<&mut crate::console::weapons::ActiveBeam, With<LocalShip>>();
         if let Ok(mut b) = q.single_mut(app.world_mut()) {
             for bank in banks {
                 if let Some(slot) = b.bank_slot_mut(&bank) {
@@ -6397,7 +6444,7 @@ station = "pilot"
         let banks = live_beam_banks(app);
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::weapons_plugin::ActiveBeam, With<LocalShip>>();
+            .query_filtered::<&mut crate::console::weapons::ActiveBeam, With<LocalShip>>();
         if let Ok(mut b) = q.single_mut(app.world_mut()) {
             for bank in banks {
                 if let Some(slot) = b.bank_slot_mut(&bank) {
@@ -6410,7 +6457,7 @@ station = "pilot"
     fn phaser_bank_is_active(app: &mut App, bank: &str) -> bool {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::weapons_plugin::PhaserCooldown, With<LocalShip>>();
+            .query_filtered::<&crate::console::weapons::PhaserCooldown, With<LocalShip>>();
         q.single(app.world())
             .ok()
             .map(|cd| cd.is_bank_active(bank))
@@ -6420,7 +6467,7 @@ station = "pilot"
     fn start_phaser_cooldown(app: &mut App, bank: &str, secs: f32) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::weapons_plugin::PhaserCooldown, With<LocalShip>>();
+            .query_filtered::<&mut crate::console::weapons::PhaserCooldown, With<LocalShip>>();
         if let Ok(mut cd) = q.single_mut(app.world_mut()) {
             cd.start_bank_with_cooldown(bank, secs);
         }
@@ -6435,7 +6482,7 @@ station = "pilot"
             .unwrap();
         app.world_mut()
             .entity_mut(ship)
-            .get_mut::<crate::entity_spawner::EntitySystemHull>()
+            .get_mut::<crate::entities::spawner::EntitySystemHull>()
             .unwrap()
             .0
             .apply_damage(amount, &mut rng);
@@ -6444,7 +6491,7 @@ station = "pilot"
     fn get_ship_modifiers(app: &mut App) -> crate::modifiers::ShipModifiers {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::modifiers::ShipModifiers, With<crate::simulation::LocalShip>>(
+            .query_filtered::<&crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>(
             );
         q.single(app.world()).unwrap().clone()
     }
@@ -6455,7 +6502,7 @@ station = "pilot"
     {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::modifiers::ShipModifiers, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&mut crate::modifiers::ShipModifiers, With<crate::server_app::LocalShip>>();
         let mut mods = q.single_mut(app.world_mut()).unwrap();
         f(&mut mods);
     }
@@ -6463,18 +6510,18 @@ station = "pilot"
     fn get_phaser_frequency(app: &mut App) -> f32 {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::ship_state::ShipPhaserFrequency, With<LocalShip>>();
+            .query_filtered::<&crate::ship::state::ShipPhaserFrequency, With<LocalShip>>();
         q.single(app.world()).map(|f| f.0).unwrap_or(0.5)
     }
 
-    fn get_view_mode(app: &mut App) -> crate::messages::ViewMode {
+    fn get_view_mode(app: &mut App) -> crate::core::messages::ViewMode {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::ship_state::ShipViewMode, With<LocalShip>>();
+            .query_filtered::<&crate::ship::state::ShipViewMode, With<LocalShip>>();
         q.single(app.world())
             .map(|vm| vm.view_mode.clone())
-            .unwrap_or(crate::messages::ViewMode::Camera(
-                crate::messages::CameraView::default(),
+            .unwrap_or(crate::core::messages::ViewMode::Camera(
+                crate::core::messages::CameraView::default(),
             ))
     }
 
@@ -6536,7 +6583,7 @@ station = "pilot"
     fn set_ship_yaw(app: &mut App, yaw: f32) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut ShipPhysicsComponent, With<crate::simulation::Ship>>();
+            .query_filtered::<&mut ShipPhysicsComponent, With<crate::server_app::Ship>>();
         let mut p = q
             .single_mut(app.world_mut())
             .expect("expected Ship with ShipPhysics");
@@ -6699,17 +6746,17 @@ station = "pilot"
 
     #[test]
     fn entity_config_radar_icon_flows_into_world_snapshot() {
-        let config = crate::entity_config::EntityConfig {
+        let config = crate::entities::config::EntityConfig {
             name: Some("Sun".into()),
             tags: vec!["star".into(), "center".into()],
-            collider: Some(crate::entity_config::ColliderConfig {
-                shape: crate::entity_config::ColliderShape::Ball,
+            collider: Some(crate::entities::config::ColliderConfig {
+                shape: crate::entities::config::ColliderShape::Ball,
                 radius: 50.0,
                 length: 0.0,
                 half_height: None,
                 movable: false,
             }),
-            radar_appearance: Some(crate::entity_config::RadarAppearanceConfig {
+            radar_appearance: Some(crate::entities::config::RadarAppearanceConfig {
                 colour: Some(vec![1.0, 0.85, 0.3]),
                 size: None,
                 region_colour: None,
@@ -6735,7 +6782,7 @@ station = "pilot"
     fn player_ship_identity_adds_player_tag_and_playership_icon() {
         let (tags, radar) = player_ship_identity(
             &["ship".to_string()],
-            Some(&crate::entity_config::RadarAppearanceConfig {
+            Some(&crate::entities::config::RadarAppearanceConfig {
                 icon: Some("ship".into()),
                 colour: Some(vec![0.0, 1.0, 0.2]),
                 size: Some(6.0),
@@ -6758,20 +6805,21 @@ station = "pilot"
     /// icon. Uses the checked-in template so it regresses on the TOML edits too.
     #[test]
     fn player_spawn_injects_player_tag_and_icon_over_template() {
-        use crate::entity_spawner::{EntityTagsSection, RadarAppearanceSection};
+        use crate::entities::spawner::{EntityTagsSection, RadarAppearanceSection};
         use bevy::prelude::*;
 
         // Through the resolver (issue #876): this hull is COMPOSED, so its baked
         // bytes are no longer the document that spawns.
-        let config =
-            crate::entity_includes::load_entity_config("assets/entities/alliance_cruiser.toml")
-                .expect("cruiser template must compose and parse");
+        let config = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_cruiser.toml",
+        )
+        .expect("cruiser template must compose and parse");
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
         let spawned = {
             let mut cmds = app.world_mut().commands();
-            crate::entity_spawner::spawn_entity(
+            crate::entities::spawner::spawn_entity(
                 &mut cmds,
                 &config,
                 Vec3::ZERO,
@@ -6820,15 +6868,15 @@ station = "pilot"
 
     /// Two real shipped hulls, loaded the way the runtime loads them (include
     /// closure resolved first) so these tests regress on the TOML too.
-    fn hull(path: &str) -> crate::entity_config::EntityConfig {
-        crate::entity_includes::load_entity_config(path)
+    fn hull(path: &str) -> crate::entities::config::EntityConfig {
+        crate::entities::include_resolve::load_entity_config(path)
             .unwrap_or_else(|e| panic!("{path} must compose and parse: {e}"))
     }
 
     fn doctrine<'a>(
-        config: &'a crate::entity_config::EntityConfig,
+        config: &'a crate::entities::config::EntityConfig,
         id: &str,
-    ) -> &'a crate::entity_config::DoctrineObjective {
+    ) -> &'a crate::entities::config::DoctrineObjective {
         config
             .behaviour
             .as_ref()
@@ -6971,7 +7019,7 @@ _remove = true
             &mut app,
             "sensors",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::ScienceRadar,
                 },
@@ -6988,7 +7036,7 @@ _remove = true
             &mut app,
             "sensors",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::SensorsRadar,
                 },
@@ -7006,7 +7054,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::SensorsRadar,
                 },
@@ -7027,7 +7075,7 @@ _remove = true
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::SystemChart,
                 },
@@ -7045,7 +7093,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::ScienceRadar,
                 },
@@ -7066,7 +7114,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::SystemChart,
                 },
@@ -7087,7 +7135,7 @@ _remove = true
             &mut app,
             "navigation",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::NavigationChart,
                 },
@@ -7105,7 +7153,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::NavigationChart,
                 },
@@ -7169,7 +7217,7 @@ _remove = true
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Comms,
                 },
@@ -7187,7 +7235,7 @@ _remove = true
             &mut app,
             "comms",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Comms,
                 },
@@ -7199,7 +7247,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Camera(CameraView::new("camera_aft")),
                 },
@@ -7220,7 +7268,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Comms,
                 },
@@ -7241,7 +7289,7 @@ _remove = true
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar,
                 },
@@ -7260,7 +7308,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar,
                 },
@@ -7281,7 +7329,7 @@ _remove = true
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Camera(CameraView::new("camera_aft")),
                 },
@@ -7526,10 +7574,12 @@ _remove = true
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("target-uuid".into()),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
-                30.0,
-            )])),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(
+                    crate::core::messages::SystemId("captain".into()),
+                    30.0,
+                )]),
+            ),
             Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
         ));
     }
@@ -7554,9 +7604,12 @@ _remove = true
             .spawn((
                 Asteroid,
                 AsteroidUuid("target-uuid".into()),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
-                    (crate::messages::SystemId("captain".into()), 30.0),
-                ])),
+                crate::entities::spawner::EntitySystemHull(
+                    crate::ship::damage::SystemHull::from_config(&[(
+                        crate::core::messages::SystemId("captain".into()),
+                        30.0,
+                    )]),
+                ),
                 Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
             ))
             .id()
@@ -7612,27 +7665,27 @@ _remove = true
         if let Ok(mut cs) = q.single_mut(app.world_mut()) {
             use crate::ship::control_source::ControlSource;
             cs.0.set(
-                crate::system_registry::phaser_fore_system_id(),
+                crate::ship::system_registry::phaser_fore_system_id(),
                 ControlSource::Human,
             );
             cs.0.set(
-                crate::system_registry::phaser_aft_system_id(),
+                crate::ship::system_registry::phaser_aft_system_id(),
                 ControlSource::Human,
             );
             cs.0.set(
-                crate::system_registry::torpedo_tube_fore_port_system_id(),
+                crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
                 ControlSource::Human,
             );
             cs.0.set(
-                crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+                crate::ship::system_registry::torpedo_tube_fore_starboard_system_id(),
                 ControlSource::Human,
             );
             cs.0.set(
-                crate::system_registry::torpedo_tube_aft_system_id(),
+                crate::ship::system_registry::torpedo_tube_aft_system_id(),
                 ControlSource::Human,
             );
             cs.0.set(
-                crate::system_registry::torpedo_magazine_system_id(),
+                crate::ship::system_registry::torpedo_magazine_system_id(),
                 ControlSource::Human,
             );
         }
@@ -7650,7 +7703,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -7684,7 +7737,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -7713,7 +7766,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "no-such-asteroid".into(),
                 },
@@ -7746,7 +7799,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -7790,7 +7843,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -7827,7 +7880,7 @@ _remove = true
             app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -7839,7 +7892,7 @@ _remove = true
             app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_fore_system_id(),
+                target: crate::ship::system_registry::phaser_fore_system_id(),
                 payload: SystemControlPayload::FirePhaser,
             },
         );
@@ -7892,7 +7945,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_fore_system_id(),
+                target: crate::ship::system_registry::phaser_fore_system_id(),
                 payload: SystemControlPayload::FirePhaser,
             },
         );
@@ -7916,7 +7969,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_fore_system_id(),
+                target: crate::ship::system_registry::phaser_fore_system_id(),
                 payload: SystemControlPayload::FirePhaser,
             },
         );
@@ -7941,7 +7994,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -7953,7 +8006,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_fore_system_id(),
+                target: crate::ship::system_registry::phaser_fore_system_id(),
                 payload: SystemControlPayload::FirePhaser,
             },
         );
@@ -8043,7 +8096,7 @@ _remove = true
         // The entity should be despawned.
         assert!(
             app.world()
-                .get::<crate::entity_spawner::EntitySystemHull>(asteroid_entity)
+                .get::<crate::entities::spawner::EntitySystemHull>(asteroid_entity)
                 .is_none(),
             "asteroid entity should be despawned"
         );
@@ -8138,7 +8191,7 @@ _remove = true
 
         let hp = app
             .world()
-            .get::<crate::entity_spawner::EntitySystemHull>(asteroid_entity)
+            .get::<crate::entities::spawner::EntitySystemHull>(asteroid_entity)
             .map(|h| h.0.total_current());
         assert!(
             hp.is_some() && hp.unwrap() < 30.0,
@@ -8166,19 +8219,23 @@ _remove = true
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("t1".into()),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
-                30.0,
-            )])),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(
+                    crate::core::messages::SystemId("captain".into()),
+                    30.0,
+                )]),
+            ),
             Transform::from_xyz(0.0, 0.0, -20.0),
         ));
         app.world_mut().spawn((
             Asteroid,
             AsteroidUuid("t2".into()),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
-                30.0,
-            )])),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(
+                    crate::core::messages::SystemId("captain".into()),
+                    30.0,
+                )]),
+            ),
             Transform::from_xyz(0.0, 0.0, -15.0),
         ));
         start_game_with_weapons(&mut app);
@@ -8188,7 +8245,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget { uuid: "t1".into() },
             },
         );
@@ -8197,7 +8254,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_fore_system_id(),
+                target: crate::ship::system_registry::phaser_fore_system_id(),
                 payload: SystemControlPayload::FirePhaser,
             },
         );
@@ -8221,7 +8278,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget { uuid: "t2".into() },
             },
         );
@@ -8230,7 +8287,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_fore_system_id(),
+                target: crate::ship::system_registry::phaser_fore_system_id(),
                 payload: SystemControlPayload::FirePhaser,
             },
         );
@@ -8297,9 +8354,9 @@ _remove = true
             .query_filtered::<Entity, With<LocalShip>>()
             .single(app.world())
             .expect("LocalShip must be spawned by start_game_with_repair");
-        app.world_mut()
-            .entity_mut(ship)
-            .insert(ShipRepairTeams(crate::repair_teams::RepairTeams::new(2)));
+        app.world_mut().entity_mut(ship).insert(ShipRepairTeams(
+            crate::modifiers::repair_teams::RepairTeams::new(2),
+        ));
     }
 
     /// Read the LocalShip's own `ShipRepairTeams` component (issue #830 — no
@@ -8316,12 +8373,12 @@ _remove = true
     fn team_is_travelling(teams: &ShipRepairTeams, idx: usize) -> bool {
         matches!(
             teams.0.slots()[idx],
-            crate::messages::TeamSlot::Travelling { .. }
+            crate::core::messages::TeamSlot::Travelling { .. }
         )
     }
 
     fn team_is_idle(teams: &ShipRepairTeams, idx: usize) -> bool {
-        matches!(teams.0.slots()[idx], crate::messages::TeamSlot::Idle)
+        matches!(teams.0.slots()[idx], crate::core::messages::TeamSlot::Idle)
     }
 
     /// Damage the named systems on the LocalShip's hull, adding a row for any
@@ -8344,7 +8401,7 @@ _remove = true
         };
         let mut rows: Vec<(SystemId, f32)> = app
             .world()
-            .get::<crate::entity_spawner::EntitySystemHull>(ship)
+            .get::<crate::entities::spawner::EntitySystemHull>(ship)
             .expect("LocalShip must carry EntitySystemHull")
             .0
             .iter()
@@ -8356,7 +8413,7 @@ _remove = true
                 rows.push((sid, 25.0));
             }
         }
-        let mut hull = crate::damage::SystemHull::from_config(&rows);
+        let mut hull = crate::ship::damage::SystemHull::from_config(&rows);
         for id in systems {
             let sid = SystemId((*id).into());
             let max = hull.get(&sid).expect("just built this row").max;
@@ -8364,7 +8421,7 @@ _remove = true
         }
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::entity_spawner::EntitySystemHull(hull));
+            .insert(crate::entities::spawner::EntitySystemHull(hull));
     }
 
     // -- Repair dispatch tests --------------------------------------
@@ -8377,10 +8434,10 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
-                    target: crate::messages::RepairTarget::Station(StationId("helm".into())),
+                    target: crate::core::messages::RepairTarget::Station(StationId("helm".into())),
                 },
             },
         );
@@ -8401,10 +8458,10 @@ _remove = true
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
-                    target: crate::messages::RepairTarget::Station(StationId("helm".into())),
+                    target: crate::core::messages::RepairTarget::Station(StationId("helm".into())),
                 },
             },
         );
@@ -8429,10 +8486,10 @@ _remove = true
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
-                    target: crate::messages::RepairTarget::Station(StationId("helm".into())),
+                    target: crate::core::messages::RepairTarget::Station(StationId("helm".into())),
                 },
             },
         );
@@ -8441,10 +8498,12 @@ _remove = true
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 1,
-                    target: crate::messages::RepairTarget::Station(StationId("tactical".into())),
+                    target: crate::core::messages::RepairTarget::Station(StationId(
+                        "tactical".into(),
+                    )),
                 },
             },
         );
@@ -8454,10 +8513,10 @@ _remove = true
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
-                    target: crate::messages::RepairTarget::Station(StationId("power".into())),
+                    target: crate::core::messages::RepairTarget::Station(StationId("power".into())),
                 },
             },
         );
@@ -8465,7 +8524,7 @@ _remove = true
         let teams = local_teams(&mut app);
         assert!(matches!(
             teams.0.slots()[0],
-            crate::messages::TeamSlot::Returning { .. }
+            crate::core::messages::TeamSlot::Returning { .. }
         ));
         assert!(team_is_travelling(&teams, 1));
     }
@@ -8479,17 +8538,17 @@ _remove = true
             &mut app,
             "eng",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("repair".into()),
+                target: crate::core::messages::SystemId("repair".into()),
                 payload: SystemControlPayload::DispatchRepairTeam {
                     team_idx: 0,
-                    target: crate::messages::RepairTarget::Station(StationId("helm".into())),
+                    target: crate::core::messages::RepairTarget::Station(StationId("helm".into())),
                 },
             },
         );
         let out = tick(&mut app);
         let repair_state = out.iter().find(|m| {
             matches!(&m.msg, ServerMessage::RepairState { teams } if
-                teams.iter().any(|t| matches!(t, crate::messages::TeamSlot::Travelling { .. })))
+                teams.iter().any(|t| matches!(t, crate::core::messages::TeamSlot::Travelling { .. })))
                 && matches!(&m.target, Target::Token(t) if t == "eng")
         });
         assert!(
@@ -8509,16 +8568,16 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_control_system_id(),
+                target: crate::ship::system_registry::phaser_control_system_id(),
                 payload: SystemControlPayload::SetPhaserMode {
-                    mode: crate::messages::PhaserMode::Manual,
+                    mode: crate::core::messages::PhaserMode::Manual,
                 },
             },
         );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<CurrentPhaserMode>().0,
-            crate::messages::PhaserMode::Manual,
+            crate::core::messages::PhaserMode::Manual,
             "phaser mode should be Manual after SetPhaserMode"
         );
     }
@@ -8533,9 +8592,9 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_control_system_id(),
+                target: crate::ship::system_registry::phaser_control_system_id(),
                 payload: SystemControlPayload::SetPhaserMode {
-                    mode: crate::messages::PhaserMode::Auto,
+                    mode: crate::core::messages::PhaserMode::Auto,
                 },
             },
         );
@@ -8545,16 +8604,16 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_control_system_id(),
+                target: crate::ship::system_registry::phaser_control_system_id(),
                 payload: SystemControlPayload::SetPhaserMode {
-                    mode: crate::messages::PhaserMode::Manual,
+                    mode: crate::core::messages::PhaserMode::Manual,
                 },
             },
         );
         tick(&mut app);
         assert_eq!(
             app.world().resource::<CurrentPhaserMode>().0,
-            crate::messages::PhaserMode::Auto,
+            crate::core::messages::PhaserMode::Auto,
             "phaser mode should stay Auto when non-Weapons player sends SetPhaserMode"
         );
     }
@@ -8699,7 +8758,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::torpedo_tube_fore_port_system_id(),
+                target: crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
                 payload: SystemControlPayload::FireTorpedo { target_uuid: None },
             },
         );
@@ -8755,7 +8814,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -8766,7 +8825,7 @@ _remove = true
             &mut app,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_fore_system_id(),
+                target: crate::ship::system_registry::phaser_fore_system_id(),
                 payload: SystemControlPayload::FirePhaser,
             },
         );
@@ -8801,7 +8860,7 @@ _remove = true
     ///   Test: after running ~4s of game time, the asteroid is destroyed with 2Ã— but not with 1Ã—.
     #[test]
     fn phaser_damage_modifier_doubles_kill_rate() {
-        use crate::messages::{ModifierSlot, ModifierSource};
+        use crate::core::messages::{ModifierSlot, ModifierSource};
         use crate::modifiers::Modifier;
 
         // --- App with 2Ã— PhaserDamage modifier ---
@@ -8820,7 +8879,7 @@ _remove = true
             &mut app_fast,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -8831,7 +8890,7 @@ _remove = true
             &mut app_fast,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_fore_system_id(),
+                target: crate::ship::system_registry::phaser_fore_system_id(),
                 payload: SystemControlPayload::FirePhaser,
             },
         );
@@ -8861,7 +8920,7 @@ _remove = true
             &mut app_base,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "target-uuid".into(),
                 },
@@ -8872,7 +8931,7 @@ _remove = true
             &mut app_base,
             "weapons",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::phaser_fore_system_id(),
+                target: crate::ship::system_registry::phaser_fore_system_id(),
                 payload: SystemControlPayload::FirePhaser,
             },
         );
@@ -8897,7 +8956,7 @@ _remove = true
 
     #[test]
     fn add_modifier_broadcasts_modifier_added_message() {
-        use crate::messages::{ModifierSlot, ModifierSource};
+        use crate::core::messages::{ModifierSlot, ModifierSource};
         use crate::modifiers::Modifier;
 
         let mut app = test_app();
@@ -8928,7 +8987,7 @@ _remove = true
 
     #[test]
     fn remove_modifier_broadcasts_modifier_removed_message() {
-        use crate::messages::{ModifierSlot, ModifierSource};
+        use crate::core::messages::{ModifierSlot, ModifierSource};
         use crate::modifiers::Modifier;
 
         let mut app = test_app();
@@ -8965,14 +9024,14 @@ _remove = true
         // Replicates the split + apply that `handle_collisions` performs
         // (without standing up Rapier), proving the pierce=0 path leaves
         // hull untouched and the shield quadrant absorbs full damage.
-        use crate::damage::{
+        use crate::ship::damage::{
             apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce,
         };
-        use crate::shield::{ShieldConfig, ShieldSystem};
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
         let mut hull =
-            crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
+            crate::ship::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
 
         let damage: f32 = 10.0;
         let (pierced, absorbed) = split_damage_for_pierce(damage, 0.0);
@@ -8998,14 +9057,14 @@ _remove = true
 
     #[test]
     fn asteroid_collision_pierce_full_routes_all_to_hull() {
-        use crate::damage::{
+        use crate::ship::damage::{
             apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce,
         };
-        use crate::shield::{ShieldConfig, ShieldSystem};
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
         let mut hull =
-            crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
+            crate::ship::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
 
         let damage: f32 = 10.0;
         let (pierced, absorbed) = split_damage_for_pierce(damage, 1.0);
@@ -9031,14 +9090,14 @@ _remove = true
 
     #[test]
     fn asteroid_collision_pierce_partial_splits_proportionally() {
-        use crate::damage::{
+        use crate::ship::damage::{
             apply_damage_with_shields, apply_hull_damage, split_damage_for_pierce,
         };
-        use crate::shield::{ShieldConfig, ShieldSystem};
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
         let mut shields = ShieldSystem::new(&ShieldConfig::default());
         let initial_fore_hp = shields.facings[0].hp;
         let mut hull =
-            crate::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
+            crate::ship::damage::SystemHull::from_config(&[(SystemId("captain".into()), 100.0)]);
 
         // pierce = 0.3 on 10 damage → 3 to hull, 7 to fore shield.
         let damage: f32 = 10.0;
@@ -9061,7 +9120,7 @@ _remove = true
 
     #[test]
     fn hull_damage_modifier_halves_collision_damage() {
-        use crate::messages::{ModifierSlot, ModifierSource};
+        use crate::core::messages::{ModifierSlot, ModifierSource};
         use crate::modifiers::Modifier;
 
         // Hull damage halved via modifier.
@@ -9123,10 +9182,10 @@ _remove = true
     /// effects (`DamageTaken`, `ShipDestroyed`, `GameOver`) may fire.
     #[test]
     fn npc_ship_takes_hull_damage_from_asteroid_collision() {
-        use crate::damage::SystemHull;
-        use crate::entity_config::{ColliderConfig, ColliderShape};
-        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::entities::config::{ColliderConfig, ColliderShape};
+        use crate::entities::spawner::{ColliderSection, EntitySystemHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
+        use crate::ship::damage::SystemHull;
         use bevy_rapier3d::prelude::*;
 
         let mut app = App::new();
@@ -9145,7 +9204,7 @@ _remove = true
             .init_resource::<WorldResource>()
             .insert_resource(GameOverReason(None, None))
             .init_resource::<DamageLog>()
-            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_message::<crate::ai::server::AiEntityDestroyed>()
             .add_systems(Update, handle_collisions);
 
         // Move the game into InProgress so RapierPhysicsPlugin's default
@@ -9285,10 +9344,10 @@ _remove = true
     /// correction is continuous.
     #[test]
     fn a_hull_inside_a_collider_is_separated_even_mid_cooldown() {
-        use crate::damage::SystemHull;
-        use crate::entity_config::{ColliderConfig, ColliderShape};
-        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::entities::config::{ColliderConfig, ColliderShape};
+        use crate::entities::spawner::{ColliderSection, EntitySystemHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
+        use crate::ship::damage::SystemHull;
         use bevy_rapier3d::prelude::*;
 
         const SHIP_RADIUS: f32 = 1.2;
@@ -9312,7 +9371,7 @@ _remove = true
             .init_resource::<WorldResource>()
             .insert_resource(GameOverReason(None, None))
             .init_resource::<DamageLog>()
-            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_message::<crate::ai::server::AiEntityDestroyed>()
             .add_systems(Update, handle_collisions);
         app.world_mut()
             .resource_mut::<NextState<GamePhase>>()
@@ -9428,15 +9487,15 @@ _remove = true
     #[cfg(test)]
     fn hull_left_after_touching(
         structure: (
-            crate::entity_config::ColliderConfig,
+            crate::entities::config::ColliderConfig,
             bevy_rapier3d::prelude::Collider,
         ),
         ship_at: Vec3,
     ) -> f32 {
-        use crate::damage::SystemHull;
-        use crate::entity_config::{ColliderConfig, ColliderShape};
-        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::entities::config::{ColliderConfig, ColliderShape};
+        use crate::entities::spawner::{ColliderSection, EntitySystemHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
+        use crate::ship::damage::SystemHull;
         use bevy_rapier3d::prelude::*;
 
         const SHIP_RADIUS: f32 = 1.2;
@@ -9458,7 +9517,7 @@ _remove = true
             .init_resource::<WorldResource>()
             .insert_resource(GameOverReason(None, None))
             .init_resource::<DamageLog>()
-            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_message::<crate::ai::server::AiEntityDestroyed>()
             .add_systems(Update, handle_collisions);
         app.world_mut()
             .resource_mut::<NextState<GamePhase>>()
@@ -9527,12 +9586,12 @@ _remove = true
     /// author it.
     #[cfg(test)]
     fn starbase_disc() -> (
-        crate::entity_config::ColliderConfig,
+        crate::entities::config::ColliderConfig,
         bevy_rapier3d::prelude::Collider,
     ) {
         (
-            crate::entity_config::ColliderConfig {
-                shape: crate::entity_config::ColliderShape::Cylinder,
+            crate::entities::config::ColliderConfig {
+                shape: crate::entities::config::ColliderShape::Cylinder,
                 radius: 17.04,
                 length: 0.0,
                 half_height: Some(7.16),
@@ -9546,12 +9605,12 @@ _remove = true
     /// height by ten units.
     #[cfg(test)]
     fn starbase_ball() -> (
-        crate::entity_config::ColliderConfig,
+        crate::entities::config::ColliderConfig,
         bevy_rapier3d::prelude::Collider,
     ) {
         (
-            crate::entity_config::ColliderConfig {
-                shape: crate::entity_config::ColliderShape::Ball,
+            crate::entities::config::ColliderConfig {
+                shape: crate::entities::config::ColliderShape::Ball,
                 radius: 17.04,
                 length: 0.0,
                 half_height: None,
@@ -9661,10 +9720,10 @@ _remove = true
     /// default `Relative`) swallows that hull whole.
     #[test]
     fn a_collider_ignores_the_render_lod_transform_scale() {
-        use crate::damage::SystemHull;
-        use crate::entity_config::{ColliderConfig, ColliderShape};
-        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::entities::config::{ColliderConfig, ColliderShape};
+        use crate::entities::spawner::{ColliderSection, EntitySystemHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
+        use crate::ship::damage::SystemHull;
         use bevy_rapier3d::prelude::*;
 
         const SHIP_RADIUS: f32 = 1.2;
@@ -9693,7 +9752,7 @@ _remove = true
                 .init_resource::<WorldResource>()
                 .insert_resource(GameOverReason(None, None))
                 .init_resource::<DamageLog>()
-                .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+                .add_message::<crate::ai::server::AiEntityDestroyed>()
                 .add_systems(Update, handle_collisions);
             app.world_mut()
                 .resource_mut::<NextState<GamePhase>>()
@@ -9803,10 +9862,10 @@ _remove = true
     /// damage contact is still exactly one and still `ast-aaa`.
     #[test]
     fn a_ship_between_two_asteroids_is_resolved_against_the_lower_world_id() {
-        use crate::damage::SystemHull;
-        use crate::entity_config::{ColliderConfig, ColliderShape};
-        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::entities::config::{ColliderConfig, ColliderShape};
+        use crate::entities::spawner::{ColliderSection, EntitySystemHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
+        use crate::ship::damage::SystemHull;
         use bevy_rapier3d::prelude::*;
 
         /// Where the ship ends up after being separated out of the overlap,
@@ -9828,7 +9887,7 @@ _remove = true
                 .init_resource::<WorldResource>()
                 .insert_resource(GameOverReason(None, None))
                 .init_resource::<DamageLog>()
-                .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+                .add_message::<crate::ai::server::AiEntityDestroyed>()
                 .add_systems(Update, handle_collisions);
             app.world_mut()
                 .resource_mut::<NextState<GamePhase>>()
@@ -9936,10 +9995,10 @@ _remove = true
     /// at a time.
     #[test]
     fn a_hull_wedged_between_two_bodies_is_separated_from_both() {
-        use crate::damage::SystemHull;
-        use crate::entity_config::{ColliderConfig, ColliderShape};
-        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::entities::config::{ColliderConfig, ColliderShape};
+        use crate::entities::spawner::{ColliderSection, EntitySystemHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
+        use crate::ship::damage::SystemHull;
         use bevy_rapier3d::prelude::*;
 
         const R: f32 = 5.0;
@@ -9961,7 +10020,7 @@ _remove = true
             .init_resource::<WorldResource>()
             .insert_resource(GameOverReason(None, None))
             .init_resource::<DamageLog>()
-            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_message::<crate::ai::server::AiEntityDestroyed>()
             .add_systems(Update, handle_collisions);
         app.world_mut()
             .resource_mut::<NextState<GamePhase>>()
@@ -10050,10 +10109,10 @@ _remove = true
     /// on `Option::is_some()` upstream instead of on real contact.
     #[test]
     fn a_lower_uuid_rock_with_only_an_aabb_overlap_is_never_selected() {
-        use crate::damage::SystemHull;
-        use crate::entity_config::{ColliderConfig, ColliderShape};
-        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::entities::config::{ColliderConfig, ColliderShape};
+        use crate::entities::spawner::{ColliderSection, EntitySystemHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
+        use crate::ship::damage::SystemHull;
         use bevy_rapier3d::prelude::*;
 
         let mut app = App::new();
@@ -10072,7 +10131,7 @@ _remove = true
             .init_resource::<WorldResource>()
             .insert_resource(GameOverReason(None, None))
             .init_resource::<DamageLog>()
-            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_message::<crate::ai::server::AiEntityDestroyed>()
             .add_systems(Update, handle_collisions);
         app.world_mut()
             .resource_mut::<NextState<GamePhase>>()
@@ -10186,11 +10245,11 @@ _remove = true
     /// no attacker — the half of a fight that `DamageTaken` never reports.
     #[test]
     fn npc_asteroid_collision_emits_attacker_less_balance_event() {
-        use crate::balance::BalanceEvent;
-        use crate::damage::SystemHull;
-        use crate::entity_config::{ColliderConfig, ColliderShape};
-        use crate::entity_spawner::{ColliderSection, EntitySystemHull, EntityUuid};
+        use crate::core::balance::BalanceEvent;
+        use crate::entities::config::{ColliderConfig, ColliderShape};
+        use crate::entities::spawner::{ColliderSection, EntitySystemHull, EntityUuid};
         use crate::modifiers::ShipModifiers;
+        use crate::ship::damage::SystemHull;
         use bevy::ecs::message::Messages;
         use bevy_rapier3d::prelude::*;
 
@@ -10210,7 +10269,7 @@ _remove = true
             .init_resource::<WorldResource>()
             .insert_resource(GameOverReason(None, None))
             .init_resource::<DamageLog>()
-            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+            .add_message::<crate::ai::server::AiEntityDestroyed>()
             .add_message::<BalanceEvent>()
             .add_systems(Update, handle_collisions);
 
@@ -10298,10 +10357,10 @@ _remove = true
         assert_eq!(victim, &npc_uuid);
         assert_eq!(
             *victim_kind,
-            crate::balance::VictimKind::Ship,
+            crate::core::balance::VictimKind::Ship,
             "the ship takes the collision damage, not the rock it hit"
         );
-        assert_eq!(weapon, crate::balance::WEAPON_KIND_COLLISION);
+        assert_eq!(weapon, crate::core::balance::WEAPON_KIND_COLLISION);
         assert!(*amount > 0.0, "a 100-speed impact must offer damage");
         assert_eq!(
             *shield_absorbed, 0.0,
@@ -10395,7 +10454,9 @@ _remove = true
             .resource_mut::<ShipPowerSystem>()
             .0
             .set_group_allocation(
-                &crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                ),
                 1,
             );
 
@@ -10404,10 +10465,10 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(
-                        crate::power_system::HELM_POWER_GROUP.into(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
+                payload: crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::HELM_POWER_GROUP.into(),
                     ),
                     level: 2,
                 },
@@ -10416,12 +10477,11 @@ _remove = true
         let _ = tick(&mut app);
 
         assert_eq!(
-            app.world()
-                .resource::<ShipPowerSystem>()
-                .0
-                .level_for(&crate::messages::PowerGroupId(
-                    crate::power_system::HELM_POWER_GROUP.into()
-                )),
+            app.world().resource::<ShipPowerSystem>().0.level_for(
+                &crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into()
+                )
+            ),
             1,
             "non-Power sender should not be able to increase power"
         );
@@ -10437,10 +10497,10 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(
-                        crate::power_system::SHIELDS_POWER_GROUP.into(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
+                payload: crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
                     ),
                     level: 1,
                 },
@@ -10449,12 +10509,11 @@ _remove = true
         let _ = tick(&mut app);
 
         assert_eq!(
-            app.world()
-                .resource::<ShipPowerSystem>()
-                .0
-                .level_for(&crate::messages::PowerGroupId(
-                    crate::power_system::SHIELDS_POWER_GROUP.into()
-                )),
+            app.world().resource::<ShipPowerSystem>().0.level_for(
+                &crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::SHIELDS_POWER_GROUP.into()
+                )
+            ),
             2,
             "non-Power sender should not be able to decrease power"
         );
@@ -10470,10 +10529,10 @@ _remove = true
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(
-                        crate::power_system::HELM_POWER_GROUP.into(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
+                payload: crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::HELM_POWER_GROUP.into(),
                     ),
                     level: 3,
                 },
@@ -10505,10 +10564,10 @@ _remove = true
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(
-                        crate::power_system::WEAPONS_POWER_GROUP.into(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
+                payload: crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
                     ),
                     level: 1,
                 },
@@ -10577,7 +10636,9 @@ _remove = true
             .resource_mut::<ShipPowerSystem>()
             .0
             .set_group_allocation(
-                &crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                ),
                 4,
             );
 
@@ -10585,10 +10646,10 @@ _remove = true
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(
-                        crate::power_system::HELM_POWER_GROUP.into(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
+                payload: crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::HELM_POWER_GROUP.into(),
                     ),
                     level: 4,
                 },
@@ -10622,7 +10683,9 @@ _remove = true
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
             .insert(
-                crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                ),
                 [-0.5, 0.0, 1.0, 2.0],
             );
 
@@ -10631,10 +10694,10 @@ _remove = true
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(
-                        crate::power_system::HELM_POWER_GROUP.into(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
+                payload: crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::HELM_POWER_GROUP.into(),
                     ),
                     level: 3,
                 },
@@ -10660,7 +10723,9 @@ _remove = true
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
             .insert(
-                crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                ),
                 [-0.5, 0.0, 0.25, 0.5],
             );
 
@@ -10669,10 +10734,10 @@ _remove = true
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(
-                        crate::power_system::WEAPONS_POWER_GROUP.into(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
+                payload: crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
                     ),
                     level: 1,
                 },
@@ -10703,21 +10768,27 @@ _remove = true
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
             .insert(
-                crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                ),
                 defaults,
             );
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
             .insert(
-                crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                ),
                 defaults,
             );
         app.world_mut()
             .resource_mut::<PowerMultiplierResource>()
             .multipliers
             .insert(
-                crate::messages::PowerGroupId(crate::power_system::SHIELDS_POWER_GROUP.into()),
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
+                ),
                 defaults,
             );
 
@@ -10727,15 +10798,21 @@ _remove = true
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                ),
                 4,
             );
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(crate::power_system::WEAPONS_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
+                ),
                 2,
             );
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(crate::power_system::SHIELDS_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
+                ),
                 2,
             );
             ps.0.battery_charge = 0.0;
@@ -10775,7 +10852,9 @@ _remove = true
             .resource_mut::<ShipPowerSystem>()
             .0
             .set_group_allocation(
-                &crate::messages::PowerGroupId(crate::power_system::HELM_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::HELM_POWER_GROUP.into(),
+                ),
                 4,
             );
 
@@ -10784,10 +10863,10 @@ _remove = true
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
-                payload: crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(
-                        crate::power_system::SHIELDS_POWER_GROUP.into(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
+                payload: crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group: crate::core::messages::PowerGroupId(
+                        crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
                     ),
                     level: 3,
                 },
@@ -10834,7 +10913,7 @@ _remove = true
         start_game(&mut app);
 
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("runtime-entity-1".into()),
+            crate::entities::spawner::EntityUuid("runtime-entity-1".into()),
             Transform::from_xyz(100.0, 0.0, -200.0),
         ));
 
@@ -10857,8 +10936,8 @@ _remove = true
         start_game(&mut app);
 
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("pos-entity".into()),
-            crate::entity_spawner::EntityId("station-alpha".into()),
+            crate::entities::spawner::EntityUuid("pos-entity".into()),
+            crate::entities::spawner::EntityId("station-alpha".into()),
             Transform::from_xyz(50.0, 0.0, -75.0),
         ));
 
@@ -10886,7 +10965,7 @@ _remove = true
         let entity = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid("to-despawn".into()),
+                crate::entities::spawner::EntityUuid("to-despawn".into()),
                 Transform::default(),
             ))
             .id();
@@ -10916,13 +10995,15 @@ _remove = true
 
         // Spawn an asteroid entity (has Asteroid component + EntityUuid).
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("asteroid-1".into()),
+            crate::entities::spawner::EntityUuid("asteroid-1".into()),
             Asteroid,
             AsteroidUuid("asteroid-1".into()),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
-                30.0,
-            )])),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(
+                    crate::core::messages::SystemId("captain".into()),
+                    30.0,
+                )]),
+            ),
             Transform::default(),
         ));
 
@@ -10944,7 +11025,7 @@ _remove = true
 
         // Spawn a non-asteroid entity.
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("reconnect-entity".into()),
+            crate::entities::spawner::EntityUuid("reconnect-entity".into()),
             Transform::from_xyz(25.0, 0.0, -50.0),
         ));
 
@@ -11043,7 +11124,7 @@ _remove = true
         // frozen combat lock filtered for liveness, so a lock on a uuid with no
         // entity behind it is (correctly) never published.
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("npc-only-target".into()),
+            crate::entities::spawner::EntityUuid("npc-only-target".into()),
             bevy::prelude::Transform::from_xyz(0.0, 0.0, -30.0),
         ));
 
@@ -11051,16 +11132,16 @@ _remove = true
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 crate::ship_plugin::ShipConfigComponent::default(),
                 crate::ship_plugin::ShipSystemControlSources::default(),
                 ShipSystemBlackboards::default(),
-                crate::weapons_plugin::TacticalRadarSelection(Some("npc-only-target".into())),
-                crate::weapons_plugin::ActiveBeam::default(),
-                crate::weapons_plugin::PhaserCooldown::default(),
-                crate::weapons_plugin::LastShipAttacker::default(),
+                crate::console::weapons::TacticalRadarSelection(Some("npc-only-target".into())),
+                crate::console::weapons::ActiveBeam::default(),
+                crate::console::weapons::PhaserCooldown::default(),
+                crate::console::weapons::LastShipAttacker::default(),
                 ShipPhysicsComponent::default(),
-                crate::entity_spawner::EntityUuid("npc-1".into()),
+                crate::entities::spawner::EntityUuid("npc-1".into()),
                 bevy::prelude::Transform::default(),
             ))
             .id();
@@ -11080,7 +11161,7 @@ _remove = true
         assert!(
             matches!(
                 npc_target,
-                Some(crate::messages::SystemBlackboard::Weapons(ref bb))
+                Some(crate::core::messages::SystemBlackboard::Weapons(ref bb))
                     if bb.target_uuid.as_deref() == Some("npc-only-target")
             ),
             "NPC must publish its own Weapons blackboard, got {npc_target:?}"
@@ -11090,7 +11171,7 @@ _remove = true
         for m in &out {
             if let ServerMessage::BlackboardUpdate { updates } = &m.msg {
                 for (id, bb) in updates {
-                    if let crate::messages::SystemBlackboard::Weapons(w) = bb {
+                    if let crate::core::messages::SystemBlackboard::Weapons(w) = bb {
                         assert_ne!(
                             w.target_uuid.as_deref(),
                             Some("npc-only-target"),
@@ -11108,7 +11189,7 @@ _remove = true
         start_game(&mut app);
 
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("all-broadcast".into()),
+            crate::entities::spawner::EntityUuid("all-broadcast".into()),
             Transform::default(),
         ));
 
@@ -11133,7 +11214,7 @@ _remove = true
         let entity = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid("broadcast-despawn".into()),
+                crate::entities::spawner::EntityUuid("broadcast-despawn".into()),
                 Transform::default(),
             ))
             .id();
@@ -11161,8 +11242,8 @@ _remove = true
     /// Build the admitted-envelope form of a frequency change (issue #804).
     fn set_phaser_frequency_msg(frequency: f32) -> ClientMessage {
         ClientMessage::ControlSystem {
-            target: crate::system_registry::phaser_control_system_id(),
-            payload: crate::messages::SystemControlPayload::SetPhaserFrequency { frequency },
+            target: crate::ship::system_registry::phaser_control_system_id(),
+            payload: crate::core::messages::SystemControlPayload::SetPhaserFrequency { frequency },
         }
     }
 
@@ -11284,7 +11365,7 @@ _remove = true
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("fore").expect("fore"),
+                target: crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
@@ -11306,7 +11387,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("port").expect("port"),
+                target: crate::ship::system_registry::shield_arc_system_id("port").expect("port"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
@@ -11332,7 +11413,7 @@ _remove = true
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("fore").expect("fore"),
+                target: crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
@@ -11345,7 +11426,7 @@ _remove = true
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("fore").expect("fore"),
+                target: crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: false },
             },
         );
@@ -11387,7 +11468,7 @@ _remove = true
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("aft").expect("aft"),
+                target: crate::ship::system_registry::shield_arc_system_id("aft").expect("aft"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
@@ -11413,7 +11494,7 @@ _remove = true
             &mut app,
             "shields",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::shield_arc_system_id("fore").expect("fore"),
+                target: crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
             },
         );
@@ -11525,7 +11606,7 @@ _remove = true
             .world_mut()
             .spawn((
                 LastShipAttacker(Some("attacker-1".to_string())),
-                crate::ship_state::ShipRedAlert(true),
+                crate::ship::state::ShipRedAlert(true),
                 LocalShip,
             ))
             .id();
@@ -11535,7 +11616,7 @@ _remove = true
             Some("attacker-1".to_string())
         );
         app.world_mut()
-            .get_mut::<crate::ship_state::ShipRedAlert>(ship)
+            .get_mut::<crate::ship::state::ShipRedAlert>(ship)
             .unwrap()
             .0 = false;
         app.update();
@@ -11557,7 +11638,7 @@ _remove = true
             .world_mut()
             .spawn((
                 LastShipAttacker(Some("attacker-1".to_string())),
-                crate::ship_state::ShipRedAlert(true),
+                crate::ship::state::ShipRedAlert(true),
                 LocalShip,
             ))
             .id();
@@ -11583,7 +11664,7 @@ _remove = true
             .world_mut()
             .spawn((
                 LastShipAttacker(Some("attacker-1".to_string())),
-                crate::ship_state::ShipRedAlert(true),
+                crate::ship::state::ShipRedAlert(true),
                 // No `LocalShip` marker — this is an NPC.
             ))
             .id();
@@ -11593,7 +11674,7 @@ _remove = true
             Some("attacker-1".to_string())
         );
         app.world_mut()
-            .get_mut::<crate::ship_state::ShipRedAlert>(npc)
+            .get_mut::<crate::ship::state::ShipRedAlert>(npc)
             .unwrap()
             .0 = false;
         app.update();
@@ -11622,7 +11703,7 @@ _remove = true
             .world_mut()
             .spawn((
                 LastShipAttacker(Some("attacker-1".to_string())),
-                crate::ship_state::ShipRedAlert(true),
+                crate::ship::state::ShipRedAlert(true),
                 LocalShip,
             ))
             .id();
@@ -11630,14 +11711,14 @@ _remove = true
             .world_mut()
             .spawn((
                 LastShipAttacker(Some("attacker-2".to_string())),
-                crate::ship_state::ShipRedAlert(true),
+                crate::ship::state::ShipRedAlert(true),
             ))
             .id();
         app.update();
 
         // Only the NPC stands down this tick; the player stays at red alert.
         app.world_mut()
-            .get_mut::<crate::ship_state::ShipRedAlert>(npc)
+            .get_mut::<crate::ship::state::ShipRedAlert>(npc)
             .unwrap()
             .0 = false;
         app.update();
@@ -11689,8 +11770,8 @@ _remove = true
     /// cadence latch from swallowing steps.
     #[test]
     fn the_local_ship_doctrine_pool_reopens_its_raid_after_the_attacked_window() {
+        use crate::entities::config::{BehaviourConfig, DoctrineObjective};
         use crate::entities::spawner::BehaviourSection;
-        use crate::entity_config::{BehaviourConfig, DoctrineObjective};
         use crate::ship::combat_activity::RecentCombatActivity;
         use crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID;
 
@@ -11722,7 +11803,7 @@ _remove = true
         };
 
         let window = 2.0_f32;
-        let default_window = crate::entity_config::GlobalConfig::default().attacked_memory_secs;
+        let default_window = crate::entities::config::GlobalConfig::default().attacked_memory_secs;
         assert!(
             window < default_window,
             "the authored window must differ from the {default_window}s serde \
@@ -11752,9 +11833,12 @@ _remove = true
             .spawn((
                 LocalShip,
                 BehaviourSection(behaviour),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
-                    (SystemId("captain".into()), 100.0),
-                ])),
+                crate::entities::spawner::EntitySystemHull(
+                    crate::ship::damage::SystemHull::from_config(&[(
+                        SystemId("captain".into()),
+                        100.0,
+                    )]),
+                ),
                 ShipSystemBlackboards::default(),
                 // The latch that used to decide this on its own.
                 LastShipAttacker(Some("attacker-uuid".to_string())),
@@ -12040,7 +12124,7 @@ _remove = true
         let mut admitted = app.world_mut().get_mut::<AdmittedCommands>(ship).unwrap();
         admitted.0.clear();
         admitted.0.push(AdmittedCommand {
-            target: SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into()),
+            target: SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into()),
             payload,
             response_token: None,
         });
@@ -12102,7 +12186,7 @@ _remove = true
         world.init_resource::<SimOutbox>();
         world.insert_resource(GameOverReason(
             Some("world.falling_skyway.ending.held".into()),
-            Some(crate::balance::Outcome::Victory),
+            Some(crate::core::balance::Outcome::Victory),
         ));
 
         world.run_system_once(on_game_over_enter).unwrap();
@@ -12127,7 +12211,7 @@ _remove = true
         assert_eq!(latch.0, None, "the reason is consumed by the broadcast");
         assert_eq!(
             latch.1,
-            Some(crate::balance::Outcome::Victory),
+            Some(crate::core::balance::Outcome::Victory),
             "the outcome survives the broadcast"
         );
     }

@@ -62,11 +62,11 @@ use crate::authoritative::{DeclareState, StateClass};
 use crate::civilian::traffic::{
     CivilianConfig, CivilianOrder, CivilianState, CivilianTravel, ComplianceDisposition,
 };
+use crate::core::messages::{AdmittedCommands, SystemControlPayload};
 use crate::effect_queue::EffectQueue;
+use crate::entities::config::DoctrineObjective;
 use crate::entities::spawner::{BehaviourSection, EntityUuid, FactionComponent};
-use crate::entity_config::DoctrineObjective;
 use crate::logging::LogFilterConfig;
-use crate::messages::{AdmittedCommands, SystemControlPayload};
 use crate::world::config::WorldConfig;
 use crate::world::server::WorldContentRuntime;
 
@@ -166,7 +166,7 @@ pub fn tick_civilian_traffic(
     world_config: Option<Res<WorldConfig>>,
     factions: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
-    mut outbox: Option<ResMut<crate::simulation::SimOutbox>>,
+    mut outbox: Option<ResMut<crate::server_app::SimOutbox>>,
     order_sources: Query<&AdmittedCommands>,
     mut civilians: Query<(
         Entity,
@@ -175,7 +175,7 @@ pub fn tick_civilian_traffic(
         &CivilianSection,
         &mut CivilianTraffic,
         &mut BehaviourSection,
-        Option<&mut crate::ai_plugin::ObjectiveCursors>,
+        Option<&mut crate::ai::server::ObjectiveCursors>,
     )>,
     log: Option<Res<LogFilterConfig>>,
 ) {
@@ -189,7 +189,7 @@ pub fn tick_civilian_traffic(
     let tick_hz = world_config
         .as_deref()
         .map(|wc| wc.global.sim_tick_hz)
-        .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().sim_tick_hz);
+        .unwrap_or_else(|| crate::entities::config::GlobalConfig::default().sim_tick_hz);
 
     // Who is actually addressable. An order that resolves to a real entity
     // which is not traffic — a rock, a starbase, the player's own hull — is
@@ -208,7 +208,7 @@ pub fn tick_civilian_traffic(
     let mut queued: Vec<PendingCivilianOrder> = std::mem::take(&mut civilian_orders_queue.0);
     let mut rejections: Vec<(String, String, String)> = Vec::new();
     for admitted in order_sources.iter() {
-        for cmd in admitted.for_target(crate::system_registry::NAVIGATION_SYSTEM_ID) {
+        for cmd in admitted.for_target(crate::ship::system_registry::NAVIGATION_SYSTEM_ID) {
             let SystemControlPayload::OrderCivilian { target, order } = &cmd.payload else {
                 continue;
             };
@@ -250,7 +250,7 @@ pub fn tick_civilian_traffic(
         if let Some(outbox) = outbox.as_deref_mut() {
             outbox.0.push((
                 crate::lobby::Target::Token(token),
-                crate::messages::ServerMessage::CivilianOrderRejected { target, reason },
+                crate::core::messages::ServerMessage::CivilianOrderRejected { target, reason },
             ));
         }
     }
@@ -801,7 +801,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<WorldContentRuntime>();
         app.init_resource::<crate::sim_tick::SimTick>();
-        app.init_resource::<crate::simulation::SimOutbox>();
+        app.init_resource::<crate::server_app::SimOutbox>();
         app.configure_sets(FixedUpdate, crate::sim_sets::SimSet::Input);
         app.add_plugins(CivilianPlugin);
         app
@@ -814,7 +814,7 @@ mod tests {
                 EntityUuid(uuid.to_string()),
                 CivilianSection(config),
                 CivilianTraffic(state),
-                BehaviourSection(crate::entity_config::BehaviourConfig::default()),
+                BehaviourSection(crate::entities::config::BehaviourConfig::default()),
             ))
             .id()
     }
@@ -871,7 +871,7 @@ mod tests {
     /// drains.
     #[test]
     fn an_undeliverable_order_is_refused_with_a_reason_on_the_senders_own_token() {
-        use crate::messages::{AdmittedCommand, SystemId};
+        use crate::core::messages::{AdmittedCommand, SystemId};
 
         let mut app = test_app();
         spawn_civilian(&mut app, "civ-1", CivilianConfig::default());
@@ -883,7 +883,7 @@ mod tests {
             .insert("a_rock".into(), "rock-1".into());
 
         let console = |target: &str, order: CivilianOrder| AdmittedCommand {
-            target: SystemId(crate::system_registry::NAVIGATION_SYSTEM_ID.to_string()),
+            target: SystemId(crate::ship::system_registry::NAVIGATION_SYSTEM_ID.to_string()),
             payload: SystemControlPayload::OrderCivilian {
                 target: target.to_string(),
                 order,
@@ -906,13 +906,13 @@ mod tests {
 
         let bounced: Vec<(String, String)> = app
             .world()
-            .resource::<crate::simulation::SimOutbox>()
+            .resource::<crate::server_app::SimOutbox>()
             .0
             .iter()
             .filter_map(|(target, msg)| match (target, msg) {
                 (
                     crate::lobby::Target::Token(token),
-                    crate::messages::ServerMessage::CivilianOrderRejected { target, reason },
+                    crate::core::messages::ServerMessage::CivilianOrderRejected { target, reason },
                 ) => Some((token.clone(), format!("{target}:{reason}"))),
                 _ => None,
             })

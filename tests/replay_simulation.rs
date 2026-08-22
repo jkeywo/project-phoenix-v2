@@ -19,9 +19,9 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use project_phoenix::command_admission::log::{LoggedCommand, ShipKey};
+use project_phoenix::core::messages::{SystemControlPayload, SystemId};
 use project_phoenix::headless::replay::{drive_run, PhoenixSim, ReplayError};
 use project_phoenix::headless::{verify_artifact, HeadlessArgs, ReplayArtifact};
-use project_phoenix::messages::{SystemControlPayload, SystemId};
 
 /// How often the runs here sample a digest, in logical ticks.
 ///

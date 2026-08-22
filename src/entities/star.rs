@@ -7,7 +7,7 @@ use bevy::{
     shader::ShaderRef,
 };
 
-use crate::entity_config::StarConfig;
+use crate::entities::config::StarConfig;
 
 const STAR_SURFACE_SHADER: &str = "shaders/star_surface.wgsl";
 const STAR_HALO_SHADER: &str = "shaders/star_halo.wgsl";

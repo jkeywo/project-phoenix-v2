@@ -11,7 +11,7 @@
 //   - `CommsInbox::messages` — ordered snapshot of current inbox
 //   - `CommsInbox::is_dirty` / `CommsInbox::mark_clean` — change tracking
 
-use crate::messages::CommsMessage;
+use crate::core::messages::CommsMessage;
 
 /// Server-side record for a single inbox message.
 #[derive(Clone, Debug)]
@@ -153,12 +153,12 @@ mod tests {
             body: "We are under attack!".into(),
             body_params: Default::default(),
             responses: vec![
-                crate::messages::CommsResponseView {
+                crate::core::messages::CommsResponseView {
                     text: "Understood".into(),
                     important: false,
                     available: true,
                 },
-                crate::messages::CommsResponseView {
+                crate::core::messages::CommsResponseView {
                     text: "On our way".into(),
                     important: false,
                     available: true,

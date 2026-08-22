@@ -104,8 +104,8 @@
 
 use std::collections::BTreeMap;
 
-use crate::entity_config::EntityConfig;
-use crate::entity_override::{ArrayRule, MergePolicy};
+use crate::entities::config::EntityConfig;
+use crate::entities::entity_override::{ArrayRule, MergePolicy};
 use crate::world::validate::{line_of, Severity, SourceLocation, WorldFinding};
 
 /// The authored key that lists a template's ordered includes.
@@ -127,7 +127,7 @@ const POLICY: MergePolicy = MergePolicy::ComposeFragments;
 /// exactly the point of putting the seam here.
 ///
 /// Object-safe (`&self`, no generics) so callers hold a `&dyn FragmentSource`,
-/// exactly like [`crate::entity_loader::TemplateLoader`].
+/// exactly like [`crate::entities::loader::TemplateLoader`].
 ///
 /// A `None` means "not available *yet*" as much as "does not exist"; which of
 /// those it is depends on the caller's [`MissingPolicy`] and on
@@ -203,7 +203,7 @@ pub struct FsFragmentSource;
 #[cfg(not(target_arch = "wasm32"))]
 impl FragmentSource for FsFragmentSource {
     fn read(&self, path: &str) -> Option<String> {
-        crate::config_cache::mod_pack_overlay_get(path)
+        crate::entities::config_cache::mod_pack_overlay_get(path)
             .or_else(|| std::fs::read_to_string(path).ok())
     }
 
@@ -412,7 +412,7 @@ fn record_leaves(
             // pruned.
             out.remove(prefix);
             for (key, child) in table {
-                if key == crate::entity_override::REMOVE_KEY {
+                if key == crate::entities::entity_override::REMOVE_KEY {
                     // The tombstone marker is authoring metadata, stripped from
                     // the resolved document; it is not a field anyone authored.
                     continue;
@@ -438,7 +438,7 @@ fn record_leaves(
                             .and_then(|v| v.as_str())
                             .map(|id| format!("{prefix}[{key}={id}]"))
                             .unwrap_or_else(|| format!("{prefix}[{index}]"));
-                        if crate::entity_override::is_removal(element) {
+                        if crate::entities::entity_override::is_removal(element) {
                             // A removal is the opposite of authoring: prune the
                             // entry an earlier fragment recorded rather than
                             // claiming it.
@@ -704,7 +704,7 @@ fn resolve_with(
     // nothing to remove), but it must not be one that leaks a marker into
     // `value` while `toml` is served verbatim from `root_text`. Pinned by
     // `an_uncomposed_template_never_leaks_a_tombstone_into_its_value`.
-    let value = crate::entity_override::strip_removals(
+    let value = crate::entities::entity_override::strip_removals(
         &ctx.accumulator
             .unwrap_or_else(|| toml::Value::Table(toml::value::Table::new())),
     );
@@ -848,9 +848,11 @@ fn visit(
     // `POLICY` yields a located diagnostic instead of a panic in the resolver.
     let merged = match ctx.accumulator.take() {
         None => Ok(value.clone()),
-        Some(accumulated) => {
-            crate::entity_override::merge_entity_config_toml_with(&accumulated, &value, POLICY)
-        }
+        Some(accumulated) => crate::entities::entity_override::merge_entity_config_toml_with(
+            &accumulated,
+            &value,
+            POLICY,
+        ),
     };
     let merged = match merged {
         Ok(merged) => merged,
@@ -863,7 +865,7 @@ fn visit(
                 chain,
                 SourceLocation {
                     file: path.to_string(),
-                    line: line_of(&text, crate::entity_override::REMOVE_KEY),
+                    line: line_of(&text, crate::entities::entity_override::REMOVE_KEY),
                     reference: path.to_string(),
                 },
                 message,
@@ -962,7 +964,7 @@ pub fn load_entity_config(path: &str) -> Result<EntityConfig, IncludeError> {
 
 /// The fragment source a HOST resolves against, on either target.
 ///
-/// Mirrors [`crate::entity_loader::WasmTemplateLoader`]'s three-step lookup, one
+/// Mirrors [`crate::entities::loader::WasmTemplateLoader`]'s three-step lookup, one
 /// layer lower down (raw text rather than parsed configs):
 ///
 /// 1. the session mod-pack overlay, so an uploaded pack's fragment wins;
@@ -978,10 +980,10 @@ pub struct HostFragmentSource;
 
 impl FragmentSource for HostFragmentSource {
     fn read(&self, path: &str) -> Option<String> {
-        if let Some(text) = crate::config_cache::mod_pack_overlay_get(path) {
+        if let Some(text) = crate::entities::config_cache::mod_pack_overlay_get(path) {
             return Some(text);
         }
-        if let Some(text) = crate::config_cache::raw_template_text(path) {
+        if let Some(text) = crate::entities::config_cache::raw_template_text(path) {
             return Some(text);
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -1659,7 +1661,8 @@ base_priority = 40.0
             "a key only the library declared survives two levels of merge"
         );
         assert!(
-            !r.toml.contains(crate::entity_override::REMOVE_KEY),
+            !r.toml
+                .contains(crate::entities::entity_override::REMOVE_KEY),
             "the tombstone marker must never reach the resolved document"
         );
     }
@@ -1681,11 +1684,13 @@ base_priority = 40.0
             ],
         );
         assert_eq!(ids_at(&r, "system"), vec!["real"]);
-        assert!(!r.toml.contains(crate::entity_override::REMOVE_KEY));
+        assert!(!r
+            .toml
+            .contains(crate::entities::entity_override::REMOVE_KEY));
         assert!(!r
             .value
             .to_string()
-            .contains(crate::entity_override::REMOVE_KEY));
+            .contains(crate::entities::entity_override::REMOVE_KEY));
     }
 
     /// The one document the merge cannot clean: an UNCOMPOSED root with a
@@ -1704,7 +1709,7 @@ base_priority = 40.0
         assert!(
             !r.value
                 .to_string()
-                .contains(crate::entity_override::REMOVE_KEY),
+                .contains(crate::entities::entity_override::REMOVE_KEY),
             "no `_remove` may survive into the resolved value, composed or not"
         );
         assert_eq!(

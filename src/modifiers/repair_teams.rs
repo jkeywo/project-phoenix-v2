@@ -1,6 +1,6 @@
-use crate::damage::{DamageTier, SystemHull};
-use crate::messages::{StationId, SystemId, TeamSlot};
+use crate::core::messages::{StationId, SystemId, TeamSlot};
 use crate::ship::config::ShipConfig;
+use crate::ship::damage::{DamageTier, SystemHull};
 
 /// Tunable timings for the repair-team state machine.
 ///
@@ -1565,7 +1565,7 @@ mod tests {
     /// fallback pass a test written for the label.
     #[test]
     fn sweep_labels_the_next_system_from_its_hull_entry() {
-        use crate::damage::ConsoleTierConfig;
+        use crate::ship::damage::ConsoleTierConfig;
         let mut teams = RepairTeams::new(1);
         let mut hull = SystemHull::from_config_with_display_names(vec![
             (

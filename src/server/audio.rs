@@ -30,13 +30,13 @@ use crate::audio_config::{
     build_audio_payload, forcefield_decay, forcefield_spike, forcefield_volume, AudioCue,
     ForcefieldSource,
 };
-use crate::codec;
 use crate::console_bridge::{AudioConfigChanged, AudioCueEvent};
-use crate::entity_spawner::ShipAudioSection;
+use crate::core::codec;
+use crate::core::messages::{GamePhase, ServerMessage};
+use crate::entities::spawner::ShipAudioSection;
 use crate::lobby::OutboundMessage;
-use crate::messages::{GamePhase, ServerMessage};
-use crate::ship_state::ShipPhysics;
-use crate::simulation::LocalShip;
+use crate::server_app::LocalShip;
+use crate::ship::state::ShipPhysics;
 use crate::world::config::WorldConfig;
 
 /// Current forcefield SFX intensity, 0.0 (idle bed) to 1.0 (full hit).
@@ -216,8 +216,8 @@ fn push_blaster_cues(
 mod tests {
     use super::*;
     use crate::audio_config::{ForcefieldAudio, ShipAudioConfig};
+    use crate::core::messages::DeliveryClass;
     use crate::lobby::Target;
-    use crate::messages::DeliveryClass;
 
     fn forcefield_cfg() -> ForcefieldAudio {
         ForcefieldAudio {

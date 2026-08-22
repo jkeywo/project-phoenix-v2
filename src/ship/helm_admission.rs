@@ -1,16 +1,16 @@
 use bevy::prelude::*;
 
-use crate::messages::{
+use crate::core::messages::{
     AdmittedCommands, InterSystemMsg, InterSystemPayload, InterSystemQueue, SystemControlPayload,
 };
-use crate::region_plugin::RegionMembership;
+use crate::regions::server::RegionMembership;
 use crate::server_app::LocalShip;
+use crate::server_app::ShipBoost;
 use crate::ship::components::{BoostConfigResource, LastHelmInput, ShipSystemControlSources};
 use crate::ship::helm::{
     BoostCommand, ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput,
     VerticalThrustInput,
 };
-use crate::simulation::ShipBoost;
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Systems Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -21,7 +21,7 @@ use crate::simulation::ShipBoost;
 fn entity_inside_blocks_impulse(
     entity: Entity,
     membership: &Option<Res<RegionMembership>>,
-    region_query: &Query<&crate::entity_spawner::RegionEffectsSection>,
+    region_query: &Query<&crate::entities::spawner::RegionEffectsSection>,
 ) -> bool {
     let Some(membership) = membership else {
         return false;
@@ -33,7 +33,7 @@ fn entity_inside_blocks_impulse(
         if let Ok(effects) = region_query.get(region_entity) {
             if effects
                 .0
-                .contains(&crate::region_effects::RegionEffectKind::BlocksImpulse)
+                .contains(&crate::regions::effects::RegionEffectKind::BlocksImpulse)
             {
                 return true;
             }
@@ -84,7 +84,7 @@ fn entity_inside_blocks_impulse(
 /// the payload is ignored.
 pub(crate) fn process_helm_inputs(
     membership: Option<Res<RegionMembership>>,
-    region_query: Query<&crate::entity_spawner::RegionEffectsSection>,
+    region_query: Query<&crate::entities::spawner::RegionEffectsSection>,
     mut ships: Query<(
         Entity,
         &AdmittedCommands,
@@ -143,7 +143,7 @@ pub(crate) fn process_helm_inputs(
         if let Some(sources) = sources {
             if sources
                 .0
-                .is_offline(&crate::system_registry::helm_thrust_system_id())
+                .is_offline(&crate::ship::system_registry::helm_thrust_system_id())
             {
                 if let Some(ti) = thrust_in.as_deref_mut() {
                     ti.0 = 0.0;
@@ -151,7 +151,7 @@ pub(crate) fn process_helm_inputs(
             }
             if sources
                 .0
-                .is_offline(&crate::system_registry::helm_steering_system_id())
+                .is_offline(&crate::ship::system_registry::helm_steering_system_id())
             {
                 if let Some(si) = steering_in.as_deref_mut() {
                     si.0 = 0.0;
@@ -159,7 +159,7 @@ pub(crate) fn process_helm_inputs(
             }
             if sources
                 .0
-                .is_offline(&crate::system_registry::lateral_thrust_system_id())
+                .is_offline(&crate::ship::system_registry::lateral_thrust_system_id())
             {
                 if let Some(la) = lateral_in.as_deref_mut() {
                     la.0 = 0.0;
@@ -167,7 +167,7 @@ pub(crate) fn process_helm_inputs(
             }
             if sources
                 .0
-                .is_offline(&crate::system_registry::vertical_thrust_system_id())
+                .is_offline(&crate::ship::system_registry::vertical_thrust_system_id())
             {
                 if let Some(vi) = vertical_in.as_deref_mut() {
                     vi.0 = 0.0;
@@ -194,7 +194,7 @@ pub(crate) fn process_helm_inputs(
         for cmd in admitted.0.iter() {
             match (&cmd.target.0, &cmd.payload) {
                 (t, SystemControlPayload::SetThrust { value })
-                    if t.as_str() == crate::system_registry::HELM_THRUST_SYSTEM_ID =>
+                    if t.as_str() == crate::ship::system_registry::HELM_THRUST_SYSTEM_ID =>
                 {
                     if let Some(ti) = thrust_in.as_deref_mut() {
                         ti.0 = *value;
@@ -204,7 +204,7 @@ pub(crate) fn process_helm_inputs(
                     }
                 }
                 (t, SystemControlPayload::SetSteering { value })
-                    if t.as_str() == crate::system_registry::HELM_STEERING_SYSTEM_ID =>
+                    if t.as_str() == crate::ship::system_registry::HELM_STEERING_SYSTEM_ID =>
                 {
                     if let Some(si) = steering_in.as_deref_mut() {
                         si.0 = *value;
@@ -214,7 +214,7 @@ pub(crate) fn process_helm_inputs(
                     }
                 }
                 (t, SystemControlPayload::LateralThrustInput { lateral })
-                    if *t == crate::system_registry::lateral_thrust_system_id().0 =>
+                    if *t == crate::ship::system_registry::lateral_thrust_system_id().0 =>
                 {
                     if let Some(la) = lateral_in.as_deref_mut() {
                         la.0 = *lateral;
@@ -226,7 +226,7 @@ pub(crate) fn process_helm_inputs(
                 // Vertical thrust (issue #744): AI-only, so no `LastHelmInput`
                 // mirror (that HUD cache carries no vertical field).
                 (t, SystemControlPayload::VerticalThrustInput { vertical })
-                    if *t == crate::system_registry::vertical_thrust_system_id().0 =>
+                    if *t == crate::ship::system_registry::vertical_thrust_system_id().0 =>
                 {
                     if let Some(vi) = vertical_in.as_deref_mut() {
                         vi.0 = *vertical;
@@ -237,12 +237,12 @@ pub(crate) fn process_helm_inputs(
                 // i.e. it is ignored — the same no-op the inner `if` produced
                 // before it was collapsed (clippy::collapsible_if).
                 (t, SystemControlPayload::StartImpulseCharge)
-                    if t.as_str() == crate::system_registry::HELM_IMPULSE_SYSTEM_ID
+                    if t.as_str() == crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID
                         && !entity_inside_blocks_impulse(entity, &membership, &region_query) =>
                 {
                     {
                         if let Some(ic) = impulse_cmd.as_deref_mut() {
-                            ic.0 = crate::impulse::ImpulsePhase::Charging;
+                            ic.0 = crate::ship::impulse::ImpulsePhase::Charging;
                         }
                         // Zero the LocalShip's cached helm input the moment a
                         // charge is commanded, so a stale steering/thrust
@@ -267,10 +267,10 @@ pub(crate) fn process_helm_inputs(
                     }
                 }
                 (t, SystemControlPayload::CancelImpulse)
-                    if t.as_str() == crate::system_registry::HELM_IMPULSE_SYSTEM_ID =>
+                    if t.as_str() == crate::ship::system_registry::HELM_IMPULSE_SYSTEM_ID =>
                 {
                     if let Some(ic) = impulse_cmd.as_deref_mut() {
-                        ic.0 = crate::impulse::ImpulsePhase::Idle;
+                        ic.0 = crate::ship::impulse::ImpulsePhase::Idle;
                     }
                 }
                 // Boost (issue #881). The `enabled` guard lives in the arm
@@ -278,13 +278,13 @@ pub(crate) fn process_helm_inputs(
                 // `_ => {}` — the same no-op the retired applier's early
                 // return produced.
                 (t, SystemControlPayload::SetBoost { active })
-                    if t.as_str() == crate::system_registry::HELM_BOOST_SYSTEM_ID
+                    if t.as_str() == crate::ship::system_registry::HELM_BOOST_SYSTEM_ID
                         && boost_enabled =>
                 {
                     desired_boost = Some(*active);
                 }
                 (t, SystemControlPayload::ToggleBoost)
-                    if t.as_str() == crate::system_registry::HELM_BOOST_SYSTEM_ID
+                    if t.as_str() == crate::ship::system_registry::HELM_BOOST_SYSTEM_ID
                         && boost_enabled =>
                 {
                     // Read-modify-write against this ship's live `ShipBoost`,
@@ -321,13 +321,13 @@ pub(crate) fn publish_joystick_to_engines(
     for (sources, last_input) in ships.iter() {
         let policy = sources
             .0
-            .policy_for(&crate::system_registry::helm_joystick_system_id());
+            .policy_for(&crate::ship::system_registry::helm_joystick_system_id());
         // Only publish when the joystick system can operate (human or AI).
         if !policy.accept_human_input && !policy.operate_ai {
             continue;
         }
-        let port_id = crate::system_registry::helm_engine_port_system_id();
-        let stbd_id = crate::system_registry::helm_engine_starboard_system_id();
+        let port_id = crate::ship::system_registry::helm_engine_port_system_id();
+        let stbd_id = crate::ship::system_registry::helm_engine_starboard_system_id();
         for target in [port_id, stbd_id] {
             inter_system.0.push(InterSystemMsg {
                 target,
@@ -364,7 +364,7 @@ pub(crate) fn operate_helm_engine_ai(
         // AI-controlled. This prevents a double-push on every Backfill tick.
         let joystick_policy = sources
             .0
-            .policy_for(&crate::system_registry::helm_joystick_system_id());
+            .policy_for(&crate::ship::system_registry::helm_joystick_system_id());
         let joystick_publishing = joystick_policy.accept_human_input || joystick_policy.operate_ai;
         if joystick_publishing {
             // `publish_joystick_to_engines` will cover both engines this tick.
@@ -373,15 +373,15 @@ pub(crate) fn operate_helm_engine_ai(
 
         let port_policy = sources
             .0
-            .policy_for(&crate::system_registry::helm_engine_port_system_id());
+            .policy_for(&crate::ship::system_registry::helm_engine_port_system_id());
         let stbd_policy = sources
             .0
-            .policy_for(&crate::system_registry::helm_engine_starboard_system_id());
+            .policy_for(&crate::ship::system_registry::helm_engine_starboard_system_id());
 
         // Joystick is offline; push for any engine that is still AI-operable.
         if port_policy.operate_ai {
             inter_system.0.push(InterSystemMsg {
-                target: crate::system_registry::helm_engine_port_system_id(),
+                target: crate::ship::system_registry::helm_engine_port_system_id(),
                 payload: InterSystemPayload::JoystickState {
                     thrust: last_input.thrust,
                     steering: last_input.steering,
@@ -391,7 +391,7 @@ pub(crate) fn operate_helm_engine_ai(
         }
         if stbd_policy.operate_ai {
             inter_system.0.push(InterSystemMsg {
-                target: crate::system_registry::helm_engine_starboard_system_id(),
+                target: crate::ship::system_registry::helm_engine_starboard_system_id(),
                 payload: InterSystemPayload::JoystickState {
                     thrust: last_input.thrust,
                     steering: last_input.steering,
@@ -409,8 +409,8 @@ pub(crate) fn operate_helm_engine_ai(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::control_source::ControlSource;
-    use crate::messages::ClientMessage;
+    use crate::core::messages::ClientMessage;
+    use crate::ship::control_source::ControlSource;
     use crate::ship::test_support::*;
 
     #[test]
@@ -422,7 +422,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 1.0 },
             },
         );
@@ -430,7 +430,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 0.25 },
             },
         );
@@ -475,7 +475,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: -1.0 },
             },
         );
@@ -483,7 +483,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
@@ -507,7 +507,7 @@ mod tests {
         // AI holds the throttle; the human keeps the stick.
         set_fine_control_source(
             &mut app,
-            crate::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
             ControlSource::Ai,
         );
 
@@ -516,7 +516,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 1.0 },
             },
         );
@@ -524,7 +524,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 0.25 },
             },
         );
@@ -609,16 +609,17 @@ mod tests {
     /// `AiTokenRegistry` and returns `(entity, token)`.
     fn spawn_admission_npc(app: &mut App, source: ControlSource) -> (Entity, String) {
         let mut sources = ShipSystemControlSources::default();
-        sources
-            .0
-            .set(crate::system_registry::helm_thrust_system_id(), source);
+        sources.0.set(
+            crate::ship::system_registry::helm_thrust_system_id(),
+            source,
+        );
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 crate::ship::components::ShipConfigComponent::default(),
                 sources,
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 ThrustInput::default(),
             ))
             .id();
@@ -646,7 +647,7 @@ mod tests {
             &mut app,
             &token,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 0.7 },
             },
         );
@@ -677,7 +678,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 0.4 },
             },
         );
@@ -708,7 +709,7 @@ mod tests {
             &mut app,
             &token,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 0.9 },
             },
         );
@@ -738,17 +739,17 @@ mod tests {
         // only boost writer under test is the shared applier.
         let mut sources = ShipSystemControlSources::default();
         sources.0.set(
-            crate::system_registry::helm_boost_system_id(),
+            crate::ship::system_registry::helm_boost_system_id(),
             ControlSource::Ai,
         );
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
-                crate::ai_plugin::AiHighFidelity,
+                crate::server_app::Ship,
+                crate::ai::server::AiHighFidelity,
                 crate::ship::components::ShipConfigComponent::default(),
                 sources,
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 crate::ship::components::BoostConfigResource {
                     enabled: true,
                     ..Default::default()
@@ -774,7 +775,7 @@ mod tests {
             &mut app,
             &token,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
+                target: crate::ship::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::SetBoost { active: true },
             },
         );
@@ -803,17 +804,17 @@ mod tests {
 
         let mut sources = ShipSystemControlSources::default();
         sources.0.set(
-            crate::system_registry::helm_boost_system_id(),
+            crate::ship::system_registry::helm_boost_system_id(),
             ControlSource::Ai,
         );
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
-                crate::ai_plugin::AiHighFidelity,
+                crate::server_app::Ship,
+                crate::ai::server::AiHighFidelity,
                 crate::ship::components::ShipConfigComponent::default(),
                 sources,
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 crate::ship::components::BoostConfigResource {
                     enabled: true,
                     ..Default::default()
@@ -834,7 +835,7 @@ mod tests {
             &mut app,
             &token,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
+                target: crate::ship::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             },
         );
@@ -854,17 +855,17 @@ mod tests {
 
         let mut sources = ShipSystemControlSources::default();
         sources.0.set(
-            crate::system_registry::helm_boost_system_id(),
+            crate::ship::system_registry::helm_boost_system_id(),
             ControlSource::Ai,
         );
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
-                crate::ai_plugin::AiHighFidelity,
+                crate::server_app::Ship,
+                crate::ai::server::AiHighFidelity,
                 crate::ship::components::ShipConfigComponent::default(),
                 sources,
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 // No BoostConfigResource at all: no authored boost.
                 ShipBoost::default(),
                 BoostCommand::default(),
@@ -882,7 +883,7 @@ mod tests {
             &mut app,
             &token,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
+                target: crate::ship::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::SetBoost { active: true },
             },
         );
@@ -922,8 +923,8 @@ mod tests {
         tick(&mut app);
 
         let queue = app.world().resource::<InterSystemQueue>();
-        let port_id = crate::system_registry::helm_engine_port_system_id();
-        let stbd_id = crate::system_registry::helm_engine_starboard_system_id();
+        let port_id = crate::ship::system_registry::helm_engine_port_system_id();
+        let stbd_id = crate::ship::system_registry::helm_engine_starboard_system_id();
 
         let port_msgs: Vec<_> = queue.for_target(port_id.0.as_str()).collect();
         let stbd_msgs: Vec<_> = queue.for_target(stbd_id.0.as_str()).collect();
@@ -982,7 +983,10 @@ mod tests {
                 .get_mut::<ShipSystemControlSources>()
                 .expect("the fixture ship carries control sources")
                 .0
-                .set_offline(crate::system_registry::helm_thrust_system_id(), offline);
+                .set_offline(
+                    crate::ship::system_registry::helm_thrust_system_id(),
+                    offline,
+                );
         };
 
         // Latch a real command through the normal admitted path.
@@ -990,7 +994,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 1.0 },
             },
         );

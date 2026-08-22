@@ -105,7 +105,7 @@ pub enum ViewerCommand {
     },
     /// Replace the ladder with the panel's working copy, so an edited switch
     /// distance takes effect before it is saved to the sidecar.
-    SetLadder(Vec<crate::entity_config::LodLevel>),
+    SetLadder(Vec<crate::entities::config::LodLevel>),
     /// Re-fetch every asset this ladder names, then rebuild the subject from
     /// what came back.
     ReloadAssets,
@@ -122,7 +122,7 @@ pub enum ViewerCommand {
 // serialised one: `serde_json` is confined to codec.rs (Key Constraint 1), and
 // three exports with plain scalar arguments need no wire format at all.
 thread_local! {
-    static LADDER_DRAFT: RefCell<Vec<crate::entity_config::LodLevel>> =
+    static LADDER_DRAFT: RefCell<Vec<crate::entities::config::LodLevel>> =
         const { RefCell::new(Vec::new()) };
 }
 
@@ -186,10 +186,10 @@ impl Plugin for ViewerPlugin {
             // The same skybox + custom-material plugins the game registers, so
             // every shader the viewer can show is the shader the game shows.
             .add_plugins(SpaceSkyboxPlugin)
-            .add_plugins(crate::entity_star::StarRenderPlugin)
-            .add_plugins(crate::entity_planet::PlanetRenderPlugin)
+            .add_plugins(crate::entities::star::StarRenderPlugin)
+            .add_plugins(crate::entities::planet::PlanetRenderPlugin)
             .init_resource::<LightingMode>()
-            .init_resource::<crate::entity_planet::PlanetLightingOverride>()
+            .init_resource::<crate::entities::planet::PlanetLightingOverride>()
             .init_resource::<subject::SubjectState>()
             .init_resource::<lod::LadderState>()
             .init_resource::<lod::LodMode>()
@@ -630,11 +630,11 @@ pub fn viewer_ladder_push(
     colour_b: f32,
 ) {
     let some = |s: &str| (!s.is_empty()).then(|| s.to_string());
-    let level = crate::entity_config::LodLevel {
+    let level = crate::entities::config::LodLevel {
         max_distance: max_distance.is_finite().then_some(max_distance),
         model: some(model),
         variant: some(variant),
-        shape: crate::entity_config::MeshShape::parse(shape),
+        shape: crate::entities::config::MeshShape::parse(shape),
         scale: ((scale_x, scale_y, scale_z) != (1.0, 1.0, 1.0))
             .then_some([scale_x, scale_y, scale_z]),
         rotation: ((rotation_x, rotation_y, rotation_z) != (0.0, 0.0, 0.0))

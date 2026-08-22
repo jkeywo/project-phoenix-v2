@@ -681,7 +681,7 @@ impl TorpedoSystem {
     ///
     /// Used by the Bevy `handle_torpedo_magazine_inter_system` consumer after
     /// the magazine has already been decremented via the channel-2
-    /// [`crate::messages::InterSystemPayload::ClaimTorpedoRound`] transaction.
+    /// [`crate::core::messages::InterSystemPayload::ClaimTorpedoRound`] transaction.
     /// The caller is responsible for having granted the round.
     ///
     /// Returns `false` if the tube id is unknown, the tube is not in the
@@ -704,7 +704,7 @@ impl TorpedoSystem {
 
     /// Consume one round from the shared magazine without touching any tube
     /// (issue #512). Used by the magazine consumer to enact a
-    /// [`crate::messages::InterSystemPayload::ClaimTorpedoRound`]. Returns
+    /// [`crate::core::messages::InterSystemPayload::ClaimTorpedoRound`]. Returns
     /// `false` when the magazine is empty (claim refused).
     pub fn claim_magazine_round(&mut self) -> bool {
         if self.torpedoes_remaining == 0 {
@@ -1094,7 +1094,7 @@ impl TorpedoSystem {
 ///
 /// - `damage_hull` always lands on the hull (it is pierce-by-design).
 /// - `damage_shields` is the shield-eligible portion. Use
-///   [`split_damage_for_pierce`](crate::damage::split_damage_for_pierce)
+///   [`split_damage_for_pierce`](crate::ship::damage::split_damage_for_pierce)
 ///   with `shield_pierce` to compute the pierced vs absorbed split for it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TorpedoDetonation {
@@ -1121,7 +1121,7 @@ pub struct TorpedoDetonation {
     /// impact point has to ride along with the detonation, exactly as
     /// `source_uuid` and `tube_id` already do. Callers pair it with the
     /// victim's own position and yaw via
-    /// [`attacker_bearing_relative`](crate::shield::attacker_bearing_relative).
+    /// [`attacker_bearing_relative`](crate::weapons::shield::attacker_bearing_relative).
     ///
     /// It is the *torpedo's* position, not the firing ship's: a homing torpedo
     /// curves, and the arc it meets is the one it is nose-on to at detonation.

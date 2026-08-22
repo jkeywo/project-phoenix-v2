@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::control_source::ControlSourceResolver;
-use crate::damage::DamageTier;
-use crate::messages::{CoordinationPayload, StationId, SystemId};
+use crate::core::messages::{CoordinationPayload, StationId, SystemId};
 use crate::ship::config::ShipConfig;
 use crate::ship::control_source::ControlSource;
+use crate::ship::control_source::ControlSourceResolver;
 use crate::ship::coordination::CoordinationLagQueue;
+use crate::ship::damage::DamageTier;
 
 // Ã¢â€â‚¬Ã¢â€â‚¬ Resources Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
@@ -121,7 +121,7 @@ pub struct PendingArcBearingRequest {
     pub target: Option<uuid::Uuid>,
     /// The emitting family's usable ONLINE emitter arcs. Empty when no request
     /// is pending; drives both the steering bias and the geometric self-clear.
-    pub arcs: Vec<crate::messages::WeaponEmitterArc>,
+    pub arcs: Vec<crate::core::messages::WeaponEmitterArc>,
 }
 
 /// Pending Sensors→Tactical shield-frequency advisory, delivered via the
@@ -162,7 +162,7 @@ pub struct PendingTacticalFrequencyHint(pub Option<f32>);
 /// re-derives the attachment from the crate's own source, so the omission fails
 /// a test instead of shipping.
 ///
-/// # Why not [`crate::ai_plugin::ai_high_fidelity_components`]
+/// # Why not [`crate::ai::server::ai_high_fidelity_components`]
 ///
 /// That set is the obvious-looking home and is the WRONG one: it is removed
 /// wholesale on LOD demotion. These slots must survive demotion — a ship dropped
@@ -225,7 +225,7 @@ pub struct DockingMotionIntent(pub Option<uuid::Uuid>);
 ///
 /// `None` = never cleared for anything.
 ///
-/// [`NavigationWaypoint`]: crate::navigation_plugin::NavigationWaypoint
+/// [`NavigationWaypoint`]: crate::console::navigation::NavigationWaypoint
 #[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct HelmWaypointClearance(pub Option<u64>);
 
@@ -264,7 +264,7 @@ pub struct PendingShipConfig(pub ShipConfig);
 pub struct CoordinationEnqueue {
     pub source_entity: Entity,
     pub sender_origin: ControlSource,
-    pub target: crate::messages::SystemId,
+    pub target: crate::core::messages::SystemId,
     pub payload: CoordinationPayload,
     /// Fallback origin label, used only when `sender_system` does not resolve to
     /// a station (a human sender's name, or an already-resolved `station.*.name`
@@ -275,7 +275,7 @@ pub struct CoordinationEnqueue {
     /// display id (or Core) via [`crate::ship::coordination::station_addressee_label`].
     /// An empty id opts out — the pre-resolved `sender_label` is kept as-is
     /// (the intent-narration path, which already stamps its own station id).
-    pub sender_system: crate::messages::SystemId,
+    pub sender_system: crate::core::messages::SystemId,
 }
 
 /// Load `ShipConfigComponent` from `assets/entities/alliance_battleship.toml`.
@@ -284,7 +284,7 @@ pub struct CoordinationEnqueue {
 /// hull is COMPOSED, so the bytes on disk are only half of it, and a baked site
 /// can never see resolution: `include_str!` runs at compile time and the
 /// resolver needs a fragment source at run time.
-/// [`crate::entity_includes::HostFragmentSource`] is the one source that
+/// [`crate::entities::include_resolve::HostFragmentSource`] is the one source that
 /// compiles on both targets — on native it falls through to the filesystem, on
 /// WASM it reads the raw templates the host has already delivered.
 ///
@@ -297,9 +297,11 @@ pub struct CoordinationEnqueue {
 /// without a valid ship configuration, which is the contract this always had.
 pub(crate) fn load_ship_config_from_disk() -> ShipConfigComponent {
     const HULL: &str = "assets/entities/alliance_battleship.toml";
-    let resolved =
-        crate::entity_includes::resolve_template(HULL, &crate::entity_includes::HostFragmentSource)
-            .unwrap_or_else(|e| panic!("ship_config: {HULL} failed to compose: {e}"));
+    let resolved = crate::entities::include_resolve::resolve_template(
+        HULL,
+        &crate::entities::include_resolve::HostFragmentSource,
+    )
+    .unwrap_or_else(|e| panic!("ship_config: {HULL} failed to compose: {e}"));
     let registry = crate::ship::system_registry::SystemKindRegistry::with_core_systems()
         .expect("core system registry must be valid");
     let kinds: Vec<&str> = registry.kinds().collect();
@@ -327,7 +329,7 @@ impl Default for ShipConfigComponent {
 /// Dual-derives `Resource` (for tests + global fallback) and `Component`
 /// (per-entity component on each ship — PR 4 migration, see PRD #597).
 #[derive(Resource, Component, Clone)]
-pub struct ShipPhysicsConfigResource(pub crate::ship_physics::ShipPhysicsConfig);
+pub struct ShipPhysicsConfigResource(pub crate::ship::physics::ShipPhysicsConfig);
 
 /// Runtime impulse drive config, loaded from `[helm_console]` in the entity TOML.
 /// Charge duration and speed multiplier can be overridden per ship.
@@ -348,9 +350,9 @@ pub struct ImpulseConfigResource {
 impl Default for ImpulseConfigResource {
     fn default() -> Self {
         Self {
-            charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
-            speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
-            acceleration_multiplier: crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER,
+            charge_duration: crate::ship::impulse::IMPULSE_CHARGE_DURATION,
+            speed_multiplier: crate::ship::impulse::IMPULSE_SPEED_MULTIPLIER,
+            acceleration_multiplier: crate::ship::impulse::IMPULSE_ACCELERATION_MULTIPLIER,
             engage_distance: 200.0,
             cancel_distance: 40.0,
             steering_multiplier: 0.1,
@@ -376,10 +378,10 @@ impl Default for BoostConfigResource {
     fn default() -> Self {
         Self {
             enabled: false,
-            multiplier: crate::boost::BOOST_MULTIPLIER,
-            steering_multiplier: crate::boost::BOOST_STEERING_MULTIPLIER,
-            active_duration: crate::boost::BOOST_ACTIVE_DURATION,
-            recharge_duration: crate::boost::BOOST_RECHARGE_DURATION,
+            multiplier: crate::ship::boost::BOOST_MULTIPLIER,
+            steering_multiplier: crate::ship::boost::BOOST_STEERING_MULTIPLIER,
+            active_duration: crate::ship::boost::BOOST_ACTIVE_DURATION,
+            recharge_duration: crate::ship::boost::BOOST_RECHARGE_DURATION,
         }
     }
 }

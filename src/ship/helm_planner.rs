@@ -18,13 +18,13 @@
 //! #741): baking planar assumptions in before bounded / full-3D craft arrive is
 //! the thing the shared surface exists to avoid. The vertical axis stays 0 for
 //! `Planar` hulls and is gated on the ship's authored
-//! [`VerticalMovementMode`](crate::entity_config::VerticalMovementMode).
+//! [`VerticalMovementMode`](crate::entities::config::VerticalMovementMode).
 
 use bevy::prelude::*;
 
-use crate::entity_config::VerticalMovementMode;
+use crate::entities::config::VerticalMovementMode;
 use crate::ship::helm_ai::{helm_ai_decision, HelmAiSurfacesFrame};
-use crate::ship_state::ShipPhysics;
+use crate::ship::state::ShipPhysics;
 
 /// A ship's shared desired-motion contract: where it wants to go and where it
 /// wants to point, both in the ship's local frame (`x` = starboard, `y` = up,
@@ -101,7 +101,7 @@ pub(crate) fn helm_motion_planner(
             Entity,
             &ShipPhysics,
             Option<&crate::entities::spawner::BehaviourSection>,
-            Option<&crate::ai_plugin::ObjectiveCursors>,
+            Option<&crate::ai::server::ObjectiveCursors>,
             Option<&crate::entities::spawner::HelmCapabilitySection>,
             // Docking intent (issue #742). Mutable because the planner — which
             // owns docking-motion-intent-state — clears it the moment its dock
@@ -114,7 +114,7 @@ pub(crate) fn helm_motion_planner(
             // it, it decides nothing itself.
             Option<&crate::ship::helm_ai::HelmPassSurface>,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
     plan.ships.clear();

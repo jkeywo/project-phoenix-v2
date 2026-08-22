@@ -34,7 +34,7 @@
 //! compatible seat.
 
 use crate::ship::config::{ShipConfig, StationConfig};
-use crate::system_registry as kinds;
+use crate::ship::system_registry as kinds;
 use std::collections::HashMap;
 
 // ── Assist-function vocabulary ───────────────────────────────────────────────
@@ -162,7 +162,7 @@ pub fn projected_assist_gaps(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{StationId, SystemId};
+    use crate::core::messages::{StationId, SystemId};
     use crate::ship::config::{StationConfig, StationRatingConfig, SystemInstanceConfig};
 
     fn rating(name: &str, automated: &[&str]) -> StationRatingConfig {
@@ -371,7 +371,7 @@ mod tests {
                 .to_string_lossy()
                 .to_string();
             let key = path.to_string_lossy().replace('\\', "/");
-            let config = crate::entity_includes::load_entity_config(&key)
+            let config = crate::entities::include_resolve::load_entity_config(&key)
                 .unwrap_or_else(|e| panic!("{stem} must parse: {e}"));
             let Some(ship) = config.ship_config.as_ref() else {
                 continue; // scenery / NPC-only: no stations to crew

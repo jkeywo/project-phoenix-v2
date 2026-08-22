@@ -2,7 +2,7 @@ use crate::simmath;
 use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::messages::{
+use crate::core::messages::{
     AdmittedCommands, CoordinationPayload, ShieldArcBlackboard, ShieldFacingStatus,
     ShieldsBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
 };
@@ -32,7 +32,7 @@ pub struct PendingShieldsThreatBearing(pub Option<f32>);
 /// derive has been dropped since no production code reads a global
 /// `Res<ShipShields>`.
 #[derive(Component)]
-pub struct ShipShields(pub crate::shield::ShieldSystem, pub f32);
+pub struct ShipShields(pub crate::weapons::shield::ShieldSystem, pub f32);
 
 impl ShipShields {
     pub fn frequency(&self) -> f32 {
@@ -236,7 +236,7 @@ impl Plugin for ShipShieldsPlugin {
                     // translators.
                     tick_shields
                         .in_set(crate::sim_sets::SimSet::Modifiers)
-                        .after(crate::modifier_coordination::translate_power_modifiers),
+                        .after(crate::modifiers::coordination::translate_power_modifiers),
                     publish_shields_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             )
@@ -269,7 +269,7 @@ pub fn tick_shields(
     }
     for (mut shield, mods) in shields_q.iter_mut() {
         let regen_scale = mods
-            .map(|m| m.get(&crate::messages::ModifierSlot::ShieldRegen))
+            .map(|m| m.get(&crate::core::messages::ModifierSlot::ShieldRegen))
             .unwrap_or(1.0);
         shield.0.tick_with_regen_scale(dt, regen_scale);
     }
@@ -306,7 +306,7 @@ pub fn shields_state_broadcaster() -> SimBroadcaster {
                 })
                 .collect();
             let frequency = shields.frequency();
-            vec![crate::messages::ServerMessage::ShieldStatus { facings, frequency }]
+            vec![crate::core::messages::ServerMessage::ShieldStatus { facings, frequency }]
         },
     )
 }
@@ -331,7 +331,7 @@ pub fn handle_shields_messages(
     for (admitted, mut shields) in ship_query.iter_mut() {
         // Snapshot arc ids first so we don't hold an immutable borrow across
         // the mutable `set_focused_facing` call.
-        let arc_targets: Vec<(String, crate::messages::SystemId)> = shields
+        let arc_targets: Vec<(String, crate::core::messages::SystemId)> = shields
             .0
             .facings
             .iter()
@@ -339,7 +339,7 @@ pub fn handle_shields_messages(
                 if f.id.is_empty() {
                     None
                 } else {
-                    crate::system_registry::shield_arc_system_id(&f.id)
+                    crate::ship::system_registry::shield_arc_system_id(&f.id)
                         .map(|sid| (f.id.clone(), sid))
                 }
             })
@@ -393,7 +393,7 @@ pub fn emit_shields_coordination(
         (
             Entity,
             &ShipShields,
-            &crate::ship_state::ShipRedAlert,
+            &crate::ship::state::ShipRedAlert,
             &crate::ship_plugin::ShipSystemControlSources,
             &mut ShieldsCoordinationState,
             Option<&ShieldsAiConfigResource>,
@@ -427,7 +427,7 @@ pub fn emit_shields_coordination(
         // configured (very unusual).
         let first_arc_sid = snapshots
             .iter()
-            .find_map(|s| crate::system_registry::shield_arc_system_id(&s.id));
+            .find_map(|s| crate::ship::system_registry::shield_arc_system_id(&s.id));
         let sender_origin = first_arc_sid
             .as_ref()
             .map(|sid| control_sources.0.source_for(sid))
@@ -446,12 +446,12 @@ pub fn emit_shields_coordination(
                     writer.write(CoordinationEnqueue {
                         source_entity: entity,
                         sender_origin,
-                        target: crate::system_registry::helm_station_key(),
+                        target: crate::ship::system_registry::helm_station_key(),
                         payload,
                         sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
                         sender_system: first_arc_sid
                             .clone()
-                            .unwrap_or_else(crate::system_registry::shields_system_id),
+                            .unwrap_or_else(crate::ship::system_registry::shields_system_id),
                     });
                 }
             } else {
@@ -470,12 +470,12 @@ pub fn emit_shields_coordination(
                     writer.write(CoordinationEnqueue {
                         source_entity: entity,
                         sender_origin,
-                        target: crate::system_registry::helm_station_key(),
+                        target: crate::ship::system_registry::helm_station_key(),
                         payload,
                         sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
                         sender_system: first_arc_sid
                             .clone()
-                            .unwrap_or_else(crate::system_registry::shields_system_id),
+                            .unwrap_or_else(crate::ship::system_registry::shields_system_id),
                     });
                 }
 
@@ -512,7 +512,7 @@ pub fn emit_shields_coordination(
 /// One producer, four callers, so a facing field added here reaches all
 /// four without a second hand-written mapping to drift out of sync.
 pub fn shield_facing_statuses(
-    snapshots: &[crate::shield::ShieldFacingSnapshot],
+    snapshots: &[crate::weapons::shield::ShieldFacingSnapshot],
 ) -> Vec<ShieldFacingStatus> {
     snapshots
         .iter()
@@ -593,32 +593,36 @@ fn publish_shields_blackboard(
     mut ships_q: Query<
         (
             &ShipShields,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::ship_plugin::ShipSystemControlSources>,
-            Option<&crate::ship_state::ShipPhysics>,
+            Option<&crate::ship::state::ShipPhysics>,
             Option<&crate::ship::sensors::SensorsThreatState>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
     >,
     asteroid_q: Query<
-        (&crate::simulation::AsteroidUuid, &Transform),
-        Without<crate::entity_spawner::EntityUuid>,
+        (&crate::server_app::AsteroidUuid, &Transform),
+        Without<crate::entities::spawner::EntityUuid>,
     >,
     entity_q: Query<
-        (&crate::entity_spawner::EntityUuid, &Transform),
-        Without<crate::simulation::AsteroidUuid>,
+        (&crate::entities::spawner::EntityUuid, &Transform),
+        Without<crate::server_app::AsteroidUuid>,
     >,
 ) {
     for (shields, hull, control_sources, physics, sensors_threat, mut bbs) in ships_q.iter_mut() {
         let physics = physics.copied().unwrap_or_default();
         // Frozen Combat Lock from this ship's viewscreen blackboard (written in
         // the previous tick's PublishAggregate — this system runs in Publish).
-        let combat_lock: Option<String> =
-            match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
-                Some(crate::messages::SystemBlackboard::Viewscreen(vbb)) => vbb.combat_lock.clone(),
-                _ => None,
-            };
+        let combat_lock: Option<String> = match bbs
+            .0
+            .get(&crate::ship::system_registry::viewscreen_system_id())
+        {
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(vbb)) => {
+                vbb.combat_lock.clone()
+            }
+            _ => None,
+        };
 
         // Snapshot facings once so we can reuse them for both the aggregate
         // and per-arc blackboards.
@@ -693,7 +697,7 @@ fn publish_shields_blackboard(
                 if snap.id.is_empty() {
                     return None;
                 }
-                let sid = crate::system_registry::shield_arc_system_id(&snap.id)?;
+                let sid = crate::ship::system_registry::shield_arc_system_id(&snap.id)?;
                 let hull_offline = control_sources
                     .map(|cs| cs.0.is_offline(&sid))
                     .unwrap_or(false);
@@ -715,7 +719,7 @@ fn publish_shields_blackboard(
             .collect();
 
         bbs.0.insert(
-            SystemId(crate::system_registry::SHIELDS_SYSTEM_ID.to_string()),
+            SystemId(crate::ship::system_registry::SHIELDS_SYSTEM_ID.to_string()),
             SystemBlackboard::Shields(bb),
         );
         for (sid, arc_bb) in per_arc {
@@ -749,16 +753,16 @@ pub(crate) fn angular_distance_deg(a: f32, b: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::messages::{ClientMessage, *};
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage};
-    use crate::messages::{ClientMessage, *};
-    use crate::server_app::{LocalShip, ShipSystemBlackboards};
-    use crate::ship::control_source::ControlSource;
-    use crate::ship_plugin::CoordinationEnqueue;
-    use crate::simulation::{
+    use crate::server_app::{
         LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipImpulse,
         ShipShields, SimOutbox,
     };
-    use crate::system_registry::SHIELDS_SYSTEM_ID;
+    use crate::server_app::{LocalShip, ShipSystemBlackboards};
+    use crate::ship::control_source::ControlSource;
+    use crate::ship::system_registry::SHIELDS_SYSTEM_ID;
+    use crate::ship_plugin::CoordinationEnqueue;
 
     #[derive(Resource)]
     struct ShipEntity(Entity);
@@ -820,10 +824,12 @@ mod tests {
 
         let mut boosted_mods = ShipModifiers::new();
         boosted_mods.add_or_update(Modifier {
-            source: crate::messages::ModifierSource::PowerGroup(crate::messages::PowerGroupId(
-                crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
-            )),
-            slot: crate::messages::ModifierSlot::ShieldRegen,
+            source: crate::core::messages::ModifierSource::PowerGroup(
+                crate::core::messages::PowerGroupId(
+                    crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
+                ),
+            ),
+            slot: crate::core::messages::ModifierSlot::ShieldRegen,
             bonus: 1.0, // x2.0
         });
         let boosted = app
@@ -879,7 +885,7 @@ mod tests {
     fn seed_viewscreen_from_selection(
         mut q: Query<
             (
-                Option<&crate::weapons_plugin::TacticalRadarSelection>,
+                Option<&crate::console::weapons::TacticalRadarSelection>,
                 &mut crate::server_app::ShipSystemBlackboards,
             ),
             With<crate::server_app::Ship>,
@@ -887,20 +893,23 @@ mod tests {
     ) {
         for (tac, mut bbs) in q.iter_mut() {
             let combat_lock = tac.and_then(|t| t.0.clone());
-            let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+            let mut vbb = match bbs
+                .0
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+            {
                 Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
-                _ => crate::messages::ViewscreenBlackboard::default(),
+                _ => crate::core::messages::ViewscreenBlackboard::default(),
             };
             vbb.combat_lock = combat_lock;
             bbs.0.insert(
-                crate::system_registry::viewscreen_system_id(),
+                crate::ship::system_registry::viewscreen_system_id(),
                 SystemBlackboard::Viewscreen(vbb),
             );
         }
     }
 
     fn test_app() -> App {
-        let config = crate::shield::ShieldConfig {
+        let config = crate::weapons::shield::ShieldConfig {
             num_facings: 2,
             max_hp: 100,
             regen_per_sec: 0.0,
@@ -910,9 +919,9 @@ mod tests {
         let ship = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 crate::server_app::LocalShip,
-                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
@@ -921,17 +930,17 @@ mod tests {
                     // arc's SystemId. `ShieldSystem::new` populates arc ids
                     // "fore"/"aft" for a 2-facing default.
                     cs.0.set(
-                        crate::system_registry::shield_arc_system_id("fore").expect("fore"),
+                        crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
                         ControlSource::Ai,
                     );
                     cs
                 },
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
-                crate::messages::AdmittedCommands::default(),
-                crate::ship_state::ShipRedAlert::default(),
+                crate::core::messages::AdmittedCommands::default(),
+                crate::ship::state::ShipRedAlert::default(),
                 ShieldsCoordinationState::default(),
-                ShipImpulse(crate::impulse::ImpulseState::new()),
+                ShipImpulse(crate::ship::impulse::ImpulseState::new()),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
@@ -940,7 +949,7 @@ mod tests {
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
-            .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
+            .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
@@ -978,7 +987,7 @@ mod tests {
             out.push(OutboundMessage {
                 target,
                 msg,
-                delivery: crate::messages::DeliveryClass::Reliable,
+                delivery: crate::core::messages::DeliveryClass::Reliable,
             });
         }
         app.world_mut().resource_mut::<Outbox>().0.clear();
@@ -1017,7 +1026,7 @@ mod tests {
 
     #[test]
     fn publish_shields_blackboard_four_facings() {
-        let config = crate::shield::ShieldConfig {
+        let config = crate::weapons::shield::ShieldConfig {
             num_facings: 4,
             max_hp: 100,
             regen_per_sec: 0.0,
@@ -1027,9 +1036,9 @@ mod tests {
         let _ship = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 crate::server_app::LocalShip,
-                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
@@ -1038,15 +1047,15 @@ mod tests {
                     // arc's SystemId as sender_origin. Set "fore" for the
                     // 4-facing default (Fore, Port, Aft, Starboard).
                     cs.0.set(
-                        crate::system_registry::shield_arc_system_id("fore").expect("fore"),
+                        crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
                         ControlSource::Ai,
                     );
                     cs
                 },
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
-                crate::messages::AdmittedCommands::default(),
-                ShipImpulse(crate::impulse::ImpulseState::new()),
+                crate::core::messages::AdmittedCommands::default(),
+                ShipImpulse(crate::ship::impulse::ImpulseState::new()),
             ))
             .id();
         app.add_plugins(LobbyPlugin)
@@ -1054,7 +1063,7 @@ mod tests {
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
-            .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
+            .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .add_plugins(ShipShieldsPlugin);
@@ -1124,7 +1133,7 @@ mod tests {
     // ── Coordination tests ──────────────────────────────────────────────────
 
     fn test_app_with_helm() -> App {
-        let config = crate::shield::ShieldConfig {
+        let config = crate::weapons::shield::ShieldConfig {
             num_facings: 2,
             max_hp: 100,
             regen_per_sec: 0.0,
@@ -1134,9 +1143,9 @@ mod tests {
         let ship = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
+                crate::server_app::Ship,
                 crate::server_app::LocalShip,
-                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
                 crate::server_app::ShipSystemBlackboards::default(),
                 crate::ship_plugin::ShipConfigComponent::default(),
                 {
@@ -1147,17 +1156,17 @@ mod tests {
                     // that's "fore" and "aft". Set the first arc to Ai so the
                     // test asserts continue to hold.
                     cs.0.set(
-                        crate::system_registry::shield_arc_system_id("fore").expect("fore"),
+                        crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
                         ControlSource::Ai,
                     );
                     cs
                 },
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
-                crate::messages::AdmittedCommands::default(),
-                crate::ship_state::ShipRedAlert::default(),
+                crate::core::messages::AdmittedCommands::default(),
+                crate::ship::state::ShipRedAlert::default(),
                 ShieldsCoordinationState::default(),
-                ShipImpulse(crate::impulse::ImpulseState::new()),
+                ShipImpulse(crate::ship::impulse::ImpulseState::new()),
             ))
             .id();
         app.insert_resource(ShipEntity(ship));
@@ -1166,7 +1175,7 @@ mod tests {
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
-            .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
+            .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
@@ -1252,7 +1261,7 @@ mod tests {
         assert!(
             down_msgs
                 .iter()
-                .all(|m| m.target == crate::system_registry::helm_station_key()),
+                .all(|m| m.target == crate::ship::system_registry::helm_station_key()),
             "ShieldFacingDown should target the helm system"
         );
     }
@@ -1314,7 +1323,7 @@ mod tests {
 
         // Activate red alert via per-entity ShipRedAlert component.
         {
-            let mut q = app.world_mut().query_filtered::<&mut crate::ship_state::ShipRedAlert, bevy::prelude::With<crate::simulation::LocalShip>>();
+            let mut q = app.world_mut().query_filtered::<&mut crate::ship::state::ShipRedAlert, bevy::prelude::With<crate::server_app::LocalShip>>();
             if let Ok(mut ra) = q.single_mut(app.world_mut()) {
                 ra.0 = true;
             }
@@ -1419,7 +1428,7 @@ mod tests {
             ..Default::default()
         });
 
-        let config = crate::shield::ShieldConfig {
+        let config = crate::weapons::shield::ShieldConfig {
             num_facings: 2,
             max_hp: 100,
             regen_per_sec: 0.0,
@@ -1428,19 +1437,19 @@ mod tests {
         let arc_sources = || {
             let mut cs = crate::ship_plugin::ShipSystemControlSources::default();
             cs.0.set(
-                crate::system_registry::shield_arc_system_id("fore").expect("fore"),
+                crate::ship::system_registry::shield_arc_system_id("fore").expect("fore"),
                 ControlSource::Ai,
             );
             cs
         };
-        let red_alert = || crate::ship_state::ShipRedAlert(true);
+        let red_alert = || crate::ship::state::ShipRedAlert(true);
 
         // An NPC with no shields-AI component of its own.
         let npc = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
-                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                crate::server_app::Ship,
+                ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
                 arc_sources(),
                 red_alert(),
                 ShieldsCoordinationState::default(),
@@ -1451,8 +1460,8 @@ mod tests {
         let tuned = app
             .world_mut()
             .spawn((
-                crate::simulation::Ship,
-                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                crate::server_app::Ship,
+                ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
                 arc_sources(),
                 red_alert(),
                 ShieldsCoordinationState::default(),
@@ -1529,7 +1538,7 @@ mod tests {
         assert!(
             down_msgs
                 .iter()
-                .all(|m| m.target == crate::system_registry::helm_station_key()),
+                .all(|m| m.target == crate::ship::system_registry::helm_station_key()),
             "ShieldFacingDown should target the helm system"
         );
     }
@@ -1572,13 +1581,13 @@ mod tests {
         let mut app = test_app();
         // Manually admit the command (bypasses the full authorisation stack).
         let se = ship_e(&mut app);
-        let arc_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        let arc_sid = crate::ship::system_registry::shield_arc_system_id("fore").expect("fore");
         app.world_mut()
             .entity_mut(se)
-            .get_mut::<crate::messages::AdmittedCommands>()
+            .get_mut::<crate::core::messages::AdmittedCommands>()
             .unwrap()
             .0
-            .push(crate::messages::AdmittedCommand {
+            .push(crate::core::messages::AdmittedCommand {
                 target: arc_sid.clone(),
                 payload: SystemControlPayload::SetShieldArcFocus { focused: true },
                 response_token: None,
@@ -1600,13 +1609,13 @@ mod tests {
             .0
             .set_focused_facing(Some(0));
         // Send `focused: false` targeted at fore → clears.
-        let arc_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        let arc_sid = crate::ship::system_registry::shield_arc_system_id("fore").expect("fore");
         app.world_mut()
             .entity_mut(se)
-            .get_mut::<crate::messages::AdmittedCommands>()
+            .get_mut::<crate::core::messages::AdmittedCommands>()
             .unwrap()
             .0
-            .push(crate::messages::AdmittedCommand {
+            .push(crate::core::messages::AdmittedCommand {
                 target: arc_sid,
                 payload: SystemControlPayload::SetShieldArcFocus { focused: false },
                 response_token: None,
@@ -1631,7 +1640,7 @@ mod tests {
             .expect("ShipSystemBlackboards");
         // 2-facing default: fore + aft.
         for arc_id in &["fore", "aft"] {
-            let sid = crate::system_registry::shield_arc_system_id(arc_id).expect("arc id");
+            let sid = crate::ship::system_registry::shield_arc_system_id(arc_id).expect("arc id");
             let bb = bbs.0.get(&sid).unwrap_or_else(|| {
                 panic!(
                     "expected ShieldArc blackboard under {sid:?}, got {:?}",
@@ -1649,7 +1658,7 @@ mod tests {
         // Aggregate `shields` blackboard also present.
         assert!(
             bbs.0.contains_key(&SystemId(
-                crate::system_registry::SHIELDS_SYSTEM_ID.to_string()
+                crate::ship::system_registry::SHIELDS_SYSTEM_ID.to_string()
             )),
             "aggregate shields blackboard must still be published"
         );
@@ -1663,7 +1672,7 @@ mod tests {
         let mut app = test_app();
         let se = ship_e(&mut app);
         // Directly mark fore arc as offline via ControlSources.
-        let arc_sid = crate::system_registry::shield_arc_system_id("fore").expect("fore");
+        let arc_sid = crate::ship::system_registry::shield_arc_system_id("fore").expect("fore");
         app.world_mut()
             .entity_mut(se)
             .get_mut::<crate::ship_plugin::ShipSystemControlSources>()
@@ -1692,7 +1701,7 @@ mod tests {
 
     /// Spawn a bare NPC (Ship, no LocalShip) alongside `test_app`'s player.
     fn spawn_npc(app: &mut App, frequency: f32) -> Entity {
-        let config = crate::shield::ShieldConfig {
+        let config = crate::weapons::shield::ShieldConfig {
             num_facings: 2,
             max_hp: 100,
             regen_per_sec: 0.0,
@@ -1700,8 +1709,11 @@ mod tests {
         };
         app.world_mut()
             .spawn((
-                crate::simulation::Ship,
-                ShipShields(crate::shield::ShieldSystem::new(&config), frequency),
+                crate::server_app::Ship,
+                ShipShields(
+                    crate::weapons::shield::ShieldSystem::new(&config),
+                    frequency,
+                ),
                 crate::server_app::ShipSystemBlackboards::default(),
             ))
             .id()
@@ -1730,7 +1742,7 @@ mod tests {
             "NPC blackboard must reflect the NPC's own shields, not the player's"
         );
         for arc_id in &["fore", "aft"] {
-            let sid = crate::system_registry::shield_arc_system_id(arc_id).expect("arc id");
+            let sid = crate::ship::system_registry::shield_arc_system_id(arc_id).expect("arc id");
             assert!(
                 matches!(bbs.0.get(&sid), Some(SystemBlackboard::ShieldArc(_))),
                 "NPC must publish its own ShieldArc blackboard for {arc_id}"
@@ -1750,13 +1762,13 @@ mod tests {
         // LocalShip, with no TacticalRadarSelection, stays None.
         let mut app = test_app();
         app.world_mut().spawn((
-            crate::entity_spawner::EntityUuid("npc-target".into()),
+            crate::entities::spawner::EntityUuid("npc-target".into()),
             Transform::from_xyz(10.0, 0.0, 0.0),
         ));
         let npc = spawn_npc(&mut app, 0.25);
         app.world_mut().entity_mut(npc).insert((
-            crate::ship_state::ShipPhysics::default(),
-            crate::weapons_plugin::TacticalRadarSelection(Some("npc-target".into())),
+            crate::ship::state::ShipPhysics::default(),
+            crate::console::weapons::TacticalRadarSelection(Some("npc-target".into())),
         ));
         app.update();
 

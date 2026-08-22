@@ -19,8 +19,8 @@ use super::*;
 /// identical set, and because their per-system queries are close to Bevy's
 /// tuple cap.
 ///
-/// [`NavigationWaypoint`]: crate::navigation_plugin::NavigationWaypoint
-/// [`ObjectiveCursors`]: crate::ai_plugin::ObjectiveCursors
+/// [`NavigationWaypoint`]: crate::console::navigation::NavigationWaypoint
+/// [`ObjectiveCursors`]: crate::ai::server::ObjectiveCursors
 ///
 /// The Combat Lock (who to pursue) is no longer read from a targeting component
 /// here — it comes from this ship's frozen viewscreen blackboard
@@ -28,9 +28,9 @@ use super::*;
 /// `build_helm_ai_surfaces_frame`.
 #[derive(bevy::ecs::query::QueryData)]
 pub struct HelmAiSurfaces {
-    waypoint: Option<&'static crate::navigation_plugin::NavigationWaypoint>,
+    waypoint: Option<&'static crate::console::navigation::NavigationWaypoint>,
     clearance: Option<&'static HelmWaypointClearance>,
-    cursors: Option<&'static crate::ai_plugin::ObjectiveCursors>,
+    cursors: Option<&'static crate::ai::server::ObjectiveCursors>,
 }
 
 /// The read-only entity query the helm AI falls back to when `WorldSnapshot`
@@ -39,7 +39,7 @@ pub(crate) type HelmAiFallbackQuery<'w, 's> = Query<
     'w,
     's,
     (
-        &'static crate::entity_spawner::EntityUuid,
+        &'static crate::entities::spawner::EntityUuid,
         &'static Transform,
         Option<&'static crate::entities::spawner::EntityName>,
         Option<&'static crate::entities::spawner::FactionComponent>,
@@ -101,22 +101,26 @@ pub(crate) fn helm_ai_snapshot_entities(
 /// Read this entity's scored objectives out of its viewscreen blackboard.
 pub(crate) fn helm_ai_scored_objectives(
     blackboards: &crate::server_app::ShipSystemBlackboards,
-) -> Vec<crate::messages::ScoredObjective> {
+) -> Vec<crate::core::messages::ScoredObjective> {
     match blackboards
         .0
-        .get(&crate::system_registry::viewscreen_system_id())
+        .get(&crate::ship::system_registry::viewscreen_system_id())
     {
-        Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.scored_objectives.clone(),
+        Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
+            bb.scored_objectives.clone()
+        }
         _ => vec![],
     }
 }
 
 /// True when any scored objective is live and Helm-relevant. When false the
 /// helm AI has nothing to pursue and zeroes its intent.
-pub(crate) fn has_helm_objective(scored: &[crate::messages::ScoredObjective]) -> bool {
-    scored
-        .iter()
-        .any(|o| o.score > 0.0 && o.relevance.contains(&crate::messages::SystemAffinity::Helm))
+pub(crate) fn has_helm_objective(scored: &[crate::core::messages::ScoredObjective]) -> bool {
+    scored.iter().any(|o| {
+        o.score > 0.0
+            && o.relevance
+                .contains(&crate::core::messages::SystemAffinity::Helm)
+    })
 }
 
 /// This ship's damage-scaled helm radar range (issue #674).
@@ -135,9 +139,9 @@ pub(crate) fn helm_ai_radar_range(
 ) -> f32 {
     let from_blackboard = match blackboards
         .0
-        .get(&crate::system_registry::helm_station_key())
+        .get(&crate::ship::system_registry::helm_station_key())
     {
-        Some(crate::messages::SystemBlackboard::Helm(bb)) if bb.radar_range > 0.0 => {
+        Some(crate::core::messages::SystemBlackboard::Helm(bb)) if bb.radar_range > 0.0 => {
             Some(bb.radar_range)
         }
         _ => None,
@@ -160,7 +164,7 @@ pub(crate) fn helm_ai_radar_range(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn helm_ai_world_view(
     physics: &ShipPhysics,
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
     faction: Option<&crate::entities::spawner::FactionComponent>,
     collider: Option<&crate::entities::spawner::ColliderSection>,
     helm_section: Option<&crate::entities::spawner::HelmConsoleSection>,
@@ -204,7 +208,7 @@ pub(crate) fn helm_shared_target_view(
     mut world_view: crate::ai::WorldView,
     snapshot_entities: &[crate::ai::AiWorldEntity],
     blackboards: &crate::server_app::ShipSystemBlackboards,
-    waypoint: Option<&crate::navigation_plugin::NavigationWaypoint>,
+    waypoint: Option<&crate::console::navigation::NavigationWaypoint>,
 ) -> (crate::ai::WorldView, Vec<uuid::Uuid>) {
     let mut ids = Vec::new();
     let mut push = |id: Option<String>| {
@@ -217,14 +221,14 @@ pub(crate) fn helm_shared_target_view(
     // Combat Lock + Science Target come from the frozen viewscreen blackboard
     // (issue #829, spec §3): cross-system target reads must not reach the
     // tactical / sensor radar's live selection synchronously.
-    if let Some(crate::messages::SystemBlackboard::Viewscreen(bb)) = blackboards
+    if let Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) = blackboards
         .0
-        .get(&crate::system_registry::viewscreen_system_id())
+        .get(&crate::ship::system_registry::viewscreen_system_id())
     {
         push(bb.combat_lock.clone());
         push(bb.science_target.clone());
     }
-    if let Some(crate::navigation_plugin::WaypointMode::Anchored { source_uuid, .. }) =
+    if let Some(crate::console::navigation::WaypointMode::Anchored { source_uuid, .. }) =
         waypoint.and_then(|w| w.mode())
     {
         push(Some(source_uuid.clone()));
@@ -243,12 +247,12 @@ pub(crate) fn helm_shared_target_view(
 /// their authored target; untargeted combat directives prefer explicit console
 /// selections, then acquire the nearest hostile visible to Helm itself.
 pub(crate) fn helm_destroy_target(
-    scored: &[crate::messages::ScoredObjective],
+    scored: &[crate::core::messages::ScoredObjective],
     world_view: &crate::ai::WorldView,
     shared: &[uuid::Uuid],
-    registry: &crate::faction::FactionRegistry,
+    registry: &crate::ai::faction::FactionRegistry,
 ) -> Option<uuid::Uuid> {
-    use crate::messages::{AiDirective, SystemAffinity};
+    use crate::core::messages::{AiDirective, SystemAffinity};
     let objective = scored.iter().find(|o| {
         o.score > 0.0
             && o.relevance.contains(&SystemAffinity::Helm)
@@ -265,7 +269,9 @@ pub(crate) fn helm_destroy_target(
             .entities
             .iter()
             .find(|e| e.uuid == *id)
-            .is_some_and(|e| crate::faction::is_enemy(world_view.self_faction, e.faction, registry))
+            .is_some_and(|e| {
+                crate::ai::faction::is_enemy(world_view.self_faction, e.faction, registry)
+            })
     };
     shared
         .iter()
@@ -295,7 +301,7 @@ pub(crate) fn helm_destroy_target(
 /// A ship missing either component (bare test spawns) is never cleared, which is
 /// the same safe default: it falls back to its own local objectives.
 pub(crate) fn cleared_nav_waypoint(
-    waypoint: Option<&crate::navigation_plugin::NavigationWaypoint>,
+    waypoint: Option<&crate::console::navigation::NavigationWaypoint>,
     clearance: Option<&HelmWaypointClearance>,
 ) -> Option<[f32; 2]> {
     let waypoint = waypoint?;
@@ -321,15 +327,15 @@ pub(crate) fn cleared_nav_waypoint(
 /// `pass_under_navigation_orders`, whose only use of this is to recognise a
 /// waypoint that names the ship it is already attacking.
 pub(crate) fn cleared_nav_waypoint_anchor(
-    waypoint: Option<&crate::navigation_plugin::NavigationWaypoint>,
+    waypoint: Option<&crate::console::navigation::NavigationWaypoint>,
     clearance: Option<&HelmWaypointClearance>,
 ) -> Option<uuid::Uuid> {
     cleared_nav_waypoint(waypoint, clearance)?;
     match waypoint?.mode()? {
-        crate::navigation_plugin::WaypointMode::Anchored { source_uuid, .. } => {
+        crate::console::navigation::WaypointMode::Anchored { source_uuid, .. } => {
             uuid::Uuid::parse_str(source_uuid).ok()
         }
-        crate::navigation_plugin::WaypointMode::Free { .. } => None,
+        crate::console::navigation::WaypointMode::Free { .. } => None,
     }
 }
 
@@ -371,7 +377,7 @@ pub(crate) fn helm_weapons_target(combat_lock: Option<&str>) -> Option<uuid::Uui
 #[derive(Debug, Clone, Default)]
 pub(crate) struct HelmAiShipFrame {
     /// This ship's scored objectives from its viewscreen blackboard.
-    pub(crate) scored: Vec<crate::messages::ScoredObjective>,
+    pub(crate) scored: Vec<crate::core::messages::ScoredObjective>,
     /// `has_helm_objective(&scored)`, precomputed once.
     pub(crate) has_objective: bool,
     /// Radar-gated world view of what the Helm itself can see — no
@@ -458,7 +464,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             &ShipSystemControlSources,
             &ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::entities::spawner::ColliderSection>,
             Option<&crate::entities::spawner::HelmConsoleSection>,
@@ -466,9 +472,9 @@ pub(crate) fn build_helm_ai_surfaces_frame(
             HelmAiSurfaces,
             // Issue #875: the ship's own alert state, folded onto the frame so
             // every helm policy host seeds the same `posture` this tick.
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
     mut frame: ResMut<HelmAiSurfacesFrame>,
 ) {
@@ -483,7 +489,7 @@ pub(crate) fn build_helm_ai_surfaces_frame(
         runtime.as_deref(),
         &entity_fallback_q,
     );
-    let default_registry = crate::faction::FactionRegistry::default();
+    let default_registry = crate::ai::faction::FactionRegistry::default();
     let registry = faction_registry
         .as_deref()
         .map(|r| &r.0)
@@ -507,11 +513,11 @@ pub(crate) fn build_helm_ai_surfaces_frame(
         // Build only for ships some helm axis is actually flying: the frame
         // is a decision surface, and a fully human-held helm makes none.
         let any_axis_ai = [
-            crate::system_registry::helm_thrust_system_id(),
-            crate::system_registry::helm_steering_system_id(),
-            crate::system_registry::lateral_thrust_system_id(),
-            crate::system_registry::vertical_thrust_system_id(),
-            crate::system_registry::helm_impulse_system_id(),
+            crate::ship::system_registry::helm_thrust_system_id(),
+            crate::ship::system_registry::helm_steering_system_id(),
+            crate::ship::system_registry::lateral_thrust_system_id(),
+            crate::ship::system_registry::vertical_thrust_system_id(),
+            crate::ship::system_registry::helm_impulse_system_id(),
         ]
         .iter()
         .any(|id| sources.0.policy_for(id).operate_ai);
@@ -568,9 +574,9 @@ pub(crate) fn build_helm_ai_surfaces_frame(
         // Combat Lock from the frozen viewscreen (issue #829).
         let combat_lock = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
             _ => None,
         };
 
@@ -623,10 +629,10 @@ pub(crate) fn build_helm_ai_surfaces_frame(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn helm_ai_decision(
     world_view: &crate::ai::WorldView,
-    scored: &[crate::messages::ScoredObjective],
+    scored: &[crate::core::messages::ScoredObjective],
     behaviour_section: Option<&crate::entities::spawner::BehaviourSection>,
     anchors: &std::collections::HashMap<String, [f32; 3]>,
-    cursors: Option<&crate::ai_plugin::ObjectiveCursors>,
+    cursors: Option<&crate::ai::server::ObjectiveCursors>,
     weapons_target: Option<uuid::Uuid>,
     destroy_target: Option<uuid::Uuid>,
     nav_waypoint: Option<[f32; 2]>,
@@ -812,13 +818,13 @@ pub(crate) fn apply_arc_bearing_request(
 /// not diverge, or the ship charges its impulse drive at a point it is not
 /// steering toward.
 pub(crate) fn resolve_helm_target_position(
-    scored: &[crate::messages::ScoredObjective],
+    scored: &[crate::core::messages::ScoredObjective],
     world_view: &crate::ai::WorldView,
     anchors: &std::collections::HashMap<String, [f32; 3]>,
-    cursors: Option<&crate::ai_plugin::ObjectiveCursors>,
+    cursors: Option<&crate::ai::server::ObjectiveCursors>,
     weapons_target: Option<uuid::Uuid>,
 ) -> Option<[f32; 3]> {
-    use crate::messages::{AiDirective, SystemAffinity};
+    use crate::core::messages::{AiDirective, SystemAffinity};
     let top = scored
         .iter()
         .find(|o| o.score > 0.0 && o.relevance.contains(&SystemAffinity::Helm))?;
@@ -1160,11 +1166,11 @@ pub(crate) fn build_pass_surface(
 ) -> HelmPassSurface {
     let travel_axes_ai = sources
         .0
-        .policy_for(&crate::system_registry::helm_thrust_system_id())
+        .policy_for(&crate::ship::system_registry::helm_thrust_system_id())
         .operate_ai
         && sources
             .0
-            .policy_for(&crate::system_registry::helm_steering_system_id())
+            .policy_for(&crate::ship::system_registry::helm_steering_system_id())
             .operate_ai;
     let authored = steering_policy.machine().is_some() && engines_policy.machine().is_some();
     // The two steering-response scalars every pure planner arm takes. Required

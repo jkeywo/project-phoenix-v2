@@ -13,18 +13,18 @@ use bevy::shader::ShaderRef;
 use rand::Rng;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::beam_render;
+use crate::console::weapons::PhaserCombatConfigResource;
 use crate::console::weapons::{BlasterSystemResource, ShipDestroyedVfx};
-use crate::entity_config::{EnginePfxConfig, PhaserBankConfig};
-use crate::entity_spawner::{EntityUuid, HelmConsoleSection};
-use crate::messages::GamePhase;
-use crate::model_rig::ModelMarkers;
+use crate::core::messages::GamePhase;
+use crate::entities::config::{EnginePfxConfig, PhaserBankConfig};
+use crate::entities::model_rig::ModelMarkers;
+use crate::entities::spawner::{EntityUuid, HelmConsoleSection};
 use crate::server::renderer::GameCamera;
-use crate::ship_state::ShipPhysics;
-use crate::simulation::{
+use crate::server_app::{
     ActiveBeam, Asteroid, AsteroidUuid, LocalShip, PhaserRenderConfig, TorpedoSystemResource,
 };
-use crate::weapons_plugin::PhaserCombatConfigResource;
+use crate::ship::state::ShipPhysics;
+use crate::weapons::beam_render;
 
 const BEAM_Y_OFFSET: f32 = 0.0;
 
@@ -1350,7 +1350,7 @@ fn phaser_texture_material(
 /// bolts, matching their heavier-weapon role.
 #[allow(clippy::too_many_arguments)]
 fn sync_torpedo_pfx(
-    ships_q: Query<&TorpedoSystemResource, With<crate::simulation::Ship>>,
+    ships_q: Query<&TorpedoSystemResource, With<crate::server_app::Ship>>,
     torpedo_pfx_assets: Res<TorpedoPfxAssets>,
     bolt_pfx_assets: Res<BlasterBoltPfxAssets>,
     phaser_pfx_assets: Res<PhaserPfxAssets>,
@@ -2432,7 +2432,7 @@ fn spawn_engine_trails(
             Option<&EntityUuid>,
             Has<LocalShip>,
         ),
-        With<crate::simulation::Ship>,
+        With<crate::server_app::Ship>,
     >,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -3502,7 +3502,7 @@ fn tick_dust_state(
         (
             &ShipPhysics,
             Option<&HelmConsoleSection>,
-            Option<&crate::simulation::ShipImpulse>,
+            Option<&crate::server_app::ShipImpulse>,
         ),
         With<LocalShip>,
     >,
@@ -3522,8 +3522,8 @@ fn tick_dust_state(
     // disengage has no engine-side ramp (`cancel_charge` snaps Active → Idle
     // in one frame), so the spin-down is timed here off `exit_secs`.
     let warp_target = match impulse.map(|i| i.0.phase) {
-        Some(crate::impulse::ImpulsePhase::Active) => 1.0,
-        Some(crate::impulse::ImpulsePhase::Charging) => {
+        Some(crate::ship::impulse::ImpulsePhase::Active) => 1.0,
+        Some(crate::ship::impulse::ImpulsePhase::Charging) => {
             impulse.map(|i| i.0.charge_progress).unwrap_or(0.0)
         }
         _ => 0.0,
@@ -4772,7 +4772,7 @@ mod tests {
 
     #[test]
     fn target_point_position_transforms_model_point() {
-        let rig = crate::model_rig::ModelRig::from_toml(
+        let rig = crate::entities::model_rig::ModelRig::from_toml(
             r#"
 [base]
 offset = [1.0, 0.0, 0.0]
@@ -4965,7 +4965,7 @@ position = [0.5, -0.1, 0.25]
 
     #[test]
     fn engine_emitters_use_marker_direction() {
-        let rig = crate::model_rig::ModelRig::from_toml(
+        let rig = crate::entities::model_rig::ModelRig::from_toml(
             r#"
 [base]
 offset = [1.0, 0.0, 0.0]
@@ -5005,7 +5005,7 @@ direction = [0.0, 0.0, -1.0]
         let mut map = HashMap::new();
         map.insert(
             "aft_exhaust".to_string(),
-            crate::model_rig::Marker {
+            crate::entities::model_rig::Marker {
                 position: [0.0, 0.0, 0.0],
                 direction: [0.0, 0.0, -1.0],
             },
@@ -5061,10 +5061,10 @@ direction = [0.0, 0.0, -1.0]
     // reason). Driving `process_helm_inputs` for real gets the exact,
     // explicit `.after(process_helm_inputs)` edge on `sync_ship_position`
     // for free, with no privacy workarounds needed.
-    fn thrust_command() -> crate::messages::AdmittedCommands {
-        crate::messages::AdmittedCommands(vec![crate::messages::AdmittedCommand {
-            target: crate::system_registry::helm_thrust_system_id(),
-            payload: crate::messages::SystemControlPayload::SetThrust { value: 1.0 },
+    fn thrust_command() -> crate::core::messages::AdmittedCommands {
+        crate::core::messages::AdmittedCommands(vec![crate::core::messages::AdmittedCommand {
+            target: crate::ship::system_registry::helm_thrust_system_id(),
+            payload: crate::core::messages::SystemControlPayload::SetThrust { value: 1.0 },
             response_token: None,
         }])
     }
@@ -5094,13 +5094,13 @@ direction = [0.0, 0.0, -1.0]
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
             std::time::Duration::from_millis(34),
         ))
-        .init_resource::<crate::messages::InterSystemQueue>()
+        .init_resource::<crate::core::messages::InterSystemQueue>()
         .insert_resource(PhaserRenderConfig {
             beam_range: 1000.0,
             ..Default::default()
         })
-        .insert_resource(crate::weapons_plugin::PhaserCombatConfigResource(
-            crate::entity_config::PhaserCombatConfig { banks: vec![] },
+        .insert_resource(crate::console::weapons::PhaserCombatConfigResource(
+            crate::entities::config::PhaserCombatConfig { banks: vec![] },
         ))
         .add_plugins(crate::ship_plugin::ShipPlugin)
         .add_plugins(super::PfxPlugin);
@@ -5158,7 +5158,7 @@ direction = [0.0, 0.0, -1.0]
                 // `AiHighFidelity` — add the marker + helm intent
                 // components so `process_helm_inputs` -> physics still
                 // moves this ship, matching pre-#695 behavior.
-                crate::ai_plugin::AiHighFidelity,
+                crate::ai::server::AiHighFidelity,
                 (
                     crate::ship::helm::ThrustInput::default(),
                     crate::ship::helm::SteeringInput::default(),
@@ -5217,7 +5217,7 @@ direction = [0.0, 0.0, -1.0]
                 // `AiHighFidelity` — add the marker + helm intent
                 // components so `process_helm_inputs` -> physics still
                 // moves this ship, matching pre-#695 behavior.
-                crate::ai_plugin::AiHighFidelity,
+                crate::ai::server::AiHighFidelity,
                 (
                     crate::ship::helm::ThrustInput::default(),
                     crate::ship::helm::SteeringInput::default(),

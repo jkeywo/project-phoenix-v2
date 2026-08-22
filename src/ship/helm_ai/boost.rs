@@ -2,7 +2,7 @@ use super::*;
 
 use crate::ai::host::HostOutcome;
 use crate::ai::policy::AiPolicyVerb;
-use crate::messages::SystemControlPayload;
+use crate::core::messages::SystemControlPayload;
 
 /// Per-ship runtime state for a STATEFUL Boost policy (issue #882) — the
 /// minimal host that proves the optional stateful path end to end.
@@ -48,8 +48,8 @@ pub struct HelmBoostAiPolicyState(pub crate::ai::policy::AiPolicyRuntimeState);
 pub(crate) struct BoostAxis;
 
 impl HelmAxisHost for BoostAxis {
-    fn system_id() -> crate::messages::SystemId {
-        crate::system_registry::helm_boost_system_id()
+    fn system_id() -> crate::core::messages::SystemId {
+        crate::ship::system_registry::helm_boost_system_id()
     }
     const CHANNEL: &'static str = crate::entities::config::HELM_BOOST_CHANNEL;
     const STATEFUL: bool = true;
@@ -130,11 +130,11 @@ pub(crate) fn ai_helm_boost(
             Option<&ImpulseConfigResource>,
             Option<&FineSystemAiPolicies>,
             Option<&HelmBoostAiPolicyState>,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship::components::ShipConfigComponent>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
     clock: Res<AiPolicyTickClock>,
 ) {

@@ -34,9 +34,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::config_cache::ActivePack;
-use crate::entity_includes::FragmentSource;
-use crate::entity_loader::TemplateLoader;
+use crate::entities::config_cache::ActivePack;
+use crate::entities::include_resolve::FragmentSource;
+use crate::entities::loader::TemplateLoader;
 use crate::world::config::parse_world;
 use crate::world::manifest::{
     parse_pack_manifest, validate_manifest, ContentIdentity, SUPPORTED_PACK_FORMAT,
@@ -296,7 +296,7 @@ impl<F: Fn(&str) -> Option<String>> FragmentSource for PackFragments<'_, F> {
 /// that as an obligation on its callers: do not pass a loader claiming
 /// [`TemplateLoader::absence_is_final`] unless it can serve the pack's own
 /// hulls. A future native caller writing the obvious thing —
-/// [`crate::entity_loader::WasmTemplateLoader`], the same type the documented
+/// [`crate::entities::loader::WasmTemplateLoader`], the same type the documented
 /// wasm caller passes — gets `true` on native and would reject **every valid
 /// pack** with bogus `unresolvable-template` errors. Prose on a `pub fn` is the
 /// weakest possible guard against that, and this module's own tests could never
@@ -318,12 +318,12 @@ struct PackTemplates<'a, F: Fn(&str) -> Option<String>> {
 }
 
 impl<F: Fn(&str) -> Option<String>> TemplateLoader for PackTemplates<'_, F> {
-    fn load_template(&self, path: &str) -> Option<crate::entity_config::EntityConfig> {
+    fn load_template(&self, path: &str) -> Option<crate::entities::config::EntityConfig> {
         // Both spellings, because a world may name `./assets/entities/x.toml`
         // for a pack entry keyed `assets/entities/x.toml`.
-        let canonical = crate::entity_includes::canonical_template_path(path);
+        let canonical = crate::entities::include_resolve::canonical_template_path(path);
         if self.files.contains_key(path) || self.files.contains_key(&canonical) {
-            return crate::entity_includes::resolve_template(path, self.fragments)
+            return crate::entities::include_resolve::resolve_template(path, self.fragments)
                 .ok()?
                 .parse()
                 .ok();
@@ -332,7 +332,7 @@ impl<F: Fn(&str) -> Option<String>> TemplateLoader for PackTemplates<'_, F> {
     }
 
     /// The host's answer, for the same reason
-    /// [`crate::entity_loader::SpawnTemplateLoader`]'s is: serving the pack's
+    /// [`crate::entities::loader::SpawnTemplateLoader`]'s is: serving the pack's
     /// files ADDS to what the host can see, and adding cannot make a blind host
     /// authoritative about everything it is still missing.
     fn absence_is_final(&self) -> bool {
@@ -669,7 +669,7 @@ pub fn validate_mod_pack(
 /// A [`ScriptResolver`] over an uploaded pack's OWN files, so a world's
 /// `script = "sibling.rhai"` resolves to the `.rhai` the pack carries. The
 /// upload-time twin of the overlay-backed resolver a live session uses
-/// ([`crate::config_cache::OverlayScriptResolver`]); here the archive is wholly
+/// ([`crate::entities::config_cache::OverlayScriptResolver`]); here the archive is wholly
 /// in hand, so absence is final and a missing sibling is a real error.
 struct PackScriptFiles<'a> {
     files: &'a BTreeMap<String, String>,
@@ -1454,7 +1454,7 @@ entity = "raider"
     /// A loader that serves nothing AND claims authority over absence.
     ///
     /// Exactly what a future NATIVE caller gets from
-    /// [`crate::entity_loader::WasmTemplateLoader`] with an empty cache and no
+    /// [`crate::entities::loader::WasmTemplateLoader`] with an empty cache and no
     /// pack file on disk — the same type the documented wasm caller passes, so
     /// it is the obvious thing to write and answers `true` on native. Every
     /// other fixture in this module answers `false`, which is why the dangerous

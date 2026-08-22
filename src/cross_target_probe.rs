@@ -96,8 +96,8 @@ use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
 use crate::core::messages::{GamePhase, SystemId};
-use crate::damage::SystemHull;
-use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+use crate::entities::spawner::{EntitySystemHull, EntityUuid};
+use crate::ship::damage::SystemHull;
 use crate::ship::state::{ShipPhysics, ShipRedAlert};
 use crate::sim_digest::{world_digest, DigestLedger};
 use crate::sim_rng::{SeedSource, SimRng, SimStream};

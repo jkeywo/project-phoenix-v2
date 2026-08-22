@@ -1,5 +1,5 @@
-pub use crate::messages::CoordinationPayload;
-use crate::messages::{StationId, SystemId};
+pub use crate::core::messages::CoordinationPayload;
+use crate::core::messages::{StationId, SystemId};
 use crate::ship::control_source::{ControlSource, ControlSourceResolver, ControlTickPolicy};
 use std::collections::HashMap;
 
@@ -93,13 +93,13 @@ pub fn station_for_target(
         return system.station.clone();
     }
 
-    if *target == crate::system_registry::helm_station_key() {
+    if *target == crate::ship::system_registry::helm_station_key() {
         return config
-            .system(&crate::system_registry::helm_steering_system_id())
+            .system(&crate::ship::system_registry::helm_steering_system_id())
             .and_then(|system| system.station.clone());
     }
 
-    if *target == crate::system_registry::tactical_station_key() {
+    if *target == crate::ship::system_registry::tactical_station_key() {
         return config.weapons_station();
     }
 
@@ -568,13 +568,16 @@ mod tests {
         let config = crate::ship::components::ShipConfigComponent::default().0;
 
         assert_eq!(
-            station_for_target(&config, &crate::system_registry::helm_station_key()),
+            station_for_target(&config, &crate::ship::system_registry::helm_station_key()),
             config
-                .system(&crate::system_registry::helm_steering_system_id())
+                .system(&crate::ship::system_registry::helm_steering_system_id())
                 .and_then(|system| system.station.clone())
         );
         assert_eq!(
-            station_for_target(&config, &crate::system_registry::tactical_station_key()),
+            station_for_target(
+                &config,
+                &crate::ship::system_registry::tactical_station_key()
+            ),
             config.weapons_station()
         );
         assert_eq!(
@@ -1391,7 +1394,10 @@ human_seeking = true
 
         // A system that belongs to a station → that station's display id.
         assert_eq!(
-            station_addressee_label(&config, &crate::system_registry::navigation_system_id()),
+            station_addressee_label(
+                &config,
+                &crate::ship::system_registry::navigation_system_id()
+            ),
             "station.tactical.name",
             "navigation is owned by the tactical station on this hull, so it \
              addresses as the STATION alone"
@@ -1412,7 +1418,10 @@ human_seeking = true
 
         // The resolved id carries no system suffix in either shape.
         for id in [
-            station_addressee_label(&config, &crate::system_registry::navigation_system_id()),
+            station_addressee_label(
+                &config,
+                &crate::ship::system_registry::navigation_system_id(),
+            ),
             station_addressee_label(&config, &SystemId("comms".into())),
         ] {
             assert!(

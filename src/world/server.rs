@@ -4,11 +4,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use rhai::{Map, AST};
 
+use crate::core::messages::{GamePhase, ServerMessage};
 use crate::effect_queue::EffectQueue;
 use crate::lobby::{Target, WorldResource};
-use crate::messages::{GamePhase, ServerMessage};
 use crate::objectives::ObjectiveManager;
-use crate::simulation::SimOutbox;
+use crate::server_app::SimOutbox;
 #[cfg(test)]
 use crate::world::content::TriggerAction;
 use crate::world::content::{TriggerState, WorldEvent};
@@ -695,7 +695,7 @@ impl Plugin for WorldPlugin {
             // one-tick event bridge `AiEntityAttacked` already uses).
             .add_systems(
                 FixedUpdate,
-                crate::ai_plugin::advance_objective_cursors
+                crate::ai::server::advance_objective_cursors
                     .in_set(crate::sim_sets::SimSet::Modifiers),
             )
             // The scripted-callback drain (issue #984, Rhai M6 phase 2b):
@@ -756,7 +756,7 @@ fn handle_region_entered_event(
     trigger: On<crate::regions::server::RegionEntered>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     runtime: Option<ResMut<WorldContentRuntime>>,
-    local_ship_q: Query<(), With<crate::simulation::LocalShip>>,
+    local_ship_q: Query<(), With<crate::server_app::LocalShip>>,
 ) {
     let (Some(membership), Some(mut runtime)) = (membership, runtime) else {
         return;
@@ -785,7 +785,7 @@ fn handle_region_exited_event(
     trigger: On<crate::regions::server::RegionExited>,
     membership: Option<Res<crate::regions::server::RegionMembership>>,
     runtime: Option<ResMut<WorldContentRuntime>>,
-    local_ship_q: Query<(), With<crate::simulation::LocalShip>>,
+    local_ship_q: Query<(), With<crate::server_app::LocalShip>>,
 ) {
     let (Some(membership), Some(mut runtime)) = (membership, runtime) else {
         return;
@@ -812,7 +812,7 @@ fn handle_region_exited_event(
 /// simply see an empty world (native unit tests only â€” production always
 /// loads a world TOML through the WASM bridge).
 pub(crate) fn insert_world_config_resource(mut commands: Commands) {
-    if let Some(world_config) = crate::config_cache::get_world_config() {
+    if let Some(world_config) = crate::entities::config_cache::get_world_config() {
         commands.insert_resource(world_config);
     }
 }
@@ -914,7 +914,7 @@ pub(crate) fn compile_world_scripts(
         if raw.toml.get("script").is_none() {
             return;
         }
-        let resolver = crate::config_cache::production_script_resolver();
+        let resolver = crate::entities::config_cache::production_script_resolver();
         crate::world::script::load::load_world_scripts(&raw.path, &raw.toml, &resolver)
     };
 
@@ -1001,7 +1001,7 @@ pub(crate) fn spawn_world_entities(
         }
     }
 
-    let config_cache = crate::config_cache::get_config_cache();
+    let config_cache = crate::entities::config_cache::get_config_cache();
     let world_snapshot = world_config.clone();
     // `ship_power` is seeded on `OnEnter(InProgress)` â€” not available at
     // Startup. Pass the runtime flags so any Immediate-path predicates that
@@ -1042,7 +1042,7 @@ pub(crate) fn spawn_world_entities(
 ///
 /// # A note for whoever writes the next bare-`App` fixture
 ///
-/// [`crate::entity_loader::SpawnTemplateLoader`] takes its authority from the
+/// [`crate::entities::loader::SpawnTemplateLoader`] takes its authority from the
 /// host behind the cache, so on native this gate is authoritative about paths
 /// like `"fixture/station.toml"` that no filesystem holds. That is right — the
 /// host really can decide them, and the answer really is "absent" — but it
@@ -1056,16 +1056,16 @@ pub(crate) fn spawn_world_entities(
 /// channel.
 pub fn world_activation_blocked(
     world_config: &crate::world::config::WorldConfig,
-    config_cache: &crate::config_cache::ConfigCache,
+    config_cache: &crate::entities::config_cache::ConfigCache,
     system: &str,
 ) -> bool {
-    let templates = crate::entity_loader::SpawnTemplateLoader {
+    let templates = crate::entities::loader::SpawnTemplateLoader {
         cache: config_cache,
-        host: &crate::entity_loader::WasmTemplateLoader,
+        host: &crate::entities::loader::WasmTemplateLoader,
     };
     let findings = crate::world::validate::activation_findings(
         world_config,
-        &crate::entity_includes::HostFragmentSource,
+        &crate::entities::include_resolve::HostFragmentSource,
         &templates,
     );
     let errors = findings.iter().filter(|f| f.is_error()).count();
@@ -1128,7 +1128,7 @@ pub fn world_activation_blocked(
 pub fn spawn_immediate_entities_internal(
     commands: &mut Commands,
     world_config: &crate::world::config::WorldConfig,
-    config_cache: &crate::config_cache::ConfigCache,
+    config_cache: &crate::entities::config_cache::ConfigCache,
     flags: Option<&crate::world::flags::FlagStore>,
     id_mint: Option<&crate::world_id::WorldIdMint>,
 ) -> Vec<Entity> {
@@ -1152,10 +1152,10 @@ pub fn spawn_immediate_entities_internal(
     // `entity_loader::template_is_asteroid_field`.
     let (fields, named, _anon) =
         crate::world::config::partition_immediate_entities_three_way(world_config, |path| {
-            crate::entity_loader::template_is_asteroid_field(
+            crate::entities::loader::template_is_asteroid_field(
                 path,
                 config_cache,
-                &crate::entity_loader::WasmTemplateLoader,
+                &crate::entities::loader::WasmTemplateLoader,
             )
         });
 
@@ -1182,10 +1182,10 @@ pub fn spawn_immediate_entities_internal(
         if !predicate_allows(entity_inst) {
             continue;
         }
-        let mut config = match crate::entity_loader::resolve_entity_via(
+        let mut config = match crate::entities::loader::resolve_entity_via(
             entity_inst,
             config_cache,
-            &crate::entity_loader::WasmTemplateLoader,
+            &crate::entities::loader::WasmTemplateLoader,
         ) {
             Ok(c) => c,
             Err(e) => {
@@ -1222,7 +1222,7 @@ pub fn spawn_immediate_entities_internal(
                 continue;
             }
         };
-        let entity = crate::entity_spawner::spawn_entity(
+        let entity = crate::entities::spawner::spawn_entity(
             commands,
             &config,
             pos,
@@ -1254,10 +1254,10 @@ pub fn spawn_immediate_entities_internal(
                 continue;
             }
         };
-        let config = match crate::entity_loader::resolve_entity_via(
+        let config = match crate::entities::loader::resolve_entity_via(
             entity_inst,
             config_cache,
-            &crate::entity_loader::WasmTemplateLoader,
+            &crate::entities::loader::WasmTemplateLoader,
         ) {
             Ok(c) => c,
             Err(e) => {
@@ -1281,7 +1281,7 @@ pub fn spawn_immediate_entities_internal(
         if entity_inst.name.is_some() {
             config.name = entity_inst.name.clone();
         }
-        let entity = crate::entity_spawner::spawn_entity(
+        let entity = crate::entities::spawner::spawn_entity(
             commands,
             &config,
             pos,
@@ -1867,20 +1867,22 @@ pub(crate) fn tick_trigger_pipeline(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<BehaviourSection>,
     >,
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
-    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut game_over_reason: Option<ResMut<crate::server_app::GameOverReason>>,
     mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
     time: Option<Res<bevy::time::Time>>,
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
     // The scripting seam (issue #984, Rhai M6 phase 2a). Both `Option`, so a
     // script-free world (no `WorldScriptRuntime`) and every bare-`App` fixture
     // take the `None` arm and the scripted-handler branch below is skipped
@@ -1899,7 +1901,7 @@ pub(crate) fn tick_trigger_pipeline(
     // system run. `WasmTemplateLoader` unconditionally: it serves the
     // preloaded config cache first and, on native, falls back to the
     // filesystem — reproducing the old cfg-split inline block on both targets.
-    let template_loader = crate::entity_loader::WasmTemplateLoader;
+    let template_loader = crate::entities::loader::WasmTemplateLoader;
     if buffer.0.is_empty() && runtime.pending_delayed_actions.is_empty() {
         return;
     }
@@ -2234,8 +2236,8 @@ fn world_modifiers<'a>(
 ///
 /// Not a tunable value: this identity is what lets a later `RemoveModifier`
 /// find what an earlier `ApplyModifier` added.
-fn world_modifier_source(tag: String) -> crate::messages::ModifierSource {
-    crate::messages::ModifierSource::World {
+fn world_modifier_source(tag: String) -> crate::core::messages::ModifierSource {
+    crate::core::messages::ModifierSource::World {
         id: WORLD_MODIFIER_SOURCE_ID.to_string(),
         tag,
     }
@@ -2271,17 +2273,19 @@ pub(crate) fn apply_script_commands(
     mut pending_layers: Option<&mut PendingWorldLayerChanges>,
     mut layer_map: Option<&mut WorldLayerMap>,
     mut next_state: Option<&mut NextState<GamePhase>>,
-    mut game_over_reason: Option<&mut crate::simulation::GameOverReason>,
+    mut game_over_reason: Option<&mut crate::server_app::GameOverReason>,
     faction_dispatch: &mut FactionDispatchParams,
     ai_query: &mut Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<BehaviourSection>,
     >,
-    mut balance_events: Option<&mut bevy::ecs::message::Messages<crate::balance::BalanceEvent>>,
+    mut balance_events: Option<
+        &mut bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>,
+    >,
     // The dispatch context a name-resolving `BufferedEffect::Action` needs (issue
     // #984, Rhai M6). `uuid_source` is the SAME closure `tick_trigger_pipeline`
     // binds — so a scripted `spawn_entity` mints its `EntityUuid` inside
@@ -2290,7 +2294,7 @@ pub(crate) fn apply_script_commands(
     // mint). `origin_layer`/`entity_name` come from the fired trigger (the
     // callback path passes `None`/`None`).
     uuid_source: &dyn Fn() -> String,
-    template_loader: &dyn crate::entity_loader::TemplateLoader,
+    template_loader: &dyn crate::entities::loader::TemplateLoader,
     base_anchors: &HashMap<String, [f32; 3]>,
     origin_layer: Option<String>,
     entity_name: Option<String>,
@@ -2511,12 +2515,12 @@ pub(crate) fn apply_dispatch_result(
     mut pending_layers: Option<&mut PendingWorldLayerChanges>,
     mut layer_map: Option<&mut WorldLayerMap>,
     mut next_state: Option<&mut NextState<GamePhase>>,
-    mut game_over_reason: Option<&mut crate::simulation::GameOverReason>,
+    mut game_over_reason: Option<&mut crate::server_app::GameOverReason>,
     faction_dispatch: &mut FactionDispatchParams,
     ai_query: &mut Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<BehaviourSection>,
@@ -2524,7 +2528,9 @@ pub(crate) fn apply_dispatch_result(
     // Balance telemetry: `ObjectiveCompleted` is emitted here, guarded on the
     // objective actually transitioning. `Option<&mut Messages<_>>` so callers
     // in bare-`App` fixtures (no registered message) can pass `None`.
-    mut balance_events: Option<&mut bevy::ecs::message::Messages<crate::balance::BalanceEvent>>,
+    mut balance_events: Option<
+        &mut bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>,
+    >,
     // The four transient effect queues a name-resolved command lands on (issue
     // #1223): condition/capacity adjustments, civilian orders and weapons holds
     // used to be `pending_*` fields on `runtime`; each is now its owning plugin's
@@ -2599,7 +2605,7 @@ pub(crate) fn apply_dispatch_result(
                 // does not double-emit (issue #841).
                 if objectives.0.complete(&id) {
                     if let Some(msgs) = balance_events.as_deref_mut() {
-                        msgs.write(crate::balance::BalanceEvent::ObjectiveCompleted {
+                        msgs.write(crate::core::balance::BalanceEvent::ObjectiveCompleted {
                             objective_id: id.clone(),
                         });
                     }
@@ -2915,7 +2921,7 @@ pub(crate) fn apply_dispatch_result(
                 // always spawns.
                 let pos_vec = Vec3::new(position[0], position[1], position[2]);
                 let spawned =
-                    crate::entity_spawner::spawn_entity(commands, &config, pos_vec, uuid, None);
+                    crate::entities::spawner::spawn_entity(commands, &config, pos_vec, uuid, None);
 
                 // Issue #863: the ONE site a runtime spawn happens, and so the
                 // one site that records what it was made from. Everything the
@@ -2929,7 +2935,7 @@ pub(crate) fn apply_dispatch_result(
                 // *script* made it, not what it turned out to be.
                 commands
                     .entity(spawned)
-                    .insert(crate::entity_spawner::EntitySpawnOrigin(
+                    .insert(crate::entities::spawner::EntitySpawnOrigin(
                         crate::world::spawn_origin::SpawnOrigin {
                             template_path,
                             name,
@@ -2988,9 +2994,9 @@ pub(crate) fn apply_dispatch_result(
                 // observe script-killed entities the same as combat-killed ones.
                 commands.queue(move |world: &mut World| {
                     if let Some(mut msgs) =
-                        world.get_resource_mut::<Messages<crate::ai_plugin::AiEntityDestroyed>>()
+                        world.get_resource_mut::<Messages<crate::ai::server::AiEntityDestroyed>>()
                     {
-                        msgs.write(crate::ai_plugin::AiEntityDestroyed { entity_uuid: uuid });
+                        msgs.write(crate::ai::server::AiEntityDestroyed { entity_uuid: uuid });
                     }
                 });
                 if let Some(ent) = target_entity {
@@ -3076,7 +3082,7 @@ pub(crate) fn tick_delayed_actions(
     mut commands: Commands,
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
-    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut game_over_reason: Option<ResMut<crate::server_app::GameOverReason>>,
     mut pending_layers: Option<ResMut<PendingWorldLayerChanges>>,
     mut layer_map: Option<ResMut<WorldLayerMap>>,
     base_world_config: Option<Res<crate::world::config::WorldConfig>>,
@@ -3091,13 +3097,15 @@ pub(crate) fn tick_delayed_actions(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<BehaviourSection>,
     >,
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
     // The per-owner effect queues (issue #1223): a delayed action can resolve a
     // `hold_fire` / `order_civilian` / infrastructure adjustment exactly as an
     // immediate one does, so it needs the same sinks.
@@ -3123,7 +3131,7 @@ pub(crate) fn tick_delayed_actions(
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
     // Same template source as `tick_trigger_pipeline` (issue #715): one
     // `WasmTemplateLoader` per system run, both targets.
-    let template_loader = crate::entity_loader::WasmTemplateLoader;
+    let template_loader = crate::entities::loader::WasmTemplateLoader;
     let uuid_source =
         || crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
 
@@ -3229,7 +3237,7 @@ pub(crate) fn tick_script_callbacks(
     mut commands: Commands,
     mut ship_modifiers: ShipModifiersParams,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
-    mut game_over_reason: Option<ResMut<crate::simulation::GameOverReason>>,
+    mut game_over_reason: Option<ResMut<crate::server_app::GameOverReason>>,
     mut world_layers: WorldLayerParams,
     entity_uuid_query: Query<(Entity, &EntityUuid)>,
     mut faction_dispatch: FactionDispatchParams,
@@ -3237,7 +3245,7 @@ pub(crate) fn tick_script_callbacks(
     mut ai_query: Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<BehaviourSection>,
@@ -3248,7 +3256,9 @@ pub(crate) fn tick_script_callbacks(
     // callback would fall back to the process-global mint and diverge (R2). `None`
     // for a bare-`App` fixture, exactly like `tick_delayed_actions`.
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
     // The per-owner effect queues a due callback's script pushes onto (issue
     // #1223), the same sinks the trigger and delayed paths use.
     mut effect_queues: EffectQueues,
@@ -3315,7 +3325,7 @@ pub(crate) fn tick_script_callbacks(
     // `dispatch_spawn_entity` from the real `WorldIdMint`, the same
     // `WasmTemplateLoader`, and an empty base-anchors fallback.
     let empty_anchors: HashMap<String, [f32; 3]> = HashMap::new();
-    let template_loader = crate::entity_loader::WasmTemplateLoader;
+    let template_loader = crate::entities::loader::WasmTemplateLoader;
     let uuid_source =
         || crate::world_id::mint_id_with(id_mint.as_deref(), crate::world_id::IdNamespace::Entity);
 
@@ -3485,9 +3495,9 @@ pub struct ShipModifiersParams<'w, 's> {
 /// each new AI event source would otherwise eat one slot of that budget.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct AiEventReaders<'w, 's> {
-    pub attacked: MessageReader<'w, 's, crate::ai_plugin::AiEntityAttacked>,
-    pub destroyed: MessageReader<'w, 's, crate::ai_plugin::AiEntityDestroyed>,
-    pub waypoint_reached: MessageReader<'w, 's, crate::ai_plugin::AiWaypointReached>,
+    pub attacked: MessageReader<'w, 's, crate::ai::server::AiEntityAttacked>,
+    pub destroyed: MessageReader<'w, 's, crate::ai::server::AiEntityDestroyed>,
+    pub waypoint_reached: MessageReader<'w, 's, crate::ai::server::AiWaypointReached>,
 }
 
 /// Bundle of system params used by the two trigger-dispatch sites for
@@ -3503,7 +3513,7 @@ pub struct AiEventReaders<'w, 's> {
 /// action.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct FactionDispatchParams<'w, 's> {
-    pub registry: Option<ResMut<'w, crate::config_cache::FactionRegistryResource>>,
+    pub registry: Option<ResMut<'w, crate::entities::config_cache::FactionRegistryResource>>,
     pub non_ai_factions: Query<
         'w,
         's,
@@ -3541,12 +3551,12 @@ pub(crate) fn revalidate_ai_targets_after_faction_change(
     ai_query: &mut Query<
         (
             &EntityUuid,
-            Option<&mut crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&mut crate::console::weapons::TacticalRadarSelection>,
             Option<&crate::entities::spawner::FactionComponent>,
         ),
         With<BehaviourSection>,
     >,
-    registry: &crate::faction::FactionRegistry,
+    registry: &crate::ai::faction::FactionRegistry,
     uuid_to_faction: &std::collections::HashMap<uuid::Uuid, uuid::Uuid>,
 ) {
     for (_uid, weapons_target_opt, self_faction_comp) in ai_query.iter_mut() {
@@ -3562,14 +3572,14 @@ pub(crate) fn revalidate_ai_targets_after_faction_change(
         };
         let self_faction = self_faction_comp.map(|fc| fc.0);
         let target_faction = uuid_to_faction.get(&target_uuid).copied();
-        if !crate::faction::is_enemy(self_faction, target_faction, registry) {
+        if !crate::ai::faction::is_enemy(self_faction, target_faction, registry) {
             weapons_target.0 = None;
         }
     }
 }
 
-use crate::entity_spawner::BehaviourSection;
-use crate::entity_spawner::EntityUuid;
+use crate::entities::spawner::BehaviourSection;
+use crate::entities::spawner::EntityUuid;
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Pending scenario load system ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
@@ -3674,16 +3684,17 @@ fn apply_pending_scenario_loads(
 /// is recorded rather than pre-emptively "fixed".
 fn build_layer_config_cache(
     _world_config: &crate::world::config::WorldConfig,
-) -> crate::config_cache::ConfigCache {
+) -> crate::entities::config_cache::ConfigCache {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let mut cache = crate::config_cache::get_config_cache();
+        let mut cache = crate::entities::config_cache::get_config_cache();
         for entity in &_world_config.entities {
             if cache.contains_key(&entity.template_path) {
                 continue;
             }
             if std::fs::metadata(&entity.template_path).is_err()
-                && crate::config_cache::mod_pack_overlay_get(&entity.template_path).is_none()
+                && crate::entities::config_cache::mod_pack_overlay_get(&entity.template_path)
+                    .is_none()
             {
                 // Template not on disk (e.g. test fixture); skip silently.
                 // spawn_immediate_entities_internal logs and continues for
@@ -3693,7 +3704,7 @@ fn build_layer_config_cache(
             // The `includes` closure resolves here too (issue #869), so a
             // composed hull referenced by a world reaches the layer cache fully
             // merged — the same single document the browser preload assembles.
-            match crate::entity_includes::load_entity_config(&entity.template_path) {
+            match crate::entities::include_resolve::load_entity_config(&entity.template_path) {
                 Ok(cfg) => {
                     cache.insert(entity.template_path.clone(), cfg);
                 }
@@ -3716,7 +3727,7 @@ fn build_layer_config_cache(
 
     #[cfg(target_arch = "wasm32")]
     {
-        crate::config_cache::get_config_cache()
+        crate::entities::config_cache::get_config_cache()
     }
 }
 
@@ -3934,9 +3945,9 @@ fn load_scenario_toml_text(path: &str) -> Option<String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        crate::config_cache::pop_pending_world_toml(path).or_else(|| {
+        crate::entities::config_cache::pop_pending_world_toml(path).or_else(|| {
             // Fire a JS fetch request if we haven't already.
-            crate::config_cache::request_world_fetch(path.to_string());
+            crate::entities::config_cache::request_world_fetch(path.to_string());
             None
         })
     }
@@ -3945,11 +3956,11 @@ fn load_scenario_toml_text(path: &str) -> Option<String> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::ai_plugin::{AiEntityAttacked, AiEntityDestroyed};
+    use crate::ai::server::{AiEntityAttacked, AiEntityDestroyed};
     use crate::comms::server::{CommsChannel2Event, CommsInboxRes, CommsRuntime};
     use crate::console::comms::server::handle_comms_channel2;
+    use crate::core::messages::*;
     use crate::lobby::LobbyPlugin;
-    use crate::messages::*;
     use crate::world::content::TriggerCondition;
 
     // ── The shared layered flag chain (issue #891 stage 2) ───────────────────
@@ -4075,9 +4086,9 @@ pub(crate) mod tests {
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
-            .add_plugins(crate::ai_plugin::AiPlugin)
-            .insert_resource(crate::config_cache::FactionRegistryResource(
-                crate::config_cache::get_faction_registry(),
+            .add_plugins(crate::ai::server::AiPlugin)
+            .insert_resource(crate::entities::config_cache::FactionRegistryResource(
+                crate::entities::config_cache::get_faction_registry(),
             ))
             .init_resource::<WorldContentRuntime>()
             .init_resource::<CommsRuntime>()
@@ -4675,11 +4686,11 @@ setup = 'on_destroyed("raider", "bump"); fn bump(ctx) { ctx.flags.increment("wav
     /// action took.
     #[test]
     fn scripted_and_dispatched_spawn_mint_the_same_entity_uuid() {
-        use crate::entity_config::EntityConfig;
+        use crate::entities::config::EntityConfig;
 
         // A trivial template both paths spawn, served from the native config cache
         // so the live `WasmTemplateLoader` resolves it with no files on disk.
-        crate::config_cache::insert_native_config(
+        crate::entities::config_cache::insert_native_config(
             "fixture/harrow_mint.toml".to_string(),
             EntityConfig::from_toml("").unwrap(),
         );
@@ -4854,7 +4865,7 @@ setup = 'on_destroyed("raider", "collapse"); fn collapse(ctx) { ctx.effects.dest
         );
         let msgs = app
             .world()
-            .resource::<Messages<crate::ai_plugin::AiEntityDestroyed>>();
+            .resource::<Messages<crate::ai::server::AiEntityDestroyed>>();
         let mut cursor = msgs.get_cursor();
         let emitted: Vec<String> = cursor.read(msgs).map(|m| m.entity_uuid.clone()).collect();
         assert!(
@@ -5042,8 +5053,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.effects.destroy_entity("no
     /// above to resolve against.
     #[test]
     fn a_name_freed_by_a_scripted_destroy_is_reusable_by_a_later_spawn() {
-        use crate::entity_config::EntityConfig;
-        crate::config_cache::insert_native_config(
+        use crate::entities::config::EntityConfig;
+        crate::entities::config_cache::insert_native_config(
             "fixture/reuse_1033.toml".to_string(),
             EntityConfig::from_toml("").unwrap(),
         );
@@ -5458,8 +5469,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         }];
 
         app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiWaypointReached>>()
-            .write(crate::ai_plugin::AiWaypointReached {
+            .resource_mut::<Messages<crate::ai::server::AiWaypointReached>>()
+            .write(crate::ai::server::AiWaypointReached {
                 entity_uuid: npc_uuid.to_string(),
                 objective_id: "patrol".to_string(),
                 waypoint: "wp_border".to_string(),
@@ -5502,8 +5513,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         }];
 
         app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiWaypointReached>>()
-            .write(crate::ai_plugin::AiWaypointReached {
+            .resource_mut::<Messages<crate::ai::server::AiWaypointReached>>()
+            .write(crate::ai::server::AiWaypointReached {
                 entity_uuid: npc_uuid.to_string(),
                 objective_id: "patrol".to_string(),
                 waypoint: "wp_home".to_string(),
@@ -5546,8 +5557,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         }];
 
         app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiWaypointReached>>()
-            .write(crate::ai_plugin::AiWaypointReached {
+            .resource_mut::<Messages<crate::ai::server::AiWaypointReached>>()
+            .write(crate::ai::server::AiWaypointReached {
                 entity_uuid: npc_uuid.to_string(),
                 objective_id: "patrol".to_string(),
                 waypoint: "wp_anywhere".to_string(),
@@ -5591,8 +5602,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         }];
 
         app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiWaypointReached>>()
-            .write(crate::ai_plugin::AiWaypointReached {
+            .resource_mut::<Messages<crate::ai::server::AiWaypointReached>>()
+            .write(crate::ai::server::AiWaypointReached {
                 entity_uuid: "uuid-other".to_string(),
                 objective_id: "patrol".to_string(),
                 waypoint: "wp_border".to_string(),
@@ -5708,7 +5719,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             vec![TriggerAction::ApplyModifier {
                 entity: "raider_alpha".into(),
                 tag: "boost".into(),
-                slot: crate::messages::ModifierSlot::MaxSpeed,
+                slot: crate::core::messages::ModifierSlot::MaxSpeed,
                 bonus: 1.5,
             }],
         );
@@ -5723,14 +5734,14 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             .get::<crate::modifiers::ShipModifiers>()
             .expect("player entity must carry ShipModifiers");
         assert!(
-            npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed) > 1.0,
+            npc_mods.get(&crate::core::messages::ModifierSlot::MaxSpeed) > 1.0,
             "ApplyModifier must land on the target NPC's per-entity component; got {}",
-            npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed)
+            npc_mods.get(&crate::core::messages::ModifierSlot::MaxSpeed)
         );
         assert!(
-            (player_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            (player_mods.get(&crate::core::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
             "player entity must be unaffected by an NPC-targeted ApplyModifier; got {}",
-            player_mods.get(&crate::messages::ModifierSlot::MaxSpeed)
+            player_mods.get(&crate::core::messages::ModifierSlot::MaxSpeed)
         );
     }
 
@@ -5744,13 +5755,13 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 TriggerAction::ApplyModifier {
                     entity: "raider_alpha".into(),
                     tag: "boost".into(),
-                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                    slot: crate::core::messages::ModifierSlot::MaxSpeed,
                     bonus: 2.0,
                 },
                 TriggerAction::RemoveModifier {
                     entity: "raider_alpha".into(),
                     tag: "boost".into(),
-                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                    slot: crate::core::messages::ModifierSlot::MaxSpeed,
                 },
             ],
         );
@@ -5759,7 +5770,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             .entity(npc)
             .get::<crate::modifiers::ShipModifiers>()
             .expect("NPC entity must carry ShipModifiers");
-        let value = npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed);
+        let value = npc_mods.get(&crate::core::messages::ModifierSlot::MaxSpeed);
         assert!(
             (value - 1.0).abs() < 1e-3,
             "RemoveModifier must reverse the previously-applied bonus on the NPC's component; expected 1.0, got {value}"
@@ -5775,7 +5786,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             vec![TriggerAction::ApplyFlag {
                 entity: "raider_alpha".into(),
                 tag: "jammer".into(),
-                kind: crate::messages::FlagKind::CommsJammed,
+                kind: crate::core::messages::FlagKind::CommsJammed,
             }],
         );
         let npc_mods = app
@@ -5789,11 +5800,11 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             .get::<crate::modifiers::ShipModifiers>()
             .unwrap();
         assert!(
-            npc_mods.has_flag(&crate::messages::FlagKind::CommsJammed),
+            npc_mods.has_flag(&crate::core::messages::FlagKind::CommsJammed),
             "ApplyFlag must register on the target NPC's per-entity component"
         );
         assert!(
-            !player_mods.has_flag(&crate::messages::FlagKind::CommsJammed),
+            !player_mods.has_flag(&crate::core::messages::FlagKind::CommsJammed),
             "player entity must be unaffected by an NPC-targeted ApplyFlag"
         );
     }
@@ -5808,12 +5819,12 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 TriggerAction::ApplyFlag {
                     entity: "raider_alpha".into(),
                     tag: "jammer".into(),
-                    kind: crate::messages::FlagKind::CommsJammed,
+                    kind: crate::core::messages::FlagKind::CommsJammed,
                 },
                 TriggerAction::RemoveFlag {
                     entity: "raider_alpha".into(),
                     tag: "jammer".into(),
-                    kind: crate::messages::FlagKind::CommsJammed,
+                    kind: crate::core::messages::FlagKind::CommsJammed,
                 },
             ],
         );
@@ -5823,7 +5834,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             .get::<crate::modifiers::ShipModifiers>()
             .unwrap();
         assert!(
-            !npc_mods.has_flag(&crate::messages::FlagKind::CommsJammed),
+            !npc_mods.has_flag(&crate::core::messages::FlagKind::CommsJammed),
             "RemoveFlag must un-register the flag on the NPC's per-entity component"
         );
     }
@@ -5904,7 +5915,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             vec![TriggerAction::ApplyModifier {
                 entity: "does_not_exist".into(),
                 tag: "boost".into(),
-                slot: crate::messages::ModifierSlot::MaxSpeed,
+                slot: crate::core::messages::ModifierSlot::MaxSpeed,
                 bonus: 5.0,
             }],
         );
@@ -5919,11 +5930,11 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             .get::<crate::modifiers::ShipModifiers>()
             .unwrap();
         assert!(
-            (npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            (npc_mods.get(&crate::core::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
             "unknown entity name must not touch any entity's per-entity component (NPC)"
         );
         assert!(
-            (player_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            (player_mods.get(&crate::core::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
             "unknown entity name must not touch any entity's per-entity component (player)"
         );
     }
@@ -5944,7 +5955,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             vec![TriggerAction::ApplyModifier {
                 entity: "phantom".into(),
                 tag: "boost".into(),
-                slot: crate::messages::ModifierSlot::MaxSpeed,
+                slot: crate::core::messages::ModifierSlot::MaxSpeed,
                 bonus: 5.0,
             }],
         );
@@ -5955,7 +5966,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             .get::<crate::modifiers::ShipModifiers>()
             .unwrap();
         assert!(
-            (npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            (npc_mods.get(&crate::core::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
             "registered name with no ECS entity must not silently misroute the modifier"
         );
     }
@@ -5980,7 +5991,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             vec![TriggerAction::ApplyModifier {
                 entity: "componentless".into(),
                 tag: "boost".into(),
-                slot: crate::messages::ModifierSlot::MaxSpeed,
+                slot: crate::core::messages::ModifierSlot::MaxSpeed,
                 bonus: 5.0,
             }],
         );
@@ -5991,7 +6002,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             .get::<crate::modifiers::ShipModifiers>()
             .unwrap();
         assert!(
-            (npc_mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            (npc_mods.get(&crate::core::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
             "entity without ShipModifiers component must not misroute to other ships"
         );
     }
@@ -6503,7 +6514,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     /// `[[trigger]]` action array it used to be authored on.
     #[test]
     fn set_ai_state_action_is_noop_in_doctrine_based_ai() {
-        use crate::entity_config::BehaviourConfig;
+        use crate::entities::config::BehaviourConfig;
 
         let mut app = ai_trigger_test_app();
 
@@ -6568,10 +6579,10 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         {
             let reg = &app
                 .world()
-                .resource::<crate::config_cache::FactionRegistryResource>()
+                .resource::<crate::entities::config_cache::FactionRegistryResource>()
                 .0;
             assert!(
-                !crate::faction::is_enemy(
+                !crate::ai::faction::is_enemy(
                     Some(fed_faction_uuid()),
                     Some(harrow_faction_uuid()),
                     reg
@@ -6579,7 +6590,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 "precondition: Federation must not consider Harrow hostile by default"
             );
             assert!(
-                !crate::faction::is_enemy(
+                !crate::ai::faction::is_enemy(
                     Some(harrow_faction_uuid()),
                     Some(fed_faction_uuid()),
                     reg
@@ -6602,14 +6613,22 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
         let reg = &app
             .world()
-            .resource::<crate::config_cache::FactionRegistryResource>()
+            .resource::<crate::entities::config_cache::FactionRegistryResource>()
             .0;
         assert!(
-            crate::faction::is_enemy(Some(fed_faction_uuid()), Some(harrow_faction_uuid()), reg),
+            crate::ai::faction::is_enemy(
+                Some(fed_faction_uuid()),
+                Some(harrow_faction_uuid()),
+                reg
+            ),
             "Federation must consider Harrow hostile after add_faction_enemy"
         );
         assert!(
-            crate::faction::is_enemy(Some(harrow_faction_uuid()), Some(fed_faction_uuid()), reg),
+            crate::ai::faction::is_enemy(
+                Some(harrow_faction_uuid()),
+                Some(fed_faction_uuid()),
+                reg
+            ),
             "Harrow must consider Federation hostile after add_faction_enemy"
         );
     }
@@ -6625,7 +6644,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
         let reg = &app
             .world()
-            .resource::<crate::config_cache::FactionRegistryResource>()
+            .resource::<crate::entities::config_cache::FactionRegistryResource>()
             .0;
         // Federation's enemies list must still contain Pirate (its default)
         // and nothing else from the AddFactionEnemy dispatch.
@@ -6654,10 +6673,14 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
 
         let reg = &app
             .world()
-            .resource::<crate::config_cache::FactionRegistryResource>()
+            .resource::<crate::entities::config_cache::FactionRegistryResource>()
             .0;
         assert!(
-            !crate::faction::is_enemy(Some(harrow_faction_uuid()), Some(fed_faction_uuid()), reg),
+            !crate::ai::faction::is_enemy(
+                Some(harrow_faction_uuid()),
+                Some(fed_faction_uuid()),
+                reg
+            ),
             "remove_faction_enemy must undo the prior add_faction_enemy"
         );
     }
@@ -6678,7 +6701,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     /// `tick_delayed_actions` carries the `ai_query` the revalidation needs.
     #[test]
     fn remove_faction_enemy_action_clears_blackboard_target_when_target_becomes_friendly() {
-        use crate::entity_config::BehaviourConfig;
+        use crate::entities::config::BehaviourConfig;
 
         let mut app = ai_trigger_test_app();
 
@@ -6704,7 +6727,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
                 // surface `revalidate_ai_targets_after_faction_change` clears;
                 // it used to clear the private `ShipAiMemory.target` mirror,
                 // which by then was no longer what the firing path read.
-                crate::weapons_plugin::TacticalRadarSelection::default(),
+                crate::console::weapons::TacticalRadarSelection::default(),
             ))
             .id();
 
@@ -6715,7 +6738,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         {
             let mut lock = app
                 .world_mut()
-                .get_mut::<crate::weapons_plugin::TacticalRadarSelection>(npc_entity)
+                .get_mut::<crate::console::weapons::TacticalRadarSelection>(npc_entity)
                 .expect("TacticalRadarSelection must be attached");
             lock.0 = Some(player_uuid.to_string());
         }
@@ -6746,7 +6769,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         // and in radar range, never that it is still an enemy.
         let lock = app
             .world()
-            .get::<crate::weapons_plugin::TacticalRadarSelection>(npc_entity)
+            .get::<crate::console::weapons::TacticalRadarSelection>(npc_entity)
             .unwrap();
         assert_eq!(
             lock.0, None,
@@ -6862,7 +6885,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         let mut app = App::new();
         app.init_resource::<WorldContentRuntime>();
         app.init_resource::<CommsInboxRes>();
-        app.insert_resource(WorldResource(crate::messages::WorldData::default()));
+        app.insert_resource(WorldResource(crate::core::messages::WorldData::default()));
         app.insert_resource(world_cfg);
 
         // Pre-populate the runtime with a value that must survive the merge.
@@ -6901,8 +6924,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         // `EntityUuid` component must equal the UUID already registered in
         // `WorldConfig.name_to_uuid` for that name (single source of truth ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
         // no fresh UUID allocation inside the spawn loop).
-        use crate::entity_config::EntityConfig;
-        use crate::entity_spawner::EntityUuid;
+        use crate::entities::config::EntityConfig;
+        use crate::entities::spawner::EntityUuid;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use crate::world::config::WorldEntity;
         use std::collections::HashMap;
@@ -6946,7 +6969,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             "fixture/star.toml".into(),
             EntityConfig::from_toml("").unwrap(),
         );
-        let cache = crate::config_cache::ConfigCache::from(m);
+        let cache = crate::entities::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -6991,13 +7014,13 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     /// preload delivers text on — so the test needs no files on disk.
     #[test]
     fn spawn_is_blocked_when_an_entity_template_cannot_be_composed() {
-        use crate::entity_config::EntityConfig;
+        use crate::entities::config::EntityConfig;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use crate::world::config::WorldEntity;
         use std::collections::HashMap;
 
-        crate::config_cache::clear_template_preload_state();
-        crate::config_cache::record_raw_template(
+        crate::entities::config_cache::clear_template_preload_state();
+        crate::entities::config_cache::record_raw_template(
             "fixture/broken.toml",
             "includes = [\"absent.toml\"]\n".to_string(),
         );
@@ -7039,7 +7062,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             "fixture/station.toml".into(),
             EntityConfig::from_toml("").unwrap(),
         );
-        let cache = crate::config_cache::ConfigCache::from(m);
+        let cache = crate::entities::config_cache::ConfigCache::from(m);
 
         let spawn = |cfg: &UnifiedWorldConfig| -> usize {
             let mut app = App::new();
@@ -7064,10 +7087,13 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         // Control: the same world, with the broken template's includes fixed,
         // spawns both. Without this the assertion above could pass for any
         // reason at all.
-        crate::config_cache::record_raw_template("fixture/broken.toml", "class = \"ok\"\n".into());
+        crate::entities::config_cache::record_raw_template(
+            "fixture/broken.toml",
+            "class = \"ok\"\n".into(),
+        );
         assert_eq!(spawn(&world_cfg), 2, "the control world must spawn both");
 
-        crate::config_cache::clear_template_preload_state();
+        crate::entities::config_cache::clear_template_preload_state();
     }
 
     /// Issue #969, through the spawn path rather than the resolver: a moon
@@ -7080,7 +7106,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     /// `name` the strings.csv key — because that split is the defect.
     #[test]
     fn a_relative_to_moon_spawns_at_the_planet_and_a_typo_blocks_the_world() {
-        use crate::entity_config::EntityConfig;
+        use crate::entities::config::EntityConfig;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use crate::world::config::{TransformConfig, WorldEntity};
         use std::collections::HashMap;
@@ -7124,7 +7150,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             "fixture/moon.toml".into(),
             EntityConfig::from_toml("").unwrap(),
         );
-        let cache = crate::config_cache::ConfigCache::from(m);
+        let cache = crate::entities::config_cache::ConfigCache::from(m);
 
         let spawn = |cfg: &UnifiedWorldConfig| -> (usize, Option<Vec3>) {
             let mut app = App::new();
@@ -7185,7 +7211,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
     /// gone. Both halves must refuse the same world.
     #[test]
     fn an_anonymous_entitys_broken_relative_to_blocks_both_immediate_spawn_halves() {
-        use crate::entity_config::EntityConfig;
+        use crate::entities::config::EntityConfig;
         use crate::lobby::server::WorldResource;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use crate::world::config::{TransformConfig, WorldEntity};
@@ -7231,7 +7257,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             "fixture/nebula.toml".into(),
             EntityConfig::from_toml("").unwrap(),
         );
-        let cache = crate::config_cache::ConfigCache::from(m);
+        let cache = crate::entities::config_cache::ConfigCache::from(m);
 
         // `(unified half, setup_world half)`.
         let halves = |cfg: &UnifiedWorldConfig| -> (usize, usize) {
@@ -7277,7 +7303,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         // `anchor = "..."` (no inline `position`) must be spawned at the
         // anchor's coordinates. This is the migration path for the patrol
         // raider NPC moving off `[[spawn]]`.
-        use crate::entity_config::EntityConfig;
+        use crate::entities::config::EntityConfig;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use crate::world::config::WorldEntity;
         use std::collections::HashMap;
@@ -7304,7 +7330,7 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
             "fixture/raider.toml".into(),
             EntityConfig::from_toml("").unwrap(),
         );
-        let cache = crate::config_cache::ConfigCache::from(m);
+        let cache = crate::entities::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -7336,8 +7362,8 @@ setup = 'on_destroyed("raider", "k"); fn k(ctx) { ctx.schedule.after(2, |ctx| { 
         // AiPlugin's `attach_controllers_on_spawn` system reads that to
         // wire the AiController. This guarantees NPCs migrated from
         // [[spawn]] to [[entity]] still get AI on spawn.
-        use crate::entity_config::EntityConfig;
-        use crate::entity_spawner::BehaviourSection;
+        use crate::entities::config::EntityConfig;
+        use crate::entities::spawner::BehaviourSection;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use crate::world::config::WorldEntity;
         use std::collections::HashMap;
@@ -7379,7 +7405,7 @@ base_priority = 35.0
             )
             .unwrap(),
         );
-        let cache = crate::config_cache::ConfigCache::from(m);
+        let cache = crate::entities::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -7405,10 +7431,10 @@ base_priority = 35.0
         // must have its `anchor_offset` populated with that anchor's world
         // position. The streaming spawner reads this offset to translate
         // the eligibility annulus and per-asteroid spawn positions.
-        use crate::entity_config::{
+        use crate::entities::config::{
             AsteroidFieldConfig, AsteroidFieldShape, EntityConfig, GridConfig,
         };
-        use crate::entity_spawner::AsteroidFieldSection;
+        use crate::entities::spawner::AsteroidFieldSection;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use crate::world::config::WorldEntity;
         use std::collections::HashMap;
@@ -7459,7 +7485,7 @@ base_priority = 35.0
         });
         let mut m: HashMap<String, EntityConfig> = HashMap::new();
         m.insert("fixture/anchored_belt.toml".into(), field_template);
-        let cache = crate::config_cache::ConfigCache::from(m);
+        let cache = crate::entities::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -7513,7 +7539,7 @@ base_priority = 35.0
     /// `asteroid_field_main.toml` belts miss the cache.
     #[test]
     fn a_disk_only_asteroid_field_still_routes_to_the_field_spawn_path() {
-        use crate::entity_spawner::AsteroidFieldSection;
+        use crate::entities::spawner::AsteroidFieldSection;
         use crate::lobby::server::WorldResource;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use crate::world::config::WorldEntity;
@@ -7549,7 +7575,7 @@ base_priority = 35.0
             ..Default::default()
         });
 
-        let cache = crate::config_cache::ConfigCache::from(HashMap::new());
+        let cache = crate::entities::config_cache::ConfigCache::from(HashMap::new());
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
 
@@ -7615,7 +7641,7 @@ base_priority = 35.0
             ..Default::default()
         });
 
-        let cache = crate::config_cache::ConfigCache::from(HashMap::new());
+        let cache = crate::entities::config_cache::ConfigCache::from(HashMap::new());
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
         app.insert_resource(world_cfg.clone());
@@ -7639,10 +7665,10 @@ base_priority = 35.0
         // world origin (`anchor_offset = [0,0,0]`) rather than silently
         // relocating somewhere unexpected or refusing to spawn. Implementation
         // also logs a `warn!` so the typo is visible in console output.
-        use crate::entity_config::{
+        use crate::entities::config::{
             AsteroidFieldConfig, AsteroidFieldShape, EntityConfig, GridConfig,
         };
-        use crate::entity_spawner::AsteroidFieldSection;
+        use crate::entities::spawner::AsteroidFieldSection;
         use crate::world::config::WorldConfig as UnifiedWorldConfig;
         use crate::world::config::WorldEntity;
         use std::collections::HashMap;
@@ -7691,7 +7717,7 @@ base_priority = 35.0
         });
         let mut m: HashMap<String, EntityConfig> = HashMap::new();
         m.insert("fixture/typo_belt.toml".into(), field_template);
-        let cache = crate::config_cache::ConfigCache::from(m);
+        let cache = crate::entities::config_cache::ConfigCache::from(m);
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -8504,9 +8530,9 @@ position = [1.0, 0.0, 0.0]
             .init_resource::<WorldEventBuffer>()
             .init_resource::<ChangeProbe>()
             .add_message::<CommsChannel2Event>()
-            .add_message::<crate::ai_plugin::AiEntityAttacked>()
-            .add_message::<crate::ai_plugin::AiEntityDestroyed>()
-            .add_message::<crate::ai_plugin::AiWaypointReached>()
+            .add_message::<crate::ai::server::AiEntityAttacked>()
+            .add_message::<crate::ai::server::AiEntityDestroyed>()
+            .add_message::<crate::ai::server::AiWaypointReached>()
             .add_systems(
                 Update,
                 (collect_world_events, tick_trigger_pipeline, probe).chain(),
@@ -8708,7 +8734,7 @@ position = [1.0, 0.0, 0.0]
         let mut app = ai_trigger_test_app();
         app.init_resource::<WorldLayerMap>()
             .init_resource::<PendingWorldLayerChanges>()
-            .init_resource::<crate::simulation::GameOverReason>();
+            .init_resource::<crate::server_app::GameOverReason>();
 
         // Target for the six per-entity modifier actions.
         let target = app
@@ -8742,9 +8768,9 @@ position = [1.0, 0.0, 0.0]
                     text_params: Default::default(),
                     mandatory: false,
                     targets: vec![],
-                    directive: crate::messages::AiDirective::None,
+                    directive: crate::core::messages::AiDirective::None,
                     utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
+                    source: crate::core::messages::ObjectiveSource::default(),
                     command_stance: None,
                 },
                 TriggerAction::CompleteObjective {
@@ -8756,9 +8782,9 @@ position = [1.0, 0.0, 0.0]
                     text_params: Default::default(),
                     mandatory: false,
                     targets: vec![],
-                    directive: crate::messages::AiDirective::None,
+                    directive: crate::core::messages::AiDirective::None,
                     utility: crate::objectives::UtilityConfig::default(),
-                    source: crate::messages::ObjectiveSource::default(),
+                    source: crate::core::messages::ObjectiveSource::default(),
                     command_stance: None,
                 },
                 TriggerAction::FailObjective {
@@ -8772,7 +8798,7 @@ position = [1.0, 0.0, 0.0]
                 TriggerAction::ApplyModifier {
                     entity: "target_ship".into(),
                     tag: "boost".into(),
-                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                    slot: crate::core::messages::ModifierSlot::MaxSpeed,
                     bonus: 2.0,
                 },
                 TriggerAction::ApplyIntModifier {
@@ -8784,12 +8810,12 @@ position = [1.0, 0.0, 0.0]
                 TriggerAction::ApplyFlag {
                     entity: "target_ship".into(),
                     tag: "jammer".into(),
-                    kind: crate::messages::FlagKind::CommsJammed,
+                    kind: crate::core::messages::FlagKind::CommsJammed,
                 },
                 TriggerAction::RemoveModifier {
                     entity: "target_ship".into(),
                     tag: "boost".into(),
-                    slot: crate::messages::ModifierSlot::MaxSpeed,
+                    slot: crate::core::messages::ModifierSlot::MaxSpeed,
                 },
                 TriggerAction::RemoveIntModifier {
                     entity: "target_ship".into(),
@@ -8799,7 +8825,7 @@ position = [1.0, 0.0, 0.0]
                 TriggerAction::RemoveFlag {
                     entity: "target_ship".into(),
                     tag: "jammer".into(),
-                    kind: crate::messages::FlagKind::CommsJammed,
+                    kind: crate::core::messages::FlagKind::CommsJammed,
                 },
                 TriggerAction::SetWorldFlag {
                     name: "ordered".into(),
@@ -8904,7 +8930,7 @@ position = [1.0, 0.0, 0.0]
             .get::<crate::modifiers::ShipModifiers>()
             .expect("target must keep its ShipModifiers component");
         assert!(
-            (mods.get(&crate::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
+            (mods.get(&crate::core::messages::ModifierSlot::MaxSpeed) - 1.0).abs() < 1e-3,
             "RemoveModifier must undo the earlier ApplyModifier"
         );
         assert_eq!(
@@ -8913,7 +8939,7 @@ position = [1.0, 0.0, 0.0]
             "RemoveIntModifier must undo the earlier ApplyIntModifier"
         );
         assert!(
-            !mods.has_flag(&crate::messages::FlagKind::CommsJammed),
+            !mods.has_flag(&crate::core::messages::FlagKind::CommsJammed),
             "RemoveFlag must undo the earlier ApplyFlag"
         );
 
@@ -8947,10 +8973,10 @@ position = [1.0, 0.0, 0.0]
         // Factions: add-before-remove nets out to neutral.
         let registry = &app
             .world()
-            .resource::<crate::config_cache::FactionRegistryResource>()
+            .resource::<crate::entities::config_cache::FactionRegistryResource>()
             .0;
         assert!(
-            !crate::faction::is_enemy(
+            !crate::ai::faction::is_enemy(
                 Some(harrow_faction_uuid()),
                 Some(fed_faction_uuid()),
                 registry
@@ -8976,7 +9002,7 @@ position = [1.0, 0.0, 0.0]
         // the queued NextState take effect).
         assert_eq!(
             app.world()
-                .resource::<crate::simulation::GameOverReason>()
+                .resource::<crate::server_app::GameOverReason>()
                 .0
                 .as_deref(),
             Some("all variants dispatched"),
@@ -9247,9 +9273,9 @@ seed = 1
 
     // -- Region enter/exit triggers (issue #416) -----------------------------
 
-    use crate::entity_config::EntityConfig;
-    use crate::entity_spawner::{spawn_entity, EntityUuid};
-    use crate::region_shape::RegionShape;
+    use crate::entities::config::EntityConfig;
+    use crate::entities::spawner::{spawn_entity, EntityUuid};
+    use crate::regions::shape::RegionShape;
 
     /// Build a minimal app that wires the region membership system + the issue-#416
     /// observers + `tick_trigger_pipeline` into the same world. Skips the
@@ -9305,10 +9331,10 @@ seed = 1
         // Spawn the player ship (with a Transform so RegionPlugin's
         // membership query succeeds).
         app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
             Transform::default(),
-            crate::ship_state::ShipPhysics::default(),
+            crate::ship::state::ShipPhysics::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::modifiers::ShipModifiers::new(),
@@ -9326,7 +9352,7 @@ seed = 1
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -9381,7 +9407,7 @@ seed = 1
     fn set_ship_pos(app: &mut App, x: f32, z: f32) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&mut crate::ship::state::ShipPhysics, With<crate::server_app::LocalShip>>();
         if let Ok(mut p) = q.single_mut(app.world_mut()) {
             p.x = x;
             p.z = z;
@@ -9627,7 +9653,7 @@ seed = 1
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -10031,7 +10057,7 @@ size_max = 2.0
         // matching combat-induced destruction.
         let msgs = app
             .world()
-            .resource::<Messages<crate::ai_plugin::AiEntityDestroyed>>();
+            .resource::<Messages<crate::ai::server::AiEntityDestroyed>>();
         let mut cursor = msgs.get_cursor();
         let emitted: Vec<String> = cursor.read(msgs).map(|m| m.entity_uuid.clone()).collect();
         assert!(
@@ -10159,8 +10185,8 @@ setup = 'on_attacked("src", "spawn_it").when("flag(ready)"); fn spawn_it(ctx) {{
         app.world_mut().insert_resource(sr);
 
         app.world_mut()
-            .resource_mut::<Messages<crate::ai_plugin::AiEntityAttacked>>()
-            .write(crate::ai_plugin::AiEntityAttacked {
+            .resource_mut::<Messages<crate::ai::server::AiEntityAttacked>>()
+            .write(crate::ai::server::AiEntityAttacked {
                 entity_uuid: "src-uuid".into(),
                 attacker_uuid: uuid::Uuid::parse_str("20202020-0000-0000-0000-000000000001")
                     .unwrap(),
@@ -10503,12 +10529,12 @@ setup = 'on_attacked("src", "spawn_it").when("flag(ready)"); fn spawn_it(ctx) {{
     }
 
     // Helper: build a minimal ConfigCache with a single blank template at `path`.
-    fn single_template_cache(path: &str) -> crate::config_cache::ConfigCache {
-        use crate::entity_config::EntityConfig;
+    fn single_template_cache(path: &str) -> crate::entities::config_cache::ConfigCache {
+        use crate::entities::config::EntityConfig;
         use std::collections::HashMap;
         let mut m: HashMap<String, EntityConfig> = HashMap::new();
         m.insert(path.into(), EntityConfig::from_toml("").unwrap());
-        crate::config_cache::ConfigCache::from(m)
+        crate::entities::config_cache::ConfigCache::from(m)
     }
 
     // Helper: build a minimal WorldConfig with one named GameStart entity.
@@ -10536,7 +10562,7 @@ setup = 'on_attacked("src", "spawn_it").when("flag(ready)"); fn spawn_it(ctx) {{
     /// flag store has `ship_power = 200`.
     #[test]
     fn spawn_game_start_entity_gated_on_ship_power_spawns_when_met() {
-        use crate::entity_spawner::EntityUuid;
+        use crate::entities::spawner::EntityUuid;
         use crate::world::flags::{CmpOp, FlagStore, Predicate};
 
         let pred = Predicate::Counter {
@@ -10636,7 +10662,7 @@ setup = 'on_attacked("src", "spawn_it").when("flag(ready)"); fn spawn_it(ctx) {{
         cfg.name_to_uuid.insert("heavy".into(), "heavy-uuid".into());
         cfg.name_to_uuid.insert("scout".into(), "scout-uuid".into());
 
-        use crate::entity_config::EntityConfig;
+        use crate::entities::config::EntityConfig;
         use std::collections::HashMap;
         let mut m: HashMap<String, EntityConfig> = HashMap::new();
         m.insert(
@@ -10647,7 +10673,7 @@ setup = 'on_attacked("src", "spawn_it").when("flag(ready)"); fn spawn_it(ctx) {{
             "fixture/scout.toml".into(),
             EntityConfig::from_toml("").unwrap(),
         );
-        let cache = crate::config_cache::ConfigCache::from(m);
+        let cache = crate::entities::config_cache::ConfigCache::from(m);
 
         // Low power: only scout spawns.
         let mut flags_low = FlagStore::new();
@@ -10663,7 +10689,7 @@ setup = 'on_attacked("src", "spawn_it").when("flag(ready)"); fn spawn_it(ctx) {{
         assert_eq!(spawned_low.len(), 1, "only scout should spawn at low power");
         let uuid_low = app_low
             .world()
-            .get::<crate::entity_spawner::EntityUuid>(spawned_low[0])
+            .get::<crate::entities::spawner::EntityUuid>(spawned_low[0])
             .unwrap();
         assert_eq!(uuid_low.0, "scout-uuid");
 
@@ -10685,7 +10711,7 @@ setup = 'on_attacked("src", "spawn_it").when("flag(ready)"); fn spawn_it(ctx) {{
         );
         let uuid_high = app_high
             .world()
-            .get::<crate::entity_spawner::EntityUuid>(spawned_high[0])
+            .get::<crate::entities::spawner::EntityUuid>(spawned_high[0])
             .unwrap();
         assert_eq!(uuid_high.0, "heavy-uuid");
     }
@@ -10694,7 +10720,7 @@ setup = 'on_attacked("src", "spawn_it").when("flag(ready)"); fn spawn_it(ctx) {{
     /// — entity spawns when either condition is true.
     #[test]
     fn spawn_game_start_entity_composed_predicate() {
-        use crate::entity_spawner::EntityUuid;
+        use crate::entities::spawner::EntityUuid;
         use crate::world::flags::{CmpOp, FlagStore, Predicate};
 
         let pred = Predicate::Or(

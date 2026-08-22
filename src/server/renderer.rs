@@ -12,25 +12,25 @@ use rand::Rng;
 use rand::SeedableRng;
 use std::collections::{HashMap, HashSet};
 
-use crate::ai_plugin::WarpOutMarker;
+use crate::ai::server::WarpOutMarker;
 use crate::comms::server::OnScreenMessage;
-use crate::config_cache::FactionRegistryResource;
-use crate::entity_spawner::{
+use crate::core::messages::{CameraView, GamePhase, ViewMode};
+use crate::entities::config_cache::FactionRegistryResource;
+use crate::entities::model_rig::ModelMarkers;
+use crate::entities::spawner::{
     CinematicCameraSection, EntityUuid, FactionComponent, RegionEffectsSection, RegionShapeSection,
 };
 use crate::lobby::GameStateCache;
-use crate::messages::{CameraView, GamePhase, ViewMode};
-use crate::model_rig::ModelMarkers;
-use crate::region_effects::RegionEffectKind;
-use crate::region_plugin::RegionMembership;
-use crate::region_shape::RegionShape;
+use crate::regions::effects::RegionEffectKind;
+use crate::regions::server::RegionMembership;
+use crate::regions::shape::RegionShape;
 use crate::render_setup::{
     apply_render_config, apply_target_hdr, default_ambient_light, game_camera_projection,
     space_skybox, RenderTuning, SpaceSkyboxAsset, SpaceSkyboxPlugin,
 };
 use crate::server::pfx::PfxPlugin;
-use crate::ship_state::{ShipPhysics, ShipViewMode};
-use crate::simulation::AsteroidDestroyedVfx;
+use crate::server_app::AsteroidDestroyedVfx;
+use crate::ship::state::{ShipPhysics, ShipViewMode};
 
 // ── VFX Components ────────────────────────────────────────────────
 
@@ -234,7 +234,7 @@ fn capture_local_ship_render_pose(
     mut commands: Commands,
     mut ship_q: Query<
         (Entity, &ShipPhysics, Option<&mut RenderInterp>),
-        With<crate::simulation::LocalShip>,
+        With<crate::server_app::LocalShip>,
     >,
 ) {
     let Ok((entity, physics, interp)) = ship_q.single_mut() else {
@@ -250,7 +250,7 @@ fn capture_local_ship_render_pose(
 /// Remove last frame's presentation pose before any authoritative fixed system
 /// can read the root transform.
 fn restore_authoritative_local_ship_transform(
-    mut ship_q: Query<(&RenderInterp, &mut Transform), With<crate::simulation::LocalShip>>,
+    mut ship_q: Query<(&RenderInterp, &mut Transform), With<crate::server_app::LocalShip>>,
 ) {
     if let Ok((interp, mut transform)) = ship_q.single_mut() {
         write_ship_pose(&mut transform, interp.current);
@@ -280,7 +280,7 @@ pub(crate) fn apply_local_ship_render_interpolation(
     fixed_time: Res<Time<Fixed>>,
     mut ship_q: Query<
         (&ShipViewMode, &RenderInterp, &mut Transform),
-        With<crate::simulation::LocalShip>,
+        With<crate::server_app::LocalShip>,
     >,
 ) {
     let Ok((view_mode, interp, mut transform)) = ship_q.single_mut() else {
@@ -321,7 +321,7 @@ fn capture_ship_render_pose(
     mut commands: Commands,
     mut ship_q: Query<
         (Entity, &ShipPhysics, Option<&mut RenderInterp>),
-        (With<Transform>, Without<crate::simulation::LocalShip>),
+        (With<Transform>, Without<crate::server_app::LocalShip>),
     >,
 ) {
     for (entity, physics, interp) in ship_q.iter_mut() {
@@ -337,7 +337,7 @@ fn capture_ship_render_pose(
 /// authoritative fixed system can read the root transform, mirroring
 /// `restore_authoritative_local_ship_transform`.
 fn restore_authoritative_ship_transforms(
-    mut ship_q: Query<(&RenderInterp, &mut Transform), Without<crate::simulation::LocalShip>>,
+    mut ship_q: Query<(&RenderInterp, &mut Transform), Without<crate::server_app::LocalShip>>,
 ) {
     for (interp, mut transform) in ship_q.iter_mut() {
         write_ship_pose(&mut transform, interp.current);
@@ -353,7 +353,7 @@ fn restore_authoritative_ship_transforms(
 /// engine-trail spawning after it so trails read the interpolated pose.
 pub(crate) fn apply_ship_render_interpolation(
     fixed_time: Res<Time<Fixed>>,
-    mut ship_q: Query<(&RenderInterp, &mut Transform), Without<crate::simulation::LocalShip>>,
+    mut ship_q: Query<(&RenderInterp, &mut Transform), Without<crate::server_app::LocalShip>>,
 ) {
     let alpha = fixed_time.overstep_fraction();
     for (interp, mut transform) in ship_q.iter_mut() {
@@ -599,8 +599,8 @@ fn toggle_cameras(
     view_mode_changed: Query<
         (),
         (
-            With<crate::simulation::LocalShip>,
-            Changed<crate::ship_state::ShipViewMode>,
+            With<crate::server_app::LocalShip>,
+            Changed<crate::ship::state::ShipViewMode>,
         ),
     >,
     mut game: Query<&mut Camera, With<GameCamera>>,
@@ -646,8 +646,8 @@ fn toggle_cameras(
 /// detection (and everything downstream of it) only fires on an actual
 /// transition, not every tick.
 fn toggle_ship_model_visibility(
-    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
-    mut model_q: Query<&mut Visibility, With<crate::simulation::LocalShipModel>>,
+    view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
+    mut model_q: Query<&mut Visibility, With<crate::server_app::LocalShipModel>>,
 ) {
     // `With<LocalShip>` matters: every ship (NPCs included) carries a
     // `ShipViewMode`, so an unfiltered `single()` would fail outright.
@@ -685,14 +685,14 @@ fn update_view_screen_text(
 /// camera. When no marker is found the camera falls back to ship centre looking
 /// forward.
 fn hull_camera(
-    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
     // The ship and the camera both have a `Transform`, so make their entity
     // sets explicitly disjoint. Without this, Bevy rejects the system at
     // schedule initialisation even though normal spawning never gives the
     // player ship a `GameCamera` marker (B0001).
     ship_q: Query<
         (&Transform, Option<&ModelMarkers>),
-        (With<crate::simulation::LocalShip>, Without<GameCamera>),
+        (With<crate::server_app::LocalShip>, Without<GameCamera>),
     >,
     mut cam_query: Query<&mut Transform, With<GameCamera>>,
 ) {
@@ -742,10 +742,10 @@ fn hull_camera(
 /// Cinematic camera: positions the view above and behind the ship, tracks
 /// nearby entities with hysteresis (enemy > friendly > closest).
 fn cinematic_camera(
-    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
-    physics_q: Query<(&ShipPhysics, Option<&RenderInterp>), With<crate::simulation::LocalShip>>,
-    cinematic_q: Query<&CinematicCameraSection, With<crate::simulation::LocalShip>>,
-    local_q: Query<&EntityUuid, With<crate::simulation::LocalShip>>,
+    view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
+    physics_q: Query<(&ShipPhysics, Option<&RenderInterp>), With<crate::server_app::LocalShip>>,
+    cinematic_q: Query<&CinematicCameraSection, With<crate::server_app::LocalShip>>,
+    local_q: Query<&EntityUuid, With<crate::server_app::LocalShip>>,
     all_entities: Query<(&EntityUuid, &Transform, Option<&FactionComponent>), Without<GameCamera>>,
     faction_registry: Option<Res<FactionRegistryResource>>,
     time: Res<Time>,
@@ -886,7 +886,7 @@ fn cinematic_camera(
 /// Priority: enemies first, then non-enemies; within each tier by closest XZ range.
 fn find_cinematic_target(
     ship_origin: Vec3,
-    cfg: &crate::entity_config::CinematicCameraConfig,
+    cfg: &crate::entities::config::CinematicCameraConfig,
     local_faction: Option<uuid::Uuid>,
     entities: &[(String, Vec3, Option<uuid::Uuid>)],
     faction_registry: Option<&FactionRegistryResource>,
@@ -903,7 +903,7 @@ fn find_cinematic_target(
         })
         .partition(|(_, _, faction)| {
             faction_registry
-                .map(|reg| crate::faction::is_enemy(local_faction, *faction, reg))
+                .map(|reg| crate::ai::faction::is_enemy(local_faction, *faction, reg))
                 .unwrap_or(false)
         });
 
@@ -922,12 +922,12 @@ fn find_cinematic_target(
 }
 
 fn update_view_direction_label(
-    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+    view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
     view_mode_changed: Query<
         (),
         (
-            With<crate::simulation::LocalShip>,
-            Changed<crate::ship_state::ShipViewMode>,
+            With<crate::server_app::LocalShip>,
+            Changed<crate::ship::state::ShipViewMode>,
         ),
     >,
     state: Res<State<GamePhase>>,
@@ -1416,8 +1416,8 @@ fn draw_warp_exit_markers(query: Query<(&WarpOutMarker, &Transform)>, mut gizmos
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ship_state::ShipViewMode;
-    use crate::simulation::LocalShip;
+    use crate::server_app::LocalShip;
+    use crate::ship::state::ShipViewMode;
 
     #[test]
     fn render_interp_blends_between_committed_ship_poses() {
@@ -2025,7 +2025,7 @@ mod tests {
 
     // ── Local ship hull visibility (issue #944) ───────────────────────
 
-    use crate::simulation::LocalShipModel;
+    use crate::server_app::LocalShipModel;
 
     /// Headless app carrying just the local ship and the visibility system.
     /// No model child yet — tests insert it when they want it to "finish

@@ -580,7 +580,7 @@ pub(crate) fn register_scheduling(engine: &mut HostRegistry) {
             // undeclared one, and the balance classifier would read a scripted
             // victory as a draw. Validated through the same `Outcome::parse`, so
             // a typo raises and discards the call rather than deferring a bad end.
-            let outcome = crate::balance::Outcome::parse(&outcome).map_err(|e| {
+            let outcome = crate::core::balance::Outcome::parse(&outcome).map_err(|e| {
                 Box::new(EvalAltResult::ErrorRuntime(
                     format!("game_over: {e}").into(),
                     rhai::Position::NONE,
@@ -746,7 +746,7 @@ mod tests {
             delayed[0].action,
             TriggerAction::GameOver {
                 message: Some("msg".to_string()),
-                outcome: Some(crate::balance::Outcome::Victory),
+                outcome: Some(crate::core::balance::Outcome::Victory),
             }
         );
 

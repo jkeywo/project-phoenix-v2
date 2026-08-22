@@ -40,7 +40,7 @@
 //! identical `*_KIND` and `*_SYSTEM_ID` values. New systems must use the same
 //! lowercase-kebab string for both constants to avoid this split.
 
-use crate::messages::SystemId;
+use crate::core::messages::SystemId;
 use std::collections::HashSet;
 
 // ── Ownerless capability systems ─────────────────────────────────────────────
@@ -295,7 +295,7 @@ pub const SENSOR_RADAR_SYSTEM_ID: &str = "sensor-radar";
 /// Wire `SystemId` for the Torpedo Magazine fine system (single instance).
 ///
 /// The magazine owns the shared torpedo `count`; tubes claim a round via
-/// the channel-2 [`crate::messages::InterSystemPayload::ClaimTorpedoRound`]
+/// the channel-2 [`crate::core::messages::InterSystemPayload::ClaimTorpedoRound`]
 /// message. A Disabled/Destroyed magazine refuses claims (no tubes can load
 /// even if a round would otherwise be available), and also blocks the fire
 /// path so loaded tubes cannot launch.

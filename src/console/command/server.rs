@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::messages::{
+use crate::core::messages::{
     AdmittedCommands, CommandBlackboard, CommandStanceOption, StationId, SystemBlackboard,
     SystemControlPayload, SystemId,
 };
@@ -101,7 +101,7 @@ impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
         use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
         app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::COMMAND_SYSTEM_ID,
+            crate::ship::system_registry::COMMAND_SYSTEM_ID,
         ));
         // The ONE shared AI decision cadence (issues #889, #895): re-armed here
         // because an uncrewed Command seat now decides through ordinary AI
@@ -297,7 +297,7 @@ fn handle_set_station_stance(
             continue;
         };
         let target = command.command_target.as_ref();
-        for cmd in admitted.for_target(crate::system_registry::COMMAND_SYSTEM_ID) {
+        for cmd in admitted.for_target(crate::ship::system_registry::COMMAND_SYSTEM_ID) {
             let SystemControlPayload::SetStationStance { station, stance } = &cmd.payload else {
                 continue;
             };
@@ -338,12 +338,12 @@ fn apply_alert_change_to_stances(
     mut ships: Query<
         (
             &ShipConfigComponent,
-            &crate::ship_state::ShipRedAlert,
+            &crate::ship::state::ShipRedAlert,
             &mut ShipStationStances,
         ),
         (
             With<crate::server_app::Ship>,
-            Changed<crate::ship_state::ShipRedAlert>,
+            Changed<crate::ship::state::ShipRedAlert>,
         ),
     >,
 ) {
@@ -449,7 +449,7 @@ fn reconcile_directed_target_control(
         (
             &ShipConfigComponent,
             &ShipSystemControlSources,
-            &crate::ship_state::ShipRedAlert,
+            &crate::ship::state::ShipRedAlert,
             &mut ShipStationStances,
             &mut LastDirectedControl,
         ),
@@ -556,10 +556,10 @@ fn operate_command_ai(
         (
             &ShipConfigComponent,
             &ShipSystemControlSources,
-            &crate::ship_state::ShipRedAlert,
+            &crate::ship::state::ShipRedAlert,
             &ShipStationStances,
             &mut AdmittedCommands,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -577,7 +577,7 @@ fn operate_command_ai(
         // control, which the applier checks as gate (b).
         if !control_sources
             .0
-            .policy_for(&crate::system_registry::command_system_id())
+            .policy_for(&crate::ship::system_registry::command_system_id())
             .operate_ai
         {
             continue;
@@ -632,7 +632,7 @@ fn operate_command_ai(
 /// shared [`crate::command_admission::ai_emit::emit_ai_command`] seam, using this
 /// ship's own `ai:<uuid>` token (mirrors `emit_captain_ai_command`).
 fn emit_command_ai_command(
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
     payload: SystemControlPayload,
     sources: &ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
@@ -641,7 +641,7 @@ fn emit_command_ai_command(
 ) -> bool {
     crate::command_admission::ai_emit::emit_ai_command(
         entity_uuid,
-        crate::system_registry::command_system_id(),
+        crate::ship::system_registry::command_system_id(),
         payload,
         sources,
         sessions,
@@ -660,7 +660,7 @@ fn publish_command_blackboard(
         (
             &ShipConfigComponent,
             &ShipSystemControlSources,
-            &crate::ship_state::ShipRedAlert,
+            &crate::ship::state::ShipRedAlert,
             Option<&ShipStationStances>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
@@ -683,7 +683,7 @@ fn publish_command_blackboard(
         let directed_station_ai = station_is_ai_controlled(config, &control_sources.0, &target);
         let command_auto = control_sources
             .0
-            .source_for(&crate::system_registry::command_system_id())
+            .source_for(&crate::ship::system_registry::command_system_id())
             == ControlSource::Ai;
 
         // The EFFECTIVE catalogue this tick: permanent stances plus any active
@@ -715,7 +715,7 @@ fn publish_command_blackboard(
             .collect();
 
         let bb = CommandBlackboard {
-            command_system_id: crate::system_registry::command_system_id(),
+            command_system_id: crate::ship::system_registry::command_system_id(),
             directed_station: target.clone(),
             directed_station_name: target_station.name.clone(),
             directed_station_ai,
@@ -724,7 +724,7 @@ fn publish_command_blackboard(
             stances: options,
         };
         bbs.0.insert(
-            SystemId(crate::system_registry::COMMAND_SYSTEM_ID.to_string()),
+            SystemId(crate::ship::system_registry::COMMAND_SYSTEM_ID.to_string()),
             SystemBlackboard::Command(bb),
         );
     }

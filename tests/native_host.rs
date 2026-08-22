@@ -16,12 +16,12 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use project_phoenix::core::codec;
+use project_phoenix::core::messages::PROTOCOL_VERSION;
 use project_phoenix::delivery::args::{ClientSource, HostArgs};
 use project_phoenix::delivery::payload::{catalog_payload, PayloadValue};
 use project_phoenix::delivery::serve::{load_content, preload_templates, HostServer};
 use project_phoenix::delivery::stamp::DeliveryStamp;
 use project_phoenix::delivery::DeliveryManifest;
-use project_phoenix::messages::PROTOCOL_VERSION;
 use project_phoenix::world::manifest::{build_catalog, build_merged_catalog, parse_manifest};
 
 const BASE_MANIFEST: &str = "assets/scenarios.toml";

@@ -16,8 +16,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::entity_config::GlobalConfig;
-use crate::messages::{AiDirective, ObjectiveSource};
+use crate::core::messages::{AiDirective, ObjectiveSource};
+use crate::entities::config::GlobalConfig;
 use crate::objectives::{ConditionModifier, UtilityConfig, ZeroGateCondition};
 
 // -- World-tree entity instance types ---------------------------------------
@@ -960,7 +960,7 @@ pub enum TriggerAction {
         /// vast majority of objectives, which contribute no stance. The tuple is
         /// (target Station id, authored stance).
         command_stance: Option<(
-            crate::messages::StationId,
+            crate::core::messages::StationId,
             crate::ship::config::StationStanceConfig,
         )>,
     },
@@ -978,23 +978,23 @@ pub enum TriggerAction {
     ApplyModifier {
         entity: String,
         tag: String,
-        slot: crate::messages::ModifierSlot,
+        slot: crate::core::messages::ModifierSlot,
         bonus: f32,
     },
     RemoveModifier {
         entity: String,
         tag: String,
-        slot: crate::messages::ModifierSlot,
+        slot: crate::core::messages::ModifierSlot,
     },
     ApplyFlag {
         entity: String,
         tag: String,
-        kind: crate::messages::FlagKind,
+        kind: crate::core::messages::FlagKind,
     },
     RemoveFlag {
         entity: String,
         tag: String,
-        kind: crate::messages::FlagKind,
+        kind: crate::core::messages::FlagKind,
     },
     ApplyIntModifier {
         entity: String,
@@ -1014,7 +1014,7 @@ pub enum TriggerAction {
         /// it off — the headless classifier defaults an undeclared scripted
         /// game-over to victory (the ship ran to a scripted end-state; the
         /// built-in player-death path is separately latched as defeat).
-        outcome: Option<crate::balance::Outcome>,
+        outcome: Option<crate::core::balance::Outcome>,
     },
     /// Additively load a sub-world from `path` into the running world layer map.
     LoadWorld {
@@ -1390,7 +1390,7 @@ fn parse_command_stance(
     raw: &RawActionEntry,
 ) -> Result<
     Option<(
-        crate::messages::StationId,
+        crate::core::messages::StationId,
         crate::ship::config::StationStanceConfig,
     )>,
     String,
@@ -1409,13 +1409,13 @@ fn parse_command_stance(
         );
     }
     Ok(Some((
-        crate::messages::StationId(raw_stance.station.clone()),
+        crate::core::messages::StationId(raw_stance.station.clone()),
         raw_stance.stance.clone(),
     )))
 }
 
-fn parse_modifier_slot(s: &str) -> Result<crate::messages::ModifierSlot, String> {
-    use crate::messages::ModifierSlot;
+fn parse_modifier_slot(s: &str) -> Result<crate::core::messages::ModifierSlot, String> {
+    use crate::core::messages::ModifierSlot;
     match s {
         "MaxSpeed" => Ok(ModifierSlot::MaxSpeed),
         "MaxYawRate" => Ok(ModifierSlot::MaxYawRate),
@@ -1440,8 +1440,8 @@ fn parse_int_modifier_slot(s: &str) -> Result<crate::modifiers::IntModifierSlot,
     }
 }
 
-fn parse_flag_kind(s: &str) -> Result<crate::messages::FlagKind, String> {
-    use crate::messages::FlagKind;
+fn parse_flag_kind(s: &str) -> Result<crate::core::messages::FlagKind, String> {
+    use crate::core::messages::FlagKind;
     match s {
         "CommsJammed" => Ok(FlagKind::CommsJammed),
         "SensorBlind" => Ok(FlagKind::SensorBlind),
@@ -1612,7 +1612,7 @@ pub(crate) fn parse_action_entry(raw_action: &RawActionEntry) -> Result<TriggerA
                 outcome: raw_action
                     .outcome
                     .as_deref()
-                    .map(crate::balance::Outcome::parse)
+                    .map(crate::core::balance::Outcome::parse)
                     .transpose()
                     .map_err(|e| format!("Action 'game_over' has an invalid outcome: {e}"))?,
             },
@@ -1937,15 +1937,15 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
     // load turns that silent fidelity loss into a content error the author can
     // see, and is what lets `integrate_ship_physics` assert the cap is dead.
     if !raw.global.sim_tick_hz.is_finite()
-        || raw.global.sim_tick_hz < crate::entity_config::MIN_SIM_TICK_HZ
+        || raw.global.sim_tick_hz < crate::entities::config::MIN_SIM_TICK_HZ
     {
         return Err(format!(
             "[global] sim_tick_hz = {} is below the {} Hz floor: the helm integrator caps \
              its step at 1/{} s, so a slower logical tick would be silently shortened and \
              the simulation would under-integrate",
             raw.global.sim_tick_hz,
-            crate::entity_config::MIN_SIM_TICK_HZ.round(),
-            crate::entity_config::MIN_SIM_TICK_HZ.round(),
+            crate::entities::config::MIN_SIM_TICK_HZ.round(),
+            crate::entities::config::MIN_SIM_TICK_HZ.round(),
         ));
     }
 
@@ -1957,13 +1957,13 @@ pub fn parse_world(toml_str: &str) -> Result<WorldConfig, String> {
     // 100000`) demands tens of thousands of fixed steps back-to-back inside
     // one frame and wedges the host. Rejecting the rate at load turns that
     // silent performance cliff into a content error the author can see.
-    if raw.global.sim_tick_hz > crate::entity_config::MAX_SIM_TICK_HZ {
+    if raw.global.sim_tick_hz > crate::entities::config::MAX_SIM_TICK_HZ {
         return Err(format!(
             "[global] sim_tick_hz = {} is above the {} Hz ceiling: a lagged frame can \
              unpack into max_delta / timestep FixedUpdate steps, and a rate this fast \
              would run tens of thousands of them back-to-back and wedge the host",
             raw.global.sim_tick_hz,
-            crate::entity_config::MAX_SIM_TICK_HZ.round(),
+            crate::entities::config::MAX_SIM_TICK_HZ.round(),
         ));
     }
 
@@ -3860,7 +3860,7 @@ directive_anchor = "pirate_haven"
             TriggerAction::AddObjective { directive, .. } => {
                 assert_eq!(
                     *directive,
-                    crate::messages::AiDirective::Retreat {
+                    crate::core::messages::AiDirective::Retreat {
                         anchor: "pirate_haven".into(),
                     }
                 );
@@ -3986,7 +3986,7 @@ directive_loop   = false
             } => {
                 assert_eq!(
                     *directive,
-                    crate::messages::AiDirective::Reach {
+                    crate::core::messages::AiDirective::Reach {
                         anchor: "rendezvous".into(),
                     }
                 );
@@ -4586,7 +4586,7 @@ name = "kills"
             .filter(|(_, e)| {
                 e.delayed.iter().any(|d| {
                     matches!(&d.action, TriggerAction::GameOver { outcome, .. }
-                            if *outcome == Some(crate::balance::Outcome::Victory))
+                            if *outcome == Some(crate::core::balance::Outcome::Victory))
                 })
             })
             .collect();
@@ -4808,7 +4808,7 @@ name = "kills"
             } => {
                 assert_eq!(
                     *directive,
-                    crate::messages::AiDirective::Patrol {
+                    crate::core::messages::AiDirective::Patrol {
                         anchors: vec![
                             "starbase_patrol_north".into(),
                             "starbase_patrol_east".into(),
@@ -4854,7 +4854,7 @@ name = "kills"
             };
             assert_eq!(
                 **directive,
-                crate::messages::AiDirective::Destroy {
+                crate::core::messages::AiDirective::Destroy {
                     target: target.clone(),
                 }
             );

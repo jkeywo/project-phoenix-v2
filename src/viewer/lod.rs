@@ -2,7 +2,7 @@
 //!
 //! The viewer reads the same `[[lod]]` chain the game reads — out of the
 //! model's own rig sidecar (issue #914) — and picks a level exactly the way the
-//! game picks one, through [`crate::entity_config::select_lod`] with its
+//! game picks one, through [`crate::entities::config::select_lod`] with its
 //! hysteresis. That shared selection is the point of the tool: "does anything
 //! pop when I fly past" is a question about `select_lod`, and a viewer that
 //! swapped levels by its own rule would answer a different question.
@@ -22,10 +22,10 @@
 
 use bevy::prelude::*;
 
+use crate::entities::config::{select_lod, LodLevel};
 use crate::entities::glb_visual::{
     resolve_sidecar_rig, resolve_tier_parent_scale, tier_parent_scale_at,
 };
-use crate::entity_config::{select_lod, LodLevel};
 
 use super::subject::{BillboardLevel, ProceduralLevel, Showing, SubjectState};
 use super::{ViewerArgs, ViewerCamera};
@@ -322,7 +322,7 @@ fn showing_for(index: usize, level: &LodLevel, args: &ViewerArgs, ladder: &Ladde
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity_config::MeshShape;
+    use crate::entities::config::MeshShape;
 
     /// Drive `refresh_ladder` then `apply_lod_mode` over the real shipped
     /// sidecars, the way the viewer's schedule does.

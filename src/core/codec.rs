@@ -1,4 +1,4 @@
-use crate::messages::{ClientMessage, ServerMessage};
+use crate::core::messages::{ClientMessage, ServerMessage};
 
 pub trait MessageCodec {
     type Error;
@@ -39,7 +39,7 @@ impl MessageCodec for JsonCodec {
 
 /// Encode a `ViewscreenHudState` to JSON for the HTML viewscreen overlay.
 pub fn encode_hud_state(
-    s: &crate::messages::ViewscreenHudState,
+    s: &crate::core::messages::ViewscreenHudState,
 ) -> Result<String, serde_json::Error> {
     serde_json::to_string(s)
 }
@@ -79,7 +79,7 @@ pub fn decode_bridge_client_message(s: &str) -> Result<ClientMessage, serde_json
 
 /// Encode a `LobbyStatePayload` to JSON for the HTML lobby overlay.
 pub fn encode_lobby_state(
-    s: &crate::messages::LobbyStatePayload,
+    s: &crate::core::messages::LobbyStatePayload,
 ) -> Result<String, serde_json::Error> {
     serde_json::to_string(s)
 }
@@ -200,7 +200,7 @@ pub fn encode_delivery_refusal(refusal: &crate::delivery::DeliveryRefusal) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::*;
+    use crate::core::messages::*;
     use std::collections::{BTreeMap, HashMap};
     use strum::IntoEnumIterator;
 
@@ -261,8 +261,8 @@ mod tests {
         }
     }
 
-    fn empty_ship_stations() -> crate::stations_config::ShipStations {
-        crate::stations_config::ShipStations::default()
+    fn empty_ship_stations() -> crate::lobby::stations_config::ShipStations {
+        crate::lobby::stations_config::ShipStations::default()
     }
 
     fn sample_entity_snapshot() -> EntitySnapshot {
@@ -304,7 +304,7 @@ mod tests {
         let snapshot = EntitySnapshot {
             uuid: "550e8400-e29b-41d4-a716-446655440001".into(),
             tags: vec!["station".into()],
-            infrastructure: Some(crate::messages::InfrastructureSnapshot {
+            infrastructure: Some(crate::core::messages::InfrastructureSnapshot {
                 condition_fraction: 0.3,
                 flags: vec![
                     ("depot_transfer_capable".into(), false),
@@ -386,14 +386,14 @@ mod tests {
             (
                 ClientMessageDiscriminants::ControlSystem,
                 ClientMessage::ControlSystem {
-                    target: crate::system_registry::helm_thrust_system_id(),
+                    target: crate::ship::system_registry::helm_thrust_system_id(),
                     payload: SystemControlPayload::SetThrust { value: 0.75 },
                 },
             ),
             (
                 ClientMessageDiscriminants::ControlSystem,
                 ClientMessage::ControlSystem {
-                    target: crate::system_registry::helm_steering_system_id(),
+                    target: crate::ship::system_registry::helm_steering_system_id(),
                     payload: SystemControlPayload::SetSteering { value: -0.25 },
                 },
             ),
@@ -406,7 +406,7 @@ mod tests {
             (
                 ClientMessageDiscriminants::ReportStationEligibility,
                 ClientMessage::ReportStationEligibility {
-                    ineligible: vec![crate::messages::StationId("science".into())],
+                    ineligible: vec![crate::core::messages::StationId("science".into())],
                 },
             ),
             (
@@ -414,7 +414,7 @@ mod tests {
                 ClientMessage::SendCoordination {
                     // Coordination targets are station-id keys (issue #801) —
                     // console-level routing, not system admission.
-                    target: crate::system_registry::tactical_station_key(),
+                    target: crate::ship::system_registry::tactical_station_key(),
                     payload: CoordinationPayload::FrequencyHint { frequency: 0.33 },
                 },
             ),
@@ -437,7 +437,7 @@ mod tests {
             (
                 ClientMessageDiscriminants::StationVisited,
                 ClientMessage::StationVisited {
-                    station: crate::messages::StationId("comms".into()),
+                    station: crate::core::messages::StationId("comms".into()),
                 },
             ),
             // The two client settings-menu routes (issue #940). Both rows carry
@@ -449,7 +449,7 @@ mod tests {
             (
                 ClientMessageDiscriminants::ToggleDebugFlag,
                 ClientMessage::ToggleDebugFlag {
-                    flag: crate::messages::DebugFlag::Regions,
+                    flag: crate::core::messages::DebugFlag::Regions,
                 },
             ),
             #[cfg(not(phoenix_demo_build))]
@@ -821,7 +821,7 @@ mod tests {
                         subject: "Greetings".into(),
                         body: "Welcome to the sector.".into(),
                         body_params: Default::default(),
-                        responses: vec![crate::messages::CommsResponseView {
+                        responses: vec![crate::core::messages::CommsResponseView {
                             text: "Acknowledged".into(),
                             important: true,
                             available: true,
@@ -903,7 +903,7 @@ mod tests {
                         display_name: "Helm".into(),
                         current: 25.0,
                         max_hp: 25.0,
-                        tier: crate::damage::DamageTier::Operational,
+                        tier: crate::ship::damage::DamageTier::Operational,
                         debuff_magnitude: 0.0,
                     }],
                     aggregate_fraction: Some(0.75),
@@ -920,7 +920,7 @@ mod tests {
             (
                 ServerMessageDiscriminants::CoordinationPopup,
                 ServerMessage::CoordinationPopup {
-                    target: crate::system_registry::helm_station_key(),
+                    target: crate::ship::system_registry::helm_station_key(),
                     payload: CoordinationPayload::Alert {
                         title: "Shield down".into(),
                         body: "Fore shield offline".into(),
@@ -1023,9 +1023,9 @@ mod tests {
                 ServerMessage::DebugState {
                     // Mixed on/off so a pair whose flag and bool were swapped
                     // in the encoding would not still round-trip.
-                    flags: crate::messages::DebugFlag::ALL
+                    flags: crate::core::messages::DebugFlag::ALL
                         .iter()
-                        .map(|f| (*f, *f == crate::messages::DebugFlag::Modifiers))
+                        .map(|f| (*f, *f == crate::core::messages::DebugFlag::Modifiers))
                         .collect(),
                     // Mixed again, for the same reason: two adjacent bools that
                     // agree cannot catch a transposition.
@@ -1132,7 +1132,7 @@ mod tests {
         let ev = crate::console_bridge::AiChatterEvent {
             from_label: "chatter.sender.sensors".into(),
             to_label: "tactical".into(),
-            payload: crate::messages::CoordinationPayload::FrequencyHint { frequency: 0.5 },
+            payload: crate::core::messages::CoordinationPayload::FrequencyHint { frequency: 0.5 },
         };
         let encoded = encode_chatter(&ev).unwrap();
         assert_eq!(
@@ -1152,7 +1152,7 @@ mod tests {
         let ev = crate::console_bridge::AiChatterEvent {
             from_label: r#"AI "Sensors""#.into(),
             to_label: r"helm\aux".into(),
-            payload: crate::messages::CoordinationPayload::Advisory {
+            payload: crate::core::messages::CoordinationPayload::Advisory {
                 message: "line1\nline2".into(),
             },
         };
@@ -1239,7 +1239,7 @@ mod tests {
     /// off a projected copy.
     #[test]
     fn ai_directive_operate_variants_round_trip() {
-        use crate::messages::AiDirective;
+        use crate::core::messages::AiDirective;
         let directives = vec![
             AiDirective::None,
             AiDirective::Destroy {
@@ -1418,7 +1418,7 @@ mod tests {
     #[test]
     fn target_designation_coordination_payload_round_trips() {
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::tactical_station_key(),
+            target: crate::ship::system_registry::tactical_station_key(),
             payload: CoordinationPayload::TargetDesignation {
                 uuid: "asteroid-42".into(),
                 label: "Asteroid".into(),
@@ -1428,7 +1428,7 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::tactical_station_key(),
+            target: crate::ship::system_registry::tactical_station_key(),
             payload: CoordinationPayload::TargetDesignation {
                 uuid: "asteroid-42".into(),
                 label: "Asteroid".into(),
@@ -1445,18 +1445,18 @@ mod tests {
     #[test]
     fn arc_bearing_request_coordination_payload_round_trips() {
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::helm_station_key(),
+            target: crate::ship::system_registry::helm_station_key(),
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: "hostile-7".into(),
                 label: "Raider".into(),
-                family: crate::messages::WeaponFamily::Blasters,
+                family: crate::core::messages::WeaponFamily::Blasters,
                 arcs: vec![
-                    crate::messages::WeaponEmitterArc {
+                    crate::core::messages::WeaponEmitterArc {
                         facing_deg: 0.0,
                         arc_deg: 90.0,
                         range: 35.0,
                     },
-                    crate::messages::WeaponEmitterArc {
+                    crate::core::messages::WeaponEmitterArc {
                         facing_deg: 180.0,
                         arc_deg: 60.0,
                         range: 40.0,
@@ -1468,12 +1468,12 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::helm_station_key(),
+            target: crate::ship::system_registry::helm_station_key(),
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: "hostile-7".into(),
                 label: "Raider".into(),
-                family: crate::messages::WeaponFamily::Torpedoes,
-                arcs: vec![crate::messages::WeaponEmitterArc {
+                family: crate::core::messages::WeaponFamily::Torpedoes,
+                arcs: vec![crate::core::messages::WeaponEmitterArc {
                     facing_deg: 0.0,
                     arc_deg: 45.0,
                     range: 120.0,
@@ -1491,18 +1491,18 @@ mod tests {
     #[test]
     fn arc_bearing_withdraw_coordination_payload_round_trips() {
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::helm_station_key(),
+            target: crate::ship::system_registry::helm_station_key(),
             payload: CoordinationPayload::ArcBearingWithdraw {
-                family: crate::messages::WeaponFamily::Torpedoes,
+                family: crate::core::messages::WeaponFamily::Torpedoes,
             },
         };
         assert_client_roundtrip(&JsonCodec, send_msg.clone());
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::helm_station_key(),
+            target: crate::ship::system_registry::helm_station_key(),
             payload: CoordinationPayload::ArcBearingWithdraw {
-                family: crate::messages::WeaponFamily::Blasters,
+                family: crate::core::messages::WeaponFamily::Blasters,
             },
             sender_label: "Weapons".into(),
         };
@@ -1515,7 +1515,7 @@ mod tests {
     #[test]
     fn power_brownout_coordination_payload_round_trips() {
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::tactical_station_key(),
+            target: crate::ship::system_registry::tactical_station_key(),
             payload: CoordinationPayload::PowerBrownout {
                 group: "weapons".into(),
                 label: "WEAPONS".into(),
@@ -1526,7 +1526,7 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::tactical_station_key(),
+            target: crate::ship::system_registry::tactical_station_key(),
             payload: CoordinationPayload::PowerBrownout {
                 group: "weapons".into(),
                 label: "WEAPONS".into(),
@@ -1555,7 +1555,7 @@ mod tests {
     fn navigate_to_coordination_payload_round_trips() {
         let generation = u64::MAX - 1;
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::helm_station_key(),
+            target: crate::ship::system_registry::helm_station_key(),
             payload: CoordinationPayload::NavigateTo {
                 generation,
                 x: 300.0,
@@ -1566,7 +1566,7 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::helm_station_key(),
+            target: crate::ship::system_registry::helm_station_key(),
             payload: CoordinationPayload::NavigateTo {
                 generation,
                 x: 300.0,
@@ -1583,12 +1583,12 @@ mod tests {
     #[test]
     fn repair_request_coordination_payload_round_trips() {
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::repair_system_id(),
+            target: crate::ship::system_registry::repair_system_id(),
             payload: CoordinationPayload::RepairRequest {
-                system_id: crate::messages::SystemId("helm-radar".into()),
+                system_id: crate::core::messages::SystemId("helm-radar".into()),
                 station_id: "helm".into(),
                 station_label: "Helm".into(),
-                tier: crate::damage::DamageTier::Damaged,
+                tier: crate::ship::damage::DamageTier::Damaged,
                 deficit: Some(12.5),
             },
         };
@@ -1596,12 +1596,12 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::repair_system_id(),
+            target: crate::ship::system_registry::repair_system_id(),
             payload: CoordinationPayload::RepairRequest {
-                system_id: crate::messages::SystemId("helm-radar".into()),
+                system_id: crate::core::messages::SystemId("helm-radar".into()),
                 station_id: "helm".into(),
                 station_label: "Helm".into(),
-                tier: crate::damage::DamageTier::Disabled,
+                tier: crate::ship::damage::DamageTier::Disabled,
                 // The wire form of a coarsened popup: tier crosses, exact
                 // deficit withheld (issue #737).
                 deficit: None,
@@ -1617,7 +1617,7 @@ mod tests {
     #[test]
     fn threat_bearing_coordination_payload_round_trips() {
         let send_msg = ClientMessage::SendCoordination {
-            target: crate::system_registry::shields_system_id(),
+            target: crate::ship::system_registry::shields_system_id(),
             payload: CoordinationPayload::ThreatBearing {
                 bearing_rad: 0.698,
                 label: "Hostile closing".into(),
@@ -1627,7 +1627,7 @@ mod tests {
         assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::shields_system_id(),
+            target: crate::ship::system_registry::shields_system_id(),
             payload: CoordinationPayload::ThreatBearing {
                 bearing_rad: 2.094,
                 label: "Incoming torpedo".into(),
@@ -1644,9 +1644,9 @@ mod tests {
     #[test]
     fn intent_advisory_coordination_payload_round_trips() {
         let popup_msg = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::tactical_station_key(),
+            target: crate::ship::system_registry::tactical_station_key(),
             payload: CoordinationPayload::IntentAdvisory {
-                kind: crate::messages::IntentKind::TargetSwitched,
+                kind: crate::core::messages::IntentKind::TargetSwitched,
                 subject: Some("Harrow Raider".into()),
                 generation: 4,
             },
@@ -1657,9 +1657,9 @@ mod tests {
 
         // The subject-less kinds, which serialise without the optional field.
         let bare = ServerMessage::CoordinationPopup {
-            target: crate::system_registry::helm_station_key(),
+            target: crate::ship::system_registry::helm_station_key(),
             payload: CoordinationPayload::IntentAdvisory {
-                kind: crate::messages::IntentKind::BreakingOff,
+                kind: crate::core::messages::IntentKind::BreakingOff,
                 subject: None,
                 generation: 5,
             },
@@ -1690,7 +1690,7 @@ mod tests {
     fn blaster_fired_defaults_visual_scale_when_absent() {
         // Simulate an older wire message that has no visual_scale field.
         let json = r#"{"type":"BlasterFired","data":{"bank":"fore","source_uuid":"11111111-1111-1111-1111-111111111111","projectile_id":"proj-uuid-abc","x":5.0,"z":-10.0,"heading":1.57}}"#;
-        let codec = crate::codec::JsonCodec;
+        let codec = crate::core::codec::JsonCodec;
         let decoded: ServerMessage = codec.decode_server(json).unwrap();
         if let ServerMessage::BlasterFired { visual_scale, .. } = decoded {
             assert!(
@@ -1722,7 +1722,7 @@ mod tests {
                     mandatory: true,
                     status: ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 }],
             })
             .unwrap();
@@ -1737,7 +1737,7 @@ mod tests {
     /// The same for a comms body, which carries its table under `body_params`.
     #[test]
     fn a_comms_message_with_no_params_carries_no_params_key() {
-        let msg = crate::messages::CommsMessage::injected(
+        let msg = crate::core::messages::CommsMessage::injected(
             "m1".into(),
             "u1".into(),
             "entity.skyway_control.name".into(),
@@ -1775,7 +1775,7 @@ mod tests {
                     mandatory: true,
                     status: ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 }],
             })
             .unwrap();
@@ -1901,8 +1901,8 @@ mod tests {
     /// that disappeared on `None` would make "the seek let go" unroutable.
     #[test]
     fn seeking_blackboards_always_carry_a_host_station_key() {
-        let comms = serde_json::to_value(crate::messages::SystemBlackboard::Comms(
-            crate::messages::CommsBlackboard::default(),
+        let comms = serde_json::to_value(crate::core::messages::SystemBlackboard::Comms(
+            crate::core::messages::CommsBlackboard::default(),
         ))
         .unwrap();
         // Adjacently tagged (`{"kind":…,"data":…}`) — the shape
@@ -1917,8 +1917,8 @@ mod tests {
         );
         assert!(comms["data"]["host_station"].is_null());
 
-        let nav = serde_json::to_value(crate::messages::SystemBlackboard::Navigation(
-            crate::messages::NavigationBlackboard {
+        let nav = serde_json::to_value(crate::core::messages::SystemBlackboard::Navigation(
+            crate::core::messages::NavigationBlackboard {
                 host_station: Some(StationId("engineering".into())),
                 ..Default::default()
             },
@@ -1932,7 +1932,7 @@ mod tests {
     fn seeking_blackboards_default_their_host_when_a_peer_omits_it() {
         // The pre-#984 shape: every other field, no `host_station`.
         let legacy = r#"{"messages":[],"objectives":[],"contacts":[]}"#;
-        let bb: crate::messages::CommsBlackboard = serde_json::from_str(legacy).unwrap();
+        let bb: crate::core::messages::CommsBlackboard = serde_json::from_str(legacy).unwrap();
         assert_eq!(bb.host_station, None);
     }
 
@@ -1956,7 +1956,7 @@ mod tests {
     #[test]
     fn set_torpedo_volley_target_control_system_round_trips() {
         let msg = ClientMessage::ControlSystem {
-            target: crate::system_registry::torpedo_tube_system_id("fore_port")
+            target: crate::ship::system_registry::torpedo_tube_system_id("fore_port")
                 .expect("fore_port resolves"),
             payload: SystemControlPayload::SetTorpedoVolleyTarget { count: 3 },
         };
@@ -2210,7 +2210,7 @@ mod tests {
     /// absent-field noise.
     #[test]
     fn system_blackboard_dock_round_trips_and_is_additive() {
-        use crate::messages::{DockBlackboard, SystemBlackboard};
+        use crate::core::messages::{DockBlackboard, SystemBlackboard};
         // A docked control carries the relationship the umbilical (#1160) reads.
         let docked = SystemBlackboard::Dock(DockBlackboard {
             range: 200.0,
@@ -2279,7 +2279,7 @@ mod tests {
     /// this existed.
     #[test]
     fn repair_blackboard_external_dispatch_fields_round_trip_and_are_additive() {
-        use crate::messages::RepairBlackboard;
+        use crate::core::messages::RepairBlackboard;
 
         let dispatching = SystemBlackboard::Repair(RepairBlackboard {
             external_dispatch_range: Some(800.0),
@@ -2346,7 +2346,7 @@ mod tests {
     /// no absent-field noise.
     #[test]
     fn system_blackboard_umbilical_round_trips_and_is_additive() {
-        use crate::messages::{SystemBlackboard, UmbilicalBlackboard};
+        use crate::core::messages::{SystemBlackboard, UmbilicalBlackboard};
 
         // A running umbilical carries both ends' levels the console shows.
         let running = SystemBlackboard::Umbilical(UmbilicalBlackboard {
@@ -2393,7 +2393,7 @@ mod tests {
     /// absent-field noise.
     #[test]
     fn system_blackboard_tractor_round_trips_and_is_additive() {
-        use crate::messages::TractorBlackboard;
+        use crate::core::messages::TractorBlackboard;
 
         let held = SystemBlackboard::Tractor(TractorBlackboard {
             range: 600.0,
@@ -2458,7 +2458,7 @@ mod tests {
     /// test.
     #[test]
     fn system_blackboard_scan_round_trips_and_carries_no_field_for_authored_prose() {
-        use crate::messages::{ScanBlackboard, ScanReadingSnapshot};
+        use crate::core::messages::{ScanBlackboard, ScanReadingSnapshot};
         use std::collections::BTreeSet;
 
         let reading = ScanReadingSnapshot {
@@ -2551,7 +2551,7 @@ mod tests {
     /// it: the assertion is over the type's whole surface.
     #[test]
     fn system_blackboard_dossiers_round_trips_and_carries_no_field_for_a_secret() {
-        use crate::messages::{
+        use crate::core::messages::{
             DossierBlackboard, DossierEvidenceSnapshot, DossierFactSnapshot, DossierSnapshot,
             DossierValue,
         };
@@ -2704,7 +2704,7 @@ mod tests {
     /// the read-back is not, because it is reported in every build.
     #[test]
     fn client_settings_menu_wire_shapes_are_pinned() {
-        use crate::messages::DebugFlag;
+        use crate::core::messages::DebugFlag;
 
         #[cfg(not(phoenix_demo_build))]
         {
@@ -2819,7 +2819,7 @@ mod tests {
     /// `TorpedoTubeState` with non-default volley fields round-trips (issue #632).
     #[test]
     fn torpedo_tube_state_volley_fields_round_trip() {
-        use crate::messages::{PhaserMode, TorpedoTubeState};
+        use crate::core::messages::{PhaserMode, TorpedoTubeState};
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: None,
             target_name: None,
@@ -2854,7 +2854,7 @@ mod tests {
     /// `TorpedoTubeState` patterned-attack fields round-trip (issue #766).
     #[test]
     fn torpedo_tube_state_pattern_fields_round_trip() {
-        use crate::messages::{PhaserMode, TorpedoTubeState, WeaponReadiness};
+        use crate::core::messages::{PhaserMode, TorpedoTubeState, WeaponReadiness};
         let msg = ServerMessage::WeaponsUpdate {
             target_uuid: None,
             target_name: None,
@@ -2890,7 +2890,7 @@ mod tests {
     /// reason + range/arc intact, across all three families in one message.
     #[test]
     fn weapon_readiness_contract_round_trips_for_all_families() {
-        use crate::messages::{
+        use crate::core::messages::{
             BlasterBankState, PhaserBankState, PhaserMode, TorpedoTubeState, WeaponBlockReason,
             WeaponReadiness,
         };
@@ -3165,7 +3165,7 @@ mod tests {
         ];
         for payload in payloads {
             let msg = ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
+                target: crate::ship::system_registry::comms_system_id(),
                 payload,
             };
             assert_client_roundtrip(&JsonCodec, msg.clone());
@@ -3175,7 +3175,7 @@ mod tests {
         // Pin one wire shape exactly — action-map.js `hail` depends on this.
         let encoded = JsonCodec
             .encode_client(&ClientMessage::ControlSystem {
-                target: crate::system_registry::comms_system_id(),
+                target: crate::ship::system_registry::comms_system_id(),
                 payload: SystemControlPayload::Hail {
                     target_uuid: "starbase-1".into(),
                 },
@@ -3206,7 +3206,7 @@ mod tests {
             SystemControlPayload::ClearNavigationWaypoint,
         ] {
             let msg = ClientMessage::ControlSystem {
-                target: crate::system_registry::navigation_system_id(),
+                target: crate::ship::system_registry::navigation_system_id(),
                 payload,
             };
             assert_client_roundtrip(&JsonCodec, msg.clone());
@@ -3217,7 +3217,7 @@ mod tests {
         // `clear_navigation_waypoint` depends on this.
         let encoded = JsonCodec
             .encode_client(&ClientMessage::ControlSystem {
-                target: crate::system_registry::navigation_system_id(),
+                target: crate::ship::system_registry::navigation_system_id(),
                 payload: SystemControlPayload::ClearNavigationWaypoint,
             })
             .unwrap();
@@ -3245,7 +3245,7 @@ mod tests {
             CivilianOrder::dock_at("world.entity.skyhook_depot.name"),
         ] {
             let msg = ClientMessage::ControlSystem {
-                target: crate::system_registry::navigation_system_id(),
+                target: crate::ship::system_registry::navigation_system_id(),
                 payload: SystemControlPayload::OrderCivilian {
                     target: "world.entity.hauler_kestrel.name".into(),
                     order,
@@ -3258,7 +3258,7 @@ mod tests {
         // Pin the wire shape the nav console's order controls send.
         let encoded = JsonCodec
             .encode_client(&ClientMessage::ControlSystem {
-                target: crate::system_registry::navigation_system_id(),
+                target: crate::ship::system_registry::navigation_system_id(),
                 payload: SystemControlPayload::OrderCivilian {
                     target: "hauler".into(),
                     order: CivilianOrder::divert_to_route("depot_run"),
@@ -3279,7 +3279,7 @@ mod tests {
     fn vertical_thrust_control_system_payload_round_trips() {
         for vertical in [-1.0_f32, -0.25, 0.0, 0.6, 1.0] {
             let msg = ClientMessage::ControlSystem {
-                target: crate::system_registry::vertical_thrust_system_id(),
+                target: crate::ship::system_registry::vertical_thrust_system_id(),
                 payload: SystemControlPayload::VerticalThrustInput { vertical },
             };
             assert_client_roundtrip(&JsonCodec, msg.clone());
@@ -3289,7 +3289,7 @@ mod tests {
         // Pin the wire shape.
         let encoded = JsonCodec
             .encode_client(&ClientMessage::ControlSystem {
-                target: crate::system_registry::vertical_thrust_system_id(),
+                target: crate::ship::system_registry::vertical_thrust_system_id(),
                 payload: SystemControlPayload::VerticalThrustInput { vertical: 0.5 },
             })
             .unwrap();
@@ -3352,11 +3352,11 @@ mod tests {
     #[test]
     fn flag_kind_round_trips() {
         for flag in &[
-            crate::messages::FlagKind::CommsJammed,
-            crate::messages::FlagKind::SensorBlind,
+            crate::core::messages::FlagKind::CommsJammed,
+            crate::core::messages::FlagKind::SensorBlind,
         ] {
             let json = serde_json::to_string(flag).unwrap();
-            let decoded: crate::messages::FlagKind = serde_json::from_str(&json).unwrap();
+            let decoded: crate::core::messages::FlagKind = serde_json::from_str(&json).unwrap();
             assert_eq!(*flag, decoded);
         }
     }
@@ -3552,7 +3552,7 @@ mod tests {
         // A pre-#761 wire payload carries responses as bare `{ "text": ... }`
         // objects. `important` must default to false and `available` to true.
         let json = r#"{"text":"Acknowledge"}"#;
-        let view: crate::messages::CommsResponseView = serde_json::from_str(json).unwrap();
+        let view: crate::core::messages::CommsResponseView = serde_json::from_str(json).unwrap();
         assert_eq!(view.text, "Acknowledge");
         assert!(!view.important, "important must default to false");
         assert!(view.available, "available must default to true");
@@ -3560,13 +3560,13 @@ mod tests {
 
     #[test]
     fn comms_response_view_round_trips_important_and_available() {
-        let view = crate::messages::CommsResponseView {
+        let view = crate::core::messages::CommsResponseView {
             text: "Fire everything".into(),
             important: true,
             available: false,
         };
         let json = serde_json::to_string(&view).unwrap();
-        let back: crate::messages::CommsResponseView = serde_json::from_str(&json).unwrap();
+        let back: crate::core::messages::CommsResponseView = serde_json::from_str(&json).unwrap();
         assert_eq!(view, back);
     }
 
@@ -3689,7 +3689,7 @@ mod tests {
     /// on the wire when it carries sectors.
     #[test]
     fn system_blackboard_helm_hostile_weapon_arcs_round_trip() {
-        use crate::messages::{HostileWeaponArc, HostileWeaponArcContact};
+        use crate::core::messages::{HostileWeaponArc, HostileWeaponArcContact};
         let bb = SystemBlackboard::Helm(HelmBlackboard {
             hostile_weapon_arcs: vec![HostileWeaponArcContact {
                 uuid: "1f6b4c8e-0000-4000-8000-000000000001".into(),
@@ -3748,7 +3748,7 @@ mod tests {
     /// to `None` rather than failing — pinned below.
     #[test]
     fn system_blackboard_repair_round_trips() {
-        fn hull(id: &str, current: f32, tier: crate::damage::DamageTier) -> SystemHullStatus {
+        fn hull(id: &str, current: f32, tier: crate::ship::damage::DamageTier) -> SystemHullStatus {
             SystemHullStatus {
                 system_id: SystemId(id.into()),
                 display_name: id.into(),
@@ -3763,21 +3763,25 @@ mod tests {
             teams: vec![],
             travel_duration_secs: 5.0,
             system_hull: vec![
-                hull("core", 40.0, crate::damage::DamageTier::Damaged),
-                hull("repair", 100.0, crate::damage::DamageTier::Operational),
+                hull("core", 40.0, crate::ship::damage::DamageTier::Damaged),
+                hull(
+                    "repair",
+                    100.0,
+                    crate::ship::damage::DamageTier::Operational,
+                ),
             ],
             damageable_systems: vec![SystemId("core".into()), SystemId("helm-radar".into())],
             queue_depth: vec![
                 QueueEntryPreview {
                     station_id: "core".into(),
                     station_label: "Core".into(),
-                    tier: crate::damage::DamageTier::Damaged,
+                    tier: crate::ship::damage::DamageTier::Damaged,
                     deficit: 60.0,
                 },
                 QueueEntryPreview {
                     station_id: "helm".into(),
                     station_label: "Helm".into(),
-                    tier: crate::damage::DamageTier::Disabled,
+                    tier: crate::ship::damage::DamageTier::Disabled,
                     deficit: 90.0,
                 },
             ],
@@ -4054,7 +4058,7 @@ mod tests {
             display_name: "Phaser Bank (Fore)".into(),
             current: 42.5,
             max_hp: 100.0,
-            tier: crate::damage::DamageTier::Damaged,
+            tier: crate::ship::damage::DamageTier::Damaged,
             debuff_magnitude: 0.15,
         };
         let json = serde_json::to_string(&status).unwrap();

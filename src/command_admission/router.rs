@@ -29,7 +29,7 @@
 
 use bevy::prelude::*;
 
-use crate::messages::AdmittedCommands;
+use crate::core::messages::AdmittedCommands;
 
 /// A matcher over `SystemId` strings identifying one registered consumer's
 /// target family. Keying by *kind* or *prefix* (never a concrete dynamic id)
@@ -180,7 +180,7 @@ pub fn warn_unrouted_admitted_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::{AdmittedCommand, SystemControlPayload, SystemId};
+    use crate::core::messages::{AdmittedCommand, SystemControlPayload, SystemId};
 
     fn admitted(targets: &[&str]) -> AdmittedCommands {
         AdmittedCommands(
@@ -245,15 +245,15 @@ mod tests {
     fn full_consumer_registry_app() -> App {
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin)
-            .add_plugins(crate::captain_plugin::CaptainPlugin)
+            .add_plugins(crate::console::captain::server::CaptainPlugin)
             .add_plugins(crate::comms::CommsWorldPlugin)
-            .add_plugins(crate::navigation_plugin::NavigationPlugin)
-            .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
-            .add_plugins(crate::sensors_plugin::ShipSensorsPlugin)
-            .add_plugins(crate::power_plugin::ShipPowerPlugin)
+            .add_plugins(crate::console::navigation::NavigationPlugin)
+            .add_plugins(crate::ship::shields::ShipShieldsPlugin)
+            .add_plugins(crate::ship::sensors::ShipSensorsPlugin)
+            .add_plugins(crate::ship::power::ShipPowerPlugin)
             .add_plugins(crate::ship_plugin::ShipPlugin)
-            .add_plugins(crate::weapons_plugin::WeaponsPlugin)
-            .add_plugins(crate::repair_plugin::RepairPlugin);
+            .add_plugins(crate::console::weapons::WeaponsPlugin)
+            .add_plugins(crate::console::repair::server::RepairPlugin);
         app
     }
 
@@ -264,7 +264,7 @@ mod tests {
     /// landed in #824–#832 must have exactly one registration here.
     #[test]
     fn every_admitted_consumer_kind_is_registered() {
-        use crate::system_registry as sr;
+        use crate::ship::system_registry as sr;
         let app = full_consumer_registry_app();
         let reg = app.world().resource::<AdmittedConsumerRegistry>();
 
@@ -313,10 +313,10 @@ mod tests {
     fn fire_weapon_ids_are_registered_as_admitted_consumers() {
         let app = full_consumer_registry_app();
         let reg = app.world().resource::<AdmittedConsumerRegistry>();
-        assert!(reg.is_routed(crate::system_registry::PHASER_FORE_SYSTEM_ID));
-        assert!(reg.is_routed(crate::system_registry::PHASER_AFT_SYSTEM_ID));
-        assert!(reg.is_routed(crate::system_registry::TORPEDO_TUBE_FORE_PORT_SYSTEM_ID));
-        assert!(reg.is_routed(crate::system_registry::TORPEDO_TUBE_AFT_SYSTEM_ID));
+        assert!(reg.is_routed(crate::ship::system_registry::PHASER_FORE_SYSTEM_ID));
+        assert!(reg.is_routed(crate::ship::system_registry::PHASER_AFT_SYSTEM_ID));
+        assert!(reg.is_routed(crate::ship::system_registry::TORPEDO_TUBE_FORE_PORT_SYSTEM_ID));
+        assert!(reg.is_routed(crate::ship::system_registry::TORPEDO_TUBE_AFT_SYSTEM_ID));
         assert!(!reg.is_routed("no-such-system"));
     }
 
@@ -328,7 +328,7 @@ mod tests {
         let app = full_consumer_registry_app();
         let reg = app.world().resource::<AdmittedConsumerRegistry>();
         assert!(
-            reg.is_routed(crate::system_registry::TORPEDO_TUBE_FORE_PORT_SYSTEM_ID),
+            reg.is_routed(crate::ship::system_registry::TORPEDO_TUBE_FORE_PORT_SYSTEM_ID),
             "torpedo tube ids must be routed — the volley order travels admitted"
         );
         // The prefix matcher must cover every authored per-hull tube id, not

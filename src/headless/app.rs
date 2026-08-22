@@ -15,16 +15,16 @@
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 
-use crate::asteroid_lifecycle::AsteroidLifecyclePlugin;
+use crate::asteroids::lifecycle::AsteroidLifecyclePlugin;
 use crate::boot::{BootError, BootPlan, BootProfile, WorldIngest};
+use crate::core::messages::{GamePhase, ServerMessage};
 use crate::entities::ai_declaration_manifest;
-use crate::entity_config::EntityConfig;
-use crate::entity_loader::TemplateLoader;
+use crate::entities::config::EntityConfig;
+use crate::entities::loader::TemplateLoader;
+use crate::entities::marker_validate::MarkerFinding;
 use crate::lobby::{LobbyOutbox, LobbyPlugin, SelectedShipResource, Target};
 use crate::logging::LoggingPlugin;
-use crate::marker_validate::MarkerFinding;
-use crate::messages::{GamePhase, ServerMessage};
-use crate::modifier_coordination::ModifierCoordinationPlugin;
+use crate::modifiers::coordination::ModifierCoordinationPlugin;
 use crate::perf::tick::TickSampler;
 use crate::server_app::{
     add_simulation_plugins_with, RegistrationOrder, RegistrationProbes, SimPluginOptions,
@@ -198,7 +198,7 @@ fn preload_entity_templates(
         // would silently drop content the author explicitly assembled. A plain
         // TOML parse error keeps the historical skip-with-warning, so one bad
         // cosmetic asteroid still cannot stop a combat test.
-        let resolved = match crate::entity_includes::resolve_from_disk(&key) {
+        let resolved = match crate::entities::include_resolve::resolve_from_disk(&key) {
             Ok(resolved) => resolved,
             Err(e) => return Err(BuildError(format!("template composition failed: {e}"))),
         };
@@ -216,7 +216,7 @@ fn preload_entity_templates(
                         .lines
                         .extend(ai_declaration_manifest::manifest_lines(&stem, &cfg));
                 }
-                crate::config_cache::insert_native_config(key, cfg);
+                crate::entities::config_cache::insert_native_config(key, cfg);
                 loaded += 1;
             }
             Err(e) if composed => {
@@ -277,12 +277,12 @@ fn validate_template_markers(key: &str, toml: &str, cfg: &EntityConfig) -> Vec<M
     let mut findings = Vec::new();
     let rig = cfg.mesh.as_ref().and_then(|mesh| {
         let model = mesh.model.as_deref()?;
-        let path = crate::model_rig::sidecar_path(model, mesh.variant.as_deref());
+        let path = crate::entities::model_rig::sidecar_path(model, mesh.variant.as_deref());
         let sidecar = std::fs::read_to_string(&path).unwrap_or_default();
-        findings.extend(crate::marker_validate::duplicate_marker_findings(
+        findings.extend(crate::entities::marker_validate::duplicate_marker_findings(
             &path, &sidecar,
         ));
-        match crate::model_rig::ModelRig::from_toml(&sidecar) {
+        match crate::entities::model_rig::ModelRig::from_toml(&sidecar) {
             Ok(rig) => Some(rig),
             Err(e) => {
                 warn!(target: "config", "rig sidecar {path} failed to parse: {e}");
@@ -290,7 +290,7 @@ fn validate_template_markers(key: &str, toml: &str, cfg: &EntityConfig) -> Vec<M
             }
         }
     });
-    findings.extend(crate::marker_validate::validate_entity_markers(
+    findings.extend(crate::entities::marker_validate::validate_entity_markers(
         key,
         toml,
         cfg,
@@ -388,7 +388,7 @@ pub fn build_headless_app_with(
     //
     // Errors abort now; warnings are reported below, once boot's `LogPlugin` has
     // installed a subscriber (before it, every `tracing` line goes nowhere).
-    if crate::marker_validate::has_error(&marker_findings) {
+    if crate::entities::marker_validate::has_error(&marker_findings) {
         let errors: Vec<String> = marker_findings
             .iter()
             .filter(|f| f.is_error())
@@ -453,7 +453,7 @@ pub fn build_headless_app_with(
         },
         world_path: args.world_path.clone(),
         reader: Box::new(crate::world::load::FsReader),
-        script_resolver: Box::new(crate::config_cache::production_script_resolver()),
+        script_resolver: Box::new(crate::entities::config_cache::production_script_resolver()),
         // `--deterministic`/`--seed` pins the scheduler to one thread; the seeded
         // `SimRng` inserted below is the other half. The contract is same binary,
         // same machine.
@@ -508,7 +508,7 @@ pub fn build_headless_app_with(
     // then resolves any `includes` the hull declares (issue #869) so the native
     // `PendingShipConfig` matches the composed hull the cache holds.
     let _ = read_toml(&ship_path, "ship")?;
-    let ship_entity_config = crate::entity_includes::load_entity_config(&ship_path)
+    let ship_entity_config = crate::entities::include_resolve::load_entity_config(&ship_path)
         .map_err(|e| BuildError(format!("ship {ship_path:?} failed to parse: {e}")))?;
     // Issue #935: the player's own hull is authored content too, and it is not
     // necessarily among `world_config.entities` (a duel side is chosen by
@@ -520,7 +520,7 @@ pub fn build_headless_app_with(
     // owned the first one. The ledger fold is path-sorted and order-independent,
     // so the frozen digest is byte-identical whether the hull rode in on boot's
     // eager walk or here.
-    let _ = crate::entity_loader::FsTemplateLoader.load_template(&ship_path);
+    let _ = crate::entities::loader::FsTemplateLoader.load_template(&ship_path);
     crate::content_ledger::freeze();
     let ship_config = ship_entity_config
         .ship_config

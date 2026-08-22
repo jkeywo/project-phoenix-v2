@@ -1002,7 +1002,7 @@ mod tests {
     fn parse(rel: &str) -> EntityConfig {
         let path = crate_root().join(rel);
         let key = path.to_string_lossy().replace('\\', "/");
-        crate::entity_includes::load_entity_config(&key)
+        crate::entities::include_resolve::load_entity_config(&key)
             .unwrap_or_else(|e| panic!("{rel} must parse: {e}"))
     }
 
@@ -1017,7 +1017,7 @@ mod tests {
     fn shipped_toml(rel: &str) -> String {
         let path = crate_root().join(rel);
         let key = path.to_string_lossy().replace('\\', "/");
-        crate::entity_includes::resolve_from_disk(&key)
+        crate::entities::include_resolve::resolve_from_disk(&key)
             .unwrap_or_else(|e| panic!("{rel} must compose: {e}"))
             .toml
     }
@@ -1303,7 +1303,7 @@ base_priority = 40.0
         app.add_plugins(bevy::time::TimePlugin);
         let entity = {
             let mut commands = app.world_mut().commands();
-            crate::entity_spawner::spawn_entity(
+            crate::entities::spawner::spawn_entity(
                 &mut commands,
                 &config,
                 Vec3::ZERO,
@@ -1319,8 +1319,8 @@ base_priority = 40.0
     /// [`crate::ship::helm_ai::FineSystemAiPolicies`] map (issue #1209); `None`
     /// for every non-helm kind. The six axes share one component now, so the
     /// cross-check resolves the entry by id rather than reading six newtypes.
-    fn helm_axis_system_id(key: FineSystemKey) -> Option<crate::messages::SystemId> {
-        use crate::system_registry as sr;
+    fn helm_axis_system_id(key: FineSystemKey) -> Option<crate::core::messages::SystemId> {
+        use crate::ship::system_registry as sr;
         Some(match key {
             FineSystemKey::Engines => sr::helm_thrust_system_id(),
             FineSystemKey::Steering => sr::helm_steering_system_id(),
@@ -1343,7 +1343,7 @@ base_priority = 40.0
         };
         match slot.kind.key {
             FineSystemKey::Captain => w
-                .get::<crate::captain_plugin::CaptainAiPolicy>(e)
+                .get::<crate::console::captain::server::CaptainAiPolicy>(e)
                 .map(|c| Attached::Policy(c.0.clone())),
             FineSystemKey::CommsResponse => w
                 .get::<crate::console::comms::server::CommsResponseAiPolicy>(e)
@@ -1367,28 +1367,28 @@ base_priority = 40.0
                 .get::<crate::ship::shields::ShieldsFocusAiPolicy>(e)
                 .map(|c| Attached::Policy(c.0.clone())),
             FineSystemKey::Power => w
-                .get::<crate::power_plugin::PowerAiPolicy>(e)
+                .get::<crate::ship::power::PowerAiPolicy>(e)
                 .map(|c| Attached::Policy(c.0.clone())),
             FineSystemKey::TorpedoMagazine => w
-                .get::<crate::weapons_plugin::TorpedoMagazineAiPolicy>(e)
+                .get::<crate::console::weapons::TorpedoMagazineAiPolicy>(e)
                 .map(|c| Attached::Policy(c.0.clone())),
             FineSystemKey::WeaponsDoctrine => w
-                .get::<crate::weapons_plugin::WeaponsDoctrineAiPolicy>(e)
+                .get::<crate::console::weapons::WeaponsDoctrineAiPolicy>(e)
                 .map(|c| Attached::Policy(c.0.clone())),
             FineSystemKey::PhaserBank => map(w
-                .get::<crate::weapons_plugin::PhaserBankAiPolicies>(e)
+                .get::<crate::console::weapons::PhaserBankAiPolicies>(e)
                 .map(|c| &c.0)),
             FineSystemKey::BlasterBank => map(w
-                .get::<crate::weapons_plugin::BlasterBankAiPolicies>(e)
+                .get::<crate::console::weapons::BlasterBankAiPolicies>(e)
                 .map(|c| &c.0)),
             FineSystemKey::TorpedoTube => map(w
-                .get::<crate::weapons_plugin::TorpedoTubeAiPolicies>(e)
+                .get::<crate::console::weapons::TorpedoTubeAiPolicies>(e)
                 .map(|c| &c.0)),
             FineSystemKey::SensorsSelector => w
                 .get::<crate::ship::sensors::SensorsTargetSelector>(e)
                 .map(|c| Attached::Selector(c.selector.clone())),
             FineSystemKey::TacticalSelector => w
-                .get::<crate::weapons_plugin::TacticalTargetSelector>(e)
+                .get::<crate::console::weapons::TacticalTargetSelector>(e)
                 .map(|c| Attached::Selector(c.selector.clone())),
             FineSystemKey::NavigationSelector => w
                 .get::<crate::console::navigation::NavigationTargetSelector>(e)
@@ -1427,9 +1427,9 @@ base_priority = 40.0
     fn attached_count(w: &World, e: Entity, key: FineSystemKey) -> usize {
         let one = |present: bool| usize::from(present);
         match key {
-            FineSystemKey::Captain => {
-                one(w.get::<crate::captain_plugin::CaptainAiPolicy>(e).is_some())
-            }
+            FineSystemKey::Captain => one(w
+                .get::<crate::console::captain::server::CaptainAiPolicy>(e)
+                .is_some()),
             FineSystemKey::CommsResponse => one(w
                 .get::<crate::console::comms::server::CommsResponseAiPolicy>(e)
                 .is_some()),
@@ -1451,18 +1451,18 @@ base_priority = 40.0
             FineSystemKey::ShieldsFocus => one(w
                 .get::<crate::ship::shields::ShieldsFocusAiPolicy>(e)
                 .is_some()),
-            FineSystemKey::Power => one(w.get::<crate::power_plugin::PowerAiPolicy>(e).is_some()),
+            FineSystemKey::Power => one(w.get::<crate::ship::power::PowerAiPolicy>(e).is_some()),
             FineSystemKey::TorpedoMagazine => one(w
-                .get::<crate::weapons_plugin::TorpedoMagazineAiPolicy>(e)
+                .get::<crate::console::weapons::TorpedoMagazineAiPolicy>(e)
                 .is_some()),
             FineSystemKey::WeaponsDoctrine => one(w
-                .get::<crate::weapons_plugin::WeaponsDoctrineAiPolicy>(e)
+                .get::<crate::console::weapons::WeaponsDoctrineAiPolicy>(e)
                 .is_some()),
             FineSystemKey::SensorsSelector => one(w
                 .get::<crate::ship::sensors::SensorsTargetSelector>(e)
                 .is_some()),
             FineSystemKey::TacticalSelector => one(w
-                .get::<crate::weapons_plugin::TacticalTargetSelector>(e)
+                .get::<crate::console::weapons::TacticalTargetSelector>(e)
                 .is_some()),
             FineSystemKey::NavigationSelector => one(w
                 .get::<crate::console::navigation::NavigationTargetSelector>(e)
@@ -1474,13 +1474,13 @@ base_priority = 40.0
                 .get::<crate::console::comms::server::CommsTargetSelector>(e)
                 .is_some()),
             FineSystemKey::PhaserBank => w
-                .get::<crate::weapons_plugin::PhaserBankAiPolicies>(e)
+                .get::<crate::console::weapons::PhaserBankAiPolicies>(e)
                 .map_or(0, |c| c.0.len()),
             FineSystemKey::BlasterBank => w
-                .get::<crate::weapons_plugin::BlasterBankAiPolicies>(e)
+                .get::<crate::console::weapons::BlasterBankAiPolicies>(e)
                 .map_or(0, |c| c.0.len()),
             FineSystemKey::TorpedoTube => w
-                .get::<crate::weapons_plugin::TorpedoTubeAiPolicies>(e)
+                .get::<crate::console::weapons::TorpedoTubeAiPolicies>(e)
                 .map_or(0, |c| c.0.len()),
             // Operate kinds (issue #1162): no per-hull policy component, so zero
             // attached. Never reached (absent from `FINE_SYSTEM_KINDS`).

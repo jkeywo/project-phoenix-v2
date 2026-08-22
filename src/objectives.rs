@@ -18,7 +18,7 @@
 //   - `ObjectiveManager::is_dirty` / `ObjectiveManager::mark_clean` — change tracking
 //     so callers can push `ObjectiveSummary` only on change
 
-use crate::messages::{
+use crate::core::messages::{
     AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective, StationId,
     SystemAffinity,
 };

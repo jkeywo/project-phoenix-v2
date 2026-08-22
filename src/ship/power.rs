@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
-use crate::messages::{
+use crate::core::messages::{
     CoordinationPayload, PowerBatteryBlackboard, PowerBlackboard, PowerGroupEntry, PowerGroupId,
     PowerReactorBlackboard, ServerMessage, SystemBlackboard, SystemId,
 };
@@ -243,9 +243,9 @@ impl Plugin for ShipPowerPlugin {
         // Admitted-command consumer (issue #833): `handle_power_messages` reads
         // the `power-reactor` system's admitted commands.
         app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::POWER_REACTOR_SYSTEM_ID,
+            crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID,
         ));
-        app.init_resource::<crate::messages::InterSystemQueue>()
+        app.init_resource::<crate::core::messages::InterSystemQueue>()
             .add_message::<CoordinationEnqueue>();
         app.insert_resource(ShipPowerSystem(PowerSystem::default()))
             .init_resource::<PowerConfigResource>()
@@ -352,7 +352,7 @@ pub fn power_state_broadcaster() -> SimBroadcaster {
 pub fn handle_power_messages(
     mut ship_query: Query<
         (
-            &crate::messages::AdmittedCommands,
+            &crate::core::messages::AdmittedCommands,
             Option<&mut ShipPowerSystem>,
             Has<crate::server_app::LocalShip>,
         ),
@@ -369,10 +369,12 @@ pub fn handle_power_messages(
     // `AdmittedCommands` queue — there is no longer a separate
     // `integrate_power_state` adapter mutating `ShipPowerSystem` directly.
     for (admitted, mut power_comp, is_local) in ship_query.iter_mut() {
-        let mut pending: Vec<(crate::messages::PowerGroupId, u8)> = Vec::new();
-        for cmd in admitted.for_target(crate::system_registry::POWER_REACTOR_SYSTEM_ID) {
-            if let crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } =
-                &cmd.payload
+        let mut pending: Vec<(crate::core::messages::PowerGroupId, u8)> = Vec::new();
+        for cmd in admitted.for_target(crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID) {
+            if let crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                group,
+                level,
+            } = &cmd.payload
             {
                 pending.push((group.clone(), *level));
             }
@@ -473,9 +475,9 @@ pub fn tick_power_system(
 /// Map a power group id string to the target `SystemId` for coordination.
 fn system_id_for_power_group(group: &str) -> Option<SystemId> {
     match group {
-        WEAPONS_POWER_GROUP => Some(crate::system_registry::tactical_station_key()),
-        HELM_POWER_GROUP => Some(crate::system_registry::helm_station_key()),
-        SHIELDS_POWER_GROUP => Some(crate::system_registry::shields_system_id()),
+        WEAPONS_POWER_GROUP => Some(crate::ship::system_registry::tactical_station_key()),
+        HELM_POWER_GROUP => Some(crate::ship::system_registry::helm_station_key()),
+        SHIELDS_POWER_GROUP => Some(crate::ship::system_registry::shields_system_id()),
         _ => None,
     }
 }
@@ -538,7 +540,7 @@ pub fn tick_power_brownout_advisory(
 
         let sender_origin = control_sources
             .0
-            .source_for(&crate::system_registry::power_reactor_system_id());
+            .source_for(&crate::ship::system_registry::power_reactor_system_id());
 
         brownout_state.notified_groups.clear();
         for (group_id, level) in power.0.iter() {
@@ -554,7 +556,7 @@ pub fn tick_power_brownout_advisory(
                         allocated_level: level,
                     },
                     sender_label: crate::ship::coordination::CHATTER_SENDER_POWER.to_string(),
-                    sender_system: crate::system_registry::power_reactor_system_id(),
+                    sender_system: crate::ship::system_registry::power_reactor_system_id(),
                 });
             }
         }
@@ -593,7 +595,7 @@ fn publish_power_blackboard(
         With<crate::server_app::LocalShip>,
     >,
 ) {
-    use crate::system_registry::{
+    use crate::ship::system_registry::{
         POWER_BATTERY_SYSTEM_ID, POWER_REACTOR_SYSTEM_ID, POWER_SYSTEM_ID,
     };
 
@@ -639,8 +641,8 @@ fn publish_power_blackboard(
     // with `ShipSystemControlSources` but no per-entity `ShipPowerSystem`
     // component (the primary `ship_q` above requires the latter).
     let control_sources = control_sources_q.single().ok();
-    let reactor_id = crate::system_registry::power_reactor_system_id();
-    let battery_id = crate::system_registry::power_battery_system_id();
+    let reactor_id = crate::ship::system_registry::power_reactor_system_id();
+    let battery_id = crate::ship::system_registry::power_battery_system_id();
     let reactor_online = control_sources
         .map(|cs| !cs.0.is_offline(&reactor_id))
         .unwrap_or(true);
@@ -743,7 +745,7 @@ mod tests {
     /// resolves it), and the shape must be a dotted lowercase id.
     #[test]
     fn power_group_label_emits_string_ids_not_english() {
-        use crate::power_system::{HELM_POWER_GROUP, WEAPONS_POWER_GROUP};
+        use crate::modifiers::power_system::{HELM_POWER_GROUP, WEAPONS_POWER_GROUP};
         for group in [
             HELM_POWER_GROUP,
             WEAPONS_POWER_GROUP,
@@ -763,14 +765,14 @@ mod tests {
         assert_eq!(power_group_label("ops"), "power.group.unknown");
     }
 
-    use crate::messages::{ModifierSlot, ServerMessage, *};
+    use crate::core::messages::{ModifierSlot, ServerMessage, *};
+    use crate::modifiers::power_system::SHIELDS_POWER_GROUP;
     use crate::modifiers::ShipModifiers;
-    use crate::power_system::SHIELDS_POWER_GROUP;
-    use crate::shield::ShieldSystem;
-    use crate::simulation::{
+    use crate::server_app::{
         LastBroadcastEntityPositions, LastBroadcastHull, LastBroadcastShields, ShipImpulse,
         ShipShields, SimOutbox,
     };
+    use crate::weapons::shield::ShieldSystem;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -811,16 +813,16 @@ mod tests {
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
-            .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
+            .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
             .add_plugins(ShipPowerPlugin)
             .add_systems(
                 FixedUpdate,
-                crate::modifier_coordination::translate_power_modifiers.after(tick_power_system),
+                crate::modifiers::coordination::translate_power_modifiers.after(tick_power_system),
             )
-            .add_plugins(crate::simulation::sim_state_broadcaster())
+            .add_plugins(crate::server_app::sim_state_broadcaster())
             .add_systems(PostUpdate, collect);
         // Exactly one fixed step per `update()` (issue #895), advancing 200 ms
         // of sim time so the Hz-based broadcast timers always fire inside a
@@ -833,17 +835,17 @@ mod tests {
         );
         // Spawn the player ship entity so handle_power_messages can query it.
         app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             ShipShields(ShieldSystem::default(), 0.5),
             ShipModifiers::new(),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
             PowerBrownoutState::default(),
         ));
         app
@@ -866,7 +868,7 @@ mod tests {
             out.push(OutboundMessage {
                 target,
                 msg,
-                delivery: crate::messages::DeliveryClass::Reliable,
+                delivery: crate::core::messages::DeliveryClass::Reliable,
             });
         }
         app.world_mut().resource_mut::<Outbox>().0.clear();
@@ -999,15 +1001,16 @@ mod tests {
         // Force total to 8 and check PowerSystem::increase is a no-op.
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            let _ = ps
-                .0
-                .set_group_allocation(&crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 4);
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(HELM_POWER_GROUP.into()),
+                4,
+            );
+            let _ = ps.0.set_group_allocation(
+                &crate::core::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
                 2,
             );
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
                 2,
             );
         }
@@ -1051,7 +1054,7 @@ mod tests {
         let mult = {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
+                .query_filtered::<&ShipModifiers, With<crate::server_app::LocalShip>>();
             q.single(app.world()).unwrap().get(&ModifierSlot::MaxSpeed)
         };
         assert!(
@@ -1085,7 +1088,7 @@ mod tests {
         let mult = {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
+                .query_filtered::<&ShipModifiers, With<crate::server_app::LocalShip>>();
             q.single(app.world())
                 .unwrap()
                 .get(&ModifierSlot::PhaserDamage)
@@ -1125,15 +1128,16 @@ mod tests {
 
         {
             let mut ps = app.world_mut().resource_mut::<ShipPowerSystem>();
-            let _ = ps
-                .0
-                .set_group_allocation(&crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 4);
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(HELM_POWER_GROUP.into()),
+                4,
+            );
+            let _ = ps.0.set_group_allocation(
+                &crate::core::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
                 2,
             );
             let _ = ps.0.set_group_allocation(
-                &crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
+                &crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
                 2,
             );
             ps.0.battery_charge = 0.0;
@@ -1153,7 +1157,7 @@ mod tests {
         let mods = {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&ShipModifiers, With<crate::simulation::LocalShip>>();
+                .query_filtered::<&ShipModifiers, With<crate::server_app::LocalShip>>();
             q.single(app.world()).unwrap().clone()
         };
 
@@ -1178,9 +1182,9 @@ mod tests {
     // ── Blackboard publish tests ────────────────────────────────────────────
 
     fn power_blackboard(app: &mut App) -> PowerBlackboard {
-        use crate::messages::{SystemBlackboard, SystemId};
+        use crate::core::messages::{SystemBlackboard, SystemId};
         use crate::server_app::{LocalShip, ShipSystemBlackboards};
-        use crate::system_registry::POWER_SYSTEM_ID;
+        use crate::ship::system_registry::POWER_SYSTEM_ID;
         let mut q = app
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
@@ -1274,13 +1278,13 @@ mod tests {
     /// value; it moves where the pip row begins and nothing else.
     #[test]
     fn publish_power_blackboard_reads_the_authored_floor() {
-        use crate::power_system::HELM_POWER_GROUP;
+        use crate::modifiers::power_system::HELM_POWER_GROUP;
         let mut app = test_app();
         start_game(&mut app);
         {
             let ship = app
                 .world_mut()
-                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
                 .single(app.world())
                 .unwrap();
             let mut cfg = app
@@ -1355,9 +1359,9 @@ mod tests {
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
+                    group: crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
                     level: 4,
                 },
             },
@@ -1390,7 +1394,7 @@ mod tests {
             ClientMessage::ControlSystem {
                 target: SystemId("power-reactor".to_string()),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
-                    group: crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
+                    group: crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
                     level: 4,
                 },
             },
@@ -1417,7 +1421,7 @@ mod tests {
     fn mark_offline(app: &mut App, system_id: SystemId) {
         let ship = app
             .world_mut()
-            .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
             .single(app.world())
             .unwrap();
         let mut cs = app
@@ -1446,8 +1450,8 @@ mod tests {
         // `offline_systems` (admission does), we cover this via the
         // full admission chain in a mini test app that includes
         // `AdmissionPlugin`.
+        use crate::core::messages::{ClientMessage, PowerGroupId, SystemControlPayload};
         use crate::lobby::LobbyPlugin;
-        use crate::messages::{ClientMessage, PowerGroupId, SystemControlPayload};
         let mut app = App::new();
         app.add_plugins(LobbyPlugin)
             .add_plugins(bevy::time::TimePlugin)
@@ -1475,12 +1479,12 @@ mod tests {
             .init_resource::<crate::lobby::WorldResource>()
             .init_resource::<SimOutbox>()
             .init_resource::<LastBroadcastEntityPositions>()
-            .init_resource::<crate::simulation::LastBroadcastEntityHealth>()
+            .init_resource::<crate::server_app::LastBroadcastEntityHealth>()
             .init_resource::<LastBroadcastHull>()
             .init_resource::<LastBroadcastShields>()
             .init_resource::<Outbox>()
             .add_plugins(ShipPowerPlugin)
-            .add_plugins(crate::simulation::sim_state_broadcaster());
+            .add_plugins(crate::server_app::sim_state_broadcaster());
         // One fixed step per update, 200 ms of sim time each (issue #895).
         crate::ship::test_support::drive_one_fixed_step_per_update(
             &mut app,
@@ -1488,16 +1492,16 @@ mod tests {
         );
         // Spawn the player ship with control sources so we can seed offline_systems.
         app.world_mut().spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
             crate::server_app::ShipSystemBlackboards::default(),
             crate::ship_plugin::ShipConfigComponent::default(),
             crate::ship_plugin::ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
-            crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
+            crate::server_app::ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.5),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
             ShipModifiers::new(),
             PowerBrownoutState::default(),
         ));
@@ -1507,7 +1511,7 @@ mod tests {
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
                     group: PowerGroupId(SHIELDS_POWER_GROUP.into()),
                     level: 4,
@@ -1525,12 +1529,15 @@ mod tests {
         );
 
         // Now mark the reactor offline and try to change sensors back to 1.
-        mark_offline(&mut app, crate::system_registry::power_reactor_system_id());
+        mark_offline(
+            &mut app,
+            crate::ship::system_registry::power_reactor_system_id(),
+        );
         push_msg(
             &mut app,
             "power",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::power_reactor_system_id(),
+                target: crate::ship::system_registry::power_reactor_system_id(),
                 payload: SystemControlPayload::SetPowerGroupAllocation {
                     group: PowerGroupId(SHIELDS_POWER_GROUP.into()),
                     level: 1,
@@ -1555,7 +1562,7 @@ mod tests {
         tick(&mut app);
 
         use crate::server_app::{LocalShip, ShipSystemBlackboards};
-        use crate::system_registry::{POWER_BATTERY_SYSTEM_ID, POWER_REACTOR_SYSTEM_ID};
+        use crate::ship::system_registry::{POWER_BATTERY_SYSTEM_ID, POWER_REACTOR_SYSTEM_ID};
         let mut q = app
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
@@ -1593,7 +1600,7 @@ mod tests {
         {
             let ship = app
                 .world_mut()
-                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
                 .single(app.world())
                 .unwrap();
             let mut cs = app
@@ -1601,13 +1608,16 @@ mod tests {
                 .entity_mut(ship)
                 .take::<crate::ship_plugin::ShipSystemControlSources>()
                 .unwrap();
-            cs.0.set_offline(crate::system_registry::power_reactor_system_id(), true);
+            cs.0.set_offline(
+                crate::ship::system_registry::power_reactor_system_id(),
+                true,
+            );
             app.world_mut().entity_mut(ship).insert(cs);
         }
         tick(&mut app);
 
         use crate::server_app::{LocalShip, ShipSystemBlackboards};
-        use crate::system_registry::POWER_REACTOR_SYSTEM_ID;
+        use crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID;
         let mut q = app
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
@@ -1630,7 +1640,7 @@ mod tests {
         {
             let ship = app
                 .world_mut()
-                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
                 .single(app.world())
                 .unwrap();
             let mut cs = app
@@ -1638,13 +1648,16 @@ mod tests {
                 .entity_mut(ship)
                 .take::<crate::ship_plugin::ShipSystemControlSources>()
                 .unwrap();
-            cs.0.set_offline(crate::system_registry::power_battery_system_id(), true);
+            cs.0.set_offline(
+                crate::ship::system_registry::power_battery_system_id(),
+                true,
+            );
             app.world_mut().entity_mut(ship).insert(cs);
         }
         tick(&mut app);
 
         use crate::server_app::{LocalShip, ShipSystemBlackboards};
-        use crate::system_registry::POWER_BATTERY_SYSTEM_ID;
+        use crate::ship::system_registry::POWER_BATTERY_SYSTEM_ID;
         let mut q = app
             .world_mut()
             .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
@@ -1668,7 +1681,7 @@ mod tests {
         {
             let ship = app
                 .world_mut()
-                .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+                .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
                 .single(app.world())
                 .unwrap();
             let mut cs = app
@@ -1676,7 +1689,10 @@ mod tests {
                 .entity_mut(ship)
                 .take::<crate::ship_plugin::ShipSystemControlSources>()
                 .unwrap();
-            cs.0.set_offline(crate::system_registry::power_reactor_system_id(), true);
+            cs.0.set_offline(
+                crate::ship::system_registry::power_reactor_system_id(),
+                true,
+            );
             app.world_mut().entity_mut(ship).insert(cs);
         }
 
@@ -1718,7 +1734,7 @@ mod tests {
         // tick_power_brownout_advisory's query matches it.
         let ship = app
             .world_mut()
-            .query_filtered::<Entity, With<crate::simulation::LocalShip>>()
+            .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
             .single(app.world())
             .unwrap();
         app.world_mut()
@@ -1739,7 +1755,7 @@ mod tests {
             .collect();
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut ShipPowerSystem, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&mut ShipPowerSystem, With<crate::server_app::LocalShip>>();
         if let Ok(mut ps) = q.single_mut(app.world_mut()) {
             ps.0.restore(&allocs, charge, locked);
         }
@@ -1853,16 +1869,19 @@ mod tests {
     /// point of emission precisely because nothing downstream may re-derive it.
     #[test]
     fn brownout_advisory_tags_the_live_power_control_source() {
-        use crate::control_source::ControlSource;
+        use crate::ship::control_source::ControlSource;
         for source in [ControlSource::Human, ControlSource::Ai] {
             let mut app = brownout_test_app();
             start_game(&mut app);
             {
                 let mut q = app
                     .world_mut()
-                    .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::simulation::Ship>>();
+                    .query_filtered::<&mut crate::ship_plugin::ShipSystemControlSources, With<crate::server_app::Ship>>();
                 for mut cs in q.iter_mut(app.world_mut()) {
-                    cs.0.set(crate::system_registry::power_reactor_system_id(), source);
+                    cs.0.set(
+                        crate::ship::system_registry::power_reactor_system_id(),
+                        source,
+                    );
                 }
             }
             let _ = tick(&mut app);

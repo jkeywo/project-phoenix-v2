@@ -29,8 +29,8 @@
 
 use bevy::prelude::{NextState, State};
 use project_phoenix::content_ledger;
+use project_phoenix::core::messages::{GamePhase, ServerMessage};
 use project_phoenix::headless::{build_headless_app, HeadlessArgs};
-use project_phoenix::messages::{GamePhase, ServerMessage};
 use project_phoenix::server_app::{GameOverReason, SimOutbox};
 use project_phoenix::sim_digest::world_digest;
 use project_phoenix::snapshot::{
@@ -213,7 +213,7 @@ type FacingCharge = (String, i32, f32, f32, bool);
 fn shield_charge_by_uuid(
     world: &mut bevy::prelude::World,
 ) -> std::collections::BTreeMap<String, Vec<FacingCharge>> {
-    use project_phoenix::entity_spawner::EntityUuid;
+    use project_phoenix::entities::spawner::EntityUuid;
     use project_phoenix::server_app::ShipShields;
     let mut query = world.query::<(&EntityUuid, &ShipShields)>();
     query
@@ -484,7 +484,7 @@ fn a_streamed_belt_comes_back_rock_for_rock_and_the_streamer_resumes() {
     let mut resumed = boot_to_restore_point(&args, &payload);
     let before: usize = resumed
         .world_mut()
-        .query::<&project_phoenix::simulation::AsteroidUuid>()
+        .query::<&project_phoenix::server_app::AsteroidUuid>()
         .iter(resumed.world())
         .count();
     let report = restore(resumed.world_mut(), &payload);
@@ -1390,7 +1390,7 @@ fn a_slot_with_nothing_in_it_is_not_an_error() {
 fn force_game_over(
     app: &mut bevy::prelude::App,
     reason: &str,
-    outcome: project_phoenix::balance::Outcome,
+    outcome: project_phoenix::core::balance::Outcome,
 ) {
     {
         let world = app.world_mut();
@@ -1441,7 +1441,7 @@ fn a_restored_game_over_reruns_its_entry_effects() {
     force_game_over(
         &mut live,
         "hull breach",
-        project_phoenix::balance::Outcome::Defeat,
+        project_phoenix::core::balance::Outcome::Defeat,
     );
 
     let payload = capture(live.world());
@@ -1477,7 +1477,7 @@ fn a_restored_game_over_reruns_its_entry_effects() {
     );
     assert_eq!(
         resumed.world().resource::<GameOverReason>().1,
-        Some(project_phoenix::balance::Outcome::Defeat),
+        Some(project_phoenix::core::balance::Outcome::Defeat),
         "the restored GameOverReason's outcome should have survived — \
          on_game_over_enter only takes the reason half"
     );
@@ -1564,7 +1564,7 @@ fn live_dialogue_count(app: &bevy::prelude::App) -> usize {
         .len()
 }
 
-fn live_inbox(app: &bevy::prelude::App) -> Vec<project_phoenix::messages::CommsMessage> {
+fn live_inbox(app: &bevy::prelude::App) -> Vec<project_phoenix::core::messages::CommsMessage> {
     app.world()
         .resource::<project_phoenix::comms::server::CommsInboxRes>()
         .0
@@ -3116,9 +3116,9 @@ fn scan_args() -> HeadlessArgs {
 /// Fly the scanner to 80 units off the depot and take a reading through the
 /// ordinary admitted path, exactly as `tests/headless_runner.rs` does.
 fn take_a_reading(app: &mut bevy::prelude::App) {
-    use project_phoenix::entity_spawner::{EntityName, EntityUuid};
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
+    use project_phoenix::entities::spawner::{EntityName, EntityUuid};
     use project_phoenix::lobby::InboundMessage;
-    use project_phoenix::messages::{ClientMessage, SystemControlPayload};
     use project_phoenix::server_app::LocalShip;
     use project_phoenix::ship::state::ShipPhysics;
 
@@ -3508,14 +3508,14 @@ fn reinforce_args() -> HeadlessArgs {
 
 /// Every `EntityUuid` in a world, as a set.
 fn uuids(app: &mut bevy::prelude::App) -> std::collections::BTreeSet<String> {
-    use project_phoenix::entity_spawner::EntityUuid;
+    use project_phoenix::entities::spawner::EntityUuid;
     let mut query = app.world_mut().query::<&EntityUuid>();
     query.iter(app.world()).map(|u| u.0.clone()).collect()
 }
 
 /// Every live `AsteroidUuid`, as a set.
 fn rock_uuids(app: &mut bevy::prelude::App) -> std::collections::BTreeSet<String> {
-    use project_phoenix::asteroid_lifecycle::AsteroidUuid;
+    use project_phoenix::asteroids::lifecycle::AsteroidUuid;
     let mut query = app.world_mut().query::<&AsteroidUuid>();
     query.iter(app.world()).map(|u| u.0.clone()).collect()
 }
@@ -3561,7 +3561,7 @@ fn boot_to_rebuild_point(args: &HeadlessArgs, snapshot: &PhoenixSnapshot) -> bev
 /// reads the latter, and a ship that moved only one of them is in two places.
 fn fly_local_ship_to(app: &mut bevy::prelude::App, x: f32, z: f32) {
     use project_phoenix::server_app::LocalShip;
-    use project_phoenix::ship_state::ShipPhysics;
+    use project_phoenix::ship::state::ShipPhysics;
     let mut query = app
         .world_mut()
         .query_filtered::<bevy::prelude::Entity, bevy::prelude::With<LocalShip>>();
@@ -3601,7 +3601,7 @@ fn fly_local_ship_to(app: &mut bevy::prelude::App, x: f32, z: f32) {
 /// satisfy a count.
 #[test]
 fn a_mid_run_spawn_is_rebuilt_by_the_restore_rather_than_replayed_by_the_bootstrap() {
-    use project_phoenix::entity_spawner::{
+    use project_phoenix::entities::spawner::{
         EntitySpawnOrigin, EntityTagsSection, EntityUuid, FactionComponent,
     };
 
@@ -3838,10 +3838,10 @@ fn only_the_rebuild_predicate_lets_a_mid_run_spawn_through() {
 /// counting.
 #[test]
 fn a_destroyed_streamed_rock_stays_destroyed_and_its_cell_refills_on_re_entry() {
-    use project_phoenix::asteroid_lifecycle::AsteroidUuid;
-    use project_phoenix::entity_spawner::EntitySystemHull;
+    use project_phoenix::asteroids::lifecycle::AsteroidUuid;
+    use project_phoenix::entities::spawner::EntitySystemHull;
     use project_phoenix::server_app::LocalShip;
-    use project_phoenix::ship_state::ShipPhysics;
+    use project_phoenix::ship::state::ShipPhysics;
 
     let args = combat_test_args();
     let mut live = boot(&args);

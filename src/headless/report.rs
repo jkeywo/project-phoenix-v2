@@ -8,16 +8,16 @@
 use bevy::prelude::*;
 use std::collections::BTreeMap;
 
-use crate::balance::{
+use crate::core::balance::{
     aggregate_ledgers, classify, closing_damage_rates, ledgers_to_json, BalanceEvent, DamageLedger,
     OutcomeReport, SideMargins, StampedBalanceEvent, CLOSING_WINDOW_SECS,
 };
-use crate::codec::{JsonCodec, MessageCodec};
-use crate::damage::DamageTier;
-use crate::entity_spawner::{EntityName, EntitySystemHull, EntityUuid, FactionComponent};
+use crate::core::codec::{JsonCodec, MessageCodec};
+use crate::core::messages::{GamePhase, ServerMessage, ServerMessageDiscriminants};
+use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid, FactionComponent};
 use crate::lobby::OutboundMessage;
-use crate::messages::{GamePhase, ServerMessage, ServerMessageDiscriminants};
 use crate::server_app::{GameOverReason, LocalShip, Ship};
+use crate::ship::damage::DamageTier;
 use crate::ship::state::ShipPhysics;
 use crate::sim_rng::SeedSource;
 
@@ -119,7 +119,7 @@ pub fn collect_balance_events(
     time: Res<Time>,
     sim_tick: Res<crate::sim_tick::SimTick>,
     named_q: Query<(&EntityUuid, &EntityName)>,
-    faction_q: Query<(&EntityUuid, &crate::entity_spawner::FactionComponent)>,
+    faction_q: Query<(&EntityUuid, &crate::entities::spawner::FactionComponent)>,
 ) {
     let tick = sim_tick.0;
     let sim_t = time.elapsed_secs_f64();
@@ -445,7 +445,7 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
 fn build_outcome_report(
     app: &mut App,
     is_game_over: bool,
-    outcome_flag: Option<crate::balance::Outcome>,
+    outcome_flag: Option<crate::core::balance::Outcome>,
     damage_by_ship: &BTreeMap<String, DamageLedger>,
     closing_rates: &BTreeMap<String, f32>,
     entity_factions: &BTreeMap<String, String>,
@@ -494,10 +494,10 @@ fn build_outcome_report(
     // else (allies, neutrals, the LocalShip itself) is the player side.
     let registry = app
         .world()
-        .get_resource::<crate::config_cache::FactionRegistryResource>();
+        .get_resource::<crate::entities::config_cache::FactionRegistryResource>();
     let is_enemy_side = |fac: Option<Uuid>| -> bool {
         registry
-            .map(|reg| crate::faction::is_enemy(local_faction, fac, &reg.0))
+            .map(|reg| crate::ai::faction::is_enemy(local_faction, fac, &reg.0))
             .unwrap_or(false)
     };
 
@@ -558,7 +558,7 @@ impl RunReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::balance::VictimKind;
+    use crate::core::balance::VictimKind;
 
     /// Guards against regressing to JSON key-scraping, which reported every
     /// message as `"type"` because `ServerMessage` is internally tagged.
@@ -619,7 +619,7 @@ mod tests {
             damage_by_ship: BTreeMap::new(),
             // Budget-exhausted with a live closing window → timeout, carrying
             // both sides' margins (AC1 + AC2).
-            outcome_report: crate::balance::classify(
+            outcome_report: crate::core::balance::classify(
                 false,
                 None,
                 SideMargins::new(90.0, 100.0, 200.0, 40.0, 3.0),
@@ -660,9 +660,9 @@ mod tests {
             message_counts: BTreeMap::new(),
             damage_by_ship: BTreeMap::new(),
             // Reached GameOver via the player-death latch → defeat.
-            outcome_report: crate::balance::classify(
+            outcome_report: crate::core::balance::classify(
                 true,
-                Some(crate::balance::Outcome::Defeat),
+                Some(crate::core::balance::Outcome::Defeat),
                 SideMargins::default(),
                 SideMargins::default(),
             ),
@@ -715,8 +715,8 @@ mod tests {
             entity_count: 2,
             ship: None,
             message_counts: BTreeMap::new(),
-            damage_by_ship: crate::balance::aggregate_damage(events.iter(), &names),
-            outcome_report: crate::balance::classify(
+            damage_by_ship: crate::core::balance::aggregate_damage(events.iter(), &names),
+            outcome_report: crate::core::balance::classify(
                 false,
                 None,
                 SideMargins::default(),

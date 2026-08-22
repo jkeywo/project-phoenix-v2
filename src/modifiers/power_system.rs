@@ -1,4 +1,4 @@
-use crate::messages::PowerGroupId;
+use crate::core::messages::PowerGroupId;
 use std::collections::HashMap;
 
 pub const HELM_POWER_GROUP: &str = "helm";
@@ -49,7 +49,7 @@ impl<'a> Channel1Read<'a> {
 ///
 /// `shields` replaced `sensors` here in issue #952. Sensors had stopped buying
 /// anything a reactor point is worth spending on once #955 decoupled weapon
-/// reach from [`crate::messages::ModifierSlot::RadarRange`], so the third group
+/// reach from [`crate::core::messages::ModifierSlot::RadarRange`], so the third group
 /// is one a reactor point is actually worth spending on — shields, not a radar
 /// horizon.
 pub const POWER_GROUP_ORDER: &[&str] =

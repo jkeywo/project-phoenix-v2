@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 
-use crate::entity_config::EntityConfig;
-use crate::entity_config::{AsteroidFieldConfig, LightConfig, StarConfig};
-use crate::region_effects::RegionEffectKind;
-use crate::region_shape::RegionShape;
+use crate::entities::config::EntityConfig;
+use crate::entities::config::{AsteroidFieldConfig, LightConfig, StarConfig};
+use crate::regions::effects::RegionEffectKind;
+use crate::regions::shape::RegionShape;
 
 // â”€â”€ Marker Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -44,17 +44,17 @@ pub struct AsteroidFieldSection(pub AsteroidFieldConfig);
 
 /// Present when the EntityConfig had a [collider] section.
 #[derive(Component, Clone, Debug)]
-pub struct ColliderSection(pub crate::entity_config::ColliderConfig);
+pub struct ColliderSection(pub crate::entities::config::ColliderConfig);
 
 /// Present when the EntityConfig had an [appearance] section.
 #[derive(Component, Clone, Debug)]
-pub struct AppearanceSection(pub crate::entity_config::AppearanceConfig);
+pub struct AppearanceSection(pub crate::entities::config::AppearanceConfig);
 
 /// Present when the EntityConfig has a [mesh] section.
 /// Drives all 3-D viewscreen rendering â€” the renderer creates a Bevy mesh and
 /// material from this data.
 #[derive(Component, Clone, Debug)]
-pub struct MeshSection(pub crate::entity_config::MeshConfig);
+pub struct MeshSection(pub crate::entities::config::MeshConfig);
 
 /// Present when the EntityConfig has a [star] section.
 #[derive(Component, Clone, Debug)]
@@ -62,7 +62,7 @@ pub struct StarSection(pub StarConfig);
 
 /// Present when the EntityConfig has a [planet] section.
 #[derive(Component, Clone, Debug)]
-pub struct PlanetSection(pub crate::entity_config::PlanetConfig);
+pub struct PlanetSection(pub crate::entities::config::PlanetConfig);
 
 /// Present when the EntityConfig had a [shape] section (region entity).
 #[derive(Component, Clone, Debug)]
@@ -75,7 +75,7 @@ pub struct RegionEffectsSection(pub Vec<RegionEffectKind>);
 /// Present when the EntityConfig had a [behaviour] section.
 /// Carries the initial AI state name so `ai_plugin` can attach an `AiController`.
 #[derive(Component, Clone, Debug)]
-pub struct BehaviourSection(pub crate::entity_config::BehaviourConfig);
+pub struct BehaviourSection(pub crate::entities::config::BehaviourConfig);
 
 /// Marks an ownerless, stationary weapons platform. It uses the shared ship
 /// combat substrate for its own target selection and beams. As of issue
@@ -117,21 +117,21 @@ pub struct FactionComponent(pub uuid::Uuid);
 /// Present when the EntityConfig has a `[weapons_console]` section.
 /// The AI tick reads this component to determine weapons range and phaser readiness.
 #[derive(Component, Clone, Debug)]
-pub struct WeaponsConsoleSection(pub crate::entity_config::WeaponsConsoleConfig);
+pub struct WeaponsConsoleSection(pub crate::entities::config::WeaponsConsoleConfig);
 
 /// Present when the EntityConfig has a `[helm_console]` section.
 /// The AI tick reads this to build a `ShipPhysicsConfig` instead of using hardcoded defaults.
 #[derive(Component, Clone, Debug)]
-pub struct HelmConsoleSection(pub crate::entity_config::HelmConsoleConfig);
+pub struct HelmConsoleSection(pub crate::entities::config::HelmConsoleConfig);
 
 /// Present when the EntityConfig has a `[helm_capability]` section.
 /// Describes vertical movement mode and impulse steering policy.
 #[derive(Component, Clone, Debug)]
-pub struct HelmCapabilitySection(pub crate::entity_config::HelmCapabilityConfig);
+pub struct HelmCapabilitySection(pub crate::entities::config::HelmCapabilityConfig);
 
 /// Present when the EntityConfig had a [radar_appearance] section.
 #[derive(Component, Clone, Debug)]
-pub struct RadarAppearanceSection(pub crate::entity_config::RadarAppearanceConfig);
+pub struct RadarAppearanceSection(pub crate::entities::config::RadarAppearanceConfig);
 
 /// Present when the EntityConfig has an `[audio]` section.
 ///
@@ -146,12 +146,12 @@ pub struct ShipAudioSection(pub crate::audio_config::ShipAudioConfig);
 /// Present when the EntityConfig has a `[target]` section.
 /// Carries targetability tags, threat level, and description.
 #[derive(Component, Clone, Debug)]
-pub struct EntityTarget(pub crate::entity_target::TargetSection);
+pub struct EntityTarget(pub crate::entities::target::TargetSection);
 
 /// Present when the EntityConfig has a `[cinematic_camera]` section.
 /// The viewscreen reads this for cinematic camera positioning and tracking.
 #[derive(Component, Clone, Debug)]
-pub struct CinematicCameraSection(pub crate::entity_config::CinematicCameraConfig);
+pub struct CinematicCameraSection(pub crate::entities::config::CinematicCameraConfig);
 
 /// Hull tracker attached to any entity (NPC ship, asteroid) that carries a
 /// `[hull]` section in its TOML config. For NPC ships the HP is placed in a
@@ -165,20 +165,20 @@ pub struct CinematicCameraSection(pub crate::entity_config::CinematicCameraConfi
 /// that used to hold the player-ship copy was deleted along with its
 /// dual-write bridge).
 #[derive(Component, Clone, Debug)]
-pub struct EntitySystemHull(pub crate::damage::SystemHull);
+pub struct EntitySystemHull(pub crate::ship::damage::SystemHull);
 
-/// Bevy ECS component wrapping the pure [`crate::damage::ShipArcHull`]
+/// Bevy ECS component wrapping the pure [`crate::ship::damage::ShipArcHull`]
 /// struct (issue #514). Attached to ship entities that declare
 /// `[[shield_arc]]` blocks with `hull_max_hp` fields. `ship/damage.rs` is
 /// Bevy-free per AGENTS.md rule 9, so the pure per-arc HP logic lives
 /// there and this component wraps it for ECS storage.
 ///
 /// The rest of the codebase uses the type alias
-/// [`crate::damage::ShipArcHull`] for readability at call sites — this
+/// [`crate::ship::damage::ShipArcHull`] for readability at call sites — this
 /// wrapper is a thin newtype that lets the pure struct participate in
 /// Bevy queries.
 #[derive(Component, Clone, Debug, Default)]
-pub struct EntityShipArcHull(pub crate::damage::ShipArcHull);
+pub struct EntityShipArcHull(pub crate::ship::damage::ShipArcHull);
 
 // â”€â”€ Spawner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -280,8 +280,8 @@ impl SpawnSection for ColliderSpawn {
         // Collider section â†’ Rapier collider + rigid body
         if let Some(collider) = &config.collider {
             let rapier_collider = match collider.shape {
-                crate::entity_config::ColliderShape::Ball => Collider::ball(collider.radius),
-                crate::entity_config::ColliderShape::Capsule => {
+                crate::entities::config::ColliderShape::Ball => Collider::ball(collider.radius),
+                crate::entities::config::ColliderShape::Capsule => {
                     Collider::capsule_y(collider.length / 2.0, collider.radius)
                 }
                 // `Collider::cylinder` takes the half-height FIRST and the radius
@@ -298,7 +298,7 @@ impl SpawnSection for ColliderSpawn {
                 // UPWARDS to the radius, i.e. to the enclosing sphere this variant
                 // replaces: a degenerate authored body keeps ships outside a hull
                 // rather than letting them through it.
-                crate::entity_config::ColliderShape::Cylinder => Collider::cylinder(
+                crate::entities::config::ColliderShape::Cylinder => Collider::cylinder(
                     collider.half_height.unwrap_or(collider.radius),
                     collider.radius,
                 ),
@@ -490,10 +490,10 @@ impl SpawnSection for BehaviourSpawn {
             // beyond the canonical three (e.g. `ops`) are allocatable rather than
             // returning `UnknownGroup`. Empty for ships with no `[power_groups.*]`.
             let power_group_seed =
-                crate::power_plugin::authored_power_group_seed(&ship_config.0.power_groups);
+                crate::ship::power::authored_power_group_seed(&ship_config.0.power_groups);
             // Seed ShipPhysics from the spawn position so the per-entity helm loop
             // starts with the correct initial state rather than (0, 0).
-            let ship_physics = crate::ship_state::ShipPhysics {
+            let ship_physics = crate::ship::state::ShipPhysics {
                 x: position.x,
                 z: position.z,
                 yaw: {
@@ -506,16 +506,16 @@ impl SpawnSection for BehaviourSpawn {
             };
             cmds.insert((
                 ship_config,
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 crate::ship_plugin::ShipSystemControlSources(resolver),
                 crate::ship_plugin::ActiveStationRatings(active_ratings),
                 crate::ship_plugin::CoordinationQueue::default(),
                 ship_physics,
                 crate::ship_plugin::HelmWaypointClearance::default(),
-                crate::weapons_plugin::TacticalRadarSelection::default(),
-                crate::weapons_plugin::ActiveBeam::default(),
-                crate::weapons_plugin::PhaserCooldown::default(),
-                crate::sensors_plugin::SensorRadarSelection::default(),
+                crate::console::weapons::TacticalRadarSelection::default(),
+                crate::console::weapons::ActiveBeam::default(),
+                crate::console::weapons::PhaserCooldown::default(),
+                crate::ship::sensors::SensorRadarSelection::default(),
                 // The restraint lever (issue #1041) rides in the SAME bundle as the
                 // alert it layers under, nested rather than added as a second
                 // `insert`. Every ship carries it, player and NPC alike, so the
@@ -532,12 +532,12 @@ impl SpawnSection for BehaviourSpawn {
                 // so pairing it with `ShipRedAlert` keeps the tuple inside Bevy's
                 // 15-element ceiling without paying for a second command.
                 (
-                    crate::ship_state::ShipRedAlert::default(),
-                    crate::ship_state::ShipWeaponsHold::default(),
+                    crate::ship::state::ShipRedAlert::default(),
+                    crate::ship::state::ShipWeaponsHold::default(),
                 ),
-                crate::ship_state::ShipViewMode::default(),
-                crate::ship_state::ShipPhaserFrequency::default(),
-                crate::navigation_plugin::NavigationWaypoint::default(),
+                crate::ship::state::ShipViewMode::default(),
+                crate::ship::state::ShipPhaserFrequency::default(),
+                crate::console::navigation::NavigationWaypoint::default(),
             ));
             // Per-entity helm intent (audit follow-up). Every ship carries
             // its own `LastHelmInput` so systems that iterate `With<Ship>`
@@ -554,19 +554,19 @@ impl SpawnSection for BehaviourSpawn {
             // a human Command operator's explicit stance pick ever fills it.
             cmds.insert((
                 crate::ship_plugin::LastHelmInput::default(),
-                crate::command_plugin::ShipStationStances::default(),
+                crate::console::command::server::ShipStationStances::default(),
                 // Edge-detection scratch for the persist-behind-human trigger
                 // (issue #1108). Transient and NOT folded into the sim digest —
                 // see the type's own docs; a fresh/reloaded hull records its first
                 // observation and fires no edge.
-                crate::command_plugin::LastDirectedControl::default(),
+                crate::console::command::server::LastDirectedControl::default(),
             ));
             // Per-objective route cursors: where this ship is on each objective's
             // route. Read by the low-LOD `simulate_low_lod_ships` path, the high-LOD
             // `helm_patrol`, and `operate_navigation_ai`; written only by
             // `advance_objective_cursors`. A ship without one cannot patrol.
             // Inserted separately to stay under Bevy's tuple-Bundle element cap.
-            cmds.insert(crate::ai_plugin::ObjectiveCursors::default());
+            cmds.insert(crate::ai::server::ObjectiveCursors::default());
             // Per-ship coordination bus state (audit follow-up). Every ship
             // tracks its own shields down/restore notification cycle and its
             // own sensors→tactical frequency-hint dedupe state so the two
@@ -583,7 +583,7 @@ impl SpawnSection for BehaviourSpawn {
             // Weapons->Helm arc-bearing request state (issue #677): per-ship
             // debounce for the channel-3 request, and the pending bearing Helm
             // AI folds into its steering once the request is consumed.
-            cmds.insert(crate::weapons_plugin::WeaponsArcRequestState::default());
+            cmds.insert(crate::console::weapons::WeaponsArcRequestState::default());
             cmds.insert(crate::ship_plugin::PendingArcBearingRequest::default());
             // Distinct docking intent (issue #742): the sanctioned home for
             // controlled reverse / lateral close manoeuvres, kept separate from the
@@ -601,7 +601,7 @@ impl SpawnSection for BehaviourSpawn {
             cmds.insert(crate::ship_plugin::LastSystemTiers::default());
             cmds.insert(crate::ship_plugin::RepairHumanAlerted::default());
             cmds.insert(crate::console::repair::server::RepairRequestQueue::default());
-            cmds.insert(crate::power_plugin::ShipPowerSystem(
+            cmds.insert(crate::ship::power::ShipPowerSystem(
                 crate::modifiers::power_system::PowerSystem::from_authored_groups(
                     &crate::modifiers::power_system::PowerConfig::default(),
                     &power_group_seed,
@@ -615,7 +615,7 @@ impl SpawnSection for BehaviourSpawn {
             // fork. When the TOML supplies `[power]` / `[power.ai]`, those
             // values seed the components.
             let power_config = match &config.power {
-                Some(pc) => crate::power_plugin::PowerConfigResource(
+                Some(pc) => crate::ship::power::PowerConfigResource(
                     crate::modifiers::power_system::PowerConfig {
                         capacity: pc.capacity,
                         rates: pc.rates,
@@ -624,9 +624,9 @@ impl SpawnSection for BehaviourSpawn {
                         emergency_threshold: pc.emergency_threshold,
                     },
                 ),
-                None => crate::power_plugin::PowerConfigResource::default(),
+                None => crate::ship::power::PowerConfigResource::default(),
             };
-            cmds.insert(crate::power_plugin::ShipPowerSystem(
+            cmds.insert(crate::ship::power::ShipPowerSystem(
                 crate::modifiers::power_system::PowerSystem::from_authored_groups(
                     &power_config.0,
                     &power_group_seed,
@@ -644,12 +644,12 @@ impl SpawnSection for BehaviourSpawn {
             // was validated in `EntityConfig::from_toml`.
             if let Some(ai) = config.power.as_ref().and_then(|pc| pc.ai_policy.as_ref()) {
                 cmds.insert((
-                    crate::power_plugin::PowerAiPolicy(ai.to_policy().unwrap_or_default()),
+                    crate::ship::power::PowerAiPolicy(ai.to_policy().unwrap_or_default()),
                     // Carried from the SAME authored block (issue #889's
                     // evaluate_every_ticks, wired at runtime): a resolved
                     // `AiPolicy` alone forgets this field, so it rides alongside
                     // as a sibling component.
-                    crate::power_plugin::PowerAiCadence(ai.evaluate_every_ticks),
+                    crate::ship::power::PowerAiCadence(ai.evaluate_every_ticks),
                 ));
             }
             // Per-entity power multipliers. Seeded from any per-console TOML
@@ -660,23 +660,23 @@ impl SpawnSection for BehaviourSpawn {
             // After issue #617 the map is keyed by `PowerGroupId`.
             let defaults = [-0.5f32, 0.0, 0.25, 0.5];
             let mut multipliers: std::collections::HashMap<
-                crate::messages::PowerGroupId,
+                crate::core::messages::PowerGroupId,
                 [f32; 4],
             > = std::collections::HashMap::from([
                 (
-                    crate::messages::PowerGroupId(
+                    crate::core::messages::PowerGroupId(
                         crate::modifiers::power_system::HELM_POWER_GROUP.into(),
                     ),
                     defaults,
                 ),
                 (
-                    crate::messages::PowerGroupId(
+                    crate::core::messages::PowerGroupId(
                         crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
                     ),
                     defaults,
                 ),
                 (
-                    crate::messages::PowerGroupId(
+                    crate::core::messages::PowerGroupId(
                         crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
                     ),
                     defaults,
@@ -685,7 +685,7 @@ impl SpawnSection for BehaviourSpawn {
             if let Some(hc) = &config.helm_console {
                 if let Some(pm) = hc.power_multipliers {
                     multipliers.insert(
-                        crate::messages::PowerGroupId(
+                        crate::core::messages::PowerGroupId(
                             crate::modifiers::power_system::HELM_POWER_GROUP.into(),
                         ),
                         pm,
@@ -695,7 +695,7 @@ impl SpawnSection for BehaviourSpawn {
             if let Some(wc) = &config.weapons_console {
                 if let Some(pm) = wc.power_multipliers {
                     multipliers.insert(
-                        crate::messages::PowerGroupId(
+                        crate::core::messages::PowerGroupId(
                             crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
                         ),
                         pm,
@@ -705,7 +705,7 @@ impl SpawnSection for BehaviourSpawn {
             if let Some(sc) = &config.shields_console {
                 if let Some(pm) = sc.power_multipliers {
                     multipliers.insert(
-                        crate::messages::PowerGroupId(
+                        crate::core::messages::PowerGroupId(
                             crate::modifiers::power_system::SHIELDS_POWER_GROUP.into(),
                         ),
                         pm,
@@ -756,7 +756,7 @@ impl SpawnSection for BehaviourSpawn {
                 .as_ref()
                 .and_then(|wc| wc.selector.as_ref())
             {
-                cmds.insert(crate::weapons_plugin::TacticalTargetSelector {
+                cmds.insert(crate::console::weapons::TacticalTargetSelector {
                     selector: s.to_selector().unwrap_or_default(),
                     power_rating: config.power_rating.map(|r| r as f32),
                     // AC6 (issue #781): explicit radar idle from `[weapons_console]
@@ -857,7 +857,7 @@ impl SpawnSection for BehaviourSpawn {
             // `operate_captain_ai` reads a data-authored policy rather than a
             // hardcoded controller.
             if let Some(ai) = config.captain_console.as_ref().and_then(|c| c.ai.as_ref()) {
-                cmds.insert(crate::captain_plugin::CaptainAiPolicy(
+                cmds.insert(crate::console::captain::server::CaptainAiPolicy(
                     ai.to_policy().unwrap_or_default(),
                 ));
             }
@@ -872,9 +872,9 @@ impl SpawnSection for BehaviourSpawn {
             // `PhaserBankAiPolicies`. `to_policy` cannot fail: each block was
             // validated in `EntityConfig::from_toml`.
             if let Some(hc) = config.helm_console.as_ref() {
-                use crate::system_registry as sr;
+                use crate::ship::system_registry as sr;
                 let mut fine_policies: std::collections::BTreeMap<
-                    crate::messages::SystemId,
+                    crate::core::messages::SystemId,
                     crate::ai::policy::AiPolicy,
                 > = std::collections::BTreeMap::new();
                 for (block, system_id) in [
@@ -891,7 +891,7 @@ impl SpawnSection for BehaviourSpawn {
                 }
                 cmds.insert(crate::ship::helm_ai::FineSystemAiPolicies(fine_policies));
             }
-            cmds.insert(crate::power_plugin::PowerMultiplierResource { multipliers });
+            cmds.insert(crate::ship::power::PowerMultiplierResource { multipliers });
             // ShipModifiers as per-entity component (PR 6/9 — PRD #597). Every ship
             // gets an empty modifier cache. Region-entry observers and
             // translate_power_modifiers write to the subject entity's cache;
@@ -912,7 +912,7 @@ impl SpawnSection for BehaviourSpawn {
                 if repair_cfg.declares_teams() {
                     let timings = repair_cfg.to_runtime();
                     cmds.insert(crate::console::repair::server::ShipRepairTeams(
-                        crate::repair_teams::RepairTeams::new_with_timings(
+                        crate::modifiers::repair_teams::RepairTeams::new_with_timings(
                             repair_cfg.repair_team_count as usize,
                             timings,
                         ),
@@ -932,7 +932,7 @@ impl SpawnSection for BehaviourSpawn {
             cmds.insert(crate::ship::combat_activity::RecentCombatActivity::default());
             cmds.insert(crate::server_app::WeaponFiredThisTick::default());
             cmds.insert(crate::server_app::ShipAttackedThisTick::default());
-            cmds.insert(crate::weapons_plugin::LastShipAttacker::default());
+            cmds.insert(crate::console::weapons::LastShipAttacker::default());
             // Per-ship impulse drive state (audit follow-up). NPCs carry an
             // idle `ShipImpulse` so `handle_blocks_impulse_region_enter` can
             // route per-subject and future NPC helm AI can toggle impulse
@@ -951,7 +951,7 @@ impl SpawnSection for AiProfileSpawn {
     fn apply(&self, config: &EntityConfig, _position: Vec3, cmds: &mut EntityCommands) {
         // AiProfile section — injects AI personality component.
         if let Some(profile) = &config.ai_profile {
-            cmds.insert(crate::ai_plugin::AiProfile {
+            cmds.insert(crate::ai::server::AiProfile {
                 aggression: profile.aggression,
                 sensor_range: profile.sensor_range,
                 low_lod_cruise_fraction: profile.low_lod_cruise_fraction,
@@ -960,7 +960,7 @@ impl SpawnSection for AiProfileSpawn {
             });
         } else {
             // Ships without an [ai_profile] section get a sensible default.
-            cmds.insert(crate::ai_plugin::AiProfile::default());
+            cmds.insert(crate::ai::server::AiProfile::default());
         }
     }
 }
@@ -974,7 +974,7 @@ impl SpawnSection for LodBubbleSpawn {
         // in `lod_ai_ships`, so only a NON-default zone (the station's smaller one)
         // needs the block.
         if let Some(bubble) = &config.lod_bubble {
-            cmds.insert(crate::ai_plugin::LodBubble {
+            cmds.insert(crate::ai::server::LodBubble {
                 radius: bubble.radius,
             });
         }
@@ -1041,8 +1041,9 @@ impl SpawnSection for WeaponsConsoleSpawn {
         if let Some(wc) = &config.weapons_console {
             cmds.insert(WeaponsConsoleSection(wc.clone()));
             // PhaserCombatConfig is built directly from the [[weapons_console.phaser_banks]] list.
-            let combat_config = crate::entity_config::PhaserCombatConfig::from_weapons_console(wc);
-            cmds.insert(crate::weapons_plugin::PhaserCombatConfigResource(
+            let combat_config =
+                crate::entities::config::PhaserCombatConfig::from_weapons_console(wc);
+            cmds.insert(crate::console::weapons::PhaserCombatConfigResource(
                 combat_config,
             ));
             // Per-bank phaser open-fire AI policies (issue #781): each bank's inline
@@ -1062,7 +1063,7 @@ impl SpawnSection for WeaponsConsoleSpawn {
                     Some((b.id.clone(), ai.to_policy().unwrap_or_default()))
                 })
                 .collect();
-            cmds.insert(crate::weapons_plugin::PhaserBankAiPolicies(
+            cmds.insert(crate::console::weapons::PhaserBankAiPolicies(
                 phaser_bank_policies,
             ));
             // The ship-level WEAPONS DOCTRINE (issue #956): which family this hull
@@ -1071,13 +1072,13 @@ impl SpawnSection for WeaponsConsoleSpawn {
             // component and asks Helm to turn for nothing, which strict
             // AI-declaration mode makes unreachable for an AI-bearing hull.
             if let Some(ai) = wc.ai.as_ref() {
-                cmds.insert(crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+                cmds.insert(crate::console::weapons::WeaponsDoctrineAiPolicy(
                     ai.to_policy().unwrap_or_default(),
                 ));
             }
             // PhaserRenderConfig: take the first bank's beam_color if any, else default.
             let render_config = if let Some(first_bank) = wc.phaser_banks.first() {
-                crate::weapons_plugin::PhaserRenderConfig {
+                crate::console::weapons::PhaserRenderConfig {
                     beam_color: if first_bank.beam_color.len() == 4 {
                         [
                             first_bank.beam_color[0],
@@ -1086,7 +1087,7 @@ impl SpawnSection for WeaponsConsoleSpawn {
                             first_bank.beam_color[3],
                         ]
                     } else {
-                        crate::beam_render::DEFAULT_BEAM_COLOR
+                        crate::weapons::beam_render::DEFAULT_BEAM_COLOR
                     },
                     beam_range: if first_bank.beam_range > 0.0 {
                         first_bank.beam_range
@@ -1095,7 +1096,7 @@ impl SpawnSection for WeaponsConsoleSpawn {
                     },
                 }
             } else {
-                crate::weapons_plugin::PhaserRenderConfig::default()
+                crate::console::weapons::PhaserRenderConfig::default()
             };
             cmds.insert(render_config);
         }
@@ -1112,11 +1113,13 @@ impl SpawnSection for TorpedoesSpawn {
         if let Some(tc) = &config.torpedoes {
             let runtime_config = tc.to_runtime();
             let torpedo_system = if !tc.tubes.is_empty() {
-                crate::torpedo::TorpedoSystem::from_configs(&tc.tubes, runtime_config)
+                crate::weapons::torpedo::TorpedoSystem::from_configs(&tc.tubes, runtime_config)
             } else {
-                crate::torpedo::TorpedoSystem::new(runtime_config)
+                crate::weapons::torpedo::TorpedoSystem::new(runtime_config)
             };
-            cmds.insert(crate::weapons_plugin::TorpedoSystemResource(torpedo_system));
+            cmds.insert(crate::console::weapons::TorpedoSystemResource(
+                torpedo_system,
+            ));
 
             // Per-tube torpedo load + launch AI policies (issue #782): each tube's
             // inline authored `ai` block. A tube that authors none contributes no
@@ -1130,12 +1133,14 @@ impl SpawnSection for TorpedoesSpawn {
                     Some((t.id.clone(), ai.to_policy().unwrap_or_default()))
                 })
                 .collect();
-            cmds.insert(crate::weapons_plugin::TorpedoTubeAiPolicies(tube_policies));
+            cmds.insert(crate::console::weapons::TorpedoTubeAiPolicies(
+                tube_policies,
+            ));
 
             // The shared magazine's grant AI policy (issue #782, AC1): the authored
             // `[torpedoes].ai` block.
             if let Some(ai) = tc.ai.as_ref() {
-                cmds.insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(
+                cmds.insert(crate::console::weapons::TorpedoMagazineAiPolicy(
                     ai.to_policy().unwrap_or_default(),
                 ));
             }
@@ -1152,12 +1157,12 @@ impl SpawnSection for BlastersSpawn {
         // in the per-entity component model (issue #631 Finding 1).
         if let Some(wc) = &config.weapons_console {
             if !wc.blaster_banks.is_empty() {
-                let blaster_systems: Vec<crate::blaster::BlasterSystem> = wc
+                let blaster_systems: Vec<crate::weapons::blaster::BlasterSystem> = wc
                     .blaster_banks
                     .iter()
-                    .map(|bc| crate::blaster::BlasterSystem::new(bc.to_runtime()))
+                    .map(|bc| crate::weapons::blaster::BlasterSystem::new(bc.to_runtime()))
                     .collect();
-                cmds.insert(crate::weapons_plugin::BlasterSystemResource(
+                cmds.insert(crate::console::weapons::BlasterSystemResource(
                     blaster_systems,
                 ));
                 // Per-bank blaster open-fire AI policies (issue #781): each bank's
@@ -1174,7 +1179,7 @@ impl SpawnSection for BlastersSpawn {
                         Some((b.id.clone(), ai.to_policy().unwrap_or_default()))
                     })
                     .collect();
-                cmds.insert(crate::weapons_plugin::BlasterBankAiPolicies(
+                cmds.insert(crate::console::weapons::BlasterBankAiPolicies(
                     blaster_bank_policies,
                 ));
             }
@@ -1193,7 +1198,7 @@ impl SpawnSection for HelmConsoleSpawn {
 
             // Physics config
             cmds.insert(crate::ship_plugin::ShipPhysicsConfigResource(
-                crate::ship_physics::ShipPhysicsConfig {
+                crate::ship::physics::ShipPhysicsConfig {
                     max_speed: hc.max_speed,
                     max_reverse_speed: hc.max_reverse_speed,
                     acceleration: hc.acceleration,
@@ -1212,7 +1217,7 @@ impl SpawnSection for HelmConsoleSpawn {
                         .unwrap_or(15.0),
                     // Vertical axis (issue #744): no dedicated helm_console TOML yet,
                     // so take the ShipPhysicsConfig defaults.
-                    ..crate::ship_physics::ShipPhysicsConfig::new()
+                    ..crate::ship::physics::ShipPhysicsConfig::new()
                 },
             ));
             // Impulse config
@@ -1222,7 +1227,7 @@ impl SpawnSection for HelmConsoleSpawn {
                 .helm_capability
                 .as_ref()
                 .map(|cap| cap.impulse.steering_multiplier)
-                .unwrap_or(crate::impulse::IMPULSE_STEERING_MULTIPLIER_DEFAULT);
+                .unwrap_or(crate::ship::impulse::IMPULSE_STEERING_MULTIPLIER_DEFAULT);
             cmds.insert(crate::ship_plugin::ImpulseConfigResource {
                 charge_duration: hc.impulse_charge_duration,
                 speed_multiplier: hc.impulse_speed_multiplier,
@@ -1336,7 +1341,7 @@ impl SpawnSection for ShieldsSpawn {
             // `[shields_console]` block (some legacy paths). Still build the
             // shield system from arcs, using default focus config.
             use crate::weapons::shield::ShieldSystem;
-            let ship_wide = crate::shield::ShieldConfig::default();
+            let ship_wide = crate::weapons::shield::ShieldConfig::default();
             let arcs: Vec<_> = config.shield_arcs.iter().map(|a| a.to_runtime()).collect();
             let shield_system = ShieldSystem::from_arcs(&arcs, &ship_wide);
             let freq = config
@@ -1366,17 +1371,17 @@ impl SpawnSection for ArcHullSpawn {
         // alongside the shield system so `sync_console_damage_tiers` can route arc
         // damage → offline_systems per-arc. Skipped when no arc declares hull HP.
         if !config.shield_arcs.is_empty() {
-            let arc_entries: Vec<(String, crate::damage::ArcHullEntry)> = config
+            let arc_entries: Vec<(String, crate::ship::damage::ArcHullEntry)> = config
                 .shield_arcs
                 .iter()
                 .filter(|a| a.hull_max_hp > 0.0)
                 .map(|a| {
                     (
                         a.id.clone(),
-                        crate::damage::ArcHullEntry {
+                        crate::ship::damage::ArcHullEntry {
                             current: a.hull_max_hp,
                             max: a.hull_max_hp,
-                            tier_config: crate::damage::ConsoleTierConfig {
+                            tier_config: crate::ship::damage::ConsoleTierConfig {
                                 damaged_threshold_pct: a.hull_damaged_threshold_pct,
                                 disabled_threshold_pct: a.hull_disabled_threshold_pct,
                                 debuff_magnitude: a.hull_debuff_magnitude,
@@ -1386,9 +1391,9 @@ impl SpawnSection for ArcHullSpawn {
                 })
                 .collect();
             if !arc_entries.is_empty() {
-                cmds.insert(EntityShipArcHull(crate::damage::ShipArcHull::from_entries(
-                    arc_entries,
-                )));
+                cmds.insert(EntityShipArcHull(
+                    crate::ship::damage::ShipArcHull::from_entries(arc_entries),
+                ));
             }
         }
     }
@@ -1424,7 +1429,7 @@ impl SpawnSection for TractorSpawn {
             if let Some(power_group) = config.ship_config.as_ref().and_then(|sc| {
                 sc.systems
                     .iter()
-                    .find(|s| s.kind == crate::system_registry::TRACTOR_KIND)
+                    .find(|s| s.kind == crate::ship::system_registry::TRACTOR_KIND)
                     .and_then(|s| s.power_group.clone())
             }) {
                 cmds.insert(crate::tractor::TractorBeam::new(
@@ -1508,7 +1513,7 @@ impl SpawnSection for DockSpawn {
             if let Some(power_group) = config.ship_config.as_ref().and_then(|sc| {
                 sc.systems
                     .iter()
-                    .find(|s| s.kind == crate::system_registry::DOCK_KIND)
+                    .find(|s| s.kind == crate::ship::system_registry::DOCK_KIND)
                     .and_then(|s| s.power_group.clone())
             }) {
                 cmds.insert(crate::dock::DockControl::new(dock.clone(), power_group));
@@ -1532,7 +1537,7 @@ impl SpawnSection for UmbilicalSpawn {
             if let Some(power_group) = config.ship_config.as_ref().and_then(|sc| {
                 sc.systems
                     .iter()
-                    .find(|s| s.kind == crate::system_registry::UMBILICAL_KIND)
+                    .find(|s| s.kind == crate::ship::system_registry::UMBILICAL_KIND)
                     .and_then(|s| s.power_group.clone())
             }) {
                 cmds.insert(crate::umbilical::TransferUmbilical::new(
@@ -1587,13 +1592,13 @@ impl SpawnSection for HullSpawn {
         // legacy scalar `hull_integrity` value mapped to a single `SystemId("captain")`
         // slot (used by simple entities like asteroids and station spawns).
         if let Some(hull) = &config.hull {
-            let system_hull: crate::damage::SystemHull = if !hull.system_hull.is_empty() {
+            let system_hull: crate::ship::damage::SystemHull = if !hull.system_hull.is_empty() {
                 // Explicit `[[hull.system_hull]]` entries — new authoring path.
                 let entries: Vec<(
-                    crate::messages::SystemId,
+                    crate::core::messages::SystemId,
                     String,
                     f32,
-                    crate::damage::ConsoleTierConfig,
+                    crate::ship::damage::ConsoleTierConfig,
                 )> = hull
                     .system_hull
                     .iter()
@@ -1606,7 +1611,7 @@ impl SpawnSection for HullSpawn {
                             e.system_id.clone(),
                             display,
                             e.max_hp,
-                            crate::damage::ConsoleTierConfig {
+                            crate::ship::damage::ConsoleTierConfig {
                                 damaged_threshold_pct: e.damaged_threshold_pct,
                                 disabled_threshold_pct: e.disabled_threshold_pct,
                                 debuff_magnitude: e.debuff_magnitude,
@@ -1614,15 +1619,15 @@ impl SpawnSection for HullSpawn {
                         )
                     })
                     .collect();
-                crate::damage::SystemHull::from_config_with_display_names(entries)
+                crate::ship::damage::SystemHull::from_config_with_display_names(entries)
             } else if hull.hull_integrity > 0.0 {
-                crate::damage::SystemHull::from_config(&[(
-                    crate::messages::SystemId("captain".to_string()),
+                crate::ship::damage::SystemHull::from_config(&[(
+                    crate::core::messages::SystemId("captain".to_string()),
                     hull.hull_integrity,
                 )])
             } else {
                 // Empty hull section — skip.
-                cmds.insert(EntitySystemHull(crate::damage::SystemHull::default()));
+                cmds.insert(EntitySystemHull(crate::ship::damage::SystemHull::default()));
                 return;
             };
             cmds.insert(EntitySystemHull(system_hull));
@@ -1637,7 +1642,7 @@ impl SpawnSection for HullSpawn {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::entity_config::*;
+    use crate::entities::config::*;
 
     /// Helper: build a minimal Bevy app for spawning tests.
     fn test_app() -> App {
@@ -1758,7 +1763,7 @@ fails_below = 0.4
     fn a_world_entity_override_retunes_the_authored_infrastructure_table() {
         let overrides: toml::Value = toml::from_str("[infrastructure]\ncondition = 80.0\n")
             .expect("the override document parses");
-        let merged = crate::entity_loader::apply_overrides(&lenient(DEPOT_TOML), &overrides)
+        let merged = crate::entities::loader::apply_overrides(&lenient(DEPOT_TOML), &overrides)
             .expect("the override merges onto the template");
         let infrastructure = merged
             .infrastructure
@@ -1843,7 +1848,7 @@ fails_below = 0.4
         let overrides: toml::Value =
             toml::from_str("[held_response]\nkind = \"arrest-decline\"\nrecover_per_sec = 20.0\n")
                 .expect("the override document parses");
-        let merged = crate::entity_loader::apply_overrides(&lenient(DEPOT_TOML), &overrides)
+        let merged = crate::entities::loader::apply_overrides(&lenient(DEPOT_TOML), &overrides)
             .expect("the override merges onto a target that authored none");
         let held = merged
             .held_response
@@ -1985,7 +1990,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2007,7 +2012,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             torpedoes: None,
             repair: None,
             audio: None,
-            comms: Some(crate::entity_config::CommsConfig {
+            comms: Some(crate::entities::config::CommsConfig {
                 range: 8000.0,
                 hailable: false,
                 display_name: None,
@@ -2053,7 +2058,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let mut app = test_app();
         let config = EntityConfig {
             name: Some("world.entity.outpost.name".into()),
-            comms: Some(crate::entity_config::CommsConfig {
+            comms: Some(crate::entities::config::CommsConfig {
                 range: 800.0,
                 hailable: true,
                 display_name: Some("Relay Outpost".into()),
@@ -2079,7 +2084,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2139,7 +2144,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2204,7 +2209,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2268,7 +2273,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2423,7 +2428,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: vec![LightConfig {
                 kind: LightKind::Point,
@@ -2486,7 +2491,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
 
     #[test]
     fn spawn_entity_with_asteroid_field_section() {
-        use crate::entity_config::AsteroidFieldConfig;
+        use crate::entities::config::AsteroidFieldConfig;
         let mut app = test_app();
         let config = EntityConfig {
             reference_grid: None,
@@ -2497,7 +2502,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2578,7 +2583,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2704,7 +2709,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         let mass = world
             .get::<EntityMass>(spawned)
             .expect("every spawned entity must carry EntityMass");
-        assert_eq!(mass.0, crate::entity_config::DEFAULT_ENTITY_MASS);
+        assert_eq!(mass.0, crate::entities::config::DEFAULT_ENTITY_MASS);
         assert!(
             mass.0 > 0.0,
             "an unauthored entity must never spawn at zero mass"
@@ -2723,16 +2728,16 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
             tags: vec!["region".to_string(), "nebula".to_string()],
             shape: Some(RegionShape::Sphere { radius: 150.0 }),
-            effects: Some(crate::region_effects::RegionEffectsConfig {
-                comms_jammed: Some(crate::region_effects::CommsJamEffect {}),
-                sensor_blind: Some(crate::region_effects::SensorBlindEffect {}),
+            effects: Some(crate::regions::effects::RegionEffectsConfig {
+                comms_jammed: Some(crate::regions::effects::CommsJamEffect {}),
+                sensor_blind: Some(crate::regions::effects::SensorBlindEffect {}),
                 ..Default::default()
             }),
             hull: None,
@@ -2785,10 +2790,10 @@ eligibility = "candidate_fact(source_repair_request) > 0"
         assert_eq!(effects_comp.0.len(), 2);
         assert!(effects_comp
             .0
-            .contains(&crate::region_effects::RegionEffectKind::CommsJam));
+            .contains(&crate::regions::effects::RegionEffectKind::CommsJam));
         assert!(effects_comp
             .0
-            .contains(&crate::region_effects::RegionEffectKind::SensorBlind));
+            .contains(&crate::regions::effects::RegionEffectKind::SensorBlind));
     }
 
     #[test]
@@ -2803,7 +2808,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2873,7 +2878,7 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
@@ -2967,13 +2972,13 @@ eligibility = "candidate_fact(source_repair_request) > 0"
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
             tags: vec![],
-            hull: Some(crate::entity_config::HullConfig {
+            hull: Some(crate::entities::config::HullConfig {
                 hull_integrity: 60.0,
                 ..Default::default()
             }),
@@ -3190,13 +3195,13 @@ regen_per_sec = 0.0
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             light: Vec::new(),
             ship_config: None,
             shield_arcs: Vec::new(),
             tags: vec![],
-            hull: Some(crate::entity_config::HullConfig {
+            hull: Some(crate::entities::config::HullConfig {
                 hull_integrity: 200.0,
                 ..Default::default()
             }),
@@ -3245,7 +3250,7 @@ regen_per_sec = 0.0
         let entries: Vec<_> = hull_comp.0.entries().collect();
         assert_eq!(
             entries[0].0,
-            &crate::messages::SystemId("captain".to_string())
+            &crate::core::messages::SystemId("captain".to_string())
         );
     }
 
@@ -3271,7 +3276,7 @@ regen_per_sec = 0.0
     /// All registered systems must be set to `ControlSource::Ai`.
     #[test]
     fn npc_ship_spawn_gives_all_ai_roster_and_no_ship_marker() {
-        use crate::entity_config::{BehaviourConfig, DoctrineObjective, EntityConfig};
+        use crate::entities::config::{BehaviourConfig, DoctrineObjective, EntityConfig};
         use crate::server_app::Ship;
         use crate::ship_plugin::ShipSystemControlSources;
         use bevy::prelude::*;
@@ -3386,7 +3391,7 @@ ai_only = true
         assert!(
             sc.systems
                 .iter()
-                .any(|s| s.kind == crate::system_registry::RED_ALERT_KIND && s.ai_only),
+                .any(|s| s.kind == crate::ship::system_registry::RED_ALERT_KIND && s.ai_only),
             "behaviour NPC must be provisioned an ai_only red-alert system (#749)"
         );
         assert_eq!(sc.stations.len(), 0, "NPCs have no stations");
@@ -3435,9 +3440,10 @@ ai_only = true
 
         // Through the resolver (issue #876): this hull is COMPOSED, so its baked
         // bytes are no longer the document the game spawns.
-        let config =
-            crate::entity_includes::load_entity_config("assets/entities/alliance_cruiser.toml")
-                .expect("cruiser template must compose and parse");
+        let config = crate::entities::include_resolve::load_entity_config(
+            "assets/entities/alliance_cruiser.toml",
+        )
+        .expect("cruiser template must compose and parse");
 
         let mut app = App::new();
         app.add_plugins(bevy::time::TimePlugin);
@@ -3491,7 +3497,7 @@ ai_only = true
         // Through the REAL load path: the hull is composed since issue #878, so
         // its ship-level AI declarations arrive from the fragment library and
         // `include_str!` would spawn an unresolved document.
-        let config = crate::entity_includes::load_entity_config(
+        let config = crate::entities::include_resolve::load_entity_config(
             "assets/entities/test/rng_coverage_lancer.toml",
         )
         .expect("the rng-coverage escort must resolve and parse");
@@ -3507,14 +3513,14 @@ ai_only = true
         assert!(
             sources
                 .0
-                .policy_for(&crate::system_registry::red_alert_system_id())
+                .policy_for(&crate::ship::system_registry::red_alert_system_id())
                 .operate_ai,
             "provisioned red_alert must resolve to Ai so operate_captain_ai can raise it"
         );
         // And the ship carries the Red Alert capability component.
         assert!(
             app.world()
-                .get::<crate::ship_state::ShipRedAlert>(entity)
+                .get::<crate::ship::state::ShipRedAlert>(entity)
                 .is_some(),
             "behaviour NPC must carry the ShipRedAlert capability"
         );

@@ -5,9 +5,9 @@
 
 use bevy::prelude::*;
 
-use crate::messages::SystemId;
+use crate::core::messages::SystemId;
+use crate::server_app::AsteroidUuid;
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::simulation::AsteroidUuid;
 
 /// Look up the live (x, z) world position of an entity by its string UUID.
 ///
@@ -15,12 +15,12 @@ use crate::simulation::AsteroidUuid;
 /// time and never updated, so it cannot be used for gameplay decisions
 /// involving moving entities (NPC ships, torpedoes, etc.). Always query the
 /// live ECS `Transform` instead. Asteroids carry [`AsteroidUuid`]; NPCs and
-/// stations carry [`crate::entity_spawner::EntityUuid`]. This helper checks
+/// stations carry [`crate::entities::spawner::EntityUuid`]. This helper checks
 /// both.
 pub(crate) fn live_entity_xz(
     uuid: &str,
-    asteroid_q: &Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: &Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: &Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: &Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) -> Option<(f32, f32)> {
     for (u, t) in asteroid_q.iter() {
         if u.0 == uuid {
@@ -53,7 +53,7 @@ pub(crate) fn any_bank_accepts_human_input(
     let bank_system_ids: Vec<SystemId> = ship_config
         .systems
         .iter()
-        .filter(|s| s.kind == crate::system_registry::PHASER_BANK_KIND)
+        .filter(|s| s.kind == crate::ship::system_registry::PHASER_BANK_KIND)
         .map(|s| s.id.clone())
         .collect();
     if bank_system_ids.is_empty() {
@@ -89,7 +89,7 @@ pub(crate) fn any_bank_operates_ai(
     ship_config
         .systems
         .iter()
-        .filter(|s| s.kind == crate::system_registry::PHASER_BANK_KIND)
+        .filter(|s| s.kind == crate::ship::system_registry::PHASER_BANK_KIND)
         .any(|s| control_sources.0.policy_for(&s.id).operate_ai)
 }
 
@@ -108,7 +108,7 @@ pub(crate) fn any_blaster_bank_operates_ai(
     ship_config
         .systems
         .iter()
-        .filter(|s| s.kind == crate::system_registry::BLASTER_BANK_KIND)
+        .filter(|s| s.kind == crate::ship::system_registry::BLASTER_BANK_KIND)
         .any(|s| control_sources.0.policy_for(&s.id).operate_ai)
 }
 
@@ -130,9 +130,9 @@ pub(crate) fn any_tactical_system_operates_ai(
     ship_config: &crate::ship::config::ShipConfig,
 ) -> bool {
     let tactical_fine_kinds = [
-        crate::system_registry::PHASER_BANK_KIND,
-        crate::system_registry::TORPEDO_TUBE_KIND,
-        crate::system_registry::TORPEDO_MAGAZINE_KIND,
+        crate::ship::system_registry::PHASER_BANK_KIND,
+        crate::ship::system_registry::TORPEDO_TUBE_KIND,
+        crate::ship::system_registry::TORPEDO_MAGAZINE_KIND,
     ];
     ship_config
         .systems

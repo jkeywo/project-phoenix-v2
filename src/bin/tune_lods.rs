@@ -80,14 +80,14 @@ use bevy::{
 };
 
 use project_phoenix::entities::billboard::{orient_lod_billboards, spawn_billboard_child};
-use project_phoenix::entity_config::LodLevel;
+use project_phoenix::entities::config::LodLevel;
+use project_phoenix::entities::model_rig::{sidecar_path, ModelRig, DEFAULT_VARIANT};
 use project_phoenix::lod_tune::{find_knee, find_knee_increasing, image_diff_rms};
-use project_phoenix::model_rig::{sidecar_path, ModelRig, DEFAULT_VARIANT};
 use project_phoenix::render_capture::{
     create_render_target, frame_distance, measure_world_bounds, orbit_transform, unpad_rows,
     ImageCopyPlugin, MainWorldReceiver,
 };
-use project_phoenix::renderer::GameCamera;
+use project_phoenix::server::renderer::GameCamera;
 
 // ── Config from argv ────────────────────────────────────────────────────────
 
@@ -456,12 +456,12 @@ fn spawn_level(
             .map(|c| Color::srgb(c[0], c[1], c[2]))
             .unwrap_or(Color::srgb(0.5, 0.5, 0.5));
         let mesh = match shape {
-            project_phoenix::entity_config::MeshShape::Sphere => meshes.add(Sphere::new(radius)),
-            project_phoenix::entity_config::MeshShape::Cuboid => {
+            project_phoenix::entities::config::MeshShape::Sphere => meshes.add(Sphere::new(radius)),
+            project_phoenix::entities::config::MeshShape::Cuboid => {
                 let s = level.size.unwrap_or([radius * 2.0; 3]);
                 meshes.add(Cuboid::new(s[0], s[1], s[2]))
             }
-            project_phoenix::entity_config::MeshShape::Torus => meshes.add(Torus::new(
+            project_phoenix::entities::config::MeshShape::Torus => meshes.add(Torus::new(
                 radius,
                 radius + level.minor_radius.unwrap_or(0.3),
             )),

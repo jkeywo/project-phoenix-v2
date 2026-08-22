@@ -6,18 +6,18 @@
 
 use bevy::prelude::*;
 
-use crate::control_source::ControlSource;
+use crate::core::messages::ClientMessage;
 use crate::lobby::{InboundMessage, LobbyPlugin};
-use crate::messages::ClientMessage;
 use crate::modifiers::ShipModifiers;
+use crate::server_app::{LocalShip, Ship, ShipBoost, ShipImpulse};
 use crate::ship::components::{
     ActiveStationRatings, CoordinationQueue, HelmWaypointClearance, LastHelmInput,
     ShipConfigComponent, ShipSystemControlSources,
 };
+use crate::ship::control_source::ControlSource;
 use crate::ship::helm::{SteeringInput, ThrustInput};
+use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::ShipPlugin;
-use crate::ship_state::ShipPhysics;
-use crate::simulation::{LocalShip, Ship, ShipBoost, ShipImpulse};
 
 /// The virtual time one harness `tick()` advances the simulation by.
 pub const TEST_TICK: std::time::Duration = std::time::Duration::from_millis(200);
@@ -134,10 +134,10 @@ pub fn test_app() -> App {
     crate::ai::host::register_ai_host_env(&mut app);
     drive_one_fixed_step_per_update(&mut app, TEST_TICK);
     let hull_config = &[
-        (crate::messages::SystemId("helm".into()), 25.0_f32),
-        (crate::messages::SystemId("tactical".into()), 25.0),
-        (crate::messages::SystemId("power".into()), 25.0),
-        (crate::messages::SystemId("shields".into()), 25.0),
+        (crate::core::messages::SystemId("helm".into()), 25.0_f32),
+        (crate::core::messages::SystemId("tactical".into()), 25.0),
+        (crate::core::messages::SystemId("power".into()), 25.0),
+        (crate::core::messages::SystemId("shields".into()), 25.0),
     ];
     let ship = app
         .world_mut()
@@ -150,14 +150,14 @@ pub fn test_app() -> App {
             ShipSystemControlSources::default(),
             ActiveStationRatings::default(),
             CoordinationQueue::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::server_app::ShipSystemBlackboards::default(),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                hull_config,
-            )),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(hull_config),
+            ),
             LastHelmInput::default(),
-            crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
+            crate::server_app::ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.5),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
         ))
         .id();
     app.world_mut().entity_mut(ship).insert((
@@ -167,16 +167,16 @@ pub fn test_app() -> App {
         // with it (helm intents, frequency-hint state, the #882 policy runtime
         // state), taken from the SAME definition both production spawn paths
         // use — so this test twin cannot drift out of step with production.
-        crate::ai_plugin::ai_high_fidelity_components(),
+        crate::ai::server::ai_high_fidelity_components(),
     ));
     app.world_mut().entity_mut(ship).insert((
         // The console-owned surfaces the AI helm derives its goals from
         // (issue #702). Production spawns all four on every ship; see
         // `HelmAiSurfaces`.
-        crate::weapons_plugin::TacticalRadarSelection::default(),
-        crate::navigation_plugin::NavigationWaypoint::default(),
+        crate::console::weapons::TacticalRadarSelection::default(),
+        crate::console::navigation::NavigationWaypoint::default(),
         HelmWaypointClearance::default(),
-        crate::ai_plugin::ObjectiveCursors::default(),
+        crate::ai::server::ObjectiveCursors::default(),
     ));
     attach_shipped_ai_declarations(&mut app, ship);
     app
@@ -212,39 +212,39 @@ pub fn attach_shipped_ai_declarations(app: &mut App, ship: Entity) {
             .expect("a shipped authored selector decodes")
     };
     app.world_mut().entity_mut(ship).insert((
-        crate::captain_plugin::CaptainAiPolicy(policy("captain")),
+        crate::console::captain::server::CaptainAiPolicy(policy("captain")),
         // The six helm axes' authored policies now ride the ONE keyed
         // `FineSystemAiPolicies` map (issue #1209), keyed by fine-system id —
         // the same one entry per authored `[helm_console.*_ai]` block the
         // spawner builds.
         crate::ship::helm_ai::FineSystemAiPolicies(std::collections::BTreeMap::from([
             (
-                crate::system_registry::helm_thrust_system_id(),
+                crate::ship::system_registry::helm_thrust_system_id(),
                 policy("engines"),
             ),
             (
-                crate::system_registry::helm_steering_system_id(),
+                crate::ship::system_registry::helm_steering_system_id(),
                 policy("steering"),
             ),
             (
-                crate::system_registry::lateral_thrust_system_id(),
+                crate::ship::system_registry::lateral_thrust_system_id(),
                 policy("lateral"),
             ),
             (
-                crate::system_registry::vertical_thrust_system_id(),
+                crate::ship::system_registry::vertical_thrust_system_id(),
                 policy("vertical"),
             ),
             (
-                crate::system_registry::helm_impulse_system_id(),
+                crate::ship::system_registry::helm_impulse_system_id(),
                 policy("impulse"),
             ),
             (
-                crate::system_registry::helm_boost_system_id(),
+                crate::ship::system_registry::helm_boost_system_id(),
                 policy("boost"),
             ),
         ])),
         crate::ship::shields::ShieldsFocusAiPolicy(policy("shields_focus")),
-        crate::power_plugin::PowerAiPolicy(policy("power")),
+        crate::ship::power::PowerAiPolicy(policy("power")),
         crate::console::comms::server::CommsResponseAiPolicy(policy("comms_response")),
     ));
     app.world_mut().entity_mut(ship).insert((
@@ -252,7 +252,7 @@ pub fn attach_shipped_ai_declarations(app: &mut App, ship: Entity) {
             selector: selector("sensors"),
             power_rating: None,
         },
-        crate::weapons_plugin::TacticalTargetSelector {
+        crate::console::weapons::TacticalTargetSelector {
             selector: selector("tactical"),
             power_rating: None,
             idle: false,
@@ -379,11 +379,23 @@ pub fn set_helm_control_source(app: &mut App, source: ControlSource) {
         .world_mut()
         .query_filtered::<&mut ShipSystemControlSources, With<Ship>>();
     for mut cs in q.iter_mut(app.world_mut()) {
-        cs.0.set(crate::system_registry::helm_thrust_system_id(), source);
-        cs.0.set(crate::system_registry::helm_steering_system_id(), source);
-        cs.0.set(crate::system_registry::helm_impulse_system_id(), source);
-        cs.0.set(crate::system_registry::helm_boost_system_id(), source);
-        cs.0.set(crate::system_registry::lateral_thrust_system_id(), source);
+        cs.0.set(
+            crate::ship::system_registry::helm_thrust_system_id(),
+            source,
+        );
+        cs.0.set(
+            crate::ship::system_registry::helm_steering_system_id(),
+            source,
+        );
+        cs.0.set(
+            crate::ship::system_registry::helm_impulse_system_id(),
+            source,
+        );
+        cs.0.set(crate::ship::system_registry::helm_boost_system_id(), source);
+        cs.0.set(
+            crate::ship::system_registry::lateral_thrust_system_id(),
+            source,
+        );
     }
 }
 
@@ -426,7 +438,7 @@ pub fn get_ship_active_ratings(app: &mut App) -> ActiveStationRatings {
 
 // ── Helm system control-source tests ───────────────────────────────────
 
-pub fn get_ship_impulse(app: &mut App) -> crate::impulse::ImpulseState {
+pub fn get_ship_impulse(app: &mut App) -> crate::ship::impulse::ImpulseState {
     let mut q = app
         .world_mut()
         .query_filtered::<&ShipImpulse, With<LocalShip>>();
@@ -435,7 +447,7 @@ pub fn get_ship_impulse(app: &mut App) -> crate::impulse::ImpulseState {
         .0
 }
 
-pub fn set_ship_impulse(app: &mut App, state: crate::impulse::ImpulseState) {
+pub fn set_ship_impulse(app: &mut App, state: crate::ship::impulse::ImpulseState) {
     let ship = app
         .world_mut()
         .query_filtered::<Entity, With<LocalShip>>()
@@ -448,44 +460,47 @@ pub fn set_ship_impulse(app: &mut App, state: crate::impulse::ImpulseState) {
         .0 = state;
 }
 
-pub fn reach_scored_objective(anchor: &str, score: f32) -> crate::messages::ScoredObjective {
-    crate::messages::ScoredObjective {
+pub fn reach_scored_objective(anchor: &str, score: f32) -> crate::core::messages::ScoredObjective {
+    crate::core::messages::ScoredObjective {
         id: format!("reach-{anchor}"),
         score,
-        directive: crate::messages::AiDirective::Reach {
+        directive: crate::core::messages::AiDirective::Reach {
             anchor: anchor.into(),
         },
-        source: crate::messages::ObjectiveSource::Mission,
-        relevance: vec![crate::messages::SystemAffinity::Helm],
-        snapshot: crate::messages::ObjectiveSnapshot {
+        source: crate::core::messages::ObjectiveSource::Mission,
+        relevance: vec![crate::core::messages::SystemAffinity::Helm],
+        snapshot: crate::core::messages::ObjectiveSnapshot {
             id: format!("reach-{anchor}"),
             text: format!("Reach {anchor}"),
             text_params: Default::default(),
             mandatory: true,
-            status: crate::messages::ObjectiveStatus::Active,
+            status: crate::core::messages::ObjectiveStatus::Active,
             targets: vec![],
-            source: crate::messages::ObjectiveSource::Mission,
+            source: crate::core::messages::ObjectiveSource::Mission,
         },
     }
 }
 
-pub fn retreat_scored_objective(anchor: &str, score: f32) -> crate::messages::ScoredObjective {
-    crate::messages::ScoredObjective {
+pub fn retreat_scored_objective(
+    anchor: &str,
+    score: f32,
+) -> crate::core::messages::ScoredObjective {
+    crate::core::messages::ScoredObjective {
         id: format!("retreat-{anchor}"),
         score,
-        directive: crate::messages::AiDirective::Retreat {
+        directive: crate::core::messages::AiDirective::Retreat {
             anchor: anchor.into(),
         },
-        source: crate::messages::ObjectiveSource::Mission,
-        relevance: vec![crate::messages::SystemAffinity::Helm],
-        snapshot: crate::messages::ObjectiveSnapshot {
+        source: crate::core::messages::ObjectiveSource::Mission,
+        relevance: vec![crate::core::messages::SystemAffinity::Helm],
+        snapshot: crate::core::messages::ObjectiveSnapshot {
             id: format!("retreat-{anchor}"),
             text: format!("Retreat to {anchor}"),
             text_params: Default::default(),
             mandatory: false,
-            status: crate::messages::ObjectiveStatus::Active,
+            status: crate::core::messages::ObjectiveStatus::Active,
             targets: vec![],
-            source: crate::messages::ObjectiveSource::Mission,
+            source: crate::core::messages::ObjectiveSource::Mission,
         },
     }
 }
@@ -493,7 +508,7 @@ pub fn retreat_scored_objective(anchor: &str, score: f32) -> crate::messages::Sc
 /// Point a fine system's control source at `source` on every ship.
 pub fn set_fine_control_source(
     app: &mut App,
-    system_id: crate::messages::SystemId,
+    system_id: crate::core::messages::SystemId,
     source: ControlSource,
 ) {
     let mut q = app
@@ -519,7 +534,7 @@ pub fn set_coarse_helm_only_ai(app: &mut App) {
         app,
         // #801: "helm" is a station id, not a system. Seeding it here is
         // the point of the test — it must drive nothing.
-        crate::messages::SystemId(crate::system_registry::HELM_STATION_ID.to_string()),
+        crate::core::messages::SystemId(crate::ship::system_registry::HELM_STATION_ID.to_string()),
         ControlSource::Ai,
     );
 }
@@ -530,12 +545,12 @@ pub fn set_per_axis_helm_ai(app: &mut App) {
     set_helm_control_source(app, ControlSource::Human);
     set_fine_control_source(
         app,
-        crate::system_registry::helm_thrust_system_id(),
+        crate::ship::system_registry::helm_thrust_system_id(),
         ControlSource::Ai,
     );
     set_fine_control_source(
         app,
-        crate::system_registry::helm_steering_system_id(),
+        crate::ship::system_registry::helm_steering_system_id(),
         ControlSource::Ai,
     );
 }
@@ -556,49 +571,55 @@ pub fn get_steering_input(app: &mut App) -> f32 {
         .0
 }
 
-pub fn patrol_scored_objective(anchors: Vec<&str>, score: f32) -> crate::messages::ScoredObjective {
-    crate::messages::ScoredObjective {
+pub fn patrol_scored_objective(
+    anchors: Vec<&str>,
+    score: f32,
+) -> crate::core::messages::ScoredObjective {
+    crate::core::messages::ScoredObjective {
         id: "obj-defend".into(),
         score,
-        directive: crate::messages::AiDirective::Patrol {
+        directive: crate::core::messages::AiDirective::Patrol {
             anchors: anchors.into_iter().map(str::to_string).collect(),
             loop_path: true,
         },
-        source: crate::messages::ObjectiveSource::Mission,
-        relevance: vec![crate::messages::SystemAffinity::Helm],
-        snapshot: crate::messages::ObjectiveSnapshot {
+        source: crate::core::messages::ObjectiveSource::Mission,
+        relevance: vec![crate::core::messages::SystemAffinity::Helm],
+        snapshot: crate::core::messages::ObjectiveSnapshot {
             id: "obj-defend".into(),
             text: "Defend Starbase Alpha".into(),
             text_params: Default::default(),
             mandatory: true,
-            status: crate::messages::ObjectiveStatus::Active,
+            status: crate::core::messages::ObjectiveStatus::Active,
             targets: vec!["Starbase Alpha".into()],
-            source: crate::messages::ObjectiveSource::Mission,
+            source: crate::core::messages::ObjectiveSource::Mission,
         },
     }
 }
 
-pub fn destroy_scored_objective(target: &str, score: f32) -> crate::messages::ScoredObjective {
-    crate::messages::ScoredObjective {
+pub fn destroy_scored_objective(
+    target: &str,
+    score: f32,
+) -> crate::core::messages::ScoredObjective {
+    crate::core::messages::ScoredObjective {
         id: format!("destroy-{target}"),
         score,
-        directive: crate::messages::AiDirective::Destroy {
+        directive: crate::core::messages::AiDirective::Destroy {
             target: target.into(),
         },
-        source: crate::messages::ObjectiveSource::Mission,
+        source: crate::core::messages::ObjectiveSource::Mission,
         relevance: vec![
-            crate::messages::SystemAffinity::Helm,
-            crate::messages::SystemAffinity::Weapons,
-            crate::messages::SystemAffinity::Captain,
+            crate::core::messages::SystemAffinity::Helm,
+            crate::core::messages::SystemAffinity::Weapons,
+            crate::core::messages::SystemAffinity::Captain,
         ],
-        snapshot: crate::messages::ObjectiveSnapshot {
+        snapshot: crate::core::messages::ObjectiveSnapshot {
             id: format!("destroy-{target}"),
             text: format!("Destroy {target}"),
             text_params: Default::default(),
             mandatory: true,
-            status: crate::messages::ObjectiveStatus::Active,
+            status: crate::core::messages::ObjectiveStatus::Active,
             targets: vec![target.into()],
-            source: crate::messages::ObjectiveSource::Mission,
+            source: crate::core::messages::ObjectiveSource::Mission,
         },
     }
 }
@@ -636,13 +657,16 @@ pub fn test_app_with_engine_hull() -> App {
     crate::ai::host::register_ai_host_env(&mut app);
     drive_one_fixed_step_per_update(&mut app, TEST_TICK);
     let hull_config = &[
-        (crate::messages::SystemId("helm".into()), 25.0_f32),
-        (crate::messages::SystemId("tactical".into()), 25.0),
-        (crate::messages::SystemId("power".into()), 25.0),
-        (crate::messages::SystemId("shields".into()), 25.0),
-        (crate::messages::SystemId("helm-engine-port".into()), 15.0),
+        (crate::core::messages::SystemId("helm".into()), 25.0_f32),
+        (crate::core::messages::SystemId("tactical".into()), 25.0),
+        (crate::core::messages::SystemId("power".into()), 25.0),
+        (crate::core::messages::SystemId("shields".into()), 25.0),
         (
-            crate::messages::SystemId("helm-engine-starboard".into()),
+            crate::core::messages::SystemId("helm-engine-port".into()),
+            15.0,
+        ),
+        (
+            crate::core::messages::SystemId("helm-engine-starboard".into()),
             15.0,
         ),
     ];
@@ -657,14 +681,14 @@ pub fn test_app_with_engine_hull() -> App {
             ShipSystemControlSources::default(),
             ActiveStationRatings::default(),
             CoordinationQueue::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::server_app::ShipSystemBlackboards::default(),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(
-                hull_config,
-            )),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(hull_config),
+            ),
             LastHelmInput::default(),
-            crate::simulation::ShipShields(crate::shield::ShieldSystem::default(), 0.5),
-            ShipImpulse(crate::impulse::ImpulseState::new()),
+            crate::server_app::ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.5),
+            ShipImpulse(crate::ship::impulse::ImpulseState::new()),
         ))
         .id();
     app.world_mut()
@@ -679,7 +703,7 @@ pub fn test_app_with_engine_hull() -> App {
     // pre-#695 behavior where `process_helm_inputs` computed physics
     // for any `LocalShip` unconditionally.
     app.world_mut().entity_mut(ship).insert((
-        crate::ai_plugin::AiHighFidelity,
+        crate::ai::server::AiHighFidelity,
         crate::ship::helm::ThrustInput::default(),
         crate::ship::helm::SteeringInput::default(),
         crate::ship::helm::LateralThrustInput::default(),
@@ -688,17 +712,21 @@ pub fn test_app_with_engine_hull() -> App {
         crate::ship::helm::BoostCommand::default(),
         // The console-owned surfaces the AI helm derives its goals from
         // (issue #702) — see `HelmAiSurfaces`.
-        crate::weapons_plugin::TacticalRadarSelection::default(),
-        crate::navigation_plugin::NavigationWaypoint::default(),
+        crate::console::weapons::TacticalRadarSelection::default(),
+        crate::console::navigation::NavigationWaypoint::default(),
         HelmWaypointClearance::default(),
-        crate::ai_plugin::ObjectiveCursors::default(),
+        crate::ai::server::ObjectiveCursors::default(),
     ));
     app
 }
 
 /// Set the HP of a specific system on the LocalShip hull to `new_hp`.
 /// Delegates to `SystemHull::set_hp` which directly sets the value.
-pub fn set_console_hp_direct(app: &mut App, system_id: crate::messages::SystemId, new_hp: f32) {
+pub fn set_console_hp_direct(
+    app: &mut App,
+    system_id: crate::core::messages::SystemId,
+    new_hp: f32,
+) {
     let ship = app
         .world_mut()
         .query_filtered::<Entity, With<LocalShip>>()
@@ -706,7 +734,7 @@ pub fn set_console_hp_direct(app: &mut App, system_id: crate::messages::SystemId
         .unwrap();
     let mut entity_mut = app.world_mut().entity_mut(ship);
     let mut hull = entity_mut
-        .get_mut::<crate::entity_spawner::EntitySystemHull>()
+        .get_mut::<crate::entities::spawner::EntitySystemHull>()
         .unwrap();
     hull.0.set_hp(&system_id, new_hp);
 }

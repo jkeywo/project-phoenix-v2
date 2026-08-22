@@ -144,7 +144,7 @@ impl Plugin for ConsoleAiPlugin {
                 // them.
                 ai_torpedo_load
                     .in_set(crate::sim_sets::SimSet::Input)
-                    .before(crate::weapons_plugin::handle_set_torpedo_volley_target)
+                    .before(crate::console::weapons::handle_set_torpedo_volley_target)
                     .run_if(crate::ai::cadence::ai_tick_ready),
                 // Not an AI-operator decider despite living in this plugin
                 // (issue #873): it emits the ship's Sensors frequency advisory
@@ -213,7 +213,7 @@ impl Plugin for ConsoleAiPlugin {
 /// (`None`) — not used here, since the live component is fresher anyway.
 pub(crate) fn ai_shield_focus(
     time: Res<Time>,
-    world_snapshot: Res<crate::ai_plugin::WorldSnapshot>,
+    world_snapshot: Res<crate::ai::server::WorldSnapshot>,
     // The read-only AI-host world context — flag chain, sessions (consulted by
     // the admission emitter), and origin stamps — behind one bare-`Res` system
     // param (issue #1207). A fixture that runs this host must register it
@@ -223,17 +223,17 @@ pub(crate) fn ai_shield_focus(
     mut ships: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship::shields::ShipShields,
             &mut crate::ship::shields::ShieldsDamageHistory,
             Option<&crate::ship::shields::ShieldsFocusAiPolicy>,
             &mut crate::ship::shields::PendingShieldsThreatBearing,
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
         ),
         (
-            With<crate::ai_plugin::AiHighFidelity>,
+            With<crate::ai::server::AiHighFidelity>,
             With<crate::server_app::Ship>,
         ),
     >,
@@ -264,20 +264,20 @@ pub(crate) fn ai_shield_focus(
         // addressed (they never occur in authored content — `ShieldSystem`
         // defaults every arc id).
         let emit_focus = |idx: usize,
-                          admitted: &mut crate::messages::AdmittedCommands,
+                          admitted: &mut crate::core::messages::AdmittedCommands,
                           shields: &crate::ship::shields::ShipShields| {
             let Some(sid) = shields
                 .0
                 .facings
                 .get(idx)
-                .and_then(|f| crate::system_registry::shield_arc_system_id(&f.id))
+                .and_then(|f| crate::ship::system_registry::shield_arc_system_id(&f.id))
             else {
                 return;
             };
             emitter.emit(
                 entity_uuid,
                 sid,
-                crate::messages::SystemControlPayload::SetShieldArcFocus { focused: true },
+                crate::core::messages::SystemControlPayload::SetShieldArcFocus { focused: true },
                 control_sources,
                 ship_config,
                 admitted,
@@ -286,7 +286,7 @@ pub(crate) fn ai_shield_focus(
 
         let policy = control_sources
             .0
-            .policy_for(&crate::system_registry::shields_system_id());
+            .policy_for(&crate::ship::system_registry::shields_system_id());
         if !policy.operate_ai {
             continue;
         }
@@ -433,7 +433,7 @@ pub(crate) fn ai_shield_focus(
         // spine cannot see — `decide` re-confirms both (a no-op here, since we
         // only reach it AI-operated and declared) and owns the resolution.
         let tick = crate::ai::host::HostTick {
-            system: crate::system_registry::shields_system_id(),
+            system: crate::ship::system_registry::shields_system_id(),
             channel: crate::entities::config::SHIELD_FOCUS_CHANNEL,
             facts: &facts,
             flags: &flag_chain,
@@ -476,13 +476,15 @@ pub(crate) fn ai_shield_focus(
                         .0
                         .facings
                         .get(i)
-                        .and_then(|f| crate::system_registry::shield_arc_system_id(&f.id))
+                        .and_then(|f| crate::ship::system_registry::shield_arc_system_id(&f.id))
                 });
                 if let Some(sid) = current_sid {
                     emitter.emit(
                         entity_uuid,
                         sid,
-                        crate::messages::SystemControlPayload::SetShieldArcFocus { focused: false },
+                        crate::core::messages::SystemControlPayload::SetShieldArcFocus {
+                            focused: false,
+                        },
                         control_sources,
                         ship_config,
                         &mut admitted,
@@ -583,10 +585,10 @@ fn ai_power_allocation(
     mut ships: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship::power::ShipPowerSystem,
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
             // The ACTUAL actuator throttle, written for every ship (NPC and
             // player alike) by `process_helm_inputs`. Deliberately NOT
             // `LastHelmInput`, which is only a LocalShip HUD mirror and stays
@@ -600,10 +602,10 @@ fn ai_power_allocation(
             Option<&crate::ship::power::PowerAiCadence>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             Option<&crate::ship::combat_activity::RecentCombatActivity>,
-            &mut crate::messages::AdmittedCommands,
+            &mut crate::core::messages::AdmittedCommands,
         ),
         (
-            With<crate::ai_plugin::AiHighFidelity>,
+            With<crate::ai::server::AiHighFidelity>,
             With<crate::server_app::Ship>,
         ),
     >,
@@ -620,7 +622,12 @@ fn ai_power_allocation(
         .map(|om| {
             om.0.scored_pool(&crate::objectives::WorldConditions::default())
                 .iter()
-                .any(|s| matches!(s.directive, crate::messages::AiDirective::Destroy { .. }))
+                .any(|s| {
+                    matches!(
+                        s.directive,
+                        crate::core::messages::AiDirective::Destroy { .. }
+                    )
+                })
         })
         .unwrap_or(false);
 
@@ -647,7 +654,7 @@ fn ai_power_allocation(
         // cleanly.
         if !crate::ai::host::ai_operates(
             &control_sources.0,
-            crate::system_registry::power_reactor_system_id(),
+            crate::ship::system_registry::power_reactor_system_id(),
         ) {
             continue;
         }
@@ -730,7 +737,7 @@ fn ai_power_allocation(
         // in ignorance of what the other groups had asked for is exactly how the
         // silent cap refusal happened — the applier's budget check refuses the
         // surplus without an error, and the next decision arm asks again.
-        let group_ids: Vec<crate::messages::PowerGroupId> =
+        let group_ids: Vec<crate::core::messages::PowerGroupId> =
             power.0.iter().map(|(id, _)| id.clone()).collect();
         let mut bids: Vec<crate::modifiers::power_system::AllocationBid> =
             Vec::with_capacity(group_ids.len());
@@ -787,8 +794,8 @@ fn ai_power_allocation(
             );
             emit_ai_command(
                 entity_uuid,
-                crate::system_registry::power_reactor_system_id(),
-                crate::messages::SystemControlPayload::SetPowerGroupAllocation {
+                crate::ship::system_registry::power_reactor_system_id(),
+                crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
                     group: group_id,
                     level,
                 },
@@ -905,48 +912,48 @@ pub(crate) fn ai_torpedo_auto_fire(
     mut ships: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &crate::ship_plugin::ShipConfigComponent,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::ship_plugin::ActiveStationRatings,
-            &crate::ship_state::ShipPhysics,
+            &crate::ship::state::ShipPhysics,
             &crate::server_app::ShipSystemBlackboards,
-            Option<&crate::weapons_plugin::TorpedoSystemResource>,
-            Option<&crate::weapons_plugin::TorpedoTubeAiPolicies>,
-            &mut crate::messages::AdmittedCommands,
+            Option<&crate::console::weapons::TorpedoSystemResource>,
+            Option<&crate::console::weapons::TorpedoTubeAiPolicies>,
+            &mut crate::core::messages::AdmittedCommands,
             // Issue #872: this ship's own red-alert state, seeded as a typed
             // fact for the tube's authored LAUNCH predicate. `Option<&_>` for
             // fixtures that spawn a ship without it; absent reads `false`.
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
             // Issue #1041: the captain's weapons hold, folded with the alert
             // above into the one `red_alert` fact the tube's authored LAUNCH
             // predicate already reads.
-            Option<&crate::ship_state::ShipWeaponsHold>,
+            Option<&crate::ship::state::ShipWeaponsHold>,
             // Issue #1107: the ship's Command stance selections, so a directed
             // AI weapons Station's stance decides the launch posture in place of
             // the ship's own Red Alert. Absent reads as no direction.
             Option<&crate::console::command::server::ShipStationStances>,
         ),
         (
-            With<crate::ai_plugin::AiHighFidelity>,
+            With<crate::ai::server::AiHighFidelity>,
             With<crate::server_app::Ship>,
         ),
     >,
     asteroid_q: Query<
-        (&crate::simulation::AsteroidUuid, &Transform),
-        With<crate::simulation::Asteroid>,
+        (&crate::server_app::AsteroidUuid, &Transform),
+        With<crate::server_app::Asteroid>,
     >,
     other_ships_q: Query<
         (
-            &crate::entity_spawner::EntityUuid,
+            &crate::entities::spawner::EntityUuid,
             &Transform,
             Option<&crate::ship::shields::ShipShields>,
-            Option<&crate::ship_state::ShipPhysics>,
+            Option<&crate::ship::state::ShipPhysics>,
         ),
-        Without<crate::simulation::Asteroid>,
+        Without<crate::server_app::Asteroid>,
     >,
 ) {
-    let policy_sid = crate::system_registry::torpedo_magazine_system_id();
+    let policy_sid = crate::ship::system_registry::torpedo_magazine_system_id();
 
     for (
         ship_entity,
@@ -976,7 +983,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             &control_sources.0,
             red_alert_opt.is_some_and(|r| r.0),
         );
-        let posture = crate::weapons_plugin::WeaponsAlertPosture::from_parts(
+        let posture = crate::console::weapons::WeaponsAlertPosture::from_parts(
             red_alert_opt,
             weapons_hold_opt,
             stance_override,
@@ -997,7 +1004,9 @@ pub(crate) fn ai_torpedo_auto_fire(
         // than assumed to be named "tactical". NPCs have no weapons owner, so
         // the fallback keeps them on the unclaimed (fire unconditionally) path.
         let tactical_station = ship_config.0.weapons_station().unwrap_or_else(|| {
-            crate::messages::StationId(crate::system_registry::TACTICAL_STATION_ID.into())
+            crate::core::messages::StationId(
+                crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+            )
         });
 
         // Claimed/unclaimed distinction, preserved verbatim from the old
@@ -1019,9 +1028,9 @@ pub(crate) fn ai_torpedo_auto_fire(
         // #829, spec §1/§3). One-tick lag accepted, including for firing.
         let Some(target_uuid) = (match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
             _ => None,
         }) else {
             continue;
@@ -1078,7 +1087,7 @@ pub(crate) fn ai_torpedo_auto_fire(
         let Some(torpedo_sys_comp) = torpedo_sys_comp else {
             continue;
         };
-        let torpedo_sys: &crate::torpedo::TorpedoSystem = &torpedo_sys_comp.0;
+        let torpedo_sys: &crate::weapons::torpedo::TorpedoSystem = &torpedo_sys_comp.0;
         let tubes: Vec<crate::console_ai::TubeSummary> = torpedo_sys
             .tubes
             .iter()
@@ -1135,7 +1144,7 @@ pub(crate) fn ai_torpedo_auto_fire(
             let Some(launch_policy) = tube_policies.and_then(|p| p.0.get(&tube_id)) else {
                 continue;
             };
-            let facts = crate::weapons_plugin::seed_torpedo_tube_launch_facts(
+            let facts = crate::console::weapons::seed_torpedo_tube_launch_facts(
                 true,
                 true,
                 true,
@@ -1144,7 +1153,7 @@ pub(crate) fn ai_torpedo_auto_fire(
                 tubes_full,
                 posture,
             );
-            if !crate::weapons_plugin::torpedo_tube_launch_policy_fires(
+            if !crate::console::weapons::torpedo_tube_launch_policy_fires(
                 launch_policy,
                 &facts,
                 &flag_chain,
@@ -1153,13 +1162,14 @@ pub(crate) fn ai_torpedo_auto_fire(
             }
             // Emit as an admitted command through the shared AI seam (issue
             // #846), instead of the retired `TorpedoIntents` buffer.
-            let Some(target) = crate::system_registry::torpedo_tube_system_id(&tube_id) else {
+            let Some(target) = crate::ship::system_registry::torpedo_tube_system_id(&tube_id)
+            else {
                 continue;
             };
             crate::command_admission::ai_emit::emit_ai_command(
                 entity_uuid,
                 target,
-                crate::messages::SystemControlPayload::FireTorpedo {
+                crate::core::messages::SystemControlPayload::FireTorpedo {
                     target_uuid: Some(target_uuid.clone()),
                 },
                 control_sources,
@@ -1225,17 +1235,17 @@ pub(crate) fn ai_torpedo_load(
     mut ships: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &crate::ship_plugin::ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
-            &crate::weapons_plugin::TorpedoSystemResource,
-            Option<&crate::weapons_plugin::TorpedoTubeAiPolicies>,
-            &mut crate::messages::AdmittedCommands,
+            &crate::console::weapons::TorpedoSystemResource,
+            Option<&crate::console::weapons::TorpedoTubeAiPolicies>,
+            &mut crate::core::messages::AdmittedCommands,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    let magazine_id = crate::system_registry::torpedo_magazine_system_id();
+    let magazine_id = crate::ship::system_registry::torpedo_magazine_system_id();
 
     for (
         ship_entity,
@@ -1263,7 +1273,7 @@ pub(crate) fn ai_torpedo_load(
             .tubes
             .iter()
             .map(|tube| {
-                let tube_system_id = crate::system_registry::torpedo_tube_system_id(&tube.id)
+                let tube_system_id = crate::ship::system_registry::torpedo_tube_system_id(&tube.id)
                     .filter(|id| {
                         crate::console::weapons::shared::system_is_registered(control_sources, id)
                     });
@@ -1300,17 +1310,19 @@ pub(crate) fn ai_torpedo_load(
                 continue;
             };
             let tube_ref = torpedo_sys.0.tube(&tube_id);
-            let facts = crate::weapons_plugin::seed_torpedo_tube_load_facts(
+            let facts = crate::console::weapons::seed_torpedo_tube_load_facts(
                 tube_ref.map(|t| t.loaded_count).unwrap_or(0),
                 tube_ref.map(|t| t.target_count).unwrap_or(0),
                 count,
                 torpedo_sys.0.torpedoes_remaining,
                 true,
             );
-            if !crate::weapons_plugin::torpedo_tube_load_policy_fires(policy, &facts, &flag_chain) {
+            if !crate::console::weapons::torpedo_tube_load_policy_fires(policy, &facts, &flag_chain)
+            {
                 continue;
             }
-            let Some(target) = crate::system_registry::torpedo_tube_system_id(&tube_id) else {
+            let Some(target) = crate::ship::system_registry::torpedo_tube_system_id(&tube_id)
+            else {
                 continue;
             };
             // Through the shared AI-emit seam (issue #738), never a raw
@@ -1320,7 +1332,7 @@ pub(crate) fn ai_torpedo_load(
             let admitted_ok = emit_ai_command(
                 entity_uuid,
                 target.clone(),
-                crate::messages::SystemControlPayload::SetTorpedoVolleyTarget { count },
+                crate::core::messages::SystemControlPayload::SetTorpedoVolleyTarget { count },
                 control_sources,
                 &sessions,
                 ship_config,
@@ -1410,12 +1422,12 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
             Option<&crate::ship::sensors::SensorsAiConfigResource>,
         ),
         (
-            With<crate::ai_plugin::AiHighFidelity>,
+            With<crate::ai::server::AiHighFidelity>,
             With<crate::server_app::Ship>,
         ),
     >,
     target_shields_q: Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         &crate::ship::shields::ShipShields,
     )>,
     mut writer: MessageWriter<crate::ship_plugin::CoordinationEnqueue>,
@@ -1423,9 +1435,9 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
     let hz = world_config
         .as_deref()
         .map(|wc| wc.global.ai_tick_hz)
-        .unwrap_or_else(|| crate::entity_config::GlobalConfig::default().ai_tick_hz);
+        .unwrap_or_else(|| crate::entities::config::GlobalConfig::default().ai_tick_hz);
     let dt = if hz > 0.0 { 1.0 / hz } else { 0.0 };
-    let sensors_sid = crate::system_registry::sensors_system_id();
+    let sensors_sid = crate::ship::system_registry::sensors_system_id();
 
     for (entity, control_sources, blackboards, mut hint_state, ai_config_comp) in ships.iter_mut() {
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3),
@@ -1434,9 +1446,9 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
         // selection.
         let locked_target = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
-            Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
             _ => None,
         };
 
@@ -1484,8 +1496,8 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
             writer.write(crate::ship_plugin::CoordinationEnqueue {
                 source_entity: entity,
                 sender_origin,
-                target: crate::system_registry::tactical_station_key(),
-                payload: crate::messages::CoordinationPayload::FrequencyHint { frequency },
+                target: crate::ship::system_registry::tactical_station_key(),
+                payload: crate::core::messages::CoordinationPayload::FrequencyHint { frequency },
                 sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
                 sender_system: sensors_sid.clone(),
             });
@@ -1498,15 +1510,15 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai_plugin::AiHighFidelity;
-    use crate::messages::{AdmittedCommands, CoordinationPayload};
+    use crate::ai::server::AiHighFidelity;
+    use crate::console::weapons::TacticalRadarSelection;
+    use crate::core::messages::{AdmittedCommands, CoordinationPayload};
     use crate::ship::control_source::ControlSource;
     use crate::ship::shields::{
         PendingShieldsThreatBearing, ShieldsAiConfigResource, ShieldsDamageHistory,
         ShieldsFocusAiPolicy, ShipShields,
     };
     use crate::ship_plugin::{CoordinationEnqueue, ShipSystemControlSources};
-    use crate::weapons_plugin::TacticalRadarSelection;
 
     #[derive(Resource, Default)]
     struct CoordBox(Vec<CoordinationEnqueue>);
@@ -1523,7 +1535,7 @@ mod tests {
     /// `AdmissionPlugin`'s per-tick clear, which these single-shot scenarios
     /// don't need.
     fn shield_test_app() -> App {
-        let config = crate::shield::ShieldConfig {
+        let config = crate::weapons::shield::ShieldConfig {
             num_facings: 4,
             max_hp: 100,
             regen_per_sec: 0.0,
@@ -1535,7 +1547,7 @@ mod tests {
             .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
                 std::time::Duration::from_millis(100),
             ))
-            .init_resource::<crate::ai_plugin::WorldSnapshot>()
+            .init_resource::<crate::ai::server::WorldSnapshot>()
             .init_resource::<ShieldsAiConfigResource>()
             .init_resource::<CoordBox>()
             .insert_resource(crate::lobby::Sessions(
@@ -1553,7 +1565,7 @@ mod tests {
 
         app.world_mut().spawn((
             crate::server_app::Ship,
-            ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+            ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             ShieldsDamageHistory::default(),
             PendingShieldsThreatBearing::default(),
             ai_shield_control_sources(),
@@ -1585,12 +1597,12 @@ mod tests {
     fn ai_shield_control_sources() -> ShipSystemControlSources {
         let mut control_sources = ShipSystemControlSources::default();
         control_sources.0.set(
-            crate::system_registry::shields_system_id(),
+            crate::ship::system_registry::shields_system_id(),
             ControlSource::Ai,
         );
         for arc_id in ["fore", "port", "aft", "starboard"] {
             control_sources.0.set(
-                crate::system_registry::shield_arc_system_id(arc_id).expect("arc id"),
+                crate::ship::system_registry::shield_arc_system_id(arc_id).expect("arc id"),
                 ControlSource::Ai,
             );
         }
@@ -1760,7 +1772,7 @@ mod tests {
         let mut app = shield_test_app();
         let a = ship_entity(&mut app);
 
-        let config = crate::shield::ShieldConfig {
+        let config = crate::weapons::shield::ShieldConfig {
             num_facings: 4,
             max_hp: 100,
             regen_per_sec: 0.0,
@@ -1770,7 +1782,7 @@ mod tests {
             .world_mut()
             .spawn((
                 crate::server_app::Ship,
-                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
                 ShieldsDamageHistory::default(),
                 PendingShieldsThreatBearing::default(),
                 ai_shield_control_sources(),
@@ -1812,7 +1824,7 @@ mod tests {
         // The base fixture ship carries the DEFAULT policy (50%).
         let defaulted = ship_entity(&mut app);
 
-        let config = crate::shield::ShieldConfig {
+        let config = crate::weapons::shield::ShieldConfig {
             num_facings: 4,
             max_hp: 100,
             regen_per_sec: 0.0,
@@ -1823,7 +1835,7 @@ mod tests {
             .world_mut()
             .spawn((
                 crate::server_app::Ship,
-                ShipShields(crate::shield::ShieldSystem::new(&config), 0.5),
+                ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
                 ShieldsDamageHistory::default(),
                 PendingShieldsThreatBearing::default(),
                 ai_shield_control_sources(),
@@ -1868,7 +1880,7 @@ mod tests {
             let mut cs = entity_mut.get_mut::<ShipSystemControlSources>().unwrap();
             for arc_id in ["fore", "port", "aft", "starboard"] {
                 cs.0.set(
-                    crate::system_registry::shield_arc_system_id(arc_id).expect("arc id"),
+                    crate::ship::system_registry::shield_arc_system_id(arc_id).expect("arc id"),
                     ControlSource::Human,
                 );
             }
@@ -2094,7 +2106,7 @@ mod tests {
             .unwrap()
             .0
             .set(
-                crate::system_registry::shields_system_id(),
+                crate::ship::system_registry::shields_system_id(),
                 ControlSource::Human,
             );
 
@@ -2240,7 +2252,7 @@ mod tests {
     fn seed_viewscreen_from_selection(
         mut q: Query<
             (
-                Option<&crate::weapons_plugin::TacticalRadarSelection>,
+                Option<&crate::console::weapons::TacticalRadarSelection>,
                 &mut crate::server_app::ShipSystemBlackboards,
             ),
             With<crate::server_app::Ship>,
@@ -2248,14 +2260,17 @@ mod tests {
     ) {
         for (tac, mut bbs) in q.iter_mut() {
             let combat_lock = tac.and_then(|t| t.0.clone());
-            let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
-                Some(crate::messages::SystemBlackboard::Viewscreen(v)) => v.clone(),
-                _ => crate::messages::ViewscreenBlackboard::default(),
+            let mut vbb = match bbs
+                .0
+                .get(&crate::ship::system_registry::viewscreen_system_id())
+            {
+                Some(crate::core::messages::SystemBlackboard::Viewscreen(v)) => v.clone(),
+                _ => crate::core::messages::ViewscreenBlackboard::default(),
             };
             vbb.combat_lock = combat_lock;
             bbs.0.insert(
-                crate::system_registry::viewscreen_system_id(),
-                crate::messages::SystemBlackboard::Viewscreen(vbb),
+                crate::ship::system_registry::viewscreen_system_id(),
+                crate::core::messages::SystemBlackboard::Viewscreen(vbb),
             );
         }
     }
@@ -2283,15 +2298,15 @@ mod tests {
 
         let mut control_sources = ShipSystemControlSources::default();
         control_sources.0.set(
-            crate::system_registry::sensors_system_id(),
+            crate::ship::system_registry::sensors_system_id(),
             ControlSource::Ai,
         );
 
         let target = app
             .world_mut()
             .spawn((
-                crate::entity_spawner::EntityUuid("target-1".into()),
-                ShipShields(crate::shield::ShieldSystem::default(), 0.75),
+                crate::entities::spawner::EntityUuid("target-1".into()),
+                ShipShields(crate::weapons::shield::ShieldSystem::default(), 0.75),
             ))
             .id();
 
@@ -2325,7 +2340,7 @@ mod tests {
     /// `secs * ai_tick_hz` updates. Wall-clock is advanced alongside purely so
     /// any other `Time` reader in the harness sees a consistent world.
     fn tick_with_dt(app: &mut App, secs: f32) {
-        let hz = crate::entity_config::GlobalConfig::default().ai_tick_hz;
+        let hz = crate::entities::config::GlobalConfig::default().ai_tick_hz;
         let period = 1.0 / hz;
         let ticks = (secs * hz).ceil().max(1.0) as usize;
         for _ in 0..ticks {
@@ -2358,7 +2373,7 @@ mod tests {
         }
         assert_eq!(
             hint.target,
-            crate::system_registry::tactical_station_key(),
+            crate::ship::system_registry::tactical_station_key(),
             "frequency hint should target Tactical"
         );
     }
@@ -2384,7 +2399,7 @@ mod tests {
 
         let mut tuned_sources = ShipSystemControlSources::default();
         tuned_sources.0.set(
-            crate::system_registry::sensors_system_id(),
+            crate::ship::system_registry::sensors_system_id(),
             ControlSource::Ai,
         );
         let tuned = app
@@ -2446,7 +2461,7 @@ mod tests {
             .unwrap()
             .0
             .set(
-                crate::system_registry::sensors_system_id(),
+                crate::ship::system_registry::sensors_system_id(),
                 ControlSource::Human,
             );
 
@@ -2521,7 +2536,7 @@ station = "sensors"
     /// station claimed by `holder_token`. Returns the source ship entity.
     fn claim_sensors_station(app: &mut App, holder_token: &str, rating: &str) -> Entity {
         let source = app.world().resource::<SourceShip>().0;
-        let sensors_station = crate::messages::StationId("sensors".into());
+        let sensors_station = crate::core::messages::StationId("sensors".into());
 
         let mut sm = crate::lobby::session::SessionManager::new();
         sm.register(holder_token.into(), "Operator".into()).unwrap();
@@ -2674,7 +2689,7 @@ station = "sensors"
 
         let mut control_sources = ShipSystemControlSources::default();
         control_sources.0.set(
-            crate::system_registry::power_reactor_system_id(),
+            crate::ship::system_registry::power_reactor_system_id(),
             ControlSource::Ai,
         );
 
@@ -2684,10 +2699,10 @@ station = "sensors"
             crate::ship::power::ShipPowerSystem(
                 crate::modifiers::power_system::PowerSystem::default(),
             ),
-            crate::ship_state::ShipRedAlert::default(),
+            crate::ship::state::ShipRedAlert::default(),
             crate::ship::helm::ThrustInput::default(),
             default_power_policy(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             AiHighFidelity,
         ));
 
@@ -2707,7 +2722,7 @@ station = "sensors"
             .get::<crate::ship::power::ShipPowerSystem>()
             .unwrap()
             .0
-            .level_for(&crate::messages::PowerGroupId(group.into()))
+            .level_for(&crate::core::messages::PowerGroupId(group.into()))
     }
 
     fn set_battery(app: &mut App, e: Entity, charge: f32) {
@@ -2757,7 +2772,7 @@ station = "sensors"
     }
 
     fn shipped_hull_power_app_inner(path: &str, clear_admitted: bool) -> (App, Entity) {
-        let config = crate::entity_includes::load_entity_config(path)
+        let config = crate::entities::include_resolve::load_entity_config(path)
             .unwrap_or_else(|e| panic!("{path}: {e}"));
         let reactor = config.power.as_ref().expect("hull authors [power]");
         let power_groups = config
@@ -2815,7 +2830,7 @@ station = "sensors"
 
         let mut control_sources = ShipSystemControlSources::default();
         control_sources.0.set(
-            crate::system_registry::power_reactor_system_id(),
+            crate::ship::system_registry::power_reactor_system_id(),
             ControlSource::Ai,
         );
         let e = app
@@ -2830,7 +2845,7 @@ station = "sensors"
                     ),
                 ),
                 power_config,
-                crate::ship_state::ShipRedAlert(true),
+                crate::ship::state::ShipRedAlert(true),
                 crate::ship::helm::ThrustInput(0.9),
                 policy,
                 // The hull's OWN `[[station]]`/`[[system]]` roster. Present so
@@ -2861,7 +2876,7 @@ station = "sensors"
         let e = power_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = true;
 
@@ -2892,7 +2907,7 @@ station = "sensors"
             .0 = 0.9;
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = true;
 
@@ -2948,7 +2963,7 @@ station = "sensors"
             .0 = 0.9;
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = true;
 
@@ -3001,7 +3016,7 @@ station = "sensors"
             .0 = 0.9;
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = true;
 
@@ -3035,10 +3050,19 @@ station = "sensors"
             HELM_POWER_GROUP, SHIELDS_POWER_GROUP, WEAPONS_POWER_GROUP,
         };
         let seed = [
-            (crate::messages::PowerGroupId(HELM_POWER_GROUP.into()), 3u8),
-            (crate::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()), 2),
-            (crate::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()), 2),
-            (crate::messages::PowerGroupId("ops".into()), 1),
+            (
+                crate::core::messages::PowerGroupId(HELM_POWER_GROUP.into()),
+                3u8,
+            ),
+            (
+                crate::core::messages::PowerGroupId(WEAPONS_POWER_GROUP.into()),
+                2,
+            ),
+            (
+                crate::core::messages::PowerGroupId(SHIELDS_POWER_GROUP.into()),
+                2,
+            ),
+            (crate::core::messages::PowerGroupId("ops".into()), 1),
         ];
 
         let mut app = App::new();
@@ -3060,7 +3084,7 @@ station = "sensors"
 
         let mut control_sources = ShipSystemControlSources::default();
         control_sources.0.set(
-            crate::system_registry::power_reactor_system_id(),
+            crate::ship::system_registry::power_reactor_system_id(),
             ControlSource::Ai,
         );
         let e = app
@@ -3074,7 +3098,7 @@ station = "sensors"
                         &seed,
                     ),
                 ),
-                crate::ship_state::ShipRedAlert(true),
+                crate::ship::state::ShipRedAlert(true),
                 crate::ship_plugin::LastHelmInput::default(),
                 policy,
                 AdmittedCommands::default(),
@@ -3090,7 +3114,7 @@ station = "sensors"
             .get::<crate::ship::power::ShipPowerSystem>()
             .unwrap()
             .0
-            .commanded_level_for(&crate::messages::PowerGroupId(group.into()))
+            .commanded_level_for(&crate::core::messages::PowerGroupId(group.into()))
     }
 
     fn commanded_total(app: &App, e: Entity) -> u8 {
@@ -3109,11 +3133,12 @@ station = "sensors"
             .entity(e)
             .get::<AdmittedCommands>()
             .unwrap()
-            .for_target(crate::system_registry::POWER_REACTOR_SYSTEM_ID)
+            .for_target(crate::ship::system_registry::POWER_REACTOR_SYSTEM_ID)
             .filter_map(|c| match &c.payload {
-                crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level } => {
-                    Some((group.0.clone(), *level))
-                }
+                crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                    group,
+                    level,
+                } => Some((group.0.clone(), *level)),
                 _ => None,
             })
             .collect()
@@ -3336,7 +3361,7 @@ station = "sensors"
     /// is the resolution the admission gate itself performs and a hull is free
     /// to put the reactor anywhere.
     fn seat_human_power_officer(app: &mut App, e: Entity) -> String {
-        let reactor = crate::system_registry::power_reactor_system_id();
+        let reactor = crate::ship::system_registry::power_reactor_system_id();
         app.world_mut()
             .entity_mut(e)
             .get_mut::<ShipSystemControlSources>()
@@ -3399,9 +3424,9 @@ station = "sensors"
         let mut admitted = AdmittedCommands::default();
         let ok = crate::command_admission::validate_and_admit(
             token,
-            crate::system_registry::power_reactor_system_id(),
-            crate::messages::SystemControlPayload::SetPowerGroupAllocation {
-                group: crate::messages::PowerGroupId(group.into()),
+            crate::ship::system_registry::power_reactor_system_id(),
+            crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                group: crate::core::messages::PowerGroupId(group.into()),
                 level,
             },
             &sources,
@@ -3832,7 +3857,7 @@ default_level = 2
 "#;
         crate::ship::config::ShipConfig::from_toml(
             toml,
-            &[crate::system_registry::POWER_REACTOR_KIND],
+            &[crate::ship::system_registry::POWER_REACTOR_KIND],
         )
         .unwrap()
     }
@@ -3894,7 +3919,7 @@ default_level = 2
         app.world_mut().entity_mut(e).remove::<AiHighFidelity>();
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = true;
 
@@ -3918,7 +3943,7 @@ default_level = 2
         let e = power_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = true;
         app.world_mut()
@@ -3927,7 +3952,7 @@ default_level = 2
             .unwrap()
             .0
             .set(
-                crate::system_registry::power_reactor_system_id(),
+                crate::ship::system_registry::power_reactor_system_id(),
                 ControlSource::Human,
             );
 
@@ -3946,7 +3971,7 @@ default_level = 2
             .unwrap()
             .0
             .set(
-                crate::system_registry::power_reactor_system_id(),
+                crate::ship::system_registry::power_reactor_system_id(),
                 ControlSource::Ai,
             );
         power_tick_with_dt(&mut app, 0.1);
@@ -3973,7 +3998,7 @@ default_level = 2
             .add_systems(Update, ai_power_allocation);
         let mut cs = ShipSystemControlSources::default();
         cs.0.set(
-            crate::system_registry::power_reactor_system_id(),
+            crate::ship::system_registry::power_reactor_system_id(),
             ControlSource::Ai,
         );
         let ee = emit_app
@@ -3984,10 +4009,10 @@ default_level = 2
                 crate::ship::power::ShipPowerSystem(
                     crate::modifiers::power_system::PowerSystem::default(),
                 ),
-                crate::ship_state::ShipRedAlert(true),
+                crate::ship::state::ShipRedAlert(true),
                 crate::ship_plugin::LastHelmInput::default(),
                 default_power_policy(),
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 AiHighFidelity,
             ))
             .id();
@@ -4000,12 +4025,14 @@ default_level = 2
         let admitted = emit_app
             .world()
             .entity(ee)
-            .get::<crate::messages::AdmittedCommands>()
+            .get::<crate::core::messages::AdmittedCommands>()
             .unwrap();
         let weapons_alloc = admitted.0.iter().find_map(|c| match &c.payload {
-            crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, level }
-                if c.target == crate::system_registry::power_reactor_system_id()
-                    && group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP =>
+            crate::core::messages::SystemControlPayload::SetPowerGroupAllocation {
+                group,
+                level,
+            } if c.target == crate::ship::system_registry::power_reactor_system_id()
+                && group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP =>
             {
                 Some(*level)
             }
@@ -4025,13 +4052,13 @@ default_level = 2
                 .unwrap()
                 .0
                 .set_group_allocation(
-                    &crate::messages::PowerGroupId(
+                    &crate::core::messages::PowerGroupId(
                         crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
                     ),
                     3,
                 )
                 .unwrap();
-            ent.get_mut::<crate::messages::AdmittedCommands>()
+            ent.get_mut::<crate::core::messages::AdmittedCommands>()
                 .unwrap()
                 .0
                 .clear();
@@ -4044,12 +4071,12 @@ default_level = 2
         let admitted = emit_app
             .world()
             .entity(ee)
-            .get::<crate::messages::AdmittedCommands>()
+            .get::<crate::core::messages::AdmittedCommands>()
             .unwrap();
         assert!(
             !admitted.0.iter().any(|c| matches!(
                 &c.payload,
-                crate::messages::SystemControlPayload::SetPowerGroupAllocation { group, .. }
+                crate::core::messages::SystemControlPayload::SetPowerGroupAllocation { group, .. }
                     if group.0 == crate::modifiers::power_system::WEAPONS_POWER_GROUP
             )),
             "a group already at the target level must not re-admit a no-op"
@@ -4072,7 +4099,7 @@ default_level = 2
             ));
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = true;
 
@@ -4084,7 +4111,7 @@ default_level = 2
             .world()
             .resource::<crate::ship::power::ShipPowerSystem>()
             .0
-            .level_for(&crate::messages::PowerGroupId(
+            .level_for(&crate::core::messages::PowerGroupId(
                 crate::modifiers::power_system::WEAPONS_POWER_GROUP.into(),
             ));
         assert_eq!(component_level, resource_level);
@@ -4116,12 +4143,12 @@ default_level = 2
         let spawn = |app: &mut App, groups: &[(&str, u8)], policy: PowerAiPolicy| -> Entity {
             let mut cs = ShipSystemControlSources::default();
             cs.0.set(
-                crate::system_registry::power_reactor_system_id(),
+                crate::ship::system_registry::power_reactor_system_id(),
                 ControlSource::Ai,
             );
-            let seed: Vec<(crate::messages::PowerGroupId, u8)> = groups
+            let seed: Vec<(crate::core::messages::PowerGroupId, u8)> = groups
                 .iter()
-                .map(|(g, l)| (crate::messages::PowerGroupId(g.to_string()), *l))
+                .map(|(g, l)| (crate::core::messages::PowerGroupId(g.to_string()), *l))
                 .collect();
             app.world_mut()
                 .spawn((
@@ -4133,10 +4160,10 @@ default_level = 2
                             &seed,
                         ),
                     ),
-                    crate::ship_state::ShipRedAlert::default(),
+                    crate::ship::state::ShipRedAlert::default(),
                     crate::ship::helm::ThrustInput(0.9),
                     policy,
-                    crate::messages::AdmittedCommands::default(),
+                    crate::core::messages::AdmittedCommands::default(),
                     AiHighFidelity,
                 ))
                 .id()
@@ -4211,7 +4238,7 @@ default_level = 2
         ));
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = true;
 
@@ -4269,7 +4296,7 @@ default_level = 2
             );
         let mut cs = ShipSystemControlSources::default();
         cs.0.set(
-            crate::system_registry::power_reactor_system_id(),
+            crate::ship::system_registry::power_reactor_system_id(),
             ControlSource::Ai,
         );
         let e = app
@@ -4280,13 +4307,13 @@ default_level = 2
                 crate::ship::power::ShipPowerSystem(
                     crate::modifiers::power_system::PowerSystem::default(),
                 ),
-                crate::ship_state::ShipRedAlert::default(),
+                crate::ship::state::ShipRedAlert::default(),
                 crate::ship_plugin::LastHelmInput::default(),
                 power_policy(
                     &[],
                     vec![alloc_rule(10, "weapons", "flag(battle_stations)", 4)],
                 ),
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 AiHighFidelity,
             ))
             .id();
@@ -4337,7 +4364,7 @@ default_level = 2
             );
         let mut cs = ShipSystemControlSources::default();
         cs.0.set(
-            crate::system_registry::power_reactor_system_id(),
+            crate::ship::system_registry::power_reactor_system_id(),
             ControlSource::Ai,
         );
         let e = app
@@ -4348,7 +4375,7 @@ default_level = 2
                 crate::ship::power::ShipPowerSystem(
                     crate::modifiers::power_system::PowerSystem::default(),
                 ),
-                crate::ship_state::ShipRedAlert::default(),
+                crate::ship::state::ShipRedAlert::default(),
                 crate::ship_plugin::LastHelmInput::default(),
                 power_policy(
                     &[],
@@ -4369,7 +4396,7 @@ default_level = 2
                         alloc_rule(10, "helm", "flag(base_flag)", 3),
                     ],
                 ),
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 AiHighFidelity,
             ))
             .id();
@@ -4433,7 +4460,7 @@ default_level = 2
             }));
         app.world_mut()
             .entity_mut(e)
-            .get_mut::<crate::ship_state::ShipRedAlert>()
+            .get_mut::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0 = true;
         app.world_mut()
@@ -4469,23 +4496,23 @@ default_level = 2
             Update,
             (
                 ai_torpedo_load,
-                crate::weapons_plugin::handle_set_torpedo_volley_target,
+                crate::console::weapons::handle_set_torpedo_volley_target,
             )
                 .chain(),
         );
 
         let mut control_sources = ShipSystemControlSources::default();
         control_sources.0.set(
-            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::system_registry::torpedo_magazine_system_id(),
             ControlSource::Ai,
         );
         control_sources.0.set(
-            crate::system_registry::torpedo_tube_system_id("fore_port").unwrap(),
+            crate::ship::system_registry::torpedo_tube_system_id("fore_port").unwrap(),
             tube_source,
         );
 
-        let torpedoes = crate::torpedo::TorpedoSystem::from_configs(
-            &[crate::entity_config::TorpedoTubeConfig {
+        let torpedoes = crate::weapons::torpedo::TorpedoSystem::from_configs(
+            &[crate::entities::config::TorpedoTubeConfig {
                 id: "fore_port".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 90.0,
@@ -4497,7 +4524,7 @@ default_level = 2
                 ai_target_count: None,
                 ai: None,
             }],
-            crate::torpedo::TorpedoConfig::default(),
+            crate::weapons::torpedo::TorpedoConfig::default(),
         );
 
         let e = app
@@ -4505,12 +4532,12 @@ default_level = 2
             .spawn((
                 crate::server_app::Ship,
                 control_sources,
-                crate::weapons_plugin::TorpedoSystemResource(torpedoes),
+                crate::console::weapons::TorpedoSystemResource(torpedoes),
                 AdmittedCommands::default(),
                 // The SHIPPED authored per-tube policy. Since #885b stage 5d a
                 // tube with no entry in `TorpedoTubeAiPolicies` is never ordered
                 // to load — there is no synthesised stand-in.
-                crate::weapons_plugin::TorpedoTubeAiPolicies(
+                crate::console::weapons::TorpedoTubeAiPolicies(
                     [(
                         "fore_port".to_string(),
                         crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_tube")
@@ -4528,7 +4555,7 @@ default_level = 2
     fn tube_target_count(app: &App, e: Entity) -> u32 {
         app.world()
             .entity(e)
-            .get::<crate::weapons_plugin::TorpedoSystemResource>()
+            .get::<crate::console::weapons::TorpedoSystemResource>()
             .unwrap()
             .0
             .tube("fore_port")
@@ -4560,7 +4587,7 @@ default_level = 2
         assert!(
             matches!(
                 admitted.0[0].payload,
-                crate::messages::SystemControlPayload::SetTorpedoVolleyTarget { count: 2 }
+                crate::core::messages::SystemControlPayload::SetTorpedoVolleyTarget { count: 2 }
             ),
             "the AI must issue the ordinary console command, not poke state"
         );
@@ -4618,15 +4645,15 @@ default_level = 2
     /// `fore_port` tube, built from an authored `when` guard on the
     /// `torpedo_load` channel.
     fn attach_load_policy(app: &mut App, e: Entity, when: &str) {
-        let ai = crate::entity_config::FineSystemAiConfigToml {
+        let ai = crate::entities::config::FineSystemAiConfigToml {
             evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
             idle: false,
             param: Default::default(),
-            rule: vec![crate::entity_config::FineSystemAiRuleToml {
+            rule: vec![crate::entities::config::FineSystemAiRuleToml {
                 priority: 0,
-                channel: crate::entity_config::TORPEDO_LOAD_CHANNEL.into(),
+                channel: crate::entities::config::TORPEDO_LOAD_CHANNEL.into(),
                 when: when.into(),
-                verb: crate::entity_config::TORPEDO_LOAD_VERB.into(),
+                verb: crate::entities::config::TORPEDO_LOAD_VERB.into(),
                 value: false,
                 level: 0,
                 response_index: 0,
@@ -4639,7 +4666,7 @@ default_level = 2
         map.insert("fore_port".to_string(), ai.to_policy().unwrap());
         app.world_mut()
             .entity_mut(e)
-            .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(map));
+            .insert(crate::console::weapons::TorpedoTubeAiPolicies(map));
     }
 
     /// An idle tube policy holds the load: no `SetTorpedoVolleyTarget` is issued
@@ -4657,7 +4684,7 @@ default_level = 2
         );
         app.world_mut()
             .entity_mut(e)
-            .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(map));
+            .insert(crate::console::weapons::TorpedoTubeAiPolicies(map));
         app.update();
 
         assert_eq!(

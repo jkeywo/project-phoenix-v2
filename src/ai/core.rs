@@ -38,7 +38,7 @@ pub const AVOIDANCE_LOOK_AHEAD_SECS: f32 = 3.0;
 /// steeper one leaves the dodge later. See the table in
 /// [`hazard_threat_fraction`] for what the shipped value costs at each size.
 /// Parse-time default only — see
-/// [`crate::entity_config::BehaviourConfig::hazard_threat_exponent`], whose
+/// [`crate::entities::config::BehaviourConfig::hazard_threat_exponent`], whose
 /// serde default reads this constant so the two cannot drift apart.
 pub const HAZARD_THREAT_EXPONENT: f32 = 2.0;
 /// Authored ceiling (radians) on how far a DEAD-RECKONED hull holds its heading
@@ -66,22 +66,22 @@ pub const HAZARD_THREAT_EXPONENT: f32 = 2.0;
 /// every high-fidelity hull's steering.
 ///
 /// Parse-time default only — see
-/// [`crate::entity_config::BehaviourConfig::low_lod_avoidance_deviation_rad`].
+/// [`crate::entities::config::BehaviourConfig::low_lod_avoidance_deviation_rad`].
 pub const LOW_LOD_AVOIDANCE_DEVIATION_RAD: f32 = PI / 2.0;
 /// Speed fraction [0, 1] used for the Channel-3 Navigation→Helm handoff
 /// (`NavigationWaypoint`) fallthrough when the entity has no `[behaviour]`
 /// section to author one. Parse-time default only — see
-/// [`crate::entity_config::BehaviourConfig::nav_handoff_speed`], whose serde
+/// [`crate::entities::config::BehaviourConfig::nav_handoff_speed`], whose serde
 /// default reads this constant so the two cannot drift apart.
 pub const NAV_HANDOFF_SPEED: f32 = 0.6;
 /// Distance (world units) within which a docking intent switches from normal
 /// objective approach to the close-quarters [`docking_close_manoeuvre`].
 /// Parse-time default only — see
-/// [`crate::entity_config::BehaviourConfig::docking_engage_distance`].
+/// [`crate::entities::config::BehaviourConfig::docking_engage_distance`].
 pub const DOCKING_ENGAGE_DISTANCE: f32 = 40.0;
 /// Speed fraction `[0, 1]` capping the low-speed reverse / lateral translation
 /// of a docking close manoeuvre. Parse-time default only — see
-/// [`crate::entity_config::BehaviourConfig::docking_approach_speed`].
+/// [`crate::entities::config::BehaviourConfig::docking_approach_speed`].
 pub const DOCKING_APPROACH_SPEED: f32 = 0.3;
 const AVOIDANCE_MIN_SPEED: f32 = 0.25;
 /// Authored size-ignore ratio default: a ship ignores a **mobile** hazard whose
@@ -91,32 +91,32 @@ const AVOIDANCE_MIN_SPEED: f32 = 0.25;
 /// backward-compatible default and what every shipped hull uses today — no
 /// entity TOML authors this field, so the rule is currently inert in shipped
 /// content. Parse-time default only — see
-/// [`crate::entity_config::BehaviourConfig::hazard_ignore_size_ratio`], whose
+/// [`crate::entities::config::BehaviourConfig::hazard_ignore_size_ratio`], whose
 /// serde default reads this constant so the two cannot drift apart.
 pub const HAZARD_IGNORE_SIZE_RATIO: f32 = 0.0;
 /// Authored lateral-thrust hazard sensitivity default: the multiplier a fine
 /// lateral-thrust actuator applies to the shared hazard assessment's starboard
 /// (local `+X`) repulsion component before clamping to `[-1, 1]`. `1.0` passes
 /// the boids-style repulsion through unweighted. Parse-time default only — see
-/// [`crate::entity_config::BehaviourConfig::lateral_hazard_sensitivity`], whose
+/// [`crate::entities::config::BehaviourConfig::lateral_hazard_sensitivity`], whose
 /// serde default reads this constant so the two cannot drift apart.
 pub const LATERAL_HAZARD_SENSITIVITY: f32 = 1.0;
 /// Authored vertical-thrust hazard sensitivity default (issue #744): the
 /// multiplier the vertical-thrust actuator applies to the shared assessment's
 /// moving-hazard threat before clamping to `[0, 1]`. `1.0` passes it through
 /// unweighted. Parse-time default only — see
-/// [`crate::entity_config::BehaviourConfig::vertical_hazard_sensitivity`], whose
+/// [`crate::entities::config::BehaviourConfig::vertical_hazard_sensitivity`], whose
 /// serde default reads this constant so the two cannot drift apart.
 pub const VERTICAL_HAZARD_SENSITIVITY: f32 = 1.0;
 /// Authored maximum vertical offset (world units) a `Bounded` craft may climb
 /// away from its cruise plane while dodging (issue #744). Parse-time default
-/// only — see [`crate::entity_config::HelmCapabilityConfig::max_vertical_offset`].
+/// only — see [`crate::entities::config::HelmCapabilityConfig::max_vertical_offset`].
 pub const MAX_VERTICAL_OFFSET: f32 = 30.0;
 /// Authored gradual return-to-cruise gain for `Bounded` craft (issue #744):
 /// once avoidance urgency falls, the vertical actuator commands a descent of
 /// `-y * VERTICAL_RETURN_RATE` (clamped) so the ship eases back to its cruise
 /// plane rather than snapping. Parse-time default only — see
-/// [`crate::entity_config::HelmCapabilityConfig::vertical_return_rate`].
+/// [`crate::entities::config::HelmCapabilityConfig::vertical_return_rate`].
 pub const VERTICAL_RETURN_RATE: f32 = 0.05;
 /// Authored hazard-urgency threshold at or above which an imminent collision may
 /// TEMPORARILY override the ship's desired facing to point along the escape
@@ -124,7 +124,7 @@ pub const VERTICAL_RETURN_RATE: f32 = 0.05;
 /// and never touches facing. `1.0` here means "off by default" (only a
 /// full-urgency, effectively-unavoidable collision qualifies) — a hull opts into
 /// an earlier facing bail-out by authoring a lower
-/// [`crate::entity_config::BehaviourConfig::imminent_collision_facing_threshold`].
+/// [`crate::entities::config::BehaviourConfig::imminent_collision_facing_threshold`].
 /// Parse-time default only; the override is stateless and evaporates the tick
 /// urgency drops back under the threshold.
 ///
@@ -180,7 +180,7 @@ pub struct ImpulseDecisionInput {
     /// Target position [x, y, z].
     pub target_pos: [f32; 3],
     /// Current impulse phase.
-    pub phase: crate::impulse::ImpulsePhase,
+    pub phase: crate::ship::impulse::ImpulsePhase,
     /// Minimum distance to engage impulse.
     pub engage_distance: f32,
     /// Distance below which impulse is cancelled.
@@ -204,12 +204,12 @@ pub fn decide_impulse(input: &ImpulseDecisionInput) -> ImpulseDecision {
     let dist = (dx * dx + dz * dz).sqrt();
 
     // Cancel when close enough.
-    if dist <= input.cancel_distance && input.phase != crate::impulse::ImpulsePhase::Idle {
+    if dist <= input.cancel_distance && input.phase != crate::ship::impulse::ImpulsePhase::Idle {
         return ImpulseDecision::Cancel;
     }
 
     // Only engage from Idle.
-    if input.phase != crate::impulse::ImpulsePhase::Idle {
+    if input.phase != crate::ship::impulse::ImpulsePhase::Idle {
         return ImpulseDecision::NoChange;
     }
 
@@ -248,7 +248,7 @@ pub struct AiWorldEntity {
     /// Faction UUID, if any.
     pub faction: Option<Uuid>,
     /// Four-quadrant shield state (from the entity broadcast), if the entity has shields.
-    pub shields: Option<Vec<crate::messages::ShieldFacingStatus>>,
+    pub shields: Option<Vec<crate::core::messages::ShieldFacingStatus>>,
     /// Hull integrity fraction [0, 1], if known.
     pub hull_fraction: Option<f32>,
     /// Yaw in radians (Y-up, forward = -Z at yaw 0), if known.
@@ -639,10 +639,10 @@ pub fn avoidance_steering(
 /// Convert a slice of `DoctrineObjective`s into a scored pool using the given
 /// world conditions. The pool is sorted descending by score (highest first).
 pub fn score_doctrine_pool(
-    doctrine: &[crate::entity_config::DoctrineObjective],
+    doctrine: &[crate::entities::config::DoctrineObjective],
     conditions: &crate::objectives::WorldConditions,
-) -> Vec<crate::messages::ScoredObjective> {
-    let mut pool: Vec<crate::messages::ScoredObjective> = doctrine
+) -> Vec<crate::core::messages::ScoredObjective> {
+    let mut pool: Vec<crate::core::messages::ScoredObjective> = doctrine
         .iter()
         .map(|d| {
             let utility = crate::objectives::UtilityConfig {
@@ -653,13 +653,13 @@ pub fn score_doctrine_pool(
             let score = utility.score(d.mandatory, conditions);
             let directive = parse_doctrine_directive(d);
             let relevance = crate::objectives::directive_relevance(&directive);
-            crate::messages::ScoredObjective {
+            crate::core::messages::ScoredObjective {
                 id: d.id.clone(),
                 score,
                 directive,
-                source: crate::messages::ObjectiveSource::Doctrine,
+                source: crate::core::messages::ObjectiveSource::Doctrine,
                 relevance,
-                snapshot: crate::messages::ObjectiveSnapshot {
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: d.id.clone(),
                     text: d.text.clone(),
                     // Doctrine text is authored on the hull and names no runtime
@@ -667,9 +667,9 @@ pub fn score_doctrine_pool(
                     // acquires one.
                     text_params: Default::default(),
                     mandatory: d.mandatory,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Doctrine,
+                    source: crate::core::messages::ObjectiveSource::Doctrine,
                 },
             }
         })
@@ -693,48 +693,48 @@ pub fn score_doctrine_pool(
 /// exactly how the Requiem courier ended up authoring `directive_anchors` on a
 /// `Reach` and resolving to nothing.
 ///
-/// [`AiDirective`]: crate::messages::AiDirective
+/// [`AiDirective`]: crate::core::messages::AiDirective
 pub fn parse_doctrine_directive(
-    d: &crate::entity_config::DoctrineObjective,
-) -> crate::messages::AiDirective {
+    d: &crate::entities::config::DoctrineObjective,
+) -> crate::core::messages::AiDirective {
     match d.directive_kind.as_deref() {
-        Some("Patrol") => crate::messages::AiDirective::Patrol {
+        Some("Patrol") => crate::core::messages::AiDirective::Patrol {
             anchors: d.directive_anchors.clone(),
             loop_path: d.directive_loop,
         },
-        Some("Destroy") => crate::messages::AiDirective::Destroy {
+        Some("Destroy") => crate::core::messages::AiDirective::Destroy {
             target: d.directive_target.clone().unwrap_or_default(),
         },
-        Some("Reach") => crate::messages::AiDirective::Reach {
+        Some("Reach") => crate::core::messages::AiDirective::Reach {
             anchor: d.directive_anchor.clone().unwrap_or_default(),
         },
-        Some("Hail") => crate::messages::AiDirective::Hail {
+        Some("Hail") => crate::core::messages::AiDirective::Hail {
             target: d.directive_hail_target.clone().unwrap_or_default(),
         },
-        Some("Retreat") => crate::messages::AiDirective::Retreat {
+        Some("Retreat") => crate::core::messages::AiDirective::Retreat {
             anchor: d.directive_anchor.clone().unwrap_or_default(),
         },
-        Some("Dock") => crate::messages::AiDirective::Dock {
+        Some("Dock") => crate::core::messages::AiDirective::Dock {
             target: d.directive_dock_target.clone().unwrap_or_default(),
         },
         // The issue-#1162 operate verbs, all reading the shared
         // `directive_operate_target`.
-        Some("Tow") => crate::messages::AiDirective::Tow {
+        Some("Tow") => crate::core::messages::AiDirective::Tow {
             target: d.directive_operate_target.clone().unwrap_or_default(),
         },
-        Some("Stabilise") => crate::messages::AiDirective::Stabilise {
+        Some("Stabilise") => crate::core::messages::AiDirective::Stabilise {
             target: d.directive_operate_target.clone().unwrap_or_default(),
         },
-        Some("Escort") => crate::messages::AiDirective::Escort {
+        Some("Escort") => crate::core::messages::AiDirective::Escort {
             target: d.directive_operate_target.clone().unwrap_or_default(),
         },
-        Some("Transfer") => crate::messages::AiDirective::Transfer {
+        Some("Transfer") => crate::core::messages::AiDirective::Transfer {
             target: d.directive_operate_target.clone().unwrap_or_default(),
         },
-        Some("FieldRepair") => crate::messages::AiDirective::FieldRepair {
+        Some("FieldRepair") => crate::core::messages::AiDirective::FieldRepair {
             target: d.directive_operate_target.clone().unwrap_or_default(),
         },
-        _ => crate::messages::AiDirective::None,
+        _ => crate::core::messages::AiDirective::None,
     }
 }
 
@@ -783,8 +783,8 @@ pub fn parse_doctrine_directive(
 #[allow(clippy::too_many_arguments)]
 pub fn plan_helm_travel(
     world_view: &WorldView,
-    scored_pool: &[crate::messages::ScoredObjective],
-    doctrine: &[crate::entity_config::DoctrineObjective],
+    scored_pool: &[crate::core::messages::ScoredObjective],
+    doctrine: &[crate::entities::config::DoctrineObjective],
     anchors: &std::collections::HashMap<String, [f32; 3]>,
     cursors: &[crate::ai::patrol_cursor::PatrolCursor],
     weapons_target: Option<Uuid>,
@@ -796,7 +796,7 @@ pub fn plan_helm_travel(
     forward_speed: f32,
     nav_handoff_speed: f32,
 ) -> (f32, f32) {
-    use crate::messages::{AiDirective, SystemAffinity};
+    use crate::core::messages::{AiDirective, SystemAffinity};
 
     // Iterate directives in descending score order. A directive that cannot
     // resolve (e.g. Destroy with an unknown target, or Reach with an unknown
@@ -943,7 +943,7 @@ pub fn plan_helm_travel(
             // second steering implementation the slice exists to avoid — and
             // would fly a stale position, since the anchored waypoint is the
             // thing that tracks a structure as it moves.
-            crate::messages::AiDirective::Dock { .. } => None,
+            crate::core::messages::AiDirective::Dock { .. } => None,
             _ => None,
         };
         if let Some(result) = result {
@@ -1626,7 +1626,7 @@ pub fn resolve_objective_target(target: &str, world_view: &WorldView) -> Option<
 /// range checks the caller gates on.
 pub fn find_nearest_hostile(
     world_view: &WorldView,
-    faction_registry: &crate::faction::FactionRegistry,
+    faction_registry: &crate::ai::faction::FactionRegistry,
 ) -> Option<Uuid> {
     let self_faction = world_view.self_faction?;
     let pos = world_view.entity_pos;
@@ -1635,7 +1635,9 @@ pub fn find_nearest_hostile(
         .iter()
         .filter(|e| {
             e.faction
-                .map(|ef| crate::faction::is_enemy(Some(self_faction), Some(ef), faction_registry))
+                .map(|ef| {
+                    crate::ai::faction::is_enemy(Some(self_faction), Some(ef), faction_registry)
+                })
                 .unwrap_or(false)
         })
         .min_by(|a, b| {
@@ -1674,7 +1676,7 @@ pub fn find_nearest_hostile(
 ///   `arc_geometry` module note.
 pub fn hostile_arc_exposure(
     world_view: &WorldView,
-    faction_registry: &crate::faction::FactionRegistry,
+    faction_registry: &crate::ai::faction::FactionRegistry,
 ) -> crate::weapons::arc_geometry::ArcExposure {
     let mut total_covering = 0u32;
     let mut any_inescapable = false;
@@ -1687,7 +1689,7 @@ pub fn hostile_arc_exposure(
         }
         let hostile = e
             .faction
-            .map(|ef| crate::faction::is_enemy(self_faction, Some(ef), faction_registry))
+            .map(|ef| crate::ai::faction::is_enemy(self_faction, Some(ef), faction_registry))
             .unwrap_or(false);
         if !hostile {
             continue;
@@ -2237,8 +2239,8 @@ mod tests {
     fn an_all_round_hostile_suppresses_the_escape_magnitude_across_the_view() {
         let hostile_faction = uuid::Uuid::new_v4();
         let own_faction = uuid::Uuid::new_v4();
-        let mut registry = crate::faction::FactionRegistry::new();
-        registry.insert(crate::faction::FactionConfig {
+        let mut registry = crate::ai::faction::FactionRegistry::new();
+        registry.insert(crate::ai::faction::FactionConfig {
             display_name: None,
             uuid: own_faction,
             name: "Own".into(),
@@ -2466,30 +2468,30 @@ mod tests {
 
     // ── operate_helm patrol ───────────────────────────────────────────────
 
-    fn patrol_pool() -> Vec<crate::messages::ScoredObjective> {
-        vec![crate::messages::ScoredObjective {
+    fn patrol_pool() -> Vec<crate::core::messages::ScoredObjective> {
+        vec![crate::core::messages::ScoredObjective {
             id: "patrol".into(),
             score: 20.0,
-            directive: crate::messages::AiDirective::Patrol {
+            directive: crate::core::messages::AiDirective::Patrol {
                 anchors: vec!["alpha".into()],
                 loop_path: true,
             },
-            source: crate::messages::ObjectiveSource::Doctrine,
-            relevance: vec![crate::messages::SystemAffinity::Helm],
-            snapshot: crate::messages::ObjectiveSnapshot {
+            source: crate::core::messages::ObjectiveSource::Doctrine,
+            relevance: vec![crate::core::messages::SystemAffinity::Helm],
+            snapshot: crate::core::messages::ObjectiveSnapshot {
                 id: "patrol".into(),
                 text: "Patrol".into(),
                 text_params: Default::default(),
                 mandatory: false,
-                status: crate::messages::ObjectiveStatus::Active,
+                status: crate::core::messages::ObjectiveStatus::Active,
                 targets: vec![],
-                source: crate::messages::ObjectiveSource::Doctrine,
+                source: crate::core::messages::ObjectiveSource::Doctrine,
             },
         }]
     }
 
-    fn patrol_doctrine() -> Vec<crate::entity_config::DoctrineObjective> {
-        vec![crate::entity_config::DoctrineObjective {
+    fn patrol_doctrine() -> Vec<crate::entities::config::DoctrineObjective> {
+        vec![crate::entities::config::DoctrineObjective {
             id: "patrol".into(),
             text: "Patrol".into(),
             directive_kind: Some("Patrol".into()),
@@ -2505,29 +2507,29 @@ mod tests {
     /// doctrine (`target_speed` 0.5). The caller supplies the anchor positions,
     /// so the same route can be posed as "arrived", "en route" or "terminal".
     fn two_waypoint_patrol() -> (
-        Vec<crate::messages::ScoredObjective>,
-        Vec<crate::entity_config::DoctrineObjective>,
+        Vec<crate::core::messages::ScoredObjective>,
+        Vec<crate::entities::config::DoctrineObjective>,
     ) {
-        let pool = vec![crate::messages::ScoredObjective {
+        let pool = vec![crate::core::messages::ScoredObjective {
             id: "patrol".into(),
             score: 20.0,
-            directive: crate::messages::AiDirective::Patrol {
+            directive: crate::core::messages::AiDirective::Patrol {
                 anchors: vec!["wp0".into(), "wp1".into()],
                 loop_path: false,
             },
-            source: crate::messages::ObjectiveSource::Doctrine,
-            relevance: vec![crate::messages::SystemAffinity::Helm],
-            snapshot: crate::messages::ObjectiveSnapshot {
+            source: crate::core::messages::ObjectiveSource::Doctrine,
+            relevance: vec![crate::core::messages::SystemAffinity::Helm],
+            snapshot: crate::core::messages::ObjectiveSnapshot {
                 id: "patrol".into(),
                 text: "".into(),
                 text_params: Default::default(),
                 mandatory: false,
-                status: crate::messages::ObjectiveStatus::Active,
+                status: crate::core::messages::ObjectiveStatus::Active,
                 targets: vec![],
-                source: crate::messages::ObjectiveSource::Doctrine,
+                source: crate::core::messages::ObjectiveSource::Doctrine,
             },
         }];
-        let doctrine = vec![crate::entity_config::DoctrineObjective {
+        let doctrine = vec![crate::entities::config::DoctrineObjective {
             id: "patrol".into(),
             text: "".into(),
             directive_kind: Some("Patrol".into()),
@@ -2540,23 +2542,23 @@ mod tests {
     }
 
     /// A single Reach objective naming `anchor`, scored `score`.
-    fn reach_pool(anchor: &str, score: f32) -> Vec<crate::messages::ScoredObjective> {
-        vec![crate::messages::ScoredObjective {
+    fn reach_pool(anchor: &str, score: f32) -> Vec<crate::core::messages::ScoredObjective> {
+        vec![crate::core::messages::ScoredObjective {
             id: "reach".into(),
             score,
-            directive: crate::messages::AiDirective::Reach {
+            directive: crate::core::messages::AiDirective::Reach {
                 anchor: anchor.into(),
             },
-            source: crate::messages::ObjectiveSource::Doctrine,
-            relevance: vec![crate::messages::SystemAffinity::Helm],
-            snapshot: crate::messages::ObjectiveSnapshot {
+            source: crate::core::messages::ObjectiveSource::Doctrine,
+            relevance: vec![crate::core::messages::SystemAffinity::Helm],
+            snapshot: crate::core::messages::ObjectiveSnapshot {
                 id: "reach".into(),
                 text: "".into(),
                 text_params: Default::default(),
                 mandatory: false,
-                status: crate::messages::ObjectiveStatus::Active,
+                status: crate::core::messages::ObjectiveStatus::Active,
                 targets: vec![],
-                source: crate::messages::ObjectiveSource::Doctrine,
+                source: crate::core::messages::ObjectiveSource::Doctrine,
             },
         }]
     }
@@ -2791,48 +2793,48 @@ mod tests {
     /// then Patrol (lower score, resolvable anchor) second.
     fn destroy_then_patrol_pool(
         anchors: &std::collections::HashMap<String, [f32; 3]>,
-    ) -> Vec<crate::messages::ScoredObjective> {
+    ) -> Vec<crate::core::messages::ScoredObjective> {
         let _ = anchors; // anchors used externally; pool just carries names
         vec![
-            crate::messages::ScoredObjective {
+            crate::core::messages::ScoredObjective {
                 id: "destroy-wave-1".into(),
                 score: 90.0,
-                directive: crate::messages::AiDirective::Destroy {
+                directive: crate::core::messages::AiDirective::Destroy {
                     target: "wave_1".into(), // entity not in world_view → unresolvable
                 },
-                source: crate::messages::ObjectiveSource::Mission,
+                source: crate::core::messages::ObjectiveSource::Mission,
                 relevance: vec![
-                    crate::messages::SystemAffinity::Helm,
-                    crate::messages::SystemAffinity::Weapons,
-                    crate::messages::SystemAffinity::Captain,
+                    crate::core::messages::SystemAffinity::Helm,
+                    crate::core::messages::SystemAffinity::Weapons,
+                    crate::core::messages::SystemAffinity::Captain,
                 ],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "destroy-wave-1".into(),
                     text: "Destroy wave 1".into(),
                     text_params: Default::default(),
                     mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec!["wave_1".into()],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             },
-            crate::messages::ScoredObjective {
+            crate::core::messages::ScoredObjective {
                 id: "patrol-base".into(),
                 score: 30.0,
-                directive: crate::messages::AiDirective::Patrol {
+                directive: crate::core::messages::AiDirective::Patrol {
                     anchors: vec!["alpha".into()],
                     loop_path: true,
                 },
-                source: crate::messages::ObjectiveSource::Mission,
-                relevance: vec![crate::messages::SystemAffinity::Helm],
-                snapshot: crate::messages::ObjectiveSnapshot {
+                source: crate::core::messages::ObjectiveSource::Mission,
+                relevance: vec![crate::core::messages::SystemAffinity::Helm],
+                snapshot: crate::core::messages::ObjectiveSnapshot {
                     id: "patrol-base".into(),
                     text: "Patrol".into(),
                     text_params: Default::default(),
                     mandatory: true,
-                    status: crate::messages::ObjectiveStatus::Active,
+                    status: crate::core::messages::ObjectiveStatus::Active,
                     targets: vec![],
-                    source: crate::messages::ObjectiveSource::Mission,
+                    source: crate::core::messages::ObjectiveSource::Mission,
                 },
             },
         ]
@@ -3047,7 +3049,7 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn destroy_vs_patrol_scene() -> (
         WorldView,
-        Vec<crate::messages::ScoredObjective>,
+        Vec<crate::core::messages::ScoredObjective>,
         std::collections::HashMap<String, [f32; 3]>,
         Uuid,
     ) {
@@ -3065,26 +3067,26 @@ mod tests {
             }],
             ..Default::default()
         };
-        let mut pool = vec![crate::messages::ScoredObjective {
+        let mut pool = vec![crate::core::messages::ScoredObjective {
             id: "destroy-wave-1".into(),
             score: 90.0,
-            directive: crate::messages::AiDirective::Destroy {
+            directive: crate::core::messages::AiDirective::Destroy {
                 target: "wave_1".into(),
             },
-            source: crate::messages::ObjectiveSource::Mission,
+            source: crate::core::messages::ObjectiveSource::Mission,
             relevance: vec![
-                crate::messages::SystemAffinity::Helm,
-                crate::messages::SystemAffinity::Weapons,
-                crate::messages::SystemAffinity::Captain,
+                crate::core::messages::SystemAffinity::Helm,
+                crate::core::messages::SystemAffinity::Weapons,
+                crate::core::messages::SystemAffinity::Captain,
             ],
-            snapshot: crate::messages::ObjectiveSnapshot {
+            snapshot: crate::core::messages::ObjectiveSnapshot {
                 id: "destroy-wave-1".into(),
                 text: "Destroy".into(),
                 text_params: Default::default(),
                 mandatory: true,
-                status: crate::messages::ObjectiveStatus::Active,
+                status: crate::core::messages::ObjectiveStatus::Active,
                 targets: vec![],
-                source: crate::messages::ObjectiveSource::Mission,
+                source: crate::core::messages::ObjectiveSource::Mission,
             },
         }];
         pool.extend(patrol_pool()); // score 20 — below Destroy
@@ -3094,23 +3096,23 @@ mod tests {
     // ── operate_helm Retreat ──────────────────────────────────────────────
 
     /// Build a single-objective Retreat scored pool naming `anchor`.
-    fn retreat_pool(anchor: &str, score: f32) -> Vec<crate::messages::ScoredObjective> {
-        vec![crate::messages::ScoredObjective {
+    fn retreat_pool(anchor: &str, score: f32) -> Vec<crate::core::messages::ScoredObjective> {
+        vec![crate::core::messages::ScoredObjective {
             id: "retreat".into(),
             score,
-            directive: crate::messages::AiDirective::Retreat {
+            directive: crate::core::messages::AiDirective::Retreat {
                 anchor: anchor.into(),
             },
-            source: crate::messages::ObjectiveSource::Doctrine,
-            relevance: vec![crate::messages::SystemAffinity::Helm],
-            snapshot: crate::messages::ObjectiveSnapshot {
+            source: crate::core::messages::ObjectiveSource::Doctrine,
+            relevance: vec![crate::core::messages::SystemAffinity::Helm],
+            snapshot: crate::core::messages::ObjectiveSnapshot {
                 id: "retreat".into(),
                 text: "Retreat".into(),
                 text_params: Default::default(),
                 mandatory: false,
-                status: crate::messages::ObjectiveStatus::Active,
+                status: crate::core::messages::ObjectiveStatus::Active,
                 targets: vec![],
-                source: crate::messages::ObjectiveSource::Doctrine,
+                source: crate::core::messages::ObjectiveSource::Doctrine,
             },
         }]
     }
@@ -3235,31 +3237,31 @@ mod tests {
         target_speed: f32,
         maintain_range: f32,
     ) -> (
-        Vec<crate::messages::ScoredObjective>,
-        Vec<crate::entity_config::DoctrineObjective>,
+        Vec<crate::core::messages::ScoredObjective>,
+        Vec<crate::entities::config::DoctrineObjective>,
     ) {
-        let pool = vec![crate::messages::ScoredObjective {
+        let pool = vec![crate::core::messages::ScoredObjective {
             id: "destroy-target".into(),
             score: 50.0,
-            directive: crate::messages::AiDirective::Destroy {
+            directive: crate::core::messages::AiDirective::Destroy {
                 target: target_name.into(),
             },
-            source: crate::messages::ObjectiveSource::Doctrine,
+            source: crate::core::messages::ObjectiveSource::Doctrine,
             relevance: vec![
-                crate::messages::SystemAffinity::Helm,
-                crate::messages::SystemAffinity::Weapons,
+                crate::core::messages::SystemAffinity::Helm,
+                crate::core::messages::SystemAffinity::Weapons,
             ],
-            snapshot: crate::messages::ObjectiveSnapshot {
+            snapshot: crate::core::messages::ObjectiveSnapshot {
                 id: "destroy-target".into(),
                 text: "".into(),
                 text_params: Default::default(),
                 mandatory: false,
-                status: crate::messages::ObjectiveStatus::Active,
+                status: crate::core::messages::ObjectiveStatus::Active,
                 targets: vec![target_name.into()],
-                source: crate::messages::ObjectiveSource::Doctrine,
+                source: crate::core::messages::ObjectiveSource::Doctrine,
             },
         }];
-        let doctrine = vec![crate::entity_config::DoctrineObjective {
+        let doctrine = vec![crate::entities::config::DoctrineObjective {
             id: "destroy-target".into(),
             text: "".into(),
             directive_kind: Some("Destroy".into()),
@@ -3453,23 +3455,23 @@ mod tests {
             ..Default::default()
         };
         let (mut pool, doctrine) = destroy_pool_for("enemy", 0.8, 25.0);
-        pool.push(crate::messages::ScoredObjective {
+        pool.push(crate::core::messages::ScoredObjective {
             id: "patrol-base".into(),
             score: 10.0,
-            directive: crate::messages::AiDirective::Patrol {
+            directive: crate::core::messages::AiDirective::Patrol {
                 anchors: vec!["alpha".into()],
                 loop_path: true,
             },
-            source: crate::messages::ObjectiveSource::Doctrine,
-            relevance: vec![crate::messages::SystemAffinity::Helm],
-            snapshot: crate::messages::ObjectiveSnapshot {
+            source: crate::core::messages::ObjectiveSource::Doctrine,
+            relevance: vec![crate::core::messages::SystemAffinity::Helm],
+            snapshot: crate::core::messages::ObjectiveSnapshot {
                 id: "patrol-base".into(),
                 text: "Patrol".into(),
                 text_params: Default::default(),
                 mandatory: false,
-                status: crate::messages::ObjectiveStatus::Active,
+                status: crate::core::messages::ObjectiveStatus::Active,
                 targets: vec![],
-                source: crate::messages::ObjectiveSource::Doctrine,
+                source: crate::core::messages::ObjectiveSource::Doctrine,
             },
         });
         let anchors = anchors_with_alpha();
@@ -3501,7 +3503,7 @@ mod tests {
 
     #[test]
     fn score_doctrine_pool_patrol_always_scores() {
-        use crate::entity_config::DoctrineObjective;
+        use crate::entities::config::DoctrineObjective;
         use crate::objectives::WorldConditions;
 
         let doctrine = vec![DoctrineObjective {
@@ -3523,7 +3525,7 @@ mod tests {
 
     #[test]
     fn score_doctrine_pool_zero_gate_vetoes_destroy() {
-        use crate::entity_config::DoctrineObjective;
+        use crate::entities::config::DoctrineObjective;
         use crate::objectives::{WorldConditions, ZeroGateCondition};
 
         // Zero gate: hull must be below 0.3 (but hull = 1.0 → gate fails → score 0)
@@ -3549,7 +3551,7 @@ mod tests {
 
     #[test]
     fn score_doctrine_pool_sorted_descending_by_score() {
-        use crate::entity_config::DoctrineObjective;
+        use crate::entities::config::DoctrineObjective;
         use crate::objectives::WorldConditions;
 
         let doctrine = vec![
@@ -3589,7 +3591,7 @@ mod tests {
         pos: [f32; 2],
         yaw: f32,
         target_pos: [f32; 3],
-        phase: crate::impulse::ImpulsePhase,
+        phase: crate::ship::impulse::ImpulsePhase,
         engage_dist: f32,
         cancel_dist: f32,
     ) -> ImpulseDecisionInput {
@@ -3611,7 +3613,7 @@ mod tests {
             [0.0, 0.0],
             0.0,                // yaw = 0 → facing -Z
             [0.0, 0.0, -300.0], // target 300 units ahead
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             200.0,
             40.0,
         );
@@ -3624,7 +3626,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [0.0, 0.0, -200.0],
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             200.0,
             40.0,
         );
@@ -3637,7 +3639,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [0.0, 0.0, -150.0],
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             200.0,
             40.0,
         );
@@ -3651,7 +3653,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [300.0, 0.0, 0.0],
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             200.0,
             40.0,
         );
@@ -3664,7 +3666,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [0.0, 0.0, -20.0],
-            crate::impulse::ImpulsePhase::Charging,
+            crate::ship::impulse::ImpulsePhase::Charging,
             200.0,
             40.0,
         );
@@ -3677,7 +3679,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [0.0, 0.0, -20.0],
-            crate::impulse::ImpulsePhase::Active,
+            crate::ship::impulse::ImpulsePhase::Active,
             200.0,
             40.0,
         );
@@ -3690,7 +3692,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [300.0, 0.0, -100.0],
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             200.0,
             40.0,
         );
@@ -3704,7 +3706,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [0.0, 0.0, -500.0],
-            crate::impulse::ImpulsePhase::Active,
+            crate::ship::impulse::ImpulsePhase::Active,
             200.0,
             40.0,
         );
@@ -3721,7 +3723,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [target_x, 0.0, target_z],
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             200.0,
             40.0,
         );
@@ -3737,7 +3739,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [target_x, 0.0, target_z],
-            crate::impulse::ImpulsePhase::Idle,
+            crate::ship::impulse::ImpulsePhase::Idle,
             200.0,
             40.0,
         );
@@ -3750,7 +3752,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [0.0, 0.0, -40.0],
-            crate::impulse::ImpulsePhase::Active,
+            crate::ship::impulse::ImpulsePhase::Active,
             200.0,
             40.0,
         );
@@ -3763,7 +3765,7 @@ mod tests {
             [0.0, 0.0],
             0.0,
             [0.0, 0.0, -41.0],
-            crate::impulse::ImpulsePhase::Active,
+            crate::ship::impulse::ImpulsePhase::Active,
             200.0,
             40.0,
         );
@@ -3788,7 +3790,7 @@ mod tests {
     #[test]
     fn operate_helm_falls_through_to_nav_waypoint_when_no_objective() {
         let world = world_at_origin(); // entities list empty, anchors empty
-        let pool: Vec<crate::messages::ScoredObjective> = vec![];
+        let pool: Vec<crate::core::messages::ScoredObjective> = vec![];
 
         let (thrust, _steering) = plan_helm_travel(
             &world,
@@ -3818,7 +3820,7 @@ mod tests {
     #[test]
     fn operate_helm_ignores_an_uncleared_nav_waypoint() {
         let world = world_at_origin();
-        let pool: Vec<crate::messages::ScoredObjective> = vec![];
+        let pool: Vec<crate::core::messages::ScoredObjective> = vec![];
 
         let (thrust, steering) = plan_helm_travel(
             &world,

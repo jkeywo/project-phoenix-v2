@@ -25,12 +25,14 @@ use crate::console::repair::external::{
     dispatch_status, ExternalRepairConfig, ExternalRepairRefusal,
 };
 use crate::console::weapons::beam::TacticalRadarSelection;
-use crate::damage::DamageTier;
+use crate::core::messages::{
+    AdmittedCommands, SystemAffinity, SystemBlackboard, SystemControlPayload,
+};
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::EntityUuid;
 use crate::infrastructure::condition::ConditionAdjustment;
 use crate::infrastructure::InfrastructureCondition;
-use crate::messages::{AdmittedCommands, SystemAffinity, SystemBlackboard, SystemControlPayload};
+use crate::ship::damage::DamageTier;
 use crate::ship::system_registry::{repair_system_id, REPAIR_SYSTEM_ID};
 use crate::world::server::WorldContentRuntime;
 
@@ -81,7 +83,7 @@ impl ExternalRepairDispatch {
     /// Derived from the live `dispatched_target` rather than stored, which is
     /// what makes "returned on recall or drift" true by construction: a team
     /// brought home commits nothing, so there is no release step to forget. The
-    /// team never moves in the [`crate::repair_teams::RepairTeams`] readout — it
+    /// team never moves in the [`crate::modifiers::repair_teams::RepairTeams`] readout — it
     /// is still `Idle`, simply spoken for.
     pub fn committed_repair_teams(&self) -> u8 {
         u8::from(self.dispatched_target.is_some())
@@ -502,7 +504,7 @@ pub fn operate_external_repair_ai(
         }
         let directive_target: Option<String> = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,

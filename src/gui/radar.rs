@@ -17,7 +17,7 @@ use bevy::shader::ShaderRef;
 use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialPlugin};
 use std::collections::HashMap;
 
-use crate::messages::EntitySnapshot;
+use crate::core::messages::EntitySnapshot;
 
 // ── Filter ────────────────────────────────────────────────────────────────────
 

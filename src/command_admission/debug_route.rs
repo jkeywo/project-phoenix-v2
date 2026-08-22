@@ -62,7 +62,7 @@
 //! Pure and Bevy-free: the Bevy seam that applies this verdict is
 //! `policy::is_command_authorized`.
 
-use crate::messages::{SystemControlPayload, SystemId};
+use crate::core::messages::{SystemControlPayload, SystemId};
 
 /// True when `(target, payload)` is the client Debug/Cheat tab's one
 /// admission-path command.
@@ -71,7 +71,7 @@ use crate::messages::{SystemControlPayload, SystemId};
 /// route?") stays testable in a demo build, where the *authority* question is
 /// compiled to a constant `false`.
 pub fn is_debug_command(target: &SystemId, payload: &SystemControlPayload) -> bool {
-    target.0 == crate::system_registry::GOD_MODE_SYSTEM_ID
+    target.0 == crate::ship::system_registry::GOD_MODE_SYSTEM_ID
         && matches!(payload, SystemControlPayload::ToggleGodMode)
 }
 
@@ -102,7 +102,7 @@ mod tests {
     use crate::build_flags::is_demo_cfg;
 
     fn god_mode() -> SystemId {
-        SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into())
+        SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into())
     }
 
     /// The route's shape, independent of the build: only `ToggleGodMode` on

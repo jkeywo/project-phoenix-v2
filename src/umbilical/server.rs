@@ -26,17 +26,17 @@ use bevy::prelude::*;
 
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
-use crate::damage::DamageTier;
+use crate::core::messages::{
+    PowerGroupId, SystemAffinity, SystemBlackboard, SystemControlPayload, SystemId,
+    UmbilicalBlackboard,
+};
 use crate::dock::DockControl;
 use crate::effect_queue::EffectQueue;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::{CapacityAdjustment, InfrastructureCondition};
-use crate::messages::{
-    PowerGroupId, SystemAffinity, SystemBlackboard, SystemControlPayload, SystemId,
-    UmbilicalBlackboard,
-};
+use crate::ship::damage::DamageTier;
 use crate::ship::power::{power_level_for, ShipPowerSystem};
-use crate::system_registry::{umbilical_system_id, UMBILICAL_SYSTEM_ID};
+use crate::ship::system_registry::{umbilical_system_id, UMBILICAL_SYSTEM_ID};
 use crate::umbilical::flow::{
     plan_flow, CapacityEnd, FlowContext, FlowEnds, FlowVerdict, UmbilicalConfig,
     UmbilicalDirection, UmbilicalRefusal,
@@ -203,7 +203,10 @@ impl Plugin for UmbilicalPlugin {
 /// AI through the same `validate_and_admit` seam) and stripped the source, so
 /// nothing here asks who sent the command (AGENTS.md rule 6).
 pub fn handle_umbilical_commands(
-    mut ships: Query<(&crate::messages::AdmittedCommands, &mut TransferUmbilical)>,
+    mut ships: Query<(
+        &crate::core::messages::AdmittedCommands,
+        &mut TransferUmbilical,
+    )>,
 ) {
     for (admitted, mut umbilical) in ships.iter_mut() {
         for cmd in admitted.for_target(UMBILICAL_SYSTEM_ID) {
@@ -260,7 +263,7 @@ pub fn operate_umbilical_ai(
         &DockControl,
         &crate::server_app::ShipSystemBlackboards,
         Has<UmbilicalAiRunning>,
-        &mut crate::messages::AdmittedCommands,
+        &mut crate::core::messages::AdmittedCommands,
     )>,
 ) {
     for (entity, uuid, sources, config, umbilical, dock, blackboards, host_running, mut admitted) in
@@ -271,7 +274,7 @@ pub fn operate_umbilical_ai(
         }
         let transfer_active = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,

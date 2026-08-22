@@ -25,7 +25,7 @@ pub struct PendingSceneHandle(pub Handle<bevy::scene::Scene>);
 /// model reads the same body and the preload poller can read it too (that is
 /// what lets `asset_preload` expand a sidecar's `[[lod]]` chain without stealing
 /// it from the renderer). Callers that only need readiness should still prefer
-/// [`crate::config_cache::is_pending_sidecar_delivered`].
+/// [`crate::entities::config_cache::is_pending_sidecar_delivered`].
 fn load_sidecar_toml(path: &str, absence: Absence) -> Option<String> {
     let text = load_sidecar_toml_text(path, absence);
     // Issue #935: a rig sidecar is authored content too — record it into the
@@ -60,8 +60,8 @@ fn load_sidecar_toml_text(path: &str, absence: Absence) -> Option<String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        crate::config_cache::take_pending_sidecar_toml(path).or_else(|| {
-            crate::config_cache::request_sidecar_fetch(
+        crate::entities::config_cache::take_pending_sidecar_toml(path).or_else(|| {
+            crate::entities::config_cache::request_sidecar_fetch(
                 path.to_string(),
                 absence == Absence::Expected,
             );
@@ -96,7 +96,7 @@ fn load_sidecar_toml_text(path: &str, absence: Absence) -> Option<String> {
 pub fn resolve_sidecar_rig(
     model_path: &str,
     variant: Option<&str>,
-) -> Option<crate::model_rig::ModelRig> {
+) -> Option<crate::entities::model_rig::ModelRig> {
     resolve_sidecar_rig_where(model_path, variant, Absence::Unexpected)
 }
 
@@ -109,7 +109,7 @@ pub fn resolve_sidecar_rig(
 pub fn resolve_sidecar_rig_optional(
     model_path: &str,
     variant: Option<&str>,
-) -> Option<crate::model_rig::ModelRig> {
+) -> Option<crate::entities::model_rig::ModelRig> {
     resolve_sidecar_rig_where(model_path, variant, Absence::Expected)
 }
 
@@ -117,15 +117,15 @@ fn resolve_sidecar_rig_where(
     model_path: &str,
     variant: Option<&str>,
     absence: Absence,
-) -> Option<crate::model_rig::ModelRig> {
-    let path = crate::model_rig::sidecar_path(model_path, variant);
+) -> Option<crate::entities::model_rig::ModelRig> {
+    let path = crate::entities::model_rig::sidecar_path(model_path, variant);
     match load_sidecar_toml(&path, absence) {
         Some(toml_str) => {
             if toml_str.trim().is_empty() {
                 // Absent (404 / empty) → identity rig so the model still renders.
-                Some(crate::model_rig::ModelRig::default())
+                Some(crate::entities::model_rig::ModelRig::default())
             } else {
-                match crate::model_rig::ModelRig::from_toml(&toml_str) {
+                match crate::entities::model_rig::ModelRig::from_toml(&toml_str) {
                     Ok(rig) => Some(rig),
                     Err(e) => {
                         // A present-but-malformed sidecar degrades to an identity
@@ -138,7 +138,7 @@ fn resolve_sidecar_rig_where(
                              identity rig — this model loses its markers AND any [[lod]] \
                              chain, and will render only its flat [mesh] level"
                         );
-                        Some(crate::model_rig::ModelRig::default())
+                        Some(crate::entities::model_rig::ModelRig::default())
                     }
                 }
             }
@@ -147,7 +147,7 @@ fn resolve_sidecar_rig_where(
             #[cfg(not(target_arch = "wasm32"))]
             {
                 // Native: a missing file is "genuinely absent" → identity rig.
-                Some(crate::model_rig::ModelRig::default())
+                Some(crate::entities::model_rig::ModelRig::default())
             }
             #[cfg(target_arch = "wasm32")]
             {
@@ -223,7 +223,7 @@ pub fn tier_parent_scale(base_scale: [f32; 3], generated_child_scale: [f32; 3]) 
 /// claim to the shipped assets: no ladder mixes the two conventions.)
 ///
 /// The tier states its convention itself, in
-/// [`crate::entity_config::TierRig`], written by the script that authored the
+/// [`crate::entities::config::TierRig`], written by the script that authored the
 /// ladder. A declared `Identity` tier is answered without reading anything: the
 /// claim is precisely "there is no sidecar here", and the old way of checking
 /// that was to fetch the absent file and watch the 404 come back — one alarming
@@ -237,7 +237,7 @@ pub fn tier_parent_scale(base_scale: [f32; 3], generated_child_scale: [f32; 3]) 
 /// caller retries next frame, the same wait the GLB spawn path already takes. On
 /// native the read is synchronous and this always resolves.
 pub fn resolve_tier_parent_scale(
-    levels: &[crate::entity_config::LodLevel],
+    levels: &[crate::entities::config::LodLevel],
     base_scale: [f32; 3],
     entity_variant: Option<&str>,
 ) -> Option<Vec3> {
@@ -259,11 +259,11 @@ pub fn resolve_tier_parent_scale(
     let child_scale = match tier_rig {
         // Declared: no sidecar there, so the tier resolves an identity rig and
         // the parent owes it everything. Read nothing.
-        Some(crate::entity_config::TierRig::Identity) => [1.0, 1.0, 1.0],
+        Some(crate::entities::config::TierRig::Identity) => [1.0, 1.0, 1.0],
         // Declared: a sidecar IS there. Read it — the number that matters is
         // what that file actually says, not what the convention implies it
         // ought to say, and the fetch resolves rather than 404ing.
-        Some(crate::entity_config::TierRig::Baked) => {
+        Some(crate::entities::config::TierRig::Baked) => {
             resolve_sidecar_rig(model_path, variant)?.base.scale
         }
         // Undeclared — a sidecar predating the field, which in practice means
@@ -287,11 +287,11 @@ pub fn resolve_tier_parent_scale(
 /// asks this first, so a hull ladder's absent per-tier sidecars are never
 /// requested by anyone — the probe was only one of the three askers.
 pub fn declared_tier_rig(
-    level: &crate::entity_config::LodLevel,
-) -> Option<crate::model_rig::ModelRig> {
+    level: &crate::entities::config::LodLevel,
+) -> Option<crate::entities::model_rig::ModelRig> {
     match level.tier_rig {
-        Some(crate::entity_config::TierRig::Identity) => {
-            Some(crate::model_rig::ModelRig::default())
+        Some(crate::entities::config::TierRig::Identity) => {
+            Some(crate::entities::model_rig::ModelRig::default())
         }
         _ => None,
     }
@@ -326,7 +326,7 @@ pub enum GlbSpawnOutcome {
 /// renderer. Resolves the scene handle (storing a [`PendingSceneHandle`] on the
 /// parent to keep it alive across frames), waits for both the scene asset and
 /// the rig sidecar, then spawns the `SceneRoot` child and attaches
-/// [`crate::model_rig::ModelMarkers`] to the parent. Returns the spawned child
+/// [`crate::entities::model_rig::ModelMarkers`] to the parent. Returns the spawned child
 /// so callers can tear it down on an LOD switch, or decorate it — the local
 /// ship, for instance, adds `Visibility::Hidden` and `NoFrustumCulling` to the
 /// returned entity.
@@ -344,7 +344,7 @@ pub fn spawn_glb_visual(
     model_path: &str,
     variant: Option<&str>,
     pending: Option<&PendingSceneHandle>,
-    resolved_rig: Option<&crate::model_rig::ModelRig>,
+    resolved_rig: Option<&crate::entities::model_rig::ModelRig>,
 ) -> GlbSpawnOutcome {
     let scene: Handle<bevy::scene::Scene> = match pending {
         Some(p) => p.0.clone(),
@@ -383,7 +383,7 @@ pub fn spawn_glb_visual(
     }
     // Only re-read the sidecar when the caller hasn't already resolved it.
     let rig_owned;
-    let rig: &crate::model_rig::ModelRig = match resolved_rig {
+    let rig: &crate::entities::model_rig::ModelRig = match resolved_rig {
         Some(rig) => rig,
         None => {
             rig_owned = match resolve_sidecar_rig(model_path, variant) {
@@ -408,7 +408,7 @@ pub fn spawn_glb_visual(
     // can resolve mount points by name.
     commands
         .entity(entity)
-        .insert(crate::model_rig::ModelMarkers::from_rig(rig));
+        .insert(crate::entities::model_rig::ModelMarkers::from_rig(rig));
     GlbSpawnOutcome::Spawned(child)
 }
 
@@ -478,7 +478,7 @@ mod tests {
 
     // ── `tier_rig`: the ladder states its convention instead of being probed ──
 
-    use crate::entity_config::{LodLevel, TierRig};
+    use crate::entities::config::{LodLevel, TierRig};
 
     /// A real asteroid tier: its sidecar exists and carries a base scale far
     /// from 1, so "did the resolver read this file?" has a visible answer.
@@ -584,7 +584,7 @@ mod tests {
         let identity = level(BAKED_TIER, None, Some(TierRig::Identity));
         assert_eq!(
             declared_tier_rig(&identity),
-            Some(crate::model_rig::ModelRig::default()),
+            Some(crate::entities::model_rig::ModelRig::default()),
             "an identity tier resolves the default rig without a read"
         );
         assert_eq!(
@@ -675,20 +675,22 @@ mod tests {
         for path in sidecars {
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
             let text = std::fs::read_to_string(&path).expect("read sidecar");
-            let Ok(rig) = crate::model_rig::ModelRig::from_toml(&text) else {
+            let Ok(rig) = crate::entities::model_rig::ModelRig::from_toml(&text) else {
                 continue;
             };
             if rig.lod.is_empty() {
                 continue;
             }
-            let own_variant = crate::model_rig::sidecar_variant(&name);
+            let own_variant = crate::entities::model_rig::sidecar_variant(&name);
 
             for level in rig.lod.iter().skip(1) {
                 let Some(model) = level.model.as_deref() else {
                     continue;
                 };
-                let sidecar =
-                    crate::model_rig::sidecar_path(model, level.variant.as_deref().or(own_variant));
+                let sidecar = crate::entities::model_rig::sidecar_path(
+                    model,
+                    level.variant.as_deref().or(own_variant),
+                );
                 let on_disk = std::path::Path::new(&sidecar).exists();
                 let want = if on_disk {
                     TierRig::Baked

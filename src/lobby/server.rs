@@ -1,19 +1,19 @@
 use bevy::prelude::*;
 
-use crate::lobby_handler;
-use crate::lobby_handler::CountdownAction;
-pub use crate::lobby_handler::Target;
-use crate::messages::{
+use crate::core::messages::{
     ClientMessage, DeliveryClass, GamePhase, GameState, ServerMessage, ShipClientConfig, WorldData,
 };
+use crate::lobby::handler;
+use crate::lobby::handler::CountdownAction;
+pub use crate::lobby::handler::Target;
+use crate::lobby::session::SessionManager;
+use crate::lobby::stations_config::{stations_from_ship_config, ShipStations};
 use crate::server::asset_preload::AssetPreloadResource;
-use crate::session::SessionManager;
 use crate::ship::rating;
 use crate::ship_plugin::{
     load_ship_config_from_disk, ActiveStationRatings, PendingShipConfig, ShipConfigComponent,
     ShipSystemControlSources,
 };
-use crate::stations_config::{stations_from_ship_config, ShipStations};
 
 /// Server-authoritative pre-game countdown. When `remaining_secs > 0.0` the
 /// lobby is counting down and `pending_phase` is the target after the timer
@@ -211,7 +211,7 @@ impl Plugin for LobbyPlugin {
             // issue #939, which aborts a running mission). Both phases have to
             // be registered here or the second is dead on arrival: the
             // sender-authority gate inside
-            // `lobby_handler::handle_return_to_lobby` never gets a chance to
+            // `handler::handle_return_to_lobby` never gets a chance to
             // run in a phase this `run_if` filters out. That gate is what keeps
             // the mid-mission abort host-only — this registration is only about
             // which phases the system is allowed to look at the message in.
@@ -250,7 +250,7 @@ fn update_session_with_config(
         .map(|s| s.0.as_str())
         .unwrap_or("assets/entities/alliance_cruiser.toml");
 
-    if let Some(ship_config) = crate::config_cache::get_config_cache().get(config_path) {
+    if let Some(ship_config) = crate::entities::config_cache::get_config_cache().get(config_path) {
         // Build the client-facing ship config from the same source-of-truth.
         // `HelmConsoleConfig::effective_radar_range()` prefers the structured
         // [helm_console.radar] range when present, falling back to the legacy
@@ -305,7 +305,7 @@ fn update_session_with_config(
                     cooldown_secs: if b.cooldown_secs > 0.0 {
                         b.cooldown_secs
                     } else {
-                        crate::entity_config::PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS
+                        crate::entities::config::PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS
                     },
                 })
                 .collect();
@@ -464,7 +464,7 @@ fn update_session_with_config(
         // Helm capability fields — sourced from [helm_capability] if present.
         // helm_systems: all system ids owned by the helm station.
         if let Some(sc) = ship_config.ship_config.as_ref() {
-            let helm_station_id = crate::messages::StationId("helm".into());
+            let helm_station_id = crate::core::messages::StationId("helm".into());
             next.helm_systems = sc
                 .systems_for_station(&helm_station_id)
                 .map(|sys| sys.id.0.clone())
@@ -472,9 +472,9 @@ fn update_session_with_config(
         }
         if let Some(cap) = &ship_config.helm_capability {
             next.vertical_movement_mode = match cap.vertical_movement_mode {
-                crate::entity_config::VerticalMovementMode::Planar => "planar".to_string(),
-                crate::entity_config::VerticalMovementMode::Bounded => "bounded".to_string(),
-                crate::entity_config::VerticalMovementMode::Full3D => "full_3d".to_string(),
+                crate::entities::config::VerticalMovementMode::Planar => "planar".to_string(),
+                crate::entities::config::VerticalMovementMode::Bounded => "bounded".to_string(),
+                crate::entities::config::VerticalMovementMode::Full3D => "full_3d".to_string(),
             };
             next.impulse_steering_multiplier = cap.impulse.steering_multiplier;
         }
@@ -503,9 +503,9 @@ fn update_session_with_config(
 /// through here, keyed by system kind, exactly as the shields base block was in
 /// issue #772. Machine value-codes only; no player-visible English.
 fn build_manual_system_extras(
-    ship_config: &crate::entity_config::EntityConfig,
+    ship_config: &crate::entities::config::EntityConfig,
 ) -> std::collections::HashMap<String, toml::Value> {
-    use crate::system_registry as kinds;
+    use crate::ship::system_registry as kinds;
     let mut extras: std::collections::HashMap<String, toml::Value> =
         std::collections::HashMap::new();
     let f = toml::Value::Float;
@@ -525,12 +525,12 @@ fn build_manual_system_extras(
         // Phaser banks — one per-bank table tagged with its system id so the
         // per-instance provider can find its own values. `0.0` authored fields
         // resolve to the same runtime beam defaults the combat code applies.
-        use crate::entity_config::PhaserCombatConfig as P;
+        use crate::entities::config::PhaserCombatConfig as P;
         let banks: Vec<toml::Value> = wc
             .phaser_banks
             .iter()
             .filter_map(|b| {
-                let sid = crate::system_registry::phaser_bank_system_id(&b.id)?;
+                let sid = crate::ship::system_registry::phaser_bank_system_id(&b.id)?;
                 let mut t = toml::value::Table::new();
                 t.insert("system_id".into(), toml::Value::String(sid.0));
                 let beam_range = if b.beam_range > 0.0 {
@@ -566,7 +566,7 @@ fn build_manual_system_extras(
             .blaster_banks
             .iter()
             .filter_map(|b| {
-                let sid = crate::system_registry::blaster_bank_system_id(&b.id)?;
+                let sid = crate::ship::system_registry::blaster_bank_system_id(&b.id)?;
                 let barrel_count = if b.barrels.is_empty() {
                     1
                 } else {
@@ -615,7 +615,7 @@ fn build_manual_system_extras(
             .tubes
             .iter()
             .filter_map(|tube| {
-                let sid = crate::system_registry::torpedo_tube_system_id(&tube.id)?;
+                let sid = crate::ship::system_registry::torpedo_tube_system_id(&tube.id)?;
                 let load_time = tube.load_time.unwrap_or(tc.load_time);
                 let mut t = toml::value::Table::new();
                 t.insert("system_id".into(), toml::Value::String(sid.0));
@@ -697,9 +697,9 @@ fn build_manual_system_extras(
     }
     let cap = ship_config.helm_capability.clone().unwrap_or_default();
     let movement_mode = match cap.vertical_movement_mode {
-        crate::entity_config::VerticalMovementMode::Planar => "planar",
-        crate::entity_config::VerticalMovementMode::Bounded => "bounded",
-        crate::entity_config::VerticalMovementMode::Full3D => "full_3d",
+        crate::entities::config::VerticalMovementMode::Planar => "planar",
+        crate::entities::config::VerticalMovementMode::Bounded => "bounded",
+        crate::entities::config::VerticalMovementMode::Full3D => "full_3d",
     };
     helm.insert(
         "movement_mode".into(),
@@ -727,7 +727,7 @@ pub fn update_game_state_cache(
         return;
     }
     let world_data = world.as_ref().map(|w| &w.0);
-    cache.0 = lobby_handler::derive_game_state(&sessions.0, state.get(), world_data);
+    cache.0 = handler::derive_game_state(&sessions.0, state.get(), world_data);
 }
 
 // ── Systems ────────────────────────────────────────────────────────────────
@@ -774,7 +774,7 @@ pub fn handle_identify_system(
         };
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
             let ratings_snapshot = active_ratings.0.clone();
-            let result = lobby_handler::handle_identify(
+            let result = handler::handle_identify(
                 token,
                 name,
                 &mut sessions.0,
@@ -813,7 +813,7 @@ pub fn handle_identify_system(
             // ratings players have picked in the lobby so far, so (re)joining
             // clients' Welcome reflects current toggle state.
             let pending_ratings = sessions.0.pending_ratings().clone();
-            let result = lobby_handler::handle_identify(
+            let result = handler::handle_identify(
                 token,
                 name,
                 &mut sessions.0,
@@ -874,7 +874,7 @@ pub fn handle_set_name_system(
             continue;
         };
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = lobby_handler::handle_set_name(&ev.token, name, &mut sessions.0);
+            let result = handler::handle_set_name(&ev.token, name, &mut sessions.0);
             apply_result(
                 result,
                 &mut outbox,
@@ -885,7 +885,7 @@ pub fn handle_set_name_system(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result = lobby_handler::handle_set_name(&ev.token, name, &mut sessions.0);
+            let result = handler::handle_set_name(&ev.token, name, &mut sessions.0);
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(
                 result,
@@ -904,7 +904,7 @@ pub fn handle_set_name_system(
 /// GameOver for a connected participant — the game-over screen's "return to
 /// lobby" button — and additionally on `InProgress` for the host page's own
 /// settings menu, whose "exit to lobby" aborts a running mission (issue #939).
-/// The phase gate itself lives in `lobby_handler::handle_return_to_lobby`; this
+/// The phase gate itself lives in `handler::handle_return_to_lobby`; this
 /// system only classifies the sender's token. `apply_result` routes the phase
 /// transition back to `Lobby` plus the cleared-ready / returned broadcasts.
 pub fn handle_return_to_lobby_system(
@@ -929,10 +929,9 @@ pub fn handle_return_to_lobby_system(
         let ClientMessage::ReturnToLobby = &ev.msg else {
             continue;
         };
-        let authority = lobby_handler::return_to_lobby_authority(&ev.token);
+        let authority = handler::return_to_lobby_authority(&ev.token);
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result =
-                lobby_handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
+            let result = handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
             apply_result(
                 result,
                 &mut outbox,
@@ -943,8 +942,7 @@ pub fn handle_return_to_lobby_system(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result =
-                lobby_handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
+            let result = handler::handle_return_to_lobby(&mut sessions.0, phase.clone(), authority);
             let mut fallback_ratings = ActiveStationRatings::default();
             apply_result(
                 result,
@@ -961,7 +959,7 @@ pub fn handle_return_to_lobby_system(
 
 /// Per-variant system for `ClientMessage::SelectStation` (issue #733).
 /// Reads its variant off the inbound bus with its own cursor, calls the pure
-/// `lobby_handler::handle_select_station`, then applies the result to Bevy
+/// `handler::handle_select_station`, then applies the result to Bevy
 /// resources via `apply_result` — using the same dual-path
 /// (real ship entity vs. pre-spawn fallback) handling as the other lobby
 /// message systems.
@@ -994,7 +992,7 @@ pub fn handle_select_station_system(
             continue;
         };
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = lobby_handler::handle_select_station(
+            let result = handler::handle_select_station(
                 &ev.token,
                 station,
                 &mut sessions.0,
@@ -1011,7 +1009,7 @@ pub fn handle_select_station_system(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result = lobby_handler::handle_select_station(
+            let result = handler::handle_select_station(
                 &ev.token,
                 station,
                 &mut sessions.0,
@@ -1062,7 +1060,7 @@ pub fn handle_release_station_system(
             continue;
         };
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = lobby_handler::handle_release_station(
+            let result = handler::handle_release_station(
                 &ev.token,
                 &mut sessions.0,
                 phase.clone(),
@@ -1078,7 +1076,7 @@ pub fn handle_release_station_system(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result = lobby_handler::handle_release_station(
+            let result = handler::handle_release_station(
                 &ev.token,
                 &mut sessions.0,
                 phase.clone(),
@@ -1138,7 +1136,7 @@ pub fn handle_set_ready_system(
             continue;
         };
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = lobby_handler::handle_set_ready(
+            let result = handler::handle_set_ready(
                 &ev.token,
                 *ready,
                 &mut sessions.0,
@@ -1156,7 +1154,7 @@ pub fn handle_set_ready_system(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result = lobby_handler::handle_set_ready(
+            let result = handler::handle_set_ready(
                 &ev.token,
                 *ready,
                 &mut sessions.0,
@@ -1180,7 +1178,7 @@ pub fn handle_set_ready_system(
 
 /// Per-variant system for `ClientMessage::SetSpectator` (issue #1105). Reads
 /// its variant off the inbound bus with its own cursor, calls the pure
-/// `lobby_handler::handle_set_spectator`, and applies the seat-vacate / unready
+/// `handler::handle_set_spectator`, and applies the seat-vacate / unready
 /// / rating-reset / `SpectatorChanged` broadcasts through the same dual-path
 /// `apply_result` the other lobby message systems use. Threads the phase and
 /// `ShipStations` through like `handle_release_station_system` does: when a
@@ -1215,7 +1213,7 @@ pub fn handle_set_spectator_system(
             continue;
         };
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = lobby_handler::handle_set_spectator(
+            let result = handler::handle_set_spectator(
                 &ev.token,
                 *spectator,
                 &mut sessions.0,
@@ -1232,7 +1230,7 @@ pub fn handle_set_spectator_system(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result = lobby_handler::handle_set_spectator(
+            let result = handler::handle_set_spectator(
                 &ev.token,
                 *spectator,
                 &mut sessions.0,
@@ -1255,7 +1253,7 @@ pub fn handle_set_spectator_system(
 
 /// Per-variant system for `ClientMessage::SetAfk` (issue #1104). Reads its
 /// variant off the inbound bus with its own cursor, calls the pure
-/// `lobby_handler::handle_set_afk`, and applies the delegate/restore
+/// `handler::handle_set_afk`, and applies the delegate/restore
 /// `RatingChanged` + `AfkChanged` broadcasts through the same dual-path
 /// `apply_result` the other lobby message systems use. Threads
 /// `ActiveStationRatings` through so the pure handler can SNAPSHOT the player's
@@ -1284,7 +1282,7 @@ pub fn handle_set_afk_system(
         };
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
             let result =
-                lobby_handler::handle_set_afk(&ev.token, *afk, &mut sessions.0, &active_ratings.0);
+                handler::handle_set_afk(&ev.token, *afk, &mut sessions.0, &active_ratings.0);
             apply_result(
                 result,
                 &mut outbox,
@@ -1296,12 +1294,8 @@ pub fn handle_set_afk_system(
             );
         } else {
             let fallback_ratings = ActiveStationRatings::default();
-            let result = lobby_handler::handle_set_afk(
-                &ev.token,
-                *afk,
-                &mut sessions.0,
-                &fallback_ratings.0,
-            );
+            let result =
+                handler::handle_set_afk(&ev.token, *afk, &mut sessions.0, &fallback_ratings.0);
             let mut apply_ratings = ActiveStationRatings::default();
             apply_result(
                 result,
@@ -1351,7 +1345,7 @@ pub fn handle_set_station_rating_system(
             continue;
         };
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
-            let result = lobby_handler::handle_set_station_rating(
+            let result = handler::handle_set_station_rating(
                 &ev.token,
                 rating_name,
                 &mut sessions.0,
@@ -1368,7 +1362,7 @@ pub fn handle_set_station_rating_system(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result = lobby_handler::handle_set_station_rating(
+            let result = handler::handle_set_station_rating(
                 &ev.token,
                 rating_name,
                 &mut sessions.0,
@@ -1409,7 +1403,7 @@ pub fn handle_report_station_eligibility_system(
         let ClientMessage::ReportStationEligibility { ineligible } = &ev.msg else {
             continue;
         };
-        let set: std::collections::HashSet<crate::messages::StationId> =
+        let set: std::collections::HashSet<crate::core::messages::StationId> =
             ineligible.iter().cloned().collect();
         sessions.0.set_eligibility(&ev.token, set);
     }
@@ -1452,7 +1446,7 @@ fn handle_disconnect(
         // ship_query may return Err if the Ship entity hasn't spawned yet.
         if let Ok((cfg, mut cs, mut active_ratings)) = ship_query.single_mut() {
             let ratings_snapshot = active_ratings.0.clone();
-            let result = lobby_handler::process_disconnect_with_stations(
+            let result = handler::process_disconnect_with_stations(
                 &ev.token,
                 &mut sessions.0,
                 ship_stations,
@@ -1472,7 +1466,7 @@ fn handle_disconnect(
                 countdown.as_deref_mut(),
             );
         } else {
-            let result = lobby_handler::process_disconnect(
+            let result = handler::process_disconnect(
                 &ev.token,
                 &mut sessions.0,
                 state.get().clone(),
@@ -1493,7 +1487,7 @@ fn handle_disconnect(
 }
 
 fn apply_result(
-    result: lobby_handler::LobbyHandlerResult,
+    result: handler::LobbyHandlerResult,
     outbox: &mut ResMut<LobbyOutbox>,
     next_state: &mut ResMut<NextState<GamePhase>>,
     ship_config: Option<&ShipConfigComponent>,
@@ -1705,8 +1699,8 @@ mod tests {
 
     #[test]
     fn select_station_works_during_in_progress_phase() {
+        use crate::core::messages::StationId;
         use crate::lobby::stations_config::stations_from_ship_config;
-        use crate::messages::StationId;
         use crate::ship::config::{ShipConfig, StationConfig, StationRatingConfig};
         use std::collections::HashMap;
 
@@ -1856,8 +1850,8 @@ mod tests {
 
     #[test]
     fn release_station_works_during_in_progress_phase() {
+        use crate::core::messages::StationId;
         use crate::lobby::stations_config::stations_from_ship_config;
-        use crate::messages::StationId;
         use crate::ship::config::{ShipConfig, StationConfig, StationRatingConfig};
         use std::collections::HashMap;
 
@@ -1951,7 +1945,7 @@ mod tests {
 
     #[test]
     fn selected_ship_resource_populates_ship_stations_via_update_session() {
-        use crate::messages::StationId;
+        use crate::core::messages::StationId;
         use crate::ship::config::{ShipConfig, StationConfig, StationRatingConfig};
         use std::collections::HashMap;
 
@@ -2038,7 +2032,7 @@ mod tests {
     ) {
         // Through the include resolver (issue #906) — the same document the
         // runtime hull load produces, composed or not.
-        let config = crate::entity_includes::load_entity_config(path)
+        let config = crate::entities::include_resolve::load_entity_config(path)
             .unwrap_or_else(|e| panic!("parse {path}: {e}"));
         let topology = config
             .ship_config
@@ -2072,12 +2066,12 @@ mod tests {
         // Reactor capacity reflects each hull's own authored [power] capacity.
         let cruiser_cap = find_metric(
             &cruiser,
-            crate::system_registry::POWER_REACTOR_KIND,
+            crate::ship::system_registry::POWER_REACTOR_KIND,
             "capacity",
         );
         let courier_cap = find_metric(
             &courier,
-            crate::system_registry::POWER_REACTOR_KIND,
+            crate::ship::system_registry::POWER_REACTOR_KIND,
             "capacity",
         );
         assert_eq!(
@@ -2094,8 +2088,10 @@ mod tests {
         );
 
         // Comms range likewise reflects each hull's own authored [comms] range.
-        let cruiser_comms = find_metric(&cruiser, crate::system_registry::COMMS_KIND, "range");
-        let courier_comms = find_metric(&courier, crate::system_registry::COMMS_KIND, "range");
+        let cruiser_comms =
+            find_metric(&cruiser, crate::ship::system_registry::COMMS_KIND, "range");
+        let courier_comms =
+            find_metric(&courier, crate::ship::system_registry::COMMS_KIND, "range");
         assert_eq!(
             cruiser_comms,
             cruiser_cfg.comms.as_ref().map(|c| c.range as f64)
@@ -2124,7 +2120,7 @@ mod tests {
         assert_eq!(
             find_metric(
                 &cruiser,
-                crate::system_registry::PHASER_BANK_KIND,
+                crate::ship::system_registry::PHASER_BANK_KIND,
                 "beam_range"
             ),
             authored_beam_range
@@ -2134,7 +2130,7 @@ mod tests {
         assert_eq!(
             find_metric(
                 &cruiser,
-                crate::system_registry::TORPEDO_MAGAZINE_KIND,
+                crate::ship::system_registry::TORPEDO_MAGAZINE_KIND,
                 "capacity"
             ),
             Some(torpedoes.count as f64)
@@ -2142,14 +2138,18 @@ mod tests {
         assert_eq!(
             find_metric(
                 &cruiser,
-                crate::system_registry::TORPEDO_MAGAZINE_KIND,
+                crate::ship::system_registry::TORPEDO_MAGAZINE_KIND,
                 "tubes"
             ),
             Some(torpedoes.tubes.len() as f64)
         );
         // Sensors long-range radar range reflects the authored [sensors_console].
         assert_eq!(
-            find_metric(&cruiser, crate::system_registry::SENSORS_KIND, "range"),
+            find_metric(
+                &cruiser,
+                crate::ship::system_registry::SENSORS_KIND,
+                "range"
+            ),
             cfg.sensors_console
                 .as_ref()
                 .map(|s| s.long_range_radar.range as f64)
@@ -2160,7 +2160,7 @@ mod tests {
             .stations
             .iter()
             .flat_map(|s| &s.sections)
-            .find(|sec| sec.kind == crate::system_registry::HELM_THRUST_KIND)
+            .find(|sec| sec.kind == crate::ship::system_registry::HELM_THRUST_KIND)
             .expect("helm section present");
         assert_eq!(
             helm.capabilities
@@ -2191,7 +2191,11 @@ mod tests {
             .map(|b| b.range as f64);
         assert!(authored_range.is_some(), "hull authors a blaster bank");
         assert_eq!(
-            find_metric(&courier, crate::system_registry::BLASTER_BANK_KIND, "range"),
+            find_metric(
+                &courier,
+                crate::ship::system_registry::BLASTER_BANK_KIND,
+                "range"
+            ),
             authored_range
         );
     }

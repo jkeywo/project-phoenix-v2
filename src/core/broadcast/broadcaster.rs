@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use crate::core::broadcast::audience::Audience;
 use crate::core::broadcast::cadence::Cadence;
+use crate::core::messages::{DeliveryClass, ServerMessage};
 use crate::lobby::{OutboundMessage, Sessions};
-use crate::messages::{DeliveryClass, ServerMessage};
 
 // ── Registration types ─────────────────────────────────────────────────────
 
@@ -192,7 +192,7 @@ pub fn dispatch<M: BroadcastKind>(
         Option<
             QueryState<
                 &'static crate::ship_plugin::ShipConfigComponent,
-                With<crate::simulation::LocalShip>,
+                With<crate::server_app::LocalShip>,
             >,
         >,
     >,
@@ -224,7 +224,7 @@ pub fn dispatch<M: BroadcastKind>(
     // the world, which this system was paying for on every single tick.
     let ship_config_opt: Option<crate::ship_plugin::ShipConfigComponent> = {
         let q = config_query.get_or_insert_with(|| {
-            world.query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<crate::simulation::LocalShip>>()
+            world.query_filtered::<&crate::ship_plugin::ShipConfigComponent, With<crate::server_app::LocalShip>>()
         });
         q.single(world).ok().cloned()
     };
@@ -232,7 +232,7 @@ pub fn dispatch<M: BroadcastKind>(
     // Collect (target, producer) for entries that should fire this tick.
     // We clone Arcs so we can release the borrow on `registry` before calling
     // into the world (producers need exclusive world access).
-    let ready: Vec<(crate::lobby_handler::Target, Producer)> = {
+    let ready: Vec<(crate::lobby::handler::Target, Producer)> = {
         let registry = world.resource::<BroadcastRegistry<M>>();
         let sessions = world.resource::<Sessions>();
         registry
@@ -277,8 +277,8 @@ mod tests {
     use crate::core::broadcast::lobby::LobbyBroadcaster;
     use crate::core::broadcast::sim::SimBroadcaster;
     use crate::core::broadcast::{Lobby, Sim};
+    use crate::core::messages::{GamePhase, ServerMessage};
     use crate::lobby::{LobbyPlugin, OutboundMessage, Sessions};
-    use crate::messages::{GamePhase, ServerMessage};
     use std::time::Duration;
 
     // ── cadence_timer unit tests ──────────────────────────────────────────

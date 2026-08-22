@@ -172,18 +172,18 @@
 use bevy::prelude::*;
 use vellum_digest::{digest_postcard, fnv1a, fold_digest, FOLD_SEED};
 
-use crate::balance::BalanceEvent;
 use crate::civilian::{CivilianState, CivilianTraffic};
-use crate::command_plugin::ShipStationStances;
+use crate::console::command::server::ShipStationStances;
 use crate::console::repair::external_server::ExternalRepairDispatch;
+use crate::core::balance::BalanceEvent;
+use crate::core::messages::GamePhase;
 use crate::core::telemetry::RunTelemetry;
-use crate::damage::SystemHull;
 use crate::dock::DockControl;
-use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 use crate::infrastructure::{InfrastructureCondition, InfrastructureState};
 use crate::lobby::WorldResource;
-use crate::messages::GamePhase;
 use crate::server_app::{AsteroidUuid, CaptainPriorityBoost, GameOverReason};
+use crate::ship::damage::SystemHull;
 use crate::ship::state::{ShipPhysics, ShipRedAlert, ShipWeaponsHold};
 use crate::sim_rng::SimRng;
 use crate::sim_tick::SimTick;
@@ -1077,7 +1077,7 @@ fn fold_collisions(world: &World, mut acc: u64) -> u64 {
                 shield_absorbed,
                 hull_damage,
                 ..
-            } if weapon == crate::balance::WEAPON_KIND_COLLISION => {
+            } if weapon == crate::core::balance::WEAPON_KIND_COLLISION => {
                 Some((victim.clone(), *amount, *shield_absorbed, *hull_damage))
             }
             _ => None,
@@ -1422,7 +1422,7 @@ mod tests {
                     max_penalty: 0.8,
                 },
             },
-            crate::messages::PowerGroupId("tractor".into()),
+            crate::core::messages::PowerGroupId("tractor".into()),
         );
         if let Some(target) = holding {
             beam.engaged = true;
@@ -1485,7 +1485,7 @@ mod tests {
                 undock_clear_distance: 120.0,
                 min_power_level: 2,
             },
-            crate::messages::PowerGroupId("dock".into()),
+            crate::core::messages::PowerGroupId("dock".into()),
         );
         if let Some(target) = docked_to {
             control.engaged = true;
@@ -1546,7 +1546,7 @@ mod tests {
                 direction: crate::umbilical::UmbilicalDirection::Deliver,
                 min_power_level: 2,
             },
-            crate::messages::PowerGroupId("umbilical".into()),
+            crate::core::messages::PowerGroupId("umbilical".into()),
         );
         umbilical.running = running;
         // The carry and the level projections are live state the fold must

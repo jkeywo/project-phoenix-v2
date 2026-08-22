@@ -8,13 +8,13 @@
 
 use bevy::prelude::*;
 
-use crate::balance::BalanceEvent;
-use crate::entity_spawner::EntitySystemHull;
+use crate::core::balance::BalanceEvent;
+use crate::entities::spawner::EntitySystemHull;
 use crate::headless::report::RunTelemetry;
+use crate::server_app::Ship;
 use crate::ship::state::ShipPhysics;
 use crate::sim_rng::{SimRng, SimStream};
 use crate::sim_tick::SimTick;
-use crate::simulation::Ship;
 
 /// Deliberately not just the player ship: a slice narrow enough to miss a
 /// divergence is worse than no assertion at all. It folds the logical tick
@@ -79,7 +79,7 @@ pub fn fingerprint(app: &mut App) -> RunFingerprint {
                 shield_absorbed,
                 hull_damage,
                 ..
-            } if weapon == crate::balance::WEAPON_KIND_COLLISION => {
+            } if weapon == crate::core::balance::WEAPON_KIND_COLLISION => {
                 Some((victim.clone(), *amount, *shield_absorbed, *hull_damage))
             }
             _ => None,

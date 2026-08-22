@@ -26,18 +26,18 @@ use bevy::ui_render::prelude::{UiMaterial, UiMaterialPlugin};
 
 use rand::Rng;
 
-use crate::codec;
 use crate::console_bridge::{HudStateChanged, LobbyStateChanged};
-use crate::lobby::{CountdownTimer, OutboundMessage, Sessions, WorldResource};
-use crate::messages::{
+use crate::core::codec;
+use crate::core::messages::{
     GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState,
 };
+use crate::lobby::stations_config::ShipStations;
+use crate::lobby::{CountdownTimer, OutboundMessage, Sessions, WorldResource};
 use crate::server::asset_preload::AssetPreloadResource;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::server::renderer::GameCamera;
 use crate::server_app::GameOverReason;
-use crate::ship_state::ShipPhysics;
-use crate::stations_config::ShipStations;
+use crate::ship::state::ShipPhysics;
 
 // ── Shield flash constants ────────────────────────────────────────────
 
@@ -659,13 +659,13 @@ fn compute_hud_state(
 /// `ViewscreenHud` component only when it differs, so `Changed<ViewscreenHud>`
 /// fires only on actual change.
 fn recompute_hud_state(
-    red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::simulation::LocalShip>>,
-    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::simulation::LocalShip>>,
+    red_alert_q: Query<&crate::ship::state::ShipRedAlert, With<crate::server_app::LocalShip>>,
+    hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     phase: Option<Res<State<GamePhase>>>,
     game_over_reason: Option<Res<GameOverReason>>,
-    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
-    last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::simulation::LocalShip>>,
-    beam_q: Query<&crate::weapons_plugin::ActiveBeam, With<crate::simulation::LocalShip>>,
+    physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
+    last_input_q: Query<&crate::ship_plugin::LastHelmInput, With<crate::server_app::LocalShip>>,
+    beam_q: Query<&crate::console::weapons::ActiveBeam, With<crate::server_app::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
 ) {
     let Some(phase) = phase else { return };
@@ -703,10 +703,10 @@ fn recompute_hud_state(
 
 /// `OnEnter(GamePhase::GameOver)` system: push one final HUD state.
 fn push_game_over_hud_state(
-    red_alert_q: Query<&crate::ship_state::ShipRedAlert, With<crate::simulation::LocalShip>>,
-    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<crate::simulation::LocalShip>>,
+    red_alert_q: Query<&crate::ship::state::ShipRedAlert, With<crate::server_app::LocalShip>>,
+    hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<crate::server_app::LocalShip>>,
     game_over_reason: Option<Res<GameOverReason>>,
-    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
+    physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     mut hud_q: Query<&mut ViewscreenHud>,
     mut writer: MessageWriter<HudStateChanged>,
 ) {

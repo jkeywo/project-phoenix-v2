@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::core::broadcast::broadcaster::{dispatch, BroadcastKind, Broadcaster};
-use crate::messages::DeliveryClass;
+use crate::core::messages::DeliveryClass;
 
 /// Marker for the simulation (`InProgress`) broadcast phase.
 ///
@@ -39,8 +39,8 @@ mod tests {
     use super::*;
     use crate::core::broadcast::audience::Audience;
     use crate::core::broadcast::cadence::Cadence;
+    use crate::core::messages::ServerMessage;
     use crate::lobby::{LobbyPlugin, OutboundMessage, Sessions};
-    use crate::messages::ServerMessage;
 
     // ── Test harness ──────────────────────────────────────────────────────
 

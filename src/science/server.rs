@@ -65,14 +65,14 @@
 
 use bevy::prelude::*;
 
+use crate::core::messages::{
+    AdmittedCommands, InfrastructureSnapshot, PowerGroupId, ScanBlackboard, ScanReadingSnapshot,
+    SystemBlackboard, SystemControlPayload, SystemId,
+};
 use crate::dossier::SubjectCondition;
 use crate::entities::spawner::{EntityName, EntityUuid};
 use crate::infrastructure::InfrastructureCondition;
 use crate::logging::LogFilterConfig;
-use crate::messages::{
-    AdmittedCommands, InfrastructureSnapshot, PowerGroupId, ScanBlackboard, ScanReadingSnapshot,
-    SystemBlackboard, SystemControlPayload, SystemId,
-};
 use crate::regions::effects::RegionEffectName;
 use crate::science::scan::{
     derive, scanned_flag, ScanConditions, ScanConfig, ScanReading, ScanRefusal, ScanSubject,
@@ -252,7 +252,7 @@ pub fn tick_scans(
             continue;
         };
         let requested: Vec<String> = admitted
-            .for_target(crate::system_registry::SENSORS_SYSTEM_ID)
+            .for_target(crate::ship::system_registry::SENSORS_SYSTEM_ID)
             .filter_map(|cmd| match &cmd.payload {
                 SystemControlPayload::ScanTarget { uuid } => Some(uuid.clone()),
                 _ => None,
@@ -411,7 +411,7 @@ fn subject_condition(condition: Option<&InfrastructureCondition>) -> Option<Subj
 
 /// The subject's authored mass (issue #1154), off its `EntityMass` component.
 ///
-/// Falls back to [`crate::entity_config::DEFAULT_ENTITY_MASS`] — never to
+/// Falls back to [`crate::entities::config::DEFAULT_ENTITY_MASS`] — never to
 /// `0.0` — for the handful of test fixtures that build a subject entity by
 /// hand rather than through [`crate::entities::spawner::spawn_entity`], the
 /// only path that inserts the component. Every entity the real spawner
@@ -419,7 +419,7 @@ fn subject_condition(condition: Option<&InfrastructureCondition>) -> Option<Subj
 /// production.
 fn subject_mass(mass: Option<&crate::entities::spawner::EntityMass>) -> f32 {
     mass.map(|m| m.0)
-        .unwrap_or(crate::entity_config::DEFAULT_ENTITY_MASS)
+        .unwrap_or(crate::entities::config::DEFAULT_ENTITY_MASS)
 }
 
 /// Which authored region effects the scanning hull is standing in,
@@ -591,8 +591,8 @@ mod tests {
             .get_mut::<AdmittedCommands>(ship)
             .expect("the ship has an admitted set")
             .0
-            .push(crate::messages::AdmittedCommand {
-                target: SystemId(crate::system_registry::SENSORS_SYSTEM_ID.to_string()),
+            .push(crate::core::messages::AdmittedCommand {
+                target: SystemId(crate::ship::system_registry::SENSORS_SYSTEM_ID.to_string()),
                 payload: SystemControlPayload::ScanTarget {
                     uuid: uuid.to_string(),
                 },
@@ -682,7 +682,7 @@ mod tests {
         app.update();
 
         let reading = record(&app, ship).last.expect("a reading came back");
-        assert_eq!(reading.mass, crate::entity_config::DEFAULT_ENTITY_MASS);
+        assert_eq!(reading.mass, crate::entities::config::DEFAULT_ENTITY_MASS);
         assert!(reading.mass > 0.0, "the fallback must never be zero");
     }
 

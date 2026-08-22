@@ -20,7 +20,7 @@
 //!   crew can see: none of them has anywhere to go. Leaking one would take a new
 //!   field on this struct, in a diff, next to this paragraph.
 //! * The condition input arrives as
-//!   [`InfrastructureSnapshot`](crate::messages::InfrastructureSnapshot) — the
+//!   [`InfrastructureSnapshot`](crate::core::messages::InfrastructureSnapshot) — the
 //!   type #1025 mints through `from_state`, which returns `None` for a structure
 //!   whose scenario authored `publish = false`. The dossier therefore cannot
 //!   read a condition track that is off the wire, because it never holds one.
@@ -54,7 +54,7 @@
 //!
 //! The two structural gates stand exactly as they did. A withheld condition
 //! track still reaches no field, because
-//! [`InfrastructureSnapshot::from_state`](crate::messages::InfrastructureSnapshot)
+//! [`InfrastructureSnapshot::from_state`](crate::core::messages::InfrastructureSnapshot)
 //! still returns `None` for it and *nothing about evidence touches that path*;
 //! and the payload's whole key set is still pinned in `codec.rs`, which is where
 //! a field a secret could ride in would have to appear. What a scenario CAN now
@@ -65,11 +65,11 @@
 //! Pure and Bevy-free. The adapter that gathers the live inputs is
 //! [`super::server`].
 
-use crate::dossier::evidence::EvidenceEntry;
-use crate::messages::{
+use crate::core::messages::{
     DossierEvidenceSnapshot, DossierFactSnapshot, DossierSnapshot, DossierValue,
     InfrastructureSnapshot,
 };
+use crate::dossier::evidence::EvidenceEntry;
 use crate::world::commitments::{Commitment, CommitmentState};
 
 /// `strings.csv` id: the subject's faction.

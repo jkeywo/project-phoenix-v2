@@ -42,8 +42,8 @@ pub struct DamageZoneEffect {
 ///
 /// This is the same trap [`RadarDampeningEffect::range_modifier`] carries, on a
 /// field pair whose names read even more like multipliers. `thrust_modifier`
-/// and `yaw_rate_modifier` are added to [`crate::messages::ModifierSlot::MaxSpeed`]
-/// and [`crate::messages::ModifierSlot::MaxYawRate`] by
+/// and `yaw_rate_modifier` are added to [`crate::core::messages::ModifierSlot::MaxSpeed`]
+/// and [`crate::core::messages::ModifierSlot::MaxYawRate`] by
 /// `modifiers::coordination::apply_region_effects`, and each slot's cache
 /// (`modifiers::cache::ShipModifiers::rebuild_cache`) turns the SUM of every
 /// bonus on the slot into the multiplier the helm actually flies, through PRD
@@ -118,7 +118,7 @@ pub struct BlocksImpulseEffect {}
 ///
 /// The field name is `range_modifier` and the serde alias is `multiplier`, and
 /// the alias is the historical trap: the value is neither. It is added to
-/// [`crate::messages::ModifierSlot::RadarRange`] by
+/// [`crate::core::messages::ModifierSlot::RadarRange`] by
 /// `modifiers::coordination::apply_region_effects`, and the slot's cache
 /// (`modifiers::cache::ShipModifiers::rebuild_cache`) turns the SUM of every
 /// bonus on the slot into the multiplier the radar actually uses, via PRD

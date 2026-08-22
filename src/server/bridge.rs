@@ -13,23 +13,23 @@ use std::collections::HashSet;
 
 #[cfg(target_arch = "wasm32")]
 use {
-    crate::asteroid_lifecycle::AsteroidLifecyclePlugin,
+    crate::asteroids::lifecycle::AsteroidLifecyclePlugin,
     crate::boot::{BootPlan, BootProfile, WorldIngest},
-    crate::codec::{self, JsonCodec, MessageCodec},
-    crate::config_cache::ConfigCachePlugin,
     crate::console_bridge::{
         AiChatterEvent, AudioConfigChanged, AudioCueEvent, HudStateChanged, LobbyStateChanged,
     },
+    crate::core::codec::{self, JsonCodec, MessageCodec},
+    crate::core::messages::{self, DeliveryClass},
+    crate::entities::config_cache::ConfigCachePlugin,
+    crate::lobby::stations_config::ShipStations,
     crate::lobby::{
         InboundMessage, LobbyOutbox, LobbyPlugin, OutboundMessage, PlayerDisconnected,
         SelectedShipResource, Target,
     },
-    crate::messages::{self, DeliveryClass},
-    crate::modifier_coordination::ModifierCoordinationPlugin,
+    crate::modifiers::coordination::ModifierCoordinationPlugin,
     crate::server_app::add_simulation_plugins,
     crate::ship::config::ShipConfig,
     crate::ship_plugin::PendingShipConfig,
-    crate::stations_config::ShipStations,
     crate::world::load::WasmReader,
     crate::world::WorldPlugin,
     bevy::{log::LogPlugin, prelude::*},
@@ -71,7 +71,7 @@ pub enum DebugToggleKind {
     EntityInspector,
 }
 
-impl From<crate::messages::DebugFlag> for DebugToggleKind {
+impl From<crate::core::messages::DebugFlag> for DebugToggleKind {
     /// The wire form of the *diagnostic* half of this enum (issue #940) maps
     /// one-for-one onto it, so an overlay flipped from a phone and one flipped
     /// from the host page converge on the same pending-toggle vocabulary and
@@ -85,8 +85,8 @@ impl From<crate::messages::DebugFlag> for DebugToggleKind {
     /// wire flag a client could send that stops the simulation through the
     /// overlay drain. `debug_overlay::tests::no_debug_flag_maps_to_the_pause_toggle`
     /// pins that.
-    fn from(flag: crate::messages::DebugFlag) -> Self {
-        use crate::messages::DebugFlag;
+    fn from(flag: crate::core::messages::DebugFlag) -> Self {
+        use crate::core::messages::DebugFlag;
         match flag {
             DebugFlag::Regions => DebugToggleKind::Regions,
             DebugFlag::Modifiers => DebugToggleKind::Overlay,
@@ -158,7 +158,7 @@ pub fn apply_pending_toggles(
 /// least-surprising behaviour — the ship slides across to the waypoint without
 /// changing altitude (issue #768 allows ships to sit at nonzero Y).
 pub fn apply_teleport_to_waypoint(
-    physics: &mut crate::ship_state::ShipPhysics,
+    physics: &mut crate::ship::state::ShipPhysics,
     waypoint: &crate::console::navigation::NavigationWaypoint,
 ) -> bool {
     match waypoint.snapshot() {
@@ -497,7 +497,7 @@ pub fn wasm_get_instagib() -> bool {
 /// parsing that text directly rejects every composed hull — and the document
 /// the game actually runs is the RESOLVED one, so parsing the authored text
 /// would validate a document that is not the one being validated for.
-/// Resolution goes through [`crate::entity_includes::HostFragmentSource`], the
+/// Resolution goes through [`crate::entities::include_resolve::HostFragmentSource`], the
 /// one source that compiles on both targets: on WASM it reads the raw templates
 /// the host has already delivered, on native it falls through to the filesystem.
 ///
@@ -535,12 +535,12 @@ pub fn validate_ship_stations(
     template_path: &str,
     toml_str: &str,
 ) -> Result<crate::ship::config::ShipConfig, String> {
-    if !crate::config_cache::is_raw_template_delivered(template_path) {
-        crate::config_cache::record_raw_template(template_path, toml_str.to_string());
+    if !crate::entities::config_cache::is_raw_template_delivered(template_path) {
+        crate::entities::config_cache::record_raw_template(template_path, toml_str.to_string());
     }
-    let resolved = crate::entity_includes::resolve_template(
+    let resolved = crate::entities::include_resolve::resolve_template(
         template_path,
-        &crate::entity_includes::HostFragmentSource,
+        &crate::entities::include_resolve::HostFragmentSource,
     )
     .map_err(|e| format!("Station config validation failed: {e}"))?;
     let entity_config = resolved
@@ -568,7 +568,7 @@ pub fn validate_ship_stations(
 pub fn wasm_validate_stations(template_path: &str, toml_str: &str) -> Result<JsValue, JsValue> {
     let ship_config =
         validate_ship_stations(template_path, toml_str).map_err(|e| JsValue::from_str(&e))?;
-    let stations = crate::stations_config::stations_from_ship_config(&ship_config);
+    let stations = crate::lobby::stations_config::stations_from_ship_config(&ship_config);
     SHIP_STATIONS.with(|slot| {
         *slot.borrow_mut() = Some(stations);
     });
@@ -657,7 +657,7 @@ pub fn wasm_init() {
             .map(|(path, _)| path)
             .unwrap_or_default(),
         reader: Box::new(WasmReader),
-        script_resolver: Box::new(crate::config_cache::production_script_resolver()),
+        script_resolver: Box::new(crate::entities::config_cache::production_script_resolver()),
         single_threaded: false,
         raw_transform: None,
     };
@@ -1629,7 +1629,7 @@ pub fn wasm_sim_tick() -> f64 {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_config_request_callback(callback: js_sys::Function) {
-    crate::config_cache::set_config_request_callback(callback);
+    crate::entities::config_cache::set_config_request_callback(callback);
 }
 
 /// Re-export config preload functions from config_cache module.
@@ -1640,14 +1640,14 @@ pub fn wasm_load_config(path: String, toml_str: String) -> Result<JsValue, JsVal
     // time — so the clock starts on the first one and stops when the page
     // first observes it complete (issue #868).
     crate::perf::browser::preload_begin_once();
-    crate::config_cache::wasm_load_config(path, toml_str)
+    crate::entities::config_cache::wasm_load_config(path, toml_str)
 }
 
 /// Check if preload is complete.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_is_preload_complete() -> bool {
-    let complete = crate::config_cache::wasm_is_preload_complete();
+    let complete = crate::entities::config_cache::wasm_is_preload_complete();
     if complete {
         crate::perf::browser::preload_end_once();
     }
@@ -1690,7 +1690,7 @@ pub fn wasm_load_world(
     SNAPSHOT_WORLD.with(|slot| {
         *slot.borrow_mut() = Some((path.clone(), toml_str.clone()));
     });
-    crate::config_cache::wasm_load_world(path, toml_str, curated_ships)
+    crate::entities::config_cache::wasm_load_world(path, toml_str, curated_ships)
 }
 
 /// The raw `(path, TOML text)` of the world this session loaded, if any.
@@ -1712,7 +1712,7 @@ pub fn get_raw_world_source() -> Option<(String, String)> {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_world_fetch_callback(callback: js_sys::Function) {
-    crate::config_cache::set_world_fetch_callback(callback);
+    crate::entities::config_cache::set_world_fetch_callback(callback);
 }
 
 /// Deliver a runtime-fetched world TOML to the Rust side.
@@ -1722,7 +1722,7 @@ pub fn set_world_fetch_callback(callback: js_sys::Function) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_push_world_toml(path: String, toml_str: String) {
-    crate::config_cache::wasm_push_world_toml(path, toml_str);
+    crate::entities::config_cache::wasm_push_world_toml(path, toml_str);
 }
 
 /// Deliver a runtime-fetched model-rig sidecar TOML to the Rust side.
@@ -1734,7 +1734,7 @@ pub fn wasm_push_world_toml(path: String, toml_str: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
-    crate::config_cache::wasm_push_sidecar_toml(path, toml_str);
+    crate::entities::config_cache::wasm_push_sidecar_toml(path, toml_str);
 }
 
 /// Return the list of available player ships for the currently loaded world.
@@ -1750,7 +1750,7 @@ pub fn wasm_push_sidecar_toml(path: String, toml_str: String) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_get_available_ships() -> Array {
-    let world_config = crate::config_cache::get_world_config();
+    let world_config = crate::entities::config_cache::get_world_config();
     let ships = match world_config {
         Some(ref wc) => &wc.available_ships,
         None => return Array::new(),
@@ -1804,7 +1804,7 @@ fn ship_entry_to_js(ship: &crate::world::config::AvailableShipEntry) -> Object {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_push_scenario_manifest(toml_str: String) {
-    crate::config_cache::set_scenario_manifest_toml(toml_str);
+    crate::entities::config_cache::set_scenario_manifest_toml(toml_str);
 }
 
 /// Validate an uploaded host mod-pack ZIP and, when accepted, PUSH it onto the
@@ -1856,11 +1856,11 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
     // `resolve_base` below. A host whose manifest declares no `[content]` block
     // yields an identity no real pack can match (empty id, epoch 0), so an
     // upload is rejected rather than silently accepted against unknown content.
-    let base_content = crate::config_cache::get_scenario_manifest_toml()
+    let base_content = crate::entities::config_cache::get_scenario_manifest_toml()
         .and_then(|toml| crate::world::manifest::parse_content_identity(&toml))
         .unwrap_or_default();
     // The already-active overlay stack the candidate is judged against (#987).
-    let active = crate::config_cache::active_packs();
+    let active = crate::entities::config_cache::active_packs();
     let result = crate::world::mod_pack::validate_mod_pack(
         bytes,
         &base_content,
@@ -1870,10 +1870,10 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
             // pack hull may include a SHIPPED fragment. The active overlay stack
             // is consulted by `validate_mod_pack` itself (via the `active` slice
             // below), BENEATH the candidate and ABOVE this base resolver.
-            crate::config_cache::peek_pending_world_toml(path)
-                .or_else(|| crate::config_cache::raw_template_text(path))
+            crate::entities::config_cache::peek_pending_world_toml(path)
+                .or_else(|| crate::entities::config_cache::raw_template_text(path))
         },
-        &crate::entity_loader::WasmTemplateLoader,
+        &crate::entities::loader::WasmTemplateLoader,
         &active,
     );
 
@@ -1929,7 +1929,7 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
                 .and_then(|pm| pm.pack)
                 .map(|p| (p.id, p.name, p.version))
                 .unwrap_or_default();
-        crate::config_cache::push_mod_pack(crate::config_cache::ActivePack {
+        crate::entities::config_cache::push_mod_pack(crate::entities::config_cache::ActivePack {
             id,
             name,
             version,
@@ -1948,7 +1948,7 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_clear_mod_pack() {
-    crate::config_cache::clear_mod_pack_overlay();
+    crate::entities::config_cache::clear_mod_pack_overlay();
 }
 
 /// Remove the pack with `id` from the overlay stack (issue #987). Precedence for
@@ -1957,7 +1957,7 @@ pub fn wasm_clear_mod_pack() {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_remove_mod_pack(id: String) -> bool {
-    crate::config_cache::remove_mod_pack(&id)
+    crate::entities::config_cache::remove_mod_pack(&id)
 }
 
 /// Reorder the overlay stack to match `ids` (oldest → newest / lowest → highest
@@ -1966,7 +1966,7 @@ pub fn wasm_remove_mod_pack(id: String) -> bool {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_reorder_mod_packs(ids: Vec<String>) {
-    crate::config_cache::reorder_mod_packs(&ids);
+    crate::entities::config_cache::reorder_mod_packs(&ids);
 }
 
 /// The active overlay stack + its path conflicts, for the host UI (issue #987).
@@ -1980,7 +1980,7 @@ pub fn wasm_reorder_mod_packs(ids: Vec<String>) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_active_pack_manifest() -> JsValue {
-    let packs = crate::config_cache::active_packs();
+    let packs = crate::entities::config_cache::active_packs();
     let out = Object::new();
 
     let packs_arr = Array::new();
@@ -2017,7 +2017,7 @@ pub fn wasm_active_pack_manifest() -> JsValue {
     Reflect::set(&out, &JsValue::from_str("packs"), &packs_arr).ok();
 
     let conflicts_arr = Array::new();
-    for conflict in crate::config_cache::overlay_conflicts(&packs) {
+    for conflict in crate::entities::config_cache::overlay_conflicts(&packs) {
         let obj = Object::new();
         Reflect::set(
             &obj,
@@ -2071,7 +2071,7 @@ pub fn wasm_active_pack_manifest() -> JsValue {
 pub fn wasm_get_scenario_catalog() -> Array {
     use crate::world::manifest::{build_merged_catalog, parse_manifest, validate_manifest};
     let arr = Array::new();
-    let Some(manifest_toml) = crate::config_cache::get_scenario_manifest_toml() else {
+    let Some(manifest_toml) = crate::entities::config_cache::get_scenario_manifest_toml() else {
         return arr;
     };
     let Ok(manifest) = parse_manifest(&manifest_toml) else {
@@ -2081,7 +2081,7 @@ pub fn wasm_get_scenario_catalog() -> Array {
     // (issue #760 AC3, #987), resolving every root world through the overlay-aware
     // resolver (the winning pack's content first, then base). Only
     // manifest-listed scenarios appear.
-    let active = crate::config_cache::active_packs();
+    let active = crate::entities::config_cache::active_packs();
     let parsed_mods: Vec<(String, crate::world::manifest::Manifest)> = active
         .iter()
         .filter_map(|p| {
@@ -2093,8 +2093,8 @@ pub fn wasm_get_scenario_catalog() -> Array {
     let mods: Vec<(&str, &crate::world::manifest::Manifest)> =
         parsed_mods.iter().map(|(id, m)| (id.as_str(), m)).collect();
     let resolve_world = |path: &str| {
-        crate::config_cache::mod_pack_overlay_get(path)
-            .or_else(|| crate::config_cache::peek_pending_world_toml(path))
+        crate::entities::config_cache::mod_pack_overlay_get(path)
+            .or_else(|| crate::entities::config_cache::peek_pending_world_toml(path))
     };
     for f in validate_manifest(&manifest, &manifest_toml, &resolve_world) {
         bevy::log::warn!(
@@ -2156,7 +2156,8 @@ pub fn wasm_get_scenario_catalog() -> Array {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_delivery_stamp() -> String {
-    let manifest_toml = crate::config_cache::get_scenario_manifest_toml().unwrap_or_default();
+    let manifest_toml =
+        crate::entities::config_cache::get_scenario_manifest_toml().unwrap_or_default();
     crate::core::codec::encode_delivery_stamp(&crate::delivery::stamp::DeliveryStamp::for_manifest(
         &manifest_toml,
     ))
@@ -2456,7 +2457,7 @@ fn apply_force_start(
 fn drain_teleport_to_waypoint(
     mut ship_q: Query<
         (
-            &mut crate::ship_state::ShipPhysics,
+            &mut crate::ship::state::ShipPhysics,
             &crate::console::navigation::NavigationWaypoint,
         ),
         With<crate::server_app::LocalShip>,
@@ -2506,7 +2507,9 @@ fn drain_god_mode_toggle(mut writer: MessageWriter<InboundMessage>) {
         writer.write(InboundMessage {
             token: crate::console_bridge::LOCAL_CONSOLE_TOKEN.to_string(),
             msg: messages::ClientMessage::ControlSystem {
-                target: messages::SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.to_string()),
+                target: messages::SystemId(
+                    crate::ship::system_registry::GOD_MODE_SYSTEM_ID.to_string(),
+                ),
                 payload: messages::SystemControlPayload::ToggleGodMode,
             },
         });
@@ -2695,7 +2698,7 @@ mod tests {
         apply_pending_toggles, apply_teleport_to_waypoint, host_channels, DebugToggleKind,
     };
     use crate::console::navigation::{NavigationWaypoint, WaypointMode};
-    use crate::ship_state::ShipPhysics;
+    use crate::ship::state::ShipPhysics;
 
     /// Teleport onto a Free waypoint sets `x`/`z` and leaves `y` unchanged.
     #[test]

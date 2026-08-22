@@ -164,7 +164,7 @@ pub(crate) const HOSTILE_ARC_INESCAPABLE_FACT: &str = "hostile_arc_inescapable";
 /// New plumbing: the shield fraction was computed host-side for BROADCAST only
 /// (`server_app`'s entity-health delta), so no ship could reason about the state
 /// of its own shields. Seeded from the shared, pure
-/// [`crate::shield::ShieldSystem::fraction`] — the same function the player
+/// [`crate::weapons::shield::ShieldSystem::fraction`] — the same function the player
 /// ship's shields go through, because a shield does not care who owns the hull
 /// (AGENTS.md #6).
 ///
@@ -558,7 +558,7 @@ pub(crate) fn artillery_params_authored(params: &crate::world::flags::AiParams) 
 /// — so "longest range" is the selector, and a hull with no blaster bank at all
 /// reads `0.0`, which [`crate::ai::plan_artillery_position`] degrades to aiming at
 /// the target's live position rather than at an invented intercept.
-pub(crate) fn artillery_lead_speed(banks: &[crate::blaster::BlasterSystem]) -> f32 {
+pub(crate) fn artillery_lead_speed(banks: &[crate::weapons::blaster::BlasterSystem]) -> f32 {
     banks
         .iter()
         .max_by(|a, b| a.config.range.total_cmp(&b.config.range))
@@ -583,7 +583,7 @@ pub(crate) fn artillery_lead_speed(banks: &[crate::blaster::BlasterSystem]) -> f
 ///
 /// Resolved through the SAME path damage takes and the same one
 /// `ai_torpedo_auto_fire` gates on: the target's live `Transform` + its own
-/// `ShipShields`, through [`crate::shield::attacker_bearing_relative`] and then
+/// `ShipShields`, through [`crate::weapons::shield::attacker_bearing_relative`] and then
 /// the target's own `facing_index_for_bearing`. That resolver is
 /// priority-tiered, so a hull that authors overlapping arcs routes the AI's
 /// belief and the eventual hit to the same arc. Deriving the arc any other way
@@ -615,7 +615,7 @@ pub(crate) const TARGET_FACING_SHIELD_DOWN_FACT: &str = "target_facing_shield_do
 ///
 /// Transition-scope only — see the note above.
 ///
-/// Read off the live [`crate::weapons_plugin::TorpedoSystemResource`] component,
+/// Read off the live [`crate::console::weapons::TorpedoSystemResource`] component,
 /// NOT off `SystemBlackboard::TorpedoMagazine`: the blackboard is published in
 /// `SimSet::Publish`, one whole tick after this system runs in `SimSet::Physics`,
 /// so a doctrine gating on it would see a salvo it launched a tick after it
@@ -635,7 +635,7 @@ pub(crate) const TARGET_FACING_SHIELD_DOWN_FACT: &str = "target_facing_shield_do
 /// ## Why `in_flight` alone is not the count
 ///
 /// A burst launch puts its FIRST round in `in_flight` immediately and schedules
-/// the rest as a [`crate::torpedo::TubeBurstState`], whose `pending` rounds are
+/// the rest as a [`crate::weapons::torpedo::TubeBurstState`], whose `pending` rounds are
 /// not in `in_flight` until their timer elapses. `in_flight.len()` on its own
 /// therefore under-reports a salvo mid-burst, and a doctrine reading `< 1`
 /// releases the hull in the gap between the last airborne round resolving and
@@ -706,7 +706,7 @@ pub(crate) const TORPEDOES_IN_FLIGHT_FACT: &str = "torpedoes_in_flight";
 ///   `handle_fire_torpedo` gates a launch on, so this stays a statement about
 ///   the hull and not about who is crewing it (AGENTS.md #6);
 /// * the magazine holds at least
-///   [`crate::torpedo::TorpedoSystem::salvo_shortfall`] rounds — the ones still
+///   [`crate::weapons::torpedo::TorpedoSystem::salvo_shortfall`] rounds — the ones still
 ///   needed to top every tube up, over and above those already claimed for an
 ///   in-progress load.
 ///
@@ -1151,7 +1151,7 @@ pub(crate) fn seed_pressed_facts(
 ///
 /// * [`TARGET_FACING_SHIELD_DOWN_FACT`] resolves the ONE arc of the target that
 ///   faces this ship through the target's OWN
-///   [`crate::shield::ShieldSystem::facing_index_for_bearing`] — the same
+///   [`crate::weapons::shield::ShieldSystem::facing_index_for_bearing`] — the same
 ///   priority-tiered resolver `apply_damage` routes a hit through, and the same
 ///   one `ai_torpedo_auto_fire` gates its launch on. Going through a parallel
 ///   view of the target's arcs would let the manoeuvre commit to an opportunity
@@ -1171,12 +1171,12 @@ pub(crate) fn seed_torpedo_opportunity_facts(
     target: Option<uuid::Uuid>,
     physics: &ShipPhysics,
     targets: &Query<(
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         &Transform,
         Option<&crate::ship::shields::ShipShields>,
         Option<&ShipPhysics>,
     )>,
-    torpedoes: Option<&crate::torpedo::TorpedoSystem>,
+    torpedoes: Option<&crate::weapons::torpedo::TorpedoSystem>,
     sources: &ShipSystemControlSources,
 ) {
     // A hull with no torpedo system reads zero rather than absent: it can never
@@ -1240,7 +1240,7 @@ pub(crate) fn seed_torpedo_opportunity_facts(
             };
             // Arcs are authored relative to the TARGET's own facing, so the
             // bearing is taken in the target's frame.
-            let incoming = crate::shield::attacker_bearing_relative(
+            let incoming = crate::weapons::shield::attacker_bearing_relative(
                 physics.x,
                 physics.z,
                 transform.translation.x,
@@ -1273,7 +1273,9 @@ pub(crate) fn seed_torpedo_opportunity_facts(
 /// about who is crewing them or whether the console is Disabled — a shot-out
 /// tube that still has rounds in it reads full here, and the doctrine conjoins
 /// `tubes_fillable` beside this precisely to catch that case.
-pub(crate) fn torpedo_tubes_full(torpedoes: Option<&crate::torpedo::TorpedoSystem>) -> bool {
+pub(crate) fn torpedo_tubes_full(
+    torpedoes: Option<&crate::weapons::torpedo::TorpedoSystem>,
+) -> bool {
     // A hull with no tubes reads false, not `all`'s vacuous true.
     torpedoes
         .filter(|sys| !sys.tubes.is_empty())
@@ -1296,7 +1298,7 @@ pub(crate) fn torpedo_tubes_full(torpedoes: Option<&crate::torpedo::TorpedoSyste
 /// a hull-capability reading must not turn on who happens to be crewing the
 /// tube, which is what an `operate_ai`-only test would make it (AGENTS.md #6).
 pub(crate) fn torpedo_tubes_fillable(
-    torpedoes: Option<&crate::torpedo::TorpedoSystem>,
+    torpedoes: Option<&crate::weapons::torpedo::TorpedoSystem>,
     sources: &ShipSystemControlSources,
 ) -> bool {
     // No torpedo system, or a system with no tubes: nothing to fill. Ruled out
@@ -1305,7 +1307,7 @@ pub(crate) fn torpedo_tubes_fillable(
         return false;
     };
 
-    let online = |id: &crate::messages::SystemId| {
+    let online = |id: &crate::core::messages::SystemId| {
         let policy = if crate::console::weapons::shared::system_is_registered(sources, id) {
             sources.0.policy_for(id)
         } else {
@@ -1321,14 +1323,14 @@ pub(crate) fn torpedo_tubes_fillable(
 
     // The magazine is the shared bottleneck every tube draws from: offline, and
     // no tube tops up again.
-    if !online(&crate::system_registry::torpedo_magazine_system_id()) {
+    if !online(&crate::ship::system_registry::torpedo_magazine_system_id()) {
         return false;
     }
     // One dead tube is enough. `tubes_full` is an ALL-tubes reading, so a tube
     // that can never load makes it permanently false however healthy the rest
     // of the battery is.
     let every_tube_online = sys.tubes.iter().all(|tube| {
-        crate::system_registry::torpedo_tube_system_id(&tube.id).is_some_and(|id| online(&id))
+        crate::ship::system_registry::torpedo_tube_system_id(&tube.id).is_some_and(|id| online(&id))
     });
     if !every_tube_online {
         return false;

@@ -14,7 +14,7 @@
 use bevy::prelude::*;
 
 use crate::command_admission::AdmissionSet;
-use crate::messages::{AdmittedCommands, RepairTarget, SystemControlPayload, SystemId};
+use crate::core::messages::{AdmittedCommands, RepairTarget, SystemControlPayload, SystemId};
 use crate::ship::system_registry::REPAIR_SYSTEM_ID;
 
 use super::server::ShipRepairTeams;
@@ -74,7 +74,7 @@ pub fn handle_dispatch_repair_team(
             &AdmittedCommands,
             &crate::ship_plugin::ShipConfigComponent,
             &mut ShipRepairTeams,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             // Issue #1161: teams held abroad by an external repair dispatch.
             // Read here as well as in the AI dispatcher, because humans and AI
             // issue the same command and so have to meet the same constraint —
@@ -182,7 +182,7 @@ pub fn handle_set_repair_target_priority(
         (
             &AdmittedCommands,
             &mut ShipRepairTeams,
-            Option<&crate::entity_spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
         ),
         With<crate::server_app::Ship>,
@@ -240,7 +240,7 @@ pub fn handle_set_repair_target_priority(
 fn resolve_repair_target(
     target: &RepairTarget,
     ship_config: &crate::ship_plugin::ShipConfigComponent,
-    hull: Option<&crate::damage::SystemHull>,
+    hull: Option<&crate::ship::damage::SystemHull>,
 ) -> Option<SystemId> {
     match target {
         RepairTarget::Core => Some(SystemId("core".into())),
@@ -275,9 +275,9 @@ fn resolve_repair_target(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::SystemHull;
-    use crate::messages::StationId;
+    use crate::core::messages::StationId;
     use crate::ship::config::{ShipConfig, SystemInstanceConfig};
+    use crate::ship::damage::SystemHull;
 
     fn system(id: &str, station: Option<&str>) -> SystemInstanceConfig {
         SystemInstanceConfig {

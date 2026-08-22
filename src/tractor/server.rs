@@ -23,20 +23,20 @@ use bevy::prelude::*;
 use crate::command_admission::ai_emit::emit_ai_command;
 use crate::command_admission::{ConsumerMatcher, RegisterAdmittedConsumer};
 use crate::console::weapons::beam::TacticalRadarSelection;
-use crate::damage::DamageTier;
-use crate::effect_queue::EffectQueue;
-use crate::entities::spawner::{EntityMass, EntityName, EntitySystemHull, EntityUuid};
-use crate::entity_config::DEFAULT_ENTITY_MASS;
-use crate::infrastructure::condition::ConditionAdjustment;
-use crate::infrastructure::InfrastructureCondition;
-use crate::messages::{
+use crate::core::messages::{
     ModifierSlot, ModifierSource, PowerGroupId, SystemAffinity, SystemBlackboard,
     SystemControlPayload, SystemId, TractorBlackboard,
 };
+use crate::effect_queue::EffectQueue;
+use crate::entities::config::DEFAULT_ENTITY_MASS;
+use crate::entities::spawner::{EntityMass, EntityName, EntitySystemHull, EntityUuid};
+use crate::infrastructure::condition::ConditionAdjustment;
+use crate::infrastructure::InfrastructureCondition;
 use crate::modifiers::{Modifier, ShipModifiers};
+use crate::ship::damage::DamageTier;
 use crate::ship::power::{power_level_for, ShipPowerSystem};
 use crate::ship::state::ShipPhysics;
-use crate::system_registry::{tractor_system_id, TRACTOR_SYSTEM_ID};
+use crate::ship::system_registry::{tractor_system_id, TRACTOR_SYSTEM_ID};
 use crate::tractor::coupling::{
     coupled_position, hold_status, tow_load_penalty, TractorConfig, TractorRefusal,
 };
@@ -242,7 +242,7 @@ impl Plugin for TractorPlugin {
 /// through the same `validate_and_admit` seam) and stripped the source, so
 /// nothing here asks who sent the command (AGENTS.md rule 6).
 pub fn handle_tractor_commands(
-    mut ships: Query<(&crate::messages::AdmittedCommands, &mut TractorBeam)>,
+    mut ships: Query<(&crate::core::messages::AdmittedCommands, &mut TractorBeam)>,
 ) {
     for (admitted, mut beam) in ships.iter_mut() {
         // The last engage/release in the tick wins — the same latest-command-
@@ -309,7 +309,7 @@ pub fn operate_tractor_ai(
         Option<&TacticalRadarSelection>,
         &crate::server_app::ShipSystemBlackboards,
         Has<TractorAiEngaged>,
-        &mut crate::messages::AdmittedCommands,
+        &mut crate::core::messages::AdmittedCommands,
     )>,
 ) {
     for (entity, uuid, sources, config, beam, lock, blackboards, host_engaged, mut admitted) in
@@ -324,7 +324,7 @@ pub fn operate_tractor_ai(
         // borrow of the blackboard is released before the emit.
         let directive_target: Option<String> = match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(SystemBlackboard::Viewscreen(vbb)) => crate::objectives::top_operate_directive(
                 &vbb.scored_objectives,

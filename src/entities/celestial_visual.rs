@@ -8,9 +8,9 @@
 
 use bevy::prelude::*;
 
-use crate::entity_config::{PlanetConfig, StarConfig};
-use crate::entity_planet::{PlanetCloudMaterial, PlanetSurfaceMaterial};
-use crate::entity_star::{StarHalo, StarHaloMaterial, StarSurfaceMaterial};
+use crate::entities::config::{PlanetConfig, StarConfig};
+use crate::entities::planet::{PlanetCloudMaterial, PlanetSurfaceMaterial};
+use crate::entities::star::{StarHalo, StarHaloMaterial, StarSurfaceMaterial};
 
 /// Attach a star's surface sphere to `entity` plus a billboarded halo child.
 pub fn insert_star_visual(
@@ -21,15 +21,16 @@ pub fn insert_star_visual(
     entity: Entity,
     cfg: &StarConfig,
 ) {
-    let surface_mesh = meshes.add(crate::entity_star::uv_sphere_mesh(
+    let surface_mesh = meshes.add(crate::entities::star::uv_sphere_mesh(
         cfg.radius,
         cfg.longitude_segments,
         cfg.latitude_segments,
     ));
-    let surface_mat = surface_materials.add(crate::entity_star::surface_material_from_config(cfg));
+    let surface_mat =
+        surface_materials.add(crate::entities::star::surface_material_from_config(cfg));
     let halo_radius = cfg.radius * cfg.halo_radius_multiplier.max(1.0);
-    let halo_mesh = meshes.add(crate::entity_star::halo_quad_mesh(halo_radius));
-    let halo_mat = halo_materials.add(crate::entity_star::halo_material_from_config(cfg));
+    let halo_mesh = meshes.add(crate::entities::star::halo_quad_mesh(halo_radius));
+    let halo_mat = halo_materials.add(crate::entities::star::halo_material_from_config(cfg));
     let mut ec = commands.entity(entity);
     ec.insert((Mesh3d(surface_mesh), MeshMaterial3d(surface_mat)));
     ec.with_children(|parent| {
@@ -55,24 +56,25 @@ pub fn insert_planet_visual(
     entity: Entity,
     cfg: &PlanetConfig,
 ) {
-    let surface_mesh = meshes.add(crate::entity_star::uv_sphere_mesh(
+    let surface_mesh = meshes.add(crate::entities::star::uv_sphere_mesh(
         cfg.radius,
         cfg.longitude_segments,
         cfg.latitude_segments,
     ));
-    let surface_mat = surface_materials.add(crate::entity_planet::surface_material_from_config(
+    let surface_mat = surface_materials.add(crate::entities::planet::surface_material_from_config(
         cfg,
         asset_server,
     ));
     let mut ec = commands.entity(entity);
     ec.insert((Mesh3d(surface_mesh), MeshMaterial3d(surface_mat)));
-    if let Some(cloud_mat) = crate::entity_planet::cloud_material_from_config(cfg, asset_server) {
+    if let Some(cloud_mat) = crate::entities::planet::cloud_material_from_config(cfg, asset_server)
+    {
         let shell_scale = cfg
             .clouds
             .as_ref()
             .map(|c| c.scale.max(1.001))
             .unwrap_or(1.03);
-        let cloud_mesh = meshes.add(crate::entity_star::uv_sphere_mesh(
+        let cloud_mesh = meshes.add(crate::entities::star::uv_sphere_mesh(
             cfg.radius * shell_scale,
             cfg.longitude_segments,
             cfg.latitude_segments,

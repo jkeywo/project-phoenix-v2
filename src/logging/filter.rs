@@ -1,7 +1,7 @@
 //! The runtime filter resource and the system that keeps its entity set fresh.
 
 use super::{empty_entities, empty_per_cat, LevelFilter, LogCat};
-use crate::entity_spawner::EntityName;
+use crate::entities::spawner::EntityName;
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 

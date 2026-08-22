@@ -180,7 +180,7 @@ pub struct BootPlan {
     /// The world-TOML reader for this target.
     pub reader: Box<dyn WorldReader>,
     /// The sibling-`.rhai` script resolver for this target
-    /// ([`crate::config_cache::production_script_resolver`] in production).
+    /// ([`crate::entities::config_cache::production_script_resolver`] in production).
     pub script_resolver: Box<dyn ScriptResolver>,
     /// Pin Bevy's [`TaskPoolPlugin`] to a single thread, so the executor runs
     /// systems in a fixed order run to run.

@@ -49,7 +49,7 @@ use project_phoenix::cross_target_probe::{
     build_probe_app, probe_end_tick, run_probe, ProbeConfig, ProbeReport, BURSTY_PACING,
     CHECKPOINT_INTERVAL, EVEN_PACING, PROBE_SEED, PROBE_TICKS,
 };
-use project_phoenix::entity_spawner::{EntitySystemHull, EntityUuid};
+use project_phoenix::entities::spawner::{EntitySystemHull, EntityUuid};
 use project_phoenix::sim_digest::DigestLedger;
 use project_phoenix::world_id::{IdNamespace, WorldId};
 

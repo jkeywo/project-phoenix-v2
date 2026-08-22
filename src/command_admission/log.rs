@@ -61,7 +61,7 @@
 //! So a [`LoggedCommand`] is not an `AdmittedCommand` with a tick bolted on. It
 //! is the *non-secret projection* of one: the tick, the target system, the
 //! payload, and a [`ShipKey`] — the routed ship's
-//! [`crate::entity_spawner::EntityUuid`], which is already the vocabulary
+//! [`crate::entities::spawner::EntityUuid`], which is already the vocabulary
 //! snapshots, balance events and damage ledgers name ships in, and which is
 //! derived from the seeded simulation rather than from a client. The raw token
 //! stays on the in-process `AdmittedCommand` in [`PendingCommands`] and in the
@@ -103,8 +103,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::entity_spawner::EntityUuid;
-use crate::messages::{AdmittedCommand, SystemControlPayload, SystemId};
+use crate::core::messages::{AdmittedCommand, SystemControlPayload, SystemId};
+use crate::entities::spawner::EntityUuid;
 
 /// Which ship's `AdmittedCommands` a logged command lands in, named by that
 /// ship's [`EntityUuid`].

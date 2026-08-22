@@ -277,7 +277,7 @@ impl ScanConfig {
 /// The shortness is the point: see the module docs. There is no field for
 /// authored result text because there is no authored result text. `mass`
 /// (issue #1154) does not bend that rule — it is not a result either, it is a
-/// number [`EntityConfig::mass`](crate::entity_config::EntityConfig::mass)
+/// number [`EntityConfig::mass`](crate::entities::config::EntityConfig::mass)
 /// already carries on every entity, unconditionally, before anyone scans
 /// anything.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -563,7 +563,7 @@ pub fn derive(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::InfrastructureSnapshot;
+    use crate::core::messages::InfrastructureSnapshot;
 
     /// The mirror flag's spelling is a **contract with scenario authors** —
     /// `falling_skyway.toml` and `probe_scandiff.toml` write

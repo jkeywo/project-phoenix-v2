@@ -72,7 +72,7 @@
 //! There is deliberately no "real terms versus stated terms" pair and no hidden
 //! field: a scenario in which the crew is misled about what they agreed to
 //! authors the misleading line as its own dialogue content, exactly as
-//! [`InfrastructureSnapshot`](crate::messages::InfrastructureSnapshot) refuses a
+//! [`InfrastructureSnapshot`](crate::core::messages::InfrastructureSnapshot) refuses a
 //! reported-versus-actual pair and sends a contradicting maintenance dossier as
 //! content instead. That is what makes the whole record safe to hand to a later
 //! UI: inspecting it cannot reveal anything the crew was not already told.

@@ -1,4 +1,4 @@
-use crate::messages::{Player, StationId};
+use crate::core::messages::{Player, StationId};
 use crate::ship::config::ShipConfig;
 
 #[derive(Debug)]
@@ -368,8 +368,8 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::messages::{PowerGroupId, SystemId};
     use crate::lobby::stations_config::{ShipStations, StationDef};
-    use crate::messages::{PowerGroupId, SystemId};
     use crate::ship::config::{PowerGroupConfig, StationConfig, SystemInstanceConfig};
 
     fn sm() -> SessionManager {
@@ -1016,8 +1016,8 @@ mod tests {
     /// station id is nowhere in the wire form.
     #[test]
     fn eligibility_is_absent_from_the_serialized_player() {
-        use crate::codec::{JsonCodec, MessageCodec};
-        use crate::messages::ServerMessage;
+        use crate::core::codec::{JsonCodec, MessageCodec};
+        use crate::core::messages::ServerMessage;
 
         let mut sm = sm();
         sm.register("t1".into(), "Alice".into()).unwrap();

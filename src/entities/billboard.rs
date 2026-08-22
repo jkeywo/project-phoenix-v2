@@ -1,7 +1,7 @@
 //! Far-LOD billboards: a camera-facing quad textured from a yaw-ring atlas.
 //!
 //! The farthest band of a model's LOD ladder is a `billboard` level (see
-//! [`crate::entity_config::LodLevel::billboard`]): a camera-facing quad,
+//! [`crate::entities::config::LodLevel::billboard`]): a camera-facing quad,
 //! textured from an atlas of pre-rendered views of the hull packed left→right
 //! around a horizontal yaw ring. At 400+ units a captured silhouette of the real
 //! ship reads far better than a coloured sphere, and the PNG is small enough to
@@ -40,8 +40,8 @@
 
 use bevy::prelude::*;
 
+use crate::entities::config::LodLevel;
 use crate::entities::visual_fade::{SelfDrivenAlpha, VisualFade};
-use crate::entity_config::LodLevel;
 
 /// Marks a far-LOD billboard's ROOT and records how many yaw tiles its atlas
 /// packs (left→right). Lives on the root, not the entity, and not on the pose
@@ -478,7 +478,7 @@ mod tests {
     fn a_level_with_no_capture_block_is_a_single_view_atlas() {
         assert_eq!(billboard_yaw_views(&LodLevel::default()), 1);
         let zero = LodLevel {
-            capture: Some(crate::entity_config::LodCapture {
+            capture: Some(crate::entities::config::LodCapture {
                 yaw_views: Some(0),
                 ..Default::default()
             }),
@@ -491,7 +491,7 @@ mod tests {
     #[test]
     fn the_shipped_capture_block_reads_its_ring() {
         let level = LodLevel {
-            capture: Some(crate::entity_config::LodCapture {
+            capture: Some(crate::entities::config::LodCapture {
                 yaw_views: Some(8),
                 ..Default::default()
             }),

@@ -40,7 +40,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::messages::{CoordinationPayload, StationId, SystemId};
+use crate::core::messages::{CoordinationPayload, StationId, SystemId};
 use crate::ship::components::CoordinationEnqueue;
 use crate::ship::coordination::seat_control_source;
 use crate::ship::intent_narration::{coalesce_intent, IntentNarrationConfig, IntentSnapshot};
@@ -143,7 +143,7 @@ pub fn tick_intent_narration(
             &crate::ship::components::ShipSystemControlSources,
             &mut ShipIntentNarration,
             Option<&crate::console::weapons::beam::TacticalRadarSelection>,
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::ship::shields::ShipShields>,
             Option<&crate::ship::power::PowerBrownoutState>,
@@ -163,7 +163,7 @@ pub fn tick_intent_narration(
             .as_deref()
             .map(|wc| wc.global.intent_break_off_hull_fraction)
             .unwrap_or_else(|| {
-                crate::entity_config::GlobalConfig::default().intent_break_off_hull_fraction
+                crate::entities::config::GlobalConfig::default().intent_break_off_hull_fraction
             }),
     };
 
@@ -297,20 +297,20 @@ fn seat_station(
 ) -> Option<StationId> {
     match seat {
         NarratingSeat::Tactical => Some(StationId(
-            crate::system_registry::TACTICAL_STATION_ID.to_string(),
+            crate::ship::system_registry::TACTICAL_STATION_ID.to_string(),
         )),
         NarratingSeat::Helm => Some(StationId(
-            crate::system_registry::HELM_STATION_ID.to_string(),
+            crate::ship::system_registry::HELM_STATION_ID.to_string(),
         )),
         NarratingSeat::Shields => station_owning_kind(
             config,
             &[
-                crate::system_registry::SHIELDS_KIND,
-                crate::system_registry::SHIELD_ARC_KIND,
+                crate::ship::system_registry::SHIELDS_KIND,
+                crate::ship::system_registry::SHIELD_ARC_KIND,
             ],
         ),
         NarratingSeat::Power => {
-            station_owning_kind(config, &[crate::system_registry::POWER_REACTOR_KIND])
+            station_owning_kind(config, &[crate::ship::system_registry::POWER_REACTOR_KIND])
         }
     }
 }
@@ -333,10 +333,10 @@ fn entity_label(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control_source::ControlSource;
-    use crate::messages::IntentKind;
+    use crate::core::messages::IntentKind;
+    use crate::server_app::Ship;
+    use crate::ship::control_source::ControlSource;
     use crate::ship::test_support::*;
-    use crate::simulation::Ship;
 
     #[derive(Resource, Default)]
     struct AdvisoryBox(Vec<CoordinationEnqueue>);
@@ -397,7 +397,7 @@ mod tests {
         let ship = find_ship_entity(app);
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::weapons_plugin::TacticalRadarSelection(
+            .insert(crate::console::weapons::TacticalRadarSelection(
                 uuid.map(|u| u.to_string()),
             ));
     }
@@ -434,7 +434,7 @@ mod tests {
         // shots and thrust ticks by the dozen, and it must still be silent.
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::ship_state::ShipRedAlert(true));
+            .insert(crate::ship::state::ShipRedAlert(true));
         app.world_mut()
             .entity_mut(ship)
             .insert(crate::ship::power::PowerBrownoutState {
@@ -499,12 +499,12 @@ mod tests {
         let ship = find_ship_entity(&mut app);
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::ship_state::ShipRedAlert(false));
+            .insert(crate::ship::state::ShipRedAlert(false));
         settle(&mut app);
 
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::ship_state::ShipRedAlert(true));
+            .insert(crate::ship::state::ShipRedAlert(true));
         decide(&mut app);
         assert_eq!(
             advisory_kinds(&drain(&mut app)),
@@ -513,7 +513,7 @@ mod tests {
 
         app.world_mut()
             .entity_mut(ship)
-            .insert(crate::ship_state::ShipRedAlert(false));
+            .insert(crate::ship::state::ShipRedAlert(false));
         decide(&mut app);
         assert_eq!(
             advisory_kinds(&drain(&mut app)),
@@ -528,7 +528,7 @@ mod tests {
     fn crossing_the_authored_hull_threshold_narrates_breaking_off() {
         let mut app = narration_app();
         let threshold =
-            crate::entity_config::GlobalConfig::default().intent_break_off_hull_fraction;
+            crate::entities::config::GlobalConfig::default().intent_break_off_hull_fraction;
         settle(&mut app);
 
         // Take the whole hull to just under the authored fraction.
@@ -536,9 +536,9 @@ mod tests {
             let ship = find_ship_entity(&mut app);
             let mut hull = app
                 .world_mut()
-                .get_mut::<crate::entity_spawner::EntitySystemHull>(ship)
+                .get_mut::<crate::entities::spawner::EntitySystemHull>(ship)
                 .expect("the fixture ship carries a hull");
-            let entries: Vec<(crate::messages::SystemId, f32)> = hull
+            let entries: Vec<(crate::core::messages::SystemId, f32)> = hull
                 .0
                 .entries()
                 .map(|(id, _, max)| (id.clone(), max))
@@ -693,7 +693,7 @@ mod tests {
     /// Put every system the Tactical station owns on `source`, which is what
     /// claiming or vacating the seat does.
     fn set_tactical_station_source(app: &mut App, source: ControlSource) {
-        let ids: Vec<crate::messages::SystemId> = {
+        let ids: Vec<crate::core::messages::SystemId> = {
             let mut q = app
                 .world_mut()
                 .query_filtered::<&crate::ship::components::ShipConfigComponent, With<Ship>>();
@@ -702,7 +702,7 @@ mod tests {
                 .iter()
                 .filter(|s| {
                     s.station.as_ref().map(|st| st.0.as_str())
-                        == Some(crate::system_registry::TACTICAL_STATION_ID)
+                        == Some(crate::ship::system_registry::TACTICAL_STATION_ID)
                 })
                 .map(|s| s.id.clone())
                 .collect()
@@ -747,7 +747,7 @@ mod tests {
         }
         let narrated = advisory_kinds(&drain(&mut app)).len();
 
-        let hz = crate::entity_config::GlobalConfig::default().ai_tick_hz;
+        let hz = crate::entities::config::GlobalConfig::default().ai_tick_hz;
         let span_secs = (FRAMES as f32) * (FRAME_MS as f32) / 1000.0;
         // +1 for the part-period the settle left on the shared timer.
         let max_decisions = (span_secs * hz).ceil() as usize + 1;

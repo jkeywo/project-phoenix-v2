@@ -19,14 +19,14 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use bevy::prelude::*;
-use project_phoenix::balance::BalanceEvent;
-use project_phoenix::entity_spawner::EntityUuid;
+use project_phoenix::console::weapons::TorpedoSystemResource;
+use project_phoenix::core::balance::BalanceEvent;
+use project_phoenix::entities::spawner::EntityUuid;
 use project_phoenix::headless::args::ticks_for_sim_seconds;
 use project_phoenix::headless::report::RunTelemetry;
 use project_phoenix::headless::{build_headless_app, build_report, run, HeadlessArgs};
 use project_phoenix::server_app::LocalShip;
 use project_phoenix::ship::shields::ShipShields;
-use project_phoenix::weapons_plugin::TorpedoSystemResource;
 use std::collections::{BTreeMap, HashSet};
 
 /// The scenario's fixed inputs. `rng_coverage.toml` picks the world; the

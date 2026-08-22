@@ -109,10 +109,10 @@ use crate::command_admission::ai_emit::AI_BACKFILL_TOKEN;
 use crate::command_admission::log::{LoggedCommand, ReplayRejection};
 use crate::command_admission::CommandLog;
 use crate::console_bridge::LOCAL_CONSOLE_TOKEN;
+use crate::core::messages::{ClientMessage, GamePhase, SystemId};
 use crate::headless::args::HeadlessArgs;
 use crate::headless::digest::{state_digest, DigestLedger, Divergence};
 use crate::lobby::InboundMessage;
-use crate::messages::{ClientMessage, GamePhase, SystemId};
 use crate::sim_tick::SimTick;
 
 /// The credential a re-injected command is submitted under.
@@ -144,7 +144,7 @@ use crate::sim_tick::SimTick;
 /// `AI_BACKFILL_TOKEN`. If a future target needs a third credential, this is
 /// the one function that has to learn about it.
 pub fn replay_token_for(target: &SystemId) -> &'static str {
-    if target.0 == crate::system_registry::GOD_MODE_SYSTEM_ID {
+    if target.0 == crate::ship::system_registry::GOD_MODE_SYSTEM_ID {
         LOCAL_CONSOLE_TOKEN
     } else {
         AI_BACKFILL_TOKEN
@@ -670,7 +670,7 @@ pub fn verify_artifact(artifact: &ReplayArtifact) -> Result<Option<Divergence>, 
 mod tests {
     use super::*;
     use crate::command_admission::ShipKey;
-    use crate::messages::SystemControlPayload;
+    use crate::core::messages::SystemControlPayload;
 
     fn artifact() -> ReplayArtifact {
         let mut ledger = DigestLedger::new(50);
@@ -779,7 +779,7 @@ mod tests {
 
     #[test]
     fn god_mode_is_the_one_target_that_needs_the_host_console_token() {
-        let god = SystemId(crate::system_registry::GOD_MODE_SYSTEM_ID.into());
+        let god = SystemId(crate::ship::system_registry::GOD_MODE_SYSTEM_ID.into());
         assert_eq!(replay_token_for(&god), LOCAL_CONSOLE_TOKEN);
         assert_eq!(
             replay_token_for(&SystemId("red-alert".into())),

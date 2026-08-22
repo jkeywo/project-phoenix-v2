@@ -25,14 +25,14 @@
 use bevy::prelude::*;
 use std::collections::HashSet;
 
+use crate::core::messages::{GamePhase, ViewMode};
 use crate::gui::radar::GuiRadarPlugin;
 use crate::gui::{
     bridge_sim_to_radar, AutoScaleRadar, ConsoleRadar, GenericRadar, OrientationMode, RadarBlipMap,
     RadarCenterPose, RadarClipMode, RadarFilter, WorldCentredRadar,
 };
 use crate::lobby::WorldResource;
-use crate::messages::{GamePhase, ViewMode};
-use crate::ship_state::ShipPhysics;
+use crate::ship::state::ShipPhysics;
 
 // ── Marker component ──────────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ impl Plugin for ServerViewscreenRadarPlugin {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Build a `RadarFilter` from a TOML `shows` tag list.
-fn radar_filter_from_shows(shows: &[crate::entity_tags::EntityTag]) -> RadarFilter {
+fn radar_filter_from_shows(shows: &[crate::entities::tags::EntityTag]) -> RadarFilter {
     let set: HashSet<String> = shows.iter().map(|t| t.as_str().to_string()).collect();
     RadarFilter(set)
 }
@@ -182,7 +182,7 @@ fn spawn_viewscreen_radar_widgets(
     mut commands: Commands,
     selected_ship: Option<Res<crate::lobby::SelectedShipResource>>,
 ) {
-    let config_cache = crate::config_cache::get_config_cache();
+    let config_cache = crate::entities::config_cache::get_config_cache();
     let ship_config = config_cache.get(viewscreen_ship_config_path(selected_ship.as_deref()));
 
     let helm_radar = ship_config
@@ -280,16 +280,16 @@ fn spawn_viewscreen_radar_widgets(
 fn sync_server_radar_bridge(
     mut commands: Commands,
     world: Option<Res<WorldResource>>,
-    view_mode_q: Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
-    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
+    view_mode_q: Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
+    physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     mut widgets: Query<(Entity, &ConsoleRadar, &mut RadarBlipMap)>,
 ) {
     let Some(world) = world else { return };
     let view_mode = view_mode_q
         .single()
         .map(|vm| vm.view_mode.clone())
-        .unwrap_or(crate::messages::ViewMode::Camera(
-            crate::messages::CameraView::default(),
+        .unwrap_or(crate::core::messages::ViewMode::Camera(
+            crate::core::messages::CameraView::default(),
         ));
     let Some(active) = view_mode_to_console_radar(&view_mode) else {
         return;
@@ -315,13 +315,13 @@ fn sync_server_radar_bridge(
 
 fn toggle_viewscreen_radar_widgets(
     view_mode_q: Option<
-        Query<&crate::ship_state::ShipViewMode, With<crate::simulation::LocalShip>>,
+        Query<&crate::ship::state::ShipViewMode, With<crate::server_app::LocalShip>>,
     >,
     view_mode_changed: Query<
         (),
         (
-            With<crate::simulation::LocalShip>,
-            Changed<crate::ship_state::ShipViewMode>,
+            With<crate::server_app::LocalShip>,
+            Changed<crate::ship::state::ShipViewMode>,
         ),
     >,
     state: Res<State<GamePhase>>,
@@ -336,8 +336,8 @@ fn toggle_viewscreen_radar_widgets(
     }
     let view_mode = view_mode_q
         .and_then(|q| q.single().ok().map(|vm| vm.view_mode.clone()))
-        .unwrap_or(crate::messages::ViewMode::Camera(
-            crate::messages::CameraView::default(),
+        .unwrap_or(crate::core::messages::ViewMode::Camera(
+            crate::core::messages::CameraView::default(),
         ));
 
     let in_game = state.get() == &GamePhase::InProgress;
@@ -362,8 +362,8 @@ fn toggle_viewscreen_radar_widgets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ship_state::ShipViewMode;
-    use crate::simulation::LocalShip;
+    use crate::server_app::LocalShip;
+    use crate::ship::state::ShipViewMode;
 
     fn test_app() -> App {
         let mut app = App::new();

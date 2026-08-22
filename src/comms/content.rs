@@ -24,7 +24,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::messages::CommsResponseView;
+use crate::core::messages::CommsResponseView;
 
 // -- The shown node ---------------------------------------------------------
 

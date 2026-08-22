@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
-use crate::entity_spawner::RegionShapeSection;
+use crate::entities::spawner::RegionShapeSection;
 use crate::modifiers::ShipModifiers;
-use crate::region_shape::RegionShape;
+use crate::regions::shape::RegionShape;
 
 /// Resource indicating whether debug region wireframes are enabled.
 #[derive(Resource)]
@@ -120,7 +120,7 @@ impl DamageLog {
 #[derive(Resource, Default)]
 #[allow(clippy::type_complexity)]
 pub struct LastReportedDebugState(
-    pub Option<(Vec<(crate::messages::DebugFlag, bool)>, bool, bool)>,
+    pub Option<(Vec<(crate::core::messages::DebugFlag, bool)>, bool, bool)>,
 );
 
 /// Decide which flags a batch of inbound messages actually flips.
@@ -133,13 +133,13 @@ pub struct LastReportedDebugState(
 /// them, exactly as it does for the host page's own pending set.
 #[cfg(not(phoenix_demo_build))]
 pub fn admitted_flag_toggles<'a>(
-    messages: impl IntoIterator<Item = (&'a str, crate::messages::DebugFlag)>,
+    messages: impl IntoIterator<Item = (&'a str, crate::core::messages::DebugFlag)>,
     is_connected: impl Fn(&str) -> bool,
-) -> Vec<crate::bridge::DebugToggleKind> {
+) -> Vec<crate::server::bridge::DebugToggleKind> {
     messages
         .into_iter()
         .filter(|(token, _)| is_connected(token))
-        .map(|(_, flag)| crate::bridge::DebugToggleKind::from(flag))
+        .map(|(_, flag)| crate::server::bridge::DebugToggleKind::from(flag))
         .collect()
 }
 
@@ -167,9 +167,9 @@ pub fn drain_client_debug_flags(
     mut entities: ResMut<DebugEntitiesEnabled>,
     mut inspector: ResMut<DebugEntityInspectorEnabled>,
 ) {
-    let mut requests: Vec<(String, crate::messages::DebugFlag)> = Vec::new();
+    let mut requests: Vec<(String, crate::core::messages::DebugFlag)> = Vec::new();
     for ev in reader.read() {
-        if let crate::messages::ClientMessage::ToggleDebugFlag { flag } = &ev.msg {
+        if let crate::core::messages::ClientMessage::ToggleDebugFlag { flag } = &ev.msg {
             requests.push((ev.token.clone(), *flag));
         }
     }
@@ -186,7 +186,7 @@ pub fn drain_client_debug_flags(
     }
 
     let mut unreachable_pause = false;
-    let pause_changed = crate::bridge::apply_pending_toggles(
+    let pause_changed = crate::server::bridge::apply_pending_toggles(
         pending,
         &mut regions.0,
         &mut overlay.0,
@@ -239,7 +239,7 @@ pub fn drain_client_pause(
 ) {
     let tokens: Vec<String> = reader
         .read()
-        .filter(|ev| matches!(ev.msg, crate::messages::ClientMessage::TogglePause))
+        .filter(|ev| matches!(ev.msg, crate::core::messages::ClientMessage::TogglePause))
         .map(|ev| ev.token.clone())
         .collect();
     if tokens.is_empty() {
@@ -301,7 +301,7 @@ pub fn report_debug_state(
     mut last: ResMut<LastReportedDebugState>,
     mut writer: MessageWriter<crate::lobby::OutboundMessage>,
 ) {
-    use crate::messages::DebugFlag;
+    use crate::core::messages::DebugFlag;
 
     // Forgetting what was last sent makes the compare below re-announce the
     // current state to everyone, which is cheap and is the only sync a joining
@@ -309,10 +309,12 @@ pub fn report_debug_state(
     // same frame, in this order, so `gui/sim-state.js` PRESERVES `debugFlags`
     // across a `Welcome` reset rather than clearing it — see the field's
     // own comment.
-    if reader
-        .read()
-        .any(|ev| matches!(ev.msg, crate::messages::ClientMessage::Identify { .. }))
-    {
+    if reader.read().any(|ev| {
+        matches!(
+            ev.msg,
+            crate::core::messages::ClientMessage::Identify { .. }
+        )
+    }) {
         last.0 = None;
     }
 
@@ -338,12 +340,12 @@ pub fn report_debug_state(
     last.0 = Some(current.clone());
     writer.write(crate::lobby::OutboundMessage {
         target: crate::lobby::Target::All,
-        msg: crate::messages::ServerMessage::DebugState {
+        msg: crate::core::messages::ServerMessage::DebugState {
             flags: current.0,
             paused: current.1,
             god_mode: current.2,
         },
-        delivery: crate::messages::DeliveryClass::Reliable,
+        delivery: crate::core::messages::DeliveryClass::Reliable,
     });
 }
 
@@ -430,7 +432,7 @@ fn should_install_region_wireframes() -> bool {
 fn write_debug_state(modifiers_q: Query<&ShipModifiers, With<crate::server_app::LocalShip>>) {
     if let Some(modifiers) = modifiers_q.iter().next() {
         let text = modifiers.format_debug();
-        crate::bridge::set_debug_state_string(text);
+        crate::server::bridge::set_debug_state_string(text);
     }
 }
 
@@ -445,7 +447,7 @@ fn write_debug_state(_modifiers_q: Query<&ShipModifiers, With<crate::server_app:
 #[cfg(all(target_arch = "wasm32", feature = "server"))]
 fn write_damage_log(log: Res<DamageLog>) {
     let text = log.format();
-    crate::bridge::set_damage_log_string(text);
+    crate::server::bridge::set_damage_log_string(text);
 }
 
 /// Native / test stub — does nothing.
@@ -463,7 +465,7 @@ fn write_entity_debug_state(
         &crate::entities::spawner::BehaviourSection,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
-        Option<&crate::weapons_plugin::TacticalRadarSelection>,
+        Option<&crate::console::weapons::TacticalRadarSelection>,
     )>,
 ) {
     let count = entities.iter().count();
@@ -488,7 +490,7 @@ fn write_entity_debug_state(
             target_str
         ));
     }
-    crate::bridge::set_entity_debug_string(out);
+    crate::server::bridge::set_entity_debug_string(out);
 }
 
 /// Native / test stub — does nothing.
@@ -498,7 +500,7 @@ fn write_entity_debug_state(
         &crate::entities::spawner::BehaviourSection,
         &Transform,
         Option<&crate::entities::spawner::EntityName>,
-        Option<&crate::weapons_plugin::TacticalRadarSelection>,
+        Option<&crate::console::weapons::TacticalRadarSelection>,
     )>,
 ) {
 }
@@ -519,14 +521,14 @@ fn update_entity_inspector(
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
-            Option<&crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&crate::console::weapons::TacticalRadarSelection>,
             &crate::entities::spawner::EntityTagsSection,
         ),
         bevy::ecs::query::Without<crate::server_app::Asteroid>,
     >,
-    ship_physics_q: Query<&crate::ship_state::ShipPhysics, With<crate::server_app::LocalShip>>,
+    ship_physics_q: Query<&crate::ship::state::ShipPhysics, With<crate::server_app::LocalShip>>,
     player_hull_q: Query<
-        &crate::entity_spawner::EntitySystemHull,
+        &crate::entities::spawner::EntitySystemHull,
         With<crate::server_app::LocalShip>,
     >,
     ship_shields_q: Query<&crate::server_app::ShipShields, With<crate::server_app::LocalShip>>,
@@ -549,7 +551,7 @@ fn update_entity_inspector(
     ));
 
     // Per-system hull from the LocalShip's EntitySystemHull component.
-    let hull_entries: Vec<(crate::messages::SystemId, f32, f32)> = player_hull_q
+    let hull_entries: Vec<(crate::core::messages::SystemId, f32, f32)> = player_hull_q
         .single()
         .map(|h| {
             h.0.entries()
@@ -674,7 +676,7 @@ fn update_entity_inspector(
     }
 
     out.push_str("────────────────────────────────────────────────────────────\n");
-    crate::bridge::set_entity_inspector_string(out);
+    crate::server::bridge::set_entity_inspector_string(out);
 }
 
 /// Native / test stub — does nothing.
@@ -687,7 +689,7 @@ fn update_entity_inspector(
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::entities::spawner::FactionComponent>,
             Option<&crate::comms::component::CommsRange>,
-            Option<&crate::weapons_plugin::TacticalRadarSelection>,
+            Option<&crate::console::weapons::TacticalRadarSelection>,
             &crate::entities::spawner::EntityTagsSection,
         ),
         bevy::ecs::query::Without<crate::server_app::Asteroid>,
@@ -923,11 +925,11 @@ mod tests {
     /// shape of the two enums, not a route.
     #[test]
     fn every_flag_maps_to_its_own_toggle_kind() {
-        let kinds: std::collections::HashSet<_> = crate::messages::DebugFlag::ALL
+        let kinds: std::collections::HashSet<_> = crate::core::messages::DebugFlag::ALL
             .iter()
-            .map(|f| crate::bridge::DebugToggleKind::from(*f))
+            .map(|f| crate::server::bridge::DebugToggleKind::from(*f))
             .collect();
-        assert_eq!(kinds.len(), crate::messages::DebugFlag::ALL.len());
+        assert_eq!(kinds.len(), crate::core::messages::DebugFlag::ALL.len());
     }
 
     /// No `DebugFlag` reaches the clock. Pause left this enum precisely so the
@@ -935,10 +937,10 @@ mod tests {
     /// this is that claim, checked rather than asserted in prose.
     #[test]
     fn no_debug_flag_maps_to_the_pause_toggle() {
-        for flag in crate::messages::DebugFlag::ALL {
+        for flag in crate::core::messages::DebugFlag::ALL {
             assert_ne!(
-                crate::bridge::DebugToggleKind::from(flag),
-                crate::bridge::DebugToggleKind::Pause,
+                crate::server::bridge::DebugToggleKind::from(flag),
+                crate::server::bridge::DebugToggleKind::Pause,
                 "{flag:?} would let the overlay drain stop the simulation clock"
             );
         }
@@ -955,7 +957,7 @@ mod tests {
     #[cfg(not(phoenix_demo_build))]
     mod client_route {
         use super::*;
-        use crate::messages::DebugFlag;
+        use crate::core::messages::DebugFlag;
 
         /// Only tokens in this list count as connected players.
         fn connected<'a>(known: &'a [&'a str]) -> impl Fn(&str) -> bool + 'a {
@@ -973,8 +975,8 @@ mod tests {
             assert_eq!(
                 kinds,
                 vec![
-                    crate::bridge::DebugToggleKind::Regions,
-                    crate::bridge::DebugToggleKind::Damage,
+                    crate::server::bridge::DebugToggleKind::Regions,
+                    crate::server::bridge::DebugToggleKind::Damage,
                 ]
             );
         }
@@ -998,7 +1000,7 @@ mod tests {
             let (mut damage, mut entities, mut inspector) = (false, false, false);
             let pending =
                 admitted_flag_toggles([("phone", DebugFlag::Damage)], connected(&["phone"]));
-            let pause_changed = crate::bridge::apply_pending_toggles(
+            let pause_changed = crate::server::bridge::apply_pending_toggles(
                 pending,
                 &mut regions,
                 &mut overlay,

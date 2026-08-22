@@ -119,7 +119,8 @@ pub fn ship_payload(ship: &AvailableShipEntry) -> ShipPayload {
         "label",
         ship.label.as_deref().unwrap_or(&ship.template_path),
     );
-    if let Some(cfg) = crate::config_cache::get_cached_entity_config(&ship.template_path) {
+    if let Some(cfg) = crate::entities::config_cache::get_cached_entity_config(&ship.template_path)
+    {
         if let Some(ref class) = cfg.class {
             out.push_text("class", class.clone());
         }

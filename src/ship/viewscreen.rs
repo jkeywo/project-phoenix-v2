@@ -1,4 +1,4 @@
-use crate::messages::{CameraView, SystemId, ViewMode};
+use crate::core::messages::{CameraView, SystemId, ViewMode};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ViewscreenRequest {
@@ -51,7 +51,7 @@ impl ViewscreenArbiter {
             }
         } else if self.cinematic {
             ViewscreenResolution {
-                owner: crate::system_registry::captain_system_id(),
+                owner: crate::ship::system_registry::captain_system_id(),
                 mode: ViewMode::Cinematic,
             }
         } else {
@@ -120,7 +120,7 @@ impl ViewscreenArbiter {
 
     fn captain_resolution(&self) -> ViewscreenResolution {
         ViewscreenResolution {
-            owner: crate::system_registry::captain_system_id(),
+            owner: crate::ship::system_registry::captain_system_id(),
             mode: ViewMode::Camera(self.captain_view.clone()),
         }
     }
@@ -128,16 +128,16 @@ impl ViewscreenArbiter {
 
 pub fn source_system_for_view_mode(mode: &ViewMode) -> SystemId {
     match mode {
-        ViewMode::Camera(_) => crate::system_registry::captain_system_id(),
-        ViewMode::Radar => crate::system_registry::helm_radar_system_id(),
+        ViewMode::Camera(_) => crate::ship::system_registry::captain_system_id(),
+        ViewMode::Radar => crate::ship::system_registry::helm_radar_system_id(),
         ViewMode::ScienceRadar | ViewMode::SensorsRadar => {
-            crate::system_registry::sensors_system_id()
+            crate::ship::system_registry::sensors_system_id()
         }
         ViewMode::SystemChart | ViewMode::NavigationChart => {
-            crate::system_registry::navigation_system_id()
+            crate::ship::system_registry::navigation_system_id()
         }
-        ViewMode::Comms => crate::system_registry::comms_system_id(),
-        ViewMode::Cinematic => crate::system_registry::captain_system_id(),
+        ViewMode::Comms => crate::ship::system_registry::comms_system_id(),
+        ViewMode::Cinematic => crate::ship::system_registry::captain_system_id(),
     }
 }
 
@@ -152,7 +152,7 @@ mod tests {
         assert_eq!(
             arbiter.resolved(),
             ViewscreenResolution {
-                owner: crate::system_registry::captain_system_id(),
+                owner: crate::ship::system_registry::captain_system_id(),
                 mode: ViewMode::Camera(CameraView::default()),
             }
         );
@@ -162,18 +162,18 @@ mod tests {
     fn channel_2_radar_request_toggles_back_to_captain_camera() {
         let mut arbiter = ViewscreenArbiter::new();
         arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::captain_system_id(),
+            requester: crate::ship::system_registry::captain_system_id(),
             mode: ViewMode::Camera(CameraView::new("camera_aft")),
         });
 
         let first = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_radar_system_id(),
+            requester: crate::ship::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         assert_eq!(first.mode, ViewMode::Radar);
 
         let second = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_radar_system_id(),
+            requester: crate::ship::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         assert_eq!(second.mode, ViewMode::Camera(CameraView::new("camera_aft")));
@@ -186,18 +186,18 @@ mod tests {
         // helm-radar request landing AFTER comms takes the screen.
         let mut arbiter = ViewscreenArbiter::new();
         arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::comms_system_id(),
+            requester: crate::ship::system_registry::comms_system_id(),
             mode: ViewMode::Comms,
         });
 
         let resolved = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_radar_system_id(),
+            requester: crate::ship::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
 
         assert_eq!(
             resolved.owner,
-            crate::system_registry::helm_radar_system_id()
+            crate::ship::system_registry::helm_radar_system_id()
         );
         assert_eq!(resolved.mode, ViewMode::Radar);
     }
@@ -209,16 +209,19 @@ mod tests {
         // purely because it is the most recent valid request.
         let mut arbiter = ViewscreenArbiter::new();
         arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_radar_system_id(),
+            requester: crate::ship::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
 
         let resolved = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::comms_system_id(),
+            requester: crate::ship::system_registry::comms_system_id(),
             mode: ViewMode::Comms,
         });
 
-        assert_eq!(resolved.owner, crate::system_registry::comms_system_id());
+        assert_eq!(
+            resolved.owner,
+            crate::ship::system_registry::comms_system_id()
+        );
         assert_eq!(resolved.mode, ViewMode::Comms);
     }
 
@@ -229,24 +232,24 @@ mod tests {
         // request wins with no regard to which console it came from.
         let mut arbiter = ViewscreenArbiter::new();
         let after_radar = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_radar_system_id(),
+            requester: crate::ship::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         assert_eq!(after_radar.mode, ViewMode::Radar);
 
         let after_comms = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::comms_system_id(),
+            requester: crate::ship::system_registry::comms_system_id(),
             mode: ViewMode::Comms,
         });
         assert_eq!(after_comms.mode, ViewMode::Comms);
 
         let after_nav = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::navigation_system_id(),
+            requester: crate::ship::system_registry::navigation_system_id(),
             mode: ViewMode::NavigationChart,
         });
         assert_eq!(
             after_nav.owner,
-            crate::system_registry::navigation_system_id()
+            crate::ship::system_registry::navigation_system_id()
         );
         assert_eq!(after_nav.mode, ViewMode::NavigationChart);
     }
@@ -260,14 +263,14 @@ mod tests {
         let mut arbiter = ViewscreenArbiter::new();
 
         let first = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_radar_system_id(),
+            requester: crate::ship::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         let first_seq = arbiter.active.as_ref().map(|a| a.sequence);
         assert_eq!(first.mode, ViewMode::Radar);
 
         let second = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::sensors_system_id(),
+            requester: crate::ship::system_registry::sensors_system_id(),
             mode: ViewMode::SensorsRadar,
         });
         let second_seq = arbiter.active.as_ref().map(|a| a.sequence);
@@ -288,13 +291,13 @@ mod tests {
 
         // Comms's original (pre-reconnect) request.
         arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::comms_system_id(),
+            requester: crate::ship::system_registry::comms_system_id(),
             mode: ViewMode::Comms,
         });
 
         // Another console posts a NEWER request while comms is away.
         let after_radar = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_radar_system_id(),
+            requester: crate::ship::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         // The reconnecting console cannot clobber the newer view just by
@@ -302,18 +305,18 @@ mod tests {
         assert_eq!(after_radar.mode, ViewMode::Radar);
         assert_eq!(
             arbiter.resolved().owner,
-            crate::system_registry::helm_radar_system_id()
+            crate::ship::system_registry::helm_radar_system_id()
         );
 
         // After reconnect the comms console issues a genuinely NEWER request,
         // which now correctly wins under latest-wins.
         let after_reconnect = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::comms_system_id(),
+            requester: crate::ship::system_registry::comms_system_id(),
             mode: ViewMode::Comms,
         });
         assert_eq!(
             after_reconnect.owner,
-            crate::system_registry::comms_system_id()
+            crate::ship::system_registry::comms_system_id()
         );
         assert_eq!(after_reconnect.mode, ViewMode::Comms);
     }
@@ -324,21 +327,21 @@ mod tests {
 
         // Activate cinematic.
         let resolved = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::captain_system_id(),
+            requester: crate::ship::system_registry::captain_system_id(),
             mode: ViewMode::Cinematic,
         });
         assert_eq!(resolved.mode, ViewMode::Cinematic);
 
         // Overlay on top of cinematic.
         let overlay = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_radar_system_id(),
+            requester: crate::ship::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         assert_eq!(overlay.mode, ViewMode::Radar);
 
         // Dismiss overlay → back to Cinematic.
         let dismiss = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::helm_radar_system_id(),
+            requester: crate::ship::system_registry::helm_radar_system_id(),
             mode: ViewMode::Radar,
         });
         assert_eq!(dismiss.mode, ViewMode::Cinematic);
@@ -349,14 +352,14 @@ mod tests {
         let mut arbiter = ViewscreenArbiter::new();
 
         arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::captain_system_id(),
+            requester: crate::ship::system_registry::captain_system_id(),
             mode: ViewMode::Cinematic,
         });
         assert_eq!(arbiter.resolved().mode, ViewMode::Cinematic);
 
         // Switch to a camera view → cinematic cleared.
         let cam = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::captain_system_id(),
+            requester: crate::ship::system_registry::captain_system_id(),
             mode: ViewMode::Camera(CameraView::new("camera_fore")),
         });
         assert_eq!(cam.mode, ViewMode::Camera(CameraView::new("camera_fore")));
@@ -367,7 +370,7 @@ mod tests {
         let mut arbiter = ViewscreenArbiter::new();
 
         arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::captain_system_id(),
+            requester: crate::ship::system_registry::captain_system_id(),
             mode: ViewMode::Cinematic,
         });
 
@@ -379,16 +382,19 @@ mod tests {
     fn captain_camera_request_resolves_competing_overlay() {
         let mut arbiter = ViewscreenArbiter::new();
         arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::comms_system_id(),
+            requester: crate::ship::system_registry::comms_system_id(),
             mode: ViewMode::Comms,
         });
 
         let resolved = arbiter.apply_channel_2(ViewscreenRequest {
-            requester: crate::system_registry::captain_system_id(),
+            requester: crate::ship::system_registry::captain_system_id(),
             mode: ViewMode::Camera(CameraView::new("camera_port")),
         });
 
-        assert_eq!(resolved.owner, crate::system_registry::captain_system_id());
+        assert_eq!(
+            resolved.owner,
+            crate::ship::system_registry::captain_system_id()
+        );
         assert_eq!(
             resolved.mode,
             ViewMode::Camera(CameraView::new("camera_port"))

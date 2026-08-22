@@ -1,7 +1,7 @@
 use crate::entities::ai_declaration_manifest::AiDeclarationMode;
 use crate::entities::ai_flag_hosts as ai_hosts;
-use crate::region_effects::RegionEffectsConfig;
-use crate::region_shape::RegionShape;
+use crate::regions::effects::RegionEffectsConfig;
+use crate::regions::shape::RegionShape;
 use serde::de::Error as SerdeError;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -313,7 +313,7 @@ pub(crate) fn default_low_lod_turn_rate_fraction() -> f32 {
 
 /// High-fidelity bubble section: `[lod_bubble] radius = N`. An entity carrying
 /// one projects a zone inside which NPCs stay promoted to full-fidelity AI, and
-/// is itself always full-fidelity. See [`crate::ai_plugin::LodBubble`]. A player
+/// is itself always full-fidelity. See [`crate::ai::server::LodBubble`]. A player
 /// hull may author one to size its zone; a stationary defended object (the
 /// station) authors a smaller one so the raid sieging it runs in full even when
 /// the player is elsewhere.
@@ -539,7 +539,7 @@ impl MeshShape {
 ///
 /// **Level of detail is not authored here** (issue #914). The LOD ladder
 /// belongs to the model, so it lives in the model's rig sidecar as
-/// [`crate::model_rig::ModelRig::lod`]; this section only names the model. The
+/// [`crate::entities::model_rig::ModelRig::lod`]; this section only names the model. The
 /// flat fields above remain the fallback every level falls back to. A leftover
 /// `[[mesh.lod]]` block is rejected by [`EntityConfig::from_toml`] with a
 /// message naming the sidecar it belongs in.
@@ -595,7 +595,7 @@ fn default_mesh_scale() -> f32 {
 pub const LOD_HYSTERESIS_MARGIN: f32 = 5.0;
 
 /// One distance band in a model rig sidecar's `[[lod]]` chain
-/// ([`crate::model_rig::ModelRig::lod`]).
+/// ([`crate::entities::model_rig::ModelRig::lod`]).
 ///
 /// Levels are declared near→far in ascending `max_distance` order. Each level
 /// self-describes as either a GLB level (`model` set) or a procedural level
@@ -935,7 +935,10 @@ fn reject_relocated_mesh_lod(value: &toml::Value) -> Result<(), toml::de::Error>
         .get("model")
         .and_then(|m| m.as_str())
         .map(|model| {
-            crate::model_rig::sidecar_path(model, mesh.get("variant").and_then(|v| v.as_str()))
+            crate::entities::model_rig::sidecar_path(
+                model,
+                mesh.get("variant").and_then(|v| v.as_str()),
+            )
         })
         .unwrap_or_else(|| "assets/models/<model>.<variant>.toml".to_string());
     Err(SerdeError::custom(format!(
@@ -1168,7 +1171,7 @@ pub struct SystemHullEntry {
     /// Stable ship-wide system identifier (e.g. `"helm"`, `"phaser-fore"`).
     /// Deserialises from a bare TOML string via the `SystemId(String)`
     /// newtype.
-    pub system_id: crate::messages::SystemId,
+    pub system_id: crate::core::messages::SystemId,
     /// Optional human-readable name. When omitted, downstream code falls
     /// back to the raw `system_id` string.
     #[serde(default)]
@@ -1634,11 +1637,11 @@ fn default_bank_lerp_rate() -> f32 {
 }
 
 fn default_impulse_charge_duration() -> f32 {
-    crate::impulse::IMPULSE_CHARGE_DURATION
+    crate::ship::impulse::IMPULSE_CHARGE_DURATION
 }
 
 fn default_impulse_speed_multiplier() -> f32 {
-    crate::impulse::IMPULSE_SPEED_MULTIPLIER
+    crate::ship::impulse::IMPULSE_SPEED_MULTIPLIER
 }
 
 fn default_impulse_engage_distance() -> f32 {
@@ -1650,11 +1653,11 @@ fn default_impulse_cancel_distance() -> f32 {
 }
 
 fn default_impulse_acceleration_multiplier() -> f32 {
-    crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
+    crate::ship::impulse::IMPULSE_ACCELERATION_MULTIPLIER
 }
 
 fn default_boost_steering_multiplier() -> f32 {
-    crate::boost::BOOST_STEERING_MULTIPLIER
+    crate::ship::boost::BOOST_STEERING_MULTIPLIER
 }
 
 /// Stable identifier for a phaser bank, parsed verbatim from the TOML
@@ -1835,9 +1838,9 @@ fn default_blaster_range() -> f32 {
 }
 
 impl BlasterBankConfig {
-    /// Convert this TOML config into a runtime `crate::blaster::BlasterBankConfig`.
-    pub fn to_runtime(&self) -> crate::blaster::BlasterBankConfig {
-        crate::blaster::BlasterBankConfig {
+    /// Convert this TOML config into a runtime `crate::weapons::blaster::BlasterBankConfig`.
+    pub fn to_runtime(&self) -> crate::weapons::blaster::BlasterBankConfig {
+        crate::weapons::blaster::BlasterBankConfig {
             id: self.id.clone(),
             facing_deg: self.facing_deg,
             fire_arc_deg: self.fire_arc_deg,
@@ -2777,7 +2780,7 @@ pub const NAVIGATION_SELECTOR_SOURCES: &[&str] = &[
 /// raw hull poll, so a station nobody reported is not a candidate.
 pub const SELECTOR_SOURCE_DAMAGED_STATIONS: &str = "damaged-stations";
 /// Candidate source: the ownerless ship-wide `core` repair bucket (issue #785),
-/// the second [`crate::messages::RepairTarget`] variant. Surfaced as a candidate
+/// the second [`crate::core::messages::RepairTarget`] variant. Surfaced as a candidate
 /// so an author can weight core repairs into the ranking; under the canonical
 /// policy it only becomes eligible once a `RepairRequest` names it, mirroring
 /// how `chart-contacts` enriches rather than independently steers Navigation.
@@ -3923,7 +3926,7 @@ impl Default for ShieldsConsoleConfig {
 
 /// Base shield-system values loaded from `[shields_console.base]`.
 ///
-/// These map 1:1 onto `crate::shield::ShieldConfig` (the runtime struct
+/// These map 1:1 onto `crate::weapons::shield::ShieldConfig` (the runtime struct
 /// consumed by `ShieldSystem::new`). All fields default to the historical
 /// hardcoded values from `ShieldConfig::default()` so omitting the block
 /// changes nothing.
@@ -3975,8 +3978,8 @@ impl Default for ShieldsBaseConfig {
 
 impl ShieldsBaseConfig {
     /// Convert this TOML config into a runtime `ShieldConfig`.
-    pub fn to_runtime(&self) -> crate::shield::ShieldConfig {
-        crate::shield::ShieldConfig {
+    pub fn to_runtime(&self) -> crate::weapons::shield::ShieldConfig {
+        crate::weapons::shield::ShieldConfig {
             num_facings: self.num_facings,
             max_hp: self.max_hp,
             regen_per_sec: self.regen_per_sec,
@@ -3991,7 +3994,7 @@ impl ShieldsBaseConfig {
 /// arc auto-generates a matching `[[system]]` entry with
 /// `kind = "shield_arc"` and `SystemId("shield-arc-<id>")` during
 /// `EntityConfig::from_toml`. See [`ShieldArcConfig::to_runtime`] for the
-/// runtime conversion consumed by [`crate::shield::ShieldSystem::from_arcs`].
+/// runtime conversion consumed by [`crate::weapons::shield::ShieldSystem::from_arcs`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShieldArcConfig {
@@ -4059,9 +4062,9 @@ fn default_arc_hull_debuff_magnitude() -> f32 {
 
 impl ShieldArcConfig {
     /// Convert this TOML block into the runtime shape consumed by
-    /// [`crate::shield::ShieldSystem::from_arcs`].
-    pub fn to_runtime(&self) -> crate::shield::ArcRuntimeConfig {
-        crate::shield::ArcRuntimeConfig {
+    /// [`crate::weapons::shield::ShieldSystem::from_arcs`].
+    pub fn to_runtime(&self) -> crate::weapons::shield::ArcRuntimeConfig {
+        crate::weapons::shield::ArcRuntimeConfig {
             id: self.id.clone(),
             label: self.label.clone(),
             center_deg: self.center_deg,
@@ -4211,8 +4214,8 @@ impl RepairConfig {
     }
 
     /// Convert this TOML config into a runtime `RepairTimings`.
-    pub fn to_runtime(&self) -> crate::repair_teams::RepairTimings {
-        crate::repair_teams::RepairTimings {
+    pub fn to_runtime(&self) -> crate::modifiers::repair_teams::RepairTimings {
+        crate::modifiers::repair_teams::RepairTimings {
             travel_duration: self.travel_duration_secs,
             repair_rate_hp_per_sec: self.repair_rate_hp_per_sec,
         }
@@ -4367,8 +4370,8 @@ impl Default for TorpedoesConfig {
 impl TorpedoesConfig {
     /// Convert this TOML config into a runtime `TorpedoConfig`.
     /// Performs the degrees → radians conversion on `turn_rate_deg_per_sec`.
-    pub fn to_runtime(&self) -> crate::torpedo::TorpedoConfig {
-        crate::torpedo::TorpedoConfig {
+    pub fn to_runtime(&self) -> crate::weapons::torpedo::TorpedoConfig {
+        crate::weapons::torpedo::TorpedoConfig {
             count: self.count,
             damage_hull: self.damage_hull,
             damage_shields: self.damage_shields,
@@ -4585,7 +4588,7 @@ pub struct EntityConfig {
     /// Optional AI profile (aggression, sensor range).
     #[serde(default)]
     pub ai_profile: Option<AiProfileConfig>,
-    /// Optional high-fidelity bubble ([`crate::ai_plugin::LodBubble`]).
+    /// Optional high-fidelity bubble ([`crate::ai::server::LodBubble`]).
     #[serde(default)]
     pub lod_bubble: Option<LodBubbleConfig>,
     /// Radar appearance (colour, optional radius) for the helm radar blip.
@@ -4593,7 +4596,7 @@ pub struct EntityConfig {
     pub radar_appearance: Option<RadarAppearanceConfig>,
     /// Targetability section. When absent the entity is not targetable.
     #[serde(default)]
-    pub target: Option<crate::entity_target::TargetSection>,
+    pub target: Option<crate::entities::target::TargetSection>,
     /// 3-D mesh definition. When present the entity receives a visual on the viewscreen.
     #[serde(default)]
     pub mesh: Option<MeshConfig>,
@@ -4667,9 +4670,10 @@ impl EntityConfig {
                 .is_some_and(|weapons| !weapons.phaser_banks.is_empty())
             && self.ship_config.as_ref().is_some_and(|ship| {
                 ship.systems.iter().any(|system| {
-                    system.ai_only && system.kind == crate::system_registry::TACTICAL_RADAR_KIND
+                    system.ai_only
+                        && system.kind == crate::ship::system_registry::TACTICAL_RADAR_KIND
                 }) && ship.systems.iter().any(|system| {
-                    system.ai_only && system.kind == crate::system_registry::PHASER_BANK_KIND
+                    system.ai_only && system.kind == crate::ship::system_registry::PHASER_BANK_KIND
                 })
             })
     }
@@ -4815,11 +4819,11 @@ impl EntityConfig {
             // systems, matching how NPC phaser banks / power reactors work.
             // If a kind="shields" system exists, its station assignment
             // is used (allowing shields to live on e.g. Science).
-            let shields_station_id = crate::messages::StationId("shields".into());
+            let shields_station_id = crate::core::messages::StationId("shields".into());
             let shields_system = ship_config
                 .systems
                 .iter()
-                .find(|s| s.kind == crate::system_registry::SHIELDS_KIND);
+                .find(|s| s.kind == crate::ship::system_registry::SHIELDS_KIND);
             let has_shields_station = shields_system.is_some()
                 || ship_config
                     .stations
@@ -4829,10 +4833,9 @@ impl EntityConfig {
                 .and_then(|s| s.station.clone())
                 .unwrap_or(shields_station_id);
             for arc in &config.shield_arcs {
-                let sid =
-                    crate::system_registry::shield_arc_system_id(&arc.id).ok_or_else(|| {
-                        SerdeError::custom(format!("shield_arc id {:?} is empty", arc.id))
-                    })?;
+                let sid = crate::ship::system_registry::shield_arc_system_id(&arc.id).ok_or_else(
+                    || SerdeError::custom(format!("shield_arc id {:?} is empty", arc.id)),
+                )?;
                 let mut synthesised_config = toml::value::Table::new();
                 synthesised_config.insert(
                     "center_deg".into(),
@@ -4858,7 +4861,7 @@ impl EntityConfig {
                     .systems
                     .push(crate::ship::config::SystemInstanceConfig {
                         id: sid,
-                        kind: crate::system_registry::SHIELD_ARC_KIND.into(),
+                        kind: crate::ship::system_registry::SHIELD_ARC_KIND.into(),
                         station: if has_shields_station {
                             Some(effective_shields_station.clone())
                         } else {
@@ -4893,15 +4896,15 @@ impl EntityConfig {
                 && !ship_config
                     .systems
                     .iter()
-                    .any(|s| s.kind == crate::system_registry::RED_ALERT_KIND)
+                    .any(|s| s.kind == crate::ship::system_registry::RED_ALERT_KIND)
             {
                 ship_config
                     .systems
                     .push(crate::ship::config::SystemInstanceConfig {
-                        id: crate::messages::SystemId(
-                            crate::system_registry::RED_ALERT_SYSTEM_ID.into(),
+                        id: crate::core::messages::SystemId(
+                            crate::ship::system_registry::RED_ALERT_SYSTEM_ID.into(),
                         ),
-                        kind: crate::system_registry::RED_ALERT_KIND.into(),
+                        kind: crate::ship::system_registry::RED_ALERT_KIND.into(),
                         station: None,
                         ai_only: true,
                         human_seeking: false,
@@ -4970,7 +4973,7 @@ impl EntityConfig {
                 .and_then(|sc| {
                     sc.systems
                         .iter()
-                        .find(|s| s.kind == crate::system_registry::TRACTOR_KIND)
+                        .find(|s| s.kind == crate::ship::system_registry::TRACTOR_KIND)
                 })
                 .ok_or_else(|| {
                     SerdeError::custom(
@@ -5009,7 +5012,7 @@ impl EntityConfig {
         if let Some(system) = config.ship_config.as_ref().and_then(|sc| {
             sc.systems
                 .iter()
-                .find(|s| s.kind == crate::system_registry::DOCK_KIND)
+                .find(|s| s.kind == crate::ship::system_registry::DOCK_KIND)
         }) {
             if config.dock.is_none() {
                 return Err(SerdeError::custom(
@@ -5055,7 +5058,7 @@ impl EntityConfig {
                 .and_then(|sc| {
                     sc.systems
                         .iter()
-                        .find(|s| s.kind == crate::system_registry::UMBILICAL_KIND)
+                        .find(|s| s.kind == crate::ship::system_registry::UMBILICAL_KIND)
                 })
                 .ok_or_else(|| {
                     SerdeError::custom(
@@ -5528,7 +5531,7 @@ impl EntityConfig {
             let declared_systems: Vec<&crate::ship::config::SystemInstanceConfig> = ship_config
                 .systems
                 .iter()
-                .filter(|s| s.kind != crate::system_registry::SHIELD_ARC_KIND)
+                .filter(|s| s.kind != crate::ship::system_registry::SHIELD_ARC_KIND)
                 .collect();
             if !declared_systems.is_empty() {
                 table.insert(
@@ -5663,7 +5666,7 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
 
     use super::*;
-    use crate::entity_tags::EntityTag;
+    use crate::entities::tags::EntityTag;
     use crate::simmath;
 
     /// One shipped hull through the REAL load path — include resolution and all.
@@ -5680,7 +5683,7 @@ mod tests {
     /// load fails without that line find the line wherever it is now authored —
     /// hull or fragment.
     fn resolved_text(stem: &str) -> String {
-        crate::entity_includes::resolve_from_disk(&format!("assets/entities/{stem}.toml"))
+        crate::entities::include_resolve::resolve_from_disk(&format!("assets/entities/{stem}.toml"))
             .unwrap_or_else(|e| panic!("{stem} must resolve: {e}"))
             .toml
     }
@@ -5817,8 +5820,8 @@ hostile_arc_color = [ 1, 0.3, 0.3, 0.07 ]
             // Through the include resolver (issue #906) so a composed hull is
             // judged on its resolved document — a raw read would assert on the
             // unresolved text and silently stop covering the hull.
-            let config =
-                crate::entity_includes::load_entity_config(path).expect("hull TOML must parse");
+            let config = crate::entities::include_resolve::load_entity_config(path)
+                .expect("hull TOML must parse");
             let color = &config
                 .helm_console
                 .as_ref()
@@ -6108,8 +6111,8 @@ length = 4.0
             ("assets/entities/skyhook.toml", 250_000.0),
             ("assets/entities/depot_transfer.toml", 180_000.0),
         ] {
-            let config =
-                crate::entity_includes::load_entity_config(path).expect("hull TOML must parse");
+            let config = crate::entities::include_resolve::load_entity_config(path)
+                .expect("hull TOML must parse");
             assert_eq!(
                 config.mass, expected,
                 "{path} must author mass = {expected}"
@@ -6215,7 +6218,7 @@ movable = true
         let (mut hulls, mut terrain) = (0, 0);
         for path in templates {
             let key = path.to_string_lossy().replace('\\', "/");
-            let cfg = crate::entity_includes::load_entity_config(&key)
+            let cfg = crate::entities::include_resolve::load_entity_config(&key)
                 .unwrap_or_else(|e| panic!("{key} must parse: {e}"));
             let Some(collider) = cfg.collider.as_ref() else {
                 continue;
@@ -6335,7 +6338,7 @@ recharge_duration = 20.0
         let boost = h.boost.as_ref().expect("helm_console.boost must parse");
         assert_eq!(
             boost.steering_multiplier,
-            crate::boost::BOOST_STEERING_MULTIPLIER
+            crate::ship::boost::BOOST_STEERING_MULTIPLIER
         );
     }
 
@@ -6435,7 +6438,7 @@ emergency_threshold = 30.0
             "assets/entities/alliance_cruiser.toml",
             "assets/entities/alliance_battleship.toml",
         ] {
-            let config = crate::entity_includes::load_entity_config(path)
+            let config = crate::entities::include_resolve::load_entity_config(path)
                 .unwrap_or_else(|error| panic!("{path}: {error}"));
             let power = config.power.expect("Alliance hull authors [power]");
             assert_eq!(power.sustainable_total, 6, "{path}");
@@ -6664,7 +6667,7 @@ asteroid_type_paths = ["x.toml"]
         let field = config.asteroid_field.expect("asteroid_field must be Some");
         assert_eq!(
             field.shape,
-            Some(crate::entity_config::AsteroidFieldShape::Torus)
+            Some(crate::entities::config::AsteroidFieldShape::Torus)
         );
         assert!((field.inner_radius - 300.0).abs() < 1e-6);
         assert!((field.outer_radius - 350.0).abs() < 1e-6);
@@ -6785,7 +6788,7 @@ radius = 100.0
         let shape = config.shape.expect("shape must be Some");
         assert_eq!(
             shape,
-            crate::region_shape::RegionShape::Sphere { radius: 100.0 }
+            crate::regions::shape::RegionShape::Sphere { radius: 100.0 }
         );
     }
 
@@ -6802,7 +6805,7 @@ half_extents = [50.0, 30.0, 40.0]
         let shape = config.shape.expect("shape must be Some");
         assert_eq!(
             shape,
-            crate::region_shape::RegionShape::Box {
+            crate::regions::shape::RegionShape::Box {
                 half_extents: [50.0, 30.0, 40.0],
                 yaw: 0.0
             }
@@ -6823,7 +6826,7 @@ outer_radius = 80.0
         let shape = config.shape.expect("shape must be Some");
         assert_eq!(
             shape,
-            crate::region_shape::RegionShape::Torus {
+            crate::regions::shape::RegionShape::Torus {
                 inner_radius: 50.0,
                 outer_radius: 80.0
             }
@@ -6905,7 +6908,7 @@ radius = 100.0
     /// names such sites; this helper is what they move to.
     fn shipped_hull(stem: &str) -> EntityConfig {
         let path = format!("assets/entities/{stem}.toml");
-        crate::entity_includes::load_entity_config(&path)
+        crate::entities::include_resolve::load_entity_config(&path)
             .unwrap_or_else(|e| panic!("{stem}.toml must compose and parse: {e}"))
     }
 
@@ -7096,7 +7099,7 @@ debuff_magnitude = 0.25
         let entry = &hull.system_hull[0];
         assert_eq!(
             entry.system_id,
-            crate::messages::SystemId("phaser-fore".into())
+            crate::core::messages::SystemId("phaser-fore".into())
         );
         assert_eq!(entry.display_name.as_deref(), Some("Phaser Bank (Fore)"));
         assert!((entry.max_hp - 25.0).abs() < 1e-6);
@@ -7130,7 +7133,10 @@ max_hp = 30.0
 "##;
         let config = EntityConfig::from_toml(toml_str).expect("parse must succeed");
         let entry = &config.hull.as_ref().unwrap().system_hull[0];
-        assert_eq!(entry.system_id, crate::messages::SystemId("helm".into()));
+        assert_eq!(
+            entry.system_id,
+            crate::core::messages::SystemId("helm".into())
+        );
         assert!(entry.display_name.is_none());
         assert!((entry.damaged_threshold_pct - 0.75).abs() < 1e-6);
         assert!((entry.disabled_threshold_pct - 0.25).abs() < 1e-6);
@@ -7434,7 +7440,7 @@ surfase_colour = [1.0, 0.7, 0.1]
     fn the_huge_asteroid_size_is_a_targetable_triple_size_rock() {
         for n in 1..=4 {
             let path = format!("assets/entities/asteroid_common_{n}_huge.toml");
-            let cfg = crate::entity_includes::load_entity_config(&path)
+            let cfg = crate::entities::include_resolve::load_entity_config(&path)
                 .unwrap_or_else(|e| panic!("{path} must parse: {e}"));
 
             // Every asteroid variant shares one display id since the strings
@@ -7532,7 +7538,7 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
             .expect("alliance_battleship must declare a faction");
         // Must match the Federation UUID in assets/factions/federation.toml
         let fed_toml = include_str!("../../assets/factions/federation.toml");
-        let fed = crate::faction::parse_faction_config(fed_toml).unwrap();
+        let fed = crate::ai::faction::parse_faction_config(fed_toml).unwrap();
         assert_eq!(faction, fed.uuid, "battleship faction must be Federation");
     }
 
@@ -7837,7 +7843,7 @@ automated_systems = []
             );
             assert_eq!(
                 sys.station,
-                Some(crate::messages::StationId("shields".into()))
+                Some(crate::core::messages::StationId("shields".into()))
             );
         }
     }
@@ -7847,7 +7853,7 @@ automated_systems = []
     /// against the real asset.
     #[test]
     fn courier_toml_is_a_valid_two_station_hull() {
-        use crate::messages::{StationId, SystemId};
+        use crate::core::messages::{StationId, SystemId};
 
         let toml_str = include_str!("../../assets/entities/alliance_courier.toml");
         let config = EntityConfig::from_toml(toml_str).expect("alliance_courier must parse");
@@ -7951,7 +7957,7 @@ automated_systems = []
             assert!(!sys.ai_only);
             assert_eq!(
                 sys.station,
-                Some(crate::messages::StationId("shields".into()))
+                Some(crate::core::messages::StationId("shields".into()))
             );
             assert_eq!(sys.power_group, None);
         }
@@ -8405,7 +8411,7 @@ hull_max_hp = 6
             "assets/entities/ship_harrow_destroyer.toml",
             "assets/entities/alliance_destroyer.toml",
         ] {
-            let other = crate::entity_includes::load_entity_config(name)
+            let other = crate::entities::include_resolve::load_entity_config(name)
                 .unwrap_or_else(|e| panic!("{name} must compose and parse: {e}"));
             for bank in &other.weapons_console.as_ref().unwrap().blaster_banks {
                 assert!(
@@ -8543,7 +8549,7 @@ hull_max_hp = 6
         let bank_id = cfg.weapons_console.as_ref().unwrap().blaster_banks[0]
             .id
             .clone();
-        let expected = crate::system_registry::blaster_bank_system_id(&bank_id)
+        let expected = crate::ship::system_registry::blaster_bank_system_id(&bank_id)
             .expect("a non-empty bank id resolves to a system id");
         let systems = &cfg
             .ship_config
@@ -8565,7 +8571,7 @@ hull_max_hp = 6
         );
         assert_eq!(
             declared.station,
-            Some(crate::messages::StationId("tactical".into())),
+            Some(crate::core::messages::StationId("tactical".into())),
             "the artillery bank belongs to the Tactical seat"
         );
     }
@@ -9045,14 +9051,14 @@ hull_max_hp = 6
         // degradation the per-tube guard above exists to prevent.
         let ship_config = cfg.ship_config.as_ref().expect("hull declares systems");
         let declared =
-            |id: &crate::messages::SystemId| ship_config.systems.iter().any(|s| &s.id == id);
+            |id: &crate::core::messages::SystemId| ship_config.systems.iter().any(|s| &s.id == id);
         assert!(
-            declared(&crate::system_registry::torpedo_magazine_system_id()),
+            declared(&crate::ship::system_registry::torpedo_magazine_system_id()),
             "the shared magazine needs a [[system]] entry or neither loading nor \
              launching runs at all"
         );
         for tube in &torpedoes.tubes {
-            let expected = crate::system_registry::torpedo_tube_system_id(&tube.id)
+            let expected = crate::ship::system_registry::torpedo_tube_system_id(&tube.id)
                 .expect("a non-empty tube id always resolves");
             assert!(
                 declared(&expected),
@@ -9282,7 +9288,7 @@ hull_max_hp = 6
         let (mut checked, mut colliderless) = (0, 0);
         for path in templates {
             let key = path.to_string_lossy().replace('\\', "/");
-            let cfg = crate::entity_includes::load_entity_config(&key)
+            let cfg = crate::entities::include_resolve::load_entity_config(&key)
                 .unwrap_or_else(|e| panic!("{key} must parse: {e}"));
             let Some(model) = cfg.mesh.as_ref().and_then(|m| m.model.as_deref()) else {
                 continue;
@@ -9609,7 +9615,7 @@ count = 99
     #[test]
     fn torpedoes_defaults_match_runtime_torpedo_config_default() {
         let toml_default = TorpedoesConfig::default().to_runtime();
-        let runtime_default = crate::torpedo::TorpedoConfig::default();
+        let runtime_default = crate::weapons::torpedo::TorpedoConfig::default();
         assert_eq!(toml_default.count, runtime_default.count);
         assert_eq!(toml_default.damage_hull, runtime_default.damage_hull);
         assert_eq!(toml_default.damage_shields, runtime_default.damage_shields);
@@ -9767,7 +9773,7 @@ travel_duration_secs = 9.0
     #[test]
     fn repair_defaults_match_runtime_repair_timings_default() {
         let toml_default = RepairConfig::default().to_runtime();
-        let runtime_default = crate::repair_teams::RepairTimings::default();
+        let runtime_default = crate::modifiers::repair_teams::RepairTimings::default();
         assert_eq!(
             toml_default.travel_duration,
             runtime_default.travel_duration
@@ -9789,7 +9795,7 @@ travel_duration_secs = 9.0
             .repair
             .expect("alliance_battleship must have [repair]");
         let rt = r.to_runtime();
-        let baseline = crate::repair_teams::RepairTimings::default();
+        let baseline = crate::modifiers::repair_teams::RepairTimings::default();
         assert_eq!(
             rt.travel_duration, baseline.travel_duration,
             "travel duration drift"
@@ -9880,7 +9886,7 @@ max_hp = 250
     #[test]
     fn shields_base_defaults_match_runtime_shield_config_default() {
         let toml_default = ShieldsBaseConfig::default().to_runtime();
-        let runtime_default = crate::shield::ShieldConfig::default();
+        let runtime_default = crate::weapons::shield::ShieldConfig::default();
         assert_eq!(toml_default.num_facings, runtime_default.num_facings);
         assert_eq!(toml_default.max_hp, runtime_default.max_hp);
         assert_eq!(toml_default.regen_per_sec, runtime_default.regen_per_sec);
@@ -10076,7 +10082,7 @@ fire_arc_deg = 90.0
     fn torpedo_in_flight_snapshots_shield_pierce_at_launch() {
         // Wiring proof: changing the in-flight torpedo's snapshot mid-flight
         // doesn't affect future launches (it's a per-torpedo copy).
-        use crate::torpedo::{TorpedoConfig, TorpedoSystem};
+        use crate::weapons::torpedo::{TorpedoConfig, TorpedoSystem};
         use std::collections::HashMap;
         let mut cfg = TorpedoConfig::default();
         cfg.shield_pierce = 0.75;
@@ -12094,7 +12100,7 @@ yields_to_arc_requests = false
         // Every bank needs its own fine system or it is never AI-operable, and
         // the id follows the `phaser-<bank_id>` convention the resolver uses.
         for bank in &wc.phaser_banks {
-            let expected = crate::system_registry::phaser_bank_system_id(&bank.id)
+            let expected = crate::ship::system_registry::phaser_bank_system_id(&bank.id)
                 .expect("a non-empty bank id always resolves");
             assert!(
                 ship_config.systems.iter().any(|s| s.id == expected),
@@ -12227,14 +12233,14 @@ yields_to_arc_requests = false
         // silently switch the whole armament off.
         let ship_config = cfg.ship_config.as_ref().expect("hull declares systems");
         let declared =
-            |id: &crate::messages::SystemId| ship_config.systems.iter().any(|s| &s.id == id);
+            |id: &crate::core::messages::SystemId| ship_config.systems.iter().any(|s| &s.id == id);
         assert!(
-            declared(&crate::system_registry::torpedo_magazine_system_id()),
+            declared(&crate::ship::system_registry::torpedo_magazine_system_id()),
             "the shared magazine needs a [[system]] entry or neither loading nor \
              launching runs at all"
         );
         for tube in &torpedoes.tubes {
-            let expected = crate::system_registry::torpedo_tube_system_id(&tube.id)
+            let expected = crate::ship::system_registry::torpedo_tube_system_id(&tube.id)
                 .expect("a non-empty tube id always resolves");
             assert!(
                 declared(&expected),
@@ -14791,7 +14797,7 @@ model = "assets/models/rock.glb"
             .map(|sc| {
                 sc.systems
                     .iter()
-                    .filter(|s| s.kind == crate::system_registry::RED_ALERT_KIND)
+                    .filter(|s| s.kind == crate::ship::system_registry::RED_ALERT_KIND)
                     .collect()
             })
             .unwrap_or_default()
@@ -14838,7 +14844,7 @@ ai_only = true
             "behaviour NPC must be provisioned exactly one red_alert system"
         );
         let sys = reds[0];
-        assert_eq!(sys.id.0, crate::system_registry::RED_ALERT_SYSTEM_ID);
+        assert_eq!(sys.id.0, crate::ship::system_registry::RED_ALERT_SYSTEM_ID);
         assert!(sys.ai_only, "provisioned red_alert must be ai_only");
         assert!(
             sys.station.is_none(),
@@ -14911,7 +14917,7 @@ ai_only = true
         );
         assert_eq!(
             reds[0].station,
-            Some(crate::messages::StationId("captain".into())),
+            Some(crate::core::messages::StationId("captain".into())),
             "the Captain seat owns Red Alert"
         );
         assert!(
@@ -14938,7 +14944,7 @@ ai_only = true
         );
         assert_eq!(
             reds[0].station,
-            Some(crate::messages::StationId("captain".into())),
+            Some(crate::core::messages::StationId("captain".into())),
             "authored captain ownership must survive provisioning"
         );
         assert!(

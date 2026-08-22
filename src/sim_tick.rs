@@ -276,7 +276,7 @@ mod tests {
     /// then be a function of the frame rate.
     #[test]
     fn phase_transitions_land_on_the_same_tick_whatever_the_frame_pacing() {
-        use crate::messages::GamePhase;
+        use crate::core::messages::GamePhase;
 
         /// The step the writer flips the phase on, and the total steps driven.
         const SWITCH_ON: u64 = 5;
@@ -376,7 +376,7 @@ mod tests {
     /// identity.
     #[test]
     fn game_start_mint_is_frame_pacing_invariant() {
-        use crate::messages::GamePhase;
+        use crate::core::messages::GamePhase;
         use crate::world_id::{IdNamespace, WorldId, WorldIdMint};
 
         #[derive(Resource, Default, Debug, PartialEq, Eq)]

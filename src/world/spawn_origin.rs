@@ -43,8 +43,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::entities::config::EntityConfig;
 use crate::entities::loader::TemplateLoader;
-use crate::entity_config::EntityConfig;
 
 /// The inputs a runtime spawn was resolved from, kept so it can be resolved
 /// again.
@@ -176,7 +176,7 @@ mod tests {
             EntityConfig {
                 name: Some("Harrow Destroyer".to_string()),
                 tags: vec!["npc".to_string()],
-                mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+                mass: crate::entities::config::DEFAULT_ENTITY_MASS,
                 ..Default::default()
             },
         )])

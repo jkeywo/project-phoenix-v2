@@ -22,21 +22,21 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::asteroid_spawner::{
+use crate::asteroids::spawner::{
     composed_lattice, eval_cell_composed, ComposedLattice, ComposedLayer, FieldContribution,
 };
-use crate::asteroid_window::{
+use crate::asteroids::window::{
     compute_player_grid_cell, compute_slot_for_world_cell, eval_on_player_move,
 };
-use crate::entity_spawner::{AsteroidFieldSection, MeshSection};
+use crate::core::messages::{EntitySnapshot, ServerMessage};
+use crate::entities::spawner::{AsteroidFieldSection, MeshSection};
 use crate::lobby::Target;
 use crate::lobby::WorldResource;
-use crate::messages::{EntitySnapshot, ServerMessage};
-use crate::ship_state::ShipPhysics;
-use crate::simulation::SimOutbox;
+use crate::server_app::SimOutbox;
+use crate::ship::state::ShipPhysics;
 
-pub use crate::entity_spawner::EntitySystemHull;
-pub use crate::simulation::{Asteroid, AsteroidShieldPierce, AsteroidUuid};
+pub use crate::entities::spawner::EntitySystemHull;
+pub use crate::server_app::{Asteroid, AsteroidShieldPierce, AsteroidUuid};
 
 // ── Resources ────────────────────────────────────────────────────────────
 
@@ -186,7 +186,7 @@ pub fn check_destroyed_asteroids(
 /// rebuild against the new composition.
 pub fn update_asteroid_window(
     mut commands: Commands,
-    physics_q: Query<&ShipPhysics, With<crate::simulation::LocalShip>>,
+    physics_q: Query<&ShipPhysics, With<crate::server_app::LocalShip>>,
     fields: Query<(Entity, &AsteroidFieldSection)>,
     mut window: ResMut<AsteroidWindow>,
     mut world: ResMut<WorldResource>,
@@ -548,10 +548,10 @@ fn splitmix64(x: u64) -> u64 {
 /// scenario whose TOML moved is one the content-version gate refuses outright.
 #[derive(Clone, Debug)]
 pub struct RockConfig {
-    pub collider: crate::entity_config::ColliderConfig,
+    pub collider: crate::entities::config::ColliderConfig,
     pub max_hp: f32,
     pub tags: Vec<String>,
-    pub mesh: Option<crate::entity_config::MeshConfig>,
+    pub mesh: Option<crate::entities::config::MeshConfig>,
     pub radar_icon: Option<String>,
     pub radar_colour: Option<[f32; 3]>,
     pub radar_size: Option<f32>,
@@ -560,7 +560,7 @@ pub struct RockConfig {
 /// Resolve one rock config path against the config cache, with the same
 /// fallbacks the streamer has always used.
 pub fn rock_config(config_path: &str) -> RockConfig {
-    let config_cache = crate::config_cache::get_config_cache();
+    let config_cache = crate::entities::config_cache::get_config_cache();
     let entity_config = config_cache.get(config_path);
     let collider_radius = entity_config
         .and_then(|c| c.collider.as_ref())
@@ -572,8 +572,8 @@ pub fn rock_config(config_path: &str) -> RockConfig {
     let radar_appearance = entity_config.and_then(|c| c.radar_appearance.as_ref());
     RockConfig {
         collider: entity_config.and_then(|c| c.collider.clone()).unwrap_or(
-            crate::entity_config::ColliderConfig {
-                shape: crate::entity_config::ColliderShape::Ball,
+            crate::entities::config::ColliderConfig {
+                shape: crate::entities::config::ColliderShape::Ball,
                 radius: collider_radius,
                 length: 0.0,
                 half_height: None,
@@ -622,7 +622,7 @@ pub type RockBundle = (
     AsteroidUuid,
     AsteroidShieldPierce,
     EntitySystemHull,
-    crate::entity_spawner::ColliderSection,
+    crate::entities::spawner::ColliderSection,
     Transform,
     Visibility,
     bevy_rapier3d::prelude::Collider,
@@ -646,17 +646,20 @@ pub fn rock_bundle(
     shield_pierce: f32,
     current_hp: f32,
 ) -> RockBundle {
-    let mut hull = crate::damage::SystemHull::from_config(&[(
-        crate::messages::SystemId("captain".into()),
+    let mut hull = crate::ship::damage::SystemHull::from_config(&[(
+        crate::core::messages::SystemId("captain".into()),
         config.max_hp,
     )]);
-    hull.set_hp(&crate::messages::SystemId("captain".into()), current_hp);
+    hull.set_hp(
+        &crate::core::messages::SystemId("captain".into()),
+        current_hp,
+    );
     (
         Asteroid,
         AsteroidUuid(uuid.to_string()),
         AsteroidShieldPierce(shield_pierce),
         EntitySystemHull(hull),
-        crate::entity_spawner::ColliderSection(config.collider.clone()),
+        crate::entities::spawner::ColliderSection(config.collider.clone()),
         Transform::from_translation(translation).with_rotation(rotation),
         Visibility::default(),
         bevy_rapier3d::prelude::Collider::ball(config.collider.radius),
@@ -868,10 +871,10 @@ fn clear_slot(
 /// solid; those are the ones you are meant to hit.
 fn spawn_cosmetic_entity(
     commands: &mut Commands,
-    spawn: &crate::asteroid_spawner::AsteroidSpawn,
+    spawn: &crate::asteroids::spawner::AsteroidSpawn,
     y: f32,
 ) -> Entity {
-    let config_cache = crate::config_cache::get_config_cache();
+    let config_cache = crate::entities::config_cache::get_config_cache();
     let entity_config = config_cache.get(&spawn.config_path);
 
     let mut entity_cmd = commands.spawn((
@@ -967,10 +970,10 @@ impl Plugin for AsteroidLifecyclePlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entity_config::{AsteroidFieldConfig, GridConfig};
-    use crate::entity_spawner::AsteroidFieldSection;
+    use crate::entities::config::{AsteroidFieldConfig, GridConfig};
+    use crate::entities::spawner::AsteroidFieldSection;
     use crate::lobby::OutboundMessage;
-    use crate::simulation::SimOutbox;
+    use crate::server_app::SimOutbox;
 
     /// A rock's uuid keys its row in the headless report's `damage_by_ship`
     /// ledger, so two distinct rocks sharing one is silent data corruption
@@ -1025,9 +1028,9 @@ mod tests {
         app.init_resource::<crate::core::broadcast::LastBroadcastEntityHealth>();
         // Spawn a LocalShip entity with ShipPhysics so update_asteroid_window can query it.
         app.world_mut().spawn((
-            crate::simulation::LocalShip,
+            crate::server_app::LocalShip,
             bevy::prelude::Transform::default(),
-            crate::ship_state::ShipPhysics::default(),
+            crate::ship::state::ShipPhysics::default(),
         ));
         // (#913) One composed window per world: every AsteroidFieldSection
         // entity feeds the same evaluator and the same window resource.
@@ -1038,7 +1041,7 @@ mod tests {
     fn set_ship_pos(app: &mut App, x: f32, z: f32) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::ship_state::ShipPhysics, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&mut crate::ship::state::ShipPhysics, With<crate::server_app::LocalShip>>();
         let mut p = q
             .single_mut(app.world_mut())
             .expect("expected LocalShip with ShipPhysics");
@@ -1119,7 +1122,7 @@ mod tests {
                 despawn_cells,
             }),
             shield_pierce: 0.0,
-            shape: Some(crate::entity_config::AsteroidFieldShape::Torus),
+            shape: Some(crate::entities::config::AsteroidFieldShape::Torus),
             anchor: None,
             anchor_offset: [0.0, 0.0, 0.0],
             random_rotation: None,

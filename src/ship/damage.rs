@@ -1,5 +1,5 @@
-use crate::messages::SystemId;
-use crate::shield::ShieldSystem;
+use crate::core::messages::SystemId;
+use crate::weapons::shield::ShieldSystem;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use vellum_rng::Pcg32;
@@ -727,7 +727,8 @@ mod tests {
     fn apply_hull_damage_zero_damage_no_change() {
         let mut hull = single_console_hull(100.0);
         let mut rng = test_rng();
-        let (applied, _destroyed) = crate::damage::apply_hull_damage(&mut hull, 0.0, &mut rng);
+        let (applied, _destroyed) =
+            crate::ship::damage::apply_hull_damage(&mut hull, 0.0, &mut rng);
         assert_eq!(applied, 0.0);
         assert!((hull.total_current() - 100.0).abs() < 1e-6);
     }
@@ -736,7 +737,8 @@ mod tests {
     fn apply_hull_damage_fractional_accumulates() {
         let mut hull = single_console_hull(100.0);
         let mut rng = test_rng();
-        let (applied, _destroyed) = crate::damage::apply_hull_damage(&mut hull, 3.5, &mut rng);
+        let (applied, _destroyed) =
+            crate::ship::damage::apply_hull_damage(&mut hull, 3.5, &mut rng);
         assert!((applied - 3.5).abs() < 1e-6, "applied={}", applied);
         assert!((hull.total_current() - 96.5).abs() < 1e-6);
     }
@@ -805,7 +807,7 @@ mod tests {
 
     #[test]
     fn shield_absorbs_damage_hull_unchanged() {
-        let mut shields = crate::shield::ShieldSystem::default(); // 4 facings, 100 hp each
+        let mut shields = crate::weapons::shield::ShieldSystem::default(); // 4 facings, 100 hp each
         let hull_damage = apply_damage_with_shields(20, 0.0, &mut shields);
         // Fore shield absorbs all 20; hull unchanged (no hull ref passed).
         assert_eq!(hull_damage, 0);
@@ -814,7 +816,7 @@ mod tests {
 
     #[test]
     fn depleted_shield_passes_overflow_to_hull() {
-        use crate::shield::{ShieldConfig, ShieldSystem};
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
         let config = ShieldConfig {
             max_hp: 50,
             ..Default::default()
@@ -827,7 +829,7 @@ mod tests {
 
     #[test]
     fn offline_shield_passes_all_damage_to_hull() {
-        use crate::shield::{ShieldConfig, ShieldSystem};
+        use crate::weapons::shield::{ShieldConfig, ShieldSystem};
         let config = ShieldConfig {
             max_hp: 50,
             ..Default::default()
@@ -842,7 +844,7 @@ mod tests {
 
     #[test]
     fn damage_routed_to_correct_facing_not_hull() {
-        let mut shields = crate::shield::ShieldSystem::default();
+        let mut shields = crate::weapons::shield::ShieldSystem::default();
         // Hit from the port side (bearing -π/2)
         let hull_damage = apply_damage_with_shields(10, -std::f32::consts::FRAC_PI_2, &mut shields);
         assert_eq!(hull_damage, 0);

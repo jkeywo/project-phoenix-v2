@@ -2,11 +2,11 @@ use bevy::prelude::*;
 
 use crate::authoritative::{DeclareState, StateClass};
 use crate::command_admission::ai_emit::emit_ai_command;
-use crate::effect_queue::EffectQueue;
-use crate::messages::{
+use crate::core::messages::{
     AdmittedCommands, CameraView, CaptainBlackboard, ObjectiveSnapshot, SystemBlackboard,
     SystemControlPayload, SystemId, ViewMode,
 };
+use crate::effect_queue::EffectQueue;
 use crate::objectives::WorldConditions;
 use crate::ship::combat_activity::RecentCombatActivity;
 use crate::ship::control_source::ControlSource;
@@ -34,13 +34,13 @@ impl Plugin for CaptainPlugin {
         // (red-alert), `handle_set_objective_priority` (captain), and
         // `handle_set_view` (viewscreen SetView).
         app.register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::RED_ALERT_SYSTEM_ID,
+            crate::ship::system_registry::RED_ALERT_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::CAPTAIN_SYSTEM_ID,
+            crate::ship::system_registry::CAPTAIN_SYSTEM_ID,
         ))
         .register_admitted_consumer(ConsumerMatcher::exact(
-            crate::system_registry::VIEWSCREEN_SYSTEM_ID,
+            crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID,
         ));
         app.init_resource::<crate::server_app::CaptainPriorityBoost>();
         // The scripted weapons-hold queue `apply_scripted_weapons_holds` drains
@@ -111,17 +111,19 @@ fn handle_set_red_alert(
     mut ship_query: Query<
         (
             &AdmittedCommands,
-            &mut crate::ship_state::ShipRedAlert,
-            Option<&crate::entity_spawner::EntityUuid>,
+            &mut crate::ship::state::ShipRedAlert,
+            Option<&crate::entities::spawner::EntityUuid>,
         ),
         With<crate::server_app::Ship>,
     >,
     // Balance telemetry. `Option<ResMut<Messages<_>>>` so bare-`App` fixtures
     // that never registered the message still pass parameter validation.
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
 ) {
     for (admitted, mut ra, ship_uuid) in ship_query.iter_mut() {
-        for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
+        for cmd in admitted.for_target(crate::ship::system_registry::RED_ALERT_SYSTEM_ID) {
             if let SystemControlPayload::SetRedAlert { active } = cmd.payload {
                 // Assign, don't invert — the whole point of the set command
                 // (issue #748). Only emit the balance tracer when the value
@@ -134,7 +136,7 @@ fn handle_set_red_alert(
                 // route through this same command), on every ship. Skipped
                 // for a ship with no uuid to key it on.
                 if let (Some(msgs), Some(uuid)) = (balance_events.as_mut(), ship_uuid) {
-                    msgs.write(crate::balance::BalanceEvent::RedAlertChanged {
+                    msgs.write(crate::core::balance::BalanceEvent::RedAlertChanged {
                         ship: uuid.0.clone(),
                         on: ra.0,
                     });
@@ -158,15 +160,15 @@ fn handle_set_red_alert(
 /// Nothing in this handler decides whether the ship then fires. It writes one
 /// boolean; the suppression happens where every other firing decision happens,
 /// in the bank's own authored predicate reading the fact the hosts seed from
-/// [`crate::weapons_plugin::WeaponsAlertPosture`].
+/// [`crate::console::weapons::WeaponsAlertPosture`].
 fn handle_set_weapons_hold(
     mut ship_query: Query<
-        (&AdmittedCommands, &mut crate::ship_state::ShipWeaponsHold),
+        (&AdmittedCommands, &mut crate::ship::state::ShipWeaponsHold),
         With<crate::server_app::Ship>,
     >,
 ) {
     for (admitted, mut hold) in ship_query.iter_mut() {
-        for cmd in admitted.for_target(crate::system_registry::RED_ALERT_SYSTEM_ID) {
+        for cmd in admitted.for_target(crate::ship::system_registry::RED_ALERT_SYSTEM_ID) {
             if let SystemControlPayload::SetWeaponsHold { held } = cmd.payload {
                 hold.0 = held;
             }
@@ -199,8 +201,8 @@ pub fn apply_scripted_weapons_holds(
     weapons_holds_queue: Option<ResMut<EffectQueue<(String, bool)>>>,
     mut ships: Query<
         (
-            &crate::entity_spawner::EntityUuid,
-            &mut crate::ship_state::ShipWeaponsHold,
+            &crate::entities::spawner::EntityUuid,
+            &mut crate::ship::state::ShipWeaponsHold,
         ),
         With<crate::server_app::Ship>,
     >,
@@ -258,13 +260,13 @@ pub fn mirror_weapons_hold_flags(
     runtime: Option<ResMut<crate::world::server::WorldContentRuntime>>,
     ships: Query<
         (
-            &crate::ship_state::ShipWeaponsHold,
-            Option<&crate::entity_spawner::EntityName>,
+            &crate::ship::state::ShipWeaponsHold,
+            Option<&crate::entities::spawner::EntityName>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
         ),
         (
             With<crate::server_app::Ship>,
-            Changed<crate::ship_state::ShipWeaponsHold>,
+            Changed<crate::ship::state::ShipWeaponsHold>,
         ),
     >,
 ) {
@@ -278,12 +280,12 @@ pub fn mirror_weapons_hold_flags(
     for (hold, name, is_local) in ships.iter() {
         if is_local {
             writes.push((
-                crate::ship_state::OWN_SHIP_WEAPONS_HOLD_FLAG.to_string(),
+                crate::ship::state::OWN_SHIP_WEAPONS_HOLD_FLAG.to_string(),
                 hold.0,
             ));
         }
         if let Some(name) = name {
-            writes.push((crate::ship_state::weapons_hold_flag(&name.0), hold.0));
+            writes.push((crate::ship::state::weapons_hold_flag(&name.0), hold.0));
         }
     }
     writes.sort();
@@ -331,7 +333,7 @@ pub fn mirror_weapons_hold_flags(
 }
 
 fn view_request_from_admitted(
-    cmd: &crate::messages::AdmittedCommand,
+    cmd: &crate::core::messages::AdmittedCommand,
 ) -> Option<(SystemId, ViewMode)> {
     /// Map a "cinematic" marker name to the Cinematic view mode.
     fn resolve(mode: &ViewMode) -> ViewMode {
@@ -347,8 +349,8 @@ fn view_request_from_admitted(
         // through the station-name admission fallback. Either way the
         // requesting system is derived from the view mode itself.
         SystemControlPayload::SetView { mode }
-            if cmd.target.0 == crate::system_registry::VIEWSCREEN_SYSTEM_ID
-                || cmd.target.0 == crate::system_registry::HELM_STATION_ID =>
+            if cmd.target.0 == crate::ship::system_registry::VIEWSCREEN_SYSTEM_ID
+                || cmd.target.0 == crate::ship::system_registry::HELM_STATION_ID =>
         {
             Some((
                 crate::ship::viewscreen::source_system_for_view_mode(mode),
@@ -371,7 +373,7 @@ fn view_request_from_admitted(
 pub(crate) fn handle_set_view(
     ship_query: Query<&AdmittedCommands, With<crate::server_app::LocalShip>>,
     mut view_mode_q: Query<
-        &mut crate::ship_state::ShipViewMode,
+        &mut crate::ship::state::ShipViewMode,
         With<crate::server_app::LocalShip>,
     >,
 ) {
@@ -409,8 +411,8 @@ fn backfill_captain_prefers_cinematic_view(
         (
             &mut AdmittedCommands,
             &ShipSystemControlSources,
-            &crate::ship_state::ShipViewMode,
-            Option<&crate::entity_spawner::EntityUuid>,
+            &crate::ship::state::ShipViewMode,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&crate::ship_plugin::ShipConfigComponent>,
         ),
         With<crate::server_app::LocalShip>,
@@ -425,7 +427,7 @@ fn backfill_captain_prefers_cinematic_view(
         // itself has no seat to be human- or AI-operated, the Captain does.
         let policy = control_sources
             .0
-            .policy_for(&crate::system_registry::captain_system_id());
+            .policy_for(&crate::ship::system_registry::captain_system_id());
         if !policy.operate_ai {
             continue;
         }
@@ -437,7 +439,7 @@ fn backfill_captain_prefers_cinematic_view(
         }
         emit_ai_command(
             entity_uuid,
-            crate::system_registry::viewscreen_system_id(),
+            crate::ship::system_registry::viewscreen_system_id(),
             SystemControlPayload::SetView {
                 mode: ViewMode::Cinematic,
             },
@@ -455,7 +457,7 @@ fn handle_set_objective_priority(
     ship_query: Query<
         (
             &AdmittedCommands,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
         ),
         With<crate::server_app::LocalShip>,
     >,
@@ -468,7 +470,7 @@ fn handle_set_objective_priority(
     // writes into the local ship's scope only, never a session-global slot.
     let scope =
         crate::server_app::CaptainPriorityBoost::scope_key(uuid.map(|u| u.0.as_str())).to_string();
-    for cmd in admitted.for_target(crate::system_registry::CAPTAIN_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::ship::system_registry::CAPTAIN_SYSTEM_ID) {
         if let SystemControlPayload::SetObjectivePriority { id } = &cmd.payload {
             boost.toggle(&scope, id);
         }
@@ -509,11 +511,11 @@ fn operate_captain_ai(
         &mut AdmittedCommands,
         &ShipSystemControlSources,
         &RecentCombatActivity,
-        Option<&crate::ship_state::ShipRedAlert>,
-        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&crate::ship::state::ShipRedAlert>,
+        Option<&crate::entities::spawner::EntityUuid>,
         Option<&crate::ship_plugin::ShipConfigComponent>,
         Option<&CaptainAiPolicy>,
-        Option<&crate::ship_state::ShipPhysics>,
+        Option<&crate::ship::state::ShipPhysics>,
         Option<&crate::entities::spawner::FactionComponent>,
     )>,
 ) {
@@ -579,7 +581,7 @@ fn operate_captain_ai(
         // means "no Red Alert decision this tick".
         let flag_chain = ai_env.flag_chain(ship_entity);
         let tick = crate::ai::host::HostTick {
-            system: crate::system_registry::red_alert_system_id(),
+            system: crate::ship::system_registry::red_alert_system_id(),
             channel: crate::entities::config::CAPTAIN_RED_ALERT_CHANNEL,
             facts: &facts,
             flags: &flag_chain,
@@ -621,7 +623,7 @@ fn operate_captain_ai(
 /// the shared [`crate::command_admission::validate_and_admit`] seam, using this
 /// ship's own `ai:<uuid>` token (mirrors `emit_sensors_ai_command`).
 fn emit_captain_ai_command(
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
     payload: SystemControlPayload,
     sources: &ShipSystemControlSources,
     sessions: &crate::lobby::Sessions,
@@ -630,7 +632,7 @@ fn emit_captain_ai_command(
 ) -> bool {
     emit_ai_command(
         entity_uuid,
-        crate::system_registry::red_alert_system_id(),
+        crate::ship::system_registry::red_alert_system_id(),
         payload,
         sources,
         sessions,
@@ -675,10 +677,10 @@ fn emit_captain_ai_command(
 /// three mean "this host cannot see anything", which seeds the safe reading.
 fn nearest_hostile_range(
     snapshot: Option<&crate::ai::server::WorldSnapshot>,
-    registry: Option<&crate::faction::FactionRegistry>,
-    physics: Option<&crate::ship_state::ShipPhysics>,
+    registry: Option<&crate::ai::faction::FactionRegistry>,
+    physics: Option<&crate::ship::state::ShipPhysics>,
     faction: Option<&crate::entities::spawner::FactionComponent>,
-    entity_uuid: Option<&crate::entity_spawner::EntityUuid>,
+    entity_uuid: Option<&crate::entities::spawner::EntityUuid>,
 ) -> Option<f32> {
     let snapshot = snapshot?;
     let registry = registry?;
@@ -744,21 +746,21 @@ fn publish_captain_blackboard(
     world_config: Option<Res<crate::world::config::WorldConfig>>,
     sim_tick: Option<Res<crate::sim_tick::SimTick>>,
     boost: Res<crate::server_app::CaptainPriorityBoost>,
-    markers_q: Query<&crate::model_rig::ModelMarkers, With<crate::server_app::LocalShip>>,
+    markers_q: Query<&crate::entities::model_rig::ModelMarkers, With<crate::server_app::LocalShip>>,
     cinematic_q: Query<
-        Option<&crate::entity_spawner::CinematicCameraSection>,
+        Option<&crate::entities::spawner::CinematicCameraSection>,
         With<crate::server_app::LocalShip>,
     >,
     mut ship_query: Query<
         (
             &ShipSystemControlSources,
-            Option<&crate::ship_state::ShipRedAlert>,
+            Option<&crate::ship::state::ShipRedAlert>,
             // The restraint lever (issue #1041), replicated onto the same
             // console that raises the alert.
-            Option<&crate::ship_state::ShipWeaponsHold>,
-            Option<&crate::ship_state::ShipViewMode>,
-            Option<&crate::entity_spawner::EntitySystemHull>,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::ship::state::ShipWeaponsHold>,
+            Option<&crate::ship::state::ShipViewMode>,
+            Option<&crate::entities::spawner::EntitySystemHull>,
+            Option<&crate::entities::spawner::EntityUuid>,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
@@ -793,11 +795,11 @@ fn publish_captain_blackboard(
 
         let red_alert_auto = control_sources
             .0
-            .source_for(&crate::system_registry::red_alert_system_id())
+            .source_for(&crate::ship::system_registry::red_alert_system_id())
             == ControlSource::Ai;
         let viewscreen_auto = control_sources
             .0
-            .source_for(&crate::system_registry::viewscreen_system_id())
+            .source_for(&crate::ship::system_registry::viewscreen_system_id())
             == ControlSource::Ai;
 
         // ── Player-only fields (LocalShip) ────────────────────────────────────
@@ -820,7 +822,7 @@ fn publish_captain_blackboard(
         let mut camera_views: Vec<String> = Vec::new();
         let mut objectives_snap: Vec<ObjectiveSnapshot> = Vec::new();
         let mut boosted_objective_id: Option<String> = None;
-        let mut deadlines: Vec<crate::messages::DeadlineSnapshot> = Vec::new();
+        let mut deadlines: Vec<crate::core::messages::DeadlineSnapshot> = Vec::new();
         if is_local {
             camera_views = markers_q
                 .single()
@@ -876,7 +878,7 @@ fn publish_captain_blackboard(
                     .records
                     .iter()
                     .filter(|record| record.visible)
-                    .map(|record| crate::messages::DeadlineSnapshot {
+                    .map(|record| crate::core::messages::DeadlineSnapshot {
                         id: record.id.clone(),
                         label: record.label.clone(),
                         remaining_secs: content
@@ -897,10 +899,10 @@ fn publish_captain_blackboard(
 
         let bb = CaptainBlackboard {
             red_alert,
-            red_alert_system_id: crate::system_registry::red_alert_system_id(),
+            red_alert_system_id: crate::ship::system_registry::red_alert_system_id(),
             red_alert_auto,
             weapons_hold,
-            viewscreen_system_id: crate::system_registry::viewscreen_system_id(),
+            viewscreen_system_id: crate::ship::system_registry::viewscreen_system_id(),
             viewscreen_auto,
             view_direction,
             view_mode,
@@ -913,7 +915,7 @@ fn publish_captain_blackboard(
         };
 
         bbs.0.insert(
-            SystemId(crate::system_registry::CAPTAIN_SYSTEM_ID.to_string()),
+            SystemId(crate::ship::system_registry::CAPTAIN_SYSTEM_ID.to_string()),
             SystemBlackboard::Captain(bb),
         );
     }
@@ -926,13 +928,13 @@ fn publish_captain_blackboard(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
+    use crate::core::messages::{CameraView, ClientMessage};
     use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Sessions};
-    use crate::messages::{CameraView, ClientMessage};
     use crate::server_app::LocalShip;
+    use crate::server_app::Ship;
     use crate::ship::control_source::ControlSource;
+    use crate::ship::system_registry::CAPTAIN_SYSTEM_ID;
     use crate::ship_plugin::{ShipConfigComponent, ShipSystemControlSources};
-    use crate::simulation::Ship;
-    use crate::system_registry::CAPTAIN_SYSTEM_ID;
 
     #[derive(Resource, Default)]
     struct Outbox(Vec<OutboundMessage>);
@@ -957,20 +959,22 @@ mod tests {
             LocalShip,
             ShipConfigComponent::default(),
             ShipSystemControlSources::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
             crate::ship_plugin::CoordinationQueue::default(),
-            crate::ship_state::ShipRedAlert::default(),
-            crate::ship_state::ShipViewMode::default(),
+            crate::ship::state::ShipRedAlert::default(),
+            crate::ship::state::ShipViewMode::default(),
             crate::server_app::ShipSystemBlackboards::default(),
             // Per-entity combat activity trackers (PRD #597 PR 10).
             RecentCombatActivity::default(),
             crate::server_app::WeaponFiredThisTick::default(),
             crate::server_app::ShipAttackedThisTick::default(),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
-                100.0,
-            )])),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(
+                    crate::core::messages::SystemId("captain".into()),
+                    100.0,
+                )]),
+            ),
             // The AUTHORED `[captain_console.ai]` block every shipped hull
             // carries. Since #885b stage 5d `operate_captain_ai` has no
             // synthesised fallback — a ship with no policy takes no Red Alert
@@ -990,7 +994,7 @@ mod tests {
             let ship = q.single(app.world()).expect("the fixture ship");
             app.world_mut()
                 .entity_mut(ship)
-                .insert(crate::ship_state::ShipWeaponsHold::default());
+                .insert(crate::ship::state::ShipWeaponsHold::default());
         }
         // One fixed step per update (issue #895): the plugin's systems run on
         // the logical tick, and each harness tick advances it once.
@@ -1004,14 +1008,14 @@ mod tests {
     fn get_red_alert(app: &mut App) -> bool {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::ship_state::ShipRedAlert, With<LocalShip>>();
+            .query_filtered::<&crate::ship::state::ShipRedAlert, With<LocalShip>>();
         q.single(app.world()).map(|ra| ra.0).unwrap_or(false)
     }
 
     fn get_view_mode(app: &mut App) -> ViewMode {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::ship_state::ShipViewMode, With<LocalShip>>();
+            .query_filtered::<&crate::ship::state::ShipViewMode, With<LocalShip>>();
         q.single(app.world())
             .map(|vm| vm.view_mode.clone())
             .unwrap_or(ViewMode::Camera(CameraView::default()))
@@ -1020,7 +1024,7 @@ mod tests {
     fn set_red_alert(app: &mut App, red: bool) {
         let mut q = app
             .world_mut()
-            .query_filtered::<&mut crate::ship_state::ShipRedAlert, With<LocalShip>>();
+            .query_filtered::<&mut crate::ship::state::ShipRedAlert, With<LocalShip>>();
         if let Ok(mut ra) = q.single_mut(app.world_mut()) {
             ra.0 = red;
         }
@@ -1029,7 +1033,7 @@ mod tests {
     fn get_weapons_hold(app: &mut App) -> bool {
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::ship_state::ShipWeaponsHold, With<LocalShip>>();
+            .query_filtered::<&crate::ship::state::ShipWeaponsHold, With<LocalShip>>();
         q.single(app.world()).map(|h| h.0).unwrap_or(false)
     }
 
@@ -1070,7 +1074,7 @@ mod tests {
 
     fn set_control_source(
         app: &mut App,
-        system_id: crate::messages::SystemId,
+        system_id: crate::core::messages::SystemId,
         source: ControlSource,
     ) {
         let mut q = app
@@ -1131,7 +1135,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1156,7 +1160,7 @@ mod tests {
             &mut app,
             "crew",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1172,7 +1176,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1197,7 +1201,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1212,7 +1216,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetWeaponsHold { held: true },
             },
         );
@@ -1229,7 +1233,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetWeaponsHold { held: false },
             },
         );
@@ -1251,7 +1255,7 @@ mod tests {
                 &mut app,
                 "captain",
                 ClientMessage::ControlSystem {
-                    target: crate::system_registry::red_alert_system_id(),
+                    target: crate::ship::system_registry::red_alert_system_id(),
                     payload: SystemControlPayload::SetWeaponsHold { held: true },
                 },
             );
@@ -1272,7 +1276,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetWeaponsHold { held: true },
             },
         );
@@ -1294,7 +1298,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1311,12 +1315,12 @@ mod tests {
         // both must be Ai for human commands targeting red-alert to be rejected.
         set_control_source(
             &mut app,
-            crate::system_registry::captain_system_id(),
+            crate::ship::system_registry::captain_system_id(),
             ControlSource::Ai,
         );
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         start_game(&mut app);
@@ -1324,7 +1328,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1340,7 +1344,7 @@ mod tests {
             &mut app,
             "crew",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1359,7 +1363,7 @@ mod tests {
             &mut app,
             "rando",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1370,7 +1374,7 @@ mod tests {
         );
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
         let admitted = q
             .single(app.world())
             .expect("LocalShip must carry AdmittedCommands");
@@ -1389,7 +1393,7 @@ mod tests {
         // check the token would pass is_command_authorized.
         set_control_source(
             &mut app,
-            crate::system_registry::tactical_radar_system_id(),
+            crate::ship::system_registry::tactical_radar_system_id(),
             ControlSource::Ai,
         );
         start_game(&mut app);
@@ -1406,7 +1410,7 @@ mod tests {
             &mut app,
             &npc_token,
             ClientMessage::ControlSystem {
-                target: crate::system_registry::tactical_radar_system_id(),
+                target: crate::ship::system_registry::tactical_radar_system_id(),
                 payload: SystemControlPayload::SetTarget {
                     uuid: "enemy-ship".into(),
                 },
@@ -1415,7 +1419,7 @@ mod tests {
         tick(&mut app);
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
         let admitted = q
             .single(app.world())
             .expect("LocalShip must carry AdmittedCommands");
@@ -1437,7 +1441,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1449,7 +1453,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: false },
             },
         );
@@ -1461,7 +1465,7 @@ mod tests {
             &mut app,
             "rando",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1469,7 +1473,7 @@ mod tests {
         assert!(!get_red_alert(&mut app), "rando must not control red-alert");
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
         let admitted = q
             .single(app.world())
             .expect("LocalShip must carry AdmittedCommands");
@@ -1489,7 +1493,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("foobar".into()),
+                target: crate::core::messages::SystemId("foobar".into()),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1497,7 +1501,7 @@ mod tests {
         assert!(!get_red_alert(&mut app));
         let mut q = app
             .world_mut()
-            .query_filtered::<&crate::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
+            .query_filtered::<&crate::core::messages::AdmittedCommands, With<crate::server_app::LocalShip>>();
         let admitted = q
             .single(app.world())
             .expect("LocalShip must carry AdmittedCommands");
@@ -1515,7 +1519,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::messages::SystemId("not-red-alert".into()),
+                target: crate::core::messages::SystemId("not-red-alert".into()),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1531,7 +1535,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -1541,7 +1545,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: false },
             },
         );
@@ -1563,7 +1567,7 @@ mod tests {
                 &mut app,
                 "captain",
                 ClientMessage::ControlSystem {
-                    target: crate::system_registry::red_alert_system_id(),
+                    target: crate::ship::system_registry::red_alert_system_id(),
                     payload: SystemControlPayload::SetRedAlert { active: true },
                 },
             );
@@ -1586,7 +1590,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::red_alert_system_id(),
+                target: crate::ship::system_registry::red_alert_system_id(),
                 payload: SystemControlPayload::SetRedAlert { active: false },
             },
         );
@@ -1625,7 +1629,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Camera(CameraView::new("camera_starboard")),
                 },
@@ -1655,7 +1659,7 @@ mod tests {
             &mut app,
             "crew",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Camera(CameraView::new("camera_port")),
                 },
@@ -1676,7 +1680,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Camera(CameraView::new("camera_aft")),
                 },
@@ -1725,22 +1729,22 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Camera(CameraView::new("camera_aft")),
                 },
             },
         );
         tick(&mut app);
-        app.world_mut()
-            .resource_mut::<Sessions>()
-            .0
-            .set_station("helm", Some(crate::messages::StationId("helm".into())));
+        app.world_mut().resource_mut::<Sessions>().0.set_station(
+            "helm",
+            Some(crate::core::messages::StationId("helm".into())),
+        );
         push(
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar,
                 },
@@ -1752,7 +1756,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar,
                 },
@@ -1786,16 +1790,16 @@ mod tests {
             },
         );
         tick(&mut app);
-        app.world_mut()
-            .resource_mut::<Sessions>()
-            .0
-            .set_station("helm", Some(crate::messages::StationId("helm".into())));
+        app.world_mut().resource_mut::<Sessions>().0.set_station(
+            "helm",
+            Some(crate::core::messages::StationId("helm".into())),
+        );
 
         push(
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar,
                 },
@@ -1825,15 +1829,15 @@ mod tests {
             },
         );
         tick(&mut app);
-        app.world_mut()
-            .resource_mut::<Sessions>()
-            .0
-            .set_station("helm", Some(crate::messages::StationId("helm".into())));
+        app.world_mut().resource_mut::<Sessions>().0.set_station(
+            "helm",
+            Some(crate::core::messages::StationId("helm".into())),
+        );
         push(
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar,
                 },
@@ -1856,7 +1860,7 @@ mod tests {
             &mut app,
             "crew",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Camera(CameraView::new("camera_port")),
                 },
@@ -1875,7 +1879,7 @@ mod tests {
         // (issue #801) — the coarse helm system no longer exists.
         set_control_source(
             &mut app,
-            crate::system_registry::helm_radar_system_id(),
+            crate::ship::system_registry::helm_radar_system_id(),
             ControlSource::Ai,
         );
 
@@ -1883,7 +1887,7 @@ mod tests {
             &mut app,
             "ai:helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::viewscreen_system_id(),
+                target: crate::ship::system_registry::viewscreen_system_id(),
                 payload: SystemControlPayload::SetView {
                     mode: ViewMode::Radar,
                 },
@@ -1921,7 +1925,7 @@ mod tests {
         // Set captain to AI mode
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         set_activity_last_damage(&mut app, Some(0.0));
@@ -1945,7 +1949,7 @@ mod tests {
         // Set captain to AI mode with no recent activity
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         // No recent damage or weapons fire — activity is default (None)
@@ -1975,7 +1979,7 @@ mod tests {
         start_game(&mut app);
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         set_activity_hostile_fire(&mut app, Some(0.0));
@@ -1994,7 +1998,7 @@ mod tests {
         start_game(&mut app);
         set_control_source(
             &mut app,
-            crate::system_registry::captain_system_id(),
+            crate::ship::system_registry::captain_system_id(),
             ControlSource::Ai,
         );
         set_activity_last_damage(&mut app, Some(0.0));
@@ -2021,7 +2025,7 @@ mod tests {
 
         set_control_source(
             &mut app,
-            crate::system_registry::captain_system_id(),
+            crate::ship::system_registry::captain_system_id(),
             ControlSource::Ai,
         );
         tick(&mut app);
@@ -2055,7 +2059,7 @@ mod tests {
         start_game(&mut app);
         set_control_source(
             &mut app,
-            crate::system_registry::captain_system_id(),
+            crate::ship::system_registry::captain_system_id(),
             ControlSource::Ai,
         );
         tick(&mut app);
@@ -2092,7 +2096,7 @@ mod tests {
             .world_mut()
             .query_filtered::<&mut ShipSystemControlSources, With<LocalShip>>();
         let mut cs = q.single_mut(app.world_mut()).unwrap();
-        cs.0.set_offline(crate::system_registry::red_alert_system_id(), offline);
+        cs.0.set_offline(crate::ship::system_registry::red_alert_system_id(), offline);
     }
 
     fn always_on_policy() -> crate::ai::policy::AiPolicy {
@@ -2133,7 +2137,7 @@ mod tests {
         start_game(&mut app);
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         set_captain_policy(&mut app, always_on_policy());
@@ -2177,7 +2181,7 @@ mod tests {
         app.init_resource::<crate::world::server::WorldContentRuntime>();
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         set_captain_policy(&mut app, flag_gated);
@@ -2209,7 +2213,7 @@ mod tests {
         start_game(&mut app);
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         set_captain_policy(&mut app, idle_policy());
@@ -2230,7 +2234,7 @@ mod tests {
     /// only while the template is being loaded.
     #[test]
     fn a_policy_authored_in_an_included_fragment_drives_red_alert() {
-        let config = crate::entity_includes::load_entity_config(
+        let config = crate::entities::include_resolve::load_entity_config(
             "assets/entities/fragments/composed_escort.toml",
         )
         .expect("the composed fixture hull must resolve and validate");
@@ -2257,7 +2261,7 @@ mod tests {
         start_game(&mut app);
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         set_captain_policy(&mut app, composed);
@@ -2283,7 +2287,7 @@ mod tests {
         start_game(&mut app);
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         set_activity_last_damage(&mut app, Some(0.0));
@@ -2293,7 +2297,7 @@ mod tests {
         // Human takes over; combat ends.
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Human,
         );
         set_activity_last_damage(&mut app, None);
@@ -2307,7 +2311,7 @@ mod tests {
         // AI reacquires with no combat history → stateless recompute stands down.
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         tick(&mut app);
@@ -2326,7 +2330,7 @@ mod tests {
         start_game(&mut app);
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
         set_red_alert_offline(&mut app, true);
@@ -2348,9 +2352,9 @@ mod tests {
 
     // ── Blackboard publish tests ─────────────────────────────────────────────
 
-    use crate::damage::SystemHull;
-    use crate::messages::SystemId;
+    use crate::core::messages::SystemId;
     use crate::objectives::ObjectiveManager;
+    use crate::ship::damage::SystemHull;
     use crate::world::server::ObjectiveManagerRes;
 
     /// Minimal app: just publish_captain_blackboard + per-entity components.
@@ -2367,10 +2371,10 @@ mod tests {
         app.world_mut().spawn((
             crate::server_app::Ship,
             crate::server_app::LocalShip,
-            crate::ship_state::ShipRedAlert::default(),
-            crate::ship_state::ShipViewMode::default(),
+            crate::ship::state::ShipRedAlert::default(),
+            crate::ship::state::ShipViewMode::default(),
             ShipSystemControlSources::default(),
-            crate::entity_spawner::EntitySystemHull(hull),
+            crate::entities::spawner::EntitySystemHull(hull),
             crate::server_app::ShipSystemBlackboards::default(),
         ));
         app
@@ -2385,7 +2389,7 @@ mod tests {
             .unwrap();
         app.world_mut()
             .entity_mut(ship)
-            .get_mut::<crate::entity_spawner::EntitySystemHull>()
+            .get_mut::<crate::entities::spawner::EntitySystemHull>()
             .unwrap()
             .0
             .apply_damage(amount, &mut rng);
@@ -2415,7 +2419,7 @@ mod tests {
                 .query_filtered::<&mut ShipSystemControlSources, With<LocalShip>>();
             if let Ok(mut cs) = q.single_mut(app.world_mut()) {
                 cs.0.set(
-                    crate::system_registry::red_alert_system_id(),
+                    crate::ship::system_registry::red_alert_system_id(),
                     ControlSource::Ai,
                 );
             }
@@ -2426,7 +2430,7 @@ mod tests {
         assert!(bb.red_alert_auto);
         assert_eq!(
             bb.red_alert_system_id,
-            crate::system_registry::red_alert_system_id()
+            crate::ship::system_registry::red_alert_system_id()
         );
     }
 
@@ -2439,7 +2443,7 @@ mod tests {
                 .query_filtered::<&mut ShipSystemControlSources, With<LocalShip>>();
             if let Ok(mut cs) = q.single_mut(app.world_mut()) {
                 cs.0.set(
-                    crate::system_registry::viewscreen_system_id(),
+                    crate::ship::system_registry::viewscreen_system_id(),
                     ControlSource::Ai,
                 );
             }
@@ -2453,7 +2457,7 @@ mod tests {
         );
         assert_eq!(
             bb.viewscreen_system_id,
-            crate::system_registry::viewscreen_system_id()
+            crate::ship::system_registry::viewscreen_system_id()
         );
     }
 
@@ -2502,7 +2506,7 @@ mod tests {
         {
             let mut q = app
                 .world_mut()
-                .query_filtered::<&mut crate::ship_state::ShipViewMode, With<LocalShip>>();
+                .query_filtered::<&mut crate::ship::state::ShipViewMode, With<LocalShip>>();
             if let Ok(mut vm) = q.single_mut(app.world_mut()) {
                 vm.view_mode = ViewMode::Radar;
             }
@@ -2513,7 +2517,7 @@ mod tests {
 
     // ── #574 objective filtering + priority boost tests ──────────────────────
 
-    use crate::messages::ObjectiveSource;
+    use crate::core::messages::ObjectiveSource;
     use crate::objectives::{UtilityConfig, ZeroGateCondition};
 
     fn doctrine_objective_manager() -> ObjectiveManager {
@@ -2524,7 +2528,7 @@ mod tests {
             "Destroy hostiles",
             false,
             vec![],
-            crate::messages::AiDirective::None,
+            crate::core::messages::AiDirective::None,
             UtilityConfig {
                 base_priority: 30.0,
                 zero_gates: vec![ZeroGateCondition {
@@ -2673,7 +2677,7 @@ mod tests {
             &mut app,
             "captain",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::captain_system_id(),
+                target: crate::ship::system_registry::captain_system_id(),
                 payload: SystemControlPayload::SetObjectivePriority {
                     id: "destroy-hostiles".into(),
                 },
@@ -2695,7 +2699,7 @@ mod tests {
             .insert_resource(crate::server_app::CaptainPriorityBoost::default());
         start_game(&mut app);
         let set_priority = || ClientMessage::ControlSystem {
-            target: crate::system_registry::captain_system_id(),
+            target: crate::ship::system_registry::captain_system_id(),
             payload: SystemControlPayload::SetObjectivePriority {
                 id: "destroy-hostiles".into(),
             },
@@ -2730,7 +2734,7 @@ mod tests {
         start_game(&mut app);
         set_control_source(
             &mut app,
-            crate::system_registry::red_alert_system_id(),
+            crate::ship::system_registry::red_alert_system_id(),
             ControlSource::Ai,
         );
 
@@ -2762,7 +2766,7 @@ mod tests {
         let npc_control_sources = {
             let mut cs = ShipSystemControlSources::default();
             cs.0.set(
-                crate::system_registry::red_alert_system_id(),
+                crate::ship::system_registry::red_alert_system_id(),
                 ControlSource::Ai,
             );
             cs
@@ -2773,11 +2777,11 @@ mod tests {
                 Ship,
                 ShipConfigComponent::default(),
                 npc_control_sources,
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
-                crate::ship_state::ShipRedAlert::default(),
-                crate::ship_state::ShipViewMode::default(),
+                crate::ship::state::ShipRedAlert::default(),
+                crate::ship::state::ShipViewMode::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
                 RecentCombatActivity {
                     last_damage_taken: Some(0.0),
@@ -2785,9 +2789,12 @@ mod tests {
                 },
                 crate::server_app::WeaponFiredThisTick::default(),
                 crate::server_app::ShipAttackedThisTick::default(),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
-                    (crate::messages::SystemId("captain".into()), 100.0),
-                ])),
+                crate::entities::spawner::EntitySystemHull(
+                    crate::ship::damage::SystemHull::from_config(&[(
+                        crate::core::messages::SystemId("captain".into()),
+                        100.0,
+                    )]),
+                ),
                 // The NPC authors its own Captain policy too — the declaration
                 // is per-ENTITY and nothing is synthesised for it since #885b
                 // stage 5d.
@@ -2806,7 +2813,7 @@ mod tests {
         let npc_red_alert = app
             .world()
             .entity(npc)
-            .get::<crate::ship_state::ShipRedAlert>()
+            .get::<crate::ship::state::ShipRedAlert>()
             .expect("NPC must carry ShipRedAlert")
             .0;
         assert!(
@@ -2834,7 +2841,7 @@ mod tests {
         let npc_control_sources = {
             let mut cs = ShipSystemControlSources::default();
             cs.0.set(
-                crate::system_registry::red_alert_system_id(),
+                crate::ship::system_registry::red_alert_system_id(),
                 ControlSource::Ai,
             );
             cs
@@ -2845,18 +2852,21 @@ mod tests {
                 Ship,
                 ShipConfigComponent::default(),
                 npc_control_sources,
-                crate::messages::AdmittedCommands::default(),
+                crate::core::messages::AdmittedCommands::default(),
                 crate::ship_plugin::ActiveStationRatings::default(),
                 crate::ship_plugin::CoordinationQueue::default(),
-                crate::ship_state::ShipRedAlert::default(),
-                crate::ship_state::ShipViewMode::default(),
+                crate::ship::state::ShipRedAlert::default(),
+                crate::ship::state::ShipViewMode::default(),
                 crate::server_app::ShipSystemBlackboards::default(),
                 RecentCombatActivity::default(),
                 crate::server_app::WeaponFiredThisTick::default(),
                 crate::server_app::ShipAttackedThisTick::default(),
-                crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[
-                    (crate::messages::SystemId("captain".into()), 100.0),
-                ])),
+                crate::entities::spawner::EntitySystemHull(
+                    crate::ship::damage::SystemHull::from_config(&[(
+                        crate::core::messages::SystemId("captain".into()),
+                        100.0,
+                    )]),
+                ),
             ))
             .id();
         let npc_uuid = uuid::Uuid::new_v4().to_string();
@@ -2868,7 +2878,7 @@ mod tests {
             &mut app,
             &format!("ai:{npc_uuid}"),
             ClientMessage::ControlSystem {
-                target: SystemId(crate::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
+                target: SystemId(crate::ship::system_registry::RED_ALERT_SYSTEM_ID.to_string()),
                 payload: SystemControlPayload::SetRedAlert { active: true },
             },
         );
@@ -2877,7 +2887,7 @@ mod tests {
         let npc_red_alert = app
             .world()
             .entity(npc)
-            .get::<crate::ship_state::ShipRedAlert>()
+            .get::<crate::ship::state::ShipRedAlert>()
             .unwrap()
             .0;
         assert!(

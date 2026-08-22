@@ -80,7 +80,7 @@ pub fn client_stamp_from_request(req: &http::Request) -> Option<DeliveryStamp> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::PROTOCOL_VERSION;
+    use crate::core::messages::PROTOCOL_VERSION;
 
     fn request(head: &str) -> http::Request {
         http::parse_request(head).expect("well-formed head")

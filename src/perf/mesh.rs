@@ -310,7 +310,7 @@ struct RootedFragmentSource<'a> {
     root: &'a Path,
 }
 
-impl crate::entity_includes::FragmentSource for RootedFragmentSource<'_> {
+impl crate::entities::include_resolve::FragmentSource for RootedFragmentSource<'_> {
     fn read(&self, path: &str) -> Option<String> {
         std::fs::read_to_string(self.root.join(path)).ok()
     }
@@ -339,7 +339,7 @@ fn reachable_models(root: &Path) -> Result<ReachableModels, MeasureError> {
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        let config = crate::entity_includes::resolve_template(&template_path, &source)
+        let config = crate::entities::include_resolve::resolve_template(&template_path, &source)
             .and_then(|resolved| resolved.parse())
             .map_err(|error| {
                 MeasureError::Failed(format!("entity template {template_path}: {error}"))
@@ -352,11 +352,13 @@ fn reachable_models(root: &Path) -> Result<ReachableModels, MeasureError> {
         };
         let variant = mesh.variant;
         let flat_model = asset_server_model_path(&flat_model);
-        let sidecar =
-            crate::model_rig::sidecar_path(&format!("assets/{flat_model}"), variant.as_deref());
+        let sidecar = crate::entities::model_rig::sidecar_path(
+            &format!("assets/{flat_model}"),
+            variant.as_deref(),
+        );
         let rig = std::fs::read_to_string(root.join(&sidecar))
             .ok()
-            .and_then(|text| crate::model_rig::ModelRig::from_toml(&text).ok());
+            .and_then(|text| crate::entities::model_rig::ModelRig::from_toml(&text).ok());
 
         let Some(rig) = rig.filter(|rig| !rig.lod.is_empty()) else {
             if !is_remesh_model(&flat_model) {

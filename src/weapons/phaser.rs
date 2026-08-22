@@ -260,7 +260,7 @@ pub fn in_arc(radar_x: f32, radar_y: f32, facing_deg: f32, arc_deg: f32) -> bool
     angle_diff(bearing, facing).abs() <= half
 }
 
-/// Compute the shared [`crate::messages::WeaponTargetGeometry`] for one weapon
+/// Compute the shared [`crate::core::messages::WeaponTargetGeometry`] for one weapon
 /// instance from a world-space target, the shooter's physics, and the weapon's
 /// effective range + fire arc (issue #764).
 ///
@@ -277,7 +277,7 @@ pub fn target_geometry(
     effective_range: f32,
     facing_deg: f32,
     fire_arc_deg: f32,
-) -> crate::messages::WeaponTargetGeometry {
+) -> crate::core::messages::WeaponTargetGeometry {
     let (rx, ry) = ship_local(target_x, target_z, ship_x, ship_z, ship_yaw);
     let dx = target_x - ship_x;
     let dz = target_z - ship_z;
@@ -287,7 +287,7 @@ pub fn target_geometry(
     let facing = facing_deg.to_radians();
     let arc_offset = angle_diff(bearing, facing).abs();
     let in_arc = arc_offset <= fire_arc_deg.to_radians() * 0.5;
-    crate::messages::WeaponTargetGeometry {
+    crate::core::messages::WeaponTargetGeometry {
         range,
         arc_offset_deg: arc_offset.to_degrees(),
         in_range,

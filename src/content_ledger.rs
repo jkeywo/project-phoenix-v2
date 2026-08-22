@@ -18,7 +18,7 @@
 //! * Entity templates and their `includes` fragments —
 //!   `entity_loader::FsTemplateLoader::load_template` on native,
 //!   `config_cache::wasm_load_config`'s resolved-template loop on wasm. Both
-//!   record the same thing: [`crate::entity_includes::ResolvedTemplate::toml`],
+//!   record the same thing: [`crate::entities::include_resolve::ResolvedTemplate::toml`],
 //!   the byte-stable composed document, keyed by the template's canonical
 //!   path — so a shared fragment moving the digest is visible on either
 //!   target without the two recording different shapes.
@@ -76,7 +76,7 @@ thread_local! {
 /// for identical authored paths regardless of which slash style the host
 /// delivered.
 pub fn normalize_key(path: &str) -> String {
-    crate::entity_includes::canonical_template_path(path)
+    crate::entities::include_resolve::canonical_template_path(path)
 }
 
 /// Record that the loader consumed `text` at `path`. Stores only `text`'s
@@ -170,7 +170,7 @@ impl ContentLedger {
 /// parsed and before anything spawns.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn eager_record_world_entities(world_config: &crate::world::config::WorldConfig) {
-    use crate::entity_loader::TemplateLoader;
+    use crate::entities::loader::TemplateLoader;
     use std::collections::HashSet;
 
     let mut queue: Vec<String> = world_config
@@ -185,8 +185,10 @@ pub fn eager_record_world_entities(world_config: &crate::world::config::WorldCon
         if !visited.insert(key) {
             continue;
         }
-        if let Some(config) = crate::entity_loader::FsTemplateLoader.load_template(&path) {
-            queue.extend(crate::config_cache::nested_template_paths(&config));
+        if let Some(config) = crate::entities::loader::FsTemplateLoader.load_template(&path) {
+            queue.extend(crate::entities::config_cache::nested_template_paths(
+                &config,
+            ));
         }
     }
 }

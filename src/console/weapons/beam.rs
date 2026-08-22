@@ -7,15 +7,15 @@
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::ReadRapierContext;
 
-use crate::entity_spawner::{EntitySystemHull, FactionComponent};
-use crate::lobby::{Target, WorldResource};
-use crate::messages::{
+use crate::core::messages::{
     AdmittedCommands, GamePhase, ModifierSlot, PhaserBank, PhaserMode, ServerMessage,
     SystemBlackboard, SystemControlPayload,
 };
+use crate::entities::spawner::{EntitySystemHull, FactionComponent};
+use crate::lobby::{Target, WorldResource};
+use crate::server_app::{AsteroidUuid, GameOverReason, SimOutbox};
+use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::ship_state::ShipPhysics;
-use crate::simulation::{AsteroidUuid, GameOverReason, SimOutbox};
 
 use super::shared::{
     any_bank_accepts_human_input, any_bank_operates_ai, live_entity_xz, system_is_registered,
@@ -31,7 +31,7 @@ use super::{AsteroidDestroyedVfx, ShipDestroyedVfx, DEFAULT_SHIP_EXPLOSION_RADIU
 // `server_app.rs` references it as a documented baseline; gameplay systems
 // must read the resource.
 pub const BEAM_DAMAGE_PER_SEC: f32 =
-    crate::entity_config::PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC;
+    crate::entities::config::PhaserCombatConfig::DEFAULT_BEAM_DAMAGE_PER_SEC;
 
 /// The currently locked target UUID on the Weapons console. `None` means no
 /// lock is active.
@@ -297,11 +297,11 @@ impl PhaserCooldown {
 
 /// Current phaser firing mode (Auto or Manual), set by the Weapons console.
 #[derive(Resource)]
-pub struct CurrentPhaserMode(pub crate::messages::PhaserMode);
+pub struct CurrentPhaserMode(pub crate::core::messages::PhaserMode);
 
 impl Default for CurrentPhaserMode {
     fn default() -> Self {
-        Self(crate::messages::PhaserMode::Manual)
+        Self(crate::core::messages::PhaserMode::Manual)
     }
 }
 
@@ -317,7 +317,7 @@ impl Default for CurrentPhaserMode {
 /// Derives both `Resource` (existing player-ship singleton path) and
 /// `Component` (per-entity path, PR 5 unification).
 #[derive(Resource, Component, Default, Clone)]
-pub struct PhaserCombatConfigResource(pub crate::entity_config::PhaserCombatConfig);
+pub struct PhaserCombatConfigResource(pub crate::entities::config::PhaserCombatConfig);
 
 /// Per-ship map of each phaser bank's inline stateless open-fire policy
 /// (issue #781), keyed by the same bank id used everywhere else
@@ -334,7 +334,10 @@ pub struct PhaserCombatConfigResource(pub crate::entity_config::PhaserCombatConf
 /// being absent (bare-`App` fixtures) means "every bank fires unconditionally".
 #[derive(Component, Default, Clone, Debug)]
 pub struct PhaserBankAiPolicies(
-    pub std::collections::HashMap<crate::entity_config::PhaserBankId, crate::ai::policy::AiPolicy>,
+    pub  std::collections::HashMap<
+        crate::entities::config::PhaserBankId,
+        crate::ai::policy::AiPolicy,
+    >,
 );
 
 /// Seed the per-tick policy fact snapshot for one phaser bank's open-fire
@@ -346,7 +349,7 @@ pub struct PhaserBankAiPolicies(
 /// calling this, so the policy evaluates over the real per-bank state while
 /// `policy.rs` stays Bevy-free (AGENTS.md #10).
 /// `red_alert` is the SHIP-WIDE reading added by issue #872: this ship's own
-/// [`crate::ship_state::ShipRedAlert`], the same per-entity state the captain's
+/// [`crate::ship::state::ShipRedAlert`], the same per-entity state the captain's
 /// `SetRedAlert` command writes for human and AI captains alike. It is seeded
 /// unconditionally (a ship with no component reads `0.0`, not absent) so an
 /// authored guard can read it in BOTH directions rather than only failing
@@ -416,14 +419,16 @@ pub struct BeamEndedEvent {
 pub(crate) fn on_beam_started(
     trigger: On<BeamStartedEvent>,
     mut outbox: ResMut<SimOutbox>,
-    ship_q: Query<&crate::entity_spawner::EntityUuid>,
+    ship_q: Query<&crate::entities::spawner::EntityUuid>,
     mut weapon_fired_q: Query<&mut crate::server_app::WeaponFiredThisTick>,
     // `Option<Res<_>>`, never bare — observers run in bare-`App` weapons
     // fixtures with no `LogFilterConfig` inserted (see logging macro docs).
     log: Option<Res<crate::logging::LogFilterConfig>>,
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
 ) {
     let ev = trigger.event();
     if let Ok(mut wf) = weapon_fired_q.get_mut(ev.source_entity) {
@@ -447,10 +452,10 @@ pub(crate) fn on_beam_started(
     // from the `DamageApplied` each tick it burns). Unconditional — all ships,
     // all builds. Blank uuid → `None`, matching the DamageApplied convention.
     if let Some(ref mut msgs) = balance_events {
-        msgs.write(crate::balance::BalanceEvent::WeaponFired {
+        msgs.write(crate::core::balance::BalanceEvent::WeaponFired {
             shooter: Some(source_uuid.clone()).filter(|u| !u.is_empty()),
             weapon: ev.bank.clone(),
-            kind: crate::balance::FIRED_KIND_BEAM.to_string(),
+            kind: crate::core::balance::FIRED_KIND_BEAM.to_string(),
         });
     }
     outbox.0.push((
@@ -466,7 +471,7 @@ pub(crate) fn on_beam_started(
 pub(crate) fn on_beam_ended(
     trigger: On<BeamEndedEvent>,
     mut outbox: ResMut<SimOutbox>,
-    ship_q: Query<&crate::entity_spawner::EntityUuid>,
+    ship_q: Query<&crate::entities::spawner::EntityUuid>,
     log: Option<Res<crate::logging::LogFilterConfig>>,
 ) {
     let ev = trigger.event();
@@ -538,13 +543,13 @@ pub(crate) fn handle_set_target(
             &ShipPhysics,
             &mut TacticalRadarSelection,
             Option<&crate::modifiers::ShipModifiers>,
-            Option<&crate::entity_spawner::WeaponsConsoleSection>,
+            Option<&crate::entities::spawner::WeaponsConsoleSection>,
         ),
         With<crate::server_app::Ship>,
     >,
     mut outbox: ResMut<SimOutbox>,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
     for (admitted, physics, mut weapons_target, modifiers, weapons_section) in ship_query.iter_mut()
     {
@@ -558,7 +563,7 @@ pub(crate) fn handle_set_target(
         let range_bounds_targets =
             effective_weapons_range > 0.0 && effective_weapons_range.is_finite();
 
-        for cmd in admitted.for_target(crate::system_registry::TACTICAL_RADAR_SYSTEM_ID) {
+        for cmd in admitted.for_target(crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID) {
             let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
                 continue;
             };
@@ -624,10 +629,10 @@ pub(crate) fn handle_fire_phaser(
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    use crate::entity_config::PhaserCombatConfig;
+    use crate::entities::config::PhaserCombatConfig;
 
     for (
         ship_entity,
@@ -656,7 +661,7 @@ pub(crate) fn handle_fire_phaser(
                 raw
             } else {
                 combat_config.0.banks.iter().find_map(|b| {
-                    crate::system_registry::phaser_bank_system_id(&b.id)
+                    crate::ship::system_registry::phaser_bank_system_id(&b.id)
                         .filter(|id| id == &cmd.target)
                         .map(|_| b.id.clone())
                 })
@@ -665,7 +670,7 @@ pub(crate) fn handle_fire_phaser(
             };
 
             // Verify the bank is registered and operable.
-            let bank_system_id = crate::system_registry::phaser_bank_system_id(&bank_id)
+            let bank_system_id = crate::ship::system_registry::phaser_bank_system_id(&bank_id)
                 .filter(|id| system_is_registered(control_sources, id));
             let policy = match &bank_system_id {
                 Some(id) => control_sources.0.policy_for(id),
@@ -690,7 +695,7 @@ pub(crate) fn handle_fire_phaser(
             // Target: the combat lock from the ship's viewscreen blackboard.
             let Some(target_uuid) = (match blackboards
                 .0
-                .get(&crate::system_registry::viewscreen_system_id())
+                .get(&crate::ship::system_registry::viewscreen_system_id())
             {
                 Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
                 _ => None,
@@ -823,7 +828,7 @@ pub(crate) fn ai_phaser_auto_fire(
         (
             Entity,
             bevy::ecs::query::Has<crate::server_app::LocalShip>,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &ShipSystemControlSources,
             Option<&crate::ship_plugin::ShipConfigComponent>,
             &ShipPhysics,
@@ -833,7 +838,7 @@ pub(crate) fn ai_phaser_auto_fire(
             &mut AdmittedCommands,
             Option<&PhaserCombatConfigResource>,
             Option<&PhaserBankAiPolicies>,
-            Option<&crate::ship_state::ShipPhaserFrequency>,
+            Option<&crate::ship::state::ShipPhaserFrequency>,
             // The three posture inputs are grouped into ONE Bundle query item so
             // the tuple stays within Bevy's 15-element ceiling now the Command
             // stance rides here too (issue #1107):
@@ -846,17 +851,17 @@ pub(crate) fn ai_phaser_auto_fire(
             //     neutral-stance path. Every one is `Option<&_>` so a bare-`App`
             //     fixture that spawns none behaves exactly as before.
             (
-                Option<&crate::ship_state::ShipRedAlert>,
-                Option<&crate::ship_state::ShipWeaponsHold>,
+                Option<&crate::ship::state::ShipRedAlert>,
+                Option<&crate::ship::state::ShipWeaponsHold>,
                 Option<&crate::console::command::server::ShipStationStances>,
             ),
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
 ) {
-    use crate::entity_config::PhaserCombatConfig;
+    use crate::entities::config::PhaserCombatConfig;
 
     for (
         ship_entity,
@@ -920,7 +925,7 @@ pub(crate) fn ai_phaser_auto_fire(
             // `tactical` fallback (issue #801).
             None => combat_config_opt.is_some_and(|cc| {
                 cc.0.banks.iter().any(|b| {
-                    crate::system_registry::phaser_bank_system_id(&b.id)
+                    crate::ship::system_registry::phaser_bank_system_id(&b.id)
                         .is_some_and(|id| control_sources.0.policy_for(&id).operate_ai)
                 })
             }),
@@ -942,7 +947,7 @@ pub(crate) fn ai_phaser_auto_fire(
         // reads the aggregated viewscreen fact.
         let Some(target_uuid) = (match blackboards
             .0
-            .get(&crate::system_registry::viewscreen_system_id())
+            .get(&crate::ship::system_registry::viewscreen_system_id())
         {
             Some(SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
             _ => None,
@@ -1003,7 +1008,9 @@ pub(crate) fn ai_phaser_auto_fire(
                 .iter()
                 .filter_map(|b| {
                     // Per-bank fine-system gate — skip offline banks.
-                    if let Some(bank_id) = crate::system_registry::phaser_bank_system_id(&b.id) {
+                    if let Some(bank_id) =
+                        crate::ship::system_registry::phaser_bank_system_id(&b.id)
+                    {
                         // Per-bank Control-Source gate through the shared AI host
                         // spine (issue #1208): skip offline/human banks. The
                         // per-bank FIRE resolution stays in
@@ -1074,13 +1081,13 @@ pub(crate) fn ai_phaser_auto_fire(
         // bank's own policy) still applied independently to each.
         for bank_id in bank_ids {
             // Emit as an admitted command through the shared AI seam.
-            let Some(target) = crate::system_registry::phaser_bank_system_id(&bank_id) else {
+            let Some(target) = crate::ship::system_registry::phaser_bank_system_id(&bank_id) else {
                 continue;
             };
             crate::command_admission::ai_emit::emit_ai_command(
                 entity_uuid,
                 target,
-                crate::messages::SystemControlPayload::FirePhaser,
+                crate::core::messages::SystemControlPayload::FirePhaser,
                 control_sources,
                 &sessions,
                 ship_config_opt,
@@ -1129,7 +1136,7 @@ pub(crate) fn tick_beams_prepare(
     mut ship_q: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &ShipPhysics,
             &mut ActiveBeam,
             &mut PhaserCooldown,
@@ -1145,25 +1152,25 @@ pub(crate) fn tick_beams_prepare(
             // Shooter's faction for LOS friendly-fire check.
             Option<&FactionComponent>,
             // Shooter's phaser frequency for frequency-matching damage (issue #679).
-            Option<&crate::ship_state::ShipPhaserFrequency>,
+            Option<&crate::ship::state::ShipPhaserFrequency>,
         ),
         With<crate::server_app::Ship>,
     >,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     // LOS raycast parameters (optional so tests without RapierPhysicsPlugin still pass).
     rapier_context: Option<ReadRapierContext>,
     faction_registry: Option<Res<crate::entities::config_cache::FactionRegistryResource>>,
     // Read-only lookup: entity → UUID + faction, used to classify the LOS blocker.
     blocker_info_q: Query<(
         Entity,
-        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&crate::entities::spawner::EntityUuid>,
         Option<&AsteroidUuid>,
         Option<&FactionComponent>,
     )>,
     mut beam_context: ResMut<BeamContext>,
 ) {
-    use crate::entity_config::PhaserCombatConfig;
+    use crate::entities::config::PhaserCombatConfig;
 
     let dt = time.delta_secs();
 
@@ -1393,7 +1400,11 @@ pub(crate) fn tick_beams_prepare(
                                             &faction_registry,
                                         ) {
                                             (Some(sf), Some(bf), Some(reg)) => {
-                                                !crate::faction::is_enemy(Some(sf), Some(bf), reg)
+                                                !crate::ai::faction::is_enemy(
+                                                    Some(sf),
+                                                    Some(bf),
+                                                    reg,
+                                                )
                                             }
                                             // No faction data → treat as non-friendly (takes damage).
                                             _ => false,
@@ -1510,7 +1521,7 @@ pub(crate) fn tick_beams_apply_damage(
     mut hull_q: Query<(
         Entity,
         Option<&AsteroidUuid>,
-        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&crate::entities::spawner::EntityUuid>,
         Option<&Transform>,
         Option<&ShipPhysics>,
         &mut EntitySystemHull,
@@ -1518,14 +1529,14 @@ pub(crate) fn tick_beams_apply_damage(
         Option<&mut crate::server_app::ShipAttackedThisTick>,
         Option<&mut LastShipAttacker>,
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
-        Option<&mut crate::entity_spawner::EntityShipArcHull>,
-        Option<&crate::entity_spawner::ColliderSection>,
+        Option<&mut crate::entities::spawner::EntityShipArcHull>,
+        Option<&crate::entities::spawner::ColliderSection>,
     )>,
     mut world: ResMut<WorldResource>,
     mut outbox: Option<ResMut<SimOutbox>>,
     mut next_state: Option<ResMut<NextState<GamePhase>>>,
     mut game_over_reason: Option<ResMut<GameOverReason>>,
-    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    mut destroyed_events: MessageWriter<crate::ai::server::AiEntityDestroyed>,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
     mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
     mut beam_context: ResMut<BeamContext>,
@@ -1533,7 +1544,7 @@ pub(crate) fn tick_beams_apply_damage(
     // fixtures that never registered the message still pass Bevy's parameter
     // validation. Balance telemetry must never be the reason a test app fails
     // to run.
-    mut balance_events: Option<ResMut<Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<ResMut<Messages<crate::core::balance::BalanceEvent>>>,
     sim_rng: Option<Res<crate::sim_rng::SimRng>>,
     // Single-emission bookkeeping (issue #838): this kill site is the eager
     // emitter of `EntityDespawned`, so it must forget the uuid from the
@@ -1573,7 +1584,7 @@ pub(crate) fn tick_beams_apply_damage(
         }
 
         // Instagib: local ship deals 100x damage.
-        if state.is_local_shooter && crate::bridge::is_instagib() {
+        if state.is_local_shooter && crate::server::bridge::is_instagib() {
             state.damage_to_apply = state.damage_to_apply.saturating_mul(100);
         }
 
@@ -1702,7 +1713,7 @@ pub(crate) fn tick_beams_apply_damage(
                 if all_offline {
                     (base_damage as f32, 0.0f32)
                 } else {
-                    let (pierced, absorbed) = crate::damage::split_damage_for_pierce(
+                    let (pierced, absorbed) = crate::ship::damage::split_damage_for_pierce(
                         base_damage as f32,
                         state.shield_pierce,
                     );
@@ -1713,7 +1724,7 @@ pub(crate) fn tick_beams_apply_damage(
                         // (bearing = 0.0 in that degenerate case).
                         let target_yaw = target_physics_opt.map(|p| p.yaw).unwrap_or(0.0);
                         match target_tf {
-                            Some(tf) => crate::shield::attacker_bearing_relative(
+                            Some(tf) => crate::weapons::shield::attacker_bearing_relative(
                                 state.shooter_x,
                                 state.shooter_z,
                                 tf.translation.x,
@@ -1741,8 +1752,11 @@ pub(crate) fn tick_beams_apply_damage(
                     sim_rng.as_deref(),
                     crate::sim_rng::SimStream::BeamDamage,
                     |rng| {
-                        let result =
-                            crate::damage::apply_hull_damage(&mut hull_comp.0, damage_to_hull, rng);
+                        let result = crate::ship::damage::apply_hull_damage(
+                            &mut hull_comp.0,
+                            damage_to_hull,
+                            rng,
+                        );
                         // Distribute the same absorbed amount across per-arc
                         // hull (issue #514). Skipped when the target has no
                         // `EntityShipArcHull` (NPCs, asteroids).
@@ -1777,7 +1791,7 @@ pub(crate) fn tick_beams_apply_damage(
                                 reason.0 = Some("server.game_over.ship_destroyed".into());
                                 // The LocalShip died → defeat (#843), latched
                                 // under the same first-write guard as the reason.
-                                reason.1 = Some(crate::balance::Outcome::Defeat);
+                                reason.1 = Some(crate::core::balance::Outcome::Defeat);
                                 // EntityDestroyed for the player death, exactly
                                 // once (guarded by the first-write of the reason).
                                 // Killer credit = the beam's shooter (issue #841).
@@ -1801,11 +1815,13 @@ pub(crate) fn tick_beams_apply_damage(
                                 // The same coupling holds at the blaster,
                                 // collision, and region death sites.
                                 if let Some(ref mut msgs) = balance_events {
-                                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
-                                        victim: state.effective_target_uuid.clone(),
-                                        killer: Some(state.shooter_uuid.clone())
-                                            .filter(|u| !u.is_empty()),
-                                    });
+                                    msgs.write(
+                                        crate::core::balance::BalanceEvent::EntityDestroyed {
+                                            victim: state.effective_target_uuid.clone(),
+                                            killer: Some(state.shooter_uuid.clone())
+                                                .filter(|u| !u.is_empty()),
+                                        },
+                                    );
                                 }
                             }
                         }
@@ -1851,7 +1867,7 @@ pub(crate) fn tick_beams_apply_damage(
             // Balance tracer. Deliberately outside every `is_local` branch
             // above: the whole point is to see both halves of a fight.
             if let Some(ref mut msgs) = balance_events {
-                msgs.write(crate::balance::BalanceEvent::DamageApplied {
+                msgs.write(crate::core::balance::BalanceEvent::DamageApplied {
                     // `ShooterState.shooter_uuid` is empty for a shooter with
                     // no `EntityUuid`. That is "unknown", not a ship called
                     // "" — every chokepoint models an unknown attacker as
@@ -1860,9 +1876,9 @@ pub(crate) fn tick_beams_apply_damage(
                     attacker: Some(state.shooter_uuid.clone()).filter(|u| !u.is_empty()),
                     victim: state.effective_target_uuid.clone(),
                     victim_kind: if is_asteroid {
-                        crate::balance::VictimKind::Asteroid
+                        crate::core::balance::VictimKind::Asteroid
                     } else {
-                        crate::balance::VictimKind::Ship
+                        crate::core::balance::VictimKind::Ship
                     },
                     weapon: state.active_bank.clone(),
                     amount: base_damage as f32,
@@ -1887,10 +1903,12 @@ pub(crate) fn tick_beams_apply_damage(
                                 .map(|f| !f.is_online())
                                 .unwrap_or(false);
                             if now_offline {
-                                msgs.write(crate::balance::BalanceEvent::ShieldArcCollapsed {
-                                    ship: state.effective_target_uuid.clone(),
-                                    arc_id: id.clone(),
-                                });
+                                msgs.write(
+                                    crate::core::balance::BalanceEvent::ShieldArcCollapsed {
+                                        ship: state.effective_target_uuid.clone(),
+                                        arc_id: id.clone(),
+                                    },
+                                );
                             }
                         }
                     }
@@ -1950,7 +1968,7 @@ pub(crate) fn tick_beams_apply_damage(
                     ));
                 }
             } else {
-                destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
+                destroyed_events.write(crate::ai::server::AiEntityDestroyed {
                     entity_uuid: state.effective_target_uuid.clone(),
                 });
                 ship_vfx_events.write(ShipDestroyedVfx {
@@ -1975,7 +1993,7 @@ pub(crate) fn tick_beams_apply_damage(
                 // AiEntityDestroyed write so it fires exactly once. Killer
                 // credit = the beam's shooter (issue #841).
                 if let Some(ref mut msgs) = balance_events {
-                    msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                    msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
                         victim: state.effective_target_uuid.clone(),
                         killer: Some(state.shooter_uuid.clone()).filter(|u| !u.is_empty()),
                     });
@@ -2074,7 +2092,7 @@ pub(crate) fn handle_set_phaser_mode(
     if !any_bank_accepts_human_input(control_sources, &ship_config.0) {
         return;
     }
-    for cmd in admitted.for_target(crate::system_registry::PHASER_CONTROL_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID) {
         if let SystemControlPayload::SetPhaserMode { mode } = &cmd.payload {
             phaser_mode.0 = *mode;
         }
@@ -2091,7 +2109,7 @@ pub(crate) fn handle_set_phaser_frequency(
         With<crate::server_app::LocalShip>,
     >,
     mut freq_q: Query<
-        &mut crate::ship_state::ShipPhaserFrequency,
+        &mut crate::ship::state::ShipPhaserFrequency,
         With<crate::server_app::LocalShip>,
     >,
 ) {
@@ -2102,7 +2120,7 @@ pub(crate) fn handle_set_phaser_frequency(
     if !any_bank_accepts_human_input(control_sources, &ship_config.0) {
         return;
     }
-    for cmd in admitted.for_target(crate::system_registry::PHASER_CONTROL_SYSTEM_ID) {
+    for cmd in admitted.for_target(crate::ship::system_registry::PHASER_CONTROL_SYSTEM_ID) {
         if let SystemControlPayload::SetPhaserFrequency { frequency } = &cmd.payload {
             if let Some(mut freq) = freq_q.iter_mut().next() {
                 freq.0 = frequency.clamp(0.0, 1.0);

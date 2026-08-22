@@ -2,13 +2,13 @@ use bevy::prelude::*;
 
 use crate::lobby::Sessions;
 use crate::server_app::{LocalShip, Ship};
+use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship::components::{
     BoostConfigResource, ImpulseConfigResource, LastHelmInput, ShipConfigComponent,
     ShipSystemControlSources,
 };
 use crate::ship::helm::ImpulseCommand;
 use crate::ship::helm_ai::helm_axes_operate_ai;
-use crate::simulation::{ShipBoost, ShipImpulse};
 
 /// Hull-damage impulse auto-cancel (issue #695, reshaped by #824): writes an
 /// `Idle` `ImpulseCommand` intent when the LocalShip's hull took damage this
@@ -26,7 +26,7 @@ use crate::simulation::{ShipBoost, ShipImpulse};
 pub fn handle_impulse_messages(
     impulse_q: Query<&ShipImpulse, With<LocalShip>>,
     mut impulse_cmd_q: Query<&mut ImpulseCommand, With<LocalShip>>,
-    hull_q: Query<&crate::entity_spawner::EntitySystemHull, With<LocalShip>>,
+    hull_q: Query<&crate::entities::spawner::EntitySystemHull, With<LocalShip>>,
     mut last_hull_hp: Local<f32>,
 ) {
     // Guard: only proceed when the LocalShip actually carries `ShipImpulse`
@@ -43,9 +43,9 @@ pub fn handle_impulse_messages(
     }
 
     let current_hp = hull_total.0;
-    let mut desired: Option<crate::impulse::ImpulsePhase> = None;
+    let mut desired: Option<crate::ship::impulse::ImpulsePhase> = None;
     if current_hp < *last_hull_hp {
-        desired = Some(crate::impulse::ImpulsePhase::Idle);
+        desired = Some(crate::ship::impulse::ImpulsePhase::Idle);
     }
     *last_hull_hp = current_hp;
 
@@ -100,8 +100,8 @@ pub(crate) fn tick_boost(
     let last_input = last_input_q.single().copied().unwrap_or_default();
     let has_helm = sessions
         .0
-        .holder_for_station(&crate::messages::StationId(
-            crate::system_registry::HELM_STATION_ID.into(),
+        .holder_for_station(&crate::core::messages::StationId(
+            crate::ship::system_registry::HELM_STATION_ID.into(),
         ))
         .is_some()
         || helm_axes_operate_ai(control_sources);
@@ -132,13 +132,13 @@ pub(crate) fn tick_boost(
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use crate::entity_config::EntityConfig;
-    use crate::entity_spawner::spawn_entity;
-    use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
-    use crate::messages::{ClientMessage, SystemControlPayload};
-    use crate::region_effects::{BlocksImpulseEffect, RegionEffectsConfig};
-    use crate::region_shape::RegionShape;
+    use crate::core::messages::{ClientMessage, SystemControlPayload};
+    use crate::entities::config::EntityConfig;
+    use crate::entities::spawner::spawn_entity;
+    use crate::regions::effects::{BlocksImpulseEffect, RegionEffectsConfig};
     use crate::regions::server::RegionPlugin;
+    use crate::regions::shape::RegionShape;
+    use crate::ship::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::ship::test_support::*;
 
     fn apply_hull_damage(app: &mut App, amount: f32) {
@@ -150,7 +150,7 @@ mod tests {
             .unwrap();
         app.world_mut()
             .entity_mut(ship)
-            .get_mut::<crate::entity_spawner::EntitySystemHull>()
+            .get_mut::<crate::entities::spawner::EntitySystemHull>()
             .unwrap()
             .0
             .apply_damage(amount, &mut rng);
@@ -195,7 +195,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -227,7 +227,7 @@ mod tests {
 
         {
             let active = {
-                let mut s = crate::impulse::ImpulseState::new();
+                let mut s = crate::ship::impulse::ImpulseState::new();
                 s.start_charge();
                 s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
                 s
@@ -258,7 +258,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -282,7 +282,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -300,7 +300,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -318,7 +318,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -327,7 +327,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::CancelImpulse,
             },
         );
@@ -345,7 +345,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -354,7 +354,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::CancelImpulse,
             },
         );
@@ -417,7 +417,7 @@ mod tests {
             class: None,
             hull_id: None,
             power_rating: None,
-            mass: crate::entity_config::DEFAULT_ENTITY_MASS,
+            mass: crate::entities::config::DEFAULT_ENTITY_MASS,
             css: None,
             target: None,
             cinematic_camera: None,
@@ -454,7 +454,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -479,7 +479,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -508,8 +508,8 @@ mod tests {
         app.world_mut()
             .entity_mut(ship)
             .insert(ImpulseConfigResource {
-                charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
-                speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+                charge_duration: crate::ship::impulse::IMPULSE_CHARGE_DURATION,
+                speed_multiplier: crate::ship::impulse::IMPULSE_SPEED_MULTIPLIER,
                 acceleration_multiplier: 5.0,
                 engage_distance: 200.0,
                 cancel_distance: 40.0,
@@ -519,7 +519,7 @@ mod tests {
 
         // Activate impulse directly (bypass charge).
         {
-            let mut s = crate::impulse::ImpulseState::new();
+            let mut s = crate::ship::impulse::ImpulseState::new();
             s.start_charge();
             s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
             set_ship_impulse(&mut app, s);
@@ -531,7 +531,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 0.0 },
             },
         );
@@ -539,7 +539,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
@@ -571,8 +571,8 @@ mod tests {
         app.world_mut()
             .entity_mut(ship)
             .insert(ImpulseConfigResource {
-                charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
-                speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+                charge_duration: crate::ship::impulse::IMPULSE_CHARGE_DURATION,
+                speed_multiplier: crate::ship::impulse::IMPULSE_SPEED_MULTIPLIER,
                 acceleration_multiplier: 5.0,
                 engage_distance: 200.0,
                 cancel_distance: 40.0,
@@ -585,7 +585,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 1.0 },
             },
         );
@@ -593,7 +593,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 0.0 },
             },
         );
@@ -621,8 +621,8 @@ mod tests {
         app.world_mut()
             .entity_mut(ship)
             .insert(ImpulseConfigResource {
-                charge_duration: crate::impulse::IMPULSE_CHARGE_DURATION,
-                speed_multiplier: crate::impulse::IMPULSE_SPEED_MULTIPLIER,
+                charge_duration: crate::ship::impulse::IMPULSE_CHARGE_DURATION,
+                speed_multiplier: crate::ship::impulse::IMPULSE_SPEED_MULTIPLIER,
                 acceleration_multiplier: 0.0,
                 engage_distance: 200.0,
                 cancel_distance: 40.0,
@@ -632,7 +632,7 @@ mod tests {
 
         // Activate impulse directly (bypass charge).
         {
-            let mut s = crate::impulse::ImpulseState::new();
+            let mut s = crate::ship::impulse::ImpulseState::new();
             s.start_charge();
             s.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
             set_ship_impulse(&mut app, s);
@@ -677,7 +677,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 1.0 },
             },
         );
@@ -685,7 +685,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 0.0 },
             },
         );
@@ -699,7 +699,7 @@ mod tests {
             &mut base,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 1.0 },
             },
         );
@@ -707,7 +707,7 @@ mod tests {
             &mut base,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 0.0 },
             },
         );
@@ -736,7 +736,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 0.0 },
             },
         );
@@ -744,7 +744,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
@@ -757,7 +757,7 @@ mod tests {
             &mut base,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 0.0 },
             },
         );
@@ -765,7 +765,7 @@ mod tests {
             &mut base,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
@@ -847,7 +847,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
+                target: crate::ship::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             },
         );
@@ -858,7 +858,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
+                target: crate::ship::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             },
         );
@@ -879,7 +879,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
+                target: crate::ship::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             },
         );
@@ -900,7 +900,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
+                target: crate::ship::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::SetBoost { active: true },
             },
         );
@@ -911,7 +911,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
+                target: crate::ship::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::SetBoost { active: false },
             },
         );
@@ -930,7 +930,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_boost_system_id(),
+                target: crate::ship::system_registry::helm_boost_system_id(),
                 payload: SystemControlPayload::ToggleBoost,
             },
         );
@@ -960,7 +960,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_thrust_system_id(),
+                target: crate::ship::system_registry::helm_thrust_system_id(),
                 payload: SystemControlPayload::SetThrust { value: 0.0 },
             },
         );
@@ -968,7 +968,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_steering_system_id(),
+                target: crate::ship::system_registry::helm_steering_system_id(),
                 payload: SystemControlPayload::SetSteering { value: 1.0 },
             },
         );
@@ -979,7 +979,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::StartImpulseCharge,
             },
         );
@@ -1006,7 +1006,7 @@ mod tests {
             &mut app,
             "helm",
             ClientMessage::ControlSystem {
-                target: crate::system_registry::helm_impulse_system_id(),
+                target: crate::ship::system_registry::helm_impulse_system_id(),
                 payload: SystemControlPayload::CancelImpulse,
             },
         );

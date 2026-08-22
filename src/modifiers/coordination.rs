@@ -2,20 +2,20 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::entity_spawner::{EntityUuid, RegionEffectsSection};
-use crate::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
-use crate::messages::FlagKind;
-use crate::messages::{ModifierSlot, ModifierSource, PowerGroupId};
-use crate::modifiers::{Modifier, ShipModifiers};
-use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
-use crate::power_system::{
+use crate::core::messages::FlagKind;
+use crate::core::messages::{ModifierSlot, ModifierSource, PowerGroupId};
+use crate::entities::spawner::{EntityUuid, RegionEffectsSection};
+use crate::modifiers::power_system::{
     Channel1Read, PowerReadState, PowerSystem, HELM_POWER_GROUP, SHIELDS_POWER_GROUP,
     WEAPONS_POWER_GROUP,
 };
-use crate::region_effects::RegionEffectKind;
-use crate::region_plugin::{RegionEntered, RegionExited, RegionMembership};
+use crate::modifiers::{Modifier, ShipModifiers};
+use crate::regions::effects::RegionEffectKind;
+use crate::regions::server::{RegionEntered, RegionExited, RegionMembership};
+use crate::server_app::ShipImpulse;
+use crate::ship::impulse::{ImpulsePhase, ImpulseState, IMPULSE_SPEED_MULTIPLIER};
+use crate::ship::power::{PowerMultiplierResource, ShipPowerSystem};
 use crate::ship_plugin::ImpulseConfigResource;
-use crate::simulation::ShipImpulse;
 
 /// Single owner of `ShipModifiers` lifecycle.
 ///
@@ -145,12 +145,15 @@ const RADAR_DESTROYED_BONUS: f32 = -999.0;
 /// the fresh multiplier the same tick).
 pub fn apply_radar_damage_modifiers(
     mut ships_q: Query<
-        (&crate::entity_spawner::EntitySystemHull, &mut ShipModifiers),
+        (
+            &crate::entities::spawner::EntitySystemHull,
+            &mut ShipModifiers,
+        ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    use crate::damage::DamageTier;
-    use crate::system_registry::{
+    use crate::ship::damage::DamageTier;
+    use crate::ship::system_registry::{
         helm_radar_system_id, sensor_radar_system_id, tactical_radar_system_id,
     };
 
@@ -534,7 +537,7 @@ mod tests {
             "assets/entities/alliance_destroyer.toml",
             "assets/entities/alliance_courier.toml",
         ] {
-            let config = crate::entity_includes::load_entity_config(path)
+            let config = crate::entities::include_resolve::load_entity_config(path)
                 .unwrap_or_else(|e| panic!("{path}: {e}"));
             let reactor = config
                 .power
@@ -706,7 +709,7 @@ mod tests {
 
         let mut checked: Vec<String> = Vec::new();
         for path in shipped_entity_paths() {
-            let config = crate::entity_includes::load_entity_config(&path)
+            let config = crate::entities::include_resolve::load_entity_config(&path)
                 .unwrap_or_else(|e| panic!("{path}: {e}"));
             let Some(wc) = config.weapons_console.as_ref() else {
                 continue;
@@ -727,13 +730,13 @@ mod tests {
                 let reach = if bank.beam_range > 0.0 {
                     bank.beam_range
                 } else {
-                    crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
+                    crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE
                 };
                 longest_gun = longest_gun.max(reach);
             }
             if wc.phaser_banks.is_empty() {
-                longest_gun =
-                    longest_gun.max(crate::entity_config::PhaserCombatConfig::DEFAULT_PHASER_RANGE);
+                longest_gun = longest_gun
+                    .max(crate::entities::config::PhaserCombatConfig::DEFAULT_PHASER_RANGE);
             }
             for bank in &wc.blaster_banks {
                 longest_gun = longest_gun.max(bank.range);
@@ -883,8 +886,8 @@ mod tests {
 
     // ── apply_region_effects tests ─────────────────────────────────────
 
-    use crate::messages::FlagKind;
-    use crate::region_effects::RegionEffectKind;
+    use crate::core::messages::FlagKind;
+    use crate::regions::effects::RegionEffectKind;
 
     #[test]
     fn enter_radar_dampening_adds_radar_range_modifier_with_correct_source() {
@@ -1041,7 +1044,7 @@ mod tests {
 
     // ── apply_impulse_to tests ──────────────────────────────────────────
 
-    use crate::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIPLIER};
+    use crate::ship::impulse::{ImpulseState, IMPULSE_CHARGE_DURATION, IMPULSE_SPEED_MULTIPLIER};
 
     #[test]
     fn impulse_idle_does_not_write_modifier() {
@@ -1121,9 +1124,9 @@ mod tests {
     /// MaxSpeed modifier must reflect the resource value.
     #[test]
     fn translate_impulse_modifiers_reads_speed_multiplier_from_resource() {
-        use crate::impulse::ImpulseState;
+        use crate::server_app::ShipImpulse;
+        use crate::ship::impulse::ImpulseState;
         use crate::ship_plugin::ImpulseConfigResource;
-        use crate::simulation::ShipImpulse;
 
         let mut app = App::new();
 
@@ -1139,8 +1142,8 @@ mod tests {
         let ship = app
             .world_mut()
             .spawn((
-                crate::simulation::LocalShip,
-                crate::simulation::Ship,
+                crate::server_app::LocalShip,
+                crate::server_app::Ship,
                 ShipImpulse(impulse),
                 ShipModifiers::new(),
             ))
@@ -1188,8 +1191,8 @@ mod tests {
     #[test]
     fn npc_ship_helm_power_translates_to_max_speed_modifier() {
         use crate::modifiers::power_system::PowerSystem;
-        use crate::power_plugin::{PowerMultiplierResource, ShipPowerSystem};
         use crate::server_app::Ship;
+        use crate::ship::power::{PowerMultiplierResource, ShipPowerSystem};
 
         let mut app = App::new();
 
@@ -1224,11 +1227,11 @@ mod tests {
 
     mod radar_damage {
         use super::*;
-        use crate::damage::{ConsoleTierConfig, SystemHull};
-        use crate::entity_spawner::EntitySystemHull;
-        use crate::messages::SystemId;
+        use crate::core::messages::SystemId;
+        use crate::entities::spawner::EntitySystemHull;
         use crate::server_app::Ship;
-        use crate::system_registry::{
+        use crate::ship::damage::{ConsoleTierConfig, SystemHull};
+        use crate::ship::system_registry::{
             helm_radar_system_id, sensor_radar_system_id, tactical_radar_system_id,
         };
 

@@ -111,11 +111,11 @@ pub fn preload_templates(content_dir: &str) -> Result<usize, String> {
                 continue;
             };
             let key = rel.to_string_lossy().replace('\\', "/");
-            let Ok(resolved) = crate::entity_includes::resolve_from_disk(&key) else {
+            let Ok(resolved) = crate::entities::include_resolve::resolve_from_disk(&key) else {
                 continue;
             };
             if let Ok(cfg) = resolved.parse() {
-                crate::config_cache::insert_native_config(key, cfg);
+                crate::entities::config_cache::insert_native_config(key, cfg);
                 loaded += 1;
             }
         }
@@ -508,9 +508,9 @@ fn find_head_end(buf: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::messages::PROTOCOL_VERSION;
     use crate::delivery::http::CLIENT_STAMP_HEADER;
     use crate::delivery::payload::PayloadValue;
-    use crate::messages::PROTOCOL_VERSION;
 
     const MANIFEST: &str = "\
 [content]

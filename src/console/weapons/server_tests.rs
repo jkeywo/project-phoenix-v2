@@ -1,13 +1,13 @@
 use super::shared::system_is_registered;
 use super::*;
-use crate::ai_plugin::AiTokenRegistry;
-use crate::damage::SystemHull;
-use crate::entity_spawner::EntitySystemHull;
+use crate::ai::server::AiTokenRegistry;
+use crate::core::messages::*;
+use crate::entities::spawner::EntitySystemHull;
 use crate::lobby::{InboundMessage, LobbyPlugin, OutboundMessage, Target, WorldResource};
-use crate::messages::*;
 use crate::modifiers::ShipModifiers;
+use crate::server_app::{ShipImpulse, SimOutbox};
+use crate::ship::damage::SystemHull;
 use crate::simmath;
-use crate::simulation::{ShipImpulse, SimOutbox};
 
 #[derive(Resource, Default)]
 struct Outbox(Vec<OutboundMessage>);
@@ -138,24 +138,27 @@ fn seed_viewscreen_from_selection(
     mut q: Query<
         (
             Option<&TacticalRadarSelection>,
-            Option<&crate::sensors_plugin::SensorRadarSelection>,
+            Option<&crate::ship::sensors::SensorRadarSelection>,
             &mut crate::server_app::ShipSystemBlackboards,
         ),
         With<crate::server_app::Ship>,
     >,
 ) {
-    use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+    use crate::core::messages::{SystemBlackboard, ViewscreenBlackboard};
     for (tac, sci, mut bbs) in q.iter_mut() {
         let combat_lock = tac.and_then(|t| t.0.clone());
         let science_target = sci.and_then(|s| s.0.clone());
-        let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+        let mut vbb = match bbs
+            .0
+            .get(&crate::ship::system_registry::viewscreen_system_id())
+        {
             Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
             _ => ViewscreenBlackboard::default(),
         };
         vbb.combat_lock = combat_lock;
         vbb.science_target = science_target;
         bbs.0.insert(
-            crate::system_registry::viewscreen_system_id(),
+            crate::ship::system_registry::viewscreen_system_id(),
             SystemBlackboard::Viewscreen(vbb),
         );
     }
@@ -183,8 +186,8 @@ fn test_app() -> App {
     .init_resource::<WorldResource>()
     .add_message::<AsteroidDestroyedVfx>()
     .add_message::<ShipDestroyedVfx>()
-    .add_message::<crate::ai_plugin::AiEntityDestroyed>()
-    .add_message::<crate::balance::BalanceEvent>()
+    .add_message::<crate::ai::server::AiEntityDestroyed>()
+    .add_message::<crate::core::balance::BalanceEvent>()
     .init_resource::<CurrentPhaserMode>()
     .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
         TorpedoConfig::default(),
@@ -200,9 +203,9 @@ fn test_app() -> App {
     // target ahead still pass. Tighter arcs are tested in dedicated
     // per-bank arc severance tests.
     .insert_resource(PhaserCombatConfigResource(
-        crate::entity_config::PhaserCombatConfig {
+        crate::entities::config::PhaserCombatConfig {
             banks: vec![
-                crate::entity_config::PhaserBankConfig {
+                crate::entities::config::PhaserBankConfig {
                     id: "port".into(),
                     facing_deg: -90.0,
                     fire_arc_deg: 270.0,
@@ -216,7 +219,7 @@ fn test_app() -> App {
                     marker: None,
                     ai: None,
                 },
-                crate::entity_config::PhaserBankConfig {
+                crate::entities::config::PhaserBankConfig {
                     id: "starboard".into(),
                     facing_deg: 90.0,
                     fire_arc_deg: 270.0,
@@ -241,7 +244,7 @@ fn test_app() -> App {
     // PR-7 (issue #597) — `tick_shields` (formerly `tick_npc_shield_regen`)
     // now lives on `ShipShieldsPlugin`. Include it so tests that spawn NPCs
     // with `ShipShields` observe regen on every frame.
-    .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
+    .add_plugins(crate::ship::shields::ShipShieldsPlugin)
     .add_systems(PostUpdate, (collect, collect_arc_requests));
     // One fixed step per update (issue #895): the plugins' systems run on the
     // logical tick, and each harness tick advances it once.
@@ -256,17 +259,17 @@ fn test_app() -> App {
     let ship = app
         .world_mut()
         .spawn((
-            crate::simulation::Ship,
-            crate::simulation::LocalShip,
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
             test_ship_config(),
             ShipSystemControlSources::default(),
             crate::ship_plugin::ActiveStationRatings::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::ship_plugin::CoordinationQueue::default(),
             ShipPhysics::default(),
-            crate::ship_state::ShipPhaserFrequency::default(),
+            crate::ship::state::ShipPhaserFrequency::default(),
             bevy::prelude::Transform::default(),
-            crate::entity_spawner::EntitySystemHull(SystemHull::from_config(&[
+            crate::entities::spawner::EntitySystemHull(SystemHull::from_config(&[
                 (SystemId("helm".into()), 25.0),
                 (SystemId("tactical".into()), 25.0),
                 (SystemId("power".into()), 25.0),
@@ -282,7 +285,7 @@ fn test_app() -> App {
                 (SystemId("torpedo-magazine".into()), 20.0),
             ])),
             crate::server_app::ShipSystemBlackboards::default(),
-            crate::entity_spawner::EntityUuid("test-local-ship".to_string()),
+            crate::entities::spawner::EntityUuid("test-local-ship".to_string()),
         ))
         .id();
     // Second insert to stay under Bevy's Bundle-tuple length limit.
@@ -291,9 +294,9 @@ fn test_app() -> App {
         // These are overridden by individual tests via insert_resource for the
         // PhaserCombatConfigResource; we keep both in sync here.
         TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())),
-        PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+        PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
             banks: vec![
-                crate::entity_config::PhaserBankConfig {
+                crate::entities::config::PhaserBankConfig {
                     id: "port".into(),
                     facing_deg: -90.0,
                     fire_arc_deg: 270.0,
@@ -307,7 +310,7 @@ fn test_app() -> App {
                     marker: None,
                     ai: None,
                 },
-                crate::entity_config::PhaserBankConfig {
+                crate::entities::config::PhaserBankConfig {
                     id: "starboard".into(),
                     facing_deg: 90.0,
                     fire_arc_deg: 270.0,
@@ -333,7 +336,7 @@ fn test_app() -> App {
         crate::server_app::ShipAttackedThisTick::default(),
         LastShipAttacker::default(),
         crate::ship::combat_activity::RecentCombatActivity::default(),
-        ShipImpulse(crate::impulse::ImpulseState::new()),
+        ShipImpulse(crate::ship::impulse::ImpulseState::new()),
         ShipModifiers::new(),
     ));
     attach_shipped_weapon_ai(&mut app, ship);
@@ -376,7 +379,7 @@ pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
     let blaster_ids: Vec<String> = app
         .world()
         .entity(ship)
-        .get::<crate::weapons_plugin::BlasterSystemResource>()
+        .get::<crate::console::weapons::BlasterSystemResource>()
         .map(|c| c.0.iter().map(|b| b.config.id.clone()).collect())
         .unwrap_or_default();
     let tube_ids: Vec<String> = app
@@ -387,29 +390,29 @@ pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
         .unwrap_or_default();
 
     app.world_mut().entity_mut(ship).insert((
-        crate::weapons_plugin::TacticalTargetSelector {
+        crate::console::weapons::TacticalTargetSelector {
             selector: shipped_selector_toml("tactical")
                 .to_selector()
                 .expect("the shipped Tactical selector decodes"),
             power_rating: None,
             idle: false,
         },
-        crate::weapons_plugin::PhaserBankAiPolicies(
+        crate::console::weapons::PhaserBankAiPolicies(
             phaser_ids
                 .into_iter()
                 .map(|id| (id, bank_policy()))
                 .collect(),
         ),
-        crate::weapons_plugin::BlasterBankAiPolicies(
+        crate::console::weapons::BlasterBankAiPolicies(
             blaster_ids
                 .into_iter()
                 .map(|id| (id, blaster_policy()))
                 .collect(),
         ),
-        crate::weapons_plugin::TorpedoTubeAiPolicies(
+        crate::console::weapons::TorpedoTubeAiPolicies(
             tube_ids.into_iter().map(|id| (id, tube_policy())).collect(),
         ),
-        crate::weapons_plugin::TorpedoMagazineAiPolicy(
+        crate::console::weapons::TorpedoMagazineAiPolicy(
             shipped_policy_toml("torpedo_magazine")
                 .to_policy()
                 .expect("the shipped torpedo-magazine policy decodes"),
@@ -420,7 +423,7 @@ pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
         // order the shipped content authors — and a ship with no doctrine at all
         // turns for nothing, which is why it belongs in this helper rather than
         // in each test.
-        crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+        crate::console::weapons::WeaponsDoctrineAiPolicy(
             shipped_policy_toml("weapons_doctrine")
                 .to_policy()
                 .expect("the shipped weapons-doctrine policy decodes"),
@@ -437,7 +440,7 @@ pub(crate) fn attach_shipped_weapon_ai(app: &mut App, ship: Entity) {
         // the gate; the gate itself is proved in both directions by
         // `backfilled_weapons_hold_fire_until_red_alert` and the
         // `weapons_fire_guard_truth_table` in `authored_ai_pins`.
-        crate::ship_state::ShipRedAlert(true),
+        crate::ship::state::ShipRedAlert(true),
     ));
 }
 
@@ -578,7 +581,7 @@ fn start_phaser_cooldown(app: &mut App, bank: &str, secs: f32) {
 fn get_phaser_frequency(app: &mut App) -> f32 {
     let mut q = app
         .world_mut()
-        .query_filtered::<&crate::ship_state::ShipPhaserFrequency, With<crate::server_app::LocalShip>>();
+        .query_filtered::<&crate::ship::state::ShipPhaserFrequency, With<crate::server_app::LocalShip>>();
     q.single(app.world()).map(|f| f.0).unwrap_or(0.5)
 }
 
@@ -615,7 +618,7 @@ fn tick(app: &mut App) -> Vec<OutboundMessage> {
         out.push(OutboundMessage {
             target,
             msg,
-            delivery: crate::messages::DeliveryClass::Reliable,
+            delivery: crate::core::messages::DeliveryClass::Reliable,
         });
     }
     app.world_mut().resource_mut::<Outbox>().0.clear();
@@ -671,8 +674,8 @@ fn setup_weapons_world(
 ) -> bevy::ecs::entity::Entity {
     let uuid = "target-uuid".to_string();
     app.world_mut()
-        .insert_resource(WorldResource(crate::messages::WorldData {
-            entities: vec![crate::messages::EntitySnapshot::asteroid(
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
+            entities: vec![crate::core::messages::EntitySnapshot::asteroid(
                 &uuid, asteroid_x, asteroid_z, 2.0,
             )],
             ..Default::default()
@@ -682,10 +685,10 @@ fn setup_weapons_world(
     // matching ECS entity with the components all queries expect.
     app.world_mut()
         .spawn((
-            crate::simulation::Asteroid,
-            crate::simulation::AsteroidUuid(uuid),
-            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
+            crate::server_app::Asteroid,
+            crate::server_app::AsteroidUuid(uuid),
+            EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+                crate::core::messages::SystemId("captain".into()),
                 30.0,
             )])),
             Transform::from_xyz(asteroid_x, 0.0, asteroid_z),
@@ -750,19 +753,19 @@ fn start_game_with_weapons(app: &mut App) {
         cs.0.set(SystemId("phaser-port".into()), ControlSource::Human);
         cs.0.set(SystemId("phaser-starboard".into()), ControlSource::Human);
         cs.0.set(
-            crate::system_registry::torpedo_tube_fore_port_system_id(),
+            crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
             ControlSource::Human,
         );
         cs.0.set(
-            crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+            crate::ship::system_registry::torpedo_tube_fore_starboard_system_id(),
             ControlSource::Human,
         );
         cs.0.set(
-            crate::system_registry::torpedo_tube_aft_system_id(),
+            crate::ship::system_registry::torpedo_tube_aft_system_id(),
             ControlSource::Human,
         );
         cs.0.set(
-            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::system_registry::torpedo_magazine_system_id(),
             ControlSource::Human,
         );
     }
@@ -775,7 +778,7 @@ fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<Outboun
         app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -810,7 +813,7 @@ fn valid_target_within_range_replies_with_target_lock_confirmed() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -844,7 +847,7 @@ fn asteroid_outside_weapons_range_replies_with_target_lock_rejected() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -873,7 +876,7 @@ fn unknown_uuid_replies_with_target_lock_rejected() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "no-such-asteroid".into(),
             },
@@ -915,7 +918,7 @@ fn spawn_lockable_contact(
     faction: Option<uuid::Uuid>,
 ) -> Entity {
     let mut ec = app.world_mut().spawn((
-        crate::entity_spawner::EntityUuid(uuid.into()),
+        crate::entities::spawner::EntityUuid(uuid.into()),
         Transform::from_xyz(x, 0.0, z),
     ));
     if let Some(f) = faction {
@@ -930,7 +933,7 @@ fn push_human_set_target(app: &mut App, uuid: &str) -> Vec<OutboundMessage> {
         app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget { uuid: uuid.into() },
         },
     );
@@ -1072,16 +1075,17 @@ fn a_non_hostile_ship_and_structure_read_as_selectable() {
     // Two non-hostile contacts: a ship (ally/derelict kind) and a station
     // (structure kind). Each needs a world-registry snapshot carrying the tags
     // `project_blip` filters + selects on, plus a live ECS entity to project.
-    let mut ally = crate::messages::EntitySnapshot::asteroid("ally-ship", 0.0, -50.0, 2.0);
+    let mut ally = crate::core::messages::EntitySnapshot::asteroid("ally-ship", 0.0, -50.0, 2.0);
     ally.tags = vec!["ship".into()];
     ally.target_tags = vec!["ship".into()];
     ally.radar_icon = Some("ship".into());
-    let mut structure = crate::messages::EntitySnapshot::asteroid("structure-1", 30.0, -40.0, 2.0);
+    let mut structure =
+        crate::core::messages::EntitySnapshot::asteroid("structure-1", 30.0, -40.0, 2.0);
     structure.tags = vec!["station".into()];
     structure.target_tags = vec!["station".into()];
     structure.radar_icon = Some("station".into());
     app.world_mut()
-        .insert_resource(WorldResource(crate::messages::WorldData {
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
             entities: vec![ally, structure],
             ..Default::default()
         }));
@@ -1121,8 +1125,8 @@ fn backfilled_tactical_does_not_lock_a_non_objective_named_derelict() {
     // hostile predicate reads it as non-hostile. It is reachable only by the
     // radar/scan, never by an objective.
     app.world_mut().spawn((
-        crate::simulation::Ship,
-        crate::entity_spawner::EntityUuid(derelict.clone()),
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid(derelict.clone()),
         Transform::from_xyz(0.0, 0.0, -10.0),
     ));
     // Arm the nearest-hostile source with an untargeted Destroy doctrine, so the
@@ -1151,7 +1155,7 @@ fn weapons_update_fire_ready_true_when_target_in_range_and_arc() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -1192,7 +1196,7 @@ fn weapons_update_fire_ready_false_when_target_out_of_phaser_range() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -1228,7 +1232,7 @@ fn weapons_update_fire_ready_false_when_target_out_of_phaser_range() {
 
 /// Read the LocalShip's published Weapons blackboard `banks` (deterministic
 /// every tick, unlike the diff-gated WeaponsUpdate broadcast).
-fn local_weapons_banks(app: &mut App) -> Vec<crate::messages::PhaserBankState> {
+fn local_weapons_banks(app: &mut App) -> Vec<crate::core::messages::PhaserBankState> {
     let entity = app
         .world_mut()
         .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
@@ -1240,7 +1244,7 @@ fn local_weapons_banks(app: &mut App) -> Vec<crate::messages::PhaserBankState> {
 }
 
 /// Read the LocalShip's published Weapons blackboard `tubes`.
-fn local_weapons_tubes(app: &mut App) -> Vec<crate::messages::TorpedoTubeState> {
+fn local_weapons_tubes(app: &mut App) -> Vec<crate::core::messages::TorpedoTubeState> {
     let entity = app
         .world_mut()
         .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
@@ -1253,7 +1257,7 @@ fn local_weapons_tubes(app: &mut App) -> Vec<crate::messages::TorpedoTubeState> 
 
 #[test]
 fn torpedo_readiness_unloaded_tube_blocks_on_loading_or_no_ammo() {
-    use crate::messages::WeaponBlockReason;
+    use crate::core::messages::WeaponBlockReason;
     let mut app = test_app();
     setup_weapons_world(&mut app, 0.0, -20.0);
     start_game_with_weapons(&mut app);
@@ -1284,7 +1288,7 @@ fn set_target(app: &mut App) {
         app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -1294,7 +1298,7 @@ fn set_target(app: &mut App) {
 
 #[test]
 fn phaser_readiness_ready_when_target_in_range_and_arc() {
-    use crate::messages::WeaponBlockReason;
+    use crate::core::messages::WeaponBlockReason;
     let mut app = test_app();
     setup_weapons_world(&mut app, 0.0, -20.0);
     start_game_with_weapons(&mut app);
@@ -1317,7 +1321,7 @@ fn phaser_readiness_ready_when_target_in_range_and_arc() {
 
 #[test]
 fn phaser_readiness_no_target_blocks_with_no_target_reason() {
-    use crate::messages::WeaponBlockReason;
+    use crate::core::messages::WeaponBlockReason;
     let mut app = test_app();
     setup_weapons_world(&mut app, 0.0, -20.0);
     start_game_with_weapons(&mut app);
@@ -1338,7 +1342,7 @@ fn phaser_readiness_no_target_blocks_with_no_target_reason() {
 
 #[test]
 fn phaser_readiness_out_of_range_blocks_with_out_of_range_reason() {
-    use crate::messages::WeaponBlockReason;
+    use crate::core::messages::WeaponBlockReason;
     let mut app = test_app();
     // Target dead ahead but beyond phaser range.
     setup_weapons_world(&mut app, 0.0, -50.0);
@@ -1452,7 +1456,7 @@ fn fire_phaser_rejected_when_target_outside_bank_arc() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -1485,7 +1489,7 @@ fn full_beam_duration_kills_asteroid() {
     let asteroid_entity = {
         let mut q = app
             .world_mut()
-            .query::<(bevy::ecs::entity::Entity, &crate::simulation::AsteroidUuid)>();
+            .query::<(bevy::ecs::entity::Entity, &crate::server_app::AsteroidUuid)>();
         q.iter(app.world())
             .find(|(_, u)| u.0 == "target-uuid")
             .map(|(e, _)| e)
@@ -1583,7 +1587,7 @@ fn beam_severs_when_target_leaves_phaser_range() {
     let entity = {
         let mut q = app
             .world_mut()
-            .query::<(bevy::ecs::entity::Entity, &crate::simulation::AsteroidUuid)>();
+            .query::<(bevy::ecs::entity::Entity, &crate::server_app::AsteroidUuid)>();
         q.iter(app.world())
             .find(|(_, u)| u.0 == "target-uuid")
             .map(|(e, _)| e)
@@ -1616,10 +1620,10 @@ fn no_damage_refund_on_sever() {
     let asteroid_entity = app
         .world_mut()
         .spawn((
-            crate::simulation::Asteroid,
-            crate::simulation::AsteroidUuid("target-uuid".into()),
-            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
+            crate::server_app::Asteroid,
+            crate::server_app::AsteroidUuid("target-uuid".into()),
+            EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+                crate::core::messages::SystemId("captain".into()),
                 30.0,
             )])),
         ))
@@ -1649,28 +1653,28 @@ fn no_damage_refund_on_sever() {
 fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
     let mut app = test_app();
     app.world_mut()
-        .insert_resource(WorldResource(crate::messages::WorldData {
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
             entities: vec![
-                crate::messages::EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
-                crate::messages::EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
+                crate::core::messages::EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
+                crate::core::messages::EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
             ],
             ..Default::default()
         }));
     // Spawn matching ECS entities so live_entity_xz can find them.
     app.world_mut().spawn((
-        crate::simulation::Asteroid,
-        crate::simulation::AsteroidUuid("t1".into()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            crate::messages::SystemId("captain".into()),
+        crate::server_app::Asteroid,
+        crate::server_app::AsteroidUuid("t1".into()),
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+            crate::core::messages::SystemId("captain".into()),
             30.0,
         )])),
         Transform::from_xyz(0.0, 0.0, -20.0),
     ));
     app.world_mut().spawn((
-        crate::simulation::Asteroid,
-        crate::simulation::AsteroidUuid("t2".into()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            crate::messages::SystemId("captain".into()),
+        crate::server_app::Asteroid,
+        crate::server_app::AsteroidUuid("t2".into()),
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+            crate::core::messages::SystemId("captain".into()),
             30.0,
         )])),
         Transform::from_xyz(0.0, 0.0, -15.0),
@@ -1681,7 +1685,7 @@ fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget { uuid: "t1".into() },
         },
     );
@@ -1709,7 +1713,7 @@ fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget { uuid: "t2".into() },
         },
     );
@@ -1745,27 +1749,27 @@ fn retarget_after_cooldown_cancels_prior_beam_and_starts_new() {
 fn firing_beam_retains_captured_target_when_combat_lock_changes() {
     let mut app = test_app();
     app.world_mut()
-        .insert_resource(WorldResource(crate::messages::WorldData {
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
             entities: vec![
-                crate::messages::EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
-                crate::messages::EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
+                crate::core::messages::EntitySnapshot::asteroid("t1", 0.0, -20.0, 2.0),
+                crate::core::messages::EntitySnapshot::asteroid("t2", 0.0, -15.0, 2.0),
             ],
             ..Default::default()
         }));
     app.world_mut().spawn((
-        crate::simulation::Asteroid,
-        crate::simulation::AsteroidUuid("t1".into()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            crate::messages::SystemId("captain".into()),
+        crate::server_app::Asteroid,
+        crate::server_app::AsteroidUuid("t1".into()),
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+            crate::core::messages::SystemId("captain".into()),
             30.0,
         )])),
         Transform::from_xyz(0.0, 0.0, -20.0),
     ));
     app.world_mut().spawn((
-        crate::simulation::Asteroid,
-        crate::simulation::AsteroidUuid("t2".into()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            crate::messages::SystemId("captain".into()),
+        crate::server_app::Asteroid,
+        crate::server_app::AsteroidUuid("t2".into()),
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+            crate::core::messages::SystemId("captain".into()),
             30.0,
         )])),
         Transform::from_xyz(0.0, 0.0, -15.0),
@@ -1777,7 +1781,7 @@ fn firing_beam_retains_captured_target_when_combat_lock_changes() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget { uuid: "t1".into() },
         },
     );
@@ -1801,7 +1805,7 @@ fn firing_beam_retains_captured_target_when_combat_lock_changes() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget { uuid: "t2".into() },
         },
     );
@@ -1852,7 +1856,7 @@ fn beam_severs_when_target_vanishes() {
     let entity = {
         let mut q = app
             .world_mut()
-            .query::<(bevy::ecs::entity::Entity, &crate::simulation::AsteroidUuid)>();
+            .query::<(bevy::ecs::entity::Entity, &crate::server_app::AsteroidUuid)>();
         q.iter(app.world())
             .find(|(_, u)| u.0 == "target-uuid")
             .map(|(e, _)| e)
@@ -1934,16 +1938,16 @@ fn weapons_console_can_set_phaser_mode_to_manual() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::phaser_control_system_id(),
+            target: crate::ship::system_registry::phaser_control_system_id(),
             payload: SystemControlPayload::SetPhaserMode {
-                mode: crate::messages::PhaserMode::Manual,
+                mode: crate::core::messages::PhaserMode::Manual,
             },
         },
     );
     tick(&mut app);
     assert_eq!(
         app.world().resource::<CurrentPhaserMode>().0,
-        crate::messages::PhaserMode::Manual,
+        crate::core::messages::PhaserMode::Manual,
         "phaser mode should be Manual after SetPhaserMode"
     );
 }
@@ -1957,9 +1961,9 @@ fn non_weapons_player_cannot_set_phaser_mode() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::phaser_control_system_id(),
+            target: crate::ship::system_registry::phaser_control_system_id(),
             payload: SystemControlPayload::SetPhaserMode {
-                mode: crate::messages::PhaserMode::Auto,
+                mode: crate::core::messages::PhaserMode::Auto,
             },
         },
     );
@@ -1969,16 +1973,16 @@ fn non_weapons_player_cannot_set_phaser_mode() {
         &mut app,
         "captain",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::phaser_control_system_id(),
+            target: crate::ship::system_registry::phaser_control_system_id(),
             payload: SystemControlPayload::SetPhaserMode {
-                mode: crate::messages::PhaserMode::Manual,
+                mode: crate::core::messages::PhaserMode::Manual,
             },
         },
     );
     tick(&mut app);
     assert_eq!(
         app.world().resource::<CurrentPhaserMode>().0,
-        crate::messages::PhaserMode::Auto,
+        crate::core::messages::PhaserMode::Auto,
         "phaser mode should stay Auto when non-Weapons player sends SetPhaserMode"
     );
 }
@@ -2028,9 +2032,9 @@ fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
 /// tactical decomposition). This test covers the wiring.
 #[test]
 fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::entity_spawner::EntityUuid;
-    use crate::torpedo::LaunchResult;
+    use crate::ai::server::AiTokenRegistry;
+    use crate::entities::spawner::EntityUuid;
+    use crate::weapons::torpedo::LaunchResult;
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -2041,15 +2045,15 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
     // `[torpedoes]`: attach a `TorpedoSystemResource` component built
     // from the runtime config, with default tubes (fore_port, fore_starboard, aft).
     let torpedo_config = TorpedoConfig::default();
-    let npc_torpedo_sys = crate::torpedo::TorpedoSystem::new(torpedo_config);
+    let npc_torpedo_sys = crate::weapons::torpedo::TorpedoSystem::new(torpedo_config);
     let mut npc_ai_sources = crate::ship::control_source::ControlSourceResolver::new();
     // #801: seed the fine tube + magazine systems (there is no coarse
     // tactical system to seed).
     for sysid in [
-        crate::system_registry::torpedo_tube_fore_port_system_id(),
-        crate::system_registry::torpedo_tube_fore_starboard_system_id(),
-        crate::system_registry::torpedo_tube_aft_system_id(),
-        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
+        crate::ship::system_registry::torpedo_tube_fore_starboard_system_id(),
+        crate::ship::system_registry::torpedo_tube_aft_system_id(),
+        crate::ship::system_registry::torpedo_magazine_system_id(),
     ] {
         npc_ai_sources.set(sysid, crate::ship::control_source::ControlSource::Ai);
     }
@@ -2064,7 +2068,7 @@ fn npc_ship_can_fire_torpedo_when_toml_has_torpedoes_block() {
             TacticalRadarSelection::default(),
             TorpedoSystemResource(npc_torpedo_sys),
             crate::server_app::WeaponFiredThisTick::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             crate::server_app::ShipSystemBlackboards::default(),
             bevy::prelude::Transform::default(),
         ))
@@ -2188,14 +2192,15 @@ fn torpedo_system_resource_reflects_battleship_toml_torpedoes_block() {
     // and assert the magazine size matches the TOML.
     // Through the resolver (issue #876): this hull is COMPOSED, so its baked
     // bytes are no longer the document `spawn_game_start_entities` reads.
-    let config =
-        crate::entity_includes::load_entity_config("assets/entities/alliance_battleship.toml")
-            .expect("alliance_battleship.toml must compose and parse");
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("alliance_battleship.toml must compose and parse");
     let tc = config
         .torpedoes
         .expect("alliance_battleship must declare [torpedoes]");
     let runtime = tc.to_runtime();
-    let sys = crate::torpedo::TorpedoSystem::new(runtime.clone());
+    let sys = crate::weapons::torpedo::TorpedoSystem::new(runtime.clone());
     // Magazine size matches TOML — changing `count = 30` to `count = 99`
     // in alliance_battleship.toml would fail this assertion.
     assert_eq!(sys.torpedoes_remaining, tc.count);
@@ -2213,13 +2218,14 @@ fn phaser_combat_config_resource_reflects_battleship_toml_weapons_console() {
     // values are exactly what the TOML says.
     // Through the resolver (issue #876): this hull is COMPOSED, so its baked
     // bytes are no longer the document `spawn_game_start_entities` reads.
-    let config =
-        crate::entity_includes::load_entity_config("assets/entities/alliance_battleship.toml")
-            .expect("alliance_battleship.toml must compose and parse");
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("alliance_battleship.toml must compose and parse");
     let wc = config
         .weapons_console
         .expect("alliance_battleship must declare [weapons_console]");
-    let combat = crate::entity_config::PhaserCombatConfig::from_weapons_console(&wc);
+    let combat = crate::entities::config::PhaserCombatConfig::from_weapons_console(&wc);
 
     // alliance_battleship.toml has two banks (fore, aft) with matching combat values.
     // Fore bank is double-damage (8.0 dps) and shorter range (40) than the standard cruiser.
@@ -2353,8 +2359,8 @@ fn torpedo_does_not_detonate_on_asteroid_field_anchor_entity() {
     //
     // Asteroid-field anchors are virtual organisational entities and
     // must never act as torpedo detonation targets.
-    use crate::entity_config::AsteroidFieldConfig;
-    use crate::entity_spawner::{AsteroidFieldSection, EntityUuid};
+    use crate::entities::config::AsteroidFieldConfig;
+    use crate::entities::spawner::{AsteroidFieldSection, EntityUuid};
 
     let mut app = test_app();
     start_game_with_weapons(&mut app);
@@ -2363,8 +2369,8 @@ fn torpedo_does_not_detonate_on_asteroid_field_anchor_entity() {
     // Mirror the production code path: the WorldResource snapshot for the
     // field anchor reports radius = outer_radius.
     app.world_mut()
-        .insert_resource(WorldResource(crate::messages::WorldData {
-            entities: vec![crate::messages::EntitySnapshot {
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
+            entities: vec![crate::core::messages::EntitySnapshot {
                 uuid: field_uuid.clone(),
                 position: Some([0.0, 0.0, 0.0]),
                 radius: Some(350.0),
@@ -2459,7 +2465,7 @@ fn empty_modifier_table_reproduces_base_phaser_damage() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -2490,7 +2496,7 @@ fn empty_modifier_table_reproduces_base_phaser_damage() {
 
 #[test]
 fn phaser_damage_modifier_doubles_kill_rate() {
-    use crate::messages::{ModifierSlot, ModifierSource};
+    use crate::core::messages::{ModifierSlot, ModifierSource};
     use crate::modifiers::{Modifier, ShipModifiers};
 
     let mut app_fast = test_app();
@@ -2499,7 +2505,7 @@ fn phaser_damage_modifier_doubles_kill_rate() {
     {
         let mut q = app_fast
             .world_mut()
-            .query_filtered::<&mut ShipModifiers, With<crate::simulation::LocalShip>>();
+            .query_filtered::<&mut ShipModifiers, With<crate::server_app::LocalShip>>();
         let mut mods = q.single_mut(app_fast.world_mut()).unwrap();
         mods.add_or_update(Modifier {
             source: ModifierSource::ImpulseDrive,
@@ -2511,7 +2517,7 @@ fn phaser_damage_modifier_doubles_kill_rate() {
         &mut app_fast,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -2550,7 +2556,7 @@ fn phaser_damage_modifier_doubles_kill_rate() {
         &mut app_base,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -2646,7 +2652,7 @@ fn start_game_with_sensors_and_weapons(app: &mut App) {
 /// the only wire shape since the legacy top-level message was deleted.
 fn set_phaser_frequency_msg(frequency: f32) -> ClientMessage {
     ClientMessage::ControlSystem {
-        target: crate::system_registry::phaser_control_system_id(),
+        target: crate::ship::system_registry::phaser_control_system_id(),
         payload: SystemControlPayload::SetPhaserFrequency { frequency },
     }
 }
@@ -2704,7 +2710,7 @@ fn set_phaser_frequency_rejected_when_phaser_control_ai() {
             .query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
         for mut cs in q.iter_mut(app.world_mut()) {
             cs.0.set(
-                crate::system_registry::phaser_control_system_id(),
+                crate::ship::system_registry::phaser_control_system_id(),
                 crate::ship::control_source::ControlSource::Ai,
             );
         }
@@ -2743,8 +2749,8 @@ fn set_phaser_frequency_clamps_value() {
 
 fn setup_npc_world(app: &mut App, npc_x: f32, npc_z: f32) {
     app.world_mut()
-        .insert_resource(WorldResource(crate::messages::WorldData {
-            entities: vec![crate::messages::EntitySnapshot {
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
+            entities: vec![crate::core::messages::EntitySnapshot {
                 uuid: "npc-1".into(),
                 position: Some([npc_x, 0.0, npc_z]),
                 tags: vec!["ship".into()],
@@ -2762,9 +2768,9 @@ fn spawn_npc_entity(
 ) -> bevy::ecs::entity::Entity {
     app.world_mut()
         .spawn((
-            crate::entity_spawner::EntityUuid("npc-1".into()),
-            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
+            crate::entities::spawner::EntityUuid("npc-1".into()),
+            EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+                crate::core::messages::SystemId("captain".into()),
                 max_hp,
             )])),
             Transform::from_xyz(npc_x, 0.0, npc_z),
@@ -2786,7 +2792,7 @@ fn phaser_beam_damages_npc_entity_hull() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -2834,7 +2840,7 @@ fn phaser_beam_destroys_npc_entity_when_hull_reaches_zero() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -2901,10 +2907,10 @@ fn spawn_shielded_npc_entity(
         .spawn((
             // PR-7 (issue #597) — NPC ships carry the `Ship` marker
             // so the unified `tick_shields` picks them up.
-            crate::simulation::Ship,
-            crate::entity_spawner::EntityUuid("npc-1".into()),
-            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
+            crate::server_app::Ship,
+            crate::entities::spawner::EntityUuid("npc-1".into()),
+            EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+                crate::core::messages::SystemId("captain".into()),
                 hull_max,
             )])),
             crate::ship::shields::ShipShields(
@@ -2933,7 +2939,7 @@ fn phaser_beam_damages_shielded_npc_routes_through_shield_first() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -2991,7 +2997,7 @@ fn phaser_beam_breaks_shield_then_leaks_to_hull() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -3052,7 +3058,7 @@ fn shield_hp(app: &App, entity: Entity) -> f32 {
 /// the whole point of the event, and nothing on the wire carries it.
 #[test]
 fn phaser_beam_emits_balance_event_with_attacker_victim_and_split() {
-    use crate::balance::BalanceEvent;
+    use crate::core::balance::BalanceEvent;
     use bevy::ecs::message::Messages;
 
     let mut app = test_app();
@@ -3065,7 +3071,7 @@ fn phaser_beam_emits_balance_event_with_attacker_victim_and_split() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -3129,7 +3135,7 @@ fn phaser_beam_emits_balance_event_with_attacker_victim_and_split() {
 
         assert_eq!(attacker.as_deref(), Some("test-local-ship"));
         assert_eq!(victim, "npc-1");
-        assert_eq!(*victim_kind, crate::balance::VictimKind::Ship);
+        assert_eq!(*victim_kind, crate::core::balance::VictimKind::Ship);
         assert_eq!(weapon, "port", "weapon must name the firing bank");
         assert!(
             *amount >= shield_absorbed + hull_damage && *amount > 0.0,
@@ -3158,7 +3164,7 @@ fn phaser_beam_emits_balance_event_with_attacker_victim_and_split() {
 /// `damage_dealt` in a report field literally named `damage_by_ship`.
 #[test]
 fn phaser_beam_on_an_asteroid_is_tagged_and_kept_out_of_the_ledger() {
-    use crate::balance::{aggregate_damage, BalanceEvent, VictimKind};
+    use crate::core::balance::{aggregate_damage, BalanceEvent, VictimKind};
     use bevy::ecs::message::Messages;
     use std::collections::BTreeMap;
 
@@ -3172,7 +3178,7 @@ fn phaser_beam_on_an_asteroid_is_tagged_and_kept_out_of_the_ledger() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "rock-1".into(),
             },
@@ -3231,7 +3237,7 @@ fn phaser_beam_on_an_asteroid_is_tagged_and_kept_out_of_the_ledger() {
 /// junk `""` row in the ledger and print `"attacker":""` in the timeline.
 #[test]
 fn phaser_beam_from_an_unidentified_shooter_reports_no_attacker() {
-    use crate::balance::BalanceEvent;
+    use crate::core::balance::BalanceEvent;
     use bevy::ecs::message::Messages;
 
     let mut app = test_app();
@@ -3244,7 +3250,7 @@ fn phaser_beam_from_an_unidentified_shooter_reports_no_attacker() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -3271,7 +3277,7 @@ fn phaser_beam_from_an_unidentified_shooter_reports_no_attacker() {
     };
     app.world_mut()
         .entity_mut(shooter)
-        .remove::<crate::entity_spawner::EntityUuid>();
+        .remove::<crate::entities::spawner::EntityUuid>();
 
     app.world_mut()
         .resource_mut::<Messages<BalanceEvent>>()
@@ -3316,9 +3322,9 @@ fn phaser_beam_post_break_skips_shield_routing_entirely() {
     let npc_entity = app
         .world_mut()
         .spawn((
-            crate::entity_spawner::EntityUuid("npc-1".into()),
-            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
+            crate::entities::spawner::EntityUuid("npc-1".into()),
+            EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+                crate::core::messages::SystemId("captain".into()),
                 30.0,
             )])),
             crate::ship::shields::ShipShields(shield_sys, 0.5),
@@ -3330,7 +3336,7 @@ fn phaser_beam_post_break_skips_shield_routing_entirely() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -3425,7 +3431,7 @@ fn shield_regen_advances_npc_shield_below_max() {
 /// torpedo damage path (PR2: Unified ShipShields).
 #[test]
 fn torpedo_hit_reduces_ship_shields_on_local_ship() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
     use crate::server_app::LocalShip;
     use crate::weapons::shield::{ShieldConfig, ShieldSystem};
     use crate::weapons::torpedo::Torpedo;
@@ -3456,8 +3462,8 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     // Also expose the player ship in the world snapshot so the torpedo can
     // find it as a target.
     app.world_mut()
-        .insert_resource(WorldResource(crate::messages::WorldData {
-            entities: vec![crate::messages::EntitySnapshot {
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
+            entities: vec![crate::core::messages::EntitySnapshot {
                 uuid: "player-ship".into(),
                 position: Some([0.0, 0.0, 0.0]),
                 radius: Some(5.0),
@@ -3483,7 +3489,7 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     let hull_before = app
         .world()
         .entity(player_entity)
-        .get::<crate::entity_spawner::EntitySystemHull>()
+        .get::<crate::entities::spawner::EntitySystemHull>()
         .unwrap()
         .0
         .total_current();
@@ -3536,7 +3542,7 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
     let hull_after = app
         .world()
         .entity(player_entity)
-        .get::<crate::entity_spawner::EntitySystemHull>()
+        .get::<crate::entities::spawner::EntitySystemHull>()
         .unwrap()
         .0
         .total_current();
@@ -3569,7 +3575,7 @@ fn torpedo_hit_reduces_ship_shields_on_local_ship() {
 /// tracks the routing instead of restating it.
 #[test]
 fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
     use crate::server_app::LocalShip;
     use crate::weapons::shield::{ShieldConfig, ShieldSystem};
     use crate::weapons::torpedo::Torpedo;
@@ -3597,8 +3603,8 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
     ));
 
     app.world_mut()
-        .insert_resource(WorldResource(crate::messages::WorldData {
-            entities: vec![crate::messages::EntitySnapshot {
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
+            entities: vec![crate::core::messages::EntitySnapshot {
                 uuid: "player-ship".into(),
                 position: Some([0.0, 0.0, 0.0]),
                 radius: Some(5.0),
@@ -3614,28 +3620,25 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
     // a torpedo started at z=1 would overshoot to z=-2 and legitimately strike
     // the fore arc.
     let (start_x, start_z) = (0.0_f32, 6.0_f32);
-    let (astern_arc, fore_arc) = {
-        let shields = app
-            .world()
-            .entity(player_entity)
-            .get::<crate::ship::shields::ShipShields>()
-            .unwrap();
-        let astern = shields
-            .0
-            .facing_index_for_bearing(crate::shield::attacker_bearing_relative(
-                start_x, start_z, 0.0, 0.0, 0.0,
-            ));
-        let fore = shields
-            .0
-            .facing_index_for_bearing(crate::shield::attacker_bearing_relative(
-                0.0, -1.0, 0.0, 0.0, 0.0,
-            ));
-        assert_ne!(
-            astern, fore,
-            "precondition: a four-arc hull must route fore and astern to different arcs"
-        );
-        (astern, fore)
-    };
+    let (astern_arc, fore_arc) =
+        {
+            let shields = app
+                .world()
+                .entity(player_entity)
+                .get::<crate::ship::shields::ShipShields>()
+                .unwrap();
+            let astern = shields.0.facing_index_for_bearing(
+                crate::weapons::shield::attacker_bearing_relative(start_x, start_z, 0.0, 0.0, 0.0),
+            );
+            let fore = shields.0.facing_index_for_bearing(
+                crate::weapons::shield::attacker_bearing_relative(0.0, -1.0, 0.0, 0.0, 0.0),
+            );
+            assert_ne!(
+                astern, fore,
+                "precondition: a four-arc hull must route fore and astern to different arcs"
+            );
+            (astern, fore)
+        };
 
     let hp_of = |app: &App, idx: usize| -> i32 {
         app.world()
@@ -3697,13 +3700,13 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
 #[test]
 fn phaser_beam_emits_ai_entity_destroyed_on_npc_kill() {
     #[derive(Resource, Default)]
-    struct DestroyedBox(Vec<crate::ai_plugin::AiEntityDestroyed>);
+    struct DestroyedBox(Vec<crate::ai::server::AiEntityDestroyed>);
 
     let mut app = test_app();
     app.init_resource::<DestroyedBox>();
     app.add_systems(
         bevy::app::Update,
-        |mut r: bevy::ecs::prelude::MessageReader<crate::ai_plugin::AiEntityDestroyed>,
+        |mut r: bevy::ecs::prelude::MessageReader<crate::ai::server::AiEntityDestroyed>,
          mut b: bevy::ecs::prelude::ResMut<DestroyedBox>| {
             for ev in r.read() {
                 b.0.push(ev.clone());
@@ -3719,7 +3722,7 @@ fn phaser_beam_emits_ai_entity_destroyed_on_npc_kill() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -3777,7 +3780,7 @@ fn phaser_beam_emits_ship_destroyed_vfx_on_npc_kill() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -3818,7 +3821,7 @@ fn phaser_beam_emits_ship_destroyed_vfx_on_npc_kill() {
 /// projectile travel) so the hit registers on the very first tick.
 #[test]
 fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
 
     #[derive(Resource, Default)]
     struct VfxBox(Vec<ShipDestroyedVfx>);
@@ -3837,38 +3840,40 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
 
     let target_uuid = "npc-blaster-target";
 
-    let mut bank = crate::blaster::BlasterSystem::new(crate::blaster::BlasterBankConfig {
-        id: "fore".into(),
-        facing_deg: 0.0,
-        fire_arc_deg: 360.0,
-        volley_count: 1,
-        volley_interval_secs: 0.1,
-        cooldown_secs: 3.0,
-        charge_time_secs: 0.0,
-        projectile_speed: 40.0,
-        collision_radius: 5.0,
-        visual_scale: 1.0,
-        damage: 50,
-        shield_pierce: 0.0,
-        recoil_impulse: 0.0,
-        screenshake_magnitude: 0.0,
-        marker: None,
-        barrels: Vec::new(),
-        pattern: Vec::new(),
-        range: 35.0,
-    });
-    bank.in_flight.push(crate::blaster::BlasterProjectile {
-        id: "proj-1".into(),
-        x: 0.0,
-        z: -20.0,
-        heading: 0.0,
-        speed: 40.0,
-        lifespan_remaining: 5.0,
-        collision_radius: 5.0,
-        damage: 50,
-        shield_pierce: 0.0,
-        source_uuid: "shooter-uuid".into(),
-    });
+    let mut bank =
+        crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            id: "fore".into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 360.0,
+            volley_count: 1,
+            volley_interval_secs: 0.1,
+            cooldown_secs: 3.0,
+            charge_time_secs: 0.0,
+            projectile_speed: 40.0,
+            collision_radius: 5.0,
+            visual_scale: 1.0,
+            damage: 50,
+            shield_pierce: 0.0,
+            recoil_impulse: 0.0,
+            screenshake_magnitude: 0.0,
+            marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
+            range: 35.0,
+        });
+    bank.in_flight
+        .push(crate::weapons::blaster::BlasterProjectile {
+            id: "proj-1".into(),
+            x: 0.0,
+            z: -20.0,
+            heading: 0.0,
+            speed: 40.0,
+            lifespan_remaining: 5.0,
+            collision_radius: 5.0,
+            damage: 50,
+            shield_pierce: 0.0,
+            source_uuid: "shooter-uuid".into(),
+        });
 
     app.world_mut().spawn((
         crate::server_app::Ship,
@@ -3879,10 +3884,9 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
 
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            30.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 30.0)],
+        )),
         Transform::from_xyz(0.0, 0.0, -20.0),
     ));
 
@@ -3907,45 +3911,47 @@ fn blaster_hit_emits_ship_destroyed_vfx_on_npc_kill() {
 /// `""` row and the timeline prints `"attacker":""`.
 #[test]
 fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
-    use crate::balance::BalanceEvent;
-    use crate::entity_spawner::EntityUuid;
+    use crate::core::balance::BalanceEvent;
+    use crate::entities::spawner::EntityUuid;
     use bevy::ecs::message::Messages;
 
     let mut app = test_app();
 
-    let mut bank = crate::blaster::BlasterSystem::new(crate::blaster::BlasterBankConfig {
-        id: "fore".into(),
-        facing_deg: 0.0,
-        fire_arc_deg: 360.0,
-        volley_count: 1,
-        volley_interval_secs: 0.1,
-        cooldown_secs: 3.0,
-        charge_time_secs: 0.0,
-        projectile_speed: 40.0,
-        collision_radius: 5.0,
-        visual_scale: 1.0,
-        damage: 5,
-        shield_pierce: 0.0,
-        recoil_impulse: 0.0,
-        screenshake_magnitude: 0.0,
-        marker: None,
-        barrels: Vec::new(),
-        pattern: Vec::new(),
-        range: 35.0,
-    });
-    bank.in_flight.push(crate::blaster::BlasterProjectile {
-        id: "proj-1".into(),
-        x: 0.0,
-        z: -20.0,
-        heading: 0.0,
-        speed: 40.0,
-        lifespan_remaining: 5.0,
-        collision_radius: 5.0,
-        damage: 5,
-        shield_pierce: 0.0,
-        // What the firing path writes when the shooter has no `EntityUuid`.
-        source_uuid: String::new(),
-    });
+    let mut bank =
+        crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            id: "fore".into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 360.0,
+            volley_count: 1,
+            volley_interval_secs: 0.1,
+            cooldown_secs: 3.0,
+            charge_time_secs: 0.0,
+            projectile_speed: 40.0,
+            collision_radius: 5.0,
+            visual_scale: 1.0,
+            damage: 5,
+            shield_pierce: 0.0,
+            recoil_impulse: 0.0,
+            screenshake_magnitude: 0.0,
+            marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
+            range: 35.0,
+        });
+    bank.in_flight
+        .push(crate::weapons::blaster::BlasterProjectile {
+            id: "proj-1".into(),
+            x: 0.0,
+            z: -20.0,
+            heading: 0.0,
+            speed: 40.0,
+            lifespan_remaining: 5.0,
+            collision_radius: 5.0,
+            damage: 5,
+            shield_pierce: 0.0,
+            // What the firing path writes when the shooter has no `EntityUuid`.
+            source_uuid: String::new(),
+        });
 
     // The shooter deliberately has no `EntityUuid`, matching the projectile.
     app.world_mut().spawn((
@@ -3955,10 +3961,9 @@ fn blaster_hit_from_an_unidentified_shooter_reports_no_attacker() {
     ));
     app.world_mut().spawn((
         EntityUuid("npc-blaster-target".into()),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            100.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 100.0)],
+        )),
         Transform::from_xyz(0.0, 0.0, -20.0),
     ));
 
@@ -3994,7 +3999,7 @@ fn setup_npc_shooter(
     target_x: f32,
     target_z: f32,
 ) -> (bevy::ecs::entity::Entity, bevy::ecs::entity::Entity) {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     // Spawn NPC entity facing toward negative-Z (yaw = 0 → forward = -Z).
     // Includes the Ship marker so the unified `tick_beams` picks it up as
@@ -4013,7 +4018,7 @@ fn setup_npc_shooter(
     // coarse tactical system to seed.
     for bank in ["port", "starboard"] {
         sources.set(
-            crate::system_registry::phaser_bank_system_id(bank).unwrap(),
+            crate::ship::system_registry::phaser_bank_system_id(bank).unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
     }
@@ -4056,7 +4061,7 @@ station = "tactical"
             PhaserCooldown::default(),
             ShipPhysics::default(),
             Transform::from_xyz(0.0, 0.0, 0.0),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
         ))
         .id();
 
@@ -4071,8 +4076,8 @@ station = "tactical"
         .world_mut()
         .spawn((
             EntityUuid(target_uuid.to_string()),
-            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
+            EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
+                crate::core::messages::SystemId("captain".into()),
                 50.0,
             )])),
             Transform::from_xyz(target_x, 0.0, target_z),
@@ -4087,7 +4092,7 @@ fn npc_fire_phaser_activates_entity_phaser_state() {
     // NPC entity at origin, target directly ahead (negative-Z), within beam range.
     // Sending a FirePhaser InboundMessage for the NPC's ai: token should set
     // `ActiveBeam::target_uuid = Some(...)` after one update.
-    use crate::ai_plugin::AiTokenRegistry;
+    use crate::ai::server::AiTokenRegistry;
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -4124,8 +4129,8 @@ fn npc_fire_phaser_activates_entity_phaser_state() {
 fn npc_beam_tick_applies_damage_to_target_hull() {
     // With an active NPC beam, each tick of tick_beams reduces
     // the target's EntitySystemHull.
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::entity_spawner::EntitySystemHull;
+    use crate::ai::server::AiTokenRegistry;
+    use crate::entities::spawner::EntitySystemHull;
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -4173,7 +4178,7 @@ fn npc_beam_tick_records_shooter_as_last_attacker() {
     // shooter's UUID as that target's last attacker. This write fires in
     // Phase 2 before the `damage_to_apply <= 0` guard, but only when the
     // target entity actually carries the component — so we insert it.
-    use crate::ai_plugin::AiTokenRegistry;
+    use crate::ai::server::AiTokenRegistry;
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -4225,7 +4230,7 @@ fn npc_beam_tick_records_shooter_as_last_attacker() {
 /// half in `ai::server`.
 #[test]
 fn sustained_beam_marks_last_attacker_changed_exactly_once() {
-    use crate::ai_plugin::AiTokenRegistry;
+    use crate::ai::server::AiTokenRegistry;
 
     #[derive(Resource, Default)]
     struct ChangeCount(usize);
@@ -4297,13 +4302,13 @@ fn npc_beam_tick_damages_npc_target_not_player() {
     // Without<LocalShip> so NPCs couldn't damage other NPCs — damage
     // was silently lost. The unified `tick_beams` iterates all ships
     // and applies damage to any target found via `hull_q`.
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::entity_spawner::EntitySystemHull;
+    use crate::ai::server::AiTokenRegistry;
+    use crate::entities::spawner::EntitySystemHull;
     use crate::server_app::ShipAttackedThisTick;
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
-    app.init_resource::<crate::simulation::GameOverReason>();
+    app.init_resource::<crate::server_app::GameOverReason>();
 
     let shooter_uuid = "10000000-0000-0000-0000-000000000001";
     let npc_target_uuid = "20000000-0000-0000-0000-000000000002";
@@ -4370,7 +4375,7 @@ fn on_beam_started_emits_correct_source_uuid_with_multiple_ships() {
     // ship even when several ships exist. Originally a regression guard for the
     // PRD #597 PR-1 `With<Ship>.single()` panic; the source is now the event's
     // shooter entity, not any `LocalShip`/`single()` query (#832).
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
 
     let mut app = test_app();
     let player_uuid_str = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -4404,12 +4409,15 @@ fn on_beam_started_emits_correct_source_uuid_with_multiple_ships() {
     app.update();
 
     // Find the BeamStarted message in the SimOutbox.
-    let outbox = app.world().resource::<crate::simulation::SimOutbox>();
-    let beam_started = outbox
-        .0
-        .iter()
-        .find(|(_, msg)| matches!(msg, crate::messages::ServerMessage::BeamStarted { .. }));
-    let Some((_, crate::messages::ServerMessage::BeamStarted { source_uuid, .. })) = beam_started
+    let outbox = app.world().resource::<crate::server_app::SimOutbox>();
+    let beam_started = outbox.0.iter().find(|(_, msg)| {
+        matches!(
+            msg,
+            crate::core::messages::ServerMessage::BeamStarted { .. }
+        )
+    });
+    let Some((_, crate::core::messages::ServerMessage::BeamStarted { source_uuid, .. })) =
+        beam_started
     else {
         panic!("expected BeamStarted message in outbox");
     };
@@ -4424,11 +4432,11 @@ fn on_beam_started_emits_correct_source_uuid_with_multiple_ships() {
 fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
     // When the beam target is the player ship (has Ship marker), damage
     // must route through shields → hull component, not just EntitySystemHull directly.
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::entity_spawner::EntityUuid;
+    use crate::ai::server::AiTokenRegistry;
+    use crate::entities::spawner::EntityUuid;
+    use crate::server_app::{GameOverReason, ShipShields};
     use crate::server_app::{LocalShip, ShipAttackedThisTick};
-    use crate::shield::ShieldConfig;
-    use crate::simulation::{GameOverReason, ShipShields};
+    use crate::weapons::shield::ShieldConfig;
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -4447,7 +4455,7 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
         let mut q = app.world_mut().query_filtered::<Entity, With<LocalShip>>();
         let local = q.single(app.world()).unwrap();
         app.world_mut().entity_mut(local).insert(ShipShields(
-            crate::shield::ShieldSystem::new(&shield_config),
+            crate::weapons::shield::ShieldSystem::new(&shield_config),
             0.5,
         ));
     }
@@ -4493,7 +4501,7 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
     let hull_before = app
         .world()
         .entity(player_entity)
-        .get::<crate::entity_spawner::EntitySystemHull>()
+        .get::<crate::entities::spawner::EntitySystemHull>()
         .unwrap()
         .0
         .total_current();
@@ -4523,7 +4531,7 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
     let hull_after = app
         .world()
         .entity(player_entity)
-        .get::<crate::entity_spawner::EntitySystemHull>()
+        .get::<crate::entities::spawner::EntitySystemHull>()
         .unwrap()
         .0
         .total_current();
@@ -4563,7 +4571,7 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
 fn npc_beam_cooldown_starts_after_beam_expires() {
     // When an NPC's ActiveBeam remaining_secs reaches zero, PhaserCooldown must
     // be set to a positive value and ActiveBeam.target_uuid must become None.
-    use crate::ai_plugin::AiTokenRegistry;
+    use crate::ai::server::AiTokenRegistry;
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -4602,13 +4610,13 @@ fn npc_beam_cooldown_starts_after_beam_expires() {
 /// `tick_ai_controllers` emits a `FirePhaser` `InboundMessage` which the
 /// unified `handle_fire_phaser` picks up and activates the NPC's `ActiveBeam`.
 fn combined_test_app() -> App {
-    use crate::ai_plugin::AiPlugin;
-    use crate::config_cache::FactionRegistryResource;
+    use crate::ai::server::AiPlugin;
+    use crate::entities::config_cache::FactionRegistryResource;
 
     let mut app = test_app();
     app.add_plugins(AiPlugin)
         .insert_resource(FactionRegistryResource(
-            crate::config_cache::get_faction_registry(),
+            crate::entities::config_cache::get_faction_registry(),
         ));
     app
 }
@@ -4620,10 +4628,10 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
     // a `FirePhaser` `InboundMessage`, which the unified `handle_fire_phaser`
     // picks up
     // and sets `ActiveBeam::target_uuid`.
-    use crate::damage::SystemHull;
-    use crate::entity_config::{BehaviourConfig, DoctrineObjective};
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid, WeaponsConsoleSection};
-    use crate::messages::{GamePhase, SystemId};
+    use crate::core::messages::{GamePhase, SystemId};
+    use crate::entities::config::{BehaviourConfig, DoctrineObjective};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid, WeaponsConsoleSection};
+    use crate::ship::damage::SystemHull;
     use bevy::prelude::State;
 
     let mut app = combined_test_app();
@@ -4658,7 +4666,7 @@ fn tick_ai_controllers_fire_phaser_routes_through_unified_handle_fire_phaser() {
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     // #801: seed the phaser bank's fine system (no coarse tactical).
     sources.set(
-        crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::phaser_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
     // Minimal ShipConfigComponent so admission's ship_query resolves this NPC.
@@ -4684,7 +4692,7 @@ rank = "Ltn."
         .world_mut()
         .spawn((
             crate::server_app::Ship,
-            crate::entity_spawner::BehaviourSection(behaviour),
+            crate::entities::spawner::BehaviourSection(behaviour),
             EntityUuid(npc_uuid_str.to_string()),
             crate::ship_plugin::ShipSystemControlSources(sources),
             npc_config,
@@ -4693,10 +4701,10 @@ rank = "Ltn."
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
-            WeaponsConsoleSection(crate::entity_config::WeaponsConsoleConfig {
+            WeaponsConsoleSection(crate::entities::config::WeaponsConsoleConfig {
                 torpedo_arc_color: vec![],
                 power_multipliers: None,
-                phaser_banks: vec![crate::entity_config::PhaserBankConfig {
+                phaser_banks: vec![crate::entities::config::PhaserBankConfig {
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -4746,7 +4754,7 @@ rank = "Ltn."
     {
         let mut reg = app
             .world_mut()
-            .resource_mut::<crate::ai_plugin::AiTokenRegistry>();
+            .resource_mut::<crate::ai::server::AiTokenRegistry>();
         reg.register_with_entity(npc_uuid_str, npc_entity);
     }
 
@@ -4792,8 +4800,8 @@ rank = "Ltn."
 /// `tick_beams` handler (unified per-entity beam path — issues #588 / #597).
 #[test]
 fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::ai::server::AiTokenRegistry;
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -4806,7 +4814,7 @@ fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
         .world_mut()
         .spawn((
             EntityUuid(target_uuid.to_string()),
-            EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+            EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
                 SystemId("captain".into()),
                 100.0,
             )])),
@@ -4864,8 +4872,8 @@ fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
 /// AI-controlled, activating an [`ActiveBeam`] directly.
 #[test]
 fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::ai::server::AiTokenRegistry;
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -4877,7 +4885,7 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     // #801: seed the phaser bank's fine system (no coarse tactical).
     sources.set(
-        crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::phaser_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
     let npc_entity = app
@@ -4891,8 +4899,8 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
-            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-                banks: vec![crate::entity_config::PhaserBankConfig {
+            PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+                banks: vec![crate::entities::config::PhaserBankConfig {
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -4919,7 +4927,7 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
     // Spawn target
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
             SystemId("captain".into()),
             50.0,
         )])),
@@ -4954,12 +4962,12 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
 /// `ai_phaser_auto_fire`'s missing `With<AiHighFidelity>` filter exists to
 /// serve. Tests that need high fidelity add the marker themselves.
 fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Entity {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     // #801: seed the phaser bank's fine system (no coarse tactical).
     sources.set(
-        crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::phaser_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
     let npc = app
@@ -4973,8 +4981,8 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
-            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-                banks: vec![crate::entity_config::PhaserBankConfig {
+            PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+                banks: vec![crate::entities::config::PhaserBankConfig {
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -4997,7 +5005,7 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
 
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
             SystemId("captain".into()),
             50.0,
         )])),
@@ -5027,8 +5035,8 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
 /// `handle_fire_phaser` re-checks the range before lighting it).
 #[test]
 fn phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot() {
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::messages::ModifierSlot;
+    use crate::ai::server::AiTokenRegistry;
+    use crate::core::messages::ModifierSlot;
     use crate::modifiers::cache::ModifierSource;
     use crate::modifiers::{Modifier, ShipModifiers};
 
@@ -5045,7 +5053,9 @@ fn phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot() {
     // that NOTHING which writes it may change how far the gun shoots.
     let mut mods = ShipModifiers::new();
     mods.add_or_update(Modifier {
-        source: ModifierSource::SystemDamage(crate::system_registry::tactical_radar_system_id()),
+        source: ModifierSource::SystemDamage(
+            crate::ship::system_registry::tactical_radar_system_id(),
+        ),
         slot: ModifierSlot::RadarRange,
         bonus: -0.5,
     });
@@ -5059,7 +5069,7 @@ fn phaser_reach_is_the_authored_beam_range_and_ignores_the_radar_range_slot() {
     // 45 units out: inside the authored 50, outside 50 × 0.667 = 33.3.
     let target = app
         .world_mut()
-        .query_filtered::<(Entity, &crate::entity_spawner::EntityUuid), Without<crate::server_app::Ship>>()
+        .query_filtered::<(Entity, &crate::entities::spawner::EntityUuid), Without<crate::server_app::Ship>>()
         .iter(app.world())
         .find_map(|(e, u)| (u.0 == target_uuid).then_some(e))
         .expect("the helper spawns the target entity");
@@ -5115,7 +5125,7 @@ fn ai_phaser_auto_fire_writes_admitted_command_without_touching_the_beam() {
     );
     assert_eq!(
         admitted.0[0].target,
-        crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::phaser_bank_system_id("fore").unwrap(),
         "the decider must target the chosen bank"
     );
     assert!(
@@ -5153,7 +5163,7 @@ fn ai_phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity() {
     );
     assert!(
         app.world()
-            .get::<crate::ai_plugin::AiHighFidelity>(npc)
+            .get::<crate::ai::server::AiHighFidelity>(npc)
             .is_none(),
         "precondition: this NPC is low-LOD"
     );
@@ -5172,7 +5182,7 @@ fn ai_phaser_auto_fire_runs_for_low_lod_npc_without_ai_high_fidelity() {
 /// `ArcBearingRequest` addressed to Helm.
 #[test]
 fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "bb000000-0000-0000-0000-000000000001";
@@ -5187,8 +5197,8 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
             TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
             shipped_weapons_doctrine(),
-            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-                banks: vec![crate::entity_config::PhaserBankConfig {
+            PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+                banks: vec![crate::entities::config::PhaserBankConfig {
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 30.0,
@@ -5230,7 +5240,10 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
         .find(|e| matches!(&e.payload, CoordinationPayload::ArcBearingRequest { .. }))
         .expect("expected an ArcBearingRequest CoordinationEnqueue event");
     assert_eq!(request.source_entity, ship_entity);
-    assert_eq!(request.target, crate::system_registry::helm_station_key());
+    assert_eq!(
+        request.target,
+        crate::ship::system_registry::helm_station_key()
+    );
     match &request.payload {
         CoordinationPayload::ArcBearingRequest { uuid, .. } => {
             assert_eq!(uuid, target_uuid);
@@ -5243,7 +5256,7 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
 /// request — Weapons can already fire without Helm's help.
 #[test]
 fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "bb000000-0000-0000-0000-000000000002";
@@ -5256,8 +5269,8 @@ fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
         shipped_weapons_doctrine(),
-        PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-            banks: vec![crate::entity_config::PhaserBankConfig {
+        PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+            banks: vec![crate::entities::config::PhaserBankConfig {
                 id: "fore".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 30.0,
@@ -5299,7 +5312,7 @@ fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
 /// must not re-enqueue every tick.
 #[test]
 fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "bb000000-0000-0000-0000-000000000003";
@@ -5312,8 +5325,8 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
         shipped_weapons_doctrine(),
-        PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-            banks: vec![crate::entity_config::PhaserBankConfig {
+        PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+            banks: vec![crate::entities::config::PhaserBankConfig {
                 id: "fore".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 30.0,
@@ -5360,13 +5373,13 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
 /// Build a single-bank blaster resource facing forward with the given fire arc
 /// and range.
 fn blaster_res(facing_deg: f32, fire_arc_deg: f32, range: f32) -> BlasterSystemResource {
-    BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
-        crate::blaster::BlasterBankConfig {
+    BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
+        crate::weapons::blaster::BlasterBankConfig {
             id: "fore".into(),
             facing_deg,
             fire_arc_deg,
             range,
-            ..crate::blaster::BlasterBankConfig::default()
+            ..crate::weapons::blaster::BlasterBankConfig::default()
         },
     )])
 }
@@ -5391,8 +5404,8 @@ fn loaded_torpedo_res(facing_deg: f32, fire_arc_deg: f32) -> TorpedoSystemResour
 /// asks Helm to turn for nothing at all. Read off the shipped content rather
 /// than hand-built, so a retune of the baseline order retunes these fixtures
 /// with it instead of leaving them asserting an order the fleet no longer flies.
-fn shipped_weapons_doctrine() -> crate::weapons_plugin::WeaponsDoctrineAiPolicy {
-    crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+fn shipped_weapons_doctrine() -> crate::console::weapons::WeaponsDoctrineAiPolicy {
+    crate::console::weapons::WeaponsDoctrineAiPolicy(
         crate::entities::authored_ai_pins::shipped_policy_toml("weapons_doctrine")
             .to_policy()
             .expect("the shipped weapons-doctrine policy decodes"),
@@ -5414,7 +5427,7 @@ fn find_arc_request(app: &App) -> Option<CoordinationPayload> {
 /// family's arcs.
 #[test]
 fn tick_weapons_arc_request_fires_for_blaster_family_in_range_out_of_arc() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000001";
@@ -5467,7 +5480,7 @@ fn tick_weapons_arc_request_fires_for_blaster_family_in_range_out_of_arc() {
 /// emit for the Torpedoes family carrying the tube's arc + homing reach.
 #[test]
 fn tick_weapons_arc_request_fires_for_torpedo_family_in_range_out_of_arc() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000002";
@@ -5521,15 +5534,17 @@ fn tick_weapons_arc_request_fires_for_torpedo_family_in_range_out_of_arc() {
 /// the arc a round would strike is not blocking, and fall back to the fleet
 /// baseline otherwise. Read off the shipped hull, so a retune in TOML retunes
 /// the fixture with it.
-fn harrow_cruiser_weapons_doctrine() -> crate::weapons_plugin::WeaponsDoctrineAiPolicy {
-    let hull = crate::entity_config::EntityConfig::from_toml(
-        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_cruiser.toml")
-            .expect("ship_harrow_cruiser must resolve")
-            .toml
-            .as_str(),
+fn harrow_cruiser_weapons_doctrine() -> crate::console::weapons::WeaponsDoctrineAiPolicy {
+    let hull = crate::entities::config::EntityConfig::from_toml(
+        crate::entities::include_resolve::resolve_from_disk(
+            "assets/entities/ship_harrow_cruiser.toml",
+        )
+        .expect("ship_harrow_cruiser must resolve")
+        .toml
+        .as_str(),
     )
     .expect("the shipped Harrow cruiser parses");
-    crate::weapons_plugin::WeaponsDoctrineAiPolicy(
+    crate::console::weapons::WeaponsDoctrineAiPolicy(
         hull.weapons_console
             .as_ref()
             .expect("the Harrow cruiser carries weapons")
@@ -5547,10 +5562,10 @@ fn harrow_cruiser_weapons_doctrine() -> crate::weapons_plugin::WeaponsDoctrineAi
 fn spawn_two_family_arc_miss(
     app: &mut App,
     target_uuid: &str,
-    doctrine: crate::weapons_plugin::WeaponsDoctrineAiPolicy,
+    doctrine: crate::console::weapons::WeaponsDoctrineAiPolicy,
     shields_up: bool,
 ) {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
 
     app.world_mut().spawn((
         crate::server_app::Ship,
@@ -5562,8 +5577,8 @@ fn spawn_two_family_arc_miss(
         doctrine,
         // A 30-degree fore beam and a 30-degree fore tube. The target below sits
         // 90 degrees off both, inside both reaches, so BOTH families qualify.
-        PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-            banks: vec![crate::entity_config::PhaserBankConfig {
+        PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+            banks: vec![crate::entities::config::PhaserBankConfig {
                 id: "fore".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 30.0,
@@ -5672,7 +5687,7 @@ fn the_arc_request_family_follows_the_ships_authored_doctrine() {
 /// — so what this pins is that nothing quietly reintroduces the constant.
 #[test]
 fn a_ship_with_no_authored_doctrine_asks_helm_for_nothing() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "dd000000-0000-0000-0000-000000000002";
@@ -5713,7 +5728,7 @@ fn a_ship_with_no_authored_doctrine_asks_helm_for_nothing() {
 /// (an empty blaster vec, no phasers, no tubes) must not emit.
 #[test]
 fn tick_weapons_arc_request_silent_when_family_incapable() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000003";
@@ -5749,7 +5764,7 @@ fn tick_weapons_arc_request_silent_when_family_incapable() {
 /// bank classifies as `Offline`, never `OutOfArc`, so no bearing is asked.
 #[test]
 fn tick_weapons_arc_request_silent_when_family_offline() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000004";
@@ -5789,7 +5804,7 @@ fn tick_weapons_arc_request_silent_when_family_offline() {
 /// an out-of-reach contact into a firing solution, so nothing is asked.
 #[test]
 fn tick_weapons_arc_request_silent_when_target_out_of_range() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000005";
@@ -5826,7 +5841,7 @@ fn tick_weapons_arc_request_silent_when_target_out_of_range() {
 /// once the same family+target has the target in arc, no request stands.
 #[test]
 fn tick_weapons_arc_request_clears_when_target_enters_arc() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000006";
@@ -5886,7 +5901,7 @@ fn tick_weapons_arc_request_clears_when_target_enters_arc() {
 /// request, delivered on the earlier tick, was never told.
 #[test]
 fn tick_weapons_arc_request_withdraws_when_the_standing_family_drains_to_empty() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000007";
@@ -5970,7 +5985,7 @@ fn tick_weapons_arc_request_withdraws_when_the_standing_family_drains_to_empty()
 /// debounce discipline `tick_weapons_arc_request` already gives requests.
 #[test]
 fn tick_weapons_arc_request_withdrawal_is_not_repeated_every_tick() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     let target_uuid = "cc000000-0000-0000-0000-000000000008";
@@ -6030,8 +6045,8 @@ fn tick_weapons_arc_request_withdrawal_is_not_repeated_every_tick() {
 /// rejected, matching the player-fire behaviour.
 #[test]
 fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::ai::server::AiTokenRegistry;
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -6044,11 +6059,11 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     // #801: seed the phaser bank's fine system (no coarse tactical).
     sources.set(
-        crate::system_registry::phaser_bank_system_id("port").unwrap(),
+        crate::ship::system_registry::phaser_bank_system_id("port").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
-    let combat = crate::entity_config::PhaserCombatConfig {
-        banks: vec![crate::entity_config::PhaserBankConfig {
+    let combat = crate::entities::config::PhaserCombatConfig {
+        banks: vec![crate::entities::config::PhaserBankConfig {
             id: "port".into(),
             facing_deg: -90.0,
             fire_arc_deg: 60.0,
@@ -6086,7 +6101,7 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
     // whose arc runs from -120° to -60°.
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
             SystemId("captain".into()),
             50.0,
         )])),
@@ -6113,7 +6128,7 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
 }
 
 fn tactical_blips(app: &mut App) -> Vec<RadarBlip> {
-    use crate::messages::SystemBlackboard;
+    use crate::core::messages::SystemBlackboard;
     use crate::server_app::ShipSystemBlackboards;
     let mut q = app
         .world_mut()
@@ -6121,7 +6136,7 @@ fn tactical_blips(app: &mut App) -> Vec<RadarBlip> {
     match q.single(app.world()) {
         Ok(bbs) => match bbs
             .0
-            .get(&crate::system_registry::tactical_radar_system_id())
+            .get(&crate::ship::system_registry::tactical_radar_system_id())
         {
             Some(SystemBlackboard::TacticalRadar(bb)) => bb.blips.clone(),
             _ => Vec::new(),
@@ -6134,13 +6149,13 @@ fn tactical_blips(app: &mut App) -> Vec<RadarBlip> {
 fn tactical_radar_bb_of(
     app: &mut App,
     entity: Entity,
-) -> Option<crate::messages::TacticalRadarBlackboard> {
-    use crate::messages::SystemBlackboard;
+) -> Option<crate::core::messages::TacticalRadarBlackboard> {
+    use crate::core::messages::SystemBlackboard;
     use crate::server_app::ShipSystemBlackboards;
     let bbs = app.world().get::<ShipSystemBlackboards>(entity)?;
     match bbs
         .0
-        .get(&crate::system_registry::tactical_radar_system_id())
+        .get(&crate::ship::system_registry::tactical_radar_system_id())
     {
         Some(SystemBlackboard::TacticalRadar(bb)) => Some(bb.clone()),
         _ => None,
@@ -6214,12 +6229,12 @@ fn setup_ship_contact_world(app: &mut App, uuid: &str, x: f32, z: f32) {
         cfg.0.tactical_radar_shows = vec!["ship".into()];
         cfg.0.tactical_radar_range = 300.0;
     }
-    let mut snapshot = crate::messages::EntitySnapshot::asteroid(uuid, x, z, 2.0);
+    let mut snapshot = crate::core::messages::EntitySnapshot::asteroid(uuid, x, z, 2.0);
     snapshot.tags = vec!["ship".into()];
     snapshot.radar_icon = Some("ship".into());
     snapshot.name = Some("entity.contact.name".into());
     app.world_mut()
-        .insert_resource(WorldResource(crate::messages::WorldData {
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
             entities: vec![snapshot],
             ..Default::default()
         }));
@@ -6228,14 +6243,16 @@ fn setup_ship_contact_world(app: &mut App, uuid: &str, x: f32, z: f32) {
 /// A torpedo system with tubes but NOTHING ready: every tube unloaded and the
 /// magazine empty. Capability without readiness is exactly the state the badge
 /// must still report, so the fixture starts there rather than in a firing state.
-fn cold_torpedo_system() -> crate::weapons_plugin::TorpedoSystemResource {
-    let mut system = crate::torpedo::TorpedoSystem::new(crate::torpedo::TorpedoConfig::default());
+fn cold_torpedo_system() -> crate::console::weapons::TorpedoSystemResource {
+    let mut system = crate::weapons::torpedo::TorpedoSystem::new(
+        crate::weapons::torpedo::TorpedoConfig::default(),
+    );
     system.torpedoes_remaining = 0;
     assert!(
         !system.tubes.is_empty(),
         "fixture must actually carry tubes or the test asserts nothing"
     );
-    crate::weapons_plugin::TorpedoSystemResource(system)
+    crate::console::weapons::TorpedoSystemResource(system)
 }
 
 fn blip_for<'a>(blips: &'a [RadarBlip], uuid: &str) -> &'a RadarBlip {
@@ -6253,8 +6270,8 @@ fn hostile_with_torpedo_tubes_is_torpedo_armed_before_it_fires() {
     start_game(&mut app);
     setup_harrow_ship_hostile_to_federation(&mut app);
     app.world_mut().spawn((
-        crate::simulation::Ship,
-        crate::entity_spawner::EntityUuid(contact.into()),
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid(contact.into()),
         Transform::from_xyz(0.0, 0.0, -50.0),
         FactionComponent(federation_faction()),
         cold_torpedo_system(),
@@ -6278,8 +6295,8 @@ fn hostile_without_torpedo_tubes_is_not_torpedo_armed() {
     setup_harrow_ship_hostile_to_federation(&mut app);
     // A phaser-only escort carries no TorpedoSystemResource at all.
     app.world_mut().spawn((
-        crate::simulation::Ship,
-        crate::entity_spawner::EntityUuid(contact.into()),
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid(contact.into()),
         Transform::from_xyz(0.0, 0.0, -50.0),
         FactionComponent(federation_faction()),
     ));
@@ -6301,8 +6318,8 @@ fn a_non_hostile_torpedo_boat_is_not_torpedo_armed() {
     setup_harrow_ship_hostile_to_federation(&mut app);
     // Same faction as the observing ship: torpedo tubes, but not a threat.
     app.world_mut().spawn((
-        crate::simulation::Ship,
-        crate::entity_spawner::EntityUuid(contact.into()),
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid(contact.into()),
         Transform::from_xyz(0.0, 0.0, -50.0),
         FactionComponent(harrow_faction()),
         cold_torpedo_system(),
@@ -6336,13 +6353,13 @@ fn set_tactical_control_source(app: &mut App, source: crate::ship::control_sourc
             // policy is the gate. Without it here, "put Tactical under AI"
             // would set every weapon Ai and leave the lock human-held, which
             // is a different ship from the one these tests mean.
-            crate::system_registry::tactical_radar_system_id(),
-            crate::system_registry::phaser_fore_system_id(),
-            crate::system_registry::phaser_aft_system_id(),
-            crate::system_registry::torpedo_tube_fore_port_system_id(),
-            crate::system_registry::torpedo_tube_fore_starboard_system_id(),
-            crate::system_registry::torpedo_tube_aft_system_id(),
-            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::system_registry::tactical_radar_system_id(),
+            crate::ship::system_registry::phaser_fore_system_id(),
+            crate::ship::system_registry::phaser_aft_system_id(),
+            crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
+            crate::ship::system_registry::torpedo_tube_fore_starboard_system_id(),
+            crate::ship::system_registry::torpedo_tube_aft_system_id(),
+            crate::ship::system_registry::torpedo_magazine_system_id(),
         ] {
             cs.0.set(sysid, source);
         }
@@ -6351,19 +6368,18 @@ fn set_tactical_control_source(app: &mut App, source: crate::ship::control_sourc
 
 fn spawn_asteroid_target(app: &mut App, uuid: &str, x: f32, z: f32) {
     app.world_mut().spawn((
-        crate::simulation::Asteroid,
+        crate::server_app::Asteroid,
         AsteroidUuid(uuid.into()),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            crate::messages::SystemId("captain".into()),
-            30.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(crate::core::messages::SystemId("captain".into()), 30.0)],
+        )),
         Transform::from_xyz(x, 0.0, z),
     ));
 }
 
 fn spawn_entity_target(app: &mut App, uuid: &str, x: f32, z: f32) {
     app.world_mut().spawn((
-        crate::entity_spawner::EntityUuid(uuid.into()),
+        crate::entities::spawner::EntityUuid(uuid.into()),
         AdmittedCommands::default(),
         Transform::from_xyz(x, 0.0, z),
     ));
@@ -6385,15 +6401,15 @@ fn federation_faction() -> uuid::Uuid {
 /// authored per entity template under `[weapons_console] radar.range`; the
 /// tests read it from the same component rather than any literal in code.
 fn set_tactical_radar_range(app: &mut App, range: f32) {
-    use crate::entity_tags::EntityTag;
+    use crate::entities::tags::EntityTag;
     let mut q = app
         .world_mut()
         .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
     let entity = q.single_mut(app.world_mut()).expect("LocalShip");
     app.world_mut()
         .entity_mut(entity)
-        .insert(crate::entity_spawner::WeaponsConsoleSection(
-            crate::entity_config::WeaponsConsoleConfig {
+        .insert(crate::entities::spawner::WeaponsConsoleSection(
+            crate::entities::config::WeaponsConsoleConfig {
                 torpedo_arc_color: vec![],
                 power_multipliers: None,
                 phaser_banks: vec![],
@@ -6414,7 +6430,7 @@ fn set_tactical_radar_range(app: &mut App, range: f32) {
 /// Harrow is hostile to Federation — the same shape `combat_test.toml`
 /// builds via `add_faction_enemy`.
 fn setup_harrow_ship_hostile_to_federation(app: &mut App) {
-    use crate::faction::{FactionConfig, FactionRegistry};
+    use crate::ai::faction::{FactionConfig, FactionRegistry};
 
     let mut registry = FactionRegistry::new();
     registry.insert(FactionConfig {
@@ -6458,8 +6474,8 @@ fn spawn_factioned_target(
 ) -> Entity {
     app.world_mut()
         .spawn((
-            crate::simulation::Ship,
-            crate::entity_spawner::EntityUuid(uuid.into()),
+            crate::server_app::Ship,
+            crate::entities::spawner::EntityUuid(uuid.into()),
             Transform::from_xyz(x, 0.0, z),
             FactionComponent(faction),
         ))
@@ -6524,7 +6540,7 @@ fn ai_target_selection_runs_on_the_shared_ai_tick_not_per_frame() {
     app.world_mut()
         .resource_mut::<Time<Fixed>>()
         .set_timestep(crate::sim_tick::sim_tick_period(
-            crate::entity_config::GlobalConfig::default().ai_tick_hz,
+            crate::entities::config::GlobalConfig::default().ai_tick_hz,
         ));
     app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
         std::time::Duration::from_millis(10),
@@ -6568,10 +6584,10 @@ fn tactical_ai_respects_radar_range() {
             .world_mut()
             .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
         if let Ok(entity) = q.single_mut(app.world_mut()) {
-            use crate::entity_tags::EntityTag;
+            use crate::entities::tags::EntityTag;
             app.world_mut().entity_mut(entity).insert(
-                crate::entity_spawner::WeaponsConsoleSection(
-                    crate::entity_config::WeaponsConsoleConfig {
+                crate::entities::spawner::WeaponsConsoleSection(
+                    crate::entities::config::WeaponsConsoleConfig {
                         torpedo_arc_color: vec![],
                         power_multipliers: None,
                         phaser_banks: vec![],
@@ -7049,7 +7065,7 @@ fn tier_four_does_not_acquire_a_factioned_non_ship() {
     // StaticPointDefence combatant. Everything else about it would qualify:
     // in radar range, enemy faction, closer than anything else in the world.
     app.world_mut().spawn((
-        crate::entity_spawner::EntityUuid(station_uuid),
+        crate::entities::spawner::EntityUuid(station_uuid),
         Transform::from_xyz(0.0, 0.0, -10.0),
         FactionComponent(federation_faction()),
     ));
@@ -7099,8 +7115,8 @@ fn spawn_factioned_static_point_defence_target(
 ) -> Entity {
     app.world_mut()
         .spawn((
-            crate::entity_spawner::StaticPointDefence,
-            crate::entity_spawner::EntityUuid(uuid.into()),
+            crate::entities::spawner::StaticPointDefence,
+            crate::entities::spawner::EntityUuid(uuid.into()),
             Transform::from_xyz(x, 0.0, z),
             FactionComponent(faction),
         ))
@@ -7162,8 +7178,8 @@ fn tactical_ai_does_not_acquire_an_unfactioned_static_point_defence_station() {
     // Same shape as station_axiom.toml, but no faction — an ownerless
     // point-defence turret.
     app.world_mut().spawn((
-        crate::entity_spawner::StaticPointDefence,
-        crate::entity_spawner::EntityUuid(station_uuid),
+        crate::entities::spawner::StaticPointDefence,
+        crate::entities::spawner::EntityUuid(station_uuid),
         Transform::from_xyz(0.0, 0.0, -50.0),
     ));
     insert_untargeted_destroy_objective(&mut app, 35.0);
@@ -7202,7 +7218,7 @@ fn tactical_ai_acquires_station_axiom_spawned_via_spawn_entity() {
     setup_harrow_ship_hostile_to_federation(&mut app);
     set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
 
-    let config = crate::entity_config::EntityConfig::from_toml(include_str!(
+    let config = crate::entities::config::EntityConfig::from_toml(include_str!(
         "../../../assets/entities/station_axiom.toml"
     ))
     .expect("station_axiom.toml must parse");
@@ -7212,7 +7228,7 @@ fn tactical_ai_acquires_station_axiom_spawned_via_spawn_entity() {
     // is `federation_faction()`, the same faction
     // `setup_harrow_ship_hostile_to_federation` makes the Harrow LocalShip
     // hostile to — no per-test faction override needed.
-    crate::entity_spawner::spawn_entity(
+    crate::entities::spawner::spawn_entity(
         &mut cmds,
         &config,
         bevy::math::Vec3::new(0.0, 0.0, -50.0),
@@ -7252,7 +7268,7 @@ fn set_phaser_bank_control_source(
     for mut cs in q.iter_mut(world) {
         for bank_id in bank_ids {
             cs.0.set(
-                crate::system_registry::phaser_bank_system_id(bank_id).unwrap(),
+                crate::ship::system_registry::phaser_bank_system_id(bank_id).unwrap(),
                 source,
             );
         }
@@ -7344,7 +7360,7 @@ fn set_science_designation(app: &mut App, uuid: Option<String>) {
     let entity = local_ship_entity(app);
     app.world_mut()
         .entity_mut(entity)
-        .insert(crate::sensors_plugin::SensorRadarSelection(uuid));
+        .insert(crate::ship::sensors::SensorRadarSelection(uuid));
 }
 
 /// AC6(a): Tactical COPIES the advisory Sensors designation when it wins the
@@ -7501,7 +7517,7 @@ fn objective_beats_a_lock_that_coincides_with_the_sensors_designation() {
 }
 
 fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) {
-    use crate::messages::{
+    use crate::core::messages::{
         AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
         SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
     };
@@ -7539,7 +7555,7 @@ fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) 
         .single_mut(app.world_mut())
         .expect("LocalShip must have ShipSystemBlackboards");
     bbs.0.insert(
-        crate::system_registry::viewscreen_system_id(),
+        crate::ship::system_registry::viewscreen_system_id(),
         SystemBlackboard::Viewscreen(viewscreen),
     );
 }
@@ -7550,7 +7566,7 @@ fn insert_destroy_objective_blackboard(app: &mut App, target: &str, score: f32) 
 /// selector reads it ONLY through the directive-kind-matched `objective-operate`
 /// source, which is the whole point of D2.
 fn insert_operate_objective_blackboard(app: &mut App, target: &str, score: f32) {
-    use crate::messages::{
+    use crate::core::messages::{
         AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
         SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
     };
@@ -7584,7 +7600,7 @@ fn insert_operate_objective_blackboard(app: &mut App, target: &str, score: f32) 
         .single_mut(app.world_mut())
         .expect("LocalShip must have ShipSystemBlackboards");
     bbs.0.insert(
-        crate::system_registry::viewscreen_system_id(),
+        crate::ship::system_registry::viewscreen_system_id(),
         SystemBlackboard::Viewscreen(viewscreen),
     );
 }
@@ -7715,12 +7731,15 @@ fn weapons_blackboard_of(app: &mut App, entity: Entity) -> Option<WeaponsBlackbo
     app.world()
         .entity(entity)
         .get::<crate::server_app::ShipSystemBlackboards>()
-        .and_then(
-            |bbs| match bbs.0.get(&crate::system_registry::tactical_station_key()) {
+        .and_then(|bbs| {
+            match bbs
+                .0
+                .get(&crate::ship::system_registry::tactical_station_key())
+            {
                 Some(SystemBlackboard::Weapons(bb)) => Some(bb.clone()),
                 _ => None,
-            },
-        )
+            }
+        })
 }
 
 /// Spawn an NPC ship: every component the spawner gives a `[behaviour]`
@@ -7736,7 +7755,7 @@ fn spawn_npc_ship(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
     let npc = app
         .world_mut()
         .spawn((
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             config,
             ShipSystemControlSources(resolver),
             crate::server_app::ShipSystemBlackboards::default(),
@@ -7750,12 +7769,12 @@ fn spawn_npc_ship(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
             // #887 the decision travels to `handle_set_target` as an admitted
             // `SetTarget` rather than being written straight to the component.
             // `entities/spawner.rs` inserts this on every spawned NPC.
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             TacticalRadarSelection::default(),
             ActiveBeam::default(),
             PhaserCooldown::default(),
-            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-                banks: vec![crate::entity_config::PhaserBankConfig {
+            PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+                banks: vec![crate::entities::config::PhaserBankConfig {
                     id: "phaser-fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 270.0,
@@ -7764,7 +7783,7 @@ fn spawn_npc_ship(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
                 }],
             }),
             TorpedoSystemResource(TorpedoSystem::new(TorpedoConfig::default())),
-            crate::entity_spawner::EntityUuid(uuid.into()),
+            crate::entities::spawner::EntityUuid(uuid.into()),
             Transform::from_xyz(x, 0.0, z),
         ))
         .id();
@@ -7830,7 +7849,7 @@ fn ai_target_selection_publishes_locked_target_and_applies_it() {
 /// while the flag is clear, and locks the objective target once it is set.
 #[test]
 fn ai_target_selection_flag_guard_reads_the_world_in_both_directions() {
-    let flag_gated_selector = || crate::weapons_plugin::TacticalTargetSelector {
+    let flag_gated_selector = || crate::console::weapons::TacticalTargetSelector {
         selector: crate::entities::config::FineSystemAiSelectorToml {
             param: Default::default(),
             sources: vec!["objective-destroy".into()],
@@ -7905,18 +7924,21 @@ fn weapons_blackboard_target_follows_the_frozen_combat_lock_not_the_live_selecti
     // seed glue would have run by writing directly, then read what Publish
     // produced on the next tick.
     {
-        use crate::messages::{SystemBlackboard, ViewscreenBlackboard};
+        use crate::core::messages::{SystemBlackboard, ViewscreenBlackboard};
         let mut bbs = app
             .world_mut()
             .get_mut::<crate::server_app::ShipSystemBlackboards>(local)
             .expect("LocalShip must carry ShipSystemBlackboards");
-        let mut vbb = match bbs.0.get(&crate::system_registry::viewscreen_system_id()) {
+        let mut vbb = match bbs
+            .0
+            .get(&crate::ship::system_registry::viewscreen_system_id())
+        {
             Some(SystemBlackboard::Viewscreen(v)) => v.clone(),
             _ => ViewscreenBlackboard::default(),
         };
         vbb.combat_lock = Some(frozen_uuid.clone());
         bbs.0.insert(
-            crate::system_registry::viewscreen_system_id(),
+            crate::ship::system_registry::viewscreen_system_id(),
             SystemBlackboard::Viewscreen(vbb),
         );
     }
@@ -7924,7 +7946,7 @@ fn weapons_blackboard_target_follows_the_frozen_combat_lock_not_the_live_selecti
     // the viewscreen fact back to the live selection first.
     use bevy::ecs::system::RunSystemOnce;
     app.world_mut()
-        .run_system_once(crate::weapons_plugin::publish_weapons_core_blackboard)
+        .run_system_once(crate::console::weapons::publish_weapons_core_blackboard)
         .expect("publisher must run");
 
     let bb = weapons_blackboard_of(&mut app, local).expect("blackboard");
@@ -8004,17 +8026,17 @@ fn set_mixed_tactical_control_sources(app: &mut App) {
         world.query_filtered::<&mut ShipSystemControlSources, With<crate::server_app::LocalShip>>();
     for mut cs in q.iter_mut(world) {
         for sysid in [
-            crate::system_registry::tactical_radar_system_id(),
-            crate::system_registry::phaser_fore_system_id(),
-            crate::system_registry::phaser_aft_system_id(),
+            crate::ship::system_registry::tactical_radar_system_id(),
+            crate::ship::system_registry::phaser_fore_system_id(),
+            crate::ship::system_registry::phaser_aft_system_id(),
         ] {
             cs.0.set(sysid, ControlSource::Human);
         }
         for sysid in [
-            crate::system_registry::torpedo_magazine_system_id(),
-            crate::system_registry::torpedo_tube_fore_port_system_id(),
-            crate::system_registry::torpedo_tube_fore_starboard_system_id(),
-            crate::system_registry::torpedo_tube_aft_system_id(),
+            crate::ship::system_registry::torpedo_magazine_system_id(),
+            crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
+            crate::ship::system_registry::torpedo_tube_fore_starboard_system_id(),
+            crate::ship::system_registry::torpedo_tube_aft_system_id(),
         ] {
             cs.0.set(sysid, ControlSource::Ai);
         }
@@ -8046,7 +8068,7 @@ fn mixed_rating_ship_has_live_tactical_ai_but_a_human_radar() {
     );
     let radar = control_sources
         .0
-        .policy_for(&crate::system_registry::tactical_radar_system_id());
+        .policy_for(&crate::ship::system_registry::tactical_radar_system_id());
     assert!(
         radar.accept_human_input && !radar.operate_ai,
         "the radar itself must stay the human's — that is the whole asymmetry \
@@ -8072,7 +8094,7 @@ fn human_set_target_survives_the_tick_on_a_mixed_rating_ship() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -8131,12 +8153,12 @@ fn skipped_ship_keeps_its_weapons_target_and_gains_no_blackboard_entry() {
     let ship = app
         .world_mut()
         .spawn((
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             config,
             ShipSystemControlSources(resolver),
             LastShipAttacker::default(),
             ShipPhysics::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             // The human operator's standing lock, on an entity that does not
             // exist in this bare world — so if the AI ever did run for this
             // ship, its stale-target guard would clear the lock and the
@@ -8165,7 +8187,7 @@ fn skipped_ship_keeps_its_weapons_target_and_gains_no_blackboard_entry() {
             .get::<crate::server_app::ShipSystemBlackboards>()
             .unwrap()
             .0
-            .contains_key(&crate::system_registry::tactical_station_key()),
+            .contains_key(&crate::ship::system_registry::tactical_station_key()),
         "a skipped ship has no AI intent to report, so the selector must not \
          insert a bare Weapons blackboard entry for it"
     );
@@ -8181,7 +8203,7 @@ struct KillTargetOnDamage(String);
 fn kill_target_after_input(
     mut commands: Commands,
     kill: Res<KillTargetOnDamage>,
-    target_q: Query<(Entity, &crate::entity_spawner::EntityUuid)>,
+    target_q: Query<(Entity, &crate::entities::spawner::EntityUuid)>,
     mut weapons_target_q: Query<&mut TacticalRadarSelection, With<crate::server_app::LocalShip>>,
 ) {
     for (entity, uuid) in target_q.iter() {
@@ -8379,7 +8401,7 @@ fn torpedo_ai_test_app() -> App {
     let mut app = test_app();
     app.add_systems(
         FixedUpdate,
-        crate::console_ai_plugin::ai_torpedo_auto_fire
+        crate::console_ai::server::ai_torpedo_auto_fire
             .in_set(crate::sim_sets::SimSet::Physics)
             .before(crate::console::weapons::handle_fire_torpedo),
     );
@@ -8392,7 +8414,7 @@ fn torpedo_ai_test_app() -> App {
     };
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::ai_plugin::AiHighFidelity);
+        .insert(crate::ai::server::AiHighFidelity);
     app
 }
 
@@ -8446,19 +8468,19 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
     let npc_sources = || {
         let mut s = crate::ship::control_source::ControlSourceResolver::new();
         s.set(
-            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::system_registry::torpedo_magazine_system_id(),
             crate::ship::control_source::ControlSource::Ai,
         );
         s.set(
-            crate::system_registry::torpedo_tube_fore_port_system_id(),
+            crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
             crate::ship::control_source::ControlSource::Ai,
         );
         s.set(
-            crate::system_registry::torpedo_tube_fore_starboard_system_id(),
+            crate::ship::system_registry::torpedo_tube_fore_starboard_system_id(),
             crate::ship::control_source::ControlSource::Ai,
         );
         s.set(
-            crate::system_registry::torpedo_tube_aft_system_id(),
+            crate::ship::system_registry::torpedo_tube_aft_system_id(),
             crate::ship::control_source::ControlSource::Ai,
         );
         crate::ship_plugin::ShipSystemControlSources(s)
@@ -8481,7 +8503,7 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
             TacticalRadarSelection(Some("npc-target".into())),
             TorpedoSystemResource(armed_sys),
             AdmittedCommands::default(),
-            crate::ai_plugin::AiHighFidelity,
+            crate::ai::server::AiHighFidelity,
             bevy::prelude::Transform::default(),
         ))
         .id();
@@ -8502,7 +8524,7 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some("npc-target".into())),
             AdmittedCommands::default(),
-            crate::ai_plugin::AiHighFidelity,
+            crate::ai::server::AiHighFidelity,
             bevy::prelude::Transform::default(),
         ))
         .id();
@@ -8511,7 +8533,7 @@ fn npc_torpedo_ai_never_decides_from_the_player_ships_tubes() {
         .run_system_once(seed_viewscreen_from_selection)
         .expect("seed viewscreen");
     app.world_mut()
-        .run_system_once(crate::console_ai_plugin::ai_torpedo_auto_fire)
+        .run_system_once(crate::console_ai::server::ai_torpedo_auto_fire)
         .expect("ai_torpedo_auto_fire should run");
 
     assert!(
@@ -8550,7 +8572,7 @@ fn ai_torpedo_auto_fire_writes_admitted_command_without_launching() {
         .run_system_once(seed_viewscreen_from_selection)
         .expect("seed viewscreen");
     app.world_mut()
-        .run_system_once(crate::console_ai_plugin::ai_torpedo_auto_fire)
+        .run_system_once(crate::console_ai::server::ai_torpedo_auto_fire)
         .expect("ai_torpedo_auto_fire should run");
 
     let ship = local_ship(&mut app);
@@ -8582,15 +8604,15 @@ fn ai_torpedo_auto_fire_writes_admitted_command_without_launching() {
 /// Attach a `TorpedoTubeAiPolicies` map to the local ship for `fore_port`, built
 /// from an authored `when` guard on the `torpedo_launch` channel.
 fn attach_launch_policy(app: &mut App, when: &str) {
-    let ai = crate::entity_config::FineSystemAiConfigToml {
+    let ai = crate::entities::config::FineSystemAiConfigToml {
         evaluate_every_ticks: crate::entities::config::default_evaluate_every_ticks(),
         idle: false,
         param: Default::default(),
-        rule: vec![crate::entity_config::FineSystemAiRuleToml {
+        rule: vec![crate::entities::config::FineSystemAiRuleToml {
             priority: 0,
-            channel: crate::entity_config::TORPEDO_LAUNCH_CHANNEL.into(),
+            channel: crate::entities::config::TORPEDO_LAUNCH_CHANNEL.into(),
             when: when.into(),
-            verb: crate::entity_config::TORPEDO_LAUNCH_VERB.into(),
+            verb: crate::entities::config::TORPEDO_LAUNCH_VERB.into(),
             value: false,
             level: 0,
             response_index: 0,
@@ -8604,7 +8626,7 @@ fn attach_launch_policy(app: &mut App, when: &str) {
     let ship = local_ship(app);
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(map));
+        .insert(crate::console::weapons::TorpedoTubeAiPolicies(map));
 }
 
 /// An idle launch policy blocks the launch even though the tube is loaded, in
@@ -8629,7 +8651,7 @@ fn ai_torpedo_auto_fire_idle_launch_policy_blocks_launch() {
     let ship = local_ship(&mut app);
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::weapons_plugin::TorpedoTubeAiPolicies(map));
+        .insert(crate::console::weapons::TorpedoTubeAiPolicies(map));
 
     let out = tick(&mut app);
     assert!(
@@ -8771,14 +8793,16 @@ fn ai_torpedo_auto_fire_tubes_full_fact_gates_the_salvo() {
 /// which is invisible everywhere else.
 #[test]
 fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
     use bevy::ecs::system::RunSystemOnce;
 
-    let hull = crate::entity_config::EntityConfig::from_toml(
-        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_cruiser.toml")
-            .expect("ship_harrow_cruiser must resolve")
-            .toml
-            .as_str(),
+    let hull = crate::entities::config::EntityConfig::from_toml(
+        crate::entities::include_resolve::resolve_from_disk(
+            "assets/entities/ship_harrow_cruiser.toml",
+        )
+        .expect("ship_harrow_cruiser must resolve")
+        .toml
+        .as_str(),
     )
     .expect("the shipped cruiser hull must parse");
     let torpedoes = hull.torpedoes.as_ref().expect("the cruiser carries tubes");
@@ -8786,8 +8810,10 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
     // The ship, its tubes and its AUTHORED per-tube policies — the same three
     // things `entities::spawner` attaches together.
     let build = |app: &mut App, target_uuid: &str, loaded: &[(&str, u32)]| -> Entity {
-        let mut system =
-            crate::torpedo::TorpedoSystem::from_configs(&torpedoes.tubes, torpedoes.to_runtime());
+        let mut system = crate::weapons::torpedo::TorpedoSystem::from_configs(
+            &torpedoes.tubes,
+            torpedoes.to_runtime(),
+        );
         for (id, count) in loaded {
             system.tube_mut(id).expect("shipped tube").loaded_count = *count;
         }
@@ -8806,12 +8832,12 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
             .collect();
         let mut sources = crate::ship::control_source::ControlSourceResolver::new();
         sources.set(
-            crate::system_registry::torpedo_magazine_system_id(),
+            crate::ship::system_registry::torpedo_magazine_system_id(),
             crate::ship::control_source::ControlSource::Ai,
         );
         for tube in &torpedoes.tubes {
             sources.set(
-                crate::system_registry::torpedo_tube_system_id(&tube.id).unwrap(),
+                crate::ship::system_registry::torpedo_tube_system_id(&tube.id).unwrap(),
                 crate::ship::control_source::ControlSource::Ai,
             );
         }
@@ -8826,9 +8852,9 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
                 crate::server_app::ShipSystemBlackboards::default(),
                 TacticalRadarSelection(Some(target_uuid.to_string())),
                 TorpedoSystemResource(system),
-                crate::weapons_plugin::TorpedoTubeAiPolicies(policies),
+                crate::console::weapons::TorpedoTubeAiPolicies(policies),
                 AdmittedCommands::default(),
-                crate::ai_plugin::AiHighFidelity,
+                crate::ai::server::AiHighFidelity,
                 Transform::default(),
             ))
             .id()
@@ -8838,7 +8864,7 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
     // `(0, -30)` is dead ahead of a ship at the origin with yaw 0 — deliberately
     // NOT on an arc boundary, so the 24-degree tube arc admits it on its merits.
     let spawn_target = |app: &mut App, uuid: &str, x: f32, z: f32, arcs_online: bool| {
-        let mut shields = crate::shield::ShieldSystem::default();
+        let mut shields = crate::weapons::shield::ShieldSystem::default();
         if !arcs_online {
             for facing in shields.facings.iter_mut() {
                 facing.offline_remaining = 30.0;
@@ -8847,7 +8873,7 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
         app.world_mut().spawn((
             EntityUuid(uuid.to_string()),
             Transform::from_xyz(x, 0.0, z),
-            crate::simulation::ShipShields(shields, 0.5),
+            crate::server_app::ShipShields(shields, 0.5),
         ));
     };
 
@@ -8856,7 +8882,7 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
             .run_system_once(seed_viewscreen_from_selection)
             .expect("seed viewscreen");
         app.world_mut()
-            .run_system_once(crate::console_ai_plugin::ai_torpedo_auto_fire)
+            .run_system_once(crate::console_ai::server::ai_torpedo_auto_fire)
             .expect("ai_torpedo_auto_fire runs");
         app.world()
             .get::<AdmittedCommands>(ship)
@@ -8937,14 +8963,16 @@ fn shipped_cruiser_tubes_launch_only_on_a_full_salvo_through_a_downed_arc() {
 #[cfg(test)]
 fn spawn_shipped_warhawk_battery(
     app: &mut App,
-    torpedoes: &crate::entity_config::TorpedoesConfig,
+    torpedoes: &crate::entities::config::TorpedoesConfig,
     target_uuid: &str,
     loaded: &[&str],
 ) -> Entity {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
 
-    let mut system =
-        crate::torpedo::TorpedoSystem::from_configs(&torpedoes.tubes, torpedoes.to_runtime());
+    let mut system = crate::weapons::torpedo::TorpedoSystem::from_configs(
+        &torpedoes.tubes,
+        torpedoes.to_runtime(),
+    );
     for id in loaded {
         let tube = system.tube_mut(id).expect("shipped tube");
         tube.loaded_count = tube.volley_max;
@@ -8964,12 +8992,12 @@ fn spawn_shipped_warhawk_battery(
         .collect();
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     sources.set(
-        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::system_registry::torpedo_magazine_system_id(),
         crate::ship::control_source::ControlSource::Ai,
     );
     for tube in &torpedoes.tubes {
         sources.set(
-            crate::system_registry::torpedo_tube_system_id(&tube.id).unwrap(),
+            crate::ship::system_registry::torpedo_tube_system_id(&tube.id).unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
     }
@@ -8984,9 +9012,9 @@ fn spawn_shipped_warhawk_battery(
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
             TorpedoSystemResource(system),
-            crate::weapons_plugin::TorpedoTubeAiPolicies(policies),
+            crate::console::weapons::TorpedoTubeAiPolicies(policies),
             AdmittedCommands::default(),
-            crate::ai_plugin::AiHighFidelity,
+            crate::ai::server::AiHighFidelity,
             Transform::default(),
         ))
         .id()
@@ -8997,9 +9025,9 @@ fn spawn_shipped_warhawk_battery(
 /// — "the arc a round would strike is not blocking".
 #[cfg(test)]
 fn spawn_warhawk_shield_target(app: &mut App, uuid: &str, x: f32, z: f32, arcs_online: bool) {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
 
-    let mut shields = crate::shield::ShieldSystem::default();
+    let mut shields = crate::weapons::shield::ShieldSystem::default();
     if !arcs_online {
         for facing in shields.facings.iter_mut() {
             facing.offline_remaining = 30.0;
@@ -9008,7 +9036,7 @@ fn spawn_warhawk_shield_target(app: &mut App, uuid: &str, x: f32, z: f32, arcs_o
     app.world_mut().spawn((
         EntityUuid(uuid.to_string()),
         Transform::from_xyz(x, 0.0, z),
-        crate::simulation::ShipShields(shields, 0.5),
+        crate::server_app::ShipShields(shields, 0.5),
     ));
 }
 
@@ -9021,7 +9049,7 @@ fn torpedo_launch_targets(app: &mut App, ship: Entity) -> Vec<SystemId> {
         .run_system_once(seed_viewscreen_from_selection)
         .expect("seed viewscreen");
     app.world_mut()
-        .run_system_once(crate::console_ai_plugin::ai_torpedo_auto_fire)
+        .run_system_once(crate::console_ai::server::ai_torpedo_auto_fire)
         .expect("ai_torpedo_auto_fire runs");
     app.world()
         .get::<AdmittedCommands>(ship)
@@ -9049,19 +9077,21 @@ fn torpedo_launch_targets(app: &mut App, ship: Entity) -> Vec<SystemId> {
 /// validate, and simply never fire, which is invisible everywhere else.
 #[test]
 fn shipped_warhawk_launchers_decide_independently_through_a_downed_arc() {
-    let hull = crate::entity_config::EntityConfig::from_toml(
-        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
-            .expect("ship_harrow_warhawk must resolve")
-            .toml
-            .as_str(),
+    let hull = crate::entities::config::EntityConfig::from_toml(
+        crate::entities::include_resolve::resolve_from_disk(
+            "assets/entities/ship_harrow_warhawk.toml",
+        )
+        .expect("ship_harrow_warhawk must resolve")
+        .toml
+        .as_str(),
     )
     .expect("the shipped battleship hull must parse");
     let torpedoes = hull
         .torpedoes
         .as_ref()
         .expect("the battleship carries close-defence launchers");
-    let fore = crate::system_registry::torpedo_tube_system_id("fore").unwrap();
-    let aft = crate::system_registry::torpedo_tube_system_id("aft").unwrap();
+    let fore = crate::ship::system_registry::torpedo_tube_system_id("fore").unwrap();
+    let aft = crate::ship::system_registry::torpedo_tube_system_id("aft").unwrap();
 
     // AC2: the FORE tube is loaded and bearing; the AFT tube is still reloading.
     // `(0, -30)` is dead ahead of a ship at the origin with yaw 0 — 45 degrees
@@ -9134,11 +9164,13 @@ fn shipped_warhawk_launchers_decide_independently_through_a_downed_arc() {
 /// and the guard fires anyway.
 #[test]
 fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
-    let hull = crate::entity_config::EntityConfig::from_toml(
-        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
-            .expect("ship_harrow_warhawk must resolve")
-            .toml
-            .as_str(),
+    let hull = crate::entities::config::EntityConfig::from_toml(
+        crate::entities::include_resolve::resolve_from_disk(
+            "assets/entities/ship_harrow_warhawk.toml",
+        )
+        .expect("ship_harrow_warhawk must resolve")
+        .toml
+        .as_str(),
     )
     .expect("the shipped battleship hull must parse");
     let torpedoes = hull
@@ -9154,9 +9186,9 @@ fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
             .to_policy()
             .expect("and it decodes");
         let fires = |loaded: bool, in_arc: bool, facing_shields: i32| {
-            crate::weapons_plugin::torpedo_tube_launch_policy_fires(
+            crate::console::weapons::torpedo_tube_launch_policy_fires(
                 &policy,
-                &crate::weapons_plugin::seed_torpedo_tube_launch_facts(
+                &crate::console::weapons::seed_torpedo_tube_launch_facts(
                     loaded,
                     true,
                     true,
@@ -9170,7 +9202,7 @@ fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
                     // false throughout is that statement. No weapons hold
                     // either (issue #1041) — a held hull is a separate claim,
                     // pinned in `authored_ai_pins`.
-                    crate::weapons_plugin::WeaponsAlertPosture::alert(false),
+                    crate::console::weapons::WeaponsAlertPosture::alert(false),
                 ),
                 &[],
             )
@@ -9237,11 +9269,13 @@ fn shipped_warhawk_launch_guard_reads_each_tubes_own_readiness() {
 fn warhawk_torpedo_opportunity_never_commands_the_helm() {
     use bevy::ecs::system::RunSystemOnce;
 
-    let hull = crate::entity_config::EntityConfig::from_toml(
-        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_warhawk.toml")
-            .expect("ship_harrow_warhawk must resolve")
-            .toml
-            .as_str(),
+    let hull = crate::entities::config::EntityConfig::from_toml(
+        crate::entities::include_resolve::resolve_from_disk(
+            "assets/entities/ship_harrow_warhawk.toml",
+        )
+        .expect("ship_harrow_warhawk must resolve")
+        .toml
+        .as_str(),
     )
     .expect("the shipped battleship hull must parse");
     let torpedoes = hull
@@ -9318,7 +9352,7 @@ fn warhawk_torpedo_opportunity_never_commands_the_helm() {
                 .tubes
                 .iter()
                 .any(
-                    |t| crate::system_registry::torpedo_tube_system_id(&t.id).as_ref()
+                    |t| crate::ship::system_registry::torpedo_tube_system_id(&t.id).as_ref()
                         == Some(&command.target)
                 ),
             "a launch was admitted at `{}`, which is not one of this hull's tubes",
@@ -9487,7 +9521,7 @@ fn torpedo_in_flight_count_is_published_as_a_public_fact() {
 
     let mut app = test_app();
     let mut ts = TorpedoSystem::new(TorpedoConfig::default());
-    ts.in_flight.push(crate::torpedo::Torpedo {
+    ts.in_flight.push(crate::weapons::torpedo::Torpedo {
         uuid: "flying-1".into(),
         x: 0.0,
         y: 0.0,
@@ -9520,9 +9554,9 @@ fn torpedo_in_flight_count_is_published_as_a_public_fact() {
         .unwrap();
     let mag = bbs
         .0
-        .get(&crate::system_registry::torpedo_magazine_system_id());
+        .get(&crate::ship::system_registry::torpedo_magazine_system_id());
     match mag {
-        Some(crate::messages::SystemBlackboard::TorpedoMagazine(bb)) => {
+        Some(crate::core::messages::SystemBlackboard::TorpedoMagazine(bb)) => {
             assert_eq!(
                 bb.torpedoes_in_flight, 1,
                 "the published magazine fact must expose the in-flight count"
@@ -9575,8 +9609,8 @@ fn handle_fire_torpedo_launches_from_admitted_command() {
 /// tube surfaces the active pattern step/barrel for the Tactical indicator.
 #[test]
 fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
-    use crate::entity_spawner::EntityUuid;
-    use crate::model_rig::{Marker, ModelMarkers};
+    use crate::entities::model_rig::{Marker, ModelMarkers};
+    use crate::entities::spawner::EntityUuid;
     use bevy::ecs::system::RunSystemOnce;
     use std::collections::HashMap;
 
@@ -9605,7 +9639,7 @@ fn handle_fire_torpedo_patterned_launch_resolves_barrel_origin() {
         ai: None,
     };
     let mut torp =
-        crate::torpedo::TorpedoSystem::from_configs(&[tube_cfg], TorpedoConfig::default());
+        crate::weapons::torpedo::TorpedoSystem::from_configs(&[tube_cfg], TorpedoConfig::default());
     torp.torpedoes_remaining -= 2;
     torp.tube_mut("fore-centre").unwrap().loaded_count = 2;
 
@@ -9756,7 +9790,7 @@ fn ai_torpedo_auto_fire_gates_on_the_arc_the_torpedo_would_strike() {
             shields.0.facings.len() >= 2,
             "precondition: this test needs a multi-arc target"
         );
-        let incoming = crate::shield::attacker_bearing_relative(0.0, 0.0, 0.0, -30.0, 0.0);
+        let incoming = crate::weapons::shield::attacker_bearing_relative(0.0, 0.0, 0.0, -30.0, 0.0);
         let struck = shields.0.facing_index_for_bearing(incoming);
         let away = (struck + 1) % shields.0.facings.len();
         (struck, away)
@@ -9814,18 +9848,21 @@ fn local_ship(app: &mut App) -> Entity {
 
 /// A ship-like entity carrying `ShipShields` at full HP.
 fn spawn_shielded_target(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
-    let shields = crate::shield::ShieldSystem::new(&crate::shield::ShieldConfig::default());
+    let shields =
+        crate::weapons::shield::ShieldSystem::new(&crate::weapons::shield::ShieldConfig::default());
     assert!(
         shields.facings.iter().any(|f| f.hp > 0),
         "precondition: the default shield config must start with HP up"
     );
     app.world_mut()
         .spawn((
-            crate::entity_spawner::EntityUuid(uuid.into()),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                crate::messages::SystemId("captain".into()),
-                50.0,
-            )])),
+            crate::entities::spawner::EntityUuid(uuid.into()),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(
+                    crate::core::messages::SystemId("captain".into()),
+                    50.0,
+                )]),
+            ),
             crate::ship::shields::ShipShields(shields, 0.5),
             Transform::from_xyz(x, 0.0, z),
         ))
@@ -9839,7 +9876,7 @@ fn set_tactical_station_rating(app: &mut App, rating: &str) {
         .query_filtered::<&mut crate::ship_plugin::ActiveStationRatings, With<crate::server_app::LocalShip>>();
     for mut ratings in q.iter_mut(world) {
         ratings.0.insert(
-            crate::messages::StationId("tactical".into()),
+            crate::core::messages::StationId("tactical".into()),
             rating.clone(),
         );
     }
@@ -9947,7 +9984,7 @@ fn register_fine_system(
 #[test]
 fn system_is_registered_returns_true_after_set() {
     let mut sources = ShipSystemControlSources::default();
-    let sysid = crate::system_registry::phaser_fore_system_id();
+    let sysid = crate::ship::system_registry::phaser_fore_system_id();
     sources.0.set(
         sysid.clone(),
         crate::ship::control_source::ControlSource::Human,
@@ -9958,7 +9995,7 @@ fn system_is_registered_returns_true_after_set() {
 #[test]
 fn system_is_registered_returns_true_after_offline_insert() {
     let mut sources = ShipSystemControlSources::default();
-    let sysid = crate::system_registry::phaser_fore_system_id();
+    let sysid = crate::ship::system_registry::phaser_fore_system_id();
     sources.0.set_offline(sysid.clone(), true);
     assert!(system_is_registered(&sources, &sysid));
 }
@@ -9966,7 +10003,7 @@ fn system_is_registered_returns_true_after_offline_insert() {
 #[test]
 fn system_is_registered_returns_false_when_absent() {
     let sources = ShipSystemControlSources::default();
-    let sysid = crate::system_registry::phaser_fore_system_id();
+    let sysid = crate::ship::system_registry::phaser_fore_system_id();
     assert!(!system_is_registered(&sources, &sysid));
 }
 
@@ -10053,7 +10090,7 @@ fn load_tube_emits_claim_torpedo_round_via_channel_2() {
 
     let queue = &app.world().resource::<InterSystemQueue>().0;
     let claim_present = queue.iter().any(|m| {
-        m.target == crate::system_registry::torpedo_magazine_system_id()
+        m.target == crate::ship::system_registry::torpedo_magazine_system_id()
             && matches!(
                 &m.payload,
                 InterSystemPayload::ClaimTorpedoRound { tube } if tube == "fore_port"
@@ -10119,7 +10156,7 @@ fn human_set_torpedo_volley_target_reaches_the_local_ship_tube() {
 /// carried on `InProgress` to the tick budget with no game-over reason.
 #[test]
 fn torpedo_kill_on_the_local_ship_latches_game_over() {
-    use crate::simulation::GameOverReason;
+    use crate::server_app::GameOverReason;
 
     let mut app = test_app();
     app.init_resource::<GameOverReason>();
@@ -10133,22 +10170,24 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
         damage_hull: 100_000,
         ..TorpedoConfig::default()
     });
-    enemy_torpedoes.in_flight.push(crate::torpedo::Torpedo {
-        uuid: "torpedo-uuid".into(),
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-        heading: 0.0,
-        pitch: 0.0,
-        lifespan_remaining: 10.0,
-        target_uuid: Some("test-local-ship".into()),
-        source_uuid: Some("enemy-uuid".into()),
-        tube_id: "fore_port".into(),
-        shield_pierce: 1.0,
-    });
+    enemy_torpedoes
+        .in_flight
+        .push(crate::weapons::torpedo::Torpedo {
+            uuid: "torpedo-uuid".into(),
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            heading: 0.0,
+            pitch: 0.0,
+            lifespan_remaining: 10.0,
+            target_uuid: Some("test-local-ship".into()),
+            source_uuid: Some("enemy-uuid".into()),
+            tube_id: "fore_port".into(),
+            shield_pierce: 1.0,
+        });
     app.world_mut().spawn((
-        crate::simulation::Ship,
-        crate::entity_spawner::EntityUuid("enemy-uuid".into()),
+        crate::server_app::Ship,
+        crate::entities::spawner::EntityUuid("enemy-uuid".into()),
         Transform::from_xyz(0.0, 0.0, 40.0),
         TorpedoSystemResource(enemy_torpedoes),
     ));
@@ -10166,7 +10205,7 @@ fn torpedo_kill_on_the_local_ship_latches_game_over() {
     );
     assert_eq!(
         reason.1,
-        Some(crate::balance::Outcome::Defeat),
+        Some(crate::core::balance::Outcome::Defeat),
         "the player's death is a defeat, whatever weapon delivered it"
     );
 }
@@ -10242,7 +10281,7 @@ fn load_tube_refused_when_tube_fine_system_offline() {
 
     mark_system_offline(
         &mut app,
-        crate::system_registry::torpedo_tube_fore_port_system_id(),
+        crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
     );
 
     push(
@@ -10319,7 +10358,7 @@ fn magazine_claim_decrements_counter_by_one_when_online() {
         .map(|ts| {
             matches!(
                 ts.0.tube("fore_port").map(|t| &t.load_state),
-                Some(crate::torpedo::TubeLoadState::Loading { .. })
+                Some(crate::weapons::torpedo::TubeLoadState::Loading { .. })
             )
         })
         .unwrap();
@@ -10336,12 +10375,12 @@ fn magazine_claim_refused_when_magazine_offline() {
     // Register magazine as human, then mark it offline (Disabled tier).
     register_fine_system(
         &mut app,
-        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::system_registry::torpedo_magazine_system_id(),
         crate::ship::control_source::ControlSource::Human,
     );
     mark_system_offline(
         &mut app,
-        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::system_registry::torpedo_magazine_system_id(),
     );
 
     let before = app
@@ -10410,7 +10449,7 @@ fn magazine_claim_refused_when_empty() {
         .unwrap();
     assert_eq!(
         tube_state,
-        Some(crate::torpedo::TubeLoadState::Unloaded),
+        Some(crate::weapons::torpedo::TubeLoadState::Unloaded),
         "empty magazine must not begin loading the tube"
     );
 }
@@ -10446,14 +10485,14 @@ fn same_tick_magazine_contention_is_deterministic_first_claim_wins() {
         {
             let mut q = app.world_mut().resource_mut::<InterSystemQueue>();
             q.0.push(InterSystemMsg {
-                target: crate::system_registry::torpedo_magazine_system_id(),
+                target: crate::ship::system_registry::torpedo_magazine_system_id(),
                 payload: InterSystemPayload::ClaimTorpedoRound {
                     tube: "fore_port".into(),
                 },
                 source_entity: Some(ship),
             });
             q.0.push(InterSystemMsg {
-                target: crate::system_registry::torpedo_magazine_system_id(),
+                target: crate::ship::system_registry::torpedo_magazine_system_id(),
                 payload: InterSystemPayload::ClaimTorpedoRound {
                     tube: "fore_starboard".into(),
                 },
@@ -10473,13 +10512,13 @@ fn same_tick_magazine_contention_is_deterministic_first_claim_wins() {
         assert!(
             matches!(
                 ts.0.tube("fore_port").map(|t| &t.load_state),
-                Some(crate::torpedo::TubeLoadState::Loading { .. })
+                Some(crate::weapons::torpedo::TubeLoadState::Loading { .. })
             ),
             "the first claim in queue order must win the contested round"
         );
         assert_eq!(
             ts.0.tube("fore_starboard").map(|t| &t.load_state),
-            Some(&crate::torpedo::TubeLoadState::Unloaded),
+            Some(&crate::weapons::torpedo::TubeLoadState::Unloaded),
             "the second claim must be refused when the magazine is exhausted"
         );
     }
@@ -10508,7 +10547,7 @@ fn idle_magazine_grant_policy_refuses_the_claim() {
     // Attach an idle magazine grant policy.
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(
+        .insert(crate::console::weapons::TorpedoMagazineAiPolicy(
             crate::ai::policy::AiPolicy {
                 idle: true,
                 ..Default::default()
@@ -10518,7 +10557,7 @@ fn idle_magazine_grant_policy_refuses_the_claim() {
     {
         let mut q = app.world_mut().resource_mut::<InterSystemQueue>();
         q.0.push(InterSystemMsg {
-            target: crate::system_registry::torpedo_magazine_system_id(),
+            target: crate::ship::system_registry::torpedo_magazine_system_id(),
             payload: InterSystemPayload::ClaimTorpedoRound {
                 tube: "fore_port".into(),
             },
@@ -10537,7 +10576,7 @@ fn idle_magazine_grant_policy_refuses_the_claim() {
     );
     assert_eq!(
         ts.0.tube("fore_port").map(|t| &t.load_state),
-        Some(&crate::torpedo::TubeLoadState::Unloaded),
+        Some(&crate::weapons::torpedo::TubeLoadState::Unloaded),
         "a refused claim must not begin loading the tube"
     );
 }
@@ -10565,7 +10604,7 @@ fn magazine_flag_guard_reads_the_world_in_both_directions() {
     // A grant policy whose ONLY rule is guarded on the world flag.
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(
+        .insert(crate::console::weapons::TorpedoMagazineAiPolicy(
             crate::ai::policy::AiPolicy {
                 params: crate::world::flags::AiParams::new(),
                 rules: vec![crate::ai::policy::AiPolicyRule {
@@ -10583,7 +10622,7 @@ fn magazine_flag_guard_reads_the_world_in_both_directions() {
     let push_claim = |app: &mut App| {
         let mut q = app.world_mut().resource_mut::<InterSystemQueue>();
         q.0.push(InterSystemMsg {
-            target: crate::system_registry::torpedo_magazine_system_id(),
+            target: crate::ship::system_registry::torpedo_magazine_system_id(),
             payload: InterSystemPayload::ClaimTorpedoRound {
                 tube: "fore_port".into(),
             },
@@ -10675,12 +10714,12 @@ fn conservation_fixture(
         })
         .collect();
     app.world_mut().entity_mut(ship).insert((
-        crate::weapons_plugin::TorpedoMagazineAiPolicy(
+        crate::console::weapons::TorpedoMagazineAiPolicy(
             crate::entities::authored_ai_pins::shipped_policy_toml("torpedo_magazine")
                 .to_policy()
                 .expect("the shipped torpedo-magazine policy decodes"),
         ),
-        crate::entity_spawner::BehaviourSection(crate::entities::config::BehaviourConfig {
+        crate::entities::spawner::BehaviourSection(crate::entities::config::BehaviourConfig {
             doctrine,
             ..Default::default()
         }),
@@ -10879,9 +10918,11 @@ fn torpedo_conservation_carves_out_a_sole_objective_ship() {
 #[test]
 fn combat_test_raid_cruisers_are_the_shipped_sole_objective_ship() {
     let template = crate::entities::config::EntityConfig::from_toml(
-        &crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_cruiser.toml")
-            .expect("the shipped raid cruiser must resolve")
-            .toml,
+        &crate::entities::include_resolve::resolve_from_disk(
+            "assets/entities/ship_harrow_cruiser.toml",
+        )
+        .expect("the shipped raid cruiser must resolve")
+        .toml,
     )
     .expect("the shipped raid cruiser must parse");
 
@@ -10909,7 +10950,7 @@ fn combat_test_raid_cruisers_are_the_shipped_sole_objective_ship() {
         .expect("combat_test must spawn `wave_1` with inline overrides");
 
     // Exactly the two steps `dispatch_spawn_entity` takes.
-    let merged = crate::entity_override::merge_entity_config_toml(
+    let merged = crate::entities::entity_override::merge_entity_config_toml(
         &template
             .to_toml_value()
             .expect("the template round-trips to TOML"),
@@ -11017,7 +11058,7 @@ fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission(
 
     /// Let every load, unload and burst timer in flight run to completion —
     /// what the seconds between two engagements do for a real hull.
-    fn settle(sys: &mut crate::torpedo::TorpedoSystem) {
+    fn settle(sys: &mut crate::weapons::torpedo::TorpedoSystem) {
         let targets = std::collections::HashMap::new();
         let mut n = 0usize;
         let mut next_uuid = || {
@@ -11030,9 +11071,11 @@ fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission(
     }
 
     let hull = crate::entities::config::EntityConfig::from_toml(
-        &crate::entity_includes::resolve_from_disk("assets/entities/alliance_destroyer.toml")
-            .expect("the demo hull must resolve")
-            .toml,
+        &crate::entities::include_resolve::resolve_from_disk(
+            "assets/entities/alliance_destroyer.toml",
+        )
+        .expect("the demo hull must resolve")
+        .toml,
     )
     .expect("the demo hull must parse");
     let torpedoes = hull.torpedoes.expect("the destroyer carries torpedoes");
@@ -11046,8 +11089,10 @@ fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission(
     // unconditional `torpedo_load` rule, so every tube sits at its volley
     // target — the standing `SetTorpedoVolleyTarget` the tube host emits.
     let fresh = || {
-        let mut sys =
-            crate::torpedo::TorpedoSystem::from_configs(&torpedoes.tubes, torpedoes.to_runtime());
+        let mut sys = crate::weapons::torpedo::TorpedoSystem::from_configs(
+            &torpedoes.tubes,
+            torpedoes.to_runtime(),
+        );
         for t in &mut sys.tubes {
             t.target_count = t.ai_target_count;
         }
@@ -11098,28 +11143,29 @@ fn the_shipped_destroyer_spends_its_whole_payload_across_the_eight_wave_mission(
 
     // ONE engagement, fought until the doctrine stops clearing rounds or the
     // tubes run dry. Returns what it cost the magazine.
-    let engage = |sys: &mut crate::torpedo::TorpedoSystem, threat: i64, id: &mut usize| -> u32 {
-        settle(sys);
-        let before = sys.rounds_aboard();
-        loop {
-            let facts = seed_torpedo_conservation_facts(sys.rounds_aboard(), threat, 0);
-            if !torpedo_conservation_policy_fires(&policy, &facts, &[]) {
-                break;
-            }
-            let Some(tube) = sys
-                .tubes
-                .iter()
-                .find(|t| t.loaded_count > 0)
-                .map(|t| t.id.clone())
-            else {
-                break;
-            };
-            *id += 1;
-            sys.launch(&tube, format!("round-{id}"), 0.0, 0.0, 0.0, 0.0, None, None);
+    let engage =
+        |sys: &mut crate::weapons::torpedo::TorpedoSystem, threat: i64, id: &mut usize| -> u32 {
             settle(sys);
-        }
-        before - sys.rounds_aboard()
-    };
+            let before = sys.rounds_aboard();
+            loop {
+                let facts = seed_torpedo_conservation_facts(sys.rounds_aboard(), threat, 0);
+                if !torpedo_conservation_policy_fires(&policy, &facts, &[]) {
+                    break;
+                }
+                let Some(tube) = sys
+                    .tubes
+                    .iter()
+                    .find(|t| t.loaded_count > 0)
+                    .map(|t| t.id.clone())
+                else {
+                    break;
+                };
+                *id += 1;
+                sys.launch(&tube, format!("round-{id}"), 0.0, 0.0, 0.0, 0.0, None, None);
+                settle(sys);
+            }
+            before - sys.rounds_aboard()
+        };
 
     // A whole mission as a sequence of published `mission_threat_remaining`
     // readings, one per engagement — so a REPEATED value is a wave that
@@ -11295,7 +11341,7 @@ fn a_magazine_with_no_conservation_doctrine_is_unconstrained() {
     // authored between #782 and #943.
     let mut policy = app
         .world()
-        .get::<crate::weapons_plugin::TorpedoMagazineAiPolicy>(ship)
+        .get::<crate::console::weapons::TorpedoMagazineAiPolicy>(ship)
         .expect("fixture attaches the shipped magazine policy")
         .0
         .clone();
@@ -11310,7 +11356,7 @@ fn a_magazine_with_no_conservation_doctrine_is_unconstrained() {
     );
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(policy));
+        .insert(crate::console::weapons::TorpedoMagazineAiPolicy(policy));
 
     assert!(
         launched_from_admitted_command(&mut app),
@@ -11381,7 +11427,7 @@ verb = "release_torpedo"
     let (mut app, ship) = conservation_fixture(&[None, None], 2, 8);
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::weapons_plugin::TorpedoMagazineAiPolicy(policy));
+        .insert(crate::console::weapons::TorpedoMagazineAiPolicy(policy));
     assert!(
         launched_from_admitted_command(&mut app),
         "two rounds against eight waves holds with the shipped doctrine, but with the \
@@ -11403,12 +11449,12 @@ fn fire_torpedo_refused_when_magazine_offline_even_if_tube_loaded() {
     // Register magazine as offline.
     register_fine_system(
         &mut app,
-        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::system_registry::torpedo_magazine_system_id(),
         crate::ship::control_source::ControlSource::Human,
     );
     mark_system_offline(
         &mut app,
-        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::system_registry::torpedo_magazine_system_id(),
     );
 
     push(
@@ -11434,7 +11480,7 @@ fn fire_torpedo_refused_when_tube_fine_system_offline() {
     load_tube_now(&mut app, "fore_port");
     mark_system_offline(
         &mut app,
-        crate::system_registry::torpedo_tube_fore_port_system_id(),
+        crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
     );
 
     push(
@@ -11476,7 +11522,7 @@ fn set_target_survives_every_phaser_bank_going_offline() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -11498,13 +11544,16 @@ fn set_target_refused_when_the_tactical_radar_is_offline() {
     set_tactical_radar_range(&mut app, 300.0);
     setup_weapons_world(&mut app, 30.0, 0.0);
     start_game_with_weapons(&mut app);
-    mark_system_offline(&mut app, crate::system_registry::tactical_radar_system_id());
+    mark_system_offline(
+        &mut app,
+        crate::ship::system_registry::tactical_radar_system_id(),
+    );
 
     push(
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "target-uuid".into(),
             },
@@ -11534,7 +11583,7 @@ fn publish_writes_phaser_fore_blackboard_when_bank_configured() {
             .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>(
             );
         if let Ok(mut cc) = q.single_mut(app.world_mut()) {
-            cc.0.banks = vec![crate::entity_config::PhaserBankConfig {
+            cc.0.banks = vec![crate::entities::config::PhaserBankConfig {
                 id: "fore".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 270.0,
@@ -11553,7 +11602,7 @@ fn publish_writes_phaser_fore_blackboard_when_bank_configured() {
     // Publish runs in SimSet::Publish — one full update ticks it.
     app.update();
 
-    let key = crate::system_registry::phaser_fore_system_id();
+    let key = crate::ship::system_registry::phaser_fore_system_id();
     let mut q = app
         .world_mut()
         .query_filtered::<
@@ -11573,7 +11622,7 @@ fn publish_writes_torpedo_magazine_blackboard() {
     let mut app = test_app();
     app.update();
 
-    let key = crate::system_registry::torpedo_magazine_system_id();
+    let key = crate::ship::system_registry::torpedo_magazine_system_id();
     let mut q = app
         .world_mut()
         .query_filtered::<
@@ -11609,9 +11658,9 @@ fn publish_writes_torpedo_tube_blackboards_per_tube() {
         >();
     let bbs = q.single(app.world()).unwrap();
     for tube_key in [
-        crate::system_registry::torpedo_tube_fore_port_system_id(),
-        crate::system_registry::torpedo_tube_fore_starboard_system_id(),
-        crate::system_registry::torpedo_tube_aft_system_id(),
+        crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
+        crate::ship::system_registry::torpedo_tube_fore_starboard_system_id(),
+        crate::ship::system_registry::torpedo_tube_aft_system_id(),
     ] {
         let bb = bbs
             .0
@@ -11641,8 +11690,8 @@ fn publish_writes_torpedo_tube_blackboards_per_tube() {
 /// coarse tactical touching — and asserts a beam still activates.
 #[test]
 fn ai_phaser_auto_fire_activates_when_any_bank_operates_ai() {
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::ai::server::AiTokenRegistry;
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -11687,8 +11736,8 @@ ai_only = true
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
-            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-                banks: vec![crate::entity_config::PhaserBankConfig {
+            PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+                banks: vec![crate::entities::config::PhaserBankConfig {
                     id: "port".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -11704,7 +11753,7 @@ ai_only = true
                 }],
             }),
             Transform::default(),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
         ))
         .id();
     // The SHIPPED authored weapons AI declarations: since #885b stage 5d a
@@ -11715,7 +11764,7 @@ ai_only = true
     // Target directly ahead of NPC (yaw=0, forward=-Z).
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
             SystemId("captain".into()),
             50.0,
         )])),
@@ -11780,7 +11829,7 @@ fn an_ai_magazine_alone_does_not_license_the_tactical_ai_to_take_the_lock() {
     set_tactical_station_rating(&mut app, "Assisted");
     set_system_control_source(
         &mut app,
-        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::system_registry::torpedo_magazine_system_id(),
         crate::ship::control_source::ControlSource::Ai,
     );
     // The radar stays Human (the resolver's default), i.e. the operator's.
@@ -11805,7 +11854,7 @@ fn an_ai_tactical_radar_alone_licenses_the_tactical_ai_to_take_the_lock() {
     let mut app = test_app();
     set_system_control_source(
         &mut app,
-        crate::system_registry::tactical_radar_system_id(),
+        crate::ship::system_registry::tactical_radar_system_id(),
         crate::ship::control_source::ControlSource::Ai,
     );
     let target_uuid = seed_destroy_objective_target(&mut app);
@@ -11834,12 +11883,14 @@ fn an_ai_tactical_radar_alone_licenses_the_tactical_ai_to_take_the_lock() {
 fn spawn_hostile_hull(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
     app.world_mut()
         .spawn((
-            crate::simulation::Ship,
-            crate::entity_spawner::EntityUuid(uuid.into()),
-            crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-                SystemId("captain".into()),
-                200.0,
-            )])),
+            crate::server_app::Ship,
+            crate::entities::spawner::EntityUuid(uuid.into()),
+            crate::entities::spawner::EntitySystemHull(
+                crate::ship::damage::SystemHull::from_config(&[(
+                    SystemId("captain".into()),
+                    200.0,
+                )]),
+            ),
             Transform::from_xyz(x, 0.0, z),
             FactionComponent(federation_faction()),
         ))
@@ -11848,7 +11899,7 @@ fn spawn_hostile_hull(app: &mut App, uuid: &str, x: f32, z: f32) -> Entity {
 
 fn hull_current(app: &App, entity: Entity) -> f32 {
     app.world()
-        .get::<crate::entity_spawner::EntitySystemHull>(entity)
+        .get::<crate::entities::spawner::EntitySystemHull>(entity)
         .expect("hostile carries EntitySystemHull")
         .0
         .total_current()
@@ -11864,7 +11915,7 @@ fn setup_two_arc_ai_shooter(app: &mut App) -> (Entity, Entity, String, String) {
     setup_harrow_ship_hostile_to_federation(app);
     insert_untargeted_destroy_objective(app, 45.0);
     for sysid in [
-        crate::system_registry::tactical_radar_system_id(),
+        crate::ship::system_registry::tactical_radar_system_id(),
         SystemId("phaser-port".into()),
         SystemId("phaser-starboard".into()),
     ] {
@@ -11876,32 +11927,34 @@ fn setup_two_arc_ai_shooter(app: &mut App) -> (Entity, Entity, String, String) {
     let ship = local_ship_entity(app);
     set_system_control_source(
         app,
-        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         ControlSource::Ai,
     );
     app.world_mut()
         .entity_mut(ship)
         .insert(BlasterSystemResource(vec![
-            crate::blaster::BlasterSystem::new(crate::blaster::BlasterBankConfig {
-                id: "fore".into(),
-                facing_deg: 0.0,
-                fire_arc_deg: 360.0,
-                volley_count: 1,
-                volley_interval_secs: 0.1,
-                cooldown_secs: 3.0,
-                charge_time_secs: 0.0,
-                projectile_speed: 60.0,
-                collision_radius: 1.5,
-                visual_scale: 1.0,
-                damage: 10,
-                shield_pierce: 0.0,
-                recoil_impulse: 0.0,
-                screenshake_magnitude: 0.0,
-                marker: None,
-                barrels: Vec::new(),
-                pattern: Vec::new(),
-                range: 45.0,
-            }),
+            crate::weapons::blaster::BlasterSystem::new(
+                crate::weapons::blaster::BlasterBankConfig {
+                    id: "fore".into(),
+                    facing_deg: 0.0,
+                    fire_arc_deg: 360.0,
+                    volley_count: 1,
+                    volley_interval_secs: 0.1,
+                    cooldown_secs: 3.0,
+                    charge_time_secs: 0.0,
+                    projectile_speed: 60.0,
+                    collision_radius: 1.5,
+                    visual_scale: 1.0,
+                    damage: 10,
+                    shield_pierce: 0.0,
+                    recoil_impulse: 0.0,
+                    screenshake_magnitude: 0.0,
+                    marker: None,
+                    barrels: Vec::new(),
+                    pattern: Vec::new(),
+                    range: 45.0,
+                },
+            ),
         ]));
     // Re-attach so the new blaster bank picks up the shipped open-fire policy.
     attach_shipped_weapon_ai(app, ship);
@@ -11980,7 +12033,7 @@ fn the_unengaged_hostile_was_engageable_all_along() {
     // selector's nearest-first ranking does not immediately take it back.
     set_system_control_source(
         &mut app,
-        crate::system_registry::tactical_radar_system_id(),
+        crate::ship::system_registry::tactical_radar_system_id(),
         crate::ship::control_source::ControlSource::Human,
     );
     set_weapons_target(&mut app, Some(starboard_uuid.clone()));
@@ -12018,9 +12071,9 @@ fn the_unengaged_hostile_was_engageable_all_along() {
 /// alive and keeps the lock), and `ShipShields` carrying `freq`.
 fn spawn_shield_target(app: &mut App, uuid: &str, freq: f32) {
     app.world_mut().spawn((
-        crate::entity_spawner::EntityUuid(uuid.into()),
+        crate::entities::spawner::EntityUuid(uuid.into()),
         bevy::prelude::Transform::from_xyz(0.0, 0.0, -30.0),
-        crate::ship::shields::ShipShields(crate::shield::ShieldSystem::default(), freq),
+        crate::ship::shields::ShipShields(crate::weapons::shield::ShieldSystem::default(), freq),
     ));
 }
 
@@ -12057,7 +12110,7 @@ fn npc_auto_match_frequency_matches_with_high_fidelity() {
     let ship = local_ship_entity(&mut app);
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::ai_plugin::AiHighFidelity);
+        .insert(crate::ai::server::AiHighFidelity);
 
     assert_eq!(
         get_phaser_frequency(&mut app),
@@ -12133,7 +12186,7 @@ fn publish_marks_bank_offline_when_fine_system_in_offline_set() {
             .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>(
             );
         if let Ok(mut cc) = q.single_mut(app.world_mut()) {
-            cc.0.banks = vec![crate::entity_config::PhaserBankConfig {
+            cc.0.banks = vec![crate::entities::config::PhaserBankConfig {
                 id: "dorsal".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 270.0,
@@ -12201,7 +12254,7 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
             .query_filtered::<&mut PhaserCombatConfigResource, With<crate::server_app::LocalShip>>(
             );
         if let Ok(mut cc) = q.single_mut(app.world_mut()) {
-            cc.0.banks = vec![crate::entity_config::PhaserBankConfig {
+            cc.0.banks = vec![crate::entities::config::PhaserBankConfig {
                 id: "fore".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 270.0,
@@ -12227,7 +12280,7 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
             .unwrap();
         let mut entity_mut = app.world_mut().entity_mut(ship);
         let mut hull = entity_mut
-            .get_mut::<crate::entity_spawner::EntitySystemHull>()
+            .get_mut::<crate::entities::spawner::EntitySystemHull>()
             .unwrap();
         hull.0.set_hp(&SystemId("phaser-fore".into()), 0.0);
     }
@@ -12237,7 +12290,7 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
     app.update();
 
     // Step 1 verify: offline_systems contains `phaser-fore`.
-    let phaser_fore_id = crate::system_registry::phaser_fore_system_id();
+    let phaser_fore_id = crate::ship::system_registry::phaser_fore_system_id();
     let is_in_offline = {
         let mut q = app
             .world_mut()
@@ -12305,7 +12358,7 @@ fn unload_tube_mutates_the_ships_own_component_and_never_the_global_resource() {
     assert!(
         matches!(
             ship_state.load_state,
-            crate::torpedo::TubeLoadState::Unloading { .. }
+            crate::weapons::torpedo::TubeLoadState::Unloading { .. }
         ),
         "the operating ship's own tube must begin unloading"
     );
@@ -12317,7 +12370,7 @@ fn unload_tube_mutates_the_ships_own_component_and_never_the_global_resource() {
                 .tube("fore_port")
                 .unwrap()
                 .load_state,
-            crate::torpedo::TubeLoadState::Unloading { .. }
+            crate::weapons::torpedo::TubeLoadState::Unloading { .. }
         ),
         "the shared global Resource must never be mutated by a console command"
     );
@@ -12336,8 +12389,8 @@ fn unload_tube_mutates_the_ships_own_component_and_never_the_global_resource() {
 /// actually being the LocalShip.
 #[test]
 fn npc_without_its_own_torpedo_system_cannot_fire_from_the_player_ships_magazine() {
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::entity_spawner::EntityUuid;
+    use crate::ai::server::AiTokenRegistry;
+    use crate::entities::spawner::EntityUuid;
 
     let mut app = test_app();
     app.init_resource::<AiTokenRegistry>();
@@ -12364,8 +12417,8 @@ fn npc_without_its_own_torpedo_system_cannot_fire_from_the_player_ships_magazine
     let npc_uuid = "cc000000-0000-0000-0000-0000000000ff";
     let mut npc_ai_sources = crate::ship::control_source::ControlSourceResolver::new();
     for sysid in [
-        crate::system_registry::torpedo_tube_fore_port_system_id(),
-        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
+        crate::ship::system_registry::torpedo_magazine_system_id(),
     ] {
         npc_ai_sources.set(sysid, crate::ship::control_source::ControlSource::Ai);
     }
@@ -12443,15 +12496,15 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
     // with 10 torpedoes and a "fore_port" tube.
     let mut npc_sources = crate::ship::control_source::ControlSourceResolver::new();
     npc_sources.set(
-        crate::system_registry::torpedo_magazine_system_id(),
+        crate::ship::system_registry::torpedo_magazine_system_id(),
         crate::ship::control_source::ControlSource::Human,
     );
     npc_sources.set(
-        crate::system_registry::torpedo_tube_fore_port_system_id(),
+        crate::ship::system_registry::torpedo_tube_fore_port_system_id(),
         crate::ship::control_source::ControlSource::Human,
     );
     let npc_torpedo_sys = TorpedoSystem::from_configs(
-        &[crate::entity_config::TorpedoTubeConfig {
+        &[crate::entities::config::TorpedoTubeConfig {
             id: "fore_port".into(),
             facing_deg: -30.0,
             fire_arc_deg: 90.0,
@@ -12472,7 +12525,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
         .world_mut()
         .spawn((
             crate::server_app::Ship, // NOT LocalShip
-            crate::entity_spawner::EntityUuid("npc-with-magazine".into()),
+            crate::entities::spawner::EntityUuid("npc-with-magazine".into()),
             crate::ship_plugin::ShipSystemControlSources(npc_sources),
             TorpedoSystemResource(npc_torpedo_sys),
             Transform::default(),
@@ -12498,7 +12551,7 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
         FixedUpdate,
         (move |mut queue: ResMut<InterSystemQueue>| {
             queue.0.push(InterSystemMsg {
-                target: crate::system_registry::torpedo_magazine_system_id(),
+                target: crate::ship::system_registry::torpedo_magazine_system_id(),
                 payload: InterSystemPayload::ClaimTorpedoRound {
                     tube: "fore_port".into(),
                 },
@@ -12543,7 +12596,12 @@ fn magazine_claim_routes_to_shooter_ship_when_multiple_ships_have_magazines() {
         .unwrap()
         .0
         .tube("fore_port")
-        .map(|t| matches!(t.load_state, crate::torpedo::TubeLoadState::Loading { .. }))
+        .map(|t| {
+            matches!(
+                t.load_state,
+                crate::weapons::torpedo::TubeLoadState::Loading { .. }
+            )
+        })
         .unwrap_or(false);
     assert!(
         npc_tube_loading,
@@ -12590,7 +12648,7 @@ fn los_test_app() -> App {
         .init_resource::<WorldResource>()
         .add_message::<AsteroidDestroyedVfx>()
         .add_message::<ShipDestroyedVfx>()
-        .add_message::<crate::ai_plugin::AiEntityDestroyed>()
+        .add_message::<crate::ai::server::AiEntityDestroyed>()
         .init_resource::<CurrentPhaserMode>()
         .insert_resource(TorpedoSystemResource(TorpedoSystem::new(
             TorpedoConfig::default(),
@@ -12605,8 +12663,8 @@ fn los_test_app() -> App {
         ))
         .add_plugins(WeaponsPlugin)
         .insert_resource(PhaserCombatConfigResource(
-            crate::entity_config::PhaserCombatConfig {
-                banks: vec![crate::entity_config::PhaserBankConfig {
+            crate::entities::config::PhaserCombatConfig {
+                banks: vec![crate::entities::config::PhaserBankConfig {
                     id: "port".into(),
                     facing_deg: -90.0,
                     fire_arc_deg: 360.0,
@@ -12627,7 +12685,7 @@ fn los_test_app() -> App {
         // tick_beams_tick_lifetimes) and the two torpedo-tick phases
         // (build_torpedo_target_snapshot / tick_torpedo_lifecycle).
         // Do NOT register them again here.
-        .add_plugins(crate::shields_plugin::ShipShieldsPlugin)
+        .add_plugins(crate::ship::shields::ShipShieldsPlugin)
         .add_systems(PostUpdate, collect);
 
     // One fixed step per update (issue #895).
@@ -12660,7 +12718,7 @@ fn spawn_los_ship(
     };
     let mut ecmds = app.world_mut().spawn((
         crate::server_app::Ship,
-        crate::entity_spawner::EntityUuid(uuid.to_string()),
+        crate::entities::spawner::EntityUuid(uuid.to_string()),
         ShipPhysics {
             x,
             z,
@@ -12678,14 +12736,14 @@ fn spawn_los_ship(
         RigidBody::Fixed,
         ColliderMassProperties::Density(1.0),
         ActiveCollisionTypes::all(),
-        crate::entity_spawner::EntitySystemHull(SystemHull::from_config(&[(
+        crate::entities::spawner::EntitySystemHull(SystemHull::from_config(&[(
             SystemId("captain".into()),
             hull_hp,
         )])),
         ActiveBeam::default(),
         PhaserCooldown::default(),
-        PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
-            banks: vec![crate::entity_config::PhaserBankConfig {
+        PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
+            banks: vec![crate::entities::config::PhaserBankConfig {
                 id: "port".into(),
                 facing_deg: -90.0,
                 fire_arc_deg: 360.0,
@@ -12724,7 +12782,7 @@ fn spawn_los_asteroid(
     };
     app.world_mut()
         .spawn((
-            crate::simulation::Asteroid,
+            crate::server_app::Asteroid,
             AsteroidUuid(uuid.to_string()),
             Transform::from_xyz(x, 0.0, z),
             GlobalTransform::default(),
@@ -12733,7 +12791,7 @@ fn spawn_los_asteroid(
             RigidBody::Fixed,
             ColliderMassProperties::Density(1.0),
             ActiveCollisionTypes::all(),
-            crate::entity_spawner::EntitySystemHull(SystemHull::from_config(&[(
+            crate::entities::spawner::EntitySystemHull(SystemHull::from_config(&[(
                 SystemId("captain".into()),
                 hull_hp,
             )])),
@@ -12750,7 +12808,7 @@ fn activate_los_beam(app: &mut App, shooter: bevy::ecs::entity::Entity, target_u
 /// Read the total current hull HP from a ship/asteroid entity.
 fn hull_hp(app: &App, entity: bevy::ecs::entity::Entity) -> f32 {
     app.world()
-        .get::<crate::entity_spawner::EntitySystemHull>(entity)
+        .get::<crate::entities::spawner::EntitySystemHull>(entity)
         .map(|h| h.0.total_current())
         .unwrap_or(0.0)
 }
@@ -12795,8 +12853,8 @@ fn los_no_blocker_damages_original_target() {
 fn los_enemy_blocker_redirects_damage_away_from_target() {
     // Shooter at origin. Enemy blocker at (0,0,-10). Original target at (0,0,-30).
     // Blocker is in the way → target takes no damage, blocker takes damage.
-    use crate::config_cache::FactionRegistryResource;
-    use crate::faction::FactionRegistry;
+    use crate::ai::faction::FactionRegistry;
+    use crate::entities::config_cache::FactionRegistryResource;
 
     let mut app = los_test_app();
 
@@ -12805,14 +12863,14 @@ fn los_enemy_blocker_redirects_damage_away_from_target() {
 
     // Make shooter hostile to blocker.
     let mut reg = FactionRegistry::new();
-    reg.insert(crate::faction::FactionConfig {
+    reg.insert(crate::ai::faction::FactionConfig {
         display_name: None,
         uuid: shooter_faction,
         name: "Federation".into(),
         enemies: vec![enemy_faction],
         compliance: None,
     });
-    reg.insert(crate::faction::FactionConfig {
+    reg.insert(crate::ai::faction::FactionConfig {
         display_name: None,
         uuid: enemy_faction,
         name: "Pirate".into(),
@@ -12872,8 +12930,8 @@ fn los_enemy_blocker_redirects_damage_away_from_target() {
 fn los_friendly_blocker_absorbs_beam_with_no_damage() {
     // Shooter and blocker are same faction. Blocker at (0,0,-10),
     // target at (0,0,-30). Neither blocker nor target should take damage.
-    use crate::config_cache::FactionRegistryResource;
-    use crate::faction::FactionRegistry;
+    use crate::ai::faction::FactionRegistry;
+    use crate::entities::config_cache::FactionRegistryResource;
 
     let mut app = los_test_app();
 
@@ -12881,7 +12939,7 @@ fn los_friendly_blocker_absorbs_beam_with_no_damage() {
 
     // Empty enemy list → faction is friendly to itself.
     let mut reg = FactionRegistry::new();
-    reg.insert(crate::faction::FactionConfig {
+    reg.insert(crate::ai::faction::FactionConfig {
         display_name: None,
         uuid: faction_uuid,
         name: "Federation".into(),
@@ -12974,7 +13032,7 @@ fn los_asteroid_blocker_takes_damage() {
 /// system call `request_charge_start` on the blaster bank.
 #[test]
 fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
 
     let mut app = test_app();
 
@@ -12984,7 +13042,7 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     // #801: seed the blaster bank's fine system (no coarse tactical).
     sources.set(
-        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
     // NPC at (10, 10) — away from LocalShip at origin — facing -Z (target at 10, -10).
@@ -13005,10 +13063,10 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
             TacticalRadarSelection(Some(target_uuid.to_string())),
             // #781: blaster AI now emits an admitted ChargeBlasterStart consumed
             // by handle_fire_blaster — the ship needs an AdmittedCommands.
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             npc_physics,
-            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
-                crate::blaster::BlasterBankConfig {
+            BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
+                crate::weapons::blaster::BlasterBankConfig {
                     id: "fore".into(),
                     facing_deg: 180.0, // face toward -Z (toward target)
                     fire_arc_deg: 360.0,
@@ -13040,10 +13098,9 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
     // Spawn target directly ahead (-Z), well within blaster range.
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 50.0)],
+        )),
         Transform::from_xyz(10.0, 0.0, -10.0),
     ));
 
@@ -13098,7 +13155,7 @@ fn tick_blaster_auto_fire_gate_passes_when_tactical_is_ai() {
 /// fails as loudly as one that removes it.
 #[test]
 fn a_target_with_no_blaster_banks_is_still_led() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
     use std::f32::consts::FRAC_PI_2;
 
     let mut app = test_app();
@@ -13108,7 +13165,7 @@ fn a_target_with_no_blaster_banks_is_still_led() {
 
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     sources.set(
-        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
 
@@ -13123,14 +13180,14 @@ fn a_target_with_no_blaster_banks_is_still_led() {
             crate::server_app::ShipSystemBlackboards::default(),
             // Seeds the viewscreen combat_lock via `seed_viewscreen_from_selection`.
             TacticalRadarSelection(Some(target_uuid.to_string())),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             ShipPhysics {
                 x: 10.0,
                 z: 10.0,
                 ..Default::default()
             },
-            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
-                crate::blaster::BlasterBankConfig {
+            BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
+                crate::weapons::blaster::BlasterBankConfig {
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -13172,10 +13229,9 @@ fn a_target_with_no_blaster_banks_is_still_led() {
             forward_speed: 20.0,
             ..Default::default()
         },
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 50.0)],
+        )),
         Transform::from_xyz(10.0, 0.0, -90.0),
     ));
 
@@ -13220,12 +13276,12 @@ fn a_target_with_no_blaster_banks_is_still_led() {
 /// keeps the map's coverage — not the solver — as the thing under test.
 #[test]
 fn a_blaster_carrying_target_is_led_identically() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
     use std::f32::consts::FRAC_PI_2;
 
     fn dummy_bank() -> BlasterSystemResource {
-        BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
-            crate::blaster::BlasterBankConfig {
+        BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
+            crate::weapons::blaster::BlasterBankConfig {
                 id: "fore".into(),
                 facing_deg: 0.0,
                 fire_arc_deg: 360.0,
@@ -13255,7 +13311,7 @@ fn a_blaster_carrying_target_is_led_identically() {
 
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     sources.set(
-        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
 
@@ -13267,7 +13323,7 @@ fn a_blaster_carrying_target_is_led_identically() {
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             ShipPhysics {
                 x: 10.0,
                 z: 10.0,
@@ -13294,10 +13350,9 @@ fn a_blaster_carrying_target_is_led_identically() {
             ..Default::default()
         },
         dummy_bank(),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 50.0)],
+        )),
         Transform::from_xyz(10.0, 0.0, -90.0),
     ));
 
@@ -13327,7 +13382,7 @@ fn a_blaster_carrying_target_is_led_identically() {
 /// NPC with AI-controlled blaster has target out of range — must NOT fire.
 #[test]
 fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
 
     let mut app = test_app();
 
@@ -13337,7 +13392,7 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     // #801: seed the blaster bank's fine system (no coarse tactical).
     sources.set(
-        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
     let npc_entity = app
@@ -13348,10 +13403,10 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             ShipPhysics::default(),
-            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
-                crate::blaster::BlasterBankConfig {
+            BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
+                crate::weapons::blaster::BlasterBankConfig {
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -13379,10 +13434,9 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
     // Spawn target well outside blaster range (35 units).
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 50.0)],
+        )),
         Transform::from_xyz(0.0, 0.0, -100.0),
     ));
 
@@ -13405,7 +13459,7 @@ fn tick_blaster_auto_fire_skips_when_target_out_of_range() {
 /// admitted command directly (the shape admission produces from either origin).
 #[test]
 fn handle_fire_blaster_consumes_admitted_charge_start() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
 
     let mut app = test_app();
 
@@ -13414,24 +13468,26 @@ fn handle_fire_blaster_consumes_admitted_charge_start() {
 
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     sources.set(
-        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
     // Frozen combat lock on the viewscreen blackboard — the surface
     // handle_fire_blaster's arc check reads.
     let mut blackboards = crate::server_app::ShipSystemBlackboards::default();
     blackboards.0.insert(
-        crate::system_registry::viewscreen_system_id(),
-        crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
-            combat_lock: Some(target_uuid_str.to_string()),
-            ..Default::default()
-        }),
+        crate::ship::system_registry::viewscreen_system_id(),
+        crate::core::messages::SystemBlackboard::Viewscreen(
+            crate::core::messages::ViewscreenBlackboard {
+                combat_lock: Some(target_uuid_str.to_string()),
+                ..Default::default()
+            },
+        ),
     );
     // Pre-admitted ChargeBlasterStart (no ShipConfigComponent → admission does
     // not clear this ship's queue, so the injected command survives to Physics).
-    let mut admitted = crate::messages::AdmittedCommands::default();
-    admitted.0.push(crate::messages::AdmittedCommand {
-        target: crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+    let mut admitted = crate::core::messages::AdmittedCommands::default();
+    admitted.0.push(crate::core::messages::AdmittedCommand {
+        target: crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         payload: SystemControlPayload::ChargeBlasterStart,
         response_token: None,
     });
@@ -13446,8 +13502,8 @@ fn handle_fire_blaster_consumes_admitted_charge_start() {
             admitted,
             crate::ship_plugin::ShipSystemControlSources(sources),
             ShipPhysics::default(),
-            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
-                crate::blaster::BlasterBankConfig {
+            BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
+                crate::weapons::blaster::BlasterBankConfig {
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -13476,10 +13532,9 @@ fn handle_fire_blaster_consumes_admitted_charge_start() {
     // within the 35-unit range and inside the 360° fire arc.
     app.world_mut().spawn((
         EntityUuid(target_uuid_str.to_string()),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 50.0)],
+        )),
         Transform::from_xyz(0.0, 0.0, -10.0),
     ));
 
@@ -13507,7 +13562,7 @@ fn handle_fire_blaster_consumes_admitted_charge_start() {
 /// forward-maps each authored bank id and compares, so both spellings resolve.
 #[test]
 fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
 
     let mut app = test_app();
 
@@ -13516,17 +13571,19 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
 
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     sources.set(
-        crate::system_registry::blaster_bank_system_id("fore_port").unwrap(),
+        crate::ship::system_registry::blaster_bank_system_id("fore_port").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
     // Frozen combat lock on the viewscreen blackboard (issue #829/#822).
     let mut blackboards = crate::server_app::ShipSystemBlackboards::default();
     blackboards.0.insert(
-        crate::system_registry::viewscreen_system_id(),
-        crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
-            combat_lock: Some(target_uuid_str.to_string()),
-            ..Default::default()
-        }),
+        crate::ship::system_registry::viewscreen_system_id(),
+        crate::core::messages::SystemBlackboard::Viewscreen(
+            crate::core::messages::ViewscreenBlackboard {
+                combat_lock: Some(target_uuid_str.to_string()),
+                ..Default::default()
+            },
+        ),
     );
     // A pre-admitted ChargeBlasterStart addressed to `blaster-fore-port` — the id
     // the registry produces for the underscore-authored `fore_port` bank. The
@@ -13534,9 +13591,9 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
     // the old inverse ("strip `blaster-`") turned it back into `fore-port` and
     // matched nothing. Injected directly (no ShipConfigComponent → admission
     // leaves this ship's queue intact, so it survives to Physics).
-    let mut admitted = crate::messages::AdmittedCommands::default();
-    admitted.0.push(crate::messages::AdmittedCommand {
-        target: crate::system_registry::blaster_bank_system_id("fore_port").unwrap(),
+    let mut admitted = crate::core::messages::AdmittedCommands::default();
+    admitted.0.push(crate::core::messages::AdmittedCommand {
+        target: crate::ship::system_registry::blaster_bank_system_id("fore_port").unwrap(),
         payload: SystemControlPayload::ChargeBlasterStart,
         response_token: None,
     });
@@ -13551,8 +13608,8 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
             admitted,
             crate::ship_plugin::ShipSystemControlSources(sources),
             ShipPhysics::default(),
-            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
-                crate::blaster::BlasterBankConfig {
+            BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
+                crate::weapons::blaster::BlasterBankConfig {
                     // Underscore-authored, the spelling the inverse dropped.
                     id: "fore_port".into(),
                     facing_deg: 0.0,
@@ -13585,10 +13642,9 @@ fn handle_fire_blaster_accepts_an_underscore_authored_bank_id() {
     // order, so a successful bank-id resolution is what arms the volley.
     app.world_mut().spawn((
         EntityUuid(target_uuid_str.to_string()),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 50.0)],
+        )),
         Transform::from_xyz(0.0, 0.0, -100.0),
     ));
 
@@ -13650,7 +13706,7 @@ fn spawn_policy_phaser_npc(
     npc_uuid: &str,
     target_uuid: &str,
     banks: Vec<(
-        crate::entity_config::PhaserBankConfig,
+        crate::entities::config::PhaserBankConfig,
         crate::ai::policy::AiPolicy,
     )>,
 ) -> Entity {
@@ -13666,19 +13722,19 @@ fn spawn_policy_phaser_npc_at(
     npc_uuid: &str,
     target_uuid: &str,
     banks: Vec<(
-        crate::entity_config::PhaserBankConfig,
+        crate::entities::config::PhaserBankConfig,
         crate::ai::policy::AiPolicy,
     )>,
     target_pos: [f32; 3],
 ) -> Entity {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     let mut policies = std::collections::HashMap::new();
     let mut bank_cfgs = Vec::new();
     for (cfg, policy) in banks {
         sources.set(
-            crate::system_registry::phaser_bank_system_id(&cfg.id).unwrap(),
+            crate::ship::system_registry::phaser_bank_system_id(&cfg.id).unwrap(),
             crate::ship::control_source::ControlSource::Ai,
         );
         policies.insert(cfg.id.clone(), policy);
@@ -13696,10 +13752,10 @@ fn spawn_policy_phaser_npc_at(
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
-            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+            PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
                 banks: bank_cfgs,
             }),
-            crate::weapons_plugin::PhaserBankAiPolicies(policies),
+            crate::console::weapons::PhaserBankAiPolicies(policies),
             AdmittedCommands::default(),
             Transform::default(),
         ))
@@ -13707,7 +13763,7 @@ fn spawn_policy_phaser_npc_at(
 
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
             SystemId("captain".into()),
             50.0,
         )])),
@@ -13716,8 +13772,8 @@ fn spawn_policy_phaser_npc_at(
     npc
 }
 
-fn wide_bank(id: &str, facing_deg: f32) -> crate::entity_config::PhaserBankConfig {
-    crate::entity_config::PhaserBankConfig {
+fn wide_bank(id: &str, facing_deg: f32) -> crate::entities::config::PhaserBankConfig {
+    crate::entities::config::PhaserBankConfig {
         id: id.into(),
         facing_deg,
         fire_arc_deg: 360.0,
@@ -13738,7 +13794,7 @@ fn wide_bank(id: &str, facing_deg: f32) -> crate::entity_config::PhaserBankConfi
 #[test]
 fn phaser_bank_idle_policy_holds_fire() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let npc = spawn_policy_phaser_npc(
         &mut app,
         "cc000000-0000-0000-0000-000000000001",
@@ -13760,7 +13816,7 @@ fn phaser_bank_idle_policy_holds_fire() {
 #[test]
 fn phaser_bank_fact_guard_fires_and_idle_bank_does_not_disarm_another() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let npc = spawn_policy_phaser_npc(
         &mut app,
         "cc000000-0000-0000-0000-000000000011",
@@ -13796,7 +13852,7 @@ fn phaser_bank_fact_guard_fires_and_idle_bank_does_not_disarm_another() {
 fn phaser_bank_flag_guard_reads_the_world_in_both_directions() {
     // Flag CLEAR → hold.
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     app.init_resource::<crate::world::server::WorldContentRuntime>();
     let npc = spawn_policy_phaser_npc(
         &mut app,
@@ -13816,7 +13872,7 @@ fn phaser_bank_flag_guard_reads_the_world_in_both_directions() {
     // Flag SET → the SAME guard fires and the beam starts. A fresh app, so
     // the only difference between the two runs is the world flag.
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     app.init_resource::<crate::world::server::WorldContentRuntime>();
     app.world_mut()
         .resource_mut::<crate::world::server::WorldContentRuntime>()
@@ -13852,11 +13908,13 @@ fn shipped_player_phaser_policy() -> crate::ai::policy::AiPolicy {
 /// The SHIPPED Harrow phaser policy: the same predicate text, the always-armed
 /// threshold.
 fn shipped_harrow_phaser_policy() -> crate::ai::policy::AiPolicy {
-    let hull = crate::entity_config::EntityConfig::from_toml(
-        crate::entity_includes::resolve_from_disk("assets/entities/ship_harrow_patrol.toml")
-            .expect("ship_harrow_patrol must resolve")
-            .toml
-            .as_str(),
+    let hull = crate::entities::config::EntityConfig::from_toml(
+        crate::entities::include_resolve::resolve_from_disk(
+            "assets/entities/ship_harrow_patrol.toml",
+        )
+        .expect("ship_harrow_patrol must resolve")
+        .toml
+        .as_str(),
     )
     .expect("the shipped Harrow patrol hull must parse");
     hull.weapons_console
@@ -13884,7 +13942,7 @@ fn shipped_harrow_phaser_policy() -> crate::ai::policy::AiPolicy {
 #[test]
 fn backfilled_weapons_hold_fire_until_red_alert() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let target_uuid = "cc000000-0000-0000-0000-000000000042";
     let npc = spawn_policy_phaser_npc(
         &mut app,
@@ -13897,7 +13955,7 @@ fn backfilled_weapons_hold_fire_until_red_alert() {
     // asserted rather than assumed: the weapon does not arm itself because the
     // ship is being hit.
     app.world_mut().entity_mut(npc).insert((
-        crate::ship_state::ShipRedAlert(false),
+        crate::ship::state::ShipRedAlert(false),
         crate::ship::combat_activity::RecentCombatActivity {
             last_damage_taken: Some(0.0),
             last_hostile_fire_taken: Some(0.0),
@@ -13936,7 +13994,7 @@ fn backfilled_weapons_hold_fire_until_red_alert() {
     // The captain calls red alert. Nothing else about the world changes.
     app.world_mut()
         .entity_mut(npc)
-        .insert(crate::ship_state::ShipRedAlert(true));
+        .insert(crate::ship::state::ShipRedAlert(true));
     // Two frames, because the deciders run on the ONE shared AI cadence
     // (`ai_tick_ready`, issue #889) rather than per rendered frame — this is
     // the very next AI tick, not a settling period.
@@ -13962,7 +14020,7 @@ fn backfilled_weapons_hold_fire_until_red_alert() {
 #[test]
 fn npc_weapons_fire_without_a_captain_raising_the_alert() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let npc = spawn_policy_phaser_npc(
         &mut app,
         "cc000000-0000-0000-0000-000000000051",
@@ -13971,7 +14029,7 @@ fn npc_weapons_fire_without_a_captain_raising_the_alert() {
     );
     app.world_mut()
         .entity_mut(npc)
-        .insert(crate::ship_state::ShipRedAlert(false));
+        .insert(crate::ship::state::ShipRedAlert(false));
 
     app.update();
     assert!(
@@ -13990,30 +14048,32 @@ fn npc_weapons_fire_without_a_captain_raising_the_alert() {
 /// beam through `handle_fire_phaser`, matching the AI path above.
 #[test]
 fn phaser_human_admitted_fire_matches_ai_policy_output() {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
 
     let npc_uuid = "cc000000-0000-0000-0000-000000000021";
     let target_uuid = "cc000000-0000-0000-0000-000000000022";
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     // Human-operable bank (accept_human_input via Human control source).
     sources.set(
-        crate::system_registry::phaser_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::phaser_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Human,
     );
     let mut blackboards = crate::server_app::ShipSystemBlackboards::default();
     blackboards.0.insert(
-        crate::system_registry::viewscreen_system_id(),
-        crate::messages::SystemBlackboard::Viewscreen(crate::messages::ViewscreenBlackboard {
-            combat_lock: Some(target_uuid.to_string()),
-            ..Default::default()
-        }),
+        crate::ship::system_registry::viewscreen_system_id(),
+        crate::core::messages::SystemBlackboard::Viewscreen(
+            crate::core::messages::ViewscreenBlackboard {
+                combat_lock: Some(target_uuid.to_string()),
+                ..Default::default()
+            },
+        ),
     );
     let mut admitted = AdmittedCommands::default();
-    admitted.0.push(crate::messages::AdmittedCommand {
-        target: crate::system_registry::phaser_bank_system_id("fore").unwrap(),
-        payload: crate::messages::SystemControlPayload::FirePhaser,
+    admitted.0.push(crate::core::messages::AdmittedCommand {
+        target: crate::ship::system_registry::phaser_bank_system_id("fore").unwrap(),
+        payload: crate::core::messages::SystemControlPayload::FirePhaser,
         response_token: None,
     });
     let npc = app
@@ -14028,7 +14088,7 @@ fn phaser_human_admitted_fire_matches_ai_policy_output() {
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
-            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig {
+            PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
                 banks: vec![wide_bank("fore", 0.0)],
             }),
             Transform::default(),
@@ -14036,7 +14096,7 @@ fn phaser_human_admitted_fire_matches_ai_policy_output() {
         .id();
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
             SystemId("captain".into()),
             50.0,
         )])),
@@ -14054,14 +14114,14 @@ fn phaser_human_admitted_fire_matches_ai_policy_output() {
 /// (AC1/AC2): no cooldown is entered because no volley is dispatched.
 #[test]
 fn blaster_bank_idle_policy_holds_fire() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
     let mut app = test_app();
 
     let npc_uuid = "cc000000-0000-0000-0000-000000000031";
     let target_uuid = "cc000000-0000-0000-0000-000000000032";
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     sources.set(
-        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
     let mut policies = std::collections::HashMap::new();
@@ -14074,10 +14134,10 @@ fn blaster_bank_idle_policy_holds_fire() {
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             ShipPhysics::default(),
-            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
-                crate::blaster::BlasterBankConfig {
+            BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
+                crate::weapons::blaster::BlasterBankConfig {
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -14098,16 +14158,15 @@ fn blaster_bank_idle_policy_holds_fire() {
                     range: 35.0,
                 },
             )]),
-            crate::weapons_plugin::BlasterBankAiPolicies(policies),
+            crate::console::weapons::BlasterBankAiPolicies(policies),
             Transform::default(),
         ))
         .id();
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 50.0)],
+        )),
         Transform::from_xyz(0.0, 0.0, -10.0),
     ));
     app.update();
@@ -14126,10 +14185,10 @@ fn spawn_policy_blaster_npc(
     target_uuid: &str,
     policy: crate::ai::policy::AiPolicy,
 ) -> Entity {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     sources.set(
-        crate::system_registry::blaster_bank_system_id("fore").unwrap(),
+        crate::ship::system_registry::blaster_bank_system_id("fore").unwrap(),
         crate::ship::control_source::ControlSource::Ai,
     );
     let mut policies = std::collections::HashMap::new();
@@ -14142,10 +14201,10 @@ fn spawn_policy_blaster_npc(
             crate::ship_plugin::ShipSystemControlSources(sources),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
-            crate::messages::AdmittedCommands::default(),
+            crate::core::messages::AdmittedCommands::default(),
             ShipPhysics::default(),
-            BlasterSystemResource(vec![crate::blaster::BlasterSystem::new(
-                crate::blaster::BlasterBankConfig {
+            BlasterSystemResource(vec![crate::weapons::blaster::BlasterSystem::new(
+                crate::weapons::blaster::BlasterBankConfig {
                     id: "fore".into(),
                     facing_deg: 0.0,
                     fire_arc_deg: 360.0,
@@ -14166,16 +14225,15 @@ fn spawn_policy_blaster_npc(
                     range: 35.0,
                 },
             )]),
-            crate::weapons_plugin::BlasterBankAiPolicies(policies),
+            crate::console::weapons::BlasterBankAiPolicies(policies),
             Transform::default(),
         ))
         .id();
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        crate::entity_spawner::EntitySystemHull(crate::damage::SystemHull::from_config(&[(
-            SystemId("captain".into()),
-            50.0,
-        )])),
+        crate::entities::spawner::EntitySystemHull(crate::ship::damage::SystemHull::from_config(
+            &[(SystemId("captain".into()), 50.0)],
+        )),
         Transform::from_xyz(0.0, 0.0, -10.0),
     ));
     npc
@@ -14212,7 +14270,7 @@ fn blaster_bank_fire_policy(when: &str) -> crate::ai::policy::AiPolicy {
 fn blaster_bank_flag_guard_reads_the_world_in_both_directions() {
     // Flag CLEAR → hold.
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     app.init_resource::<crate::world::server::WorldContentRuntime>();
     let npc = spawn_policy_blaster_npc(
         &mut app,
@@ -14232,7 +14290,7 @@ fn blaster_bank_flag_guard_reads_the_world_in_both_directions() {
     // Flag SET → the SAME guard fires the volley. A fresh app, so the only
     // difference between the two runs is the world flag.
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     app.init_resource::<crate::world::server::WorldContentRuntime>();
     app.world_mut()
         .resource_mut::<crate::world::server::WorldContentRuntime>()
@@ -14265,7 +14323,7 @@ fn tactical_radar_idle_makes_no_ai_selection() {
     let ship = local_ship_entity(&mut app);
     app.world_mut()
         .entity_mut(ship)
-        .insert(crate::weapons_plugin::TacticalTargetSelector {
+        .insert(crate::console::weapons::TacticalTargetSelector {
             selector: crate::entities::authored_ai_pins::shipped_selector_toml("tactical")
                 .to_selector()
                 .expect("the shipped Tactical selector decodes"),
@@ -14300,8 +14358,8 @@ fn tactical_radar_idle_makes_no_ai_selection() {
 /// `WeaponFired` attributed to that shooter.
 #[test]
 fn npc_beam_fire_emits_weapon_fired_for_the_non_local_shooter() {
-    use crate::ai_plugin::AiTokenRegistry;
-    use crate::balance::BalanceEvent;
+    use crate::ai::server::AiTokenRegistry;
+    use crate::core::balance::BalanceEvent;
     use bevy::ecs::message::Messages;
 
     let mut app = test_app();
@@ -14329,7 +14387,7 @@ fn npc_beam_fire_emits_weapon_fired_for_the_non_local_shooter() {
             e,
             BalanceEvent::WeaponFired { shooter, kind, .. }
                 if shooter.as_deref() == Some(npc_uuid)
-                    && kind == crate::balance::FIRED_KIND_BEAM
+                    && kind == crate::core::balance::FIRED_KIND_BEAM
         )
     });
     assert!(
@@ -14342,7 +14400,7 @@ fn npc_beam_fire_emits_weapon_fired_for_the_non_local_shooter() {
 /// zero emits `ShieldArcCollapsed` once, keyed on that ship.
 #[test]
 fn beam_collapsing_a_non_local_shield_facing_emits_shield_arc_collapsed() {
-    use crate::balance::BalanceEvent;
+    use crate::core::balance::BalanceEvent;
     use bevy::ecs::message::Messages;
 
     let mut app = test_app();
@@ -14357,7 +14415,7 @@ fn beam_collapsing_a_non_local_shield_facing_emits_shield_arc_collapsed() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -14397,7 +14455,7 @@ fn beam_collapsing_a_non_local_shield_facing_emits_shield_arc_collapsed() {
 /// `EntityDestroyed`, crediting the local shooter as killer.
 #[test]
 fn beam_kill_of_a_non_local_ship_emits_entity_destroyed_with_killer_credit() {
-    use crate::balance::BalanceEvent;
+    use crate::core::balance::BalanceEvent;
     use bevy::ecs::message::Messages;
 
     let mut app = test_app();
@@ -14412,7 +14470,7 @@ fn beam_kill_of_a_non_local_ship_emits_entity_destroyed_with_killer_credit() {
         &mut app,
         "weapons",
         ClientMessage::ControlSystem {
-            target: crate::system_registry::tactical_radar_system_id(),
+            target: crate::ship::system_registry::tactical_radar_system_id(),
             payload: SystemControlPayload::SetTarget {
                 uuid: "npc-1".into(),
             },
@@ -14533,9 +14591,11 @@ fn reach_is_never_negative() {
 /// Takes a hull STEM rather than baked text (issue #876): `include_str!` bakes
 /// bytes at compile time, so a baked site can never see include resolution, and
 /// `alliance_cruiser` is a COMPOSED hull since #876.
-fn shipped_bank_configs(stem: &str) -> Vec<crate::entity_config::PhaserBankConfig> {
-    let cfg = crate::entity_includes::load_entity_config(&format!("assets/entities/{stem}.toml"))
-        .unwrap_or_else(|e| panic!("{stem} must compose and parse: {e}"));
+fn shipped_bank_configs(stem: &str) -> Vec<crate::entities::config::PhaserBankConfig> {
+    let cfg = crate::entities::include_resolve::load_entity_config(&format!(
+        "assets/entities/{stem}.toml"
+    ))
+    .unwrap_or_else(|e| panic!("{stem} must compose and parse: {e}"));
     let banks = cfg
         .weapons_console
         .as_ref()
@@ -14551,7 +14611,7 @@ fn shipped_bank_configs(stem: &str) -> Vec<crate::entity_config::PhaserBankConfi
 fn shipped_banks(
     stem: &str,
 ) -> Vec<(
-    crate::entity_config::PhaserBankConfig,
+    crate::entities::config::PhaserBankConfig,
     crate::ai::policy::AiPolicy,
 )> {
     shipped_bank_configs(stem)
@@ -14607,7 +14667,7 @@ fn live_banks_of(app: &App, ship: Entity) -> Vec<String> {
 #[test]
 fn both_270_degree_banks_burn_at_once_on_a_target_abeam() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let target_uuid = "cc000000-0000-0000-0000-0000000007a2";
     let npc = spawn_policy_phaser_npc_at(
         &mut app,
@@ -14647,20 +14707,20 @@ fn spawn_player_hull_firing_all_banks_at(
     app: &mut App,
     ship_uuid: &str,
     target_uuid: &str,
-    banks: Vec<crate::entity_config::PhaserBankConfig>,
+    banks: Vec<crate::entities::config::PhaserBankConfig>,
     target_pos: [f32; 3],
 ) -> Entity {
-    use crate::entity_spawner::{EntitySystemHull, EntityUuid};
+    use crate::entities::spawner::{EntitySystemHull, EntityUuid};
 
     let mut sources = crate::ship::control_source::ControlSourceResolver::new();
     let mut admitted = AdmittedCommands::default();
     for cfg in &banks {
-        let bank_system = crate::system_registry::phaser_bank_system_id(&cfg.id).unwrap();
+        let bank_system = crate::ship::system_registry::phaser_bank_system_id(&cfg.id).unwrap();
         sources.set(
             bank_system.clone(),
             crate::ship::control_source::ControlSource::Human,
         );
-        admitted.0.push(crate::messages::AdmittedCommand {
+        admitted.0.push(crate::core::messages::AdmittedCommand {
             target: bank_system,
             payload: SystemControlPayload::FirePhaser,
             response_token: None,
@@ -14679,7 +14739,7 @@ fn spawn_player_hull_firing_all_banks_at(
             ActiveBeam::default(),
             PhaserCooldown::default(),
             ShipPhysics::default(),
-            PhaserCombatConfigResource(crate::entity_config::PhaserCombatConfig { banks }),
+            PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig { banks }),
             admitted,
             Transform::default(),
         ))
@@ -14687,7 +14747,7 @@ fn spawn_player_hull_firing_all_banks_at(
 
     app.world_mut().spawn((
         EntityUuid(target_uuid.to_string()),
-        EntitySystemHull(crate::damage::SystemHull::from_config(&[(
+        EntitySystemHull(crate::ship::damage::SystemHull::from_config(&[(
             SystemId("captain".into()),
             50.0,
         )])),
@@ -14718,7 +14778,7 @@ fn spawn_player_hull_firing_all_banks_at(
 #[test]
 fn the_player_hulls_270_degree_banks_both_light_on_the_manual_fire_path() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let target_uuid = "cc000000-0000-0000-0000-0000000007b2";
     let ship = spawn_player_hull_firing_all_banks_at(
         &mut app,
@@ -14763,7 +14823,7 @@ fn the_player_hulls_270_degree_banks_both_light_on_the_manual_fire_path() {
 #[test]
 fn the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let ship = spawn_policy_phaser_npc_at(
         &mut app,
         "cc000000-0000-0000-0000-0000000007b3",
@@ -14788,7 +14848,7 @@ fn the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line() {
 #[test]
 fn a_target_in_one_arc_only_lights_the_bank_that_bears() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let npc = spawn_policy_phaser_npc_at(
         &mut app,
         "cc000000-0000-0000-0000-0000000007c1",
@@ -14809,7 +14869,7 @@ fn a_target_in_one_arc_only_lights_the_bank_that_bears() {
 #[test]
 fn an_unavailable_bank_does_not_stop_its_sibling_broadside() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let npc = spawn_policy_phaser_npc_at(
         &mut app,
         "cc000000-0000-0000-0000-0000000007d1",
@@ -14825,7 +14885,7 @@ fn an_unavailable_bank_does_not_stop_its_sibling_broadside() {
             .get_mut::<crate::ship_plugin::ShipSystemControlSources>(npc)
             .unwrap();
         sources.0.set(
-            crate::system_registry::phaser_bank_system_id("aft").unwrap(),
+            crate::ship::system_registry::phaser_bank_system_id("aft").unwrap(),
             crate::ship::control_source::ControlSource::Human,
         );
     }
@@ -14842,7 +14902,7 @@ fn an_unavailable_bank_does_not_stop_its_sibling_broadside() {
 #[test]
 fn a_bank_on_cooldown_does_not_stop_its_sibling_broadside() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let npc = spawn_policy_phaser_npc_at(
         &mut app,
         "cc000000-0000-0000-0000-0000000007e1",
@@ -14868,7 +14928,7 @@ fn a_bank_on_cooldown_does_not_stop_its_sibling_broadside() {
 #[test]
 fn a_burning_bank_is_not_relit_while_its_sibling_may_still_open_fire() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let npc = spawn_policy_phaser_npc_at(
         &mut app,
         "cc000000-0000-0000-0000-0000000007f1",
@@ -14925,7 +14985,7 @@ fn a_burning_bank_is_not_relit_while_its_sibling_may_still_open_fire() {
 #[test]
 fn each_live_broadside_bank_announces_its_own_beam_on_the_wire() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let target_uuid = "cc000000-0000-0000-0000-000000000802";
     spawn_policy_phaser_npc_at(
         &mut app,
@@ -14962,7 +15022,7 @@ fn each_live_broadside_bank_announces_its_own_beam_on_the_wire() {
 #[test]
 fn live_phaser_banks_do_not_emit_power_battery_commands() {
     let mut app = test_app();
-    app.init_resource::<crate::ai_plugin::AiTokenRegistry>();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let npc = spawn_policy_phaser_npc_at(
         &mut app,
         "cc000000-0000-0000-0000-000000000811",
@@ -14975,10 +15035,10 @@ fn live_phaser_banks_do_not_emit_power_battery_commands() {
     app.update();
     let battery_commands = app
         .world()
-        .resource::<crate::messages::InterSystemQueue>()
+        .resource::<crate::core::messages::InterSystemQueue>()
         .0
         .iter()
-        .filter(|m| m.target == crate::system_registry::power_battery_system_id())
+        .filter(|m| m.target == crate::ship::system_registry::power_battery_system_id())
         .count();
     assert_eq!(
         battery_commands, 0,
@@ -14998,7 +15058,7 @@ fn live_phaser_banks_do_not_emit_power_battery_commands() {
 /// this is the first one.
 #[test]
 fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
-    use crate::entity_spawner::EntityUuid;
+    use crate::entities::spawner::EntityUuid;
     use bevy::ecs::system::RunSystemOnce;
 
     let mut app = test_app();
@@ -15014,42 +15074,44 @@ fn blaster_hit_does_zero_damage_to_local_ship_under_god_mode() {
         .entity_mut(local_ship)
         .insert(Transform::from_xyz(0.0, 0.0, -20.0));
 
-    let mut bank = crate::blaster::BlasterSystem::new(crate::blaster::BlasterBankConfig {
-        id: "fore".into(),
-        facing_deg: 0.0,
-        fire_arc_deg: 360.0,
-        volley_count: 1,
-        volley_interval_secs: 0.1,
-        cooldown_secs: 3.0,
-        charge_time_secs: 0.0,
-        projectile_speed: 40.0,
-        collision_radius: 5.0,
-        visual_scale: 1.0,
-        damage: 50,
-        shield_pierce: 0.0,
-        recoil_impulse: 0.0,
-        screenshake_magnitude: 0.0,
-        marker: None,
-        barrels: Vec::new(),
-        pattern: Vec::new(),
-        range: 35.0,
-    });
+    let mut bank =
+        crate::weapons::blaster::BlasterSystem::new(crate::weapons::blaster::BlasterBankConfig {
+            id: "fore".into(),
+            facing_deg: 0.0,
+            fire_arc_deg: 360.0,
+            volley_count: 1,
+            volley_interval_secs: 0.1,
+            cooldown_secs: 3.0,
+            charge_time_secs: 0.0,
+            projectile_speed: 40.0,
+            collision_radius: 5.0,
+            visual_scale: 1.0,
+            damage: 50,
+            shield_pierce: 0.0,
+            recoil_impulse: 0.0,
+            screenshake_magnitude: 0.0,
+            marker: None,
+            barrels: Vec::new(),
+            pattern: Vec::new(),
+            range: 35.0,
+        });
     // Sitting exactly on the target and never advanced by `tick_blaster_system`
     // (this test calls `handle_blaster_hits` directly, so the projectile's
     // flight-and-intercept logic never runs) — the point here is the god-mode
     // clamp inside the hit handler, not projectile physics.
-    bank.in_flight.push(crate::blaster::BlasterProjectile {
-        id: "proj-god-mode".into(),
-        x: 0.0,
-        z: -20.0,
-        heading: 0.0,
-        speed: 40.0,
-        lifespan_remaining: 5.0,
-        collision_radius: 5.0,
-        damage: 50,
-        shield_pierce: 0.0,
-        source_uuid: "attacker-uuid".into(),
-    });
+    bank.in_flight
+        .push(crate::weapons::blaster::BlasterProjectile {
+            id: "proj-god-mode".into(),
+            x: 0.0,
+            z: -20.0,
+            heading: 0.0,
+            speed: 40.0,
+            lifespan_remaining: 5.0,
+            collision_radius: 5.0,
+            damage: 50,
+            shield_pierce: 0.0,
+            source_uuid: "attacker-uuid".into(),
+        });
     app.world_mut().spawn((
         crate::server_app::Ship,
         EntityUuid("attacker-uuid".into()),

@@ -22,7 +22,7 @@
 //! same authored-content precedent as comms response text and `display_name` —
 //! data read from TOML, NOT emitted English in Rust and NOT a string id.
 
-use crate::messages::{StationId, SystemId};
+use crate::core::messages::{StationId, SystemId};
 use crate::ship::config::{ShipConfig, SystemInstanceConfig};
 use crate::ship::rating::{available_ratings_for_station, resolve_automated_systems};
 use serde::{Deserialize, Serialize};
@@ -164,7 +164,7 @@ impl ManualProviderRegistry {
     /// the ownerless capability systems) are deliberately absent: those systems
     /// stay overview-only rather than emitting a fabricated section.
     pub fn with_shipped_providers() -> Self {
-        use crate::system_registry as kinds;
+        use crate::ship::system_registry as kinds;
         let mut registry = Self::new();
         registry.register(kinds::SHIELDS_KIND, Box::new(ShieldsManualProvider));
         registry.register(kinds::PHASER_BANK_KIND, Box::new(PhaserBankManualProvider));
@@ -322,7 +322,7 @@ impl SystemManualProvider for ShieldsManualProvider {
         station_id: &StationId,
         extra: Option<&toml::Value>,
     ) -> SystemManualSection {
-        let arc_count = count_kind(ship_config, crate::system_registry::SHIELD_ARC_KIND);
+        let arc_count = count_kind(ship_config, crate::ship::system_registry::SHIELD_ARC_KIND);
         let metrics = vec![
             SystemManualMetric {
                 code: "max_hp".into(),
@@ -338,7 +338,7 @@ impl SystemManualProvider for ShieldsManualProvider {
             },
         ];
         SystemManualSection {
-            kind: crate::system_registry::SHIELDS_KIND.to_string(),
+            kind: crate::ship::system_registry::SHIELDS_KIND.to_string(),
             metrics,
             capabilities: vec![],
             automation: station_automation(ship_config, station_id),
@@ -382,7 +382,7 @@ impl SystemManualProvider for PhaserBankManualProvider {
             },
         ];
         SystemManualSection {
-            kind: crate::system_registry::PHASER_BANK_KIND.to_string(),
+            kind: crate::ship::system_registry::PHASER_BANK_KIND.to_string(),
             metrics,
             capabilities: vec![],
             automation: station_automation(ship_config, station_id),
@@ -427,7 +427,7 @@ impl SystemManualProvider for BlasterBankManualProvider {
             },
         ];
         SystemManualSection {
-            kind: crate::system_registry::BLASTER_BANK_KIND.to_string(),
+            kind: crate::ship::system_registry::BLASTER_BANK_KIND.to_string(),
             metrics,
             capabilities: vec![],
             automation: station_automation(ship_config, station_id),
@@ -464,7 +464,7 @@ impl SystemManualProvider for TorpedoTubeManualProvider {
             },
         ];
         SystemManualSection {
-            kind: crate::system_registry::TORPEDO_TUBE_KIND.to_string(),
+            kind: crate::ship::system_registry::TORPEDO_TUBE_KIND.to_string(),
             metrics,
             capabilities: vec![],
             automation: station_automation(ship_config, station_id),
@@ -485,7 +485,7 @@ impl SystemManualProvider for TorpedoMagazineManualProvider {
         station_id: &StationId,
         extra: Option<&toml::Value>,
     ) -> SystemManualSection {
-        let tube_count = count_kind(ship_config, crate::system_registry::TORPEDO_TUBE_KIND);
+        let tube_count = count_kind(ship_config, crate::ship::system_registry::TORPEDO_TUBE_KIND);
         let metrics = vec![
             SystemManualMetric {
                 code: "capacity".into(),
@@ -505,7 +505,7 @@ impl SystemManualProvider for TorpedoMagazineManualProvider {
             },
         ];
         SystemManualSection {
-            kind: crate::system_registry::TORPEDO_MAGAZINE_KIND.to_string(),
+            kind: crate::ship::system_registry::TORPEDO_MAGAZINE_KIND.to_string(),
             metrics,
             capabilities: vec![],
             automation: station_automation(ship_config, station_id),
@@ -527,7 +527,7 @@ impl SystemManualProvider for TacticalRadarManualProvider {
         extra: Option<&toml::Value>,
     ) -> SystemManualSection {
         SystemManualSection {
-            kind: crate::system_registry::TACTICAL_RADAR_KIND.to_string(),
+            kind: crate::ship::system_registry::TACTICAL_RADAR_KIND.to_string(),
             metrics: vec![SystemManualMetric {
                 code: "range".into(),
                 value: extra_number(extra, "range"),
@@ -550,7 +550,7 @@ impl SystemManualProvider for SensorsManualProvider {
         extra: Option<&toml::Value>,
     ) -> SystemManualSection {
         SystemManualSection {
-            kind: crate::system_registry::SENSORS_KIND.to_string(),
+            kind: crate::ship::system_registry::SENSORS_KIND.to_string(),
             metrics: vec![SystemManualMetric {
                 code: "range".into(),
                 value: extra_number(extra, "range"),
@@ -574,7 +574,7 @@ impl SystemManualProvider for SensorRadarManualProvider {
         extra: Option<&toml::Value>,
     ) -> SystemManualSection {
         SystemManualSection {
-            kind: crate::system_registry::SENSOR_RADAR_KIND.to_string(),
+            kind: crate::ship::system_registry::SENSOR_RADAR_KIND.to_string(),
             metrics: vec![SystemManualMetric {
                 code: "range".into(),
                 value: extra_number(extra, "range"),
@@ -610,7 +610,7 @@ impl SystemManualProvider for PowerReactorManualProvider {
             },
         ];
         SystemManualSection {
-            kind: crate::system_registry::POWER_REACTOR_KIND.to_string(),
+            kind: crate::ship::system_registry::POWER_REACTOR_KIND.to_string(),
             metrics,
             capabilities: vec![],
             automation: station_automation(ship_config, station_id),
@@ -631,7 +631,7 @@ impl SystemManualProvider for PowerBatteryManualProvider {
         extra: Option<&toml::Value>,
     ) -> SystemManualSection {
         SystemManualSection {
-            kind: crate::system_registry::POWER_BATTERY_KIND.to_string(),
+            kind: crate::ship::system_registry::POWER_BATTERY_KIND.to_string(),
             metrics: vec![SystemManualMetric {
                 code: "emergency_threshold".into(),
                 value: extra_number(extra, "emergency_threshold"),
@@ -669,7 +669,7 @@ impl SystemManualProvider for RepairManualProvider {
             },
         ];
         SystemManualSection {
-            kind: crate::system_registry::REPAIR_KIND.to_string(),
+            kind: crate::ship::system_registry::REPAIR_KIND.to_string(),
             metrics,
             capabilities: vec![],
             automation: station_automation(ship_config, station_id),
@@ -689,7 +689,7 @@ impl SystemManualProvider for CommsManualProvider {
         extra: Option<&toml::Value>,
     ) -> SystemManualSection {
         SystemManualSection {
-            kind: crate::system_registry::COMMS_KIND.to_string(),
+            kind: crate::ship::system_registry::COMMS_KIND.to_string(),
             metrics: vec![SystemManualMetric {
                 code: "range".into(),
                 value: extra_number(extra, "range"),
@@ -745,7 +745,7 @@ impl SystemManualProvider for HelmManualProvider {
             .unwrap_or("planar")
             .to_string();
         SystemManualSection {
-            kind: crate::system_registry::HELM_THRUST_KIND.to_string(),
+            kind: crate::ship::system_registry::HELM_THRUST_KIND.to_string(),
             metrics,
             capabilities: vec![SystemManualCapability {
                 code: "movement_mode".into(),
@@ -849,7 +849,7 @@ station = "science"
         base.insert("max_hp".into(), toml::Value::Integer(100));
         base.insert("regen_per_sec".into(), toml::Value::Integer(2));
         HashMap::from([(
-            crate::system_registry::SHIELDS_KIND.to_string(),
+            crate::ship::system_registry::SHIELDS_KIND.to_string(),
             toml::Value::Table(base),
         )])
     }
@@ -862,7 +862,7 @@ station = "science"
             .expect("science station present")
             .sections
             .iter()
-            .find(|sec| sec.kind == crate::system_registry::SHIELDS_KIND)
+            .find(|sec| sec.kind == crate::ship::system_registry::SHIELDS_KIND)
             .expect("shields section present")
     }
 
@@ -925,7 +925,7 @@ station = "science"
             science
                 .sections
                 .iter()
-                .any(|sec| sec.kind == crate::system_registry::SHIELDS_KIND),
+                .any(|sec| sec.kind == crate::ship::system_registry::SHIELDS_KIND),
             "science must carry the generated shields section alongside its overview"
         );
     }
@@ -1026,7 +1026,7 @@ station = "science"
 
     // ── #773: per-kind providers, station aggregation, helm capability ─────────
 
-    use crate::system_registry as kinds;
+    use crate::ship::system_registry as kinds;
     use std::collections::HashSet;
 
     const FULL_KINDS: &[&str] = &[

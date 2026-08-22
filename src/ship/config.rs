@@ -1,4 +1,4 @@
-use crate::messages::{PowerGroupId, StationId, SystemId, TutorialOverlayWire};
+use crate::core::messages::{PowerGroupId, StationId, SystemId, TutorialOverlayWire};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -24,11 +24,11 @@ fn default_coordination_lag_secs() -> f32 {
 /// [`ShipConfig::weapons_station`]. Every weapon system on a hull lives on one
 /// station by construction, so the first match wins.
 const WEAPONS_KINDS: &[&str] = &[
-    crate::system_registry::PHASER_BANK_KIND,
-    crate::system_registry::BLASTER_BANK_KIND,
-    crate::system_registry::TORPEDO_TUBE_KIND,
-    crate::system_registry::TORPEDO_MAGAZINE_KIND,
-    crate::system_registry::TACTICAL_RADAR_KIND,
+    crate::ship::system_registry::PHASER_BANK_KIND,
+    crate::ship::system_registry::BLASTER_BANK_KIND,
+    crate::ship::system_registry::TORPEDO_TUBE_KIND,
+    crate::ship::system_registry::TORPEDO_MAGAZINE_KIND,
+    crate::ship::system_registry::TACTICAL_RADAR_KIND,
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -226,7 +226,7 @@ pub struct SystemInstanceConfig {
     /// Optional rig-marker name for this system instance.
     ///
     /// **Declared but unread**: no runtime path resolves this against a model
-    /// rig, so `crate::marker_validate` deliberately excludes it from the
+    /// rig, so `crate::entities::marker_validate` deliberately excludes it from the
     /// model-marker contract (issue #758) — validating a field nothing
     /// consumes would invent a contract rather than check one. The shipped
     /// hulls carried a placeholder `marker = "ship"` here that named no rig
@@ -479,7 +479,7 @@ impl ShipConfig {
             .or_else(|| {
                 // Legacy/test ships declare a `tactical` station but no fine
                 // weapon systems. Preserve the pre-lookup behaviour for them.
-                let tactical = StationId(crate::system_registry::TACTICAL_STATION_ID.into());
+                let tactical = StationId(crate::ship::system_registry::TACTICAL_STATION_ID.into());
                 self.station(&tactical).map(|_| tactical)
             })
     }
@@ -503,7 +503,7 @@ impl ShipConfig {
     pub fn sensors_station(&self) -> Option<StationId> {
         self.systems
             .iter()
-            .find(|s| s.kind == crate::system_registry::SENSORS_KIND)
+            .find(|s| s.kind == crate::ship::system_registry::SENSORS_KIND)
             .and_then(|s| s.station.clone())
     }
 

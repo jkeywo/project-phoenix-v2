@@ -5,7 +5,7 @@
 //! projection is a real, observed code edge — the publisher's dependency on the
 //! repair-team state machine is the line-start
 //! `use crate::modifiers::repair_teams::RepairTeams;` below, and its dependency
-//! on the authoritative damage store is `use crate::damage::SystemHull;`.
+//! on the authoritative damage store is `use crate::ship::damage::SystemHull;`.
 //!
 //! # Why a projection exists at all
 //!
@@ -61,16 +61,16 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
-use crate::damage::DamageTier;
-use crate::damage::SystemHull;
-use crate::lobby::handler::Target;
-use crate::lobby::Sessions;
-use crate::messages::{
+use crate::core::messages::{
     QueueEntryPreview, RepairBlackboard, ServerMessage, StationId, SystemBlackboard,
     SystemHullStatus, SystemId,
 };
+use crate::lobby::handler::Target;
+use crate::lobby::Sessions;
 use crate::modifiers::repair_teams::RepairTeams;
 use crate::ship::config::ShipConfig;
+use crate::ship::damage::DamageTier;
+use crate::ship::damage::SystemHull;
 use crate::ship::system_registry::repair_system_id;
 
 /// The bucket id used for hull entries that no station owns.
@@ -238,7 +238,7 @@ impl HullVisibility {
     /// no system and therefore leaks nothing #737 withholds — the same privacy
     /// argument that lets every recipient have the aggregate.
     ///
-    /// `Destroyed` latches at exactly 0 HP (`crate::damage::DamageTier`), so
+    /// `Destroyed` latches at exactly 0 HP (`crate::ship::damage::DamageTier`), so
     /// this share is already inside `aggregate_fraction`'s *loss*; the two
     /// scalars answer different questions — "how much hull is left" versus "how
     /// much of it is unrecoverable" — and the client paints the second as a
@@ -525,7 +525,7 @@ pub fn ship_hull_visibility(
 
 /// Build a [`HullVisibility`] for the `LocalShip`, or `None` before spawn.
 pub fn hull_visibility(world: &mut World) -> Option<HullVisibility> {
-    use crate::entity_spawner::EntitySystemHull;
+    use crate::entities::spawner::EntitySystemHull;
     use crate::server_app::LocalShip;
     use crate::ship_plugin::ShipConfigComponent;
 
@@ -567,7 +567,7 @@ fn viewers(world: &World) -> Vec<(String, Option<StationId>)> {
 /// moving station, both alter what a given recipient may see.
 pub fn push_hull_updates(world: &mut World) {
     use crate::core::broadcast::LastBroadcastHull;
-    use crate::simulation::SimOutbox;
+    use crate::server_app::SimOutbox;
 
     let Some(vis) = hull_visibility(world) else {
         return;
@@ -721,7 +721,7 @@ pub fn project_blackboard_for_token(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::damage::DamageTier;
+    use crate::ship::damage::DamageTier;
 
     fn status(id: &str, current: f32) -> SystemHullStatus {
         SystemHullStatus {
@@ -1368,13 +1368,13 @@ station = "engineering"
     /// [`world_app`] with the post-damage HP of each system spelled out, so a
     /// test can author a *destroyed* system (0 HP) the default fixture lacks.
     fn world_app_with_hp(teams: RepairTeams, hp: &[(&str, f32)]) -> App {
-        use crate::entity_spawner::EntitySystemHull;
+        use crate::entities::spawner::EntitySystemHull;
         use crate::server_app::LocalShip;
         use crate::ship_plugin::ShipConfigComponent;
 
         let mut app = App::new();
         app.init_resource::<crate::core::broadcast::LastBroadcastHull>();
-        app.init_resource::<crate::simulation::SimOutbox>();
+        app.init_resource::<crate::server_app::SimOutbox>();
 
         let mut sessions = crate::lobby::session::SessionManager::new();
         sessions.register("eng".into(), "Bob".into()).unwrap();
@@ -1389,7 +1389,7 @@ station = "engineering"
         }
 
         app.world_mut().spawn((
-            crate::simulation::Ship,
+            crate::server_app::Ship,
             LocalShip,
             ShipConfigComponent(world_ship_config()),
             EntitySystemHull(hull),
@@ -1410,7 +1410,7 @@ station = "engineering"
     fn sent_hull(app: &mut App) -> Vec<SentHull> {
         push_hull_updates(app.world_mut());
         app.world()
-            .resource::<crate::simulation::SimOutbox>()
+            .resource::<crate::server_app::SimOutbox>()
             .0
             .iter()
             .filter_map(|(target, msg)| match (target, msg) {

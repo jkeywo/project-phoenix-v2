@@ -1,8 +1,9 @@
 use bevy::prelude::*;
 
-use crate::messages::ModifierSlot;
+use crate::core::messages::ModifierSlot;
 use crate::modifiers::ShipModifiers;
 use crate::server_app::LocalShip;
+use crate::server_app::{ShipBoost, ShipImpulse};
 use crate::ship::components::{
     BankConfigResource, BoostConfigResource, ImpulseConfigResource, ShipPhysicsConfigResource,
     ShipSystemControlSources, HELM_AI_MAX_DT_SECS,
@@ -11,9 +12,10 @@ use crate::ship::helm::{
     BoostCommand, ImpulseCommand, LateralThrustInput, SteeringInput, ThrustInput,
     VerticalThrustInput,
 };
-use crate::ship_physics::{compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState};
-use crate::ship_state::ShipPhysics;
-use crate::simulation::{ShipBoost, ShipImpulse};
+use crate::ship::physics::{
+    compute_physics, ShipPhysicsConfig, ShipPhysicsInput, ShipPhysicsState,
+};
+use crate::ship::state::ShipPhysics;
 
 pub(crate) fn sync_ship_position(mut ship_query: Query<(&ShipPhysics, &mut Transform)>) {
     for (physics, mut transform) in ship_query.iter_mut() {
@@ -53,7 +55,7 @@ pub(crate) fn apply_helm_commands(
             Option<&mut ShipBoost>,
             Option<Ref<BoostCommand>>,
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
 ) {
     for (impulse, impulse_cmd, boost, boost_cmd) in ships.iter_mut() {
@@ -69,9 +71,9 @@ pub(crate) fn apply_helm_commands(
             // later tick.
             if cmd.is_changed() && !cmd.is_added() {
                 match cmd.0 {
-                    crate::impulse::ImpulsePhase::Charging => impulse.0.start_charge(),
-                    crate::impulse::ImpulsePhase::Idle => impulse.0.cancel_charge(),
-                    crate::impulse::ImpulsePhase::Active => {}
+                    crate::ship::impulse::ImpulsePhase::Charging => impulse.0.start_charge(),
+                    crate::ship::impulse::ImpulsePhase::Idle => impulse.0.cancel_charge(),
+                    crate::ship::impulse::ImpulsePhase::Active => {}
                 }
             }
         }
@@ -148,7 +150,7 @@ pub(crate) fn integrate_ship_physics(
             &VerticalThrustInput,
             (Option<&ShipImpulse>, Option<&ShipBoost>),
         ),
-        With<crate::ai_plugin::AiHighFidelity>,
+        With<crate::ai::server::AiHighFidelity>,
     >,
     #[cfg(debug_assertions)] frame: Res<crate::ship::helm::HelmPhysicsFrame>,
     #[cfg(debug_assertions)] mut guard_q: Query<&mut crate::ship::helm::HelmPhysicsWriteGuard>,
@@ -260,10 +262,10 @@ pub(crate) fn integrate_ship_physics(
         // thrust is zeroed.
         let port_offline = sources
             .0
-            .is_offline(&crate::system_registry::helm_engine_port_system_id());
+            .is_offline(&crate::ship::system_registry::helm_engine_port_system_id());
         let stbd_offline = sources
             .0
-            .is_offline(&crate::system_registry::helm_engine_starboard_system_id());
+            .is_offline(&crate::ship::system_registry::helm_engine_starboard_system_id());
         let engine_thrust_scale: f32 = match (port_offline, stbd_offline) {
             (true, true) => 0.0,
             (true, false) | (false, true) => 0.5,
@@ -311,16 +313,16 @@ pub(crate) fn integrate_ship_physics(
         // repair — see the note there.
         let thrust_offline = sources
             .0
-            .is_offline(&crate::system_registry::helm_thrust_system_id());
+            .is_offline(&crate::ship::system_registry::helm_thrust_system_id());
         let steering_offline = sources
             .0
-            .is_offline(&crate::system_registry::helm_steering_system_id());
+            .is_offline(&crate::ship::system_registry::helm_steering_system_id());
         let lateral_offline = sources
             .0
-            .is_offline(&crate::system_registry::lateral_thrust_system_id());
+            .is_offline(&crate::ship::system_registry::lateral_thrust_system_id());
         let vertical_offline = sources
             .0
-            .is_offline(&crate::system_registry::vertical_thrust_system_id());
+            .is_offline(&crate::ship::system_registry::vertical_thrust_system_id());
         let scaled_input = ShipPhysicsInput {
             thrust: if thrust_offline {
                 0.0
@@ -356,7 +358,7 @@ pub(crate) fn integrate_ship_physics(
             let mult = if impulse_cfg.acceleration_multiplier > 0.0 {
                 impulse_cfg.acceleration_multiplier
             } else {
-                crate::impulse::IMPULSE_ACCELERATION_MULTIPLIER
+                crate::ship::impulse::IMPULSE_ACCELERATION_MULTIPLIER
             };
             config.acceleration *= mult;
         }
@@ -407,11 +409,11 @@ pub(crate) fn integrate_ship_physics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control_source::ControlSource;
-    use crate::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
+    use crate::server_app::Ship;
+    use crate::ship::control_source::ControlSource;
     use crate::ship::helm_ai::helm_axes_operate_ai;
+    use crate::ship::impulse::{ImpulsePhase, IMPULSE_CHARGE_DURATION};
     use crate::ship::test_support::*;
-    use crate::simulation::Ship;
 
     // Regression test for issue #695 follow-up: LOD promotion re-inserting
     // a fresh default `ImpulseCommand` must not silently cancel an
@@ -431,7 +433,7 @@ mod tests {
         // human/AI decision had already started charging impulse).
         set_ship_impulse(
             &mut app,
-            crate::impulse::ImpulseState {
+            crate::ship::impulse::ImpulseState {
                 phase: ImpulsePhase::Charging,
                 charge_progress: 0.4,
             },
@@ -508,19 +510,21 @@ mod tests {
         lateral: f32,
     ) -> Entity {
         let mut sources = ShipSystemControlSources::default();
-        sources
-            .0
-            .set(crate::system_registry::helm_thrust_system_id(), source);
-        sources
-            .0
-            .set(crate::system_registry::helm_steering_system_id(), source);
+        sources.0.set(
+            crate::ship::system_registry::helm_thrust_system_id(),
+            source,
+        );
+        sources.0.set(
+            crate::ship::system_registry::helm_steering_system_id(),
+            source,
+        );
         let entity = app
             .world_mut()
             .spawn((
                 Ship,
                 sources,
                 ShipPhysics::default(),
-                crate::ai_plugin::AiHighFidelity,
+                crate::ai::server::AiHighFidelity,
                 ThrustInput(thrust),
                 SteeringInput(steering),
                 LateralThrustInput(lateral),
@@ -706,7 +710,7 @@ mod tests {
         let impulsing = spawn_integrator_ship(&mut app, ControlSource::Human, true, 0.0, 1.0, 1.0);
         let control = spawn_integrator_ship(&mut app, ControlSource::Human, true, 0.0, 1.0, 1.0);
 
-        let mut active = crate::impulse::ImpulseState::new();
+        let mut active = crate::ship::impulse::ImpulseState::new();
         active.start_charge();
         active.tick(IMPULSE_CHARGE_DURATION, IMPULSE_CHARGE_DURATION);
         assert_eq!(active.phase, ImpulsePhase::Active, "impulse must be active");
@@ -803,7 +807,10 @@ mod tests {
             .get_mut::<ShipSystemControlSources>()
             .expect("spawned with control sources")
             .0
-            .set_offline(crate::system_registry::lateral_thrust_system_id(), true);
+            .set_offline(
+                crate::ship::system_registry::lateral_thrust_system_id(),
+                true,
+            );
 
         tick(&mut app); // warm-up: the first update integrates a zero `dt`.
         for e in [working, destroyed] {
@@ -856,7 +863,10 @@ mod tests {
             .get_mut::<ShipSystemControlSources>()
             .expect("spawned with control sources")
             .0
-            .set_offline(crate::system_registry::lateral_thrust_system_id(), false);
+            .set_offline(
+                crate::ship::system_registry::lateral_thrust_system_id(),
+                false,
+            );
         tick(&mut app);
         assert!(
             physics_of(&mut app, destroyed).lateral_speed > 0.0,
@@ -884,7 +894,10 @@ mod tests {
             .get_mut::<ShipSystemControlSources>()
             .expect("spawned with control sources")
             .0
-            .set_offline(crate::system_registry::helm_steering_system_id(), true);
+            .set_offline(
+                crate::ship::system_registry::helm_steering_system_id(),
+                true,
+            );
 
         for _ in 0..5 {
             tick(&mut app);
@@ -929,7 +942,7 @@ mod tests {
             .get_mut::<ShipSystemControlSources>()
             .expect("spawned with control sources")
             .0
-            .set_offline(crate::system_registry::helm_thrust_system_id(), true);
+            .set_offline(crate::ship::system_registry::helm_thrust_system_id(), true);
 
         tick(&mut app); // warm-up: the first update integrates a zero `dt`.
         for e in [working, destroyed] {
@@ -985,7 +998,7 @@ mod tests {
     /// throughout, and settled exactly on the new cap.
     #[test]
     fn a_helm_power_shed_at_the_cap_bleeds_speed_down_over_several_ticks() {
-        use crate::messages::{ModifierSource, PowerGroupId};
+        use crate::core::messages::{ModifierSource, PowerGroupId};
         use crate::modifiers::Modifier;
 
         let helm = ModifierSource::PowerGroup(PowerGroupId("helm".into()));

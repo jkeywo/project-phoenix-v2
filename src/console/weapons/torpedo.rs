@@ -1,6 +1,6 @@
 //! Torpedo systems, extracted from `server.rs` (issue #728).
 //!
-//! Note: `crate::torpedo::TorpedoSystem` (the pure-Rust tube/magazine model
+//! Note: `crate::weapons::torpedo::TorpedoSystem` (the pure-Rust tube/magazine model
 //! in `src/weapons/torpedo.rs`) is a different module from this file — this
 //! one holds the Bevy systems and the ECS wrapper resource.
 
@@ -10,16 +10,16 @@ use super::shared::{system_is_registered, TorpedoTargetSnapshot};
 use super::{
     AsteroidDestroyedVfx, ShipDestroyedVfx, TacticalRadarSelection, DEFAULT_SHIP_EXPLOSION_RADIUS,
 };
-use crate::entity_spawner::EntitySystemHull;
-use crate::lobby::{Target, WorldResource};
-use crate::messages::{
+use crate::core::messages::{
     AdmittedCommands, InterSystemMsg, InterSystemPayload, InterSystemQueue, ServerMessage,
     SystemControlPayload,
 };
+use crate::entities::spawner::EntitySystemHull;
+use crate::lobby::{Target, WorldResource};
+use crate::server_app::{AsteroidUuid, SimOutbox};
+use crate::ship::state::ShipPhysics;
 use crate::ship_plugin::ShipSystemControlSources;
-use crate::ship_state::ShipPhysics;
-use crate::simulation::{AsteroidUuid, SimOutbox};
-use crate::torpedo::TorpedoSystem;
+use crate::weapons::torpedo::TorpedoSystem;
 
 /// Wraps the pure-Rust torpedo system so it can be used as a Bevy resource.
 ///
@@ -30,7 +30,7 @@ pub struct TorpedoSystemResource(pub TorpedoSystem);
 
 /// Per-ship map of each torpedo tube's inline stateless load + launch policy
 /// (issue #782), keyed by `TorpedoTubeConfig.id`. The torpedo twin of
-/// [`crate::weapons_plugin::BlasterBankAiPolicies`]: built at spawn from each
+/// [`crate::console::weapons::BlasterBankAiPolicies`]: built at spawn from each
 /// tube's authored `ai` block, falling back to the canonical
 /// [`crate::entities::config::default_torpedo_tube_ai_config`] (unconditional
 /// load + launch) so a tube without an authored policy keeps behaving exactly as
@@ -38,7 +38,10 @@ pub struct TorpedoSystemResource(pub TorpedoSystem);
 /// `ai_torpedo_auto_fire` (the `torpedo_launch` channel).
 #[derive(Component, Default, Clone, Debug)]
 pub struct TorpedoTubeAiPolicies(
-    pub std::collections::HashMap<crate::entity_config::TorpedoTubeId, crate::ai::policy::AiPolicy>,
+    pub  std::collections::HashMap<
+        crate::entities::config::TorpedoTubeId,
+        crate::ai::policy::AiPolicy,
+    >,
 );
 
 /// The shared torpedo magazine's inline stateless grant policy (issue #782,
@@ -53,7 +56,7 @@ pub struct TorpedoMagazineAiPolicy(pub crate::ai::policy::AiPolicy);
 
 /// Seed the per-tick policy fact snapshot for one torpedo tube's LOAD decision
 /// (issue #782), the torpedo twin of
-/// [`crate::weapons_plugin::seed_blaster_bank_facts`]. Closes the #779
+/// [`crate::console::weapons::seed_blaster_bank_facts`]. Closes the #779
 /// empty-facts edge for torpedo tubes: the host resolves the tube's live loading
 /// state before calling this, so a `fact(...)` guard evaluates over real per-tube
 /// state while `policy.rs` stays Bevy-free (AGENTS.md #10).
@@ -87,9 +90,9 @@ pub fn seed_torpedo_tube_load_facts(
 /// is an HP reading, not a boolean: `<= 0` means the striking arc is not
 /// blocking (down, or absent entirely).
 /// `posture` is the other SHIP-WIDE reading, added by issue #872 and widened by
-/// issue #1041 — this ship's own [`crate::ship_state::ShipRedAlert`] and
-/// [`crate::ship_state::ShipWeaponsHold`], folded into the one `red_alert` fact
-/// by [`crate::weapons_plugin::WeaponsAlertPosture`]. Seeded on the LAUNCH
+/// issue #1041 — this ship's own [`crate::ship::state::ShipRedAlert`] and
+/// [`crate::ship::state::ShipWeaponsHold`], folded into the one `red_alert` fact
+/// by [`crate::console::weapons::WeaponsAlertPosture`]. Seeded on the LAUNCH
 /// snapshot only: loading a tube and granting a round from the magazine are not
 /// offensive fire and stay ungated — a held ship may fill its tubes, it simply
 /// will not shoot them.
@@ -101,7 +104,7 @@ pub fn seed_torpedo_tube_launch_facts(
     in_arc: bool,
     target_facing_shields: i32,
     tubes_full: bool,
-    posture: crate::weapons_plugin::WeaponsAlertPosture,
+    posture: crate::console::weapons::WeaponsAlertPosture,
 ) -> crate::world::flags::AiFacts {
     use crate::entities::ai_flag_hosts as fid;
     let mut facts = crate::world::flags::AiFacts::new();
@@ -132,7 +135,7 @@ pub fn seed_torpedo_magazine_facts(magazine: u32, in_flight: u32) -> crate::worl
 /// resolved once per ship per tick, ahead of that ship's admitted command loop
 /// in [`handle_fire_torpedo`], for human-origin and AI-origin launches alike.
 ///
-/// `rounds_aboard` is [`crate::torpedo::TorpedoSystem::rounds_aboard`] — the
+/// `rounds_aboard` is [`crate::weapons::torpedo::TorpedoSystem::rounds_aboard`] — the
 /// magazine PLUS the rounds already parked in the tubes, not the bare
 /// `torpedoes_remaining` counter, which a hull with a "keep the tubes loaded"
 /// doctrine drives permanently below what it is actually carrying and which
@@ -317,7 +320,7 @@ pub(crate) fn handle_load_tube(
             // Gate on the tube's fine-system policy (default-source policy
             // for unregistered ids — issue #801). Admission already gated
             // the token; this is a system-state gate.
-            let tube_system_id = crate::system_registry::torpedo_tube_system_id(&tube_id)
+            let tube_system_id = crate::ship::system_registry::torpedo_tube_system_id(&tube_id)
                 .filter(|id| system_is_registered(control_sources, id));
             let tube_policy = match &tube_system_id {
                 Some(id) => control_sources.0.policy_for(id),
@@ -330,7 +333,7 @@ pub(crate) fn handle_load_tube(
             }
 
             inter_system.0.push(InterSystemMsg {
-                target: crate::system_registry::torpedo_magazine_system_id(),
+                target: crate::ship::system_registry::torpedo_magazine_system_id(),
                 payload: InterSystemPayload::ClaimTorpedoRound { tube: tube_id },
                 source_entity: Some(ship_entity),
             });
@@ -376,7 +379,7 @@ pub(crate) fn handle_unload_tube(
                 .tubes
                 .iter()
                 .find(|t| {
-                    crate::system_registry::torpedo_tube_system_id(&t.id).as_ref()
+                    crate::ship::system_registry::torpedo_tube_system_id(&t.id).as_ref()
                         == Some(&cmd.target)
                 })
                 .map(|t| t.id.clone())
@@ -437,7 +440,7 @@ pub(crate) fn handle_set_torpedo_volley_target(
     mut ship_query: Query<
         (
             &ShipSystemControlSources,
-            &crate::messages::AdmittedCommands,
+            &crate::core::messages::AdmittedCommands,
             Option<&mut TorpedoSystemResource>,
         ),
         With<crate::server_app::Ship>,
@@ -470,7 +473,7 @@ pub(crate) fn handle_set_torpedo_volley_target(
                 .tubes
                 .iter()
                 .find(|t| {
-                    crate::system_registry::torpedo_tube_system_id(&t.id).as_ref()
+                    crate::ship::system_registry::torpedo_tube_system_id(&t.id).as_ref()
                         == Some(&cmd.target)
                 })
                 .map(|t| t.id.clone())
@@ -532,10 +535,10 @@ pub(crate) fn handle_fire_torpedo(
             &ShipSystemControlSources,
             &ShipPhysics,
             &Transform,
-            Option<&crate::model_rig::ModelMarkers>,
+            Option<&crate::entities::model_rig::ModelMarkers>,
             &AdmittedCommands,
             Option<&crate::server_app::ShipSystemBlackboards>,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             Option<&mut TorpedoSystemResource>,
             Option<&mut crate::server_app::WeaponFiredThisTick>,
             // The world-scoped conservation gate's three inputs (issue #943):
@@ -543,14 +546,16 @@ pub(crate) fn handle_fire_torpedo(
             // objectives, and the layer it was spawned into (which anchors the
             // flag chain the mission counter is read through).
             Option<&TorpedoMagazineAiPolicy>,
-            Option<&crate::entity_spawner::BehaviourSection>,
+            Option<&crate::entities::spawner::BehaviourSection>,
             Option<&crate::world::server::EntityOriginLayer>,
         ),
         With<crate::server_app::Ship>,
     >,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
     mut outbox: ResMut<SimOutbox>,
-    mut balance_events: Option<ResMut<bevy::ecs::message::Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<
+        ResMut<bevy::ecs::message::Messages<crate::core::balance::BalanceEvent>>,
+    >,
     // Torpedo ids are minted from the tick-scoped counter (issue #907), same
     // reason as the blaster's projectile ids: an id that is a function of
     // draw order made two instances diverge even on the same seed.
@@ -578,11 +583,11 @@ pub(crate) fn handle_fire_torpedo(
     {
         // Per-entity component first; global Resource fallback for legacy tests.
         let mut torpedo_sys_comp = torpedo_sys_comp;
-        let torpedo_sys: &mut crate::torpedo::TorpedoSystem = match torpedo_sys_comp.as_deref_mut()
-        {
-            Some(c) => &mut c.0,
-            None => &mut torpedo_sys_res.0,
-        };
+        let torpedo_sys: &mut crate::weapons::torpedo::TorpedoSystem =
+            match torpedo_sys_comp.as_deref_mut() {
+                Some(c) => &mut c.0,
+                None => &mut torpedo_sys_res.0,
+            };
 
         // Nothing below this point concerns a ship with no launch to gate, and
         // this system runs for EVERY `With<Ship>` entity on every `FixedUpdate`
@@ -647,7 +652,7 @@ pub(crate) fn handle_fire_torpedo(
                 .tubes
                 .iter()
                 .find(|t| {
-                    crate::system_registry::torpedo_tube_system_id(&t.id).as_ref()
+                    crate::ship::system_registry::torpedo_tube_system_id(&t.id).as_ref()
                         == Some(&cmd.target)
                 })
                 .map(|t| t.id.clone())
@@ -671,7 +676,7 @@ pub(crate) fn handle_fire_torpedo(
             }
 
             // Magazine-online gate: a Disabled/Destroyed magazine blocks fire.
-            let magazine_id = crate::system_registry::torpedo_magazine_system_id();
+            let magazine_id = crate::ship::system_registry::torpedo_magazine_system_id();
             let magazine_declared = control_sources
                 .0
                 .entries()
@@ -705,11 +710,13 @@ pub(crate) fn handle_fire_torpedo(
             let source_uuid = source_uuid_opt.map(|u| u.0.clone());
             // Homing target: the ship's frozen Combat Lock (issue #829),
             // else the explicit target on the FireTorpedo payload.
-            let combat_lock = match blackboards_opt
-                .as_ref()
-                .and_then(|bbs| bbs.0.get(&crate::system_registry::viewscreen_system_id()))
-            {
-                Some(crate::messages::SystemBlackboard::Viewscreen(bb)) => bb.combat_lock.clone(),
+            let combat_lock = match blackboards_opt.as_ref().and_then(|bbs| {
+                bbs.0
+                    .get(&crate::ship::system_registry::viewscreen_system_id())
+            }) {
+                Some(crate::core::messages::SystemBlackboard::Viewscreen(bb)) => {
+                    bb.combat_lock.clone()
+                }
                 _ => None,
             };
             let homing_uuid: Option<String> = combat_lock.or_else(|| target_uuid.clone());
@@ -736,7 +743,7 @@ pub(crate) fn handle_fire_torpedo(
                         .unwrap_or((physics.x, physics.y, physics.z))
                 })
                 .collect();
-            use crate::torpedo::LaunchResult;
+            use crate::weapons::torpedo::LaunchResult;
             let result = torpedo_sys.launch_with_barrels(
                 tube_id.as_str(),
                 uuid.clone(),
@@ -765,10 +772,10 @@ pub(crate) fn handle_fire_torpedo(
                         .map(|t| (t.x, t.y, t.z))
                         .unwrap_or((physics.x, physics.y, physics.z));
                     if let Some(ref mut msgs) = balance_events {
-                        msgs.write(crate::balance::BalanceEvent::WeaponFired {
+                        msgs.write(crate::core::balance::BalanceEvent::WeaponFired {
                             shooter: source_uuid.clone().filter(|u| !u.is_empty()),
                             weapon: tube_id.clone(),
-                            kind: crate::balance::FIRED_KIND_TORPEDO.to_string(),
+                            kind: crate::core::balance::FIRED_KIND_TORPEDO.to_string(),
                         });
                     }
                     outbox.0.push((
@@ -811,14 +818,14 @@ pub(crate) fn handle_fire_torpedo(
 /// all (legacy test paths without a Ship entity).
 ///
 /// For every `ClaimTorpedoRound` targeted at
-/// [`crate::system_registry::torpedo_magazine_system_id`]:
+/// [`crate::ship::system_registry::torpedo_magazine_system_id`]:
 ///
 /// 1. Refuse the claim (no-op) when the magazine is offline (Disabled /
 ///    Destroyed hull tier — reflected as `!accept_human_input && !operate_ai`
 ///    in the control-source resolver).
 /// 2. Refuse the claim when the shared magazine counter is zero.
 /// 3. Otherwise decrement the counter and start loading the named tube via
-///    [`crate::torpedo::TorpedoSystem::start_load_reserved`].
+///    [`crate::weapons::torpedo::TorpedoSystem::start_load_reserved`].
 ///
 /// This is the sole path the Bevy weapons handler uses to consume from the
 /// magazine — the tube handler (`handle_load_tube`) only *sends* the claim.
@@ -841,7 +848,7 @@ pub fn handle_torpedo_magazine_inter_system(
     >,
     mut torpedo_sys_res: ResMut<TorpedoSystemResource>,
 ) {
-    let magazine_id = crate::system_registry::torpedo_magazine_system_id();
+    let magazine_id = crate::ship::system_registry::torpedo_magazine_system_id();
     // Collect targeted claims: (source_entity, tube_id). Only claims for the
     // magazine system are relevant here — everything else is ignored.
     let claims: Vec<(Option<Entity>, String)> = queue
@@ -939,8 +946,8 @@ pub fn handle_torpedo_magazine_inter_system(
 /// which `tick_torpedo_lifecycle` reads later in the same tick.
 pub(crate) fn build_torpedo_target_snapshot(
     world: Res<WorldResource>,
-    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entity_spawner::EntityUuid>>,
-    entity_q: Query<(&crate::entity_spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
+    entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
     // Virtual entities (asteroid-field anchors, region trigger volumes) are
     // organisational/effect-only. They carry an `EntityUuid` and a non-zero
     // `radius` in the world snapshot (from `outer_radius` or region shape),
@@ -950,10 +957,10 @@ pub(crate) fn build_torpedo_target_snapshot(
     // physics tick. (Regression that made torpedoes invisible from the
     // viewscreen because the sphere lifetime was a single frame.)
     virtual_entity_q: Query<
-        &crate::entity_spawner::EntityUuid,
+        &crate::entities::spawner::EntityUuid,
         Or<(
-            With<crate::entity_spawner::AsteroidFieldSection>,
-            With<crate::entity_spawner::RegionShapeSection>,
+            With<crate::entities::spawner::AsteroidFieldSection>,
+            With<crate::entities::spawner::RegionShapeSection>,
         )>,
     >,
     mut snapshot: ResMut<TorpedoTargetSnapshot>,
@@ -1089,13 +1096,13 @@ pub(crate) struct HitPositionQueries<'w, 's> {
         'w,
         's,
         (&'static AsteroidUuid, &'static Transform),
-        Without<crate::entity_spawner::EntityUuid>,
+        Without<crate::entities::spawner::EntityUuid>,
     >,
     pub entities: Query<
         'w,
         's,
         (
-            &'static crate::entity_spawner::EntityUuid,
+            &'static crate::entities::spawner::EntityUuid,
             &'static Transform,
         ),
         Without<AsteroidUuid>,
@@ -1115,7 +1122,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     mut torpedo_sys_q: Query<
         (
             Entity,
-            Option<&crate::entity_spawner::EntityUuid>,
+            Option<&crate::entities::spawner::EntityUuid>,
             &mut TorpedoSystemResource,
         ),
         With<crate::server_app::Ship>,
@@ -1130,11 +1137,11 @@ pub(crate) fn tick_torpedo_lifecycle(
     mut hull_query: Query<(
         Entity,
         Option<&AsteroidUuid>,
-        Option<&crate::entity_spawner::EntityUuid>,
+        Option<&crate::entities::spawner::EntityUuid>,
         &mut EntitySystemHull,
         Option<&mut crate::ship::shields::ShipShields>,
-        Option<&mut crate::entity_spawner::EntityShipArcHull>,
-        Option<&crate::entity_spawner::ColliderSection>,
+        Option<&mut crate::entities::spawner::EntityShipArcHull>,
+        Option<&crate::entities::spawner::ColliderSection>,
         bevy::ecs::query::Has<crate::server_app::LocalShip>,
         // Where the victim is and which way it is pointing — shield arcs are
         // authored in the victim's own frame, so routing the hit to an arc
@@ -1146,7 +1153,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     mut death_latch: crate::server_app::PlayerDeathLatch,
     mut commands: Commands,
     mut vfx_events: MessageWriter<AsteroidDestroyedVfx>,
-    mut destroyed_events: MessageWriter<crate::ai_plugin::AiEntityDestroyed>,
+    mut destroyed_events: MessageWriter<crate::ai::server::AiEntityDestroyed>,
     mut ship_vfx_events: MessageWriter<ShipDestroyedVfx>,
     // The two position lookups bundled as one `SystemParam` (issue #838) —
     // separately they put this system over Bevy's 16-parameter ceiling. Same
@@ -1157,7 +1164,7 @@ pub(crate) fn tick_torpedo_lifecycle(
     snapshot: Res<TorpedoTargetSnapshot>,
     // `Option<ResMut<Messages<_>>>` so bare-`App` fixtures that never
     // registered the message still pass Bevy's parameter validation.
-    mut balance_events: Option<ResMut<Messages<crate::balance::BalanceEvent>>>,
+    mut balance_events: Option<ResMut<Messages<crate::core::balance::BalanceEvent>>>,
     // Seeded RNG + log filter, bundled: separately they put this system one
     // over Bevy's 16-parameter ceiling.
     ambient: crate::server_app::SimRngAndLog,
@@ -1380,7 +1387,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                     if all_offline {
                         hull_damage += shield_eligible;
                     } else {
-                        let (pierced, absorbed) = crate::damage::split_damage_for_pierce(
+                        let (pierced, absorbed) = crate::ship::damage::split_damage_for_pierce(
                             shield_eligible,
                             det.shield_pierce,
                         );
@@ -1410,7 +1417,7 @@ pub(crate) fn tick_torpedo_lifecycle(
                         // `Transform` (the degenerate case the beam path also
                         // takes) — nothing better is knowable there.
                         let bearing = match target_tf {
-                            Some(tf) => crate::shield::attacker_bearing_relative(
+                            Some(tf) => crate::weapons::shield::attacker_bearing_relative(
                                 det.impact_x,
                                 det.impact_z,
                                 tf.translation.x,
@@ -1477,13 +1484,13 @@ pub(crate) fn tick_torpedo_lifecycle(
             // Balance tracer — every torpedo hit, on every ship, regardless of
             // whether anything downstream is player-facing.
             if let Some(ref mut msgs) = balance_events {
-                msgs.write(crate::balance::BalanceEvent::DamageApplied {
+                msgs.write(crate::core::balance::BalanceEvent::DamageApplied {
                     attacker: det.source_uuid.clone(),
                     victim: target_uuid.clone(),
                     victim_kind: if is_asteroid {
-                        crate::balance::VictimKind::Asteroid
+                        crate::core::balance::VictimKind::Asteroid
                     } else {
-                        crate::balance::VictimKind::Ship
+                        crate::core::balance::VictimKind::Ship
                     },
                     weapon: det.tube_id.clone(),
                     amount: (det.damage_hull + det.damage_shields) as f32,
@@ -1505,10 +1512,12 @@ pub(crate) fn tick_torpedo_lifecycle(
                                 .map(|f| !f.is_online())
                                 .unwrap_or(false);
                             if now_offline {
-                                msgs.write(crate::balance::BalanceEvent::ShieldArcCollapsed {
-                                    ship: target_uuid.clone(),
-                                    arc_id: id.clone(),
-                                });
+                                msgs.write(
+                                    crate::core::balance::BalanceEvent::ShieldArcCollapsed {
+                                        ship: target_uuid.clone(),
+                                        arc_id: id.clone(),
+                                    },
+                                );
                             }
                         }
                     }
@@ -1560,15 +1569,15 @@ pub(crate) fn tick_torpedo_lifecycle(
             // tracer piggybacks on.
             outbox.0.push((Target::All, ServerMessage::ShipDestroyed));
             if let Some(ref mut gs) = death_latch.next_state {
-                gs.set(crate::messages::GamePhase::GameOver);
+                gs.set(crate::core::messages::GamePhase::GameOver);
             }
             if let Some(ref mut reason) = death_latch.reason {
                 if reason.0.is_none() {
                     reason.0 = Some("server.game_over.ship_destroyed".into());
                     // The LocalShip died → defeat (#843).
-                    reason.1 = Some(crate::balance::Outcome::Defeat);
+                    reason.1 = Some(crate::core::balance::Outcome::Defeat);
                     if let Some(ref mut msgs) = balance_events {
-                        msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                        msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
                             victim: target_uuid.clone(),
                             killer: det.source_uuid.clone(),
                         });
@@ -1593,7 +1602,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             }
         } else if non_local_ship_destroyed {
             world.0.entities.retain(|a| a.uuid != target_uuid);
-            destroyed_events.write(crate::ai_plugin::AiEntityDestroyed {
+            destroyed_events.write(crate::ai::server::AiEntityDestroyed {
                 entity_uuid: target_uuid.clone(),
             });
             ship_vfx_events.write(ShipDestroyedVfx {
@@ -1613,7 +1622,7 @@ pub(crate) fn tick_torpedo_lifecycle(
             // EntityDestroyed for the torpedo kill, co-located with the
             // AiEntityDestroyed write (exactly once). Killer = launching ship.
             if let Some(ref mut msgs) = balance_events {
-                msgs.write(crate::balance::BalanceEvent::EntityDestroyed {
+                msgs.write(crate::core::balance::BalanceEvent::EntityDestroyed {
                     victim: target_uuid.clone(),
                     killer: det.source_uuid.clone(),
                 });

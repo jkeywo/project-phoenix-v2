@@ -25,7 +25,7 @@
 #![cfg(all(feature = "headless", not(target_arch = "wasm32")))]
 
 use bevy::prelude::*;
-use project_phoenix::entity_spawner::EntityUuid;
+use project_phoenix::entities::spawner::EntityUuid;
 use project_phoenix::headless::{build_headless_app, run, world_digest, HeadlessArgs};
 use project_phoenix::server_app::AsteroidUuid;
 use project_phoenix::world_id::{IdNamespace, WorldId, WorldIdMint};

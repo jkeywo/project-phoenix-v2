@@ -970,32 +970,42 @@ fn no_weapons_host_decides_fire_from_red_alert_in_rust() {
 /// a live and completely silent way to reopen the trap.
 #[test]
 fn production_validation_names_its_host() {
-    let src = read_non_test_source("src/entities/config.rs");
+    // The host-less `validate_fine_system_ai_*` entry points DEFINE in the
+    // extracted `ai_policy_schema` module (issue #1196); production validation
+    // still lives in `config`'s `EntityConfig::from_toml`. Scan both: every
+    // occurrence must be the definition itself (never a call), and the
+    // definition must be seen exactly once across the two sources.
+    let sources = [
+        read_non_test_source("src/entities/ai_policy_schema.rs"),
+        read_non_test_source("src/entities/config.rs"),
+    ];
     for hostless in [
         "validate_fine_system_ai_policy(",
         "validate_fine_system_ai_selector(",
     ] {
-        let mut from = 0usize;
         let mut definitions = 0;
-        while let Some(hit) = src[from..].find(hostless) {
-            let at = from + hit;
-            from = at + hostless.len();
-            let is_definition = src[..at].ends_with("fn ");
-            assert!(
-                is_definition,
-                "src/entities/config.rs calls the host-less `{hostless}` outside a \
-                     definition. Production validation must use the `_for` variant with \
-                     the owning ai_flag_hosts::AiHost, or a flag()/counter() guard on \
-                     that block goes back to reading false in silence."
-            );
-            definitions += 1;
+        for src in &sources {
+            let mut from = 0usize;
+            while let Some(hit) = src[from..].find(hostless) {
+                let at = from + hit;
+                from = at + hostless.len();
+                let is_definition = src[..at].ends_with("fn ");
+                assert!(
+                    is_definition,
+                    "an entity-config source calls the host-less `{hostless}` outside \
+                         a definition. Production validation must use the `_for` variant \
+                         with the owning ai_flag_hosts::AiHost, or a flag()/counter() \
+                         guard on that block goes back to reading false in silence."
+                );
+                definitions += 1;
+            }
         }
         // Non-vacuity: the definition itself must have been seen, or the
         // scan found nothing and this test proves nothing.
         assert_eq!(
             definitions, 1,
-            "expected to find exactly the definition of `{hostless}` in the \
-                 non-test source; the scan is looking in the wrong place"
+            "expected to find exactly the definition of `{hostless}` across the \
+                 non-test entity-config sources; the scan is looking in the wrong place"
         );
     }
 }

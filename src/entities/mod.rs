@@ -5,6 +5,10 @@ pub mod ai_declaration_manifest;
 /// Which fine-system AI hosts can evaluate `flag()`/`counter()` guards, and the
 /// load-time rejection for the ones that cannot (issue #891 stage 1).
 pub mod ai_flag_hosts;
+/// The fine-system AI policy schema — channel/verb/selector-source name tables,
+/// the `FineSystemAi*Toml` types, verb decoding, and load-time policy/selector
+/// validation — extracted verbatim from `config` and re-exported by it (#1196).
+pub mod ai_policy_schema;
 /// Behavioural pins for the AUTHORED fine-system AI declarations: the fleet
 /// baseline the bespoke doctrines are measured against, the guard truth tables,
 /// and the selector ordering invariants (issue #885b stage 5d). Test-only, and

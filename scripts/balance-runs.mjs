@@ -22,6 +22,7 @@
 //   report.outcome                         "victory" | "defeat" | "draw" | "timeout"
 //   report.sides.{player,enemy}.damage_dealt
 //   report.damage_by_ship[uuid].death      [tick, sim_t] | null
+//   report.station_activity.buckets[].stations[]  {station, human, ai, offline}
 //   report.seed, report.final_phase, report.sim_seconds
 //
 // Merge conventions (documented so the numbers are unambiguous):
@@ -43,7 +44,8 @@
 //
 // The pure exports (mergeReports / formatMarkdown / formatMatrix / expandMatchups
 // / resolveSeeds / evaluateThresholds / formatThresholds / formatPhases /
-// runFileName) are unit-tested in tests/client/balance-runs.test.js with
+// formatStationActivity / runFileName) are unit-tested in
+// tests/client/balance-runs.test.js with
 // fabricated report objects — no simulation required. Everything that spawns a
 // process lives in main() and its helpers.
 //
@@ -262,6 +264,7 @@ export function mergeReports(runs) {
         marginSamples: [],
         failuresDetail: [],
         phaseSeconds: {},
+        stationActivity: {},
       };
       byMatchup.set(run.matchup, m);
     }
@@ -309,6 +312,21 @@ export function mergeReports(runs) {
         }
       }
     }
+
+    // Station activity (issue #1147): sum the always-on per-station,
+    // per-control-source admitted-command counts across every bucket of every
+    // seed's run. The report carries the full per-bucket series; the merge folds
+    // it flat to a per-station busyness total, split by source, so a sweep shows
+    // how busied each station was and by whom next to the win rates.
+    for (const bucket of run.report.station_activity?.buckets ?? []) {
+      for (const st of bucket?.stations ?? []) {
+        if (typeof st?.station !== 'string') continue;
+        const acc = (m.stationActivity[st.station] ??= { human: 0, ai: 0, offline: 0 });
+        acc.human += st.human ?? 0;
+        acc.ai += st.ai ?? 0;
+        acc.offline += st.offline ?? 0;
+      }
+    }
   }
 
   const matchups = {};
@@ -339,6 +357,17 @@ export function mergeReports(runs) {
         Object.entries(m.phaseSeconds)
           .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
           .map(([phase, secs]) => [phase, Math.round(secs * 1000) / 1000]),
+      ),
+      // Station → summed {human, ai, offline, total} admitted commands, keys
+      // sorted so merged.json is stable (issue #1147). Integer counts, so no
+      // rounding needed.
+      stationActivity: Object.fromEntries(
+        Object.entries(m.stationActivity)
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([station, c]) => [
+            station,
+            { human: c.human, ai: c.ai, offline: c.offline, total: c.human + c.ai + c.offline },
+          ]),
       ),
       failuresDetail: m.failuresDetail,
     };
@@ -424,6 +453,30 @@ export function formatPhases(summary) {
   }
   if (lines.length === 0) return '';
   return ['### Doctrine phase occupancy', '', ...lines].join('\n');
+}
+
+/**
+ * Render each matchup's per-station busyness as a markdown table, split by
+ * control source (issue #1147). One row per (matchup × station), so a sweep
+ * shows how busied each station was and whether a human worked it or Backfill
+ * carried it — the evidence next to the win rates. Matchups with no station
+ * activity contribute no rows; returns '' when nothing has any. PURE.
+ */
+export function formatStationActivity(summary) {
+  const rows = [];
+  for (const s of Object.values(summary.matchups)) {
+    for (const [station, c] of Object.entries(s.stationActivity ?? {})) {
+      rows.push(`| ${s.label} | ${station} | ${c.human} | ${c.ai} | ${c.offline} | ${c.total} |`);
+    }
+  }
+  if (rows.length === 0) return '';
+  return [
+    '### Station activity (admitted commands by control source)',
+    '',
+    '| Matchup | Station | Human | AI | Offline | Total |',
+    '|---|---|---:|---:|---:|---:|',
+    ...rows,
+  ].join('\n');
 }
 
 // The recordable threshold metrics: how to read the actual off a matchup
@@ -668,6 +721,9 @@ async function main() {
   }
   const phases = formatPhases(summary);
   if (phases) out = `${out}\n\n${phases}`;
+  // Per-station busyness next to the win rates (issue #1147).
+  const stationActivity = formatStationActivity(summary);
+  if (stationActivity) out = `${out}\n\n${stationActivity}`;
   // Recorded thresholds (issue #915): evaluated and WRITTEN, never enforced —
   // the exit code does not depend on them.
   const thresholds = evaluateThresholds(summary, matchups, config.thresholds ?? {});

@@ -11,12 +11,13 @@ import {
   runFileName,
   evaluateThresholds,
   formatThresholds,
+  formatStationActivity,
 } from '../../scripts/balance-runs.mjs';
 
 // A fabricated report shaped like the real phoenix-headless JSON, minimal to
 // what mergeReports consumes: outcome, sides.*.damage_dealt, damage_by_ship
 // ledgers with a `death` of [tick, sim_t] | null. No simulation needed.
-function report({ outcome, playerDealt, enemyDealt, deaths = [], phases = [] }) {
+function report({ outcome, playerDealt, enemyDealt, deaths = [], phases = [], stationBuckets = null }) {
   const damage_by_ship = {};
   let i = 0;
   for (const d of deaths) {
@@ -26,7 +27,7 @@ function report({ outcome, playerDealt, enemyDealt, deaths = [], phases = [] }) 
   for (const p of phases) {
     damage_by_ship[`ship-${i++}`] = { death: null, phase_seconds: p };
   }
-  return {
+  const out = {
     outcome,
     sides: {
       player: { damage_dealt: playerDealt },
@@ -34,6 +35,19 @@ function report({ outcome, playerDealt, enemyDealt, deaths = [], phases = [] }) 
     },
     damage_by_ship,
   };
+  // `stationBuckets` is a list of bucket station-lists (one array of
+  // {station, human, ai, offline} entries per bucket), matching the report's
+  // station_activity.buckets[].stations[] shape (issue #1147). Omitted for the
+  // many tests that predate the surface — a report without the key.
+  if (stationBuckets) {
+    out.station_activity = {
+      schema_version: 1,
+      bucket_ticks: 900,
+      bucket_secs: 15,
+      buckets: stationBuckets.map((stations, b) => ({ start_tick: b * 900, stations })),
+    };
+  }
+  return out;
 }
 
 describe('matchupLabel', () => {
@@ -248,6 +262,70 @@ describe('formatPhases', () => {
       { matchup: 'm', seed: 1, report: report({ outcome: 'draw', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
     ]);
     expect(formatPhases(summary)).toBe('');
+  });
+});
+
+describe('mergeReports — station activity', () => {
+  const entry = (station, human, ai, offline = 0) => ({ station, human, ai, offline });
+
+  it('folds per-station commands across every bucket and seed, split by control source', () => {
+    const runs = [
+      {
+        matchup: 'm', seed: 1,
+        report: report({
+          outcome: 'victory', playerDealt: 1, enemyDealt: 0, deaths: [[1, 5.0]],
+          // Two buckets in one run — the fold sums across buckets too.
+          stationBuckets: [[entry('helm', 5, 2)], [entry('helm', 3, 1), entry('weapons', 0, 4)]],
+        }),
+      },
+      {
+        matchup: 'm', seed: 2,
+        report: report({
+          outcome: 'defeat', playerDealt: 0, enemyDealt: 1, deaths: [[1, 5.0]],
+          stationBuckets: [[entry('helm', 1, 1), entry('weapons', 0, 6)]],
+        }),
+      },
+    ];
+    const s = mergeReports(runs).matchups.m;
+    // helm: human 5+3+1 = 9, ai 2+1+1 = 4; weapons: ai 4+6 = 10.
+    expect(s.stationActivity.helm).toEqual({ human: 9, ai: 4, offline: 0, total: 13 });
+    expect(s.stationActivity.weapons).toEqual({ human: 0, ai: 10, offline: 0, total: 10 });
+    expect(Object.keys(s.stationActivity)).toEqual(['helm', 'weapons']); // sorted keys
+  });
+
+  it('yields an empty stationActivity object when no report carries the series', () => {
+    const runs = [
+      { matchup: 'm', seed: 1, report: report({ outcome: 'draw', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+    ];
+    expect(mergeReports(runs).matchups.m.stationActivity).toEqual({});
+  });
+});
+
+describe('formatStationActivity', () => {
+  const entry = (station, human, ai, offline = 0) => ({ station, human, ai, offline });
+
+  it('renders a per-station busyness table split by control source', () => {
+    const summary = mergeReports([
+      {
+        matchup: 'a_vs_b', seed: 1,
+        report: report({
+          outcome: 'victory', playerDealt: 1, enemyDealt: 0, deaths: [[1, 5.0]],
+          stationBuckets: [[entry('helm', 80, 40), entry('weapons', 0, 95)]],
+        }),
+      },
+    ]);
+    const md = formatStationActivity(summary);
+    expect(md).toContain('### Station activity (admitted commands by control source)');
+    expect(md).toContain('| Matchup | Station | Human | AI | Offline | Total |');
+    expect(md).toContain('| a_vs_b | helm | 80 | 40 | 0 | 120 |');
+    expect(md).toContain('| a_vs_b | weapons | 0 | 95 | 0 | 95 |');
+  });
+
+  it('returns an empty string when no matchup has station activity', () => {
+    const summary = mergeReports([
+      { matchup: 'm', seed: 1, report: report({ outcome: 'draw', playerDealt: 0, enemyDealt: 0, deaths: [null] }) },
+    ]);
+    expect(formatStationActivity(summary)).toBe('');
   });
 });
 

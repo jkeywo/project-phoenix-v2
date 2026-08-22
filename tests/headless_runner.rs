@@ -397,6 +397,89 @@ fn a_real_combat_run_populates_the_per_ship_damage_ledger() {
     );
 }
 
+/// The wiring seam for the always-on station-activity series in the report
+/// (issue #1147, PRD #1144). The pure `report.rs` tests hand-build a payload;
+/// this is the only test that proves the whole tap survives into a REAL run's
+/// report — `record_station_activity` counting the tick's admitted commands,
+/// `build_report` reading the tracker's projection, and `to_json` serialising
+/// it — so dropping `DebugPlugin` or the `build_report` read would fail here.
+///
+/// Two claims specific to #1147:
+///  1. **Always-on, no flag.** `HeadlessArgs::default()` leaves
+///     `DebugStationActivityEnabled` at `false` (the flag-gated JSON *publish*
+///     never runs), yet the report still carries the series — the report reads
+///     the counters directly, matching the always-on damage ledgers.
+///  2. **The native/headless binary is the payload's output path.** This runs
+///     the native app with nobody connected and no browser bridge, and the
+///     payload lands in the report all the same (AC: the native host exposes
+///     the same activity payload).
+///
+/// Runs on `probe_duel.toml` for the same reason the damage-ledger test does: a
+/// purpose-built deterministic duel that trades fire to a resolution, so both
+/// ships' AI-crewed stations admit commands and the per-station counters move.
+#[test]
+fn a_real_run_carries_the_always_on_station_activity_series_with_no_flag() {
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_duel.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(60.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    // The counters ran and the series survived into the report.
+    assert!(
+        !report.station_activity.buckets.is_empty(),
+        "a 60s duel produced no station-activity buckets — is `DebugPlugin` still \
+         added in `add_simulation_plugins_with`, and does `build_report` read the \
+         tracker?"
+    );
+    let entries = || {
+        report
+            .station_activity
+            .buckets
+            .iter()
+            .flat_map(|b| b.stations.iter())
+    };
+    let total: u32 = entries().map(|e| e.total()).sum();
+    assert!(
+        total > 0,
+        "no station commands were counted in a real duel: {:?}",
+        report.station_activity
+    );
+    // Headless backfills every station, so the busyness reads as AI work — the
+    // "Backfill carrying a station" signal the surface exists to show.
+    let ai_total: u32 = entries().map(|e| e.ai).sum();
+    assert!(
+        ai_total > 0,
+        "a fully AI-crewed headless run recorded no AI station work: {:?}",
+        report.station_activity
+    );
+    // The bucket length came from the authored `[global]` default (15 s), not the
+    // degenerate one-tick default the tracker starts on before `configure`.
+    assert!(
+        report.station_activity.bucket_ticks > 1,
+        "the tracker never picked up the authored bucket length: {:?}",
+        report.station_activity
+    );
+
+    // And it serialises into the report JSON as the schema the balance merge folds.
+    let json = report.to_json();
+    let parsed: serde_json::Value = serde_json::from_str(&json)
+        .unwrap_or_else(|e| panic!("report is not valid JSON: {e}\n{json}"));
+    assert_eq!(parsed["station_activity"]["schema_version"], 1);
+    assert!(
+        parsed["station_activity"]["buckets"]
+            .as_array()
+            .is_some_and(|b| !b.is_empty()),
+        "the report JSON must carry a non-empty station-activity bucket series"
+    );
+}
+
 /// The seed is part of the report whether or not one was asked for, so a run
 /// that surprises you can always be replayed. `combat_test.toml` authors
 /// `[global] seed`, which is the middle tier of the precedence chain.

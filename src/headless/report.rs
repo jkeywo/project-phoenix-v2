@@ -14,6 +14,7 @@ use crate::core::balance::{
 };
 use crate::core::codec::{JsonCodec, MessageCodec};
 use crate::core::messages::{GamePhase, ServerMessage, ServerMessageDiscriminants};
+use crate::debug::payload::StationActivityPayload;
 use crate::entities::spawner::{EntityName, EntitySystemHull, EntityUuid, FactionComponent};
 use crate::lobby::OutboundMessage;
 use crate::server_app::{GameOverReason, LocalShip, Ship};
@@ -207,6 +208,15 @@ pub struct RunReport {
     /// went the way it did. Empty string when no projection was run (the test
     /// constructors); rendered as `null` then.
     pub ai_doctrine: String,
+    /// Always-on per-station admitted-command activity (PRD #1144, issue
+    /// #1147): the bounded, per-bucket, per-control-source series the
+    /// station-activity tracker held at run end. Present in *every* report with
+    /// no debug flag — `build_report` reads the tracker's read-only projection
+    /// directly, not the flag-gated capture, so the report is the always-on
+    /// native/headless output path for the payload the browser host publishes to
+    /// its dock. Empty (`buckets: []`) for a run that admitted no station
+    /// commands.
+    pub station_activity: StationActivityPayload,
 }
 
 impl RunReport {
@@ -296,6 +306,15 @@ impl RunReport {
             self.ai_doctrine.as_str()
         };
         s.push_str(&format!("  \"ai_doctrine\": {ai_doctrine},\n"));
+        // The always-on station-activity series (issue #1147). Encoded through
+        // the one `serde_json` seam (AGENTS.md Key Constraint 1) rather than
+        // hand-rolled here — the payload is a plain serde struct, and reusing
+        // `encode_station_activity` keeps the report's JSON byte-identical with
+        // what the dock chart parses.
+        s.push_str(&format!(
+            "  \"station_activity\": {},\n",
+            crate::core::codec::encode_station_activity(&self.station_activity)
+        ));
         // `OutcomeReport::to_json` emits `"outcome": ..., "sides": {...}` as a
         // body, so it slots straight in as the final two report fields.
         s.push_str(&format!("  {}\n", self.outcome_report.to_json()));
@@ -432,6 +451,17 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
     // the way it did — independent of the live debug flag, which drives the dock
     // and the determinism guard rather than the report.
     let ai_doctrine = collect_ai_doctrine_json(app, ticks);
+    // Always-on station activity (issue #1147): the tracker's read-only
+    // projection, read straight off the resource rather than through the
+    // flag-gated `StationActivityCapture`, so every report carries the
+    // per-station busyness split whether or not the debug surface was rendered
+    // this run. `unwrap_or_default` covers a bare fixture app that never added
+    // `DebugPlugin` — production always has the tracker.
+    let station_activity = app
+        .world()
+        .get_resource::<crate::debug::StationActivityTracker>()
+        .map(|tracker| tracker.report())
+        .unwrap_or_default();
 
     RunReport {
         ticks,
@@ -452,6 +482,7 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         damage_by_ship,
         outcome_report,
         ai_doctrine,
+        station_activity,
     }
     .tap_stream(app, args)
 }
@@ -609,6 +640,17 @@ impl RunReport {
             for line in &app.world().resource::<RunTelemetry>().stream {
                 println!("{line}");
             }
+            // One trailing station-activity record (issue #1147) so a streaming
+            // consumer sees the always-on per-station series inline, stamped at
+            // the run's final tick / sim-time like every other stream line. The
+            // full report printed after the stream carries the same series under
+            // `station_activity`; this line puts it in the ndjson flow too.
+            println!(
+                "{{\"tick\":{},\"sim_t\":{:.4},\"station_activity\":{}}}",
+                self.ticks,
+                self.sim_seconds,
+                crate::core::codec::encode_station_activity(&self.station_activity),
+            );
         }
         self
     }
@@ -685,6 +727,7 @@ mod tests {
                 SideMargins::new(0.0, 100.0, 40.0, 200.0, 1.0),
             ),
             ai_doctrine: String::new(),
+            station_activity: StationActivityPayload::default(),
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)
@@ -730,6 +773,7 @@ mod tests {
                 SideMargins::default(),
             ),
             ai_doctrine: String::new(),
+            station_activity: StationActivityPayload::default(),
         };
         let parsed: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
         assert!(parsed["ship"].is_null());
@@ -787,6 +831,7 @@ mod tests {
                 SideMargins::default(),
             ),
             ai_doctrine: String::new(),
+            station_activity: StationActivityPayload::default(),
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)
@@ -798,5 +843,75 @@ mod tests {
         assert_eq!(parsed["damage_by_ship"]["raider"]["damage_dealt"], 9.0);
         assert_eq!(parsed["damage_by_ship"]["raider"]["damage_taken"], 20.0);
         assert!(parsed["damage_by_ship"]["raider"]["name_id"].is_null());
+    }
+
+    /// The always-on station-activity series serialises into the report as a
+    /// per-station, per-bucket, per-control-source object (issue #1147). This is
+    /// the schema the balance-runs merge folds and the report-integration tests
+    /// assert on — a run's report carries it whether or not any debug flag was
+    /// set, because `build_report` reads the tracker's projection directly.
+    #[test]
+    fn report_json_carries_the_station_activity_series() {
+        use crate::debug::payload::{StationActivityBucket, StationActivityEntry};
+
+        let payload = StationActivityPayload {
+            schema_version: crate::debug::payload::DEBUG_SCHEMA_VERSION,
+            bucket_ticks: 900,
+            bucket_secs: 15.0,
+            buckets: vec![StationActivityBucket {
+                start_tick: 0,
+                stations: vec![
+                    StationActivityEntry {
+                        station: "helm".into(),
+                        human: 12,
+                        ai: 3,
+                        offline: 0,
+                    },
+                    StationActivityEntry {
+                        station: "weapons".into(),
+                        human: 0,
+                        ai: 21,
+                        offline: 0,
+                    },
+                ],
+            }],
+        };
+        let report = RunReport {
+            ticks: 900,
+            sim_seconds: 15.0,
+            seed: 1,
+            seed_source: "cli".into(),
+            wall_seconds: 0.0,
+            ticks_per_second: 0.0,
+            final_phase: "InProgress".into(),
+            game_over_reason: None,
+            entity_count: 2,
+            ship: None,
+            message_counts: BTreeMap::new(),
+            damage_by_ship: BTreeMap::new(),
+            outcome_report: crate::core::balance::classify(
+                false,
+                None,
+                SideMargins::default(),
+                SideMargins::default(),
+            ),
+            station_activity: payload,
+        };
+        let json = report.to_json();
+        let parsed: serde_json::Value = serde_json::from_str(&json)
+            .unwrap_or_else(|e| panic!("report is not valid JSON: {e}\n{json}"));
+
+        let sa = &parsed["station_activity"];
+        assert_eq!(sa["schema_version"], 1);
+        assert_eq!(sa["bucket_ticks"], 900);
+        assert_eq!(sa["bucket_secs"], 15.0);
+        let stations = &sa["buckets"][0]["stations"];
+        // Sorted by station id: helm before weapons, split by control source.
+        assert_eq!(stations[0]["station"], "helm");
+        assert_eq!(stations[0]["human"], 12);
+        assert_eq!(stations[0]["ai"], 3);
+        assert_eq!(stations[1]["station"], "weapons");
+        assert_eq!(stations[1]["ai"], 21);
+        assert_eq!(stations[1]["human"], 0);
     }
 }

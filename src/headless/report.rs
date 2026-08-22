@@ -895,6 +895,7 @@ mod tests {
                 SideMargins::default(),
                 SideMargins::default(),
             ),
+            ai_doctrine: String::new(),
             station_activity: payload,
         };
         let json = report.to_json();

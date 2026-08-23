@@ -629,14 +629,29 @@ fn world_spawned_alliance_hull_returns_fire_and_the_duel_resolves() {
         // other probe's shared control condition.
         max_ticks: ticks_for_sim_seconds(180.0, dt),
         deterministic: true,
-        // Re-blessed for issue #896 (see the sweep in `probe_duel.toml`). With
-        // rapier moved onto the logical tick, beam line-of-sight is resolved
-        // against colliders synced this tick instead of last frame's, and the
-        // duel this world's default seed used to close in 18 s now settles into
-        // a standoff. 34 is the seed that resolves on the new physics, pinned
-        // here rather than made the world default because every other probe on
-        // this world is measured against seed 3 as its control condition.
-        seed: Some(34),
+        // Re-blessed for issue #896 (see the sweep in `probe_duel.toml`) to
+        // seed 34, then AGAIN for #929's second pass to seed 89.
+        //
+        // What this test needs is narrower than "the duel resolves": it needs
+        // the run to end through the PLAYER-DEATH path, because the two
+        // assertions below it are `GamePhase::GameOver` and
+        // `RunOutcome::Defeat`, and only the LocalShip's death latches those.
+        // #929's second pass reversed who wins this duel — with the cruiser's
+        // beams able to collapse an arc the bigger hull takes it, and on 23 of
+        // 28 seeds it is now the DESTROYER that dies, seed 34 among them (at
+        // 46.3 s). A cruiser win leaves the phase `InProgress` with the hostile
+        // simply absent, which is a true reading of the run and the wrong one
+        // for this test.
+        //
+        // Re-swept at 180 s over the same 28 seeds `alliance_cruiser.toml`
+        // records: every one of them now resolves, and the five where the
+        // player is the one that dies are 89 (85.7 s), 1 (100.5 s), 6
+        // (104.4 s), 144 (110.4 s) and 47 (154.6 s). 89 is the earliest and so
+        // has the most room under the 180 s window above; the other four are the
+        // re-pick list if it stops. The destroyer still deals the bulk of the
+        // damage on it (784 against the cruiser's 412), which is what the
+        // both-sides-engaged assertions above want.
+        seed: Some(89),
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("app should build");
@@ -1847,11 +1862,13 @@ fn balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves() {
         // resolving in a kill by 180 s.
         max_ticks: ticks_for_sim_seconds(180.0, dt),
         deterministic: true,
-        // Re-blessed for issue #896, same pin and same reason as
-        // `world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`
-        // above: the "destroyed by" site this test needs reached only fires in
-        // a duel that resolves, and on the new physics clock seed 34 is the one
-        // that does inside the (now 180 s, issue #907) budget.
+        // Re-blessed for issue #896: the "destroyed by" site this test needs
+        // reached only fires in a duel that resolves, and on the new physics
+        // clock seed 34 is one that does inside the (now 180 s, issue #907)
+        // budget. It still is — #929's second pass changed WHO dies on it, not
+        // whether anything does: the destroyer goes at 46.3 s rather than the
+        // cruiser. The assertion below reads the ledger's death rows rather than
+        // the phase for exactly that reason.
         seed: Some(34),
         ..test_args()
     };
@@ -1876,12 +1893,32 @@ fn balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves() {
          plog sites) were not reached: {:?}",
         report.damage_by_ship
     );
-    assert_eq!(
-        report.final_phase,
-        format!("{:?}", GamePhase::GameOver),
+    // The `destroyed by` site fires on ANY non-asteroid destruction, so what
+    // this test needs is that SOMEBODY died — which is what it now asks.
+    //
+    // It used to ask `final_phase == GameOver` as a proxy, and that proxy broke
+    // under #929's second pass: `GameOver` latches on the LOCAL ship's death,
+    // and on this seed it is now the world-spawned destroyer that dies (46.3 s
+    // of the 180 s window) while the cruiser survives. The site under test was
+    // reached either way; only the proxy stopped tracking it. The player-death
+    // path itself is still covered — deliberately, and next door —
+    // by `world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`, which
+    // pins a seed the player loses precisely because it asserts `GameOver` and
+    // `RunOutcome::Defeat` for their own sake.
+    let deaths: Vec<(&str, f64)> = report
+        .damage_by_ship
+        .values()
+        .filter_map(|l| {
+            l.death
+                .map(|(_, t)| (l.name_id.as_deref().unwrap_or("?"), t))
+        })
+        .collect();
+    assert!(
+        !deaths.is_empty(),
         "the duel must resolve in a destruction (the damage `destroyed by` site), \
-         ended in phase {}",
-        report.final_phase
+         and nothing died inside the window — final phase {}, ledger {:?}",
+        report.final_phase,
+        report.damage_by_ship
     );
 }
 
@@ -1933,7 +1970,15 @@ fn backfilled_player_hull_proactively_engages_on_template_doctrine() {
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("app should build");
-    run(&mut app, args.max_ticks);
+    // The control condition below is read off the LIVE hostile, so it has to be
+    // read while the hostile is still alive. Since issue #929's second pass the
+    // player cruiser kills this passive target at 16.8 s of the 30 s window and
+    // the entity is despawned, so sampling at the end finds nothing. Five
+    // seconds in is comfortably before first blood and comfortably after the
+    // t=0 script spawn — and the split is not a workaround, it is the honest
+    // shape: "the override applied" is a property of the spawn, and "the player
+    // engaged proactively" is a property of the whole run.
+    run(&mut app, ticks_for_sim_seconds(5.0, dt));
 
     // Control condition: the world spawned the hostile with `doctrine = []`, so
     // the hull it actually flies must carry no standing doctrine — no Destroy
@@ -1958,6 +2003,9 @@ fn backfilled_player_hull_proactively_engages_on_template_doctrine() {
          `doctrine = []` override did not strip the template's list, so this \
          probe is not measuring proactive engagement at all"
     );
+
+    // …and now the rest of the window, which is what the ledger assertions read.
+    run(&mut app, args.max_ticks - ticks_for_sim_seconds(5.0, dt));
 
     let report = build_report(&mut app, &args, 0.0);
 
@@ -2215,8 +2263,33 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
     let args = HeadlessArgs {
         world_path: "assets/worlds/combat_test.toml".into(),
         dt,
-        max_ticks: ticks_for_sim_seconds(600.0, dt),
-        seed: Some(9),
+        // RE-MEASURED AND RE-PINNED for issue #929's second pass, and the
+        // scenario now resolves the OTHER WAY. Giving the AI-backfilled cruiser
+        // banks that can collapse a shield arc turned it from the poor defender
+        // the note above describes ("it dealt 106 damage in the whole run") into
+        // one that clears the raid: on seed 9 it now deals 2171 against 490
+        // taken, the starbase survives on 988 taken instead of dying, and 15 of
+        // the 16 spawned hostiles are destroyed — but ONE straggler
+        // (`wave_5_second`, which never engages anything on that seed) leaves
+        // the victory trigger's `on_all_destroyed` unsatisfied, so the run sits
+        // at `InProgress` for the whole budget. That is a true reading; it is
+        // just no longer a run that reaches a terminal phase.
+        //
+        // Swept at 600 s over seeds 1-5 and 9 on the current tree. Seed 1 is the
+        // one that closes: VICTORY at 523.97 s, every wave dead, the player on
+        // 2782 dealt / 1039 taken and the starbase's own row on 1066 taken —
+        // which is the #936 assault assertion below, satisfied more strongly
+        // than before. 2, 3, 4, 5 and 9 all strand `wave_5_second` the same way.
+        //
+        // Budget raised 600 -> 800 s. That is 1.5x the measured 523.97 s rather
+        // than the 3.4x the old 600 gave the old 175.9 s, and the reason is that
+        // the resolution is now bounded BELOW by the wave clock — the eighth
+        // wave is not released until late in the run, so victory cannot arrive
+        // much earlier however the fight goes. A failure here that reads
+        // "InProgress" with every wave dead is the straggler above, not a
+        // regression in this issue's subject.
+        max_ticks: ticks_for_sim_seconds(800.0, dt),
+        seed: Some(1),
         deterministic: true,
         ..test_args()
     };
@@ -2909,14 +2982,20 @@ fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
 /// The cruiser's helm opens the bow hold on readiness alone
 /// (`torpedo_run_shield_gap = 0.0`, pinned by
 /// `the_harrow_cruiser_breaks_its_ring_only_for_a_struck_down_arc`), while its
-/// tubes held the fleet launch gate `fact(target_facing_shields) <= 0`. Those
-/// are different questions, and the weaker one was the helm's: the leg's only
+/// tubes hold the fleet launch gate `fact(target_facing_shields) <= 0`. Those
+/// are different questions, and the weaker one is the helm's: the leg's only
 /// armament exits — `tubes_full < 1` and `tubes_fillable < 1` — both need a
 /// round to have LEFT a tube, so a launcher that never fires makes the leg
 /// ABSORBING. The hull cut thrust (`torpedo_bearing_speed = 0.0`) and held its
-/// bow on a shield gap its own guns cannot open: one 4 dmg/s phaser bank at a
-/// time against an 80 hp arc regenerating at 2.5/s. `alliance_cruiser.toml`
-/// carries the full argument and the fix — `max_striking_shield_hp`.
+/// bow on a shield gap its own guns could not open: one 4 dmg/s phaser bank at a
+/// time against an 80 hp arc its target's Shields AI focuses to 6.5 hp/s.
+///
+/// #929's FIRST pass answered that by switching the launcher's shield conjunct
+/// off. Its SECOND pass reverted that and answered on the attack side: a torpedo
+/// no longer bypasses a raised arc, so the gate is worth ten times the round it
+/// delays, and both phaser banks went `beam_damage_per_sec` 4 -> 24 so the gate
+/// is reachable. `alliance_cruiser.toml` carries the argument, the arithmetic
+/// and the swept ladder.
 ///
 /// ## Why it asserts what it asserts
 ///
@@ -2926,17 +3005,29 @@ fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
 ///   launch. Same discipline as
 ///   `the_harrow_battleship_takes_its_close_defence_opportunities_in_a_real_run`.
 /// * IN A RESOLVING DUEL, because "the hull launched" is only interesting while
-///   the fight is real. Seed 12 closes in a kill at 59.8 s inside a 120 s
-///   window; a timeout here is a different failure from a silent one and the
-///   message says so.
-/// * WITH MARGIN. All 28 seeds swept at 90 s (1-12, 13, 14, 17, 21, 31, 34, 41,
-///   43, 47, 55, 59, 61, 89, 144, 792, 838) put exactly 4 rounds out of the
-///   unambiguous fore pair — not a mean of 4, the same 4 on every one — so the
-///   bound is half the measured value. That flatness is the evidence the margin
-///   rests on, and it is this measurement's own rather than a property of the
-///   world: `probe_duel.toml`'s header calls the duel chaotically seed-sensitive
-///   and it is, in outcome and damage; the fore pair's count is not, because it
-///   is bounded by a six-round magazine and a reload the engagement outlives.
+///   the fight is real. RESOLVING is read off the ledger's death rows rather
+///   than `GamePhase::GameOver`, and that is a re-bless with a reason: `GameOver`
+///   latches on the LOCAL ship's death, and since the second pass this hull WINS
+///   this duel — on seed 12 the destroyer dies at 49.2 s, where before the
+///   cruiser died at 59.8 s. "The player lost" was never what this test wanted;
+///   "the fight had a conclusion" is, and a conclusion the hull's own salvo
+///   helped reach is the stronger reading of the two.
+/// * WITH MARGIN on the launch count. Swept at 90 s over 28 seeds (1-14, 17, 21,
+///   31, 34, 41, 43, 47, 55, 59, 61, 89, 144, 792, 838): every seed puts 2-5
+///   rounds out of the unambiguous fore pair, seed 12 puts 4, and the bound is 2
+///   — the sweep's own minimum, which is also half the modal count. The count is
+///   no longer the flat 4-on-every-seed the first pass measured, and that is the
+///   gate doing its job: the hull now spends rounds on windows its beams open
+///   rather than on sight, so how many it gets depends on how the fight goes.
+/// * AND ON THE BOW HOLD, with a caveat that matters. Duration ALONE no longer
+///   separates a healthy leg from a sink: the first pass measured 0.0-3.9 s
+///   because a hull that may launch at any moment never has to hold for a
+///   window, and the second pass measures 12.2-27.2 s across the same 28 seeds
+///   because the leg is now genuinely flown — which overlaps the 12-49 s the
+///   DEADLOCK used to sit at. The launch count above is what discriminates now.
+///   The bound below is kept for the extreme shape only (`probe_aggressor`
+///   measured 86.9 s of a 90 s run parked), set at a third of this window
+///   against a measured 13.4 s.
 #[test]
 fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
     use project_phoenix::entities::config::EntityConfig;
@@ -2981,14 +3072,18 @@ fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
     let args = HeadlessArgs {
         world_path: "assets/worlds/probe_duel.toml".into(),
         dt,
-        // Twice the 59.8 s this seed takes to close, so a retune that slows the
-        // fight fails on the launch count rather than on the clock.
+        // Well over twice the 49.2 s this seed takes to close, so a retune that
+        // slows the fight fails on the launch count rather than on the clock.
         max_ticks: ticks_for_sim_seconds(120.0, dt),
-        // Pinned, and not this world's own `[global] seed` (3, which draws).
-        // Swept at 90 s over seeds 1-12, 34 and 838 after the #929 fix: all 14
-        // put 4 rounds out of the fore pair, and 4, 6, 10, 12 and 34 close in a
-        // kill. 12 is the earliest of those (59.8 s), so it is the one with the
-        // most room under the window above.
+        // Pinned, and not this world's own `[global] seed` (3, which also closes
+        // now, 24 s later). KEPT at 12 across #929's second pass, which is worth
+        // saying because everything else about the run moved under it: the same
+        // seed now closes at 49.2 s instead of 59.8 s, with the DESTROYER dying
+        // rather than the cruiser, and the fore pair still puts 4 rounds out.
+        // Re-swept at 180 s over 28 seeds (1-14, 17, 21, 31, 34, 41, 43, 47, 55,
+        // 59, 61, 89, 144, 792, 838): all 28 resolve and all 28 launch. 12 stays
+        // the pin because it is among the fastest to close and because keeping it
+        // makes the before/after readable on one seed.
         seed: Some(12),
         deterministic: true,
         ..test_args()
@@ -3013,8 +3108,20 @@ fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
         .map(|id| cruiser.shots_fired.get(id).copied().unwrap_or(0))
         .sum();
 
+    // A DESTRUCTION, either way round, read off the ledger rather than
+    // `GamePhase::GameOver` — see the doc above. Since #929's second pass this
+    // hull WINS the duel, and `GameOver` only latches on the LOCAL ship's death,
+    // so the old proxy would read a cruiser victory as a timeout.
+    let deaths: Vec<(&str, f64)> = report
+        .damage_by_ship
+        .values()
+        .filter_map(|l| {
+            l.death
+                .map(|(_, t)| (l.name_id.as_deref().unwrap_or("?"), t))
+        })
+        .collect();
     assert!(
-        report.ended_in_game_over(),
+        !deaths.is_empty(),
         "the duel did not resolve inside the window, so this run says nothing about \
          launch cadence in a real fight. That is a DIFFERENT failure from the one \
          this test exists for — re-pick the seed against a fresh sweep rather than \
@@ -3025,27 +3132,33 @@ fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
     assert!(
         launched >= 2,
         "the player cruiser put {launched} rounds out of its own tubes {tube_ids:?} in a \
-         duel it fought to a conclusion; the authored doctrine spends four. Check the \
-         two halves that have to agree: the tube's `torpedo_launch` guard in \
-         `alliance_cruiser.toml` (is `max_striking_shield_hp` back to a reading this \
-         hull's own beams cannot reach?) and the helm's `torpedo_run_shield_gap` on \
-         both travel axes. A leg whose entry asks LESS than the launcher does cannot \
-         exit, because every exit it has needs a round to have left a tube. \
+         duel it fought to a conclusion; the authored doctrine spends four here. Check \
+         the two halves that have to agree: the tube's `torpedo_launch` guard in \
+         `alliance_cruiser.toml` (still the fleet's `<= 0`?) and the two phaser banks' \
+         `beam_damage_per_sec` (still 24, i.e. clear of the 20.8 break-even against a \
+         focused arc?). A launcher whose gate this hull's own guns cannot open cannot \
+         exit the helm's `torpedo_run` leg either, because every exit that leg has \
+         needs a round to have left a tube. \
          phase_seconds {:?}, whole-world TorpedoLaunched {:?}",
         cruiser.phase_seconds,
         report.message_counts.get("TorpedoLaunched")
     );
-    // The deadlock itself, stated directly rather than inferred from the count.
-    // Against the closing, shooting destroyer of THIS world a working bow hold is
-    // a short leg — the ring's own tangent walks a tube onto the target before a
-    // whole salvo and the run range coincide, so measured 0.0-0.5 s across the
-    // sweep above, against 12-49 s before the fix. 20 s is a bound neither
-    // reading is near.
+    // The extreme shape of the deadlock, and READ THE CAVEAT — this bound is no
+    // longer the discriminator it was under #929's first pass.
+    //
+    // That pass measured 0.0-3.9 s here and set the bound at 20 s, because a hull
+    // whose launcher was unconditional never had to hold for a window at all. The
+    // second pass restored the gate, so the leg is genuinely flown: 12.2-27.2 s
+    // across the same 28 seeds, and 13.4 s on this one. That OVERLAPS the 12-49 s
+    // the deadlock itself sat at, so duration alone cannot tell the two apart any
+    // more and the launch count above is what does. What is left for this bound is
+    // the extreme case — the `probe_aggressor` shape, 86.9 s parked out of 90 —
+    // and it is set at a third of this window, three times the measured value.
     //
     // Not a fleet-wide claim about the leg, and deliberately not asserted on the
     // other probes: against the PASSIVE target of `probe_aggressor` the same leg
-    // is legitimately held for 24 s of a 30 s window, firing twice inside it, and
-    // `the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes`
+    // is legitimately held for a long stretch of a short window, firing inside it,
+    // and `the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes`
     // asserts a FLOOR on it there. A long hold is not the failure; a hold with no
     // launch in it is, which is why the two readings sit next to each other here.
     let bow_hold = cruiser
@@ -3054,7 +3167,7 @@ fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
         .copied()
         .unwrap_or(0.0);
     assert!(
-        bow_hold < 20.0,
+        bow_hold < 40.0,
         "the cruiser spent {bow_hold:.1} s of this duel parked in its `torpedo_run` bow \
          hold at `torpedo_bearing_speed = 0.0`. That leg is entered on a loaded salvo \
          and left on a spent one, so a long one means the salvo is not being spent and \
@@ -5087,14 +5200,26 @@ fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
     // going untested here.
     //
     // With the tubes firing again the hull flies its ring, carries loaded tubes
-    // on it, and Channel 3 asks: measured 478 of 1180 ring ticks over this
-    // window. So the request is now the CONTROL, in the shape the pre-#896
-    // revision of this test used: a request stood, the ring declined it, and
-    // `overwritten == 0` is a real refusal rather than a description of an
-    // empty inbox. A `0` here again means either the tubes stopped being loaded
-    // on the ring or the hull went back to parking in the bow hold.
+    // on it, and Channel 3 asks. So the request is now the CONTROL, in the shape
+    // the pre-#896 revision of this test used: a request stood, the ring
+    // declined it, and `overwritten == 0` is a real refusal rather than a
+    // description of an empty inbox. A `0` here again means either the tubes
+    // stopped being loaded on the ring or the hull went back to parking in the
+    // bow hold.
+    //
+    // RE-MEASURED for #929's second pass: 81 standing ticks of 675 ring ticks
+    // over this window, against 478 of 1180 under the first pass. Both halves
+    // moved and both for the same reason — the tubes are on the fleet's
+    // shields-down gate again, so the hull holds its salvo for the windows its
+    // beams open rather than spending it on sight. It therefore flies the
+    // bow-hold leg properly (13.2 s of this 45 s sample, against ~0 before),
+    // which is ring time it no longer has, and it spends more of the ring with a
+    // tube already committed rather than loaded-and-unable-to-point, which is
+    // what raises the request. 81 is a real, non-vacuous count of chances to
+    // overwrite; the floor is set at half of it, the same margin discipline
+    // `the_player_cruisers_own_tubes_fire_in_a_resolving_duel` uses.
     assert!(
-        duel.requested > 100,
+        duel.requested > 40,
         "the cruiser's Weapons raised a standing arc-bearing request on only {} of \
          {} ring ticks, so `overwritten == 0` below would be vacuous — there was \
          essentially nothing to decline. Either the tubes are no longer loaded \

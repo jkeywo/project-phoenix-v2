@@ -1590,6 +1590,7 @@ pub(crate) fn merge_script_triggers(
     // borrow-and-clone: the staged `ScriptTrigger`s are consumed here and not
     // retained for the world's lifetime (finding 5), and taking ownership lets
     // each field move into the appended state/handler instead of cloning.
+    let mut appended = 0usize;
     for st in std::mem::take(&mut script_runtime.triggers) {
         runtime.trigger_states.push(TriggerState {
             trigger: st.trigger,
@@ -1602,8 +1603,15 @@ pub(crate) fn merge_script_triggers(
             script_path: st.source_path,
             fn_name: st.handler,
         }));
+        appended += 1;
     }
-    runtime.trigger_table_generation = runtime.trigger_table_generation.wrapping_add(1);
+    // Only a real reshape moves the generation — the mirror of the retraction's
+    // early return. A layer that appends nothing (one whose every unit was
+    // already resident, so its registrations are already live) must not cost the
+    // fire recorder a history that is still perfectly valid.
+    if appended > 0 {
+        runtime.trigger_table_generation = runtime.trigger_table_generation.wrapping_add(1);
+    }
     debug_assert_eq!(
         runtime.trigger_states.len(),
         script_runtime.handlers.len(),
@@ -2399,11 +2407,28 @@ pub(crate) fn tick_trigger_pipeline(
                 );
                 let handler = sr.handlers.get(idx).and_then(|h| h.clone());
                 if let Some(h) = handler {
+                    // The store chain THIS handler reads through (issue #1045):
+                    // its own layer first, then outward to the base world — the
+                    // same walk its `when` predicates evaluate against and the
+                    // same one `scope_scripted_flag_write` resolves its writes
+                    // through, so a handler cannot write somewhere it cannot read
+                    // back from. Snapshotted by value because the borrow of
+                    // `layer_map` must not survive into `apply_script_commands`,
+                    // which takes it mutably; one entry (`[base]`) for a
+                    // base-world handler, which is what every shipped world has.
+                    let handler_flag_chain: Vec<crate::world::flags::FlagStore> =
+                        layered_flag_chain(
+                            ft.origin_layer.as_deref(),
+                            &runtime.flags,
+                            world_layers.layer_map.as_deref(),
+                        )
+                        .into_iter()
+                        .cloned()
+                        .collect();
                     // Split `WorldScriptRuntime` into disjoint field borrows so
-                    // the one `&self` call takes `&mut budget` and `&ast` at once,
-                    // while `&runtime.flags` (a DISJOINT resource) is the base the
-                    // flag overlay snapshots. `call` returns owned `CallEffects`,
-                    // so no `WorldScriptRuntime` borrow survives into the apply.
+                    // the one `&self` call takes `&mut budget` and `&ast` at once.
+                    // `call` returns owned `CallEffects`, so no
+                    // `WorldScriptRuntime` borrow survives into the apply.
                     let effects = {
                         let WorldScriptRuntime {
                             host, asts, budget, ..
@@ -2415,7 +2440,7 @@ pub(crate) fn tick_trigger_pipeline(
                                 ast,
                                 &h.script_path,
                                 &h.fn_name,
-                                &runtime.flags,
+                                &handler_flag_chain,
                                 &runtime.deadlines,
                                 &runtime.commitments,
                                 &runtime.evidence,
@@ -3773,7 +3798,9 @@ pub(crate) fn tick_script_callbacks(
                     ast,
                     &call.script_path,
                     &call.fn_name,
-                    &runtime.flags,
+                    // Base scope, matching the `origin_layer: None` this path
+                    // passes to `apply_script_commands` below — see that call.
+                    std::slice::from_ref(&runtime.flags),
                     &runtime.deadlines,
                     &runtime.commitments,
                     &runtime.evidence,
@@ -4005,21 +4032,28 @@ use crate::entities::spawner::EntityUuid;
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Pending scenario load system ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
-/// Bevy system: drain `PendingScenarioLoad` and merge each world TOML into the
-/// live `WorldContentRuntime` (trigger states).
+/// Bevy system: drain `PendingScenarioLoad`, reading and recording each world
+/// TOML — and merging NOTHING.
+///
+/// It once merged the additively-loaded world's trigger states and comms
+/// templates into the live `WorldContentRuntime`. Issue #985 deleted both
+/// front-ends, so what survives is: read the TOML (recording it into the content
+/// ledger), parse it to prove it parses, and mark the path loaded so a duplicate
+/// is not re-read. Nothing enqueues into the queue it drains, either — see
+/// [`PendingScenarioLoad`], and `apply_world_layer_changes` for the path a
+/// supporting world that wants to CONTRIBUTE something takes instead.
 ///
 /// On WASM the TOML string is not available at runtime (JS pre-fetches only the
 /// initial world), so we push paths into the WASM-side pending-world queue and
 /// the implementation returns early until the JS bridge delivers the TOML via
 /// `wasm_push_world_toml`. On native targets `std::fs::read_to_string` is used.
 ///
-/// It does NOT re-anchor the mission clock. This is a MERGE into a live
-/// runtime - it extends `trigger_states`, it does not replace them - so the
-/// base world's own in-flight `on_timer` triggers and `action_delays` are still
-/// scheduled against the running clock, and rewinding it here would postpone
-/// every one of them by however long the mission had been going. A genuinely
-/// fresh scenario is reached through the lobby instead, and
-/// `arm_mission_clock` re-anchors on that path.
+/// It does NOT re-anchor the mission clock, and would not even if it merged
+/// again: this is additive to a LIVE runtime, so the base world's in-flight
+/// `on_timer` triggers and `action_delays` are still scheduled against the
+/// running clock, and rewinding it here would postpone every one of them by
+/// however long the mission had been going. A genuinely fresh scenario is
+/// reached through the lobby instead, and `arm_mission_clock` re-anchors there.
 fn apply_pending_scenario_loads(
     mut pending: ResMut<PendingScenarioLoad>,
     mut runtime: ResMut<WorldContentRuntime>,
@@ -4289,6 +4323,15 @@ fn warn_about_inert_layer_deadlines(
     );
 }
 
+/// How many consecutive drains a layer may answer `TomlUnavailable` before it is
+/// refused outright (issue #1045).
+///
+/// Generous on purpose: the legitimate case is a browser fetch in flight, which
+/// resolves in a handful of frames, so this is a backstop against a source that
+/// can never arrive rather than a timeout anyone should reach. At the fixed
+/// timestep it is a few seconds of retrying before the log says so.
+const MAX_TOML_RETRIES: u32 = 300;
+
 /// Bevy system: drain `PendingWorldLayerChanges` and apply each `LoadWorld` or
 /// `UnloadWorld` command to `WorldLayerMap` and `WorldContentRuntime`.
 ///
@@ -4346,6 +4389,11 @@ fn apply_world_layer_changes(
     // and any per-ship route cursor keyed to it.
     mut captain_boost: Option<ResMut<crate::server_app::CaptainPriorityBoost>>,
     mut objective_cursors_q: Query<&mut crate::ai::server::ObjectiveCursors>,
+    // Consecutive `TomlUnavailable` answers per path, so a source that never
+    // arrives is refused rather than re-queued forever (issue #1045). A `Local`
+    // because it is scheduling bookkeeping, not world state: nothing reads it,
+    // no digest folds it, and a fresh app starts it empty.
+    mut toml_retries: Local<HashMap<String, u32>>,
 ) {
     if pending.0.is_empty() {
         return;
@@ -4402,17 +4450,41 @@ fn apply_world_layer_changes(
                 match result.outcome {
                     LayerLoadOutcome::AlreadyLoaded => {
                         // De-duplicate, no-op.
+                        toml_retries.remove(&path);
                         continue;
                     }
                     LayerLoadOutcome::TomlUnavailable => {
-                        // WASM: re-queue until the fetch completes.
-                        pending.0.push(WorldLayerChange::Load { path, loader_path });
+                        // WASM: re-queue until the fetch completes — but not
+                        // forever. A world source can become permanently
+                        // unreadable mid-session (the browser's pending map is
+                        // CONSUMED by a read and its fetch guard refuses to
+                        // re-ask, which a contrived `[Load A, Unload A, Load A]`
+                        // in one drain reaches), and an unbounded re-queue turns
+                        // that into a silent spin with nothing in the log. Refuse
+                        // the layer loudly once the retries are plainly not going
+                        // anywhere, the same way a broken file is refused.
+                        let attempts = toml_retries.entry(path.clone()).or_insert(0);
+                        *attempts += 1;
+                        if *attempts > MAX_TOML_RETRIES {
+                            bevy::log::error!(
+                                target: "world",
+                                "apply_world_layer_changes: giving up on {path} after \
+                                 {MAX_TOML_RETRIES} drains with no world source; the layer \
+                                 is refused and will not be retried"
+                            );
+                            toml_retries.remove(&path);
+                            layer_map.0.insert(path, WorldRuntime::default());
+                        } else {
+                            pending.0.push(WorldLayerChange::Load { path, loader_path });
+                        }
                     }
                     LayerLoadOutcome::ParseFailed => {
                         // Insert an empty entry so we don't retry a broken file.
+                        toml_retries.remove(&path);
                         layer_map.0.insert(path, WorldRuntime::default());
                     }
                     LayerLoadOutcome::Loaded(layer) => {
+                        toml_retries.remove(&path);
                         // A scripted layer needs a live `WorldScriptRuntime` to merge
                         // into, and a script-free base world has none. Insert an empty
                         // one and re-queue the EVALUATED layer rather than merging into
@@ -4482,6 +4554,14 @@ fn apply_world_layer_changes(
                 // not arrived. Without this the unload finds no map entry, no-ops,
                 // and the load lands a tick later — an ordering inversion that turns
                 // "load it then take it away" into "it is loaded".
+                //
+                // Cancelling a `DeferredApply` leaves the empty
+                // `WorldScriptRuntime` its `Load` already queued for insertion
+                // resident, deliberately: the insert is idempotent, an empty
+                // runtime changes no behaviour (every read of it finds nothing),
+                // and the next scripted layer merges straight into it instead of
+                // waiting a tick. Chasing the `Commands` insert back would cost
+                // more than it saves.
                 pending.0.retain(|queued| match queued {
                     WorldLayerChange::Load { path: p, .. }
                     | WorldLayerChange::DeferredApply { path: p, .. } => p != &path,

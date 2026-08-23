@@ -289,7 +289,10 @@ impl RuntimeHost {
     ///
     /// The context map is `extra` with the `flags`, `effects` and `schedule`
     /// handles inserted; a script reads it as its single parameter
-    /// (`fn on_x(ctx)`). `base_flags` is the live store the flag overlay snapshots.
+    /// (`fn on_x(ctx)`). `flag_chain` is the live store chain the flag overlay
+    /// snapshots — innermost layer first, terminating at the base world, the same
+    /// walk a `when` predicate evaluates against (issue #1045). A base-world
+    /// handler passes a one-entry chain.
     ///
     /// The `budget` is threaded across every call in a tick (the M0 aggregate
     /// caps): a call refused by [`admit_call`](TickBudget::admit_call) — the tick
@@ -311,7 +314,7 @@ impl RuntimeHost {
         ast: &AST,
         path: &str,
         fn_name: &str,
-        base_flags: &FlagStore,
+        flag_chain: &[FlagStore],
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
         base_evidence: &EvidenceLog,
@@ -326,7 +329,7 @@ impl RuntimeHost {
             ast,
             path,
             fn_name,
-            base_flags,
+            flag_chain,
             base_deadlines,
             base_commitments,
             base_evidence,
@@ -373,7 +376,7 @@ impl RuntimeHost {
         ast: &AST,
         path: &str,
         fn_name: &str,
-        base_flags: &FlagStore,
+        flag_chain: &[FlagStore],
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
         base_evidence: &EvidenceLog,
@@ -384,7 +387,7 @@ impl RuntimeHost {
             ast,
             path,
             fn_name,
-            base_flags,
+            flag_chain,
             base_deadlines,
             base_commitments,
             base_evidence,
@@ -436,7 +439,7 @@ impl RuntimeHost {
         ast: &AST,
         path: &str,
         fn_name: &str,
-        base_flags: &FlagStore,
+        flag_chain: &[FlagStore],
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
         base_evidence: &EvidenceLog,
@@ -451,7 +454,7 @@ impl RuntimeHost {
             ast,
             path,
             fn_name,
-            base_flags,
+            flag_chain,
             base_deadlines,
             base_commitments,
             base_evidence,
@@ -496,7 +499,7 @@ impl RuntimeHost {
         ast: &AST,
         path: &str,
         fn_name: &str,
-        base_flags: &FlagStore,
+        flag_chain: &[FlagStore],
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
         base_evidence: &EvidenceLog,
@@ -505,7 +508,7 @@ impl RuntimeHost {
         let sink = EffectSink::new();
         // Flags share the one ordered command buffer, so a flag write is emitted
         // in authored order, interleaved with effects (issue #981 hazard 2).
-        let flags = Flags::new(base_flags, sink.clone());
+        let flags = Flags::with_chain(flag_chain, sink.clone());
         let schedule = ScheduleSink::new();
         // Measured against the SAME clock a deferred effect is stamped with, so
         // `ctx.deadlines.remaining(…)` and `ctx.schedule.after(n, …)` agree about
@@ -587,7 +590,7 @@ impl RuntimeHost {
                 ast,
                 path,
                 fn_name,
-                base_flags,
+                std::slice::from_ref(base_flags),
                 // Inert, for `SchedClock::ZERO`'s reason: this entry point wants
                 // a call's immediate commands only, and a deadline mutation is
                 // never one of them (it drains to `deadline_changes`).
@@ -697,7 +700,7 @@ mod tests {
                 &ast,
                 "t.rhai",
                 "node",
-                &FlagStore::new(),
+                &[FlagStore::new()],
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
                 &crate::dossier::evidence::EvidenceLog::default(),
@@ -744,7 +747,7 @@ mod tests {
                 &ast,
                 "t.rhai",
                 "on_pick",
-                &FlagStore::new(),
+                &[FlagStore::new()],
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
                 &crate::dossier::evidence::EvidenceLog::default(),
@@ -782,7 +785,7 @@ mod tests {
                 &ast,
                 "t.rhai",
                 "node",
-                &FlagStore::new(),
+                &[FlagStore::new()],
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
                 &crate::dossier::evidence::EvidenceLog::default(),
@@ -806,7 +809,7 @@ mod tests {
                 &ast,
                 "t.rhai",
                 "node",
-                &FlagStore::new(),
+                &[FlagStore::new()],
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
                 &crate::dossier::evidence::EvidenceLog::default(),
@@ -841,7 +844,7 @@ mod tests {
             &ast,
             "t.rhai",
             "on_x",
-            &FlagStore::new(),
+            &[FlagStore::new()],
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
             &crate::dossier::evidence::EvidenceLog::default(),
@@ -890,7 +893,7 @@ mod tests {
             &ast,
             "t.rhai",
             "on_x",
-            &FlagStore::new(),
+            &[FlagStore::new()],
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
             &crate::dossier::evidence::EvidenceLog::default(),
@@ -935,7 +938,7 @@ mod tests {
                 &ast,
                 "t.rhai",
                 "on_x",
-                &FlagStore::new(),
+                &[FlagStore::new()],
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
                 &crate::dossier::evidence::EvidenceLog::default(),
@@ -969,7 +972,7 @@ mod tests {
                 &ast,
                 "t.rhai",
                 "on_x",
-                &FlagStore::new(),
+                &[FlagStore::new()],
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
                 &crate::dossier::evidence::EvidenceLog::default(),
@@ -1006,7 +1009,7 @@ mod tests {
             &ast,
             "t.rhai",
             "on_x",
-            &FlagStore::new(),
+            &[FlagStore::new()],
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
             &crate::dossier::evidence::EvidenceLog::default(),
@@ -1037,7 +1040,7 @@ mod tests {
             &ast,
             "t.rhai",
             "on_x",
-            &FlagStore::new(),
+            &[FlagStore::new()],
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
             &crate::dossier::evidence::EvidenceLog::default(),
@@ -1051,7 +1054,7 @@ mod tests {
             &ast,
             "t.rhai",
             "on_x",
-            &FlagStore::new(),
+            &[FlagStore::new()],
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
             &crate::dossier::evidence::EvidenceLog::default(),
@@ -1077,7 +1080,7 @@ mod tests {
                 &ast,
                 "scenario.rhai",
                 "boom",
-                &FlagStore::new(),
+                &[FlagStore::new()],
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
                 &crate::dossier::evidence::EvidenceLog::default(),
@@ -1108,7 +1111,7 @@ mod tests {
                 &ast,
                 "t.rhai",
                 "boom",
-                &FlagStore::new(),
+                &[FlagStore::new()],
                 &crate::world::deadlines::DeadlineTable::default(),
                 &crate::world::commitments::CommitmentLedger::default(),
                 &crate::dossier::evidence::EvidenceLog::default(),

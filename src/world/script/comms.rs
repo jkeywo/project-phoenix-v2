@@ -317,7 +317,9 @@ pub fn enter_node(
         ast,
         path,
         fn_name,
-        base_flags,
+        // A comms thread carries no originating layer (see the applier call in
+        // `comms::scripted`), so its handler reads at base scope.
+        std::slice::from_ref(base_flags),
         base_deadlines,
         base_commitments,
         base_evidence,

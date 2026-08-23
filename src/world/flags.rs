@@ -149,16 +149,27 @@ impl FlagStore {
 /// step up the chain. Walking past the end resolves as not-found (returns
 /// `None`, evaluated as `0` / `false`).
 fn resolve_chain<'a>(chain: &'a [&'a FlagStore], name: &str) -> Option<(&'a FlagStore, String)> {
+    let (depth, rest) = strip_parent_prefixes(name);
+    chain
+        .get(depth)
+        .copied()
+        .map(|store| (store, rest.to_string()))
+}
+
+/// Split `name` into its `parent:` step count and the bare name beneath them.
+///
+/// The one place the prefix is parsed, shared by [`resolve_chain`] (borrowed
+/// chains, the `when`-predicate path) and [`counter_in_owned_chain`] (owned
+/// chains, the script host's flag view) so the two cannot drift — a scripted
+/// handler's read must resolve exactly as a predicate's does (issue #1045).
+fn strip_parent_prefixes(name: &str) -> (usize, &str) {
     let mut depth = 0usize;
     let mut rest = name;
     while let Some(stripped) = rest.strip_prefix("parent:") {
         depth += 1;
         rest = stripped;
     }
-    chain
-        .get(depth)
-        .copied()
-        .map(|store| (store, rest.to_string()))
+    (depth, rest)
 }
 
 /// Read the counter at `name` from a layer chain, honouring `parent:` prefixes.
@@ -167,6 +178,20 @@ pub fn counter_in_chain(chain: &[&FlagStore], name: &str) -> i64 {
         Some((store, key)) => store.counter(&key),
         None => 0,
     }
+}
+
+/// [`counter_in_chain`] over an OWNED chain — the shape a script call holds
+/// (issue #1045).
+///
+/// A `Flags` view snapshots its chain by value at call start (it outlives the
+/// borrow of the live stores), so it cannot use the borrowed form. Same
+/// resolution, same answers: an unprefixed name reads `chain[0]` and does NOT
+/// fall outward, each `parent:` steps one entry, and walking past the end reads
+/// `0`. That equality is the invariant — a handler's `ctx.flags.x` and a
+/// trigger's `when = "flag(x)"` see the same value for the same origin layer.
+pub fn counter_in_owned_chain(chain: &[FlagStore], name: &str) -> i64 {
+    let (depth, rest) = strip_parent_prefixes(name);
+    chain.get(depth).map(|s| s.counter(rest)).unwrap_or(0)
 }
 
 /// Read the boolean at `name` from a layer chain, honouring `parent:` prefixes.

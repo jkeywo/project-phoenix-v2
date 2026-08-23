@@ -453,7 +453,7 @@ fn scripted_in_seconds_effect_routes_through_tick_delayed_actions() {
         &ast,
         "world.toml#script.setup",
         "on_x",
-        &crate::world::flags::FlagStore::new(),
+        &[crate::world::flags::FlagStore::new()],
         &crate::world::deadlines::DeadlineTable::default(),
         &crate::world::commitments::CommitmentLedger::default(),
         &crate::dossier::evidence::EvidenceLog::default(),
@@ -3960,6 +3960,7 @@ fn layer_entity_count(app: &App, path: &str) -> usize {
 
 const LAYER_A: &str = "tests/fixtures/layer_scripted_a.toml";
 const LAYER_B: &str = "tests/fixtures/layer_scripted_b.toml";
+const READ_AFTER_WRITE: &str = "tests/fixtures/layer_read_after_write.toml";
 const SHARED_X: &str = "tests/fixtures/layer_shared_x.toml";
 const SHARED_Y: &str = "tests/fixtures/layer_shared_y.toml";
 
@@ -4132,6 +4133,113 @@ fn two_layers_sharing_a_flag_name_do_not_cross_fire() {
         0,
         "and neither write escaped to the base world's store"
     );
+}
+
+/// A layer handler READS through the same chain it writes to (issue #1045).
+///
+/// The write half alone was a trap: writes were scoped to the layer's own store
+/// while `host.call` still snapshotted the base store, so `fn arm` setting
+/// `armed` and `fn spawn_wave` branching on it disagreed about where the flag
+/// lived, and the wave silently never spawned. Both halves now resolve through
+/// the handler's loader chain.
+#[test]
+fn a_layer_handler_reads_back_the_flag_it_just_wrote() {
+    let mut app = scripted_layer_test_app();
+    load_layer(&mut app, READ_AFTER_WRITE);
+
+    assert_eq!(
+        layer_counter(&app, READ_AFTER_WRITE, "armed"),
+        1,
+        "the write landed in the layer's own scope"
+    );
+    assert_eq!(
+        layer_counter(&app, READ_AFTER_WRITE, "waves_spawned"),
+        1,
+        "and the next handler READ it back — 0 here is the silent-death bug"
+    );
+    // The `parent:` escape resolves outward on both sides.
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("base_seen"),
+        1,
+        "a parent: write reaches the base store"
+    );
+    assert_eq!(
+        layer_counter(&app, READ_AFTER_WRITE, "base_reads"),
+        1,
+        "and a parent: read sees it there"
+    );
+    assert_eq!(
+        layer_counter(&app, READ_AFTER_WRITE, "past_root_reads_zero"),
+        1,
+        "walking past the root reads 0, as a predicate does"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("armed"),
+        0,
+        "and the layer's own flag never escaped to the base store"
+    );
+}
+
+/// THE invariant behind the read fix: a handler's `ctx.flags.x` and a `when`
+/// predicate's `flag(x)` resolve identically for the same origin layer.
+///
+/// Both go through the same `parent:`-stripping walk over the same chain, so
+/// this compares the script-host reader against the predicate reader directly,
+/// across every case that distinguishes them — including the one the coordinator
+/// asked to pin: an unprefixed name reads its OWN layer and does NOT fall
+/// outward to base, so two layers cannot see each other's value of a shared name.
+#[test]
+fn handler_flag_reads_agree_with_predicate_flag_reads() {
+    use crate::world::flags::{counter_in_chain, counter_in_owned_chain, FlagStore};
+
+    let mut base = FlagStore::new();
+    base.set_flag_value("shared", 10);
+    base.set_flag_value("only_base", 7);
+    let mut layer_x = FlagStore::new();
+    layer_x.set_flag_value("shared", 1);
+    let mut layer_y = FlagStore::new();
+    layer_y.set_flag_value("shared", 2);
+
+    for (label, chain) in [
+        ("base world", vec![base.clone()]),
+        ("layer X", vec![layer_x.clone(), base.clone()]),
+        ("layer Y", vec![layer_y.clone(), base.clone()]),
+    ] {
+        let borrowed: Vec<&FlagStore> = chain.iter().collect();
+        for name in [
+            "shared",
+            "only_base",
+            "parent:shared",
+            "parent:only_base",
+            "parent:parent:shared",
+            "never_set",
+        ] {
+            assert_eq!(
+                counter_in_owned_chain(&chain, name),
+                counter_in_chain(&borrowed, name),
+                "{label}: handler and predicate must agree about {name:?}"
+            );
+        }
+    }
+
+    // And the isolation that agreement buys: an unprefixed read is the layer's
+    // own value, never the other layer's and never the base fallback.
+    let x_chain = vec![layer_x, base.clone()];
+    let y_chain = vec![layer_y, base];
+    assert_eq!(counter_in_owned_chain(&x_chain, "shared"), 1);
+    assert_eq!(counter_in_owned_chain(&y_chain, "shared"), 2);
+    assert_eq!(
+        counter_in_owned_chain(&x_chain, "only_base"),
+        0,
+        "an unprefixed name does NOT fall outward — `parent:` is how you reach base"
+    );
+    assert_eq!(counter_in_owned_chain(&x_chain, "parent:only_base"), 7);
 }
 
 /// A script-free base world has no `WorldScriptRuntime` at all, so the first
@@ -4611,6 +4719,62 @@ fn a_scripted_flag_write_resolves_against_its_handlers_own_layer() {
     // the same "no match" answer `resolve_layer_prefix` gives a condition.
     assert!(!scoped("parent:armed", None).0);
     assert!(!scoped("parent:parent:armed", Some("l1.toml")).0);
+}
+
+/// A world source that never arrives is refused, not retried forever (#1045).
+///
+/// The general backstop against a silent spin. On wasm a source can become
+/// permanently unreadable mid-session — the pending map is CONSUMED by a read and
+/// the fetch guard refuses to re-ask — which a contrived `[Load A, Unload A,
+/// Load A]` in one drain reaches; on native a path that simply is not there does
+/// the same thing. Either way the queue must stop, loudly, rather than re-queue
+/// silently for the rest of the session.
+#[test]
+fn a_world_source_that_never_arrives_is_refused_rather_than_retried_forever() {
+    const MISSING: &str = "tests/fixtures/does_not_exist_1045.toml";
+    let mut app = scripted_layer_test_app();
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: MISSING.into(),
+            loader_path: None,
+        });
+
+    // Well inside the cap it is still trying, which is the behaviour a browser
+    // fetch in flight depends on.
+    for _ in 0..10 {
+        app.update();
+    }
+    assert_eq!(
+        app.world().resource::<PendingWorldLayerChanges>().0.len(),
+        1,
+        "a source that may still arrive keeps its place in the queue"
+    );
+    assert!(!app
+        .world()
+        .resource::<WorldLayerMap>()
+        .0
+        .contains_key(MISSING));
+
+    // Past the cap it gives up, and marks the path so it is never retried.
+    for _ in 0..320 {
+        app.update();
+    }
+    assert!(
+        app.world()
+            .resource::<PendingWorldLayerChanges>()
+            .0
+            .is_empty(),
+        "the queue must stop rather than spin for the rest of the session"
+    );
+    assert!(
+        app.world()
+            .resource::<WorldLayerMap>()
+            .0
+            .contains_key(MISSING),
+        "and the path is marked refused so it is not picked up again"
+    );
 }
 
 /// The shipped-set guard: a script-free layer — `reinforcements.toml` and every

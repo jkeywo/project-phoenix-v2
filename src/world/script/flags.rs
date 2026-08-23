@@ -51,8 +51,17 @@
 //!   wrong order.) On the failure path the sink is dropped whole with the rest of
 //!   the call's effects (settled decision 10), so nothing is applied.
 //!
-//! `parent:`-prefixed cross-layer names are not specially resolved in M3 — no
-//! shipped world authors scripts yet — so a name emits verbatim at base scope.
+//! # Layer scope (issue #1045)
+//!
+//! A name is resolved against the LAYER CHAIN of the handler that wrote it, on
+//! both sides: [`Flags::with_chain`] snapshots that chain for reads, and
+//! `world::server::scope_scripted_flag_write` resolves the emitted
+//! `MutateFlag`'s target the same way. Unprefixed means "my own scope" and does
+//! not fall outward; each `parent:` steps one layer out; past the root reads `0`
+//! and drops the write. That is exactly what `flag(..)` in a `when` predicate
+//! already did, so a handler and its own trigger conditions cannot disagree.
+//! A base-world handler has a one-entry chain, so everything above collapses to
+//! the base store it always used.
 //!
 //! [`FlagStore`]: crate::world::flags::FlagStore
 //! [`FlagMutation::Increment`]: crate::world::dispatch::FlagMutation::Increment
@@ -67,15 +76,26 @@ use crate::world::flags::FlagStore;
 use crate::world::script::effects::EffectSink;
 use crate::world::script::registry::{host_fn, HostRegistry};
 
-/// The per-call flag view: a snapshot of the live store plus a scratch overlay
-/// giving read-after-write.
+/// The per-call flag view: a snapshot of the live store CHAIN plus a scratch
+/// overlay giving read-after-write.
 #[derive(Clone, Default)]
 struct FlagOverlay {
-    /// Snapshot of the live store at call start. Reads of an un-overlaid name
-    /// fall through to here.
-    base: FlagStore,
+    /// Snapshot of the layered store chain at call start, innermost first and
+    /// terminating at the base world — the same walk `layered_flag_chain` builds
+    /// for a `when` predicate. Reads of an un-overlaid name fall through to here.
+    ///
+    /// A chain rather than one store since issue #1045: a layer's handler writes
+    /// into its OWN store (`scope_scripted_flag_write`), so it has to read from
+    /// there too or `ctx.flags.armed = 1` in one handler would be invisible to
+    /// `if ctx.flags.armed == 1` in the next. A base-origin handler gets a
+    /// one-entry chain and behaves exactly as it always did.
+    chain: Vec<FlagStore>,
     /// Concrete post-write values, for read-after-write within the call. Not
     /// drained — mutations are emitted eagerly onto the shared effect sink.
+    ///
+    /// Keyed by the name AS AUTHORED, `parent:` prefixes and all, which is what
+    /// the write emits and what a later read in the same call spells — so
+    /// read-after-write matches whatever scope the write resolved to.
     overlay: BTreeMap<String, i64>,
 }
 
@@ -93,12 +113,22 @@ pub struct Flags {
 }
 
 impl Flags {
-    /// A fresh view over a snapshot of `base` for one call, emitting mutations
-    /// onto the call's shared effect `sink`.
+    /// A fresh view over a snapshot of `base` alone for one call — the base-world
+    /// shape, and the one every `#[cfg(test)]` fixture wants.
     pub fn new(base: &FlagStore, sink: EffectSink) -> Self {
+        Self::with_chain(std::slice::from_ref(base), sink)
+    }
+
+    /// A fresh view over a snapshot of a layered store `chain` (innermost first),
+    /// emitting mutations onto the call's shared effect `sink`.
+    ///
+    /// The production constructor since issue #1045: `RuntimeHost::call` hands
+    /// down the chain of the layer whose handler is running, so a read resolves
+    /// through the same walk its `when` predicates and its writes do.
+    pub fn with_chain(chain: &[FlagStore], sink: EffectSink) -> Self {
         Self {
             overlay: Arc::new(Mutex::new(FlagOverlay {
-                base: base.clone(),
+                chain: chain.to_vec(),
                 overlay: BTreeMap::new(),
             })),
             sink,
@@ -106,14 +136,15 @@ impl Flags {
     }
 
     /// Counter view of `name`: the overlay value if written this call, else the
-    /// snapshot value (unset names read `0`).
+    /// chain value (unset names, and names that walk past the chain's root, read
+    /// `0`).
     fn get(&self, name: &str) -> i64 {
         let inner = self.overlay.lock().expect("flags overlay lock");
         inner
             .overlay
             .get(name)
             .copied()
-            .unwrap_or_else(|| inner.base.counter(name))
+            .unwrap_or_else(|| crate::world::flags::counter_in_owned_chain(&inner.chain, name))
     }
 
     /// Absolute write `flags.name = value`. Updates the overlay and emits an
@@ -140,11 +171,10 @@ impl Flags {
     fn increment(&self, name: &str, by: i64) {
         {
             let mut inner = self.overlay.lock().expect("flags overlay lock");
-            let before = inner
-                .overlay
-                .get(name)
-                .copied()
-                .unwrap_or_else(|| inner.base.counter(name));
+            let before =
+                inner.overlay.get(name).copied().unwrap_or_else(|| {
+                    crate::world::flags::counter_in_owned_chain(&inner.chain, name)
+                });
             inner
                 .overlay
                 .insert(name.to_string(), before.saturating_add(by));

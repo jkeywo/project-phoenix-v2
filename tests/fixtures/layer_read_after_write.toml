@@ -1,0 +1,45 @@
+# Layer fixture for the handler-READ half of layer flag scoping (issue #1045).
+#
+# The scenario that was silently broken: one handler arms a flag, a later
+# handler branches on it. Writes were scoped to the layer's own store while
+# reads still snapshotted the BASE store, so `armed` came back 0 and the wave
+# never spawned — a script that behaved perfectly as a standalone world going
+# quietly dead the moment it was loaded as a layer.
+#
+# `arm` runs on world load and sets `armed` in this layer's scope, which also
+# emits the `FlagSet` that chains `spawn_wave` below. `spawn_wave` reads the
+# same bare name back and only then counts a wave; the test asserts the count,
+# so a read that resolved anywhere other than where the write landed shows up
+# as a zero.
+#
+# `base_seen` uses the deliberate `parent:` escape in BOTH directions — write
+# out to the base world, read it back out — so the escape hatch is exercised
+# alongside the default scope rather than only described.
+
+[global]
+seed = 7
+
+[script]
+setup = """
+on_world_loaded("arm");
+on_flag_set("armed", "spawn_wave");
+
+fn arm(ctx) {
+    ctx.flags.armed = 1;
+    ctx.flags["parent:base_seen"] = 1;
+}
+
+fn spawn_wave(ctx) {
+    if ctx.flags.armed == 1 {
+        ctx.flags.increment("waves_spawned", 1);
+    }
+    if ctx.flags["parent:base_seen"] == 1 {
+        ctx.flags.increment("base_reads", 1);
+    }
+    // A name one step further out than this layer has chain for: reads 0 and
+    // never counts, the same "past root" answer a predicate gives.
+    if ctx.flags["parent:parent:nonsense"] == 0 {
+        ctx.flags.increment("past_root_reads_zero", 1);
+    }
+}
+"""

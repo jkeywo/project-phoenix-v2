@@ -106,7 +106,9 @@ impl ScriptedWorld {
             ast,
             &path,
             fn_name,
-            flags,
+            // Fixtures are base-scope: a one-entry chain is what a base-world
+            // handler gets in production (issue #1045).
+            std::slice::from_ref(flags),
             &crate::world::deadlines::DeadlineTable::default(),
             &crate::world::commitments::CommitmentLedger::default(),
             &crate::dossier::evidence::EvidenceLog::default(),

@@ -766,7 +766,24 @@ impl ShieldSystem {
         ship_yaw: f32,
     ) -> i32 {
         let incoming = attacker_bearing_relative(attacker_x, attacker_z, ship_x, ship_z, ship_yaw);
-        let facing = &self.facings[self.facing_index_for_bearing(incoming)];
+        self.hp_facing_bearing(incoming)
+    }
+
+    /// [`Self::hp_facing_attacker`] for a bearing that has already been
+    /// resolved — same reading, same resolver, one less conversion.
+    ///
+    /// The torpedo detonation path (`console::weapons::tick_torpedo_lifecycle`)
+    /// needs the arc reading at the point the round went off, and it has already
+    /// computed that bearing from the torpedo's own impact position in order to
+    /// hand it to [`Self::apply_damage`]. Asking through this function rather
+    /// than re-deriving the arc keeps the round's IMPACT model and the tube's
+    /// authored LAUNCH gate (`fact(target_facing_shields) <= 0`, seeded from
+    /// `hp_facing_attacker`) asking one question of one resolver — which is the
+    /// whole point of that gate since issue #929: a torpedo earns its hull
+    /// payload by arriving at an arc that reads 0, so "is the arc down?" has to
+    /// mean the same thing at launch and at impact.
+    pub fn hp_facing_bearing(&self, bearing_relative: f32) -> i32 {
+        let facing = &self.facings[self.facing_index_for_bearing(bearing_relative)];
         if facing.is_online() {
             facing.hp
         } else {

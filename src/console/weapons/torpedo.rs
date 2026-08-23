@@ -1363,13 +1363,44 @@ pub(crate) fn tick_torpedo_lifecycle(
             }
             let is_asteroid = asteroid_uuid.is_some();
 
-            // Route shield-eligible damage through any `ShipShields`
-            // component, with overflow leaking to hull. Hull damage
-            // (always-pierces) goes straight to hull. Asteroids carry no
-            // shield so the shielded path is a no-op for them.
-            let mut hull_damage = det.damage_hull as f32;
+            // ── The struck arc decides which payload the round delivers ──────
+            //
+            // Torpedoes do NOT ignore shields (issue #929, second pass). A round
+            // resolves against the ONE facing arc it flew into, and that arc's
+            // own reading — the same reading the tube's authored launch gate
+            // asks for, `fact(target_facing_shields)` — selects between the two
+            // payloads the hull TOML authors:
+            //
+            //   arc UP (hp > 0)   `damage_shields`, offered to the arc through
+            //                     exactly the seam a beam takes: split by the
+            //                     tube's `shield_pierce`, the remainder into the
+            //                     facing, and any overflow past its remaining HP
+            //                     spilling to hull. A warhead detonating on a
+            //                     live screen is mostly eaten by it.
+            //   arc DOWN (hp = 0) `damage_hull`, landing in full. There is no
+            //                     screen between the warhead and the plating, so
+            //                     there is nothing to absorb it and nothing to
+            //                     pierce.
+            //
+            // "More damage when the shields are down" is therefore STRUCTURAL
+            // rather than a multiplier: the fleet authors `damage_hull` an order
+            // of magnitude above `damage_shields`, so the round that arrives at
+            // a collapsed arc is the one that matters. That is what makes the
+            // tubes' `<= 0` gate a real decision — holding a round until the
+            // beams have opened the arc is worth ten times firing it into a
+            // raised one — and it is why the gate was restored rather than
+            // switched off. Before this, `damage_hull` bypassed the shield
+            // system unconditionally and the gate protected 4 points of a
+            // 44-point payload, which is what made disabling it look reasonable.
+            //
+            // A victim with no `ShipShields` at all (an asteroid, an unshielded
+            // hull) reads 0 by the same rule and takes `damage_hull`.
+            //
+            // Nothing about the FACTS moved: `target_facing_shields` is still
+            // `ShieldSystem::hp_facing_attacker`, still per-arc, still 0 for an
+            // offline arc.
+            let mut hull_damage = 0.0f32;
             let mut shield_absorbed = 0.0f32;
-            let shield_eligible = det.damage_shields as f32;
             // Snapshot online facings before the shield apply so the
             // online→offline edge can be reported (issue #841).
             let arcs_online_before: Vec<(String, bool)> = shield_comp
@@ -1381,58 +1412,65 @@ pub(crate) fn tick_torpedo_lifecycle(
                         .collect()
                 })
                 .unwrap_or_default();
-            if shield_eligible > 0.0 {
-                if let Some(ref mut shields) = shield_comp {
-                    let all_offline = shields.0.facings.iter().all(|f| !f.is_online());
-                    if all_offline {
-                        hull_damage += shield_eligible;
-                    } else {
-                        let (pierced, absorbed) = crate::ship::damage::split_damage_for_pierce(
-                            shield_eligible,
-                            det.shield_pierce,
-                        );
-                        // Route the hit to the arc the torpedo actually flew
-                        // into, by handing `apply_damage` the bearing the
-                        // torpedo arrived on rather than a hardcoded 0.0.
-                        //
-                        // # Why this matters
-                        //
-                        // `ShieldSystem::apply_damage` resolves the facing with
-                        // `facing_index_for_bearing`, so a constant 0.0 put
-                        // every torpedo — from every direction — on whichever
-                        // arc contains bearing 0 (fore, on a four-arc Alliance
-                        // hull). `ai_torpedo_auto_fire`'s doctrine gate asks
-                        // the same resolver which arc is in the way before it
-                        // shoots; with the hit hardcoded to fore, a shot
-                        // green-lit against a collapsed AFT arc was absorbed by
-                        // the healthy FORE arc. Gate and hit now share one
-                        // resolver, so they agree.
-                        //
-                        // Attacker position is the *torpedo's* impact point,
-                        // not the firing ship's: the gate predicts from the
-                        // launcher, but a homing torpedo curves, and the arc it
-                        // meets is the one it is nose-on to when it goes off.
-                        //
-                        // Bearing falls back to 0.0 for a victim with no
-                        // `Transform` (the degenerate case the beam path also
-                        // takes) — nothing better is knowable there.
-                        let bearing = match target_tf {
-                            Some(tf) => crate::weapons::shield::attacker_bearing_relative(
-                                det.impact_x,
-                                det.impact_z,
-                                tf.translation.x,
-                                tf.translation.z,
-                                target_physics.map(|p| p.yaw).unwrap_or(0.0),
-                            ),
-                            None => 0.0,
-                        };
-                        let leak = shields.0.apply_damage(absorbed.round() as i32, bearing);
-                        shield_absorbed = (absorbed - leak as f32).max(0.0);
-                        hull_damage += pierced + leak as f32;
-                    }
-                } else {
-                    hull_damage += shield_eligible;
+            // Route the hit to the arc the torpedo actually flew into, by
+            // handing `apply_damage` the bearing the torpedo arrived on rather
+            // than a hardcoded 0.0.
+            //
+            // # Why this matters
+            //
+            // `ShieldSystem::apply_damage` resolves the facing with
+            // `facing_index_for_bearing`, so a constant 0.0 put every torpedo —
+            // from every direction — on whichever arc contains bearing 0 (fore,
+            // on a four-arc Alliance hull). `ai_torpedo_auto_fire`'s doctrine
+            // gate asks the same resolver which arc is in the way before it
+            // shoots; with the hit hardcoded to fore, a shot green-lit against a
+            // collapsed AFT arc was absorbed by the healthy FORE arc. Gate and
+            // hit now share one resolver, so they agree — and since #929's
+            // second pass the same bearing also picks the PAYLOAD, so a
+            // disagreement would now decide how much damage lands, not merely
+            // where it lands.
+            //
+            // Attacker position is the *torpedo's* impact point, not the firing
+            // ship's: the gate predicts from the launcher, but a homing torpedo
+            // curves, and the arc it meets is the one it is nose-on to when it
+            // goes off.
+            //
+            // Bearing falls back to 0.0 for a victim with no `Transform` (the
+            // degenerate case the beam path also takes) — nothing better is
+            // knowable there.
+            let bearing = match target_tf {
+                Some(tf) => crate::weapons::shield::attacker_bearing_relative(
+                    det.impact_x,
+                    det.impact_z,
+                    tf.translation.x,
+                    tf.translation.z,
+                    target_physics.map(|p| p.yaw).unwrap_or(0.0),
+                ),
+                None => 0.0,
+            };
+            let struck_arc_hp = shield_comp
+                .as_ref()
+                .map(|s| s.0.hp_facing_bearing(bearing))
+                .unwrap_or(0);
+            let payload = if struck_arc_hp > 0 {
+                det.damage_shields as f32
+            } else {
+                det.damage_hull as f32
+            };
+            match shield_comp {
+                // The arc is up, so the round meets it. `shield_pierce` is the
+                // fraction of THIS payload that gets past the screen, exactly as
+                // its doc comment has always said, and the remainder goes into
+                // the facing with the overflow spilling to hull — the same three
+                // lines `console::weapons::beam` runs.
+                Some(ref mut shields) if struck_arc_hp > 0 => {
+                    let (pierced, absorbed) =
+                        crate::ship::damage::split_damage_for_pierce(payload, det.shield_pierce);
+                    let leak = shields.0.apply_damage(absorbed.round() as i32, bearing);
+                    shield_absorbed = (absorbed - leak as f32).max(0.0);
+                    hull_damage += pierced + leak as f32;
                 }
+                _ => hull_damage += payload,
             }
             let mut hull_applied = 0.0f32;
             if hull_damage > 0.0 {
@@ -1464,8 +1502,8 @@ pub(crate) fn tick_torpedo_lifecycle(
                 log,
                 crate::logging::LogCat::Damage,
                 entity = entity,
-                "took {} (shield {:.0}/hull {:.0}) from {} via {}",
-                det.damage_hull + det.damage_shields,
+                "took {:.0} (shield {:.0}/hull {:.0}) from {} via {}",
+                payload,
                 shield_absorbed,
                 hull_applied,
                 attacker_label,
@@ -1493,7 +1531,13 @@ pub(crate) fn tick_torpedo_lifecycle(
                         crate::core::balance::VictimKind::Ship
                     },
                     weapon: det.tube_id.clone(),
-                    amount: (det.damage_hull + det.damage_shields) as f32,
+                    // The payload the struck arc's own reading selected, not the
+                    // sum of both authored fields: since #929's second pass a
+                    // round delivers `damage_shields` OR `damage_hull`, never
+                    // both, and `amount` is contracted as "damage offered to the
+                    // target". Reporting the sum would tell a balancer a
+                    // 44-point warhead was offered where 4 points were.
+                    amount: payload,
                     shield_absorbed,
                     hull_damage: hull_applied,
                     system_hit: None,

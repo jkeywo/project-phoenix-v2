@@ -2743,8 +2743,14 @@ pub struct CommsConfig {
 pub struct TorpedoesConfig {
     #[serde(default = "default_torpedo_count")]
     pub count: u32,
+    /// What a round delivers when the facing arc it strikes is DOWN: the whole
+    /// figure lands on the hull, unabsorbed and unpierced (issue #929).
     #[serde(default = "default_torpedo_damage_hull")]
     pub damage_hull: i32,
+    /// What a round delivers when the facing arc it strikes is UP: offered to
+    /// that arc through the same seam beam damage takes (issue #929). Authored
+    /// well below `damage_hull` across the fleet — that gap is what the tubes'
+    /// `fact(target_facing_shields) <= 0` launch gate is buying.
     #[serde(default = "default_torpedo_damage_shields")]
     pub damage_shields: i32,
     #[serde(default = "default_torpedo_speed")]
@@ -2762,9 +2768,12 @@ pub struct TorpedoesConfig {
     pub detonation_radius: f32,
     /// Fraction of `damage_shields` that bypasses shields and adds to
     /// hull damage at detonation. Default `0.0` — `damage_shields` is
-    /// fully absorbed by the facing shield quadrant. `damage_hull` is
-    /// unaffected (always hits hull). Clamped to `[0.0, 1.0]` at apply
-    /// time.
+    /// fully absorbed by the facing shield quadrant. Clamped to `[0.0, 1.0]`
+    /// at apply time.
+    ///
+    /// A lever on the shields-UP payload only: the shields-down payload
+    /// (`damage_hull`) meets no screen and so has nothing to pierce
+    /// (issue #929).
     #[serde(default)]
     pub shield_pierce: f32,
     /// Per-tube torpedo definitions parsed from `[[torpedoes.tubes]]`.

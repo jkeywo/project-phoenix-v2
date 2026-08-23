@@ -506,6 +506,16 @@ marker = "phasers_aft"
 #   what goes through the hole the beams made. A shot that arrives after the arc
 #   is back does nothing at all — which is the cost of a phase entered too early,
 #   and the reason the abort transition exists.
+#
+#   That sentence was ASPIRATIONAL when it was written and is now literal
+#   (issue #929). Until #929's second pass `damage_hull` bypassed the shield
+#   system unconditionally, so a round arriving at a recovered arc still landed
+#   all 34 of its points and this bullet described a cost the hull never paid. A
+#   round now meets the ONE arc it flew into and that arc's own reading picks the
+#   payload: `damage_shields`, i.e. nothing, if the arc is up; `damage_hull = 34`
+#   whole on the plating if it is down. Neither number moved and the doctrine
+#   around them did not either — the simulation caught up with what this file
+#   already claimed.
 # * a short `lifespan` and a low `turn_rate_deg_per_sec`. Barely homing: the
 #   bow-on line-up is what aims them, not the seeker. It is also what makes
 #   "every projectile has hit, missed or EXPIRED" a state the phase actually

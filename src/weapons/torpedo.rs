@@ -27,9 +27,22 @@ pub type TorpedoTubeId = String;
 pub struct TorpedoConfig {
     /// Total torpedoes available (shared pool).
     pub count: u32,
-    /// Hull damage on impact.
+    /// What the round delivers when the arc it strikes is DOWN — landing in
+    /// full on the hull, with no screen in the way to absorb or pierce
+    /// (issue #929).
+    ///
+    /// This is the payload the fleet's torpedo doctrine is written around, and
+    /// it is authored an order of magnitude above [`Self::damage_shields`]: the
+    /// tubes' `fact(target_facing_shields) <= 0` launch gate trades patience for
+    /// a payload, and that ratio is what makes waiting worth it.
     pub damage_hull: i32,
-    /// Shield damage on impact.
+    /// What the round delivers when the arc it strikes is UP (issue #929).
+    ///
+    /// Offered to that facing through the same seam a beam takes — split by
+    /// [`Self::shield_pierce`], the remainder absorbed by the arc, any overflow
+    /// past its remaining HP spilling to hull. A torpedo does NOT ignore a live
+    /// screen; a hull that authors `0` here is declaring that a round spent into
+    /// one is a round wasted.
     pub damage_shields: i32,
     /// Travel speed in world units per second.
     pub speed: f32,
@@ -47,8 +60,13 @@ pub struct TorpedoConfig {
     /// Fraction of the `damage_shields` payload that bypasses the shield
     /// system entirely and adds to hull damage. Default `0.0` — all
     /// `damage_shields` is mitigated by the facing shield quadrant.
-    /// `damage_hull` is unaffected (it always hits hull by design).
     /// Clamped to `[0.0, 1.0]` at apply time.
+    ///
+    /// It is a lever on the shields-UP payload only, and always was: the
+    /// shields-down payload (`damage_hull`) meets no screen, so there is nothing
+    /// there for it to get past (issue #929 — before that pass `damage_hull`
+    /// bypassed the shield system unconditionally, which is a different thing
+    /// entirely and is no longer true).
     pub shield_pierce: f32,
     /// Interval in seconds between successive torpedo launches in a burst
     /// volley (issue #632). Default `0.3`.
@@ -1090,12 +1108,17 @@ impl TorpedoSystem {
 
 /// Result of a successful torpedo detonation, returned by
 /// [`TorpedoSystem::handle_collision_full`]. The caller applies the damage
-/// split according to its own target model:
+/// according to its own target model, and the two damage fields are
+/// ALTERNATIVES rather than two components of one payload (issue #929):
 ///
-/// - `damage_hull` always lands on the hull (it is pierce-by-design).
-/// - `damage_shields` is the shield-eligible portion. Use
+/// - Resolve the facing arc the round struck, from [`Self::impact_x`] /
+///   [`Self::impact_z`] and the victim's own position and yaw
+///   ([`hp_facing_bearing`](crate::weapons::shield::ShieldSystem::hp_facing_bearing)).
+/// - Arc UP: deliver `damage_shields`, split by `shield_pierce` with
 ///   [`split_damage_for_pierce`](crate::ship::damage::split_damage_for_pierce)
-///   with `shield_pierce` to compute the pierced vs absorbed split for it.
+///   and the absorbed remainder handed to that facing.
+/// - Arc DOWN (or a victim with no shields at all): deliver `damage_hull`,
+///   whole, to the hull.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TorpedoDetonation {
     pub damage_hull: i32,

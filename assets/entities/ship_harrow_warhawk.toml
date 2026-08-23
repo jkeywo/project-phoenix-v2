@@ -485,14 +485,24 @@ range = 200.0
 # The loadout is authored around "the round that goes through a hole somebody else
 # made", which is the same premise as the cruiser's and a different weapon:
 #
-# * `damage_shields = 0`, so every one of the 30 points is hull damage. NOTE what
-#   that does and does not mean: `damage_hull` always hits hull by design (see
-#   `TorpedoConfig::shield_pierce`), and the detonation path only enters the
-#   shield branch when `damage_shields > 0` — so a round arriving at a RECOVERED
-#   arc still lands its full payload. The shield gate on the launcher below is
-#   therefore doctrine, not damage arithmetic: twelve rounds is a small magazine,
-#   and a battleship holding station spends them on the opening somebody else
-#   made rather than on a target that is still covered.
+# * `damage_shields = 0`, so every one of the 30 points is hull damage AND every
+#   one of them is conditional. WITHDRAWN, issue #929: this bullet used to read
+#   "`damage_hull` always hits hull by design, and the detonation path only enters
+#   the shield branch when `damage_shields > 0` — so a round arriving at a
+#   RECOVERED arc still lands its full payload. The shield gate on the launcher
+#   below is therefore doctrine, not damage arithmetic." Both halves are now
+#   false. A round meets the ONE arc it flew into and that arc's own reading picks
+#   the payload — `damage_shields` (nothing, on this hull) into a live screen, or
+#   `damage_hull = 30` whole onto bare plating — so a round arriving at a
+#   recovered arc lands NOTHING, and the launcher's shield gate is damage
+#   arithmetic as well as doctrine. The doctrinal reason still stands beside it
+#   and is the reason the number does not move: twelve rounds is a small magazine,
+#   and a battleship holding station spends them on the opening somebody else made
+#   rather than on a target that is still covered.
+#
+#   The bullet below on flight time is what this now costs. A four-second shot at
+#   the edge of the envelope is a bet on the arc still being down when it arrives,
+#   and losing that bet used to cost 0 points of 30; it now costs all 30.
 # * `speed * lifespan = 200`, the artillery envelope to the unit. Reach is the
 #   only lever there is: no launch guard can read a range, because the host seeds
 #   `in_range` as a constant `true` for every candidate and applies no range gate

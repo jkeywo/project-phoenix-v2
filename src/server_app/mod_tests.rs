@@ -1778,7 +1778,7 @@ fn direct_damage_reduces_hull_integrity_in_broadcast() {
     assert!((aggregate.expect("aggregate fraction") - 0.9).abs() < 1e-6);
 }
 
-// â"€â"€ SetTarget / TargetLock tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── SetTarget / TargetLock tests ──────────────────────────────────
 
 fn setup_weapons_world(app: &mut App, asteroid_x: f32, asteroid_z: f32) {
     app.world_mut().insert_resource(WorldResource(WorldData {
@@ -2004,7 +2004,7 @@ fn unknown_uuid_replies_with_target_lock_rejected() {
     assert!(get_weapons_target(&mut app).is_none());
 }
 
-// â"€â"€ WeaponsUpdate / fire_ready tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── WeaponsUpdate / fire_ready tests ──────────────────────────────────────
 
 /// Target locked, within 40-unit phaser range, in forward arc â†' fire_ready = true.
 #[test]
@@ -2088,7 +2088,7 @@ fn weapons_update_fire_ready_false_when_target_out_of_phaser_range() {
     );
 }
 
-// â"€â"€ FirePhaser / beam lifecycle tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── FirePhaser / beam lifecycle tests ──────────────────────────────────────
 
 /// Helper: lock target then fire phaser; returns messages from the fire tick.
 fn lock_and_fire(app: &mut App, asteroid_x: f32, asteroid_z: f32) -> Vec<OutboundMessage> {
@@ -2768,7 +2768,7 @@ fn repair_state_broadcast_after_dispatch() {
     );
 }
 
-// â"€â"€ SetPhaserMode tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── SetPhaserMode tests ────────────────────────────────────────────────────
 
 /// The Weapons console holder can change the phaser mode to Manual.
 #[test]
@@ -2891,7 +2891,7 @@ fn start_game_with_sensors_and_weapons(app: &mut App) {
     tick(app);
 }
 
-// â"€â"€ FireTorpedo tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── FireTorpedo tests ──────────────────────────────────────────────────
 
 #[test]
 fn tactical_player_can_fire_torpedo_broadcasts_torpedo_launched() {
@@ -3009,7 +3009,7 @@ fn torpedo_launched_is_broadcast_to_all() {
     );
 }
 
-// â"€â"€ ShipModifiers integration tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── ShipModifiers integration tests ──────────────────────────────────────
 
 /// Empty modifier table: phaser damage is identical to the base BEAM_DAMAGE_PER_SEC
 /// (5 HP/s). After 1 second of beam fire on a 30-HP asteroid the HP decreases by 5.
@@ -3166,7 +3166,7 @@ fn phaser_damage_modifier_doubles_kill_rate() {
 
 /// HullDamageTaken modifier at -1 (â†' 0.5Ã— multiplier) halves collision damage.
 /// At zero ship speed, base collision_damage=5. With 0.5Ã— modifier: round(5Ã—0.5)=3.
-// â"€â"€ modifier broadcast tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── modifier broadcast tests ──────────────────────────────────────────────
 
 #[test]
 fn add_modifier_broadcasts_modifier_added_message() {

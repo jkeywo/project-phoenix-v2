@@ -19,7 +19,7 @@
 
 use super::*;
 
-// â"€â"€ Marker Components â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Marker Components ────────
 /// Marks the player-controlled ship entity in simulation queries.
 /// Rendering and networking queries should use `With<LocalShip>` instead.
 #[derive(Component)]
@@ -93,7 +93,7 @@ pub struct AsteroidUuid(pub String);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct AsteroidShieldPierce(pub f32);
 
-// â"€â"€ Resources â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Resources ────────────────
 #[derive(Resource)]
 pub(crate) struct SimBroadcastTimer(pub(crate) Timer);
 

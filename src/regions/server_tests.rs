@@ -123,7 +123,7 @@ fn set_ship_pos(app: &mut App, x: f32, z: f32) {
     physics.z = z;
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Entry tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Entry tests ───────────────────────────────────────────────────
 
 #[test]
 fn ship_enters_region_when_moving_inside() {
@@ -131,7 +131,7 @@ fn ship_enters_region_when_moving_inside() {
     let region = spawn_region(&mut app, 100.0, 0.0, RegionShape::Sphere { radius: 50.0 });
     // Flush so region entity is queryable + system runs once
     app.update();
-    // Ship at (0,0) is outside region at (100,0) with radius 50 Ã¢â€ â€™ no entry
+    // Ship at (0,0) is outside region at (100,0) with radius 50 → no entry
     assert!(
         !is_inside(&mut app, region),
         "ship should start outside region"
@@ -147,14 +147,14 @@ fn ship_enters_region_when_moving_inside() {
     );
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Exit tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Exit tests ────────────────────────────────────────────────────
 
 #[test]
 fn ship_exits_region_when_moving_outside() {
     let mut app = test_app();
     let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
     set_ship_pos(&mut app, 20.0, 0.0); // inside
-    app.update(); // flush + system run Ã¢â€ â€™ enters
+    app.update(); // flush + system run → enters
     assert!(
         is_inside(&mut app, region),
         "ship should be inside after moving in"
@@ -170,20 +170,20 @@ fn ship_exits_region_when_moving_outside() {
     );
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ No-duplicate-while-inside test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── No-duplicate-while-inside test ────────────────────────────────
 
 #[test]
 fn no_duplicate_entered_while_staying_inside() {
     let mut app = test_app();
     let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
     set_ship_pos(&mut app, 10.0, 0.0); // inside
-    app.update(); // flush + system run Ã¢â€ â€™ enters
+    app.update(); // flush + system run → enters
     assert!(
         is_inside(&mut app, region),
         "ship should be inside after first tick"
     );
 
-    // Stay inside Ã¢â‚¬â€ tick again; membership should remain stable
+    // Stay inside — tick again; membership should remain stable
     app.update();
     assert!(
         is_inside(&mut app, region),
@@ -191,14 +191,14 @@ fn no_duplicate_entered_while_staying_inside() {
     );
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Despawn-implicit-exit test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Despawn-implicit-exit test ────────────────────────────────────
 
 #[test]
 fn region_despawn_while_inside_emits_implicit_exit() {
     let mut app = test_app();
     let region = spawn_region(&mut app, 0.0, 0.0, RegionShape::Sphere { radius: 50.0 });
     set_ship_pos(&mut app, 10.0, 0.0); // inside
-    app.update(); // flush + system run Ã¢â€ â€™ enters
+    app.update(); // flush + system run → enters
     assert!(
         is_inside(&mut app, region),
         "ship should be inside before despawn"
@@ -214,7 +214,7 @@ fn region_despawn_while_inside_emits_implicit_exit() {
     );
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Edge: ship outside from start Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Edge: ship outside from start ─────────────────────────────────
 
 #[test]
 fn ship_outside_from_start_does_not_enter() {
@@ -229,7 +229,7 @@ fn ship_outside_from_start_does_not_enter() {
     );
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Enter and exit across multiple regions Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Enter and exit across multiple regions ────────────────────────
 
 #[test]
 fn ship_enters_and_exits_two_regions_independently() {
@@ -251,7 +251,7 @@ fn ship_enters_and_exits_two_regions_independently() {
     assert!(is_inside(&mut app, r1), "should enter r1");
     assert!(!is_inside(&mut app, r2), "should NOT enter r2");
 
-    // Move to r2 Ã¢â‚¬â€ should exit r1, enter r2
+    // Move to r2 — should exit r1, enter r2
     set_ship_pos(&mut app, 110.0, 0.0);
     app.update();
 
@@ -259,7 +259,7 @@ fn ship_enters_and_exits_two_regions_independently() {
     assert!(!is_inside(&mut app, r1), "should exit r1");
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Damage Zone tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Damage Zone tests ────────────────────────────────────────────────
 
 use crate::regions::effects::{DamageZoneEffect, RegionEffectsConfig as EffectsCfg};
 use std::time::Duration;
@@ -724,7 +724,7 @@ fn npc_ship_in_damage_zone_takes_hull_damage() {
 
 // -- BlocksImpulse tests ------------------------------------------------
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ BlocksImpulse tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── BlocksImpulse tests ─────────────────────────────────────────────
 
 fn set_impulse_charging(app: &mut App) {
     let mut q = app
@@ -773,7 +773,7 @@ fn entering_blocks_impulse_region_cancels_charging_impulse() {
     set_impulse_charging(&mut app);
     assert_impulse_phase(&mut app, ImpulsePhase::Charging);
 
-    // Tick Ã¢â‚¬â€ should trigger RegionEntered and cancel impulse
+    // Tick — should trigger RegionEntered and cancel impulse
     tick_with_dt(&mut app, 0.016);
 
     assert_impulse_phase(&mut app, ImpulsePhase::Idle);
@@ -841,7 +841,7 @@ fn npc_entering_blocks_impulse_region_does_not_cancel_players_impulse() {
     assert_impulse_phase(&mut app, ImpulsePhase::Charging);
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Radar Dampening tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Radar Dampening tests ───────────────────────────────────────────
 
 fn radar_dampening_test_app() -> App {
     let mut app = App::new();
@@ -1023,7 +1023,7 @@ fn overlapping_radar_dampening_regions_stack_additively() {
     );
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Slow Zone tests Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Slow Zone tests ─────────────────────────────────────────────────
 
 fn slow_zone_test_app() -> App {
     let mut app = App::new();
@@ -1141,7 +1141,7 @@ fn entering_slow_zone_with_thrust_modifier_registers_maxspeed_modifier() {
     set_ship_pos(&mut app, 10.0, 0.0); // inside
     tick_with_dt(&mut app, 0.016);
 
-    // -0.5 bonus Ã¢â€ â€™ 1/(1+0.5) = 0.6667
+    // -0.5 bonus → 1/(1+0.5) = 0.6667
     check_modifier(&mut app, ModifierSlot::MaxSpeed, 1.0 / 1.5);
 }
 
@@ -1153,7 +1153,7 @@ fn entering_slow_zone_with_yaw_rate_modifier_registers_maxyawrate_modifier() {
     set_ship_pos(&mut app, 10.0, 0.0); // inside
     tick_with_dt(&mut app, 0.016);
 
-    // -0.3 bonus Ã¢â€ â€™ 1/(1+0.3) = 0.7692
+    // -0.3 bonus → 1/(1+0.3) = 0.7692
     check_modifier(&mut app, ModifierSlot::MaxYawRate, 1.0 / 1.3);
 }
 
@@ -1401,7 +1401,7 @@ fn slow_zone_slows_npc_ship() {
     );
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Flag effect tests (CommsJam / SensorBlind) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Flag effect tests (CommsJam / SensorBlind) ─────────────────────────
 
 use crate::core::messages::FlagKind;
 use crate::regions::effects::{CommsJamEffect, SensorBlindEffect};
@@ -1624,13 +1624,13 @@ fn overlapping_comms_jam_regions_or_aggregate() {
 
     assert_flag(&mut app, FlagKind::CommsJammed, true);
 
-    // Exit B: move to (-40,0) Ã¢â‚¬â€ still inside A (dist 40 < 80), outside B (dist 100 > 80)
+    // Exit B: move to (-40,0) — still inside A (dist 40 < 80), outside B (dist 100 > 80)
     set_ship_pos(&mut app, -40.0, 0.0);
     tick_with_dt(&mut app, 0.016);
 
     assert_flag(&mut app, FlagKind::CommsJammed, true);
 
-    // Exit A: move far away Ã¢â‚¬â€ outside both
+    // Exit A: move far away — outside both
     set_ship_pos(&mut app, -200.0, 0.0);
     tick_with_dt(&mut app, 0.016);
 

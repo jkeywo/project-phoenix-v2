@@ -28,7 +28,7 @@ use crate::ship::impulse::ImpulseState;
 use crate::world::server::ObjectiveManagerRes;
 use std::collections::{BTreeMap, HashMap};
 
-// â"€â"€ Beam constants â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Beam constants ──────────────────────────────────────────────────────────
 pub use crate::console::weapons::{
     weapons_update_broadcaster, ActiveBeam, AsteroidDestroyedVfx, CurrentPhaserMode,
     LastShipAttacker, LastWeaponsUpdate, PhaserCooldown, PhaserRenderConfig,
@@ -103,7 +103,7 @@ pub use components::*;
 pub use registration::*;
 pub(crate) use world_setup::*;
 
-// â"€â"€ Tests â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Tests ────────────────────────────────────────────────────────────────────
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;

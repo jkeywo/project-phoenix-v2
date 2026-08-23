@@ -15,7 +15,7 @@ use crate::ship::state::ShipPhysics;
 /// Resource tracking which entities are inside which regions.
 #[derive(Resource, Default)]
 pub struct RegionMembership {
-    /// Maps ship entity Ã¢â€ â€™ set of region entities the ship is currently inside.
+    /// Maps ship entity → set of region entities the ship is currently inside.
     /// A `BTreeSet` of regions, not a `HashSet` (issue #965). The set
     /// differences in `update_region_membership` are what emit
     /// `RegionEntered`/`RegionExited`, and a ship that crosses two boundaries

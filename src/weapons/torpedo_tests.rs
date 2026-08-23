@@ -188,7 +188,7 @@ fn start_load_fails_when_no_torpedoes() {
     assert_eq!(sys.torpedoes_remaining, 0);
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ channel-2 magazine claim helpers (issue #512) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── channel-2 magazine claim helpers (issue #512) ─────────────────────
 
 #[test]
 fn claim_magazine_round_decrements_when_available() {
@@ -328,7 +328,7 @@ fn start_unload_on_unloading_tube_does_nothing() {
     let mut sys = default_system();
     load_tube(&mut sys, "fore_port");
     assert!(sys.start_unload("fore_port"));
-    // Already unloading Ã¢â‚¬â€ second call does nothing
+    // Already unloading — second call does nothing
     assert!(!sys.start_unload("fore_port"));
 }
 
@@ -548,7 +548,7 @@ fn tube_not_loaded_before_manual_load_time_expires() {
     assert!(!sys.tube("fore_port").unwrap().is_loaded());
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ proximity detonation Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── proximity detonation ──────────────────────────────────────────────
 
 fn detonation_system(detonation_radius: f32) -> TorpedoSystem {
     let mut config = TorpedoConfig::default();
@@ -581,7 +581,7 @@ fn find_detonation_hits_reports_target_within_detonation_radius() {
 
 #[test]
 fn find_detonation_hits_includes_target_radius_in_threshold() {
-    // Detonation radius 1, target radius 10, distance 9 Ã¢â€ â€™ should hit.
+    // Detonation radius 1, target radius 10, distance 9 → should hit.
     let mut sys = detonation_system(1.0);
     sys.launch("fore_port", "t1".into(), 0.0, 0.0, 0.0, 0.0, None, None);
     let targets = vec![("rock".to_string(), 0.0, 0.0, -9.0, 10.0)];
@@ -694,7 +694,7 @@ fn find_detonation_hits_with_no_targets_in_range_returns_empty_even_if_source_pr
     assert!(hits.is_empty());
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Volley mechanics (issue #632) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// ── Volley mechanics (issue #632) ─────────────────────────────────────
 
 fn volley_cfg(id: &str, volley_max: u32) -> TorpedoTubeConfig {
     TorpedoTubeConfig {
@@ -894,7 +894,7 @@ fn auto_unload_when_target_count_decremented() {
         tube.loaded_count = 2;
         tube.target_count = 2;
     }
-    // Drop target to 1 â†’ should auto-unload one torpedo.
+    // Drop target to 1 → should auto-unload one torpedo.
     sys.set_volley_target("t1", 1);
     let targets: HashMap<String, (f32, f32, f32)> = HashMap::new();
     // First tick starts unloading one.
@@ -906,7 +906,7 @@ fn auto_unload_when_target_count_decremented() {
     // Complete the unload: loaded_count goes from 2 to 1.
     sys.tick(1.0, &targets, &mut no_uuid);
     assert_eq!(sys.tube("t1").unwrap().loaded_count, 1);
-    // target_count == loaded_count now â†’ no more auto-unload.
+    // target_count == loaded_count now → no more auto-unload.
     sys.tick(0.0, &targets, &mut no_uuid);
     assert_eq!(
         sys.tube("t1").unwrap().loaded_count,

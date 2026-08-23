@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { parse as parseToml } from 'smol-toml';
 import {
   collectTargets,
@@ -26,6 +27,51 @@ import {
 
 function sidecar(path, text) {
   return { path, doc: parseToml(text) };
+}
+
+// These are the two shipped cruiser hull models: Alliance Cruiser is the
+// player cruiser and Dynasty Cruiser is used by the Harrow cruiser/patrol
+// templates. Keep this at the generated-GLB contract level; billboards have
+// their separate capture pipeline (tracked by #1245), and this test never
+// opens a .glb or asks the generator to rewrite one.
+const SHIPPED_CRUISER_LODS = [
+  {
+    sidecar: 'assets/models/alliance_cruiser.model.toml',
+    levels: [
+      {
+        output: 'assets/models/alliance_cruiser_lod1.glb',
+        source: 'assets/models/alliance_cruiser.glb',
+        params: { ratio: 0.19, error: 0.01, textureSize: 256, remeshVoxelSize: 0.0211 },
+      },
+      {
+        output: 'assets/models/alliance_cruiser_lod2.glb',
+        source: 'assets/models/alliance_cruiser.glb',
+        params: { ratio: 0.113, error: 0.01, textureSize: 128, remeshVoxelSize: 0.0211 },
+      },
+    ],
+  },
+  {
+    sidecar: 'assets/models/dynasty_cruiser.model.toml',
+    levels: [
+      {
+        output: 'assets/models/dynasty_cruiser_lod1.glb',
+        source: 'assets/models/dynasty_cruiser.glb',
+        params: { ratio: 0.319, error: 0.01, textureSize: 256, remeshVoxelSize: 0.0211 },
+      },
+      {
+        output: 'assets/models/dynasty_cruiser_lod2.glb',
+        source: 'assets/models/dynasty_cruiser.glb',
+        params: { ratio: 0.113, error: 0.01, textureSize: 128, remeshVoxelSize: 0.0211 },
+      },
+    ],
+  },
+];
+
+function shippedCruiserSidecars() {
+  return SHIPPED_CRUISER_LODS.map(({ sidecar: path }) => ({
+    path,
+    doc: parseToml(readFileSync(path, 'utf8')),
+  }));
 }
 
 /** The shipped shape: a full model, two decimated steps, a procedural tail. */
@@ -166,6 +212,62 @@ remesh_voxel_size = 0.02
     expect(targets[0].source).toBe('assets/models/rock.glb');
     expect(targets[0].effectiveSource).toBe('assets/models/rock.remesh.glb');
     expect(remeshPath('assets/models/rock.glb')).toBe('assets/models/rock.remesh.glb');
+  });
+});
+
+describe('shipped cruiser generated LODs', () => {
+  const expected = SHIPPED_CRUISER_LODS.flatMap(({ sidecar, levels }) =>
+    levels.map((level) => ({ ...level, declaredBy: [sidecar] })),
+  );
+  const outputs = new Set(expected.map(({ output }) => output));
+
+  function manifestEntriesForCruisers() {
+    return parseManifest(readFileSync('scripts/lod-manifest.toml', 'utf8')).filter(({ path }) =>
+      outputs.has(path),
+    );
+  }
+
+  function observed(targets) {
+    const targetByOutput = new Map(targets.map((target) => [target.output, target]));
+    return manifestEntriesForCruisers().map((entry) => ({
+      target: targetByOutput.get(entry.path),
+      sourceSha256: entry.source_sha256,
+      outputSha256: entry.output_sha256,
+      outputBytes: entry.output_bytes,
+    }));
+  }
+
+  it('keeps every shipped cruiser generated level declared and recorded', () => {
+    const { targets, errors } = collectTargets(shippedCruiserSidecars());
+    expect(errors).toEqual([]);
+    expect(targets).toEqual(
+      expected.map(({ output, source, params, declaredBy }) => ({
+        output,
+        source,
+        effectiveSource: source.replace('.glb', '.remesh.glb'),
+        params,
+        declaredBy,
+      })),
+    );
+
+    // This checks the authored generation parameters against the committed
+    // manifest without reading or regenerating the checked-in binaries.
+    expect(compareManifest(manifestEntriesForCruisers(), observed(targets))).toEqual([]);
+  });
+
+  it('makes a cruiser ratio edit fail the same manifest currency check CI uses', () => {
+    const sidecars = shippedCruiserSidecars();
+    sidecars[0].doc.lod[1].generate.ratio = 0.2;
+    const { targets, errors } = collectTargets(sidecars);
+    expect(errors).toEqual([]);
+
+    const findings = compareManifest(manifestEntriesForCruisers(), observed(targets));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      output: 'assets/models/alliance_cruiser_lod1.glb',
+      kind: 'params-changed',
+    });
+    expect(findings[0].detail).toContain('ratio=0.2');
   });
 });
 

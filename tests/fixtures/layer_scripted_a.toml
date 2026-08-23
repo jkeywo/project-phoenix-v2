@@ -4,15 +4,26 @@
 # entity-free so the tests it feeds are about the scenario logic alone; the
 # entity half of the contract is pinned by `layer_entities.toml` beside it.
 #
-# Paired with `layer_scripted_b.toml`, which is identical apart from its names.
-# The two exist together so a test can load both, unload THIS one, and prove
-# that B's surviving trigger still resolves B's handler — the parallel-vec
-# invariant on `WorldScriptRuntime::handlers`, which a removal from the middle
-# of the table is what breaks.
+# Paired with `layer_scripted_b.toml`, which is IDENTICAL apart from the two
+# handler/flag names that say which file ran. The pair does double duty:
 #
-# `on_flag_set("parent:probe", …)` reads the BASE world's store rather than this
-# layer's own: a scripted flag write emits `target_layer: None`, so `probe` is a
-# base-world flag and a layer trigger has to walk one step out to see it.
+#  * load both, unload THIS one, and prove B's surviving trigger still resolves
+#    B's handler — the parallel-vec invariant on `WorldScriptRuntime::handlers`,
+#    which a removal from the middle of the table is what breaks;
+#  * both watch and write the SAME flag name (`probe`), so a cross-fire between
+#    two loaded layers shows up immediately.
+#
+# The authoring is deliberately the natural kind — a bare flag name, written
+# and watched with no `parent:` prefix, exactly as it would be written for a
+# standalone world. That is the point of layer flag scoping: an unprefixed name
+# means "my own scope" on BOTH sides, so this file behaves the same loaded as a
+# base world or as a layer, and `probe` here cannot be seen by `probe` there.
+#
+# `layer_a_loaded` setting `probe` is what chains the second trigger: the write
+# is layer-scoped, so it emits `FlagSet { origin_layer: Some(this layer) }` and
+# `on_flag_set("probe", …)` below — resolving to the same scope — fires from it
+# in the same pipeline pass. `recheck` is never written by this script; the
+# tests set it to fire a trigger on demand after an unload.
 
 [global]
 seed = 7
@@ -20,13 +31,19 @@ seed = 7
 [script]
 setup = """
 on_world_loaded("layer_a_loaded");
-on_flag_set("parent:probe", "layer_a_probed");
+on_flag_set("probe", "layer_a_probed");
+on_flag_set("recheck", "layer_a_rechecked");
 
 fn layer_a_loaded(ctx) {
     ctx.flags.layer_a_loaded = 1;
+    ctx.flags.probe = 1;
 }
 
 fn layer_a_probed(ctx) {
     ctx.flags.layer_a_probed = 1;
+}
+
+fn layer_a_rechecked(ctx) {
+    ctx.flags.layer_a_rechecked = 1;
 }
 """

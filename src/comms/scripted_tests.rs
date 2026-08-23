@@ -488,7 +488,7 @@ fn seat_scripted_thread(app: &mut App) {
     let mut sr = compile_fixture(SCRIPTED_THREAD);
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        crate::world::server::merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        crate::world::server::merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 }
@@ -621,7 +621,7 @@ ctx.effects.spawn_entity(#{
     );
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        crate::world::server::merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        crate::world::server::merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     app.world_mut()
@@ -738,7 +738,7 @@ root(ctx)
     );
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        crate::world::server::merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        crate::world::server::merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -901,7 +901,7 @@ fn seat_default_world(app: &mut App) {
     let (mut sr, _path) = compile_default_world();
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
-        crate::world::server::merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        crate::world::server::merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     app.world_mut()

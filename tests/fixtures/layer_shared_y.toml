@@ -1,0 +1,10 @@
+# The twin of `layer_shared_x.toml` — see that file and `layer_shared.rhai`.
+#
+# Identical to X apart from this comment: the whole point is that two DIFFERENT
+# worlds name one shared script unit, so whichever of them loads second must
+# not register its contents a second time.
+
+script = "layer_shared.rhai"
+
+[global]
+seed = 7

@@ -549,15 +549,26 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // Issue #1045's SCRIPT-IN-LAYERS registers nothing new, and it is the seam's
     // most invasive slice so far. A layer's `[script]` block now compiles at
     // `LoadWorld` and merges into the SAME `WorldScriptRuntime` this list already
-    // covers — its ASTs, its `handlers` vec, its `deadline_handlers` — and its
-    // trigger states into `WorldContentRuntime::trigger_states` above. The one new
-    // field is `WorldRuntime::script_units`, the AST keys a layer added so its
-    // unload can retract exactly them; `WorldRuntime` carries no
-    // `#[derive(Resource)]` of its own — it lives inside `WorldLayerMap`, already
-    // covered — so nothing new appears in the registry this guard scans. The empty
-    // `WorldScriptRuntime` a scripted layer inserts when the base world authored
-    // none is that same registered type, instantiated where a script-free world
-    // previously had nothing. See `src/world/layers.rs` and the parallel-vec
+    // covers — its ASTs and its `handlers` vec — and its trigger states into
+    // `WorldContentRuntime::trigger_states` above. Three new FIELDS, no new
+    // registrations:
+    //
+    //   * `WorldRuntime::script_units` — the AST keys a layer added, so its unload
+    //     retracts exactly them. `WorldRuntime` carries no `#[derive(Resource)]`
+    //     of its own; it lives inside `WorldLayerMap`, already covered.
+    //   * `WorldContentRuntime::trigger_table_generation` — a cache-invalidation
+    //     token for index-keyed observers of the trigger table, bumped on every
+    //     reshape. NOT authoritative state and deliberately not snapshotted: a
+    //     resumed world rebuilds the same table by replaying the same layer loads,
+    //     and its one reader (the debug fire recorder) starts empty regardless.
+    //   * `WorldLayerChange::DeferredApply` — a variant on the queue inside
+    //     `PendingWorldLayerChanges`, which `server_app::registration` already
+    //     declares. It carries a layer evaluated on the previous tick so the world
+    //     source is read exactly once (re-reading it hangs on wasm).
+    //
+    // The empty `WorldScriptRuntime` a scripted layer inserts when the base world
+    // authored none is that same registered type, instantiated where a script-free
+    // world previously had nothing. See `src/world/layers.rs` and the parallel-vec
     // invariant documented on `WorldScriptRuntime::handlers`.
     "project_phoenix::world::server::BridgeWorldSource",
     "project_phoenix::world::server::PreCompiledScripts",

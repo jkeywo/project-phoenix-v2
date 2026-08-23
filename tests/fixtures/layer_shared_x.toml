@@ -1,0 +1,14 @@
+# Scripted layer naming a SHARED sibling `.rhai` (issue #1045).
+#
+# The twin of `layer_shared_y.toml`: both name the same `layer_shared.rhai`
+# beside them, which is the shape that made a duplicate registration possible.
+# See that script for what the pair proves.
+#
+# The `script = "…"` key is deliberately at the top of the file, above the
+# `[global]` table: a bare key written after a table header would belong to
+# THAT table, and a world's sibling-script declaration is a top-level one.
+
+script = "layer_shared.rhai"
+
+[global]
+seed = 7

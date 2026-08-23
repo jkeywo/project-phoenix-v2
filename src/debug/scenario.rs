@@ -107,17 +107,28 @@ const FIRE_VALUE_UNAVAILABLE: &str = "n/a";
 /// The records are parallel to `WorldContentRuntime.trigger_states` by index —
 /// the same order [`collect_scenario_state`] emits triggers in — so
 /// [`Self::fire_history`] keys straight off the collection index. Grown in place
-/// when the roster extends (a sub-world's triggers append) and rebuilt when it
-/// shrinks (a world reload); a same-count reload keeps stale rings but cannot
-/// mis-record, since every reset trigger re-seeds its baseline to `None` before
-/// its next fire (one world per session is the norm — see #342 in this module's
-/// docs).
+/// when the roster extends (a layer's triggers append) and rebuilt whenever the
+/// table is RESHAPED.
+///
+/// # Why length is not enough (issue #1045)
+///
+/// It reconciled on length alone, which was sound while the table only ever grew
+/// and was cleared whole. Script-in-layers made a removal from the MIDDLE of it
+/// possible: unload one layer and load another between two samples and the count
+/// can come back identical while every index past the removal now names a
+/// different trigger — so the ring built for the trigger that used to be at index
+/// 4 would go on collecting index 4's fires, and the AAR would attribute them to
+/// the wrong scenario beat. `WorldContentRuntime::trigger_table_generation` moves
+/// on every reshape, so this rebuilds when it does.
 #[derive(Resource, Debug, Default)]
 pub struct TriggerFireRecorder {
     /// Per-trigger fire record, indexed like `trigger_states`.
     per_trigger: Vec<TriggerFireRecord>,
     /// The ring depth last applied, so a retuned config re-caps existing rings.
     depth: usize,
+    /// The `trigger_table_generation` these records were built against. A change
+    /// means the table was reshaped and every index may now mean something else.
+    generation: u64,
 }
 
 /// One trigger's fire ring plus the fire-detection baseline.
@@ -148,10 +159,14 @@ impl TriggerFireRecorder {
     fn sync_and_record(&mut self, runtime: &WorldContentRuntime, depth: usize) {
         let n = runtime.trigger_states.len();
 
-        // Roster reconciliation. Shrink → rebuild fresh (a world reload); grow →
-        // extend in place (appended sub-world triggers keep existing history).
-        if self.per_trigger.len() > n {
+        // Roster reconciliation. A RESHAPE (any merge or layer retraction, which
+        // is what moves the generation) invalidates every index, so rebuild fresh;
+        // otherwise grow in place, so an appended layer's triggers do not cost the
+        // existing rows their history. The length check stays as the belt to that
+        // brace, covering any shrink a future writer makes without the counter.
+        if self.generation != runtime.trigger_table_generation || self.per_trigger.len() > n {
             self.per_trigger.clear();
+            self.generation = runtime.trigger_table_generation;
         }
         while self.per_trigger.len() < n {
             self.per_trigger.push(TriggerFireRecord::new(depth));

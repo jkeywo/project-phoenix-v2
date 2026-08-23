@@ -1,8 +1,10 @@
 # Scripted layer fixture "B" for the script-in-layers tests (issue #1045).
 #
 # The twin of `layer_scripted_a.toml` — see that file for what the pair is for.
-# Only the flag and handler names differ, so a test that unloads A and probes B
-# can tell WHICH handler ran from the flag that ends up set.
+# The WATCHED names are deliberately identical (`probe`, `recheck`); only the
+# handler names and the flags they write differ, so a test can tell which file
+# ran from the flag that ends up set, and a cross-fire between the two loaded
+# layers is impossible to miss.
 
 [global]
 seed = 7
@@ -10,13 +12,19 @@ seed = 7
 [script]
 setup = """
 on_world_loaded("layer_b_loaded");
-on_flag_set("parent:probe", "layer_b_probed");
+on_flag_set("probe", "layer_b_probed");
+on_flag_set("recheck", "layer_b_rechecked");
 
 fn layer_b_loaded(ctx) {
     ctx.flags.layer_b_loaded = 1;
+    ctx.flags.probe = 1;
 }
 
 fn layer_b_probed(ctx) {
     ctx.flags.layer_b_probed = 1;
+}
+
+fn layer_b_rechecked(ctx) {
+    ctx.flags.layer_b_rechecked = 1;
 }
 """

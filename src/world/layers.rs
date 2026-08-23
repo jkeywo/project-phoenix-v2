@@ -28,7 +28,7 @@
 //! ([`crate::world::load::load`]) under [`LoadPolicy::Merge`], which compiles the
 //! layer's `[script]` block just as the base-world path compiles the base world's.
 //! The compiled [`CompiledScripts`] is carried out on
-//! [`LayerLoadOutcome::Loaded::scripts`], and the applier
+//! [`LoadedLayer::scripts`], and the applier
 //! (`world::server::apply_world_layer_changes`) merges it into the live
 //! `WorldScriptRuntime` — creating that resource when the base world authored no
 //! script of its own. A layer whose scripts carry an ERROR finding is refused
@@ -80,10 +80,7 @@ pub struct LayerLoadResult {
 }
 
 /// The branch the applier must take for one `WorldLayerChange::Load`.
-///
-/// `Debug` is hand-rolled (not derived) because [`Loaded::scripts`] holds a
-/// [`CompiledScripts`], which carries Rhai `AST`s and is not `Debug`; it prints
-/// as a presence marker, exactly as [`crate::world::load::LoadedWorld`] does.
+#[derive(Debug)]
 pub enum LayerLoadOutcome {
     /// Path already present in `WorldLayerMap` — de-duplicate, no-op.
     AlreadyLoaded,
@@ -98,46 +95,51 @@ pub enum LayerLoadOutcome {
     /// world may not author (`scenario_detail_floor`), and — since issue #1045 —
     /// a `[script]` block that compiles with an error finding.
     ParseFailed,
-    /// Layer is loadable; the applier merges/spawns from these decisions.
-    Loaded {
-        /// Named-entity `name → uuid` registrations for the live runtime's
-        /// `name_to_uuid` map (already inserted into `scenario_config`).
-        name_to_uuid_inserts: Vec<(String, String)>,
-        /// Parsed layer config (with `name_to_uuid` filled in) for the
-        /// impure steps: entity spawning and the anchor snapshot.
-        scenario_config: Box<WorldConfig>,
-        /// Emit `WorldEvent::WorldLoaded` so a base-world `on_world_loaded`
-        /// handler can react to this layer arriving (issue #415).
-        emit_world_loaded: bool,
-        /// The layer's compiled `[script]` set, carried out of the `Merge` load
-        /// (`None` for the entire shipped set — no shipped layer authors a
-        /// script). The applier merges it into the live `WorldScriptRuntime`
-        /// (issue #1045), creating that resource if the base world authored no
-        /// script of its own. Guaranteed free of ERROR findings: a layer whose
-        /// scripts do not compile never reaches this variant.
-        scripts: Option<CompiledScripts>,
-    },
+    /// Layer is loadable; the applier merges/spawns from this decision.
+    ///
+    /// Boxed because it is also what
+    /// [`WorldLayerChange::DeferredApply`](crate::world::server::WorldLayerChange::DeferredApply)
+    /// carries across a tick (issue #1045): a layer whose scripts need a
+    /// `WorldScriptRuntime` that does not exist yet is evaluated ONCE and its
+    /// decision stashed, never re-evaluated. Re-evaluating would be wrong on
+    /// wasm, where reading the TOML CONSUMES it from the pending-fetch queue and
+    /// the fetch guard refuses to ask for it twice — a second evaluation would
+    /// find nothing and re-queue forever.
+    Loaded(Box<LoadedLayer>),
 }
 
-impl std::fmt::Debug for LayerLoadOutcome {
+/// Everything the applier needs to bring one evaluated layer into the world.
+///
+/// `Debug` is hand-rolled (not derived) because [`scripts`](Self::scripts) holds
+/// a [`CompiledScripts`], which carries Rhai `AST`s and is not `Debug`; it prints
+/// as a presence marker, exactly as [`crate::world::load::LoadedWorld`] does.
+pub struct LoadedLayer {
+    /// Named-entity `name → uuid` registrations for the live runtime's
+    /// `name_to_uuid` map (already inserted into `scenario_config`).
+    pub name_to_uuid_inserts: Vec<(String, String)>,
+    /// Parsed layer config (with `name_to_uuid` filled in) for the impure steps:
+    /// entity spawning and the anchor snapshot.
+    pub scenario_config: WorldConfig,
+    /// Emit `WorldEvent::WorldLoaded` so a base-world `on_world_loaded` handler
+    /// can react to this layer arriving (issue #415).
+    pub emit_world_loaded: bool,
+    /// The layer's compiled `[script]` set, carried out of the `Merge` load
+    /// (`None` for the entire shipped set — no shipped layer authors a script).
+    /// The applier merges it into the live `WorldScriptRuntime` (issue #1045),
+    /// creating that resource if the base world authored no script of its own.
+    /// Guaranteed free of ERROR findings: a layer whose scripts do not compile
+    /// never reaches this variant.
+    pub scripts: Option<CompiledScripts>,
+}
+
+impl std::fmt::Debug for LoadedLayer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LayerLoadOutcome::AlreadyLoaded => f.write_str("AlreadyLoaded"),
-            LayerLoadOutcome::TomlUnavailable => f.write_str("TomlUnavailable"),
-            LayerLoadOutcome::ParseFailed => f.write_str("ParseFailed"),
-            LayerLoadOutcome::Loaded {
-                name_to_uuid_inserts,
-                scenario_config,
-                emit_world_loaded,
-                scripts,
-            } => f
-                .debug_struct("Loaded")
-                .field("name_to_uuid_inserts", name_to_uuid_inserts)
-                .field("scenario_config", scenario_config)
-                .field("emit_world_loaded", emit_world_loaded)
-                .field("scripts", &scripts.as_ref().map(|_| "<compiled>"))
-                .finish(),
-        }
+        f.debug_struct("LoadedLayer")
+            .field("name_to_uuid_inserts", &self.name_to_uuid_inserts)
+            .field("scenario_config", &self.scenario_config)
+            .field("emit_world_loaded", &self.emit_world_loaded)
+            .field("scripts", &self.scripts.as_ref().map(|_| "<compiled>"))
+            .finish()
     }
 }
 
@@ -225,9 +227,27 @@ where
                 .map(|f| format!("[{}] {}", f.category, f.message))
                 .collect::<Vec<_>>()
                 .join("; ");
+            // A missing sibling is the one refusal a correctly-authored layer can
+            // still hit, and only in the browser: nothing prefetches a layer's
+            // `script = "wave.rhai"` into the wasm config cache, so the resolver
+            // reads `None` and the layer is refused whole. Name that explicitly
+            // rather than leave a designer reading "file could not be read" about
+            // a file that is plainly there in the repo.
+            let hint = if compiled
+                .findings
+                .iter()
+                .any(|f| f.is_error() && f.category == "script-file-missing")
+            {
+                " (a supporting world's sibling .rhai is not prefetched in the \
+                 browser — author the layer's script as an inline [script] table)"
+            } else {
+                ""
+            };
             return LayerLoadResult {
                 outcome: LayerLoadOutcome::ParseFailed,
-                warnings: vec![format!("failed to load {path}: script error: {detail}")],
+                warnings: vec![format!(
+                    "failed to load {path}: script error: {detail}{hint}"
+                )],
             };
         }
     }
@@ -253,12 +273,12 @@ where
     }
 
     LayerLoadResult {
-        outcome: LayerLoadOutcome::Loaded {
+        outcome: LayerLoadOutcome::Loaded(Box::new(LoadedLayer {
             name_to_uuid_inserts,
-            scenario_config: Box::new(scenario_config),
+            scenario_config,
             emit_world_loaded: true,
             scripts,
-        },
+        })),
         warnings: Vec::new(),
     }
 }
@@ -316,14 +336,14 @@ name = "raider_alpha"
     #[test]
     fn load_registers_named_entities_in_config_and_insert_list() {
         let result = evaluate("worlds/l1.toml", false, Some(LAYER_TOML));
-        let LayerLoadOutcome::Loaded {
+        let LayerLoadOutcome::Loaded(layer) = result.outcome else {
+            panic!("expected Loaded, got {:?}", result.outcome);
+        };
+        let LoadedLayer {
             name_to_uuid_inserts,
             scenario_config,
             ..
-        } = result.outcome
-        else {
-            panic!("expected Loaded, got {:?}", result.outcome);
-        };
+        } = *layer;
         assert_eq!(
             name_to_uuid_inserts,
             vec![("raider_alpha".to_string(), "uuid-1".to_string())]
@@ -342,11 +362,11 @@ name = "raider_alpha"
     #[test]
     fn a_scriptless_layer_carries_no_scripts() {
         let result = evaluate("worlds/l1.toml", false, Some(LAYER_TOML));
-        let LayerLoadOutcome::Loaded { scripts, .. } = result.outcome else {
+        let LayerLoadOutcome::Loaded(layer) = result.outcome else {
             panic!("expected Loaded, got {:?}", result.outcome);
         };
         assert!(
-            scripts.is_none(),
+            layer.scripts.is_none(),
             "a layer with no [script] block compiles no scripts"
         );
     }
@@ -364,10 +384,12 @@ seed = 1
 setup = "fn on_noop(ctx) { }"
 "#;
         let result = evaluate("worlds/l1.toml", false, Some(WITH_SCRIPT));
-        let LayerLoadOutcome::Loaded { scripts, .. } = result.outcome else {
+        let LayerLoadOutcome::Loaded(layer) = result.outcome else {
             panic!("expected Loaded, got {:?}", result.outcome);
         };
-        let scripts = scripts.expect("the layer's compiled [script] set is carried through");
+        let scripts = layer
+            .scripts
+            .expect("the layer's compiled [script] set is carried through");
         assert!(
             scripts.asts.contains_key("worlds/l1.toml#script.setup"),
             "the inline block lifts to its virtual path in the carried set"
@@ -396,10 +418,12 @@ seed = 1
             &resolver,
             counter_uuids(),
         );
-        let LayerLoadOutcome::Loaded { scripts, .. } = result.outcome else {
+        let LayerLoadOutcome::Loaded(layer) = result.outcome else {
             panic!("expected Loaded, got {:?}", result.outcome);
         };
-        let scripts = scripts.expect("the sibling unit compiles into the carried set");
+        let scripts = layer
+            .scripts
+            .expect("the sibling unit compiles into the carried set");
         assert!(
             scripts.asts.contains_key("worlds/wave.rhai"),
             "the sibling resolves beside the layer file: {:?}",
@@ -515,13 +539,10 @@ seed = 1
     #[test]
     fn load_emits_world_loaded_on_success() {
         let result = evaluate("worlds/l1.toml", false, Some(LAYER_TOML));
-        let LayerLoadOutcome::Loaded {
-            emit_world_loaded, ..
-        } = result.outcome
-        else {
+        let LayerLoadOutcome::Loaded(layer) = result.outcome else {
             panic!("expected Loaded, got {:?}", result.outcome);
         };
-        assert!(emit_world_loaded);
+        assert!(layer.emit_world_loaded);
     }
 
     #[test]

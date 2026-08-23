@@ -528,7 +528,7 @@ fn scripted_on_destroyed_completes_objective_through_the_live_pipeline() {
         // No declarative triggers; merge appends the scripted one and builds
         // the parallel handler table.
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
         assert_eq!(runtime.trigger_states.len(), 1);
     }
     assert_eq!(sr.handlers.len(), 1);
@@ -585,7 +585,7 @@ fn scripted_open_comms_queues_on_the_runtime_through_the_live_pipeline() {
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     assert!(
         sr.pending_comms_opens.is_empty(),
@@ -660,7 +660,7 @@ fn scripted_flag_write_chains_a_declarative_on_flag_set() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -725,7 +725,7 @@ fn scripted_flag_clear_chains_a_declarative_on_flag_cleared() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -792,7 +792,7 @@ fn scripted_flag_increment_chains_a_declarative_on_flag_set() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -859,7 +859,7 @@ fn scripted_and_dispatched_spawn_mint_the_same_entity_uuid() {
                 .name_to_uuid
                 .insert("raider".to_string(), raider_uuid.to_string());
             runtime.trigger_states = Vec::new();
-            merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+            merge_script_triggers(&mut runtime, &mut sr, None);
         }
         app.world_mut().insert_resource(sr);
         app.world_mut()
@@ -982,7 +982,7 @@ fn a_scripted_destroy_chains_on_destroyed_in_the_same_tick() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -1068,7 +1068,7 @@ fn a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -1140,7 +1140,7 @@ fn a_scripted_destroy_of_an_unknown_name_warns_and_keeps_the_rest_of_the_call() 
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
@@ -1199,7 +1199,7 @@ fn a_name_freed_by_a_scripted_destroy_is_reusable_by_a_later_spawn() {
             .name_to_uuid
             .insert("cue".to_string(), "cue-uuid-1033d".to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -1321,7 +1321,7 @@ fn scripted_callback_fires_after_the_delay_not_immediately() {
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
@@ -1398,7 +1398,7 @@ fn scripted_callback_can_reschedule_another_callback() {
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     {
@@ -1477,7 +1477,7 @@ fn scripted_callback_rescheduled_at_delay_zero_defers_to_the_next_tick() {
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     {
@@ -3960,13 +3960,21 @@ fn layer_entity_count(app: &App, path: &str) -> usize {
 
 const LAYER_A: &str = "tests/fixtures/layer_scripted_a.toml";
 const LAYER_B: &str = "tests/fixtures/layer_scripted_b.toml";
+const SHARED_X: &str = "tests/fixtures/layer_shared_x.toml";
+const SHARED_Y: &str = "tests/fixtures/layer_shared_y.toml";
 
 /// `layer_test_app` plus the trigger pipeline, so a layer's merged scripted
-/// trigger can actually be seen to FIRE rather than merely to be present.
+/// trigger can be seen to FIRE rather than merely to be present.
 ///
-/// `apply_world_layer_changes` is ordered before `collect_world_events` so a
-/// layer that lands this tick has its `WorldLoaded` drained in the same tick it
-/// was queued.
+/// The `.before(collect_world_events)` edge is an OBSERVATION convenience this
+/// harness adds and production does not have: it makes a layer that lands on
+/// tick N have its `WorldLoaded` drained on tick N instead of N+1, so a test can
+/// assert without an extra `app.update()`. It does not paper over anything —
+/// what the fix actually relies on is that a layer's trigger states and their
+/// `handlers` are written in the SAME system body, which is true wherever
+/// `apply_world_layer_changes` runs in the tick. Production leaves the applier
+/// unordered inside `SimSet::Physics` deliberately: adding a real edge there
+/// would move system order for every shipped world.
 fn scripted_layer_test_app() -> App {
     let mut app = ai_trigger_test_app();
     app.init_resource::<WorldLayerMap>()
@@ -3981,9 +3989,9 @@ fn scripted_layer_test_app() -> App {
 /// Queue a `Load` for `path` and step until it lands in the layer map.
 ///
 /// Two ticks rather than one for the FIRST scripted layer of a session: the
-/// applier inserts an empty `WorldScriptRuntime` and re-queues, so the merge (and
-/// the `WorldLoaded` it fires from) happens on the tick after. See
-/// `apply_world_layer_changes`' docs;
+/// applier inserts an empty `WorldScriptRuntime` and re-queues the evaluated
+/// layer, so the merge (and the `WorldLoaded` it fires from) happens on the tick
+/// after. See `apply_world_layer_changes`' docs;
 /// `the_first_scripted_layer_lands_a_tick_after_it_is_queued` pins that directly.
 fn load_layer(app: &mut App, path: &str) {
     app.world_mut()
@@ -4011,13 +4019,34 @@ fn unload_layer(app: &mut App, path: &str) {
     app.update();
 }
 
-/// The base-world flag store's value for `name` (scripted writes land here —
-/// a script emits `MutateFlag { target_layer: None }`).
-fn base_counter(app: &App, name: &str) -> i64 {
+/// A LAYER's own flag store — where a layer-origin handler's writes now land.
+fn layer_counter(app: &App, layer: &str, name: &str) -> i64 {
+    app.world()
+        .resource::<WorldLayerMap>()
+        .0
+        .get(layer)
+        .map(|wr| wr.flags.counter(name))
+        .unwrap_or(0)
+}
+
+/// Push a `FlagSet` scoped to `layer` onto the runtime's pending queue, so a
+/// layer's `on_flag_set` can be fired on demand from a test.
+fn probe_layer_flag(app: &mut App, name: &str, layer: &str) {
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .pending_world_events
+        .push(WorldEvent::FlagSet {
+            name: name.into(),
+            origin_layer: Some(layer.into()),
+        });
+    app.update();
+}
+
+fn trigger_state_count(app: &App) -> usize {
     app.world()
         .resource::<WorldContentRuntime>()
-        .flags
-        .counter(name)
+        .trigger_states
+        .len()
 }
 
 /// The acceptance case (issue #1045): a layer that authors a `[script]` block
@@ -4033,9 +4062,16 @@ fn a_layer_script_compiles_and_its_trigger_fires_after_load() {
     load_layer(&mut app, LAYER_A);
 
     assert_eq!(
-        base_counter(&app, "layer_a_loaded"),
+        layer_counter(&app, LAYER_A, "layer_a_loaded"),
         1,
         "the layer's on_world_loaded handler must run"
+    );
+    // And the write it made chained its OWN on_flag_set in the same pass — the
+    // natural bare-name authoring working end to end inside one layer.
+    assert_eq!(
+        layer_counter(&app, LAYER_A, "layer_a_probed"),
+        1,
+        "a layer-scoped flag write must fire that layer's own on_flag_set"
     );
 
     let sr = app.world().resource::<WorldScriptRuntime>();
@@ -4047,8 +4083,8 @@ fn a_layer_script_compiles_and_its_trigger_fires_after_load() {
     let runtime = app.world().resource::<WorldContentRuntime>();
     assert_eq!(
         runtime.trigger_states.len(),
-        2,
-        "on_world_loaded + on_flag_set"
+        3,
+        "on_world_loaded + two on_flag_set"
     );
     assert!(
         runtime
@@ -4061,6 +4097,40 @@ fn a_layer_script_compiles_and_its_trigger_fires_after_load() {
         sr.handlers.len(),
         runtime.trigger_states.len(),
         "handlers stays index-aligned with trigger_states"
+    );
+}
+
+/// Layer flag SCOPING (issue #1045): two layers watching and writing the same
+/// flag name do not see each other.
+///
+/// Both fixtures write and watch `probe`. If a scripted write still emitted at
+/// base scope, or a condition resolved past its own layer, loading both would
+/// cross-fire and each layer would run the other's handler.
+#[test]
+fn two_layers_sharing_a_flag_name_do_not_cross_fire() {
+    let mut app = scripted_layer_test_app();
+    load_layer(&mut app, LAYER_A);
+    load_layer(&mut app, LAYER_B);
+
+    assert_eq!(layer_counter(&app, LAYER_A, "layer_a_probed"), 1);
+    assert_eq!(layer_counter(&app, LAYER_B, "layer_b_probed"), 1);
+    assert_eq!(
+        layer_counter(&app, LAYER_A, "layer_b_probed"),
+        0,
+        "B's handler must not have written into A's store"
+    );
+    assert_eq!(
+        layer_counter(&app, LAYER_B, "layer_a_probed"),
+        0,
+        "nor A's into B's"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("probe"),
+        0,
+        "and neither write escaped to the base world's store"
     );
 }
 
@@ -4100,7 +4170,24 @@ fn the_first_scripted_layer_lands_a_tick_after_it_is_queued() {
             .contains_key(LAYER_A),
         "and re-queues the layer rather than merging it"
     );
-    assert_eq!(base_counter(&app, "layer_a_loaded"), 0);
+
+    // What is re-queued is the EVALUATED layer, not another `Load`. This is the
+    // whole of the wasm fix: a second `Load` would re-enter `load_scenario_toml`,
+    // which on wasm POPS the TOML out of the pending-fetch map (already consumed)
+    // while `request_world_fetch` refuses to re-ask — so it would answer
+    // `TomlUnavailable`, re-queue, and spin forever with nothing in the log.
+    {
+        let pending = app.world().resource::<PendingWorldLayerChanges>();
+        assert_eq!(pending.0.len(), 1);
+        assert!(
+            matches!(
+                &pending.0[0],
+                WorldLayerChange::DeferredApply { path, .. } if path == LAYER_A
+            ),
+            "the queued item must carry the evaluated outcome: {:?}",
+            pending.0[0]
+        );
+    }
 
     app.update();
     assert!(
@@ -4111,10 +4198,90 @@ fn the_first_scripted_layer_lands_a_tick_after_it_is_queued() {
         "tick two merges it"
     );
     assert_eq!(
-        base_counter(&app, "layer_a_loaded"),
+        layer_counter(&app, LAYER_A, "layer_a_loaded"),
         1,
         "and its opening handler runs on the same tick its states appear"
     );
+}
+
+/// The deferred apply reads the world source EXACTLY ONCE (issue #1045).
+///
+/// The native mirror of the wasm hang: `load_scenario_toml` is the one reader,
+/// and the tick-two apply must not go back to it. A counting `WorldReader` is not
+/// reachable from this system, so the proof is structural — the queued item is a
+/// `DeferredApply` carrying the outcome, and no `Load` for that path is ever
+/// queued again — plus the observable that the layer lands with its scripts
+/// merged, which a second evaluation could not have produced on wasm at all.
+#[test]
+fn a_deferred_layer_apply_never_re_enters_the_load_evaluation() {
+    let mut app = scripted_layer_test_app();
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: LAYER_A.into(),
+            loader_path: None,
+        });
+
+    app.update();
+    let queued_loads = app
+        .world()
+        .resource::<PendingWorldLayerChanges>()
+        .0
+        .iter()
+        .filter(|c| matches!(c, WorldLayerChange::Load { .. }))
+        .count();
+    assert_eq!(
+        queued_loads, 0,
+        "no fresh Load may be queued — that is the re-read that hangs on wasm"
+    );
+
+    app.update();
+    assert!(
+        app.world()
+            .resource::<PendingWorldLayerChanges>()
+            .0
+            .is_empty(),
+        "and the queue drains rather than spinning"
+    );
+    assert_eq!(trigger_state_count(&app), 3, "the layer's scripts merged");
+}
+
+/// The SAME scripted layer queued twice in one drain defers once (issue #1045).
+///
+/// A deferred layer has no `WorldLayerMap` entry yet, so the ordinary dedup
+/// cannot see it. Without counting a queued `DeferredApply` as loaded, both
+/// copies would evaluate — reading the world source twice, which wasm cannot do —
+/// and both would apply, the second overwriting the first's map entry and
+/// leaking its spawned entities.
+#[test]
+fn the_same_scripted_layer_queued_twice_in_one_drain_defers_once() {
+    let mut app = scripted_layer_test_app();
+    {
+        let mut pending = app.world_mut().resource_mut::<PendingWorldLayerChanges>();
+        for _ in 0..2 {
+            pending.0.push(WorldLayerChange::Load {
+                path: LAYER_A.into(),
+                loader_path: None,
+            });
+        }
+    }
+
+    app.update();
+    assert_eq!(
+        app.world().resource::<PendingWorldLayerChanges>().0.len(),
+        1,
+        "exactly one deferred apply, not two: {:?}",
+        app.world().resource::<PendingWorldLayerChanges>().0
+    );
+
+    app.update();
+    assert_eq!(trigger_state_count(&app), 3, "merged once, not twice");
+    assert_eq!(
+        app.world().resource::<WorldScriptRuntime>().handlers.len(),
+        3
+    );
+    assert_eq!(layer_counter(&app, LAYER_A, "layer_a_loaded"), 1);
 }
 
 /// Two scripted layers queued in ONE batch both merge, and into the same runtime.
@@ -4132,97 +4299,185 @@ fn two_scripted_layers_in_one_batch_both_merge() {
             loader_path: None,
         });
     }
-    // Tick one inserts the landing pad and re-queues both; tick two merges them.
+    // Tick one inserts the landing pad and defers both; tick two merges them.
     app.update();
     app.update();
 
-    let sr = app.world().resource::<WorldScriptRuntime>();
-    assert_eq!(sr.handlers.len(), 4, "two triggers from each layer");
     assert_eq!(
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len(),
-        4
+        app.world().resource::<WorldScriptRuntime>().handlers.len(),
+        6,
+        "three triggers from each layer"
     );
-    assert_eq!(base_counter(&app, "layer_a_loaded"), 1);
-    assert_eq!(base_counter(&app, "layer_b_loaded"), 1);
+    assert_eq!(trigger_state_count(&app), 6);
+    assert_eq!(layer_counter(&app, LAYER_A, "layer_a_loaded"), 1);
+    assert_eq!(layer_counter(&app, LAYER_B, "layer_b_loaded"), 1);
+}
+
+/// A `Load` and an `Unload` of the same path in ONE drain net to NOT LOADED
+/// (issue #1045).
+///
+/// The scripted layer defers its apply by a tick, so the unload arrives while
+/// the load is still sitting in the queue and finds no map entry to remove. Left
+/// alone it would no-op and the deferred load would land a tick later — an
+/// ordering inversion that turns "load it, then take it away" into "it is
+/// loaded". The unload cancels the queued apply instead.
+#[test]
+fn a_same_drain_load_then_unload_of_a_scripted_layer_ends_unloaded() {
+    let mut app = scripted_layer_test_app();
+    {
+        let mut pending = app.world_mut().resource_mut::<PendingWorldLayerChanges>();
+        pending.0.push(WorldLayerChange::Load {
+            path: LAYER_A.into(),
+            loader_path: None,
+        });
+        pending.0.push(WorldLayerChange::Unload(LAYER_A.into()));
+    }
+    app.update();
+    app.update();
+    app.update();
+
+    assert!(
+        !app.world()
+            .resource::<WorldLayerMap>()
+            .0
+            .contains_key(LAYER_A),
+        "the layer must not be loaded"
+    );
+    assert!(
+        app.world()
+            .resource::<PendingWorldLayerChanges>()
+            .0
+            .is_empty(),
+        "and nothing is left queued to land later"
+    );
+    assert_eq!(trigger_state_count(&app), 0, "no trigger states merged");
+    assert_eq!(layer_counter(&app, LAYER_A, "layer_a_loaded"), 0);
+}
+
+/// A shared sibling `.rhai` registers ONCE, and load/unload cycles do not grow
+/// the table (issue #1045).
+///
+/// Running a unit's top level is what builds its registrations, so the second
+/// world to name a shared file arrives carrying a duplicate of them. Appending
+/// those would double-register the shared `on_world_loaded` — firing the intro
+/// twice on the tick the second layer landed — and the retraction, which keys on
+/// the units a layer OWNS, would take neither back out.
+#[test]
+fn a_shared_sibling_unit_registers_once_and_does_not_grow_across_reloads() {
+    let mut app = scripted_layer_test_app();
+    load_layer(&mut app, SHARED_X);
+    load_layer(&mut app, SHARED_Y);
+
+    assert_eq!(
+        trigger_state_count(&app),
+        1,
+        "one resident unit, one registration"
+    );
+    assert_eq!(app.world().resource::<WorldScriptRuntime>().asts.len(), 1);
+    assert_eq!(
+        app.world().resource::<WorldScriptRuntime>().handlers.len(),
+        1
+    );
+    assert_eq!(
+        layer_counter(&app, SHARED_X, "shared_arrivals"),
+        1,
+        "the owning layer's handler ran exactly once"
+    );
+    assert_eq!(
+        layer_counter(&app, SHARED_Y, "shared_arrivals"),
+        0,
+        "and the sharing layer registered nothing of its own"
+    );
+
+    for cycle in 0..3 {
+        unload_layer(&mut app, SHARED_X);
+        unload_layer(&mut app, SHARED_Y);
+        assert_eq!(
+            trigger_state_count(&app),
+            0,
+            "cycle {cycle}: everything retracted"
+        );
+        assert_eq!(app.world().resource::<WorldScriptRuntime>().asts.len(), 0);
+        assert_eq!(
+            app.world().resource::<WorldScriptRuntime>().handlers.len(),
+            0
+        );
+
+        load_layer(&mut app, SHARED_X);
+        load_layer(&mut app, SHARED_Y);
+        assert_eq!(
+            trigger_state_count(&app),
+            1,
+            "cycle {cycle}: still exactly one registration"
+        );
+        assert_eq!(
+            app.world().resource::<WorldScriptRuntime>().handlers.len(),
+            1
+        );
+    }
 }
 
 /// THE parallel-vec guard (issue #1045 acceptance): unloading a layer whose
 /// trigger states sit BEFORE another layer's must take their `handlers` entries
 /// with them.
 ///
-/// Filtering `trigger_states` alone leaves `handlers` one entry too long and
-/// shifted, so the surviving trigger at index 0 resolves the UNLOADED layer's
-/// handler — `layer_a_probed` would be written instead of `layer_b_probed`.
-/// Both the structural check and the behavioural probe below catch that.
+/// Filtering `trigger_states` alone leaves `handlers` too long and shifted, so a
+/// surviving trigger resolves the UNLOADED layer's handler — `layer_a_rechecked`
+/// would be written instead of `layer_b_rechecked`. Both the structural check
+/// and the behavioural probe below catch that.
 #[test]
 fn unloading_a_layer_keeps_handlers_aligned_for_the_layers_that_remain() {
     let mut app = scripted_layer_test_app();
     load_layer(&mut app, LAYER_A);
     load_layer(&mut app, LAYER_B);
-    assert_eq!(
-        app.world()
-            .resource::<WorldContentRuntime>()
-            .trigger_states
-            .len(),
-        4,
-        "two triggers per layer"
-    );
+    assert_eq!(trigger_state_count(&app), 6, "three triggers per layer");
 
     unload_layer(&mut app, LAYER_A);
 
     // Structural: the two vecs are the same length, and every survivor is B's.
-    let sr = app.world().resource::<WorldScriptRuntime>();
-    let runtime = app.world().resource::<WorldContentRuntime>();
-    assert_eq!(runtime.trigger_states.len(), 2, "only B's triggers remain");
-    assert_eq!(
-        sr.handlers.len(),
-        runtime.trigger_states.len(),
-        "handlers must shrink WITH trigger_states, not stay behind"
-    );
-    assert!(
-        runtime
-            .trigger_states
-            .iter()
-            .all(|s| s.origin_layer.as_deref() == Some(LAYER_B)),
-        "A's states are gone"
-    );
-    assert!(
-        sr.handlers.iter().all(|h| h
-            .as_ref()
-            .is_some_and(|h| h.fn_name.starts_with("layer_b_"))),
-        "and so are A's handlers: {:?}",
-        sr.handlers
-    );
-    assert!(
-        !sr.asts.contains_key(&format!("{LAYER_A}#script.setup")),
-        "A's unit is retracted too"
-    );
-    assert!(
-        sr.asts.contains_key(&format!("{LAYER_B}#script.setup")),
-        "B's is not"
-    );
+    {
+        let sr = app.world().resource::<WorldScriptRuntime>();
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        assert_eq!(runtime.trigger_states.len(), 3, "only B's triggers remain");
+        assert_eq!(
+            sr.handlers.len(),
+            runtime.trigger_states.len(),
+            "handlers must shrink WITH trigger_states, not stay behind"
+        );
+        assert!(
+            runtime
+                .trigger_states
+                .iter()
+                .all(|s| s.origin_layer.as_deref() == Some(LAYER_B)),
+            "A's states are gone"
+        );
+        assert!(
+            sr.handlers.iter().all(|h| h
+                .as_ref()
+                .is_some_and(|h| h.fn_name.starts_with("layer_b_"))),
+            "and so are A's handlers: {:?}",
+            sr.handlers
+        );
+        assert!(
+            !sr.asts.contains_key(&format!("{LAYER_A}#script.setup")),
+            "A's unit is retracted too"
+        );
+        assert!(
+            sr.asts.contains_key(&format!("{LAYER_B}#script.setup")),
+            "B's is not"
+        );
+    }
 
-    // Behavioural: probe the surviving trigger and see WHICH handler runs. A
-    // desynced `handlers` would run A's here.
-    app.world_mut()
-        .resource_mut::<WorldContentRuntime>()
-        .pending_world_events
-        .push(WorldEvent::FlagSet {
-            name: "probe".into(),
-            origin_layer: None,
-        });
-    app.update();
-
+    // Behavioural: fire the surviving layer's own trigger and see WHICH handler
+    // runs. A desynced `handlers` would run A's here.
+    probe_layer_flag(&mut app, "recheck", LAYER_B);
     assert_eq!(
-        base_counter(&app, "layer_b_probed"),
+        layer_counter(&app, LAYER_B, "layer_b_rechecked"),
         1,
         "the surviving trigger must resolve its OWN handler"
     );
     assert_eq!(
-        base_counter(&app, "layer_a_probed"),
+        layer_counter(&app, LAYER_B, "layer_a_rechecked"),
         0,
         "and never the unloaded layer's"
     );
@@ -4256,27 +4511,28 @@ fn removing_a_layers_triggers_keeps_every_survivors_own_handler() {
             .collect()
     }
 
-    let mut states: Vec<TriggerState> = Vec::new();
+    let mut runtime = WorldContentRuntime::default();
     let mut sr = WorldScriptRuntime::empty();
 
     sr.triggers = vec![
         staged("base.toml#script.setup", "base_a"),
         staged("base.toml#script.setup", "base_b"),
     ];
-    merge_script_triggers(&mut states, &mut sr, None);
+    merge_script_triggers(&mut runtime, &mut sr, None);
     sr.triggers = vec![staged("l1.toml#script.setup", "l1_a")];
-    merge_script_triggers(&mut states, &mut sr, Some("l1.toml"));
+    merge_script_triggers(&mut runtime, &mut sr, Some("l1.toml"));
     sr.triggers = vec![staged("l2.toml#script.setup", "l2_a")];
-    merge_script_triggers(&mut states, &mut sr, Some("l2.toml"));
+    merge_script_triggers(&mut runtime, &mut sr, Some("l2.toml"));
 
-    assert_eq!(states.len(), 4);
+    assert_eq!(runtime.trigger_states.len(), 4);
     assert_eq!(sr.handlers.len(), 4, "one handler per appended state");
+    let generation_before = runtime.trigger_table_generation;
 
     assert_eq!(
-        remove_layer_script_triggers(&mut states, &mut sr.handlers, "l1.toml"),
+        remove_layer_script_triggers(&mut runtime, &mut sr.handlers, "l1.toml"),
         1
     );
-    assert_eq!(states.len(), 3);
+    assert_eq!(runtime.trigger_states.len(), 3);
     assert_eq!(
         sr.handlers.len(),
         3,
@@ -4288,20 +4544,73 @@ fn removing_a_layers_triggers_keeps_every_survivors_own_handler() {
         "every survivor kept the handler it arrived with"
     );
     assert_eq!(
-        states
+        runtime
+            .trigger_states
             .iter()
             .map(|s| s.origin_layer.as_deref())
             .collect::<Vec<_>>(),
         vec![None, None, Some("l2.toml")]
     );
+    assert_ne!(
+        runtime.trigger_table_generation, generation_before,
+        "a reshape must move the generation so index-keyed observers rebuild"
+    );
 
-    // Unloading a path that contributed nothing takes nothing.
+    // Unloading a path that contributed nothing takes nothing — and does not
+    // move the generation, so it costs no observer its history.
+    let generation_after = runtime.trigger_table_generation;
     assert_eq!(
-        remove_layer_script_triggers(&mut states, &mut sr.handlers, "never_loaded.toml"),
+        remove_layer_script_triggers(&mut runtime, &mut sr.handlers, "never_loaded.toml"),
         0
     );
-    assert_eq!(states.len(), 3);
+    assert_eq!(runtime.trigger_states.len(), 3);
     assert_eq!(sr.handlers.len(), 3);
+    assert_eq!(runtime.trigger_table_generation, generation_after);
+}
+
+/// The scoping rule a scripted flag write resolves through (issue #1045), over
+/// the one function that decides it.
+#[test]
+fn a_scripted_flag_write_resolves_against_its_handlers_own_layer() {
+    fn write(name: &str) -> ActionCmd {
+        ActionCmd::MutateFlag {
+            target_layer: None,
+            name: name.to_string(),
+            mutation: crate::world::dispatch::FlagMutation::Set,
+        }
+    }
+    // A live map holding one directly-loaded layer, so `parent:` has a real chain
+    // to walk: `[Some("l1.toml"), None]`, terminating at the base world.
+    let mut layers = WorldLayerMap::default();
+    layers.0.insert("l1.toml".into(), WorldRuntime::default());
+    let scoped = |name: &str, origin: Option<&str>| -> (bool, Option<String>, String) {
+        let mut cmd = write(name);
+        let kept = scope_scripted_flag_write(&mut cmd, "test", origin, Some(&layers));
+        match cmd {
+            ActionCmd::MutateFlag {
+                target_layer, name, ..
+            } => (kept, target_layer, name),
+            _ => unreachable!(),
+        }
+    };
+
+    // A base-world handler is untouched — every shipped world's behaviour.
+    assert_eq!(scoped("armed", None), (true, None, "armed".to_string()));
+    // A layer handler writes its OWN scope, which is where its conditions look.
+    assert_eq!(
+        scoped("armed", Some("l1.toml")),
+        (true, Some("l1.toml".to_string()), "armed".to_string())
+    );
+    // `parent:` remains the deliberate escape outward; with no `loader_path`
+    // recorded, one step out of a directly-loaded layer is the base world.
+    assert_eq!(
+        scoped("parent:armed", Some("l1.toml")),
+        (true, None, "armed".to_string())
+    );
+    // Walking past the root is dropped rather than written somewhere arbitrary —
+    // the same "no match" answer `resolve_layer_prefix` gives a condition.
+    assert!(!scoped("parent:armed", None).0);
+    assert!(!scoped("parent:parent:armed", Some("l1.toml")).0);
 }
 
 /// The shipped-set guard: a script-free layer — `reinforcements.toml` and every
@@ -5065,7 +5374,7 @@ fn trigger_chain_exceeding_max_passes_stops_at_the_cap() {
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
         runtime.pending_world_events.push(WorldEvent::WorldLoaded);
     }
     app.world_mut().insert_resource(sr);
@@ -6629,7 +6938,7 @@ fn when_predicate_suppresses_a_scripted_spawn() {
             .name_to_uuid
             .insert("src".to_string(), "src-uuid".to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
+        merge_script_triggers(&mut runtime, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 

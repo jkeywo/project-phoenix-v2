@@ -1990,6 +1990,86 @@ fn default_tube_volley_max() -> u32 {
 ///   - duplicate `id` values
 ///   - `fire_arc_deg` outside `(0, 360]`
 ///   - `auto_arc_deg` outside `(0, fire_arc_deg]`
+/// Load-time validation for the Steering axis's MODIFIER param sets (#929).
+///
+/// The leg gates around these — [`COMBAT_ORBIT_PARAMS`], `TORPEDO_BEARING_PARAMS`
+/// — answer a half-authored set by declining the whole arm at runtime, which is
+/// the right answer for them: a leg that does not happen is a behaviour a
+/// designer can watch not happen. Arc-keeping and the weak-broadside flip are
+/// different in kind. They MODIFY a ring that is already running, so a
+/// half-authored set produces a hull that flies a slightly wrong ring for ever
+/// and never says why. That belongs at load, where the author is still looking.
+///
+/// Three claims, and each one is a hazard that was live before it was checked:
+///
+///   * either every scalar of a set or none of it. The mixed case is always a
+///     mistake — nothing reads a lone `arc_keep_speed`.
+///   * `arc_keep_speed > 0.0`. Zero does not mean "slow", it means STOP, and a
+///     hull parked inside a hostile's guns is exactly the hazard
+///     [`COMBAT_ORBIT_PARAMS`]'s all-or-nothing gate was written to prevent.
+///     (No upper bound: authoring it ABOVE `combat_orbit_speed` is a legitimate,
+///     if odd, "go faster near the edge" and the doctrine still flies.)
+///   * `weak_shield_restore_hp >= weak_shield_flip_hp`. An inverted pair is not a
+///     deadband; the latch would clear on the tick it set. This replaces a
+///     silent `restore.max(flip)` clamp at the read site — substituting the
+///     value an author "appears to have meant" is how a hull ends up flying a
+///     doctrine nobody wrote down.
+pub(crate) fn validate_helm_steering_param_sets(
+    ai: &crate::entities::ai_policy_schema::FineSystemAiConfigToml,
+) -> Result<(), String> {
+    for set in [
+        crate::ship::helm_ai::ARC_KEEP_PARAMS,
+        crate::ship::helm_ai::WEAK_SHIELD_FLIP_PARAMS,
+    ] {
+        let present: Vec<&str> = set
+            .iter()
+            .copied()
+            .filter(|name| ai.param.contains_key(*name))
+            .collect();
+        if !present.is_empty() && present.len() != set.len() {
+            let missing: Vec<&str> = set
+                .iter()
+                .copied()
+                .filter(|name| !ai.param.contains_key(*name))
+                .collect();
+            return Err(format!(
+                "[helm_console.steering_ai.param] authors {present:?} without {missing:?}: \
+                 these are read as one set, and a partially authored one modifies the \
+                 fighting ring in a way nothing else in the hull can explain"
+            ));
+        }
+    }
+    if let Some(speed) = ai
+        .param
+        .get(crate::ship::helm_ai::ARC_KEEP_SPEED_PARAM)
+        .copied()
+    {
+        if speed <= 0.0 {
+            return Err(format!(
+                "[helm_console.steering_ai.param] arc_keep_speed = {speed} must be > 0: \
+                 zero is not a slow ring, it is a parked ship inside a hostile's guns"
+            ));
+        }
+    }
+    if let (Some(flip), Some(restore)) = (
+        ai.param
+            .get(crate::ship::helm_ai::WEAK_SHIELD_FLIP_HP_PARAM)
+            .copied(),
+        ai.param
+            .get(crate::ship::helm_ai::WEAK_SHIELD_RESTORE_HP_PARAM)
+            .copied(),
+    ) {
+        if restore < flip {
+            return Err(format!(
+                "[helm_console.steering_ai.param] weak_shield_restore_hp = {restore} is below \
+                 weak_shield_flip_hp = {flip}: that is not a deadband, it is a latch that \
+                 clears on the tick it sets"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_phaser_banks(banks: &[PhaserBankConfig]) -> Result<(), String> {
     if banks.is_empty() {
         return Err("phaser_banks list is empty".into());
@@ -3681,6 +3761,7 @@ impl EntityConfig {
                     HELM_STEERING_VERBS,
                 )
                 .map_err(SerdeError::custom)?;
+                validate_helm_steering_param_sets(ai).map_err(SerdeError::custom)?;
             }
             // Secondary helm fine-actuator policies (issue #780): each drives its
             // own single channel with its own single mode verb. Wrong-axis verbs,

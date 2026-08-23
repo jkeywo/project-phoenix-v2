@@ -915,35 +915,31 @@ where
     //
     // A LATCH rather than a per-tick comparison, because the decision needs
     // hysteresis and hysteresis needs to know which side of the deadband it came
-    // from. Flip when the arc facing the enemy falls to the authored floor;
-    // unflip only once it has climbed back to the authored (higher) restore
-    // reading. An arc regenerating a point a second across a single threshold
-    // would otherwise reverse the ring every few ticks, which is worse than
-    // either side of the choice.
+    // from. Folded here, in the one per-tick memory site, so it moves on the same
+    // tick as the readings the surface will pair it with. Only the axis that
+    // AUTHORS the whole set folds anything — every other axis (and every hull
+    // that never authors it) leaves the slots untouched and the ring unmirrored.
     //
-    // Folded here, in the one per-tick memory site, so it moves on the same tick
-    // as the readings the surface will pair it with. Only the axis that AUTHORS
-    // the pair folds anything — every other axis (and every hull that never
-    // authors it) leaves the slot untouched and the ring unmirrored.
-    if let (Some(flip_at), Some(restore_at), Some(hp)) = (
-        policy.params.get(WEAK_SHIELD_FLIP_HP_PARAM),
-        policy.params.get(WEAK_SHIELD_RESTORE_HP_PARAM),
-        facts.get(OWN_FACING_SHIELD_HP_FACT),
-    ) {
-        // A restore floor below the flip floor is not a deadband, it is a
-        // thrash generator with extra steps; treat the pair as the single
-        // threshold the author appears to have meant rather than oscillating.
-        let restore_at = restore_at.max(flip_at);
-        let flipped = state.memory.get(BROADSIDE_FLIP_MEMORY).unwrap_or(0.0) > 0.0;
-        let now_flipped = if flipped {
-            hp < restore_at
-        } else {
-            hp <= flip_at
-        };
-        state
-            .memory
-            .set(BROADSIDE_FLIP_MEMORY, if now_flipped { 1.0 } else { 0.0 });
-    }
+    // THE LATCH REMEMBERS AN ARC, NOT JUST A STATE, and that is the correction
+    // this pass exists for. The first design tripped and cleared on
+    // `own_facing_shield_hp` — whichever arc faces the target NOW. But mirroring
+    // the ring is an instruction to change which arc that is: the hull would flip
+    // to protect a beaten arc, swing, bring a healthy arc into the reading within
+    // a few degrees of turn, watch the HP jump by a whole arc's worth, clear the
+    // latch and un-mirror. A limit cycle, and it measured as one — byte-identical
+    // to no flip on nine of twenty-eight seeds and worse on aggregate.
+    //
+    // So the trip records the arc's INDEX and the restore reads that arc through
+    // the `own_shield_hp_arc_<i>` family, which the ring's own geometry cannot
+    // move. A minimum dwell guards the remaining case identity does not: an arc
+    // crossing the restore threshold on regeneration or a focus change while the
+    // swing the flip ordered is still in flight.
+    //
+    // Three ways to NOT clear, all deliberate: before the dwell expires, while
+    // the named arc is still below the restore reading, and when the named arc
+    // has no reading at all (a hull that lost facings mid-run). The last is the
+    // interesting one — an absent reading cannot confirm recovery, so it holds.
+    fold_broadside_flip_latch(&policy.params, &mut state.memory, facts, now);
 
     // The private bag is seeded from THIS fine system's own state component and
     // nothing else (AC3) — including the memory-derived fact.

@@ -1287,20 +1287,21 @@ pub(crate) fn build_pass_surface(
     // finally spending a capability the hull was already carrying — the player
     // cruiser has authored `low_speed_turn_boost = 0.2` all along.
     //
-    // Both params are required together, and a hull that authors neither flies
-    // exactly the ring it always did. The reading is absent when there is no
-    // target, which is also when there is no ring to fly.
-    let combat_orbit_speed = match (
+    // Both params are required together — see [`ARC_KEEP_PARAMS`], and a
+    // half-authored pair is a LOAD error rather than a silent decline, because
+    // unlike the leg gates around it this modifies a ring that is already
+    // running instead of selecting an arm a designer can watch not happen.
+    //
+    // A hull that authors neither flies exactly the ring it always did. The
+    // reading is absent when there is no target, which is also when there is no
+    // ring to fly, and — note — while the bow-hold leg is flown: `combat_orbit`
+    // is false there, so arc-keeping cannot slow a torpedo run.
+    let combat_orbit_speed = arc_keep_throttle(
         combat_orbit,
-        steering_policy.params.get(ARC_KEEP_MARGIN_DEG_PARAM),
-        steering_policy.params.get(ARC_KEEP_SPEED_PARAM),
-        facts.get(OWN_BANK_ARC_MARGIN_DEG_FACT),
-    ) {
-        (true, Some(margin_at), Some(slow_speed), Some(margin)) if margin <= margin_at => {
-            slow_speed as f32
-        }
-        _ => combat_orbit_speed,
-    };
+        &steering_policy.params,
+        facts,
+        combat_orbit_speed,
+    );
 
     // ── The weak-broadside flip (issue #929) ────────────────────────────────
     //

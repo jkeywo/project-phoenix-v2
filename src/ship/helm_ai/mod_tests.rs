@@ -11537,3 +11537,480 @@ fn a_hazard_relocates_the_firing_position_without_ending_the_hold() {
         range_to_bogey(&mut app)
     );
 }
+
+// ── The broadside readings and the two levers they drive (issue #929) ────────
+//
+// Unit-level, deliberately: the sweeps that justify the TUNING live in
+// `assets/entities/alliance_cruiser.toml`'s rationale and in `headless_runner`,
+// and a seeded fleet action is a poor instrument for "does the minimum-over-
+// banks fold pick the minimum". These pin the MECHANISM, so a future retune that
+// breaks the fold fails here with a sentence instead of failing there with a
+// win-rate.
+
+/// A shield system with `n` evenly-spaced arcs, every arc at `hp`.
+fn shields_with(n: usize, hp: i32) -> crate::ship::shields::ShipShields {
+    let mut sys =
+        crate::weapons::shield::ShieldSystem::new(&crate::weapons::shield::ShieldConfig {
+            num_facings: n,
+            max_hp: 100,
+            regen_per_sec: 0.0,
+            offline_duration: 10.0,
+        });
+    for facing in &mut sys.facings {
+        facing.hp = hp;
+    }
+    crate::ship::shields::ShipShields(sys, 1.0)
+}
+
+/// One phaser bank: centreline `facing_deg`, `fire_arc_deg` wide, `dps` damage.
+fn bank(
+    id: &str,
+    facing_deg: f32,
+    fire_arc_deg: f32,
+    dps: f32,
+) -> crate::entities::config::PhaserBankConfig {
+    crate::entities::config::PhaserBankConfig {
+        id: id.into(),
+        facing_deg,
+        fire_arc_deg,
+        auto_arc_deg: fire_arc_deg,
+        beam_damage_per_sec: dps,
+        ..Default::default()
+    }
+}
+
+fn phasers(
+    banks: Vec<crate::entities::config::PhaserBankConfig>,
+) -> crate::entities::config::PhaserCombatConfig {
+    crate::entities::config::PhaserCombatConfig { banks }
+}
+
+/// Seed the broadside facts for a target on `bearing_deg`, and hand back the bag.
+fn broadside_facts_at(
+    bearing_deg: f32,
+    shields: Option<&crate::ship::shields::ShipShields>,
+    phasers: Option<&crate::entities::config::PhaserCombatConfig>,
+) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set(BEARING_TO_TARGET_FACT, bearing_deg.to_radians() as f64);
+    seed_own_broadside_facts(&mut facts, shields, phasers);
+    facts
+}
+
+/// THE FOLD IS A MINIMUM OVER BEARING BANKS, and the test is the case that made
+/// it one.
+///
+/// Two 270-degree arcs on the centreline (the shipped cruiser's geometry) overlap
+/// so heavily that their union has no gap: the BEST-bearing bank's margin never
+/// falls below 45 degrees at any bearing at all, so a threshold under 45 could
+/// never fire and one above it would fire always. Yet beams end constantly,
+/// because `tick_beams_prepare` asks about the ONE bank that is burning. The
+/// reading a helm can act on is how soon the FIRST bearing bank loses it.
+///
+/// At 50 degrees off the bow the fore bank (facing 0, ±135) has 85 degrees in
+/// hand and the aft bank (facing 180, ±135) has 5. The fact must say 5.
+#[test]
+fn the_bank_arc_margin_is_the_soonest_bearing_bank_not_the_best_one() {
+    let cfg = phasers(vec![
+        bank("fore", 0.0, 270.0, 10.0),
+        bank("aft", 180.0, 270.0, 10.0),
+    ]);
+    let facts = broadside_facts_at(50.0, None, Some(&cfg));
+    let margin = facts
+        .get(OWN_BANK_ARC_MARGIN_DEG_FACT)
+        .expect("a bearing and an armed bank must produce a margin");
+
+    assert!(
+        (margin - 5.0).abs() < 1e-3,
+        "the fold must report the SOONEST bank to drop the target (aft, 5 deg in \
+         hand), not the best-placed one (fore, 85). Reading the maximum is what \
+         the first draft did, and on this geometry it is a constant: read {margin}"
+    );
+}
+
+/// The fallback when the minimum is over an empty set.
+///
+/// A single narrow bank with the target behind it: nothing bears, so there is no
+/// "soonest to drop" to report. The honest remaining reading is the nearest arc's
+/// NEGATIVE margin — how far outside it the target sits — and the sign is what
+/// keeps an authored `<= margin` guard from reading a blind spot as "on the edge,
+/// slow down".
+#[test]
+fn an_arc_margin_with_nothing_bearing_reports_how_far_outside_the_nearest_arc_is() {
+    let cfg = phasers(vec![bank("fore", 0.0, 90.0, 10.0)]);
+    let facts = broadside_facts_at(120.0, None, Some(&cfg));
+    let margin = facts
+        .get(OWN_BANK_ARC_MARGIN_DEG_FACT)
+        .expect("a bearing and an armed bank must produce a margin");
+
+    assert!(
+        (margin - -75.0).abs() < 1e-3,
+        "with a 90-degree bank on the bow and the target 120 degrees off it, the \
+         target is 75 degrees outside the only arc there is: expected -75, read \
+         {margin}"
+    );
+}
+
+/// The TERMINATION gate is `fire_arc_deg`, and this pins the field the fold
+/// reads rather than trusting the comment.
+///
+/// `validate_phaser_banks` requires `auto_arc_deg <= fire_arc_deg`, so the two
+/// can only differ in one direction: auto is the tighter. A hull that differs
+/// (`alliance_battleship`, fire 270 / auto 180) must be measured against the
+/// edge a BURNING beam dies at — `tick_beams_prepare` ends the cycle on
+/// `!in_arc(.., fire_arc_deg)` — not the edge a new one would refuse to start at.
+#[test]
+fn the_bank_arc_margin_measures_the_fire_arc_and_not_the_auto_arc() {
+    let mut wide_fire = bank("fore", 0.0, 270.0, 10.0);
+    wide_fire.auto_arc_deg = 180.0;
+    let facts = broadside_facts_at(100.0, None, Some(&phasers(vec![wide_fire])));
+    let margin = facts
+        .get(OWN_BANK_ARC_MARGIN_DEG_FACT)
+        .expect("a bearing and an armed bank must produce a margin");
+
+    assert!(
+        (margin - 35.0).abs() < 1e-3,
+        "fire 270 gives 135 degrees of half-arc and the target is 100 off the bow, \
+         so 35 remain before the beam is cut. Reading `auto_arc_deg` instead would \
+         say -10 and have the helm give up a ring it still has a burning beam on: \
+         read {margin}"
+    );
+}
+
+/// A bank authored to hurt nothing is not a reason to give away the ring.
+#[test]
+fn a_zero_damage_bank_does_not_pull_the_arc_margin_down() {
+    let armed = phasers(vec![bank("fore", 0.0, 270.0, 10.0)]);
+    let with_dud = phasers(vec![
+        bank("fore", 0.0, 270.0, 10.0),
+        bank("dud", 180.0, 270.0, 0.0),
+    ]);
+
+    assert_eq!(
+        broadside_facts_at(50.0, None, Some(&armed)).get(OWN_BANK_ARC_MARGIN_DEG_FACT),
+        broadside_facts_at(50.0, None, Some(&with_dud)).get(OWN_BANK_ARC_MARGIN_DEG_FACT),
+        "an unarmed bank must not move the margin — its edge costs the hull nothing"
+    );
+}
+
+/// The whole ladder is seeded, and the indexed reading agrees with the
+/// facing-relative one.
+///
+/// The agreement is the point: the latch trips on `own_facing_shield_hp` and
+/// restores on `own_shield_hp_arc_<index>`, so if the index the seeder reports
+/// did not name the arc the HP came from, the latch would protect one arc and
+/// wait on another.
+#[test]
+fn every_arc_gets_its_own_reading_and_the_index_names_the_one_facing_the_target() {
+    let mut shields = shields_with(4, 100);
+    // Beat down whichever arc looks aft, so the two readings can disagree.
+    let aft = shields.0.facing_index_for_bearing(std::f32::consts::PI);
+    shields.0.facings[aft].hp = 7;
+
+    let facts = broadside_facts_at(180.0, Some(&shields), None);
+    let index = facts
+        .get(OWN_FACING_SHIELD_INDEX_FACT)
+        .expect("a bearing and a shield system must produce an index");
+    let facing_hp = facts
+        .get(OWN_FACING_SHIELD_HP_FACT)
+        .expect("...and an HP reading");
+
+    assert_eq!(index as usize, aft, "the index must name the arc astern");
+    assert_eq!(facing_hp, 7.0, "and that arc is the beaten one");
+    assert_eq!(
+        facts.get(&format!("{OWN_SHIELD_HP_ARC_PREFIX}{aft}")),
+        Some(7.0),
+        "the indexed family must agree with the facing-relative reading, or the \
+         latch protects one arc and waits on another"
+    );
+    for i in 0..shields.0.facings.len() {
+        assert!(
+            facts
+                .get(&format!("{OWN_SHIELD_HP_ARC_PREFIX}{i}"))
+                .is_some(),
+            "every arc needs a reading — a latch that named arc {i} and found no \
+             fact would never clear"
+        );
+    }
+}
+
+/// The absent-fact contract, both halves.
+///
+/// No target is not "my shields are fine" and no shields is not "my shields are
+/// down"; both are "no reading", and an authored guard on an absent fact reads
+/// false rather than picking a side.
+#[test]
+fn the_broadside_readings_are_absent_rather_than_zero_when_there_is_nothing_to_read() {
+    let shields = shields_with(4, 100);
+    let cfg = phasers(vec![bank("fore", 0.0, 270.0, 10.0)]);
+
+    // No bearing at all: no target.
+    let mut facts = crate::world::flags::AiFacts::new();
+    seed_own_broadside_facts(&mut facts, Some(&shields), Some(&cfg));
+    for name in [
+        OWN_BANK_ARC_MARGIN_DEG_FACT,
+        OWN_FACING_SHIELD_HP_FACT,
+        OWN_FACING_SHIELD_INDEX_FACT,
+    ] {
+        assert_eq!(
+            facts.get(name),
+            None,
+            "`{name}` must be absent with no target — which of my arcs faces \
+             nothing is not a question with a numeric answer"
+        );
+    }
+    assert_eq!(facts.get(&format!("{OWN_SHIELD_HP_ARC_PREFIX}0")), None);
+
+    // A bearing, but a hull with no shields and no guns.
+    let facts = broadside_facts_at(50.0, None, None);
+    for name in [
+        OWN_BANK_ARC_MARGIN_DEG_FACT,
+        OWN_FACING_SHIELD_HP_FACT,
+        OWN_FACING_SHIELD_INDEX_FACT,
+    ] {
+        assert_eq!(
+            facts.get(name),
+            None,
+            "`{name}` must be absent for a hull that has no such component — a \
+             doctrine reacting to its own absence is worse than one that declines"
+        );
+    }
+}
+
+/// F4's direction of agreement: run the REAL seeder and ask the registry about
+/// every name it produced.
+///
+/// The registry's own drift test pins the catalogue against the per-host
+/// descriptors, which keeps those two consistent with each other and says
+/// nothing about the code. #929 shipped four seeded facts that no descriptor
+/// declared, and both halves of that test stayed green; the only symptom was a
+/// load error telling an author that `fact(own_facing_shield_hp)` named
+/// something no helm seeder produces, at the moment they wrote the one guard
+/// that would have used it.
+#[test]
+fn every_broadside_fact_the_seeder_writes_is_one_this_host_declares() {
+    let shields = shields_with(4, 100);
+    let cfg = phasers(vec![
+        bank("fore", 0.0, 270.0, 10.0),
+        bank("aft", 180.0, 270.0, 10.0),
+    ]);
+    let facts = broadside_facts_at(50.0, Some(&shields), Some(&cfg));
+
+    let host = &crate::entities::ai_flag_hosts::HELM_STEERING;
+    let mut checked = 0;
+    for (name, _) in facts.iter() {
+        if name == BEARING_TO_TARGET_FACT {
+            continue; // seeded by the fixture, not by the seeder under test
+        }
+        assert!(
+            host.seeds_fact(crate::entities::ai_flag_hosts::FactScope::Ship, name),
+            "`seed_own_broadside_facts` writes `{name}`, which the helm host's \
+             registry does not declare. An authored `fact({name})` guard would be \
+             REJECTED at load with a message saying no helm seeder produces it — \
+             which is false, and points the author away from the fix"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 7,
+        "this fixture should exercise the margin, the facing HP, the facing index \
+         and one reading per arc: only {checked} names were checked, so the \
+         agreement above is weaker than it looks"
+    );
+}
+
+/// A latch under test, with the shipped hull's thresholds.
+fn flip_params(flip: f32, restore: f32, dwell: f32) -> crate::world::flags::AiParams {
+    let mut params = crate::world::flags::AiParams::default();
+    params.set(WEAK_SHIELD_FLIP_HP_PARAM, flip);
+    params.set(WEAK_SHIELD_RESTORE_HP_PARAM, restore);
+    params.set(WEAK_SHIELD_FLIP_DWELL_SECS_PARAM, dwell);
+    params
+}
+
+/// Facts as the latch sees them: the arc facing the target, its index, and the
+/// per-arc ladder.
+fn latch_facts(facing_index: usize, arc_hp: &[f64]) -> crate::world::flags::AiFacts {
+    let mut facts = crate::world::flags::AiFacts::new();
+    facts.set(OWN_FACING_SHIELD_HP_FACT, arc_hp[facing_index]);
+    facts.set(OWN_FACING_SHIELD_INDEX_FACT, facing_index as f64);
+    for (i, hp) in arc_hp.iter().enumerate() {
+        facts.set(&format!("{OWN_SHIELD_HP_ARC_PREFIX}{i}"), *hp);
+    }
+    facts
+}
+
+/// THE LIMIT CYCLE, as a regression test.
+///
+/// This is the exact sequence the first design failed on. Arc 2 is beaten to 10
+/// and faces the target, so the latch trips. The ring then mirrors — which is an
+/// instruction to bring a DIFFERENT arc round — and within a few degrees of turn
+/// arc 0, untouched at 100, is the one facing the enemy. The old latch read
+/// "whichever arc faces the target", saw 100, cleared, un-mirrored, and started
+/// over; measured across 28 seeds the result was byte-identical to no flip on
+/// nine of them.
+///
+/// The latch must hold, because arc 2 — the arc it named — is still at 10.
+#[test]
+fn the_flip_latch_holds_when_the_swing_it_ordered_brings_a_healthy_arc_around() {
+    let params = flip_params(25.0, 60.0, 4.0);
+    let mut memory = crate::world::flags::AiPolicyMemory::default();
+
+    // Arc 2 beaten and facing the enemy: trip.
+    fold_broadside_flip_latch(
+        &params,
+        &mut memory,
+        &latch_facts(2, &[100.0, 100.0, 10.0, 100.0]),
+        0.0,
+    );
+    assert_eq!(
+        memory.get(BROADSIDE_FLIP_MEMORY),
+        Some(1.0),
+        "an arc at 10 against a floor of 25 must trip the flip"
+    );
+    assert_eq!(
+        memory.get(BROADSIDE_FLIP_ARC_MEMORY),
+        Some(2.0),
+        "and the latch must record WHICH arc, or it cannot tell recovery from rotation"
+    );
+
+    // The swing the flip ordered brings the healthy arc 0 into the bearing, well
+    // past the dwell so only identity can be what holds the latch.
+    fold_broadside_flip_latch(
+        &params,
+        &mut memory,
+        &latch_facts(0, &[100.0, 100.0, 10.0, 100.0]),
+        30.0,
+    );
+    assert_eq!(
+        memory.get(BROADSIDE_FLIP_MEMORY),
+        Some(1.0),
+        "the arc now facing the target is a healthy one BECAUSE the flip worked. \
+         Clearing on that reading is a feedback loop: the hull un-mirrors, the \
+         beaten arc comes back round, and it flips again — for ever"
+    );
+}
+
+/// The dwell, isolated: the named arc recovers immediately and the latch must
+/// still hold until the authored time has been served.
+///
+/// The case it guards is not hypothetical — an arc crosses the restore threshold
+/// on regeneration or a focus change while the swing is still in flight, and
+/// unflipping there costs the whole manoeuvre and buys nothing.
+#[test]
+fn the_flip_latch_serves_its_authored_dwell_before_it_will_look_at_recovery() {
+    let params = flip_params(25.0, 60.0, 4.0);
+    let mut memory = crate::world::flags::AiPolicyMemory::default();
+    fold_broadside_flip_latch(
+        &params,
+        &mut memory,
+        &latch_facts(2, &[100.0, 100.0, 10.0, 100.0]),
+        100.0,
+    );
+    assert_eq!(memory.get(BROADSIDE_FLIP_MEMORY), Some(1.0));
+
+    // Fully recovered, one tick later.
+    let recovered = latch_facts(2, &[100.0, 100.0, 100.0, 100.0]);
+    fold_broadside_flip_latch(&params, &mut memory, &recovered, 103.9);
+    assert_eq!(
+        memory.get(BROADSIDE_FLIP_MEMORY),
+        Some(1.0),
+        "3.9 s into a 4 s dwell the latch must hold even on a fully recovered arc"
+    );
+
+    fold_broadside_flip_latch(&params, &mut memory, &recovered, 104.0);
+    assert_eq!(
+        memory.get(BROADSIDE_FLIP_MEMORY),
+        Some(0.0),
+        "and at the authored dwell exactly, with the named arc above the restore \
+         reading, it clears"
+    );
+}
+
+/// The hysteresis band, read off the arc the latch named.
+#[test]
+fn the_flip_latch_clears_on_the_restore_reading_and_not_the_flip_one() {
+    let params = flip_params(25.0, 60.0, 4.0);
+    let mut memory = crate::world::flags::AiPolicyMemory::default();
+    fold_broadside_flip_latch(
+        &params,
+        &mut memory,
+        &latch_facts(2, &[100.0, 100.0, 10.0, 100.0]),
+        0.0,
+    );
+
+    // Back above the FLIP floor but inside the deadband, dwell long served.
+    fold_broadside_flip_latch(
+        &params,
+        &mut memory,
+        &latch_facts(2, &[100.0, 100.0, 59.0, 100.0]),
+        50.0,
+    );
+    assert_eq!(
+        memory.get(BROADSIDE_FLIP_MEMORY),
+        Some(1.0),
+        "59 is above the flip floor of 25 and below the restore reading of 60: \
+         that is the deadband, and a latch that cleared there would reverse the \
+         ring every few ticks while the arc regenerates through it"
+    );
+
+    fold_broadside_flip_latch(
+        &params,
+        &mut memory,
+        &latch_facts(2, &[100.0, 100.0, 60.0, 100.0]),
+        51.0,
+    );
+    assert_eq!(memory.get(BROADSIDE_FLIP_MEMORY), Some(0.0));
+}
+
+/// An arc the ladder no longer reports cannot be read as recovered.
+///
+/// A hull that lost facings mid-run leaves the latch naming an index with no
+/// fact behind it. "Cannot confirm recovery" is not "recovered", so it holds.
+#[test]
+fn the_flip_latch_holds_when_the_arc_it_named_has_no_reading_left() {
+    let params = flip_params(25.0, 60.0, 4.0);
+    let mut memory = crate::world::flags::AiPolicyMemory::default();
+    fold_broadside_flip_latch(
+        &params,
+        &mut memory,
+        &latch_facts(2, &[100.0, 100.0, 10.0, 100.0]),
+        0.0,
+    );
+
+    // Only two arcs left, and neither is arc 2.
+    fold_broadside_flip_latch(&params, &mut memory, &latch_facts(0, &[100.0, 100.0]), 60.0);
+    assert_eq!(
+        memory.get(BROADSIDE_FLIP_MEMORY),
+        Some(1.0),
+        "the named arc has no reading, so recovery is unconfirmed and the latch holds"
+    );
+}
+
+/// A hull that authors none of the set never has the slots written at all, so
+/// the ring it flies is bit-for-bit the ring it flew before this issue.
+#[test]
+fn an_unauthored_hull_never_acquires_a_flip_slot() {
+    let mut memory = crate::world::flags::AiPolicyMemory::default();
+    let facts = latch_facts(2, &[0.0, 0.0, 0.0, 0.0]);
+
+    fold_broadside_flip_latch(
+        &crate::world::flags::AiParams::default(),
+        &mut memory,
+        &facts,
+        0.0,
+    );
+    assert_eq!(memory.get(BROADSIDE_FLIP_MEMORY), None);
+
+    // And a HALF-authored one is refused too, rather than half-applied. (The
+    // load validator makes this unreachable from TOML; the guard is here because
+    // the runtime must not depend on the validator having run.)
+    let mut half = crate::world::flags::AiParams::default();
+    half.set(WEAK_SHIELD_FLIP_HP_PARAM, 25.0);
+    fold_broadside_flip_latch(&half, &mut memory, &facts, 0.0);
+    assert_eq!(
+        memory.get(BROADSIDE_FLIP_MEMORY),
+        None,
+        "a floor with no restore reading and no dwell is not a latch"
+    );
+}

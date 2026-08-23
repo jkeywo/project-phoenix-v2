@@ -397,9 +397,30 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// distinguishes that save from one captured mid-manoeuvre, so both are refused
 /// by `Versions::check`, which names the dimension.
 ///
-/// Format 12 is defined by the COMBINED #1242 + #929 shape: `ai_world` above AND
-/// `WeaponState.beams` as a 5-tuple (the #929 drawn-cooldown column). The two
-/// widenings landed in the same unpushed batch, so no build that wrote a
+/// Format 12 is defined by the COMBINED #1242 + #929 shape, and there are THREE
+/// contributors, not two: `ai_world` above; `WeaponState.beams` as a 5-tuple
+/// (the #929 drawn-cooldown column); and the #929 helm-doctrine keys in
+/// `PolicyState.memory` — `broadside_flip`, `broadside_flip_arc` and
+/// `broadside_flip_since`, the weak-broadside latch's state, identity and clock.
+///
+/// The third contributor needs no version dimension of its own and is called out
+/// because a reader counting struct changes would miss it. `PolicyState.memory`
+/// is already a `name → value` map that the payload carries wholesale, so the
+/// keys arrived in a shape every existing format could parse: an OLDER save
+/// simply has no `broadside_flip` key, and a hull restored from one reads the
+/// slot absent, which is `0.0`, which is "not flipped". Benign — the ring
+/// resumes unmirrored and re-latches within a tick of the arc reading that
+/// justified it. A save with the keys restored into a build that does not know
+/// them is the same story in reverse: unread keys, unchanged behaviour.
+///
+/// What it is NOT is digest-covered. Policy memory is not folded into
+/// `world_digest`, so a payload that silently dropped these keys would restore a
+/// hull circling the wrong way with every digest still matching — the #1242
+/// failure mode exactly, and the reason
+/// `snapshot_resume::a_mid_flip_broadside_survives_a_save_and_restore` asserts
+/// the round trip on the payload directly instead of trusting the digest gates.
+///
+/// The widenings landed in the same unpushed batch, so no build that wrote a
 /// 4-tuple format-12 save ever existed outside that merge window; a stray dev
 /// save from the window fails RON parse rather than the format check, which is
 /// acceptable for a payload no release wrote.

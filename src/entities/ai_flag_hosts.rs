@@ -598,6 +598,11 @@ pub const INSIDE_THREAT_RANGE: FactId = FactId("inside_threat_range");
 pub const TARGET_FACING_SHIELD_DOWN: FactId = FactId("target_facing_shield_down");
 pub const TORPEDOES_IN_FLIGHT: FactId = FactId("torpedoes_in_flight");
 pub const TUBES_FILLABLE: FactId = FactId("tubes_fillable");
+// The broadside's own readings (issue #929)
+pub const OWN_BANK_ARC_MARGIN_DEG: FactId = FactId("own_bank_arc_margin_deg");
+pub const OWN_FACING_SHIELD_HP: FactId = FactId("own_facing_shield_hp");
+pub const OWN_FACING_SHIELD_INDEX: FactId = FactId("own_facing_shield_index");
+pub const OWN_SHIELD_HP_ARC: FactId = FactId("own_shield_hp_arc_");
 // Candidate facts (selector hosts)
 pub const DETECTABLE: FactId = FactId("detectable");
 pub const HOSTILE: FactId = FactId("hostile");
@@ -705,6 +710,10 @@ pub const FACT_CATALOGUE: &[FactId] = &[
     TARGET_FACING_SHIELD_DOWN,
     TORPEDOES_IN_FLIGHT,
     TUBES_FILLABLE,
+    OWN_BANK_ARC_MARGIN_DEG,
+    OWN_FACING_SHIELD_HP,
+    OWN_FACING_SHIELD_INDEX,
+    OWN_SHIELD_HP_ARC,
     DETECTABLE,
     HOSTILE,
     SOURCE_COMBAT_LOCK,
@@ -1382,6 +1391,34 @@ const HELM_FACTS: &[FactDescriptor] = &[
         "false — not reachable / no tubes",
         "ship::helm_ai::facts::seed_torpedo_opportunity_facts",
     ),
+    ship(
+        OWN_BANK_ARC_MARGIN_DEG,
+        "helm",
+        "degrees before the first bearing phaser bank drops the target",
+        "false — no target / no armed bank",
+        "ship::helm_ai::facts::seed_own_broadside_facts",
+    ),
+    ship(
+        OWN_FACING_SHIELD_HP,
+        "helm",
+        "HP of this ship's own shield arc facing the target",
+        "false — no target / no shields",
+        "ship::helm_ai::facts::seed_own_broadside_facts",
+    ),
+    ship(
+        OWN_FACING_SHIELD_INDEX,
+        "helm",
+        "which facing index the reading above came from",
+        "false — no target / no shields",
+        "ship::helm_ai::facts::seed_own_broadside_facts",
+    ),
+    ship_family(
+        OWN_SHIELD_HP_ARC,
+        "helm",
+        "per-arc shield HP, one `own_shield_hp_arc_<index>` per facing",
+        "false — no target / no shields / no such facing",
+        "ship::helm_ai::facts::seed_own_broadside_facts",
+    ),
 ];
 
 const SENSORS_SELECTOR_FACTS: &[FactDescriptor] = &[
@@ -1787,7 +1824,16 @@ impl AiHost {
     }
 
     /// Whether this host seeds `name` in `scope`, honouring prefix families.
-    fn seeds_fact(&self, scope: FactScope, name: &str) -> bool {
+    ///
+    /// `pub(crate)` so a seeder can be tested AGAINST the registry rather than
+    /// only the registry against itself: `ship::helm_ai`'s
+    /// `every_broadside_fact_the_seeder_writes_is_one_this_host_declares` runs the
+    /// real seeder and asks this of every name it produced. Without that
+    /// direction the two halves can agree perfectly and still both be wrong about
+    /// what the code does — which is what happened at #929, where four seeded
+    /// facts were missing from the registry and the only symptom was a load error
+    /// telling an author the fact did not exist.
+    pub(crate) fn seeds_fact(&self, scope: FactScope, name: &str) -> bool {
         self.facts.iter().any(|d| {
             d.scope == scope
                 && match d.shape {

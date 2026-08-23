@@ -9287,3 +9287,112 @@ tags = ["asteroid"]
         "non-behaviour entity must get no red_alert system"
     );
 }
+
+// ── The #929 steering modifier sets, refused at LOAD ─────────────────────────
+//
+// The leg gates these sit beside answer a half-authored set by declining the
+// whole arm at runtime, and that is right for them: a leg that does not happen
+// is a behaviour a designer can watch not happen. Arc-keeping and the
+// weak-broadside flip MODIFY a ring that is already running, so the same mistake
+// produces a hull that flies a slightly wrong ring for ever and never says why.
+// These four pin the load errors that close that gap.
+
+/// The shipped cruiser's own text, with `mutate` applied to its
+/// `[helm_console.steering_ai.param]` table, parsed exactly as the loader does.
+fn cruiser_with_steering_params(mutate: impl Fn(&mut String) -> ()) -> Result<(), String> {
+    let mut text = resolved_text("alliance_cruiser");
+    mutate(&mut text);
+    crate::entities::config::EntityConfig::from_toml(&text)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Every #929 modifier set is authored complete on the shipped hull, and the
+/// hull loads. The control for the three refusals below — without it they could
+/// all be passing because the file never had the params in the first place.
+#[test]
+fn the_shipped_cruiser_authors_both_steering_modifier_sets_complete() {
+    let text = resolved_text("alliance_cruiser");
+    let cfg = crate::entities::config::EntityConfig::from_toml(&text).expect("hull must parse");
+    let steering = cfg
+        .helm_console
+        .as_ref()
+        .and_then(|hc| hc.steering_ai.as_ref())
+        .expect("hull authors [helm_console.steering_ai]");
+    for required in crate::ship::helm_ai::ARC_KEEP_PARAMS
+        .iter()
+        .chain(crate::ship::helm_ai::WEAK_SHIELD_FLIP_PARAMS)
+    {
+        assert!(
+            steering.param.contains_key(*required),
+            "steering_ai must author `{required}` — the host reads each set whole"
+        );
+    }
+}
+
+/// Half a set is a load error, in both directions and for both sets.
+#[test]
+fn a_half_authored_steering_modifier_set_is_refused_at_load() {
+    for dropped in crate::ship::helm_ai::ARC_KEEP_PARAMS
+        .iter()
+        .chain(crate::ship::helm_ai::WEAK_SHIELD_FLIP_PARAMS)
+    {
+        let err = cruiser_with_steering_params(|text| {
+            let before = text.len();
+            *text = text
+                .lines()
+                .filter(|l| l.split('=').next().map(str::trim) != Some(dropped))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                text.len() < before,
+                "`{dropped}` must be present to drop it"
+            );
+        })
+        .expect_err(
+            "a hull authoring part of a modifier set must be refused, not quietly \
+             flown with half a lever",
+        );
+        assert!(
+            err.contains(dropped),
+            "the load error must NAME the missing scalar so the author can fix it \
+             without reading the host: dropping `{dropped}` said {err}"
+        );
+    }
+}
+
+/// `arc_keep_speed = 0.0` is not a slow ring. It is a parked ship inside a
+/// hostile's guns — the exact hazard the combat-orbit set's all-or-nothing gate
+/// exists to prevent, arriving through a different door.
+#[test]
+fn a_zero_arc_keep_speed_is_refused_as_a_parked_ship() {
+    let err = cruiser_with_steering_params(|text| {
+        *text = text.replace("arc_keep_speed = 0.3", "arc_keep_speed = 0.0");
+    })
+    .expect_err("a zero arc-keeping throttle must be refused");
+    assert!(
+        err.contains("arc_keep_speed"),
+        "the load error must name the scalar: {err}"
+    );
+}
+
+/// An inverted deadband is refused rather than clamped.
+///
+/// The read site used to do `restore.max(flip)` and carry on, which is the shape
+/// AGENTS.md #11 warns about: substituting the value an author appears to have
+/// meant leaves a hull flying a doctrine nobody wrote down, and the file still
+/// says the wrong thing.
+#[test]
+fn an_inverted_weak_shield_deadband_is_refused_rather_than_silently_clamped() {
+    let err = cruiser_with_steering_params(|text| {
+        *text = text.replace(
+            "weak_shield_restore_hp = 60.0",
+            "weak_shield_restore_hp = 10.0",
+        );
+    })
+    .expect_err("a restore floor below the flip floor must be refused");
+    assert!(
+        err.contains("weak_shield_restore_hp"),
+        "the load error must name the scalar: {err}"
+    );
+}

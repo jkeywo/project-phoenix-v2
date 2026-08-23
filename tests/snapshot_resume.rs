@@ -571,6 +571,118 @@ fn a_beams_drawn_cooldown_survives_capture_and_restore() {
     );
 }
 
+/// The weak-broadside flip latch (issue #929) survives a save and a restore —
+/// asserted on the PAYLOAD, because nothing else can see it.
+///
+/// The sibling above pins a field on a struct the format version names. This
+/// one pins three keys in a map, and the reason it is a test rather than a
+/// sentence in `SNAPSHOT_FORMAT`'s doc is that policy memory is **not folded
+/// into `world_digest`**. Every digest gate in this file — the byte-identical
+/// continuations, the cross-target ledger, the same-seed reruns — would stay
+/// green on a payload that dropped `broadside_flip` entirely, and the only
+/// symptom would be a resumed cruiser circling the wrong way with its beaten
+/// arc back in the enemy's guns. That is the #1242 failure mode exactly, and
+/// #1242's lesson is that "the state lives somewhere the payload already
+/// carries" is a claim about the code, not evidence about the artifact.
+///
+/// All three keys, because they are one decision split across three slots: the
+/// state, the identity of the arc that justified it, and the clock the dwell is
+/// measured from. A restore that brought back the flag and lost the arc index
+/// would resume a hull that flips on the next tick it re-reads a beaten arc and
+/// can never clear, because the arc it names is `0.0` — a real arc, at full
+/// health, that never tripped anything.
+#[test]
+fn a_mid_flip_broadside_survives_a_save_and_restore() {
+    use project_phoenix::server_app::HelmSteeringAiPolicyState;
+
+    // Values no authored number and no live run could produce, so "restored what
+    // was captured" and "re-derived something plausible" cannot be confused.
+    const FLIPPED: f64 = 1.0;
+    const LATCHED_ARC: f64 = 3.0;
+    const LATCHED_AT: f64 = 41.5;
+
+    let mut app = duel();
+    step(&mut app, CAPTURE_AT);
+
+    let ship = {
+        let mut q = app
+            .world_mut()
+            .query::<(bevy::prelude::Entity, &HelmSteeringAiPolicyState)>();
+        q.iter(app.world())
+            .map(|(e, _)| e)
+            .next()
+            .expect("the duel's ships run a stateful Steering policy")
+    };
+    {
+        let mut state = app
+            .world_mut()
+            .entity_mut(ship)
+            .get_mut::<HelmSteeringAiPolicyState>()
+            .expect("the ship carries HelmSteeringAiPolicyState");
+        state.0.memory.set("broadside_flip", FLIPPED);
+        state.0.memory.set("broadside_flip_arc", LATCHED_ARC);
+        state.0.memory.set("broadside_flip_since", LATCHED_AT);
+    }
+
+    let payload = capture(app.world());
+    let steering = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.helm_policies.as_ref())
+        .find(|p| p[1].memory.get("broadside_flip").is_some())
+        .map(|p| p[1].memory.clone())
+        .expect(
+            "the capture must carry the STEERING policy's memory — index 1 of the \
+             (engines, steering, boost) triple",
+        );
+    assert_eq!(
+        (
+            steering.get("broadside_flip"),
+            steering.get("broadside_flip_arc"),
+            steering.get("broadside_flip_since"),
+        ),
+        (Some(FLIPPED), Some(LATCHED_ARC), Some(LATCHED_AT)),
+        "the artifact must carry the latch, the arc it named and the clock its \
+         dwell runs from. No digest covers these, so a payload that dropped them \
+         would pass every other gate in this file"
+    );
+
+    // …and back in, through a fresh app that has never flipped anything.
+    let mut resumed = duel();
+    step(&mut resumed, 5);
+    let before = {
+        let mut q = resumed.world_mut().query::<&HelmSteeringAiPolicyState>();
+        q.iter(resumed.world())
+            .filter_map(|s| s.0.memory.get("broadside_flip"))
+            .next()
+    };
+    assert_eq!(
+        before, None,
+        "precondition: the fresh app has not latched a flip, so the assertion \
+         below is a restore and not a coincidence"
+    );
+
+    restore(resumed.world_mut(), &payload);
+    let memory = {
+        let mut q = resumed.world_mut().query::<&HelmSteeringAiPolicyState>();
+        q.iter(resumed.world())
+            .map(|s| s.0.memory.clone())
+            .find(|m| m.get("broadside_flip").is_some())
+            .expect("the restored world carries the mid-flip ship")
+    };
+    assert_eq!(
+        (
+            memory.get("broadside_flip"),
+            memory.get("broadside_flip_arc"),
+            memory.get("broadside_flip_since"),
+        ),
+        (Some(FLIPPED), Some(LATCHED_ARC), Some(LATCHED_AT)),
+        "the resumed hull keeps presenting the broadside it had chosen, still \
+         knows WHICH arc it is protecting, and serves the remainder of the dwell \
+         it had started rather than restarting it"
+    );
+}
+
 /// The acceptance criterion on **its own world**, streamed belts and all.
 ///
 /// The capture is taken at [`CAPTURE_AT`], long after the player has left the

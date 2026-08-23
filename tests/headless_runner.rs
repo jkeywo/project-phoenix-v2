@@ -3156,13 +3156,11 @@ fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
         // into grinds. Widening the window would have hidden that; re-picking
         // says it.
         //
-        // Re-swept at 180 s over the same 28 seeds `alliance_cruiser.toml`
-        // records (1-14, 17, 21, 31, 34, 41, 43, 47, 55, 59, 61, 89, 144, 792,
-        // 838): 24 of 28 resolve — 8, 9, 12 and 61 are the grinds — and all 28
-        // launch. 7 is the pin because it is the fastest close that still puts a
-        // full FOUR rounds out (34.9 s, 4 rounds, both hostiles dead), so the
-        // launch assertion below has margin over its floor of 2 rather than
-        // sitting on it.
+        // 7 is the pin because it is the fastest close in the recorded sweep that
+        // still puts a full FOUR rounds out, so the launch assertion below has
+        // margin over its floor of 2 rather than sitting on it. (`probe_duel`
+        // fields ONE hostile, the destroyer, so "resolves" here means that ship
+        // or this one is dead — not a fleet count.)
         seed: Some(7),
         deterministic: true,
         ..test_args()

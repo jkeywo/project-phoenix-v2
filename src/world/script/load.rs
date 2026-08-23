@@ -79,6 +79,15 @@ pub struct CompiledScripts {
     pub deadline_handlers: Vec<crate::world::deadlines::DeadlineHandler>,
     /// Content hash binding a save to the exact scripts it was recorded against.
     pub content_hash: u64,
+    /// The content-ledger write this set implies, returned as DATA for the
+    /// caller to apply (issue #1241) — `None` for a world that lifted no source
+    /// at all, which is what "the whole shipped set pays nothing" means here.
+    ///
+    /// [`load_world_scripts`] used to write it itself. That made the ledger a
+    /// side effect of compiling, and it was the one thing
+    /// [`crate::world::load::load`] could not hand back as data even though its
+    /// whole contract says it does — see [`crate::world::load::LedgerPlan`].
+    pub ledger_digest: Option<crate::content_ledger::LedgerDigest>,
     /// All findings: source lifting, compilation, and cross-reference. Any
     /// error blocks activation.
     pub findings: Vec<WorldFinding>,
@@ -255,6 +264,9 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
         script_triggers,
         deadline_handlers,
         content_hash,
+        // `compile_scripts` is handed sources with no world path to key a ledger
+        // entry by; `load_world_scripts` is what knows the world and fills this.
+        ledger_digest: None,
         findings,
     }
 }
@@ -285,12 +297,18 @@ pub fn load_world_scripts(
     // Bind a save to the exact script set it was recorded against (issue #864).
     //
     // The compiled set's own `content_hash` — the same u64 that becomes
-    // `WorldScriptRuntime::content_hash` — is recorded into the content ledger,
-    // so `snapshot::content_digest` folds it and `Versions::check` refuses a save
-    // whose scripts have since moved. Recorded HERE rather than at either call
-    // site so both of them (headless's fail-fast gate and `compile_world_scripts`)
-    // are covered by construction, and so it lands on the loading thread — the
-    // same thread `build_headless_app` records the world TOML and freezes on.
+    // `WorldScriptRuntime::content_hash` — belongs in the content ledger, so
+    // `snapshot::content_digest` folds it and `Versions::check` refuses a save
+    // whose scripts have since moved.
+    //
+    // RETURNED, not written (issue #1241). It used to be recorded right here, on
+    // the theory that doing it at the one shared site covered every call site by
+    // construction. What that actually did was make the ledger a side effect of
+    // compiling: `world::load::load` promises its caller that every ledger write
+    // comes back as a `LedgerPlan` to apply, and this one silently did not, so a
+    // caller that deliberately dropped the plan — the pure layer decision, the
+    // `Inspect` linters — still moved global state. Every call site now applies
+    // it explicitly, which is one line each and visible in the diff.
     //
     // Belt AND braces, deliberately: an inline `[script]` block already rides in
     // the world TOML's own recorded text, so an edit to it moves the digest
@@ -301,9 +319,10 @@ pub fn load_world_scripts(
     // so a browser save binds through the world TOML's inline blocks (the whole
     // shipped set) rather than through this record — moving that freeze past
     // `Startup` is `server/bridge.rs`'s call, not this loader's.
-    if !sources.is_empty() {
-        crate::content_ledger::record_digest(&script_ledger_key(world_path), compiled.content_hash);
-    }
+    compiled.ledger_digest = (!sources.is_empty()).then(|| crate::content_ledger::LedgerDigest {
+        key: script_ledger_key(world_path),
+        digest: compiled.content_hash,
+    });
     // Cross-reference every handler name against the defined-function set: the
     // generic `on(..)` registrations, the Rhai trigger front-end
     // (`on_destroyed`, …). Every unresolved name is an error finding, so the

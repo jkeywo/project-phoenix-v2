@@ -1066,7 +1066,19 @@ pub(crate) fn compile_world_scripts(
             return;
         }
         let resolver = crate::entities::config_cache::production_script_resolver();
-        crate::world::script::load::load_world_scripts(&raw.path, &raw.toml, &resolver)
+        let compiled =
+            crate::world::script::load::load_world_scripts(&raw.path, &raw.toml, &resolver);
+        // The compiled set's digest used to be written from inside the loader;
+        // since issue #1241 it comes back as data and its caller applies it. This
+        // is the BROWSER's caller, so the write lands exactly where it always did
+        // — the same statement, the same thread, the same tick. The ledger is
+        // already frozen by `wasm_init` on this target, so a browser save binds
+        // through the world TOML's inline blocks rather than through this record;
+        // that was true before the lift and is true after it.
+        if let Some(digest) = &compiled.ledger_digest {
+            digest.apply();
+        }
+        compiled
     };
 
     if crate::world::validate::has_error(&compiled.findings) {
@@ -4103,7 +4115,17 @@ fn apply_pending_scenario_loads(
             LoadPolicy::Merge,
         );
         match load(request) {
-            Ok(_loaded) => {}
+            Ok(loaded) => {
+                // The compiled set is discarded (see above), but its ledger digest
+                // is not: `load_world_scripts` used to write that itself and now
+                // returns it (issue #1241), so applying it here keeps the ledger
+                // byte-identical to before the lift. The TOML `records` are
+                // dropped for the reason the comment above gives — this function
+                // already recorded that text through `load_scenario_toml`.
+                for digest in &loaded.ledger.digests {
+                    digest.apply();
+                }
+            }
             Err(LoadError::ParseFailed { message, .. }) => {
                 bevy::log::error!(
                     "apply_pending_scenario_loads: failed to parse {path}: {message}"
@@ -4447,6 +4469,14 @@ fn apply_world_layer_changes(
                 for warning in &result.warnings {
                     bevy::log::error!("apply_world_layer_changes: {warning}");
                 }
+                // The ledger writes the evaluation gathered (issue #1241): the
+                // layer's compiled-script digest, which the loader used to write
+                // itself. Applied HERE — right after the evaluation, before the
+                // outcome is acted on and before any deferral — so it lands at the
+                // same moment the eager write did, on every outcome the eager write
+                // covered. Empty for the whole shipped set (no layer authors a
+                // script) and for every outcome that never reached a compile.
+                result.ledger.apply();
                 match result.outcome {
                     LayerLoadOutcome::AlreadyLoaded => {
                         // De-duplicate, no-op.

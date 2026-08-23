@@ -24,16 +24,21 @@
 //!
 //! The one place today's boot paths differ from a pure function is the content
 //! ledger: they `reset()` at the start of a load, `record(path, text)` each file,
-//! and `freeze()` once the declared set is known. [`load`] does **not** freeze
-//! and does not reset — it returns the world/child-TOML records it read as a
-//! [`LedgerPlan`], for the caller (the future `boot::ingest_world`) to apply and
-//! then freeze in one documented order. The compiled-script *digest* is the one
-//! record still written eagerly, because it rides inside the wrapped
-//! [`load_world_scripts`](crate::world::script::load::load_world_scripts) exactly
-//! as it does today; the content-ledger fold is path-sorted and order-independent
-//! (see [`crate::content_ledger::ContentLedger::fold`]), so interleaving that
-//! record with the caller's `LedgerPlan` application yields a byte-identical
-//! frozen digest.
+//! and `freeze()` once the declared set is known. [`load`] does **not** freeze,
+//! does not reset, and — since issue #1241 — does not record either. Every ledger
+//! write it implies comes back as a [`LedgerPlan`] for the caller to apply and
+//! then freeze in one documented order.
+//!
+//! The compiled-script digest was the exception until #1241: it was written from
+//! inside the wrapped
+//! [`load_world_scripts`](crate::world::script::load::load_world_scripts), so the
+//! sentence above was true of everything you could see and false of one thing you
+//! could not. It now rides out on [`LedgerPlan::digests`]. The content-ledger fold
+//! is path-sorted and order-independent (see
+//! [`crate::content_ledger::ContentLedger::fold`]), so applying records and
+//! digests in any order yields a byte-identical frozen digest — which is what
+//! makes moving the write from "during the load" to "at the caller's apply" a
+//! refactor rather than a change.
 //!
 //! # The reader seam
 //!
@@ -334,10 +339,16 @@ impl<'a> LoadRequest<'a> {
 
 // ── Result / ledger / error ─────────────────────────────────────────────────
 
+/// The digest half of a [`LedgerPlan`], re-exported so both halves of the
+/// vocabulary are found in one place. Defined in [`crate::content_ledger`]
+/// because the script loader that produces it sits below this module.
+pub use crate::content_ledger::LedgerDigest;
+
 /// One content-ledger record a load produced by reading a file: the file's
 /// authored path and the raw text read at it.
 ///
 /// Applied by the caller as `content_ledger::record(&record.path, &record.text)`.
+/// Its digest-carrying sibling is [`LedgerDigest`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LedgerRecord {
     /// Authored path (the content-ledger key, before canonicalisation).
@@ -348,28 +359,55 @@ pub struct LedgerRecord {
 
 /// The content-ledger writes a load gathered, returned as data.
 ///
-/// [`load`] never touches the global ledger for these records nor calls
-/// [`freeze`](crate::content_ledger::freeze); it hands them back so the caller
-/// applies them (and freezes) in one place. Carries the world-TOML records — the
-/// root and every `extra_worlds` child — that the boot paths record today. The
-/// entity-template eager walk and the `freeze` itself stay with the caller, and
-/// the compiled-script digest is recorded inside the wrapped `load_world_scripts`
-/// (order-independent under the ledger's path-sorted fold).
+/// [`load`] never touches the global ledger and never calls
+/// [`freeze`](crate::content_ledger::freeze); it hands every write back so the
+/// caller applies them (and freezes) in one place. Two halves, because the ledger
+/// has two write primitives:
+///
+/// * [`records`](Self::records) — the world-TOML text the load read: the root and
+///   every `extra_worlds` child.
+/// * [`digests`](Self::digests) — a digest already computed below the load, which
+///   today means the compiled script set's `content_hash` under
+///   `<world path>#scripts`.
+///
+/// The digest half used to be a SIDE EFFECT, written from inside the wrapped
+/// `load_world_scripts` while everything else round-tripped through here (issue
+/// #1241). That was the one place `load` reached out and touched global state,
+/// and it made "the ledger is returned as data" true of the sequence only if you
+/// did not look inside it. Now every write a load implies leaves through this
+/// type, so a caller that wants a load WITHOUT recording it — the pure layer
+/// decision in `world::layers`, the `Inspect` linters — gets one by not applying
+/// the plan, rather than by hoping nothing underneath recorded already.
+///
+/// The entity-template eager walk and the `freeze` itself still stay with the
+/// caller. Application order does not matter: the ledger's fold is path-sorted
+/// (see [`crate::content_ledger::ContentLedger::fold`]), so records and digests
+/// interleaved any way round yield a byte-identical frozen digest.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LedgerPlan {
     /// The `(path, text)` records to apply, in the order the loader read them
     /// (root first, then children). Order does not affect the folded digest.
     pub records: Vec<LedgerRecord>,
+    /// The `(key, digest)` writes to apply. One entry per compiled script set
+    /// that had any source at all; empty for a script-free world.
+    pub digests: Vec<LedgerDigest>,
 }
 
 impl LedgerPlan {
-    /// Apply every record to the content ledger via
-    /// [`crate::content_ledger::record`]. The caller calls this (then
-    /// [`crate::content_ledger::freeze`]) — [`load`] never does.
+    /// Apply every gathered write to the content ledger. The caller calls this
+    /// (then [`crate::content_ledger::freeze`]) — [`load`] never does.
     pub fn apply(&self) {
         for record in &self.records {
             crate::content_ledger::record(&record.path, &record.text);
         }
+        for digest in &self.digests {
+            digest.apply();
+        }
+    }
+
+    /// Whether this plan would write nothing.
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty() && self.digests.is_empty()
     }
 }
 
@@ -502,6 +540,7 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
         }),
         LoadPolicy::Merge => {
             let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
+            let digests = script_digests(&scripts);
             Ok(LoadedWorld {
                 config,
                 scripts,
@@ -512,6 +551,7 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
                         path: path.clone(),
                         text,
                     }],
+                    digests,
                 },
             })
         }
@@ -568,19 +608,34 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
             drop(root_src);
 
             let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
+            let digests = script_digests(&scripts);
 
             Ok(LoadedWorld {
                 config,
                 scripts,
                 children,
                 findings,
-                ledger: LedgerPlan { records },
+                ledger: LedgerPlan { records, digests },
             })
         }
     }
 }
 
 // ── Private helpers (each wraps one of today's steps) ────────────────────────
+
+/// The ledger writes a compiled script set implies (issue #1241).
+///
+/// One entry, or none for a world that lifted no source. Kept as a `Vec` rather
+/// than an `Option` because it is the shape a caller applies — and because the
+/// set of digest-shaped things a load gathers is expected to grow (a world's
+/// script-SPAWNABLE entity templates are the next candidate, issue #1047).
+fn script_digests(scripts: &Option<CompiledScripts>) -> Vec<LedgerDigest> {
+    scripts
+        .as_ref()
+        .and_then(|s| s.ledger_digest.clone())
+        .into_iter()
+        .collect()
+}
 
 fn read_root(reader: &dyn WorldReader, path: &str) -> Result<String, LoadError> {
     reader.read(path).ok_or_else(|| LoadError::ReadFailed {

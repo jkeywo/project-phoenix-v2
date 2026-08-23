@@ -171,6 +171,13 @@ pub fn compile_world_runtime(
         "{world_path} fixture scripts must compile clean: {:?}",
         compiled.findings
     );
+    // The loader used to record this itself; since issue #1241 its caller does.
+    // A fixture applies it too, so a test that compiles a world through here sees
+    // the same ledger it saw before the lift — the point of routing every fixture
+    // compile through the production loader in the first place.
+    if let Some(digest) = &compiled.ledger_digest {
+        digest.apply();
+    }
     crate::world::server::WorldScriptRuntime::from_compiled(compiled)
         .expect("fixture world must author at least one runnable script")
 }

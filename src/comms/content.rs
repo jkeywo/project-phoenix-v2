@@ -122,8 +122,9 @@ pub struct ActiveDialogue {
 ///
 /// The restore resolves `node_fn` and `on_pick` against the **recompiled**
 /// script set, and what makes that the same tree the capture read is issue
-/// #864's content binding rather than anything stored here: `load_world_scripts`
-/// records the compiled set's `content_hash` into the content ledger,
+/// #864's content binding rather than anything stored here: the load returns the
+/// compiled set's `content_hash` as a ledger record for its caller to apply
+/// (issue #1241),
 /// `snapshot::content_digest` folds it, and `Versions::check` refuses a save
 /// whose scripts moved — so an edited `on_pick` body refuses the save instead of
 /// resolving the name against a different fn.

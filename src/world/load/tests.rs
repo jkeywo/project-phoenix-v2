@@ -341,13 +341,144 @@ fn ledger_plan_apply_writes_the_records_to_the_content_ledger() {
                 text: "[global]\nseed = 1\n".to_string(),
             },
         ],
+        digests: vec![crate::content_ledger::LedgerDigest {
+            key: "a.toml#scripts".to_string(),
+            digest: 0xfeed_beef,
+        }],
     };
     plan.apply();
 
+    let after = crate::content_ledger::snapshot();
     assert_eq!(
-        crate::content_ledger::snapshot().len(),
-        2,
-        "apply records both files into the live ledger"
+        after.len(),
+        3,
+        "apply writes both text records AND the digest half into the live ledger"
+    );
+    assert_eq!(
+        after.get("a.toml#scripts"),
+        Some(0xfeed_beef),
+        "a digest record is stored verbatim, not re-hashed"
+    );
+    crate::content_ledger::reset();
+}
+
+/// The lift itself (issue #1241): compiling a world's scripts writes NOTHING to
+/// the global ledger — the digest comes back on the compiled set for a caller to
+/// apply.
+///
+/// This is the regression guard for the defect, not just for the plumbing: before
+/// #1241 `load_world_scripts` recorded from inside itself, so a caller that
+/// deliberately dropped the plan still moved global state.
+#[test]
+fn compiling_a_worlds_scripts_records_nothing_until_the_caller_applies_it() {
+    use crate::world::script::load::{load_world_scripts, NoSiblingScripts};
+
+    const WORLD: &str = r#"
+[script]
+setup = "fn on_x(ctx) { }"
+"#;
+    let value: toml::Value = toml::from_str(WORLD).expect("valid toml");
+
+    crate::content_ledger::reset();
+    let compiled = load_world_scripts("w.toml", &value, &NoSiblingScripts);
+    assert!(
+        crate::content_ledger::snapshot().is_empty(),
+        "the compile must not touch the ledger"
+    );
+
+    let digest = compiled
+        .ledger_digest
+        .as_ref()
+        .expect("a world with sources carries its digest record");
+    assert_eq!(digest.key, "w.toml#scripts");
+    assert_eq!(
+        digest.digest, compiled.content_hash,
+        "the record carries the set's own content hash — the #988 save binding"
+    );
+
+    digest.apply();
+    assert_eq!(
+        crate::content_ledger::snapshot().get("w.toml#scripts"),
+        Some(compiled.content_hash),
+        "and applying it lands exactly what the eager write used to land"
+    );
+    crate::content_ledger::reset();
+}
+
+/// A script-free world carries no digest record at all — the "shipped set pays
+/// nothing" property, preserved verbatim across the lift.
+#[test]
+fn a_script_free_world_carries_no_ledger_digest() {
+    use crate::world::script::load::{load_world_scripts, NoSiblingScripts};
+
+    let value: toml::Value = toml::from_str("[global]\nseed = 1\n").expect("valid toml");
+    let compiled = load_world_scripts("w.toml", &value, &NoSiblingScripts);
+    assert!(compiled.ledger_digest.is_none());
+}
+
+/// THE equivalence the lift has to preserve (issue #1241): the ledger a load
+/// leaves behind is identical whether the script digest was written from inside
+/// the loader (the shape before) or applied by the caller off the returned plan
+/// (the shape after).
+///
+/// Reconstructs the OLD shape exactly — the digest written at compile time, then
+/// the caller applying only the text records — and compares the whole resulting
+/// ledger, not just its fold, against the new one-call `plan.apply()`. Over a
+/// composition with a child, so the interleaving of root text / child text /
+/// digest is exercised rather than assumed.
+#[test]
+fn the_returned_plan_lands_the_same_ledger_the_eager_write_did() {
+    let root = "extra_worlds = [\"child.toml\"]\n[global]\nseed = 1\n\
+                [script]\nsetup = \"fn on_x(ctx) { }\"\n";
+    let child = "[global]\nseed = 2\n";
+    let reader = MemoryReader::new([("root.toml", root), ("child.toml", child)]);
+
+    // NEW: one `apply()` covering both halves.
+    crate::content_ledger::reset();
+    let loaded = load(request(
+        "root.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Activate,
+    ))
+    .expect("activate should load");
+    loaded.ledger.apply();
+    let after_new = crate::content_ledger::snapshot();
+
+    // OLD: the digest written where `load_world_scripts` used to write it —
+    // during the compile, before the caller applied anything — then the text
+    // records applied by the caller.
+    crate::content_ledger::reset();
+    let loaded_again = load(request(
+        "root.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Activate,
+    ))
+    .expect("activate should load");
+    let eager = loaded_again
+        .scripts
+        .as_ref()
+        .and_then(|s| s.ledger_digest.clone())
+        .expect("the scripted root carries a digest");
+    crate::content_ledger::record_digest(&eager.key, eager.digest);
+    for record in &loaded_again.ledger.records {
+        crate::content_ledger::record(&record.path, &record.text);
+    }
+    let after_old = crate::content_ledger::snapshot();
+
+    assert_eq!(
+        after_new, after_old,
+        "every (key, digest) pair must match, not merely fold to the same number"
+    );
+    assert_eq!(after_new.fold(), after_old.fold());
+
+    // And the comparison is not vacuous: the digest really is in there, keyed to
+    // the root world, alongside both TOML texts.
+    assert_eq!(after_new.len(), 3);
+    assert_eq!(
+        after_new.get("root.toml#scripts"),
+        Some(loaded.scripts.as_ref().expect("compiled").content_hash),
     );
     crate::content_ledger::reset();
 }

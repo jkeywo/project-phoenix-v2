@@ -97,6 +97,35 @@ pub fn record_digest(path: &str, digest: u64) {
     });
 }
 
+/// One [`record_digest`] write, returned as DATA for a caller to apply (issue
+/// #1241).
+///
+/// The digest counterpart to [`crate::world::load::LedgerRecord`], which carries
+/// the text a load read. This one carries a digest already computed below the
+/// load — a compiled script set's `content_hash` — so it never round-trips
+/// through bytes nobody needs.
+///
+/// It lives HERE rather than beside its sibling in `world::load` for a layering
+/// reason: `world::script::load` produces it and sits *below* `world::load` (the
+/// load sequence wraps the script loader, not the other way round), so the type
+/// has to come from a module below both. `world::load` re-exports it so a caller
+/// reading a [`LedgerPlan`](crate::world::load::LedgerPlan) finds both halves of
+/// its vocabulary in one place.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LedgerDigest {
+    /// The ledger key to store under, before canonicalisation.
+    pub key: String,
+    /// The already-computed digest.
+    pub digest: u64,
+}
+
+impl LedgerDigest {
+    /// Apply this write to the live ledger.
+    pub fn apply(&self) {
+        record_digest(&self.key, self.digest);
+    }
+}
+
 /// Clear the live ledger and any frozen snapshot. Call at the START of a new
 /// scenario/world load — see the module docs' reset-semantics section.
 pub fn reset() {
@@ -140,6 +169,18 @@ impl ContentLedger {
 
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    /// The digest stored under `path`, if any. Keyed the same way [`record`]
+    /// keys it, so a caller passes the authored path rather than pre-normalising.
+    pub fn get(&self, path: &str) -> Option<u64> {
+        self.0.get(&normalize_key(path)).copied()
+    }
+
+    /// Every `(key, digest)` pair, path-sorted — the whole ledger as data, for a
+    /// test that wants to compare two loads rather than fold them to one number.
+    pub fn entries(&self) -> impl Iterator<Item = (&str, u64)> {
+        self.0.iter().map(|(k, v)| (k.as_str(), *v))
     }
 
     /// Fold every `(path, digest)` pair into one `u64`, path-sorted so the

@@ -38,13 +38,16 @@
 //!
 //! ## What the merge does NOT touch
 //!
-//! The `LoadedWorld.ledger` records are dropped here — the applier already
-//! recorded the layer's TOML text via `load_scenario_toml`, and the compiled set's
-//! own digest rides inside `load_world_scripts` exactly as it does on the boot
-//! path. Whether a layer that arrives *after* `freeze()` should move the frozen
-//! content set at all is a ledger-policy question owned by issue #1047, not
-//! something this route decides. No shipped layer authors a script, so the frozen
-//! digest of every shipped world is untouched either way.
+//! The `LoadedWorld.ledger`'s TOML records are dropped here — the applier already
+//! recorded the layer's text via `load_scenario_toml`. Its script DIGEST is not:
+//! since issue #1241 that write comes back as data instead of being made from
+//! inside `load_world_scripts`, so it rides out on
+//! [`LayerLoadResult::ledger`] for the applier to apply at the same moment the
+//! eager write used to happen. Whether a layer that arrives *after* `freeze()`
+//! should move the frozen content set at all is a ledger-policy question owned by
+//! issue #1047, not something this route decides — and it cannot, because the
+//! frozen snapshot is what the digest folds. No shipped layer authors a script, so
+//! the frozen digest of every shipped world is untouched either way.
 //!
 //! # Purity boundaries
 //!
@@ -68,7 +71,7 @@
 //!   logs them.
 
 use crate::world::config::{assign_named_entity_uuids, WorldConfig};
-use crate::world::load::{load, LoadError, LoadPolicy, LoadRequest, MemoryReader};
+use crate::world::load::{load, LedgerPlan, LoadError, LoadPolicy, LoadRequest, MemoryReader};
 use crate::world::script::load::{CompiledScripts, ScriptResolver};
 
 /// Decision produced by [`evaluate_layer_load`].
@@ -77,6 +80,20 @@ pub struct LayerLoadResult {
     pub outcome: LayerLoadOutcome,
     /// Failure-path messages for the applier to log (`error` level).
     pub warnings: Vec<String>,
+    /// Content-ledger writes this evaluation gathered, for the applier to apply
+    /// (issue #1241) — the compiled script set's digest, and nothing else.
+    ///
+    /// The load's TOML `records` are deliberately NOT carried: the applier read
+    /// that text itself through `load_scenario_toml`, which recorded it, so
+    /// passing them on would be a second write of a record it already owns. What
+    /// it could not own is the digest, because only the compile knows it.
+    ///
+    /// Carried on EVERY outcome, not just [`LayerLoadOutcome::Loaded`]. A layer
+    /// refused for a script error still compiled its sources, and the eager write
+    /// this replaced happened at compile time regardless of what the evaluation
+    /// then decided — so a refused layer recorded its digest before, and records
+    /// it now.
+    pub ledger: crate::world::load::LedgerPlan,
 }
 
 /// The branch the applier must take for one `WorldLayerChange::Load`.
@@ -165,12 +182,14 @@ where
         return LayerLoadResult {
             outcome: LayerLoadOutcome::AlreadyLoaded,
             warnings: Vec::new(),
+            ledger: LedgerPlan::default(),
         };
     }
     let Some(toml_str) = toml_str else {
         return LayerLoadResult {
             outcome: LayerLoadOutcome::TomlUnavailable,
             warnings: Vec::new(),
+            ledger: LedgerPlan::default(),
         };
     };
 
@@ -190,6 +209,7 @@ where
             return LayerLoadResult {
                 outcome: LayerLoadOutcome::ParseFailed,
                 warnings: vec![format!("failed to parse {path}: {message}")],
+                ledger: LedgerPlan::default(),
             };
         }
         // Unreachable with a MemoryReader under Merge — the read cannot fail (the
@@ -200,6 +220,7 @@ where
             return LayerLoadResult {
                 outcome: LayerLoadOutcome::ParseFailed,
                 warnings: vec![format!("failed to load {path}: {other}")],
+                ledger: LedgerPlan::default(),
             };
         }
     };
@@ -208,6 +229,12 @@ where
     // The compiled `[script]` set the Merge load carried. Threaded out to the
     // applier on `Loaded`, which merges it into the live runtime (#1045).
     let scripts = loaded.scripts;
+    // And the ledger writes it gathered (issue #1241). Only the digests: the
+    // applier already recorded this layer's TOML itself — see the field docs.
+    let ledger = LedgerPlan {
+        records: Vec::new(),
+        digests: loaded.ledger.digests,
+    };
 
     // A layer whose scripts carry an ERROR finding is REFUSED whole, entities and
     // all, rather than merged with its logic missing — the same all-or-nothing the
@@ -248,6 +275,7 @@ where
                 warnings: vec![format!(
                     "failed to load {path}: script error: {detail}{hint}"
                 )],
+                ledger,
             };
         }
     }
@@ -258,6 +286,7 @@ where
             warnings: vec![format!(
                 "failed to load {path}: scenario_detail_floor is root-world-only; supporting worlds cannot override the selected scenario's crew detail floor"
             )],
+            ledger,
         };
     }
     // Assign UUIDs to named entities in this layer's config; the registrations go
@@ -280,6 +309,7 @@ where
             scripts,
         })),
         warnings: Vec::new(),
+        ledger,
     }
 }
 

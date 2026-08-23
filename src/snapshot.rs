@@ -1696,8 +1696,9 @@ pub struct DialogueState {
     /// parallel `on_pick` names) and already derives serde for this. Those names
     /// resolve against the **recompiled** script set, and what makes that safe is
     /// issue #864's content binding rather than anything here:
-    /// `load_world_scripts` records `CompiledScripts::content_hash` into the
-    /// content ledger, `content_digest` folds it, and `Versions::check` refuses
+    /// the load returns `CompiledScripts::content_hash` as a ledger record and
+    /// its caller applies it (issue #1241), `content_digest` folds it, and
+    /// `Versions::check` refuses
     /// a save whose scripts moved - so a restored `node_fn`/`on_pick` pair is
     /// always read against the identical compiled units it was captured from.
     /// The runtime backstop is still there underneath
@@ -3713,8 +3714,9 @@ fn restore_scenario(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut 
 /// looking `script_path` up in the *bootstrapped* world's
 /// `WorldScriptRuntime::asts` and calling the named fn. What makes that the same
 /// tree the capture was reading is issue #864's content binding, not anything
-/// here: `load_world_scripts` records the compiled set's `content_hash` into the
-/// content ledger, `content_digest` folds it, and `Versions::check` refuses a
+/// here: the load returns the compiled set's `content_hash` as a ledger record
+/// for its caller to apply (issue #1241), `content_digest` folds it, and
+/// `Versions::check` refuses a
 /// save whose scripts moved before `restore` is ever reached. Editing a single
 /// `on_pick` body therefore refuses the save rather than resolving the name
 /// against a different fn. Underneath that, `enter_node` still refuses an

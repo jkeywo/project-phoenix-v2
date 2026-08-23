@@ -124,6 +124,45 @@ export function ackEligible(cause) {
   return cause === PUSH_CAUSE.SERVER_MESSAGE;
 }
 
+/** How long a shell waits between reporting batches, in milliseconds. */
+export const FLUSH_INTERVAL_MS = 2000;
+
+/**
+ * Whether a shell should send its measured batch now.
+ *
+ * Extracted here, and unit-tested, for the same reason {@link ackEligible} is:
+ * the flush policy is a DECISION — follow the host's flag, batch rather than
+ * stream, and never lose the last batch to a page teardown — and it lived in a
+ * shell's inline script where no test could reach it.
+ *
+ * Batching matters more than it looks: a tapping player would otherwise turn one
+ * diagnostic into a stream of tiny frames on the very data channel whose latency
+ * is being measured, so the measurement would change what it measures. `force`
+ * is the teardown path (`pagehide` / `visibilitychange`), where there is no next
+ * chance and the interval must not apply.
+ *
+ * @param {{
+ *   enabled: boolean,      // the host's flag, as this client last saw it
+ *   hasPayload: boolean,   // anything measured or counted since the last flush
+ *   now: number,           // current clock reading
+ *   lastFlushedAt: number, // clock reading at the previous flush
+ *   force?: boolean,       // page teardown: send whatever there is
+ *   intervalMs?: number,
+ * }} state
+ * @returns {boolean}
+ */
+export function shouldFlush({
+  enabled,
+  hasPayload,
+  now,
+  lastFlushedAt,
+  force = false,
+  intervalMs = FLUSH_INTERVAL_MS,
+}) {
+  if (!enabled || !hasPayload) return false;
+  return force || now - lastFlushedAt >= intervalMs;
+}
+
 /**
  * Epoch-relative high-resolution time in milliseconds.
  *
@@ -374,4 +413,5 @@ if (typeof window !== 'undefined') {
   window.isConsoleLatencyEnabled = isConsoleLatencyEnabled;
   window.consoleLatencyNowMs = nowMs;
   window.CONSOLE_PUSH_CAUSE = PUSH_CAUSE;
+  window.consoleLatencyShouldFlush = shouldFlush;
 }

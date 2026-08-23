@@ -2464,13 +2464,21 @@
       const on = window.isConsoleLatencyEnabled(window.simState && window.simState.debugFlags);
       if (on !== meter.enabled) meter.setEnabled(on);
       if (!on) return;
-      // Batched on a timer rather than sent per sample: a tapping player would
-      // otherwise turn one diagnostic into a stream of tiny frames on the very
-      // data channel whose latency is being measured. `force` skips the timer
-      // for the page-teardown flush, where there is no next chance.
+      // The batching decision itself lives in gui/console-latency.js
+      // (`shouldFlush`, unit-tested) rather than in this inline script: batching
+      // is why measuring does not change what is measured, and `force` is the
+      // teardown path where there is no next chance.
       const now = window.consoleLatencyNowMs ? window.consoleLatencyNowMs() : Date.now();
-      if (!force && now - _latencyFlushedAt < LATENCY_FLUSH_MS) return;
-      if (!meter.hasPayload()) return;
+      if (typeof window.consoleLatencyShouldFlush !== 'function') return;
+      const go = window.consoleLatencyShouldFlush({
+        enabled: on,
+        hasPayload: meter.hasPayload(),
+        now,
+        lastFlushedAt: _latencyFlushedAt,
+        force: !!force,
+        intervalMs: LATENCY_FLUSH_MS,
+      });
+      if (!go) return;
       const batch = meter.drain();
       _latencyFlushedAt = now;
       const msg = window.consoleLatencyMessage(batch.samples, batch.expired);

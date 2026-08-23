@@ -13,6 +13,8 @@ import {
   consoleLatencyMessage,
   isConsoleLatencyEnabled,
   nowMs,
+  shouldFlush,
+  FLUSH_INTERVAL_MS,
   MAX_BATCH,
   PUSH_CAUSE,
 } from '../../gui/console-latency.js';
@@ -318,5 +320,46 @@ describe('consoleLatencyMessage', () => {
     );
     expect(encoded).not.toContain('surface');
     expect(encoded).not.toContain('SimHost');
+  });
+});
+
+// ── The flush policy (issue #1169 review) ───────────────────────────────────
+//
+// Batching is why measuring does not change what is measured: a tapping player
+// would otherwise put a stream of tiny frames on the very data channel whose
+// latency is the subject. Extracted from client.html's inline script so it is
+// reachable by a test at all.
+
+describe('shouldFlush', () => {
+  const base = { enabled: true, hasPayload: true, now: 10_000, lastFlushedAt: 0 };
+
+  it('sends once the interval has elapsed', () => {
+    expect(shouldFlush(base)).toBe(true);
+  });
+
+  it('holds inside the interval, so a tapping player does not flood the channel', () => {
+    expect(shouldFlush({ ...base, lastFlushedAt: base.now - 1 })).toBe(false);
+  });
+
+  it('never sends while the host has measurement off', () => {
+    expect(shouldFlush({ ...base, enabled: false })).toBe(false);
+    // Not even on teardown: an off flag means the host is not folding reports.
+    expect(shouldFlush({ ...base, enabled: false, force: true })).toBe(false);
+  });
+
+  it('never sends an empty batch', () => {
+    expect(shouldFlush({ ...base, hasPayload: false })).toBe(false);
+    expect(shouldFlush({ ...base, hasPayload: false, force: true })).toBe(false);
+  });
+
+  it('ignores the interval on page teardown, where there is no next chance', () => {
+    const justFlushed = { ...base, lastFlushedAt: base.now };
+    expect(shouldFlush(justFlushed)).toBe(false);
+    expect(shouldFlush({ ...justFlushed, force: true })).toBe(true);
+  });
+
+  it('fires exactly at the interval boundary', () => {
+    expect(shouldFlush({ ...base, lastFlushedAt: base.now - FLUSH_INTERVAL_MS })).toBe(true);
+    expect(shouldFlush({ ...base, lastFlushedAt: base.now - FLUSH_INTERVAL_MS + 1 })).toBe(false);
   });
 });

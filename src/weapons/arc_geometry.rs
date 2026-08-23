@@ -77,7 +77,7 @@ pub struct WeaponArcBank {
 /// One weapon arc expressed as a world-bearing sector — the producer's output,
 /// and the single representation both the AI fact and the helm-radar overlay
 /// are derived from.
-#[derive(Clone, Copy, Debug, PartialEq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct WeaponArcSector {
     /// World bearing of the sector's centre-line, degrees, normalised to
     /// `(−180, 180]`. Same convention as ship yaw: `0` points along `−Z`.

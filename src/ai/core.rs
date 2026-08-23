@@ -237,7 +237,7 @@ pub fn decide_impulse(input: &ImpulseDecisionInput) -> ImpulseDecision {
 // ── WorldView ─────────────────────────────────────────────────────────────────
 
 /// A visible entity in the AI's world view.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AiWorldEntity {
     /// Stable UUID of the entity.
     pub uuid: Uuid,

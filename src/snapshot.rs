@@ -381,7 +381,22 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// the constant cannot be left at 10. Nothing in the payload distinguishes that
 /// save from one whose crew had directed a Station, so both are refused by
 /// `Versions::check`, which names the dimension.
-pub const SNAPSHOT_FORMAT: u32 = 11;
+/// `12` — issue #1242 added [`EntityState::motion_plan`], and it is
+/// `pass_surface`'s argument on the sibling that fix left behind.
+/// `HelmMotionPlan` is republished wholesale by `helm_motion_planner` every AI
+/// tick, which reads like a derivation nothing need store — but the AI cadence is
+/// HALF the sim cadence, so a capture taken on one of the ticks in between leaves
+/// a restored world holding a default plan while the live one still carries the
+/// last one planned. Measured on the duel: the live cruiser wanted
+/// `desired_facing_local (0.363, 0, -0.932)` and the resumed one `(0, 0, -1)` —
+/// no turn at all — and two frames later its steering had gone to zero while the
+/// live ship kept turning. The field carries `#[serde(default)]`, so a format-11
+/// save still parses — and a format-11 save captured on an AI tick, or of a run
+/// whose ships were all stationary, would even restore correctly, which is
+/// exactly why the constant cannot be left at 11. Nothing in the payload
+/// distinguishes that save from one captured mid-manoeuvre, so both are refused
+/// by `Versions::check`, which names the dimension.
+pub const SNAPSHOT_FORMAT: u32 = 12;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -524,6 +539,22 @@ pub struct EntityState {
     /// tick to read — it cannot be rebuilt in time the way `WorldSnapshot` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_surface: Option<crate::ship::helm_ai::HelmPassSurface>,
+    /// This ship's shared desired-motion contract as of the capture tick
+    /// (issue #1242) — see [`MotionPlanState`].
+    ///
+    /// `pass_surface`'s sibling, missing for the same reason it was and found the
+    /// same way. `HelmMotionPlan` is republished wholesale every AI tick by
+    /// `helm_motion_planner`, so it reads like a derivation nothing need store —
+    /// but the AI cadence is half the sim cadence, and a capture taken on one of
+    /// the ticks in between leaves a restored world holding a DEFAULT plan while
+    /// the live one still carries the last one planned. Measured on the duel this
+    /// issue was found in: at the restore instant the live cruiser's plan asked
+    /// for `desired_facing_local (0.363, 0, -0.932)` and the resumed one for
+    /// `(0, 0, -1)` — straight ahead, i.e. no turn at all — and two frames later
+    /// its steering had gone to zero while the live ship kept turning. The digests
+    /// matched exactly at the restore, because nothing folds this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_plan: Option<MotionPlanState>,
     /// The entity's infrastructure condition track (issue #1025), whole.
     ///
     /// The second component stored whole rather than projected, and for a
@@ -1761,6 +1792,29 @@ pub struct PhoenixSnapshot {
     /// Per-layer flag stores, sorted by path so the payload is byte-stable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layer_flags: Vec<LayerFlags>,
+    /// The AI's shared world view as of the capture tick (issue #1242) —
+    /// `crate::ai::server::WorldSnapshot`'s entity list.
+    ///
+    /// This is the state the duel divergence actually hinged on, and the reason
+    /// the payload carries it rather than rebuilding it is the whole argument of
+    /// this issue. `build_world_snapshot` runs under `run_if(ai_snapshot_ready)`,
+    /// the SLOWEST of the three cadences, so at any given tick the live view is
+    /// deliberately a little behind the world — it holds where things were when
+    /// it was last built. `restore` used to call `build_world_snapshot` once to
+    /// repopulate it, which produces a view that is *correct for the restore
+    /// tick* and therefore NOT the view the captured run was steering from.
+    ///
+    /// Measured on the duel: the live cruiser's view put its target at
+    /// `[19.846668, 0, -25.908308]`; the rebuilt one put it at
+    /// `[20.491692, 0, -26.884445]` — the same ship, one snapshot interval
+    /// further along. Its combat-orbit leg steers off that vector, so the resumed
+    /// cruiser turned differently, and the digest showed it two frames later.
+    ///
+    /// A rebuild cannot be made byte-identical here, because the value being
+    /// rebuilt is a function of a tick the payload does not otherwise carry. The
+    /// only honest options are to store it or to accept the divergence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_world: Option<Vec<crate::ai::AiWorldEntity>>,
     /// The scenario's *progression*: what has already fired, what is still
     /// scheduled, and the mission clock both are measured against — see
     /// [`ScenarioState`]. `None` only for a world with no `WorldContentRuntime`
@@ -1826,6 +1880,9 @@ pub fn capture(world: &World) -> PhoenixSnapshot {
         game_over: world
             .get_resource::<GameOverReason>()
             .map(|reason| (reason.0.clone(), reason.1.map(|o| o.as_str().to_string()))),
+        ai_world: world
+            .get_resource::<crate::ai::server::WorldSnapshot>()
+            .map(|snapshot| snapshot.entities.clone()),
         captain_boosts: world
             .get_resource::<CaptainPriorityBoost>()
             .map(|boosts| {
@@ -2403,6 +2460,124 @@ fn capture_power(world: &World) -> Vec<(String, PowerState)> {
         .collect()
 }
 
+/// One ship's shared desired-motion contract and hazard assessment, as of the
+/// capture tick (issue #1242) — the scalar projection of
+/// [`crate::ship::helm_planner::ShipMotionPlan`].
+///
+/// A **projection** rather than the component whole, which is `pass_surface`'s
+/// exception and not this one's: `ShipMotionPlan` carries `Vec3`s and a
+/// `uuid::Uuid`, so storing it whole would pin glam's serde shape and the uuid
+/// crate's as save format. Six `f32`s, a string and a bool say the same thing in
+/// a form this module already knows how to keep stable.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MotionPlanState {
+    /// `DesiredMotion::desired_velocity_local`, ship-local.
+    pub desired_velocity_local: [f32; 3],
+    /// `DesiredMotion::desired_facing_local`, ship-local.
+    pub desired_facing_local: [f32; 3],
+    /// `HazardAssessment::hazard_forces`, ship-local.
+    pub hazard_forces: [f32; 3],
+    /// `HazardAssessment::urgency`.
+    pub urgency: f32,
+    /// `HazardAssessment::primary_hazard`, as its string form — the shape every
+    /// other id in this payload takes ([`EntityState::target_lock`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary_hazard: Option<String>,
+    /// `HazardAssessment::moving_hazard_threat`.
+    pub moving_hazard_threat: f32,
+    /// `ShipMotionPlan::docking_active`.
+    pub docking_active: bool,
+}
+
+/// The shared motion plan, in a query of its own, joined by uuid — see
+/// [`EntityState::motion_plan`]. Reads the `HelmMotionPlan` resource (keyed by
+/// `Entity`) and re-keys it by the stable `EntityUuid`, which is what lets it
+/// survive a restore into a world whose entity ids are different.
+fn capture_motion_plans(world: &World) -> Vec<(String, MotionPlanState)> {
+    let Some(plan) = world.get_resource::<crate::ship::helm_planner::HelmMotionPlan>() else {
+        return Vec::new();
+    };
+    let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
+        return Vec::new();
+    };
+    query
+        .iter(world)
+        .filter_map(|(entity, uuid)| {
+            let ship = plan.ships.get(&entity)?;
+            Some((
+                uuid.0.clone(),
+                MotionPlanState {
+                    desired_velocity_local: ship.motion.desired_velocity_local.to_array(),
+                    desired_facing_local: ship.motion.desired_facing_local.to_array(),
+                    hazard_forces: ship.hazard.hazard_forces.to_array(),
+                    urgency: ship.hazard.urgency,
+                    primary_hazard: ship.hazard.primary_hazard.map(|u| u.to_string()),
+                    moving_hazard_threat: ship.hazard.moving_hazard_threat,
+                    docking_active: ship.docking_active,
+                },
+            ))
+        })
+        .collect()
+}
+
+/// Refill [`crate::ship::helm_planner::HelmMotionPlan`] from the captured rows,
+/// re-keying each by the restored world's own `Entity` (issue #1242).
+///
+/// The counterpart to [`rebuild_ai_world_snapshot`], and deliberately NOT the
+/// same shape: that one RE-DERIVES its resource because it can, from inputs the
+/// restore has already put back. This one cannot. The plan was computed on the
+/// last AI tick, against that tick's positions; a restore lands on whatever tick
+/// the capture was taken at — tick 399 of a 60 Hz run whose AI cadence is 30 Hz,
+/// in the duel this issue was found in — and re-running the planner there would
+/// plan against the positions physics has since integrated, not the ones the
+/// plan was made from. That is a different plan, not a reconstructed one.
+fn restore_motion_plans(world: &mut World, snapshot: &PhoenixSnapshot) {
+    let rows: std::collections::HashMap<&str, &MotionPlanState> = snapshot
+        .entities
+        .iter()
+        .filter_map(|row| Some((row.uuid.as_str(), row.motion_plan.as_ref()?)))
+        .collect();
+    if rows.is_empty() {
+        return;
+    }
+    let mut by_entity: std::collections::HashMap<
+        Entity,
+        crate::ship::helm_planner::ShipMotionPlan,
+    > = std::collections::HashMap::new();
+    {
+        let Some(mut query) = world.try_query::<(Entity, &EntityUuid)>() else {
+            return;
+        };
+        for (entity, uuid) in query.iter(world) {
+            let Some(row) = rows.get(uuid.0.as_str()) else {
+                continue;
+            };
+            by_entity.insert(
+                entity,
+                crate::ship::helm_planner::ShipMotionPlan {
+                    motion: crate::ship::helm_planner::DesiredMotion {
+                        desired_velocity_local: Vec3::from_array(row.desired_velocity_local),
+                        desired_facing_local: Vec3::from_array(row.desired_facing_local),
+                    },
+                    hazard: crate::ship::helm_planner::HazardAssessment {
+                        hazard_forces: Vec3::from_array(row.hazard_forces),
+                        urgency: row.urgency,
+                        primary_hazard: row
+                            .primary_hazard
+                            .as_deref()
+                            .and_then(|u| uuid::Uuid::parse_str(u).ok()),
+                        moving_hazard_threat: row.moving_hazard_threat,
+                    },
+                    docking_active: row.docking_active,
+                },
+            );
+        }
+    }
+    if let Some(mut plan) = world.get_resource_mut::<crate::ship::helm_planner::HelmMotionPlan>() {
+        plan.ships = by_entity;
+    }
+}
+
 /// The helm pass surface, in a query of its own, joined by uuid — see
 /// [`EntityState::pass_surface`]. A row is emitted for every ship carrying one;
 /// the planner reads it every tick, so there is no "idle looks default"
@@ -2765,6 +2940,7 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
     let power = capture_power(world);
     let sensor_locks = capture_sensor_locks(world);
     let pass_surfaces = capture_pass_surfaces(world);
+    let motion_plans = capture_motion_plans(world);
     let infrastructure = capture_infrastructure(world);
     let tractors = capture_tractors(world);
     let docks = capture_docks(world);
@@ -2817,6 +2993,10 @@ fn capture_entities(world: &World) -> Vec<EntityState> {
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
                 .map(|(_, surface)| *surface),
+            motion_plan: motion_plans
+                .iter()
+                .find(|(id, _)| id == &uuid.0)
+                .map(|(_, plan)| plan.clone()),
             infrastructure: infrastructure
                 .iter()
                 .find(|(id, _)| id == &uuid.0)
@@ -3399,7 +3579,8 @@ pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     restore_asteroids(world, snapshot, &mut report);
     restore_run_scope(world, snapshot, &mut report);
     rebuild_power_modifiers(world);
-    rebuild_ai_world_snapshot(world);
+    restore_ai_world_snapshot(world, snapshot);
+    restore_motion_plans(world, snapshot);
 
     report
 }
@@ -3448,6 +3629,27 @@ fn rebuild_power_modifiers(world: &mut World) {
 /// at its tick, and after this restore the world already stands at that tick.
 /// Putting a derivation in the save would be storing an answer the payload can
 /// recompute — and one that a later build might compute differently.
+/// Put the AI's shared world view back as it stood at the capture (issue #1242),
+/// falling back to a rebuild for a save that predates the field.
+///
+/// The carried view WINS whenever there is one, and [`PhoenixSnapshot::ai_world`]
+/// explains why at length: the view is built on the slowest AI cadence, so it is
+/// deliberately behind the world, and rebuilding it produces a view that is right
+/// for the restore tick rather than the one the run was steering from.
+///
+/// The rebuild survives as the pre-format-12 path. It is better than nothing —
+/// which is what a resumed world otherwise has, the bootstrap's own view of its
+/// own fight — and it is what those saves were verified against.
+fn restore_ai_world_snapshot(world: &mut World, snapshot: &PhoenixSnapshot) {
+    if let Some(entities) = &snapshot.ai_world {
+        if let Some(mut view) = world.get_resource_mut::<crate::ai::server::WorldSnapshot>() {
+            view.entities = entities.clone();
+            return;
+        }
+    }
+    rebuild_ai_world_snapshot(world);
+}
+
 fn rebuild_ai_world_snapshot(world: &mut World) {
     use bevy::ecs::system::RunSystemOnce;
     // Errors are swallowed on purpose: a bare-`App` fixture with the AI plugin

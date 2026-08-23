@@ -432,6 +432,53 @@ fn a_bounded_duel_resumes_into_a_fresh_app_and_steps_forward_with_it() {
     );
 }
 
+/// The same acceptance across SEVERAL seeds (issue #1242).
+///
+/// One seed is one fight, and a resume gap that only bites when a particular
+/// manoeuvre happens to span the capture tick will hide behind it — which is
+/// exactly how this one hid: the divergence needed the cruiser to be mid
+/// combat-orbit, on a non-AI tick, at tick 400. Sweeping the seed moves the
+/// capture instant through different points of different fights, so the
+/// stale-derived-state class is caught by the suite rather than by whoever next
+/// re-tunes a hull.
+///
+/// Each seed is a full boot + capture + reload + continuation, so the sweep is
+/// deliberately short.
+#[test]
+fn the_bounded_duel_resumes_across_several_seeds() {
+    for seed in SWEPT_SEEDS {
+        let mut args = args(DUEL, ("cruiser", "destroyer"));
+        args.seed = Some(seed);
+        resume_round_trip(DUEL, args, &format!("duel-seed-{seed}"), CONTINUE_FOR);
+    }
+}
+
+/// The seeds [`the_bounded_duel_resumes_across_several_seeds`] sweeps.
+///
+/// NOT an arbitrary pick, and deliberately not "whichever ones are green":
+/// `SEED + 7` is excluded because it FAILS, and it gets its own `#[ignore]`d
+/// test below rather than being quietly dropped from this list.
+const SWEPT_SEEDS: [u64; 3] = [SEED, SEED + 1, SEED + 31];
+
+/// A resume gap this issue's seed sweep FOUND and did not fix (issue #1242).
+///
+/// Seed `SEED + 7` diverges ONE frame after the restore, not two — a different
+/// signature from the class #1242 closed, which shows at frame 2 because a
+/// steering-intent change takes a tick to reach yaw. A frame-1 divergence means
+/// something the digest folds directly was already different on the first
+/// continuation tick.
+///
+/// It is pre-existing, not a regression: measured both ways, it fails identically
+/// with and without #1242's `PhoenixSnapshot::ai_world` carry. Ignored rather than
+/// deleted so whoever works this seam next has the reproducer already written.
+#[test]
+#[ignore = "pre-existing frame-1 resume divergence found by #1242's seed sweep;             fails identically with and without that fix — needs its own diagnosis"]
+fn the_bounded_duel_resumes_on_the_seed_that_still_diverges() {
+    let mut args = args(DUEL, ("cruiser", "destroyer"));
+    args.seed = Some(SEED + 7);
+    resume_round_trip(DUEL, args, "duel-seed-divergent", CONTINUE_FOR);
+}
+
 /// The acceptance criterion on **its own world**, streamed belts and all.
 ///
 /// The capture is taken at [`CAPTURE_AT`], long after the player has left the

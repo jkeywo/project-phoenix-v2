@@ -9299,7 +9299,7 @@ tags = ["asteroid"]
 
 /// The shipped cruiser's own text, with `mutate` applied to its
 /// `[helm_console.steering_ai.param]` table, parsed exactly as the loader does.
-fn cruiser_with_steering_params(mutate: impl Fn(&mut String) -> ()) -> Result<(), String> {
+fn cruiser_with_steering_params(mutate: impl Fn(&mut String)) -> Result<(), String> {
     let mut text = resolved_text("alliance_cruiser");
     mutate(&mut text);
     crate::entities::config::EntityConfig::from_toml(&text)

@@ -174,20 +174,23 @@ pub struct TorpedoAiInput {
 /// changed is that it is now a threshold a designer can retune — or a doctrine
 /// can decline — rather than a constant compiled into the decision.
 ///
-/// **A hull has since retuned it, so "every armed tube in the fleet" — which
-/// this doc used to claim — is no longer true (issue #929).**
+/// **Every armed tube in the fleet does currently author `<= 0`, and that is a
+/// fact about CONTENT rather than an invariant this function may assume
+/// (issue #929).** It has already been false once. #929's first pass had
 /// `alliance_cruiser.toml`'s three tubes compare against a
-/// `param(max_striking_shield_hp)` authored past any arc reading, which switches
-/// the conjunct off. That hull cannot reach the fleet reading against a shielded
-/// warship: one 180-degree auto-arc phaser bank bears at a time on its own
-/// broadside ring, about 1 dmg/s into an arc the target's own Shields AI focuses
-/// to 6.5 hp/s and halves incoming damage on. Its helm's `torpedo_run` bow hold
-/// exits only on a round having LEFT a tube, so an unreachable launch gate turned
-/// an authored leg into a sink. The point for a reader HERE is narrower than the
-/// balance argument: which tubes are gated on the striking arc is a per-hull fact
-/// about content, not an invariant this function may assume.
-/// `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it`
-/// is the census that keeps the pairing honest.
+/// `param(max_striking_shield_hp)` authored past any arc reading, switching the
+/// conjunct off, because at `beam_damage_per_sec = 4` that hull could not reach
+/// the fleet reading against a self-focusing warship — and its helm's
+/// `torpedo_run` bow hold exits only on a round having LEFT a tube, so an
+/// unreachable launch gate turned an authored leg into a sink. #929's second pass
+/// restored the fleet text there and paid for it on the guns instead (24 dmg/s a
+/// bank), which it could do because a round no longer bypasses a raised arc: the
+/// gate is now worth ten times the round it delays. Either way the point for a
+/// reader HERE is the narrow one — which tubes gate on the striking arc, and
+/// against what threshold, is per-hull content, and this function reads none of
+/// it. `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it`
+/// is the census that keeps the leg/launcher pairing honest, and
+/// `torpedo_launch_shield_gate_truth_table` enumerates who authors what.
 ///
 /// `target_facing_shields` stays on [`TorpedoAiInput`] because the host seeds
 /// the fact from it; this function simply no longer reads it.

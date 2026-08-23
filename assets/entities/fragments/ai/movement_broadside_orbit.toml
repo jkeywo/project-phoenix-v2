@@ -205,8 +205,10 @@
 # — target locked, tube loaded, tube in arc — and does NOT return an empty list
 # on `target_facing_shields > 0`; the hold is each tube's own authored
 # `torpedo_launch` guard. And it is consequently no longer true "for every hull,
-# player and NPC alike": `alliance_cruiser.toml` authors a
-# `max_striking_shield_hp` threshold past any arc reading and holds for nothing.
+# player and NPC alike" — though as of #929's second pass it is true again:
+# `alliance_cruiser.toml` briefly authored a `max_striking_shield_hp` threshold
+# past any arc reading and held for nothing, and is now back on the fleet's
+# literal `<= 0` with every other armed hull.
 #
 # What this leg exists to own is the channel-3 `ArcBearingRequest`, and that
 # request fires on a strictly WEAKER condition than "the launcher would fire now":
@@ -226,6 +228,14 @@
 # dropped, the same run holds 24.5-25.6 units with no sawtooth at all and goes 62
 # dealt against 0 taken.
 #
+# The "about 1 damage per second" there is the cruiser at
+# `beam_damage_per_sec = 4`, which is what it carried until issue #929's second
+# pass took it to 24 so its own launcher gate could be satisfiable. The GEOMETRY
+# argument is what this paragraph is for and it does not depend on that number:
+# the request fires on loaded-and-unable-to-point, so a doctrine that breaks its
+# ring only when the shot is already takeable leaves Channel 3 flying the ship
+# for the rest of the engagement however hard the beams hit.
+#
 # The Harrow's reading is right for the Harrow because a shield gap is the only
 # thing its bow hold can be FOR: its rounds author `damage_shields = 0`, and its
 # beams are a 270-degree pair it works from the beam, so bow-on it can neither
@@ -237,27 +247,49 @@
 #
 # This paragraph used to end: "A hull whose forward bank bears on its own bow can
 # strip the arc it is about to shoot through, so the same bow hold is
-# SELF-COMPLETING." That is false, and it is the precise false premise that let
-# the permissive reading ship next to a strict launcher.
+# SELF-COMPLETING." That was false when it was written, and it is the precise
+# false premise that let the permissive reading ship next to a strict launcher.
 #
 # A bow hold is self-completing only if the hull can open the gap FASTER than the
-# target closes it, and `alliance_cruiser.toml` cannot. Its two banks'
+# target closes it. `alliance_cruiser.toml` could not. Its two banks'
 # `auto_arc_deg = 180` abut on the beam line, so bow-on it works ONE of them —
-# about 1 dmg/s into the arc, instrumented — while the target's own Shields AI
-# focuses that arc unconditionally on the fleet baseline: `focus_bonus_regen = 4`
-# over `regen_per_sec = 2.5` is 6.5 hp/s, and `focus_focused_damage_multiplier`
-# halves what lands. The hold therefore never completes, and because this leg's
-# only armament exits (`tubes_full`, `tubes_fillable`) both need a round to have
-# LEFT a tube, a launcher that never fires makes the leg ABSORBING: measured on
+# and at its then-authored `beam_damage_per_sec = 4` that was about 1 dmg/s into
+# the arc, instrumented — while the target's own Shields AI focuses that arc on
+# the fleet baseline: `focus_bonus_regen = 4` over `regen_per_sec = 2.5` is
+# 6.5 hp/s, and `focus_focused_damage_multiplier` halves what lands. The hold
+# therefore never completed, and because this leg's only armament exits
+# (`tubes_full`, `tubes_fillable`) both need a round to have LEFT a tube, a
+# launcher that never fires makes the leg ABSORBING: measured on
 # `probe_aggressor`, 86.9 s of a 90 s run parked at `torpedo_bearing_speed = 0.0`
 # with nothing launched.
 #
-# So a permissive `torpedo_run_shield_gap` is only safe beside a launcher that
-# will actually fire on the window it opens. `alliance_cruiser.toml` now authors
-# `max_striking_shield_hp` past any arc reading to make that true of itself, and
+# THE RULE THAT SURVIVES IT. A permissive `torpedo_run_shield_gap` is only safe
+# beside a launcher that will actually fire on the window it opens — and there
+# are exactly two ways to owe that, one static and one dynamic:
+#
+#   * STATICALLY, by making the launcher's guard no stricter than the leg's
+#     entry. No shipped hull does this.
+#   * DYNAMICALLY, by carrying guns that open the arc the launcher is waiting
+#     for. `alliance_battleship`, `alliance_destroyer` and
+#     `ship_harrow_warhawk` have always escaped this way, and since #929's
+#     second pass `alliance_cruiser` does too: its banks are
+#     `beam_damage_per_sec = 24`, which its own file justifies against the
+#     20.8 break-even the arithmetic above implies.
+#
 # `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it`
-# censuses the fleet so the mismatched pairing cannot be composed again in
-# silence. A hull that wants the permissive entry owes the matching launcher.
+# censuses the fleet so a hull with neither escape cannot be composed in silence.
+# It reads the STATIC half only — a static answer is provable from the authored
+# text, a dynamic one is a balance claim that only a seeded run can make — so a
+# hull in the dynamic bucket owes its evidence in its own file, and
+# `alliance_cruiser.toml` carries the sweep that pays for it.
+#
+# #929's first pass took a third route and it is worth naming as a road not
+# taken: it authored `max_striking_shield_hp = 1000000.0` on the cruiser's tubes,
+# a threshold past any arc reading, which made the launcher unconditional. That
+# is gone. It could only be argued for while `damage_hull` bypassed shields
+# outright — with a round that no longer does, holding it for a downed arc is
+# worth ten times spending it into a live one, and the gate is the point of the
+# leg rather than an obstacle to it.
 #
 # So it is a PARAMETER rather than a fork (issue #878, moving
 # `ship_harrow_cruiser.toml` onto this file). `torpedo_run_shield_gap` is the

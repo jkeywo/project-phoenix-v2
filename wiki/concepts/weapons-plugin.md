@@ -57,11 +57,32 @@ Above that host gate sits the per-tube launch **policy** (`torpedo_launch` chann
 
 Summing every arc meant three healthy rear arcs vetoed a shot into a collapsed front arc while the attacker sat dead ahead. With per-arc regen and short offline windows a four-arc Alliance hull practically never has all arcs down at once, so AI crews on those hulls never launched a torpedo and same-class duels reported 0% torpedo contribution. Single-omni-arc NPCs are unaffected — their one arc faces every bearing.
 
-Since issue #956 the shield conjunct itself is authored per tube rather than enforced in Rust, and since issue #929 one hull retunes it: `alliance_cruiser`'s three tubes read `fact(target_facing_shields) <= param(max_striking_shield_hp)` with the threshold set past any arc reading, which switches the conjunct off. The rest of the fleet still authors the literal `<= 0`.
+Since issue #956 the shield conjunct itself is authored per tube rather than enforced in Rust. Every armed hull currently authors the literal `<= 0`, and that is a fact about content rather than an invariant — issue #929's first pass had `alliance_cruiser`'s three tubes read `fact(target_facing_shields) <= param(max_striking_shield_hp)` with the threshold set past any arc reading, switching the conjunct off, and its second pass put the fleet text back.
 
-That hull is where the fleet reading cannot be reached — against a shielded warship, which is the only thing its doctrine is written for; the fact still reads 0 for an unshielded hull, an asteroid, or an arc already offline, and those shots are taken. Two things compound. Its two phaser banks' `auto_arc_deg = 180` abut on the beam line its own broadside ring holds the target on, so exactly one bears: `beam_damage_per_sec = 4` scaled by `ModifierSlot::PhaserDamage` off the **weapons** group (5 dmg/s at the rung `fleet_baseline` walks to at combat stations) on a 6 s / 6 s duty cycle, instrumented at about 1 dmg/s into the arc. And the arc is actively defended — not by the **shields** power group, which never bids and sits at its commanded 2 where `ShieldRegen` is ×1.0, but by the target's own Shields AI: the fleet baseline focuses an arc unconditionally, so `focus_bonus_regen = 4` takes the focused arc from 2.5 to 6.5 hp/s while `focus_focused_damage_multiplier = 0.5` halves what lands on it.
+### What the gate buys (issue #929)
 
-The cost was structural rather than cosmetic: the helm's `torpedo_run` bow hold exits only on `tubes_full < 1` / `tubes_fillable < 1`, both of which need a round to have left a tube, so a launcher that can never fire turns that leg into a sink and the hull parks in front of its target with thrust cut. `damage_hull` always pierces (only `damage_shields` is offered to the facing arc), so on this hull holding for a collapsed arc forgoes 40 of a 44-point payload to protect 4. `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it` censuses the fleet for that entry/launcher pairing so the shape cannot be composed again by accident.
+Until #929's second pass the gate protected almost nothing, and that is why switching it off looked reasonable. `damage_hull` bypassed the shield system unconditionally and only `damage_shields` was ever offered to the facing arc, so a cruiser round arriving at a healthy screen still landed 40 of its 44 points. Holding fire bought 4.
+
+A round now resolves against the **one facing arc it flew into**, and that arc's own reading selects the payload rather than splitting it:
+
+| Struck arc | Payload | How it is applied |
+| --- | --- | --- |
+| Up (`hp > 0`) | `damage_shields` | `split_damage_for_pierce` by the tube's `shield_pierce`, remainder into the facing, overflow past its remaining HP spilling to hull — the same three lines the beam path runs |
+| Down (`hp == 0`, an offline arc, or a victim with no `ShipShields` at all) | `damage_hull` | whole, straight to the hull; there is no screen to absorb it and nothing to pierce |
+
+The two damage fields are therefore **alternatives, not two halves of one payload**, and `shield_pierce` is a lever on the shields-up payload only. The arc reading comes from `ShieldSystem::hp_facing_bearing`, the bearing-resolved twin of the `hp_facing_attacker` that seeds `target_facing_shields` — so the launch gate and the impact ask one resolver one question.
+
+No authored number had to move: every hull already writes `damage_hull` an order of magnitude above `damage_shields` (40/4 on the battleship and cruiser, 45/5 on the destroyer, 34/0 and 30/0 on the Harrow pair). "More damage when the shields are down" is structural, and holding a round for a downed arc is now worth roughly ten times spending it into a live one.
+
+### The cruiser, and why the fix was the guns
+
+`alliance_cruiser` is the hull that could not reach the fleet reading. Against a shielded warship — the only thing its doctrine is written for; the fact still reads 0 for an unshielded hull, an asteroid, or an arc already offline, and those shots are taken — two things compound. Its two phaser banks' `auto_arc_deg = 180` abut on the beam line its own broadside ring holds the target on, so exactly one bears. And the arc is actively defended: not by the **shields** power group, which never bids and sits at its commanded 2 where `ShieldRegen` is ×1.0, but by the target's own Shields AI, which focuses the arc taking the damage — `focus_bonus_regen = 4` takes an `alliance_destroyer` arc from 2.5 to 6.5 hp/s while `focus_focused_damage_multiplier = 0.5` halves what lands on it.
+
+That is a real cost, because the helm's `torpedo_run` bow hold exits only on `tubes_full < 1` / `tubes_fillable < 1`, both of which need a round to have left a tube: a launcher that can never fire turns the leg into a sink and the hull parks in front of its target with thrust cut. #929's first pass answered it by switching the launcher gate off; its second pass answered it on the attack side instead, because with the impact model above the gate is worth keeping.
+
+Break-even is arithmetic. Three factors sit between an authored `beam_damage_per_sec` and the arc's HP — `ModifierSlot::PhaserDamage` at the combat weapons rung (×1.25), the bank's 6 s / 6 s duty cycle (×0.5), and the focus multiplier (×0.5) — so the arc loses `D × 0.3125` hp/s against 6.5 hp/s of regen, and `D` must clear 20.8. Both banks went 4 → 24, which a swept `probe_duel` ladder confirms is the knee: at 8 no seed of twelve opens the gate, at 16 eight do, at 20 nine, at 24 all twelve (and 28 of 28 on the wider sweep). 24 is the fleet's largest single `beam_damage_per_sec` but not its heaviest battery — time-averaged over duty and counting only banks that bear together, `ship_harrow_warhawk` is 16 dmg/s against this hull's 12.
+
+`authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it` censuses the fleet for the entry/launcher pairing. A weak entry beside a strict launcher is a deadlock only when the hull carries nothing that bears on its own bow — that corner is provable from authored text and stays asserted empty — and a hull that escapes on its guns instead is named in a bucket beside it, owing the seeded sweep its own file carries.
 
 ### Per-blackboard publish
 
@@ -166,6 +187,8 @@ Damage routing — three paths route NPC-bound damage through the shield:
 | NPC phaser → NPC/station | `tick_beams_apply_damage` (`beam.rs`) | Active bank's `shield_pierce` (per-entity `PhaserCombatConfigResource`) |
 
 Each path applies `split_damage_for_pierce(damage, pierce)`: the `pierced` portion lands on hull directly, `absorbed` hits the shield, and any overflow leaks back to hull. Damage with no shield component falls through to the legacy hull-direct path unchanged (zero regression for asteroids and shieldless stations).
+
+On the torpedo path the `damage` fed into that split is `damage_shields`, and it is only fed in at all when the struck arc is up — a round meeting a downed arc, or a victim with no shields, delivers `damage_hull` straight to the hull instead, unsplit (issue #929, above). `shield_pierce` therefore governs only what gets past a **live** screen.
 
 **Permanent break semantics** — once `current_hp` reaches `0.0`, the shield latches `broken = true` and never recovers. All subsequent damage skips the shield routing entirely and goes straight to hull regardless of the attacker's `shield_pierce`. There is no offline timer / recovery model (unlike the player ship). `tick_npc_shield_regen` (Physics set) advances `current_hp` by `regen_per_sec * dt` only while `!broken && current_hp < max_hp`.
 

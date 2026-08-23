@@ -885,12 +885,18 @@ fn most_recent_combat(a: &crate::ship::combat_activity::RecentCombatActivity) ->
 ///   moments in the shot's life.) Since issue #956 nothing in Rust compares it
 ///   to anything: it is seeded into the tube's launch snapshot and the tube's
 ///   own authored guard is what holds fire. Phasers strip the shields, torpedoes
-///   finish the hull — said in TOML, and therefore said differently by different
-///   hulls. Most author `fact(target_facing_shields) <= 0`; since issue #929
-///   `alliance_cruiser`'s three tubes author the same comparison against a
-///   `param(max_striking_shield_hp)` set past any arc reading, which switches the
-///   conjunct off, because that hull's own guns cannot open the gap the fleet
-///   reading waits for. Do not read a fleet-wide rule out of this seeding.
+///   finish the hull — said in TOML, and therefore sayable differently by
+///   different hulls. Every armed tube currently authors
+///   `fact(target_facing_shields) <= 0`, and it is worth more than it used to be:
+///   since issue #929 a round delivers `damage_hull` only into a DOWN arc and the
+///   far smaller `damage_shields` into a live one, so the gate decides the
+///   payload rather than merely the timing. Do not read a fleet-wide rule out of
+///   this seeding all the same — #929's first pass had `alliance_cruiser`'s three
+///   tubes compare against a `param(max_striking_shield_hp)` set past any arc
+///   reading, switching the conjunct off, and its second pass put the fleet text
+///   back and raised that hull's guns instead.
+///   `torpedo_launch_shield_gate_truth_table` is the enumeration; this seeding
+///   takes no position.
 ///
 ///   It is deliberately *not* the sum over all arcs. Summing let three
 ///   healthy REAR arcs veto a shot into a collapsed FRONT arc while the

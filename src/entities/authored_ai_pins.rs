@@ -378,38 +378,25 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // depart from the impulse baseline, not three.
     ("alliance_cruiser", "engines"),
     ("alliance_cruiser", "steering"),
-    // …and the THREE TUBES the ring exists to point (issue #929). The fleet
-    // launch gate holds a round until the striking arc is down
-    // (`fact(target_facing_shields) <= 0`); these three author the same guard
-    // over a `max_striking_shield_hp` param set past any arc reading, which
-    // turns the shield conjunct off and leaves the red-alert gate alone.
+    // …and NOT the three tubes the ring exists to point, which is worth a note
+    // because they were listed here for one release (issue #929).
     //
-    // It is a departure because this hull is the one that cannot satisfy the
-    // fleet reading against a shielded warship. Its two phaser banks'
-    // `auto_arc_deg = 180` abut on the ring's beam line, so exactly one bears at
-    // a time — `beam_damage_per_sec = 4`, x1.25 from `ModifierSlot::PhaserDamage`
-    // at the weapons rung `fleet_baseline` walks to in combat, on a 6 s / 6 s
-    // duty cycle, instrumented at about 1 dmg/s into the arc — while the TARGET's
-    // own Shields AI focuses an arc unconditionally, which is
-    // `focus_bonus_regen = 4` on top of `regen_per_sec = 2.5` (6.5 hp/s) plus
-    // `focus_focused_damage_multiplier = 0.5` on what lands. The SHIELDS power
-    // group is no part of it: it never bids, so it sits at its commanded 2, where
-    // `ShieldRegen` is x1.0. The consequence was not merely
-    // a quiet launcher. `movement_broadside_orbit`'s `torpedo_run` opens on
-    // readiness alone here (`torpedo_run_shield_gap = 0.0`, pinned by
-    // `the_harrow_cruiser_breaks_its_ring_only_for_a_struck_down_arc`) and every
-    // exit it has needs a round to have LEFT a tube, so a launcher that can
-    // never fire made that leg absorbing: measured across `probe_duel`,
-    // `probe_aggressor` and `combat_test`, the hull cut thrust and held its bow
-    // on the enemy for 12-87 s at a stretch and launched nothing at all.
+    // #929's first pass authored a `max_striking_shield_hp` param past any arc
+    // reading on all three, turning the fleet shield conjunct off, on the ground
+    // that the hull could not satisfy `fact(target_facing_shields) <= 0` against
+    // a self-focusing warship: at `beam_damage_per_sec = 4` its two abutting
+    // 180-degree auto-arc banks put about 1 dmg/s into an arc regenerating 6.5
+    // and halving what lands, and `movement_broadside_orbit`'s `torpedo_run`
+    // exits only on a round having LEFT a tube — so an unreachable gate made an
+    // authored leg absorbing and the hull held its bow on the enemy for 12-87 s
+    // at a stretch with nothing launched.
     //
-    // The two halves of a salvo doctrine have to ask the SAME question — the
-    // fragment's own header says so — and on this hull the launcher is the half
-    // that moves, because `damage_hull` pierces the arc anyway. See the note
-    // above `alliance_cruiser.toml`'s `fore_port` tube for the measurements.
-    ("alliance_cruiser", "torpedo_tube[fore_port]"),
-    ("alliance_cruiser", "torpedo_tube[fore_starboard]"),
-    ("alliance_cruiser", "torpedo_tube[aft]"),
+    // #929's second pass moved the OTHER half. Torpedoes stopped bypassing a
+    // raised arc, which made holding the round worth ten times spending it, and
+    // the banks went to 24 dmg/s so the gate is reachable — measured, 28/28
+    // `probe_duel` seeds. The tubes are back on the fleet text word for word and
+    // must not be listed here: the unanimity check below is what would notice
+    // them drifting off it again.
     // ── The composed HARROW doctrines (issue #878) ───────────────────────────
     //
     // These three used to author their manoeuvres inline, hull by hull; they now
@@ -3298,14 +3285,23 @@ fn the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap() {
 /// is how the two hulls sampled here author it — the Harrow doctrines have
 /// carried it as a literal since #791, and the fleet baseline matches them.
 ///
-/// **NOT "every armed tube in the fleet", which is what this doc used to claim
-/// and what #929 disproved.** `alliance_cruiser`'s three tubes deliberately
-/// author a `param(max_striking_shield_hp)` past any arc reading, so they hold
-/// for nothing and are listed in [`BESPOKE_DOCTRINES`] for it. That is why this
-/// table samples the fleet baseline (which resolves off `alliance_battleship`)
-/// and the warhawk by name rather than sweeping every hull: the shield clause is
-/// a per-hull decision now, and the sweep that treats it as one is
+/// **Every armed tube in the fleet does author `<= 0` again, and this table
+/// still declines to say so on their behalf (issue #929).** #929's first pass had
+/// `alliance_cruiser`'s three tubes author a `param(max_striking_shield_hp)` past
+/// any arc reading, holding for nothing; its second pass restored the fleet text
+/// there and raised that hull's phaser banks instead, and the cruiser's tubes
+/// have left [`BESPOKE_DOCTRINES`] with it. The clause is nonetheless still a
+/// per-hull DECISION rather than an invariant — it was overridden once and can be
+/// again — which is why this table samples the fleet baseline (which resolves off
+/// `alliance_battleship`) and the warhawk by name rather than sweeping every
+/// hull. The sweep that treats it as per-hull is
 /// [`a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it`].
+///
+/// What the gate BUYS changed under #929 too, and the `hold` rows below are
+/// worth more for it: a round no longer bypasses a raised arc. `damage_hull`
+/// lands only into a struck arc reading 0, and `damage_shields` — an order of
+/// magnitude smaller on every hull that carries both — into a live one. Holding
+/// fire is the difference between 40 points and 4, not a timing preference.
 #[test]
 fn torpedo_launch_shield_gate_truth_table() {
     // (label, the hull's tube policy). The baseline hull holds fire until its
@@ -3406,22 +3402,61 @@ fn torpedo_launch_shield_gate_truth_table() {
 ///
 /// The two halves of a salvo doctrine ask about the target's striking arc
 /// separately — the helm's `torpedo_run_shield_gap`, and each tube's own
-/// `torpedo_launch` guard — and nothing made them agree. `movement_broadside_orbit`'s
+/// `torpedo_launch` guard — and nothing makes them agree. `movement_broadside_orbit`'s
 /// header states the invariant ("only point the bow when pointing it accomplishes
 /// something") and the hazard note above [`the_torpedo_run_opens_on_a_loaded_salvo_and_closes_on_the_hulls_own_armament`]
 /// spells out the failure, but neither had a pin behind it, and the shipped
 /// cruiser composed the broken pairing for months:
 ///
-/// * the helm opened the bow hold on readiness ALONE (`torpedo_run_shield_gap`
+/// * the helm opens the bow hold on readiness ALONE (`torpedo_run_shield_gap`
 ///   at 0.0, so the arc is not asked about), while
-/// * the tubes held every round for a struck-down arc (`<= 0`) that this hull's
-///   own guns cannot produce, and
+/// * the tubes hold every round for a struck-down arc (`<= 0`), and
 /// * the leg's only armament exits (`tubes_full`, `tubes_fillable`) both need a
 ///   round to have LEFT a tube.
 ///
-/// A weak entry beside a strict launcher is therefore not a balance choice, it
-/// is an ABSORBING state: the hull cuts thrust, holds its bow, and waits for a
-/// window it is not creating. That is the shape enumerated here.
+/// A weak entry beside a strict launcher is therefore an ABSORBING state —
+/// the hull cuts thrust, holds its bow, and waits — **unless the hull can open
+/// that arc itself.** That caveat is the whole of the re-derivation below.
+///
+/// # What changed, and why the pin cannot simply assert the pairing away
+///
+/// #929's FIRST pass read the pairing as unconditionally broken and fixed it
+/// statically: `alliance_cruiser`'s tubes took a `max_striking_shield_hp` param
+/// past any arc reading, which made the launcher permissive, and this pin
+/// asserted the weak-entry/strict-launcher bucket EMPTY.
+///
+/// #929's SECOND pass put those tubes back on the fleet's `<= 0` — a torpedo no
+/// longer bypasses a raised arc, so holding the round is worth ten times
+/// spending it — and paid for the gate on the guns instead. The cruiser is
+/// therefore back in that bucket, and the bucket is no longer empty, because
+/// emptiness was never the real invariant. There are exactly TWO ways to owe a
+/// weak entry a launcher that will answer it:
+///
+/// * STATICALLY, by authoring a launch guard no stricter than the entry. No
+///   shipped hull does this now.
+/// * DYNAMICALLY, by carrying guns that open the arc the launcher waits for.
+///   `alliance_battleship`, `alliance_destroyer` and `ship_harrow_warhawk` have
+///   always escaped this way — they simply have no bow hold to be absorbed by —
+///   and `alliance_cruiser` now escapes the same way WITH one.
+///
+/// A dynamic escape is a balance claim, and this file reads authored text, so
+/// the pin does not try to prove it. What it can prove is the corner where no
+/// escape of either kind is even possible — a hull that points its bow, waits
+/// for a gap, and carries nothing that BEARS on the bow to make one — and that
+/// list must stay empty. The named bucket beside it is the reader's half: a hull
+/// in it owes seeded evidence in its own file that its guns actually open the
+/// arc, the way `alliance_cruiser.toml` carries a 28-seed `probe_duel` sweep.
+///
+/// The arithmetic that sweep answers, for a reader who wants the shape of it:
+/// against a focused arc the hull must land more than the arc regenerates, and
+/// three factors stand between an authored `beam_damage_per_sec` and the arc's
+/// HP — the weapons power rung (x1.25 at the combat rung), the bank's duty cycle
+/// (x0.5 at 6 s on 6 s), and `focus_focused_damage_multiplier` (x0.5). Against an
+/// `alliance_destroyer` arc regenerating 6.5 hp/s focused, break-even is 20.8
+/// dmg/s a bank; the cruiser's banks are 24. That steady state is PESSIMISTIC —
+/// the target's focus follows the damage with a lag, an unfocused arc takes
+/// x1.25 and regenerates 1.5, and a target losing systems defends worse — which
+/// is why the number that settles it is the sweep and not this paragraph.
 ///
 /// Read behaviourally rather than by name — the bow-hold state is discovered by
 /// the verb it resolves, and both guards are resolved through the real predicate
@@ -3439,10 +3474,12 @@ fn torpedo_launch_shield_gate_truth_table() {
 fn a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it() {
     // Hulls that hold their bow for a salvo, split by whether the ENTRY asks
     // about the target's arc; and hulls with tubes but no bow hold at all, split
-    // the same way on the LAUNCHER. Only the first list may not contain a hull
-    // whose launcher is strict.
+    // the same way on the LAUNCHER. The first list is split once more, on
+    // whether the hull carries anything that bears on its own bow — the half
+    // that decides whether a strict launcher is a deadlock or a dependency.
     let mut weak_entry_permissive_launcher: Vec<String> = Vec::new();
-    let mut weak_entry_strict_launcher: Vec<String> = Vec::new();
+    let mut weak_entry_strict_launcher_armed_bow: Vec<String> = Vec::new();
+    let mut weak_entry_strict_launcher_unarmed_bow: Vec<String> = Vec::new();
     let mut strict_entry: Vec<String> = Vec::new();
     let mut no_bow_hold_strict_launcher: Vec<String> = Vec::new();
     let mut no_bow_hold_permissive_launcher: Vec<String> = Vec::new();
@@ -3474,6 +3511,26 @@ fn a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it() {
                     .expect("every shipped tube authors a policy"),
             );
             resolve(&p, "torpedo_launch", &arc_up).as_ref() != Some(&AiPolicyVerb::LaunchTorpedo)
+        });
+
+        // CAN ANYTHING SHOOT WHILE THE BOW IS HELD? A bank bears on the bow when
+        // its arc, centred on its own `facing_deg`, contains relative bearing 0.
+        // Phasers are asked about their AI arc (`auto_arc_deg`) rather than the
+        // wider manual `fire_arc_deg`, because the bow hold is a thing an AI crew
+        // flies; blasters author one arc for both. Zero-damage banks do not
+        // count — a bank is a gun only if it is authored to hurt something.
+        let bears_on_bow = |facing_deg: f32, arc_deg: f32| {
+            let centre = (facing_deg.rem_euclid(360.0) + 180.0).rem_euclid(360.0) - 180.0;
+            centre.abs() < arc_deg * 0.5
+        };
+        let armed_bow = cfg.weapons_console.as_ref().is_some_and(|wc| {
+            wc.phaser_banks
+                .iter()
+                .any(|b| b.beam_damage_per_sec > 0.0 && bears_on_bow(b.facing_deg, b.auto_arc_deg))
+                || wc
+                    .blaster_banks
+                    .iter()
+                    .any(|b| b.damage > 0 && bears_on_bow(b.facing_deg, b.fire_arc_deg))
         });
 
         // THE ENTRY. Find the state whose yaw rule resolves the bow hold, then
@@ -3527,37 +3584,56 @@ fn a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it() {
                     .is_some_and(|t| t.to == hold.id)
         });
 
-        match (weak_entry, strict_launcher) {
-            (true, true) => weak_entry_strict_launcher.push(stem),
-            (true, false) => weak_entry_permissive_launcher.push(stem),
-            (false, _) => strict_entry.push(stem),
+        match (weak_entry, strict_launcher, armed_bow) {
+            (true, true, true) => weak_entry_strict_launcher_armed_bow.push(stem),
+            (true, true, false) => weak_entry_strict_launcher_unarmed_bow.push(stem),
+            (true, false, _) => weak_entry_permissive_launcher.push(stem),
+            (false, _, _) => strict_entry.push(stem),
         }
     }
 
     // THE PIN. A hull may open its bow hold without asking about the arc, and a
-    // hull may hold its rounds for a struck-down arc. Doing BOTH is the deadlock.
+    // hull may hold its rounds for a struck-down arc. Doing both while carrying
+    // NOTHING that bears on the bow is the deadlock, provable from the authored
+    // text alone: there is no gun in the geometry the leg commits to, so the
+    // window the launcher waits for cannot arrive from this hull.
     assert!(
-        weak_entry_strict_launcher.is_empty(),
-        "{weak_entry_strict_launcher:?} open the torpedo-run bow hold on readiness \
-         alone (`torpedo_run_shield_gap` asks nothing about the target's arc) while \
-         every tube aboard holds its round until that arc is DOWN. The leg's only \
-         armament exits need a round to have left a tube, so the hull cuts thrust, \
-         points its bow, and waits for a window nothing is opening — issue #929, \
-         measured at 86.9 s of a 90 s `probe_aggressor` run with zero launches. \
-         Author ONE of the two: `torpedo_run_shield_gap = 1.0` on both helm axes so \
-         the leg only opens on a real gap and is released when it closes (the \
-         `ship_harrow_cruiser` answer), or a `torpedo_launch` guard that will fire \
-         on the window the entry opens (the `alliance_cruiser` answer)."
+        weak_entry_strict_launcher_unarmed_bow.is_empty(),
+        "{weak_entry_strict_launcher_unarmed_bow:?} open the torpedo-run bow hold on \
+         readiness alone (`torpedo_run_shield_gap` asks nothing about the target's \
+         arc), hold every round until that arc is DOWN, and carry no bank that bears \
+         on their own bow to put it down with. The leg's only armament exits need a \
+         round to have left a tube, so the hull cuts thrust, points its bow, and \
+         waits for a window nothing is opening — issue #929, measured at 86.9 s of a \
+         90 s `probe_aggressor` run with zero launches. Author ONE of the three: \
+         `torpedo_run_shield_gap = 1.0` on both helm axes so the leg only opens on a \
+         real gap and is released when it closes (the `ship_harrow_cruiser` answer), \
+         a `torpedo_launch` guard that will fire on the window the entry opens, or a \
+         bow-bearing bank heavy enough to open the arc itself (the \
+         `alliance_cruiser` answer, and the one that owes seeded evidence)."
     );
 
     // …and the census, so a NEW hull lands in a bucket a reader has to look at
     // rather than passing silently. These are lists, not counts: a rename or a
     // refit shows up as a diff here.
     assert_eq!(
-        weak_entry_permissive_launcher,
+        weak_entry_strict_launcher_armed_bow,
         ["alliance_cruiser"],
-        "the hulls whose bow hold opens on readiness and whose tubes will fire on \
-         what it opens"
+        "the hulls whose bow hold opens on readiness, whose tubes hold for a \
+         struck-down arc, and which carry a bow-bearing bank to strike it down \
+         with. This is a DEPENDENCY, not a deadlock — but it is only discharged by \
+         guns that are actually heavy enough, which is a balance claim no authored \
+         text can settle. A hull added here owes a seeded sweep in its own file \
+         showing the gate opening in practice; `alliance_cruiser.toml` carries 28 \
+         `probe_duel` seeds, launches on all of them, and the arc-collapse trace \
+         that goes with them"
+    );
+    assert!(
+        weak_entry_permissive_launcher.is_empty(),
+        "unexpected: {weak_entry_permissive_launcher:?} open the bow hold on \
+         readiness and will also fire through a healthy arc. That is not a deadlock \
+         and not a bug, but no shipped hull authors it since issue #929 restored the \
+         cruiser's tubes to the fleet gate — so it is worth a reader's eye"
     );
     assert_eq!(
         strict_entry,
@@ -3569,7 +3645,7 @@ fn a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it() {
     // have no leg to be absorbed by — but they are the ones that only ever get a
     // shot when something else strips the arc for them. Enumerated so the
     // dependency is visible: give one of these a bow hold and it joins the list
-    // above, where the pin will refuse it until the launcher is settled too.
+    // above, where a reader has to look at whether its guns can pay for it.
     assert_eq!(
         no_bow_hold_strict_launcher,
         [
@@ -3578,7 +3654,8 @@ fn a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it() {
             "ship_harrow_warhawk"
         ],
         "the hulls that hold their rounds for an arc no leg of their own opens — \
-         they escape DYNAMICALLY, on their guns being able to strip it. The \
+         they escape DYNAMICALLY, on their guns being able to strip it, which is \
+         exactly how `alliance_cruiser` escapes above with a leg as well. The \
          warhawk is the deliberate case: its fore and aft launchers are \
          opportunistic close defence taking whatever bearing the artillery hold \
          gives them (issue #793), so it wants no bow hold and its rounds wait for \

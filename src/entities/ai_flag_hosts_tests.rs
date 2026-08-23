@@ -834,12 +834,14 @@ const FIRE_GATE: &str = r#"when = "fact(red_alert) >= param(min_alert_to_fire)""
 /// text is longer while the alert half is identical. Mutated alongside the
 /// beam form so the counts below still cover every armed weapon on the hull.
 ///
-/// The shield half is spelled as a `param` rather than the fleet's literal
-/// `<= 0` because THIS hull retunes it (issue #929 — `max_striking_shield_hp`;
-/// see the note above its `fore_port` tube). That is incidental to what this
+/// The shield half is the fleet's literal `<= 0`. It was a `param` for one
+/// release — issue #929's first pass gave this hull a `max_striking_shield_hp`
+/// past any arc reading; its second pass put the fleet text back and raised the
+/// hull's phaser banks instead. Either way it is incidental to what this
 /// constant is for: only the ALERT clause is removed below, and whatever the
 /// shield clause says rides through the mutation unchanged.
-const TUBE_FIRE_GATE: &str = r#"when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= param(max_striking_shield_hp)""#;
+const TUBE_FIRE_GATE: &str =
+    r#"when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0""#;
 
 /// The cruiser authors the gate on two phaser banks (beam form) and three
 /// torpedo tubes (tube form). Stated as numbers so a refit that adds or
@@ -912,7 +914,7 @@ fn removing_the_authored_fire_gate_removes_the_gate() {
     let ungated = with_guard_everywhere(
         &cruiser,
         TUBE_FIRE_GATE,
-        r#"when = "fact(target_facing_shields) <= param(max_striking_shield_hp)""#,
+        r#"when = "fact(target_facing_shields) <= 0""#,
         CRUISER_GATED_TUBES,
     );
     let ungated =

@@ -3357,12 +3357,21 @@ function finishInit() {
   window.wasm_get_ai_doctrine = wasmBindings.wasm_get_ai_doctrine;
   // Console input-to-feedback latency (issue #1169). The getter returns a
   // ConsoleLatencyPayload as JSON, which the cog's console-latency output draws
-  // as a per-action table (gui/console-latency-panel.js). Unlike its neighbours
-  // the toggle gates MEASUREMENT, not just the publish: with it off the
-  // simulation takes no wall-clock reading and this page's own meter stops
-  // stamping, so the payload starts empty after each enable.
-  window.wasm_toggle_console_latency = wasmBindings.wasm_toggle_console_latency;
+  // as a per-action table (gui/console-latency-panel.js).
+  //
+  // Two differences from every neighbour above, both from the #1169 review. It
+  // is an absolute SET, not a toggle: a connected phone can flip the same flag,
+  // and a relative toggle raced against that lands on the opposite value —
+  // silently leaving the simulation measuring nothing while the cog reads "on".
+  // And the flag gates MEASUREMENT rather than only the publish, so enabling
+  // clears the previous window and the payload starts empty.
+  //
+  // `wasm_get_debug_flags` is the read-back the cog paints from, mirrored by the
+  // one system that already computes that set for the wire — so this page and a
+  // connected phone can never be shown different answers.
+  window.wasm_set_console_latency = wasmBindings.wasm_set_console_latency;
   window.wasm_get_console_latency = wasmBindings.wasm_get_console_latency;
+  window.wasm_get_debug_flags = wasmBindings.wasm_get_debug_flags;
   window.wasm_toggle_god_mode = wasmBindings.wasm_toggle_god_mode;
   window.wasm_get_god_mode = wasmBindings.wasm_get_god_mode;
   window.wasm_toggle_instagib = wasmBindings.wasm_toggle_instagib;

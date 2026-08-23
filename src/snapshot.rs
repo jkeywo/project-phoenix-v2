@@ -396,6 +396,13 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// exactly why the constant cannot be left at 11. Nothing in the payload
 /// distinguishes that save from one captured mid-manoeuvre, so both are refused
 /// by `Versions::check`, which names the dimension.
+///
+/// Format 12 is defined by the COMBINED #1242 + #929 shape: `ai_world` above AND
+/// `WeaponState.beams` as a 5-tuple (the #929 drawn-cooldown column). The two
+/// widenings landed in the same unpushed batch, so no build that wrote a
+/// 4-tuple format-12 save ever existed outside that merge window; a stray dev
+/// save from the window fails RON parse rather than the format check, which is
+/// acceptable for a payload no release wrote.
 pub const SNAPSHOT_FORMAT: u32 = 12;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than

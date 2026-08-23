@@ -29,10 +29,27 @@
 //!   player's network. A phone's WebRTC round trip on a stranger's wifi is a
 //!   real number and a useless budget; the simulation's own service window is
 //!   the part a regression in this repository can move.
+//! * It is the only PER-COMMAND segment. The client's `send_to_ack` ends when
+//!   the issuing console next received server state, so it is a
+//!   perceived-feedback proxy bounded below by the host's broadcast cadence
+//!   (issue #1169 review, finding C1) — it would move for reasons no processing
+//!   change caused, and fail to move for ones that did.
 //!
 //! The client-measured segments stay where they can be read in context — the
 //! debug dock and the run report — and are not smuggled into a budget that
 //! could not fairly hold anyone to them.
+//!
+//! # The metric must not charge for its own production
+//!
+//! The samples are free to this collector, but they were not free to the run: the
+//! flag-gated JSON publish clones labels, sorts each retained window and encodes,
+//! and it used to do that EVERY tick, inside the window `sim.tick` measures
+//! (issue #1169 review, finding C4). It is now throttled to 4 Hz of simulation
+//! time and the per-command action label is a `&'static str` rather than a
+//! `format!`. Measured on `probe_duel` at 1800 ticks, six interleaved runs per
+//! build: the pre-fix build sat +0.7% / +3.2% (p50 / p95) above a build with no
+//! console-latency measurement at all; the fixed build does not sit above it on
+//! any statistic.
 //!
 //! Per the module contract in [`crate::perf`], this collector *exposes* the
 //! metric; whether it becomes a budget is a separate, deliberate decision that

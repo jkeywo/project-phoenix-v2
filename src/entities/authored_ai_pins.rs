@@ -378,6 +378,31 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // depart from the impulse baseline, not three.
     ("alliance_cruiser", "engines"),
     ("alliance_cruiser", "steering"),
+    // …and the THREE TUBES the ring exists to point (issue #929). The fleet
+    // launch gate holds a round until the striking arc is down
+    // (`fact(target_facing_shields) <= 0`); these three author the same guard
+    // over a `max_striking_shield_hp` param set past any arc reading, which
+    // turns the shield conjunct off and leaves the red-alert gate alone.
+    //
+    // It is a departure because this hull is the one that CANNOT satisfy the
+    // fleet reading: its two phaser banks' `auto_arc_deg = 180` abut on the
+    // ring's beam line, so exactly one bears at a time — 4 dmg/s on a 50% duty
+    // cycle against arcs that regenerate faster. The consequence was not merely
+    // a quiet launcher. `movement_broadside_orbit`'s `torpedo_run` opens on
+    // readiness alone here (`torpedo_run_shield_gap = 0.0`, pinned by
+    // `the_harrow_cruiser_breaks_its_ring_only_for_a_struck_down_arc`) and every
+    // exit it has needs a round to have LEFT a tube, so a launcher that can
+    // never fire made that leg absorbing: measured across `probe_duel`,
+    // `probe_aggressor` and `combat_test`, the hull cut thrust and held its bow
+    // on the enemy for 12-87 s at a stretch and launched nothing at all.
+    //
+    // The two halves of a salvo doctrine have to ask the SAME question — the
+    // fragment's own header says so — and on this hull the launcher is the half
+    // that moves, because `damage_hull` pierces the arc anyway. See the note
+    // above `alliance_cruiser.toml`'s `fore_port` tube for the measurements.
+    ("alliance_cruiser", "torpedo_tube[fore_port]"),
+    ("alliance_cruiser", "torpedo_tube[fore_starboard]"),
+    ("alliance_cruiser", "torpedo_tube[aft]"),
     // ── The composed HARROW doctrines (issue #878) ───────────────────────────
     //
     // These three used to author their manoeuvres inline, hull by hull; they now

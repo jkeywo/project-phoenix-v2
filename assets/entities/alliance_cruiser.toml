@@ -415,19 +415,84 @@ marker = "torpedo_port"
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
   # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
   # contend: keep the tube loaded, and launch when the alert is up AND the arc
-  # the round would strike is down. Loaded state, magazine stock, target
-  # validity, range and arc stay host-side gates.
+  # the round would strike is no stronger than this hull's own threshold. Loaded
+  # state, magazine stock, target validity, range and arc stay host-side gates.
   #
-  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
-  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
-  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
-  # upstream of every policy: no doctrine could authorise a round while the
-  # striking arc was up, and none could retune the threshold. It is an HP
-  # reading rather than a boolean, resolved per-arc through the target's own arc
-  # router, so this gate and the eventual hit agree about which arc is in the
-  # way. A hull that wants to spend rounds differently edits this line;
-  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
-  # and `idle = true` of declining launches altogether.
+  # `fact(target_facing_shields) <= param(max_striking_shield_hp)` is the fleet's
+  # torpedo doctrine — "phasers strip the shields, torpedoes finish the hull" —
+  # and issue #956 moved it HERE from `auto_fire_torpedo`, where it was a Rust
+  # gate sitting upstream of every policy: no doctrine could authorise a round
+  # while the striking arc was up, and none could retune the threshold. It is an
+  # HP reading rather than a boolean, resolved per-arc through the target's own
+  # arc router, so this gate and the eventual hit agree about which arc is in the
+  # way. A hull that wants to spend rounds differently retunes the threshold;
+  # `ship_harrow_cruiser.toml` is the worked example of tightening it further
+  # (with `torpedo_run_shield_gap = 1.0` on the helm to match), and `idle = true`
+  # of declining launches altogether.
+  #
+  # ── Why THIS hull authors a threshold no arc can exceed (issue #929) ─────
+  #
+  # `max_striking_shield_hp = 1000000.0` is the "a threshold outside the fact's
+  # range is a switch" idiom the movement fragments use for
+  # `pressed_min_progress = -1000000.0`, pointed the other way: no arc reading
+  # can exceed it, so this conjunct is OFF and the alert gate is the only
+  # doctrine gate left. Three measured reasons, in the order they bind.
+  #
+  #   1. THIS HULL CANNOT CREATE THE GAP. Its whole anti-shield output is ONE
+  #      phaser bank at a time: the two banks' `auto_arc_deg = 180` abut on the
+  #      ring's beam line (see "What is NOT changed" in the header), so exactly
+  #      one ever bears, and a bank is 4 dmg/s for 6 s on a 6 s cooldown —
+  #      2 dmg/s time-averaged. An `alliance_destroyer` arc is 80 hp
+  #      regenerating at 2.5/s, scaled x1.25 by the shields power group at its
+  #      rest rung. The gate was not "rarely satisfied" on this hull, it was
+  #      UNSATISFIABLE, and `probe_aggressor` measures it flatly: 90 s, 223
+  #      damage dealt, `hull_taken: 0` on the target — every point of it
+  #      absorbed and regenerated, the striking arc never once down.
+  #
+  #   2. THE HELM LEG DEADLOCKED ON IT. `movement_broadside_orbit`'s
+  #      `torpedo_run` opens on readiness alone here
+  #      (`torpedo_run_shield_gap = 0.0`) and its only armament exits are
+  #      `tubes_full < 1` / `tubes_fillable < 1` — both of which need a round to
+  #      have LEFT a tube. A launcher that can never fire therefore makes that
+  #      leg ABSORBING: the hull commits to the bow hold at
+  #      `torpedo_bearing_speed = 0.0`, cuts thrust, and holds it until the
+  #      captain stands down. Measured before this change: 86.9 s of a 90 s
+  #      `probe_aggressor` run, 12-49 s of a 90 s `probe_duel` run and 42.1 s of
+  #      a 120 s `combat_test` run parked bow-on, with ZERO launches in every
+  #      one. It is the fragment header's own "if the helm asked a weaker
+  #      question than the launcher, it would spend the geometry on windows the
+  #      launcher was always going to decline" — with the two halves the wrong
+  #      way round, and a leg that has no way back out.
+  #
+  #   3. THE ROUND DOES NOT NEED THE ARC DOWN. `damage_hull` ALWAYS pierces —
+  #      see `TorpedoesConfig::shield_pierce`'s doc comment and the split in
+  #      `tick_torpedo_lifecycle` — and only `damage_shields` is offered to the
+  #      facing arc. On this hull that is 40 hull of a 44-point payload, so
+  #      holding the round for a collapsed arc forgoes 40 to protect 4. A hull
+  #      whose rounds author `damage_shields = 0` makes a different trade, which
+  #      is why this is a per-hull number and not a fleet constant.
+  #
+  # What it buys, `probe_duel`, 90 s, `--deterministic`, one variable, swept over
+  # 28 seeds (1-12, 13, 14, 17, 21, 31, 34, 41, 43, 47, 55, 59, 61, 89, 144, 792,
+  # 838): the cruiser goes from ZERO launches on every seed to 4 out of the fore
+  # pair on every seed; `torpedo_run` falls from 12-49 s to 0-4 s, because the leg
+  # now fires on entry and leaves on the spent salvo — the cycle it was authored
+  # to fly — instead of parking in front of the enemy; and damage dealt rises
+  # from 39-104 to 290-489. `combat_test`, 150 s, seeds 1-3, the same shape:
+  # 0 -> 4 launches, 42-82 s parked -> 0.0 s, 108-178 dealt -> 304-392.
+  #
+  # It does NOT win this duel, and the cost is worth stating exactly. Before, the
+  # parked cruiser survived the 90 s window on all 14 of the first sweep's seeds
+  # — a ship at zero throttle doing nothing is also a ship not pressing an
+  # engagement. After, it fights and DIES inside the window on 5 of those 14. The
+  # cruiser losing this duel is a question about this hull's guns (see "The
+  # throttle, and why the class default is not kept" for the same trade made the
+  # same way), not a reason to leave a whole torpedo battery unfireable.
+  #
+  # Retuning is one number. 0.0 restores the fleet gate exactly; anything between
+  # reads "spend the salvo once the arc is worn to N". Whatever is authored here,
+  # `torpedo_run_shield_gap` on the two helm axes has to be able to answer the
+  # same question, or the bow hold has no way out again.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -436,7 +501,10 @@ marker = "torpedo_port"
   # "always armed". This hull has a captain's console (human, or an AI backfill
   # operating the same system) to call it, so it holds. Delete the param and the
   # guard and the weapon is ungated again — the gate is content, not code.
-  param = { min_alert_to_fire = 1.0 }
+  # `max_striking_shield_hp` is issue #929's retune of the fleet shield gate —
+  # see the note above `fore_port`. 0.0 is the fleet reading; this value puts
+  # the threshold beyond any arc, which turns the conjunct off.
+  param = { min_alert_to_fire = 1.0, max_striking_shield_hp = 1000000.0 }
 
   [[torpedoes.tubes.ai.rule]]
   priority = 0
@@ -447,7 +515,7 @@ marker = "torpedo_port"
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= param(max_striking_shield_hp)"
   verb = "launch_torpedo"
 
 [[torpedoes.tubes]]
@@ -460,19 +528,15 @@ marker = "torpedo_starboard"
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
   # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
   # contend: keep the tube loaded, and launch when the alert is up AND the arc
-  # the round would strike is down. Loaded state, magazine stock, target
-  # validity, range and arc stay host-side gates.
+  # the round would strike is no stronger than this hull's own threshold. Loaded
+  # state, magazine stock, target validity, range and arc stay host-side gates.
   #
-  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
-  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
-  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
-  # upstream of every policy: no doctrine could authorise a round while the
-  # striking arc was up, and none could retune the threshold. It is an HP
-  # reading rather than a boolean, resolved per-arc through the target's own arc
-  # router, so this gate and the eventual hit agree about which arc is in the
-  # way. A hull that wants to spend rounds differently edits this line;
-  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
-  # and `idle = true` of declining launches altogether.
+  # Identical to `fore_port`'s policy, and deliberately so — the whole battery
+  # spends its rounds on one doctrine. The argument for
+  # `max_striking_shield_hp = 1000000.0` (issue #929: this hull cannot create the
+  # shield gap the fleet gate asks for, the helm's `torpedo_run` leg deadlocks
+  # waiting for a launch that can never come, and `damage_hull` pierces the arc
+  # anyway) is written out once, above the `fore_port` tube.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -481,7 +545,10 @@ marker = "torpedo_starboard"
   # "always armed". This hull has a captain's console (human, or an AI backfill
   # operating the same system) to call it, so it holds. Delete the param and the
   # guard and the weapon is ungated again — the gate is content, not code.
-  param = { min_alert_to_fire = 1.0 }
+  # `max_striking_shield_hp` is issue #929's retune of the fleet shield gate —
+  # see the note above `fore_port`. 0.0 is the fleet reading; this value puts
+  # the threshold beyond any arc, which turns the conjunct off.
+  param = { min_alert_to_fire = 1.0, max_striking_shield_hp = 1000000.0 }
 
   [[torpedoes.tubes.ai.rule]]
   priority = 0
@@ -492,7 +559,7 @@ marker = "torpedo_starboard"
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= param(max_striking_shield_hp)"
   verb = "launch_torpedo"
 
 [[torpedoes.tubes]]
@@ -505,19 +572,15 @@ marker = "torpedo_aft"
   # Load + launch policy for this tube (issue #782), AUTHORED rather than
   # synthesised (#885b). Two rules on two DIFFERENT channels, so they never
   # contend: keep the tube loaded, and launch when the alert is up AND the arc
-  # the round would strike is down. Loaded state, magazine stock, target
-  # validity, range and arc stay host-side gates.
+  # the round would strike is no stronger than this hull's own threshold. Loaded
+  # state, magazine stock, target validity, range and arc stay host-side gates.
   #
-  # `fact(target_facing_shields) <= 0` is the fleet's torpedo doctrine —
-  # "phasers strip the shields, torpedoes finish the hull" — and issue #956
-  # moved it HERE from `auto_fire_torpedo`, where it was a Rust gate sitting
-  # upstream of every policy: no doctrine could authorise a round while the
-  # striking arc was up, and none could retune the threshold. It is an HP
-  # reading rather than a boolean, resolved per-arc through the target's own arc
-  # router, so this gate and the eventual hit agree about which arc is in the
-  # way. A hull that wants to spend rounds differently edits this line;
-  # `ship_harrow_cruiser.toml` is the worked example of tightening it further,
-  # and `idle = true` of declining launches altogether.
+  # Identical to `fore_port`'s policy, and deliberately so — the whole battery
+  # spends its rounds on one doctrine. The argument for
+  # `max_striking_shield_hp = 1000000.0` (issue #929: this hull cannot create the
+  # shield gap the fleet gate asks for, the helm's `torpedo_run` leg deadlocks
+  # waiting for a launch that can never come, and `damage_hull` pierces the arc
+  # anyway) is written out once, above the `fore_port` tube.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
   # fact — 1 while this ship is at red alert, 0 otherwise — and the guard below
@@ -526,7 +589,10 @@ marker = "torpedo_aft"
   # "always armed". This hull has a captain's console (human, or an AI backfill
   # operating the same system) to call it, so it holds. Delete the param and the
   # guard and the weapon is ungated again — the gate is content, not code.
-  param = { min_alert_to_fire = 1.0 }
+  # `max_striking_shield_hp` is issue #929's retune of the fleet shield gate —
+  # see the note above `fore_port`. 0.0 is the fleet reading; this value puts
+  # the threshold beyond any arc, which turns the conjunct off.
+  param = { min_alert_to_fire = 1.0, max_striking_shield_hp = 1000000.0 }
 
   [[torpedoes.tubes.ai.rule]]
   priority = 0
@@ -537,7 +603,7 @@ marker = "torpedo_aft"
   [[torpedoes.tubes.ai.rule]]
   priority = 0
   channel = "torpedo_launch"
-  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= 0"
+  when = "fact(red_alert) >= param(min_alert_to_fire) and fact(target_facing_shields) <= param(max_striking_shield_hp)"
   verb = "launch_torpedo"
 
 [sensors_console]

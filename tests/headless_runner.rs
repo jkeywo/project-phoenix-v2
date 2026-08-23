@@ -2771,6 +2771,16 @@ fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
         // a resolution guard too. Re-sweeping the other ~29 seeds above for a
         // seed that both resolves and launches under the new generator is out
         // of scope here — nothing requires this pin to do both.
+        //
+        // RE-MEASURED again for issue #929, and this is the pin's LIMIT rather
+        // than another re-bless: on the same command line seed 10 now reads
+        // `TorpedoLaunched: 13` and closes in a kill at 61.9 s. The count moved
+        // because the player cruiser's own tubes started firing again — every
+        // one of the launches this pin was passing on came from the world-
+        // spawned destroyer, and the aggregate count cannot tell you that.
+        // `the_player_cruisers_own_tubes_fire_in_a_resolving_duel` below is the
+        // per-ship guard that can; keep this one for the schedule-ordering
+        // failure it was written for, and read that one for cadence.
         seed: Some(10),
         deterministic: true,
         ..test_args()
@@ -2798,6 +2808,165 @@ fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
          `RedAlertChanged` in the balance ledger separates the two: absent means \
          (2), present means (1). message_counts: {:?}",
         report.message_counts
+    );
+}
+
+/// **The player cruiser spends its OWN tubes in a real, resolving duel
+/// (issue #929).**
+///
+/// The guard above counts `TorpedoLaunched` across the whole world, and that is
+/// exactly how #929 hid. Both duellists carry tubes; the world-spawned destroyer
+/// supplies four to six launches per 90 s run on every seed sampled, so the
+/// aggregate stayed comfortably non-zero for months while the PLAYER cruiser
+/// launched nothing at all — measured 0 out of 14 seeds before the fix, with the
+/// hull parked in its own `torpedo_run` bow hold for 12-49 s of each 90 s window.
+///
+/// ## What went wrong, so a future failure of this test can be read
+///
+/// The cruiser's helm opens the bow hold on readiness alone
+/// (`torpedo_run_shield_gap = 0.0`, pinned by
+/// `the_harrow_cruiser_breaks_its_ring_only_for_a_struck_down_arc`), while its
+/// tubes held the fleet launch gate `fact(target_facing_shields) <= 0`. Those
+/// are different questions, and the weaker one was the helm's: the leg's only
+/// armament exits — `tubes_full < 1` and `tubes_fillable < 1` — both need a
+/// round to have LEFT a tube, so a launcher that never fires makes the leg
+/// ABSORBING. The hull cut thrust (`torpedo_bearing_speed = 0.0`) and held its
+/// bow on a shield gap its own guns cannot open: one 4 dmg/s phaser bank at a
+/// time against an 80 hp arc regenerating at 2.5/s. `alliance_cruiser.toml`
+/// carries the full argument and the fix — `max_striking_shield_hp`.
+///
+/// ## Why it asserts what it asserts
+///
+/// * PER SHIP, off the cruiser's own ledger rows. The launches are attributed by
+///   tube id, and the tube ids are filtered against this hull's gun ids first
+///   (`aft` names both a phaser bank and a tube here), so a row can only be a
+///   launch. Same discipline as
+///   `the_harrow_battleship_takes_its_close_defence_opportunities_in_a_real_run`.
+/// * IN A RESOLVING DUEL, because "the hull launched" is only interesting while
+///   the fight is real. Seed 12 closes in a kill at 59.8 s inside a 120 s
+///   window; a timeout here is a different failure from a silent one and the
+///   message says so.
+/// * WITH MARGIN. All 28 seeds swept at 90 s (1-12, 13, 14, 17, 21, 31, 34, 41,
+///   43, 47, 55, 59, 61, 89, 144, 792, 838) put exactly 4 rounds out of the
+///   unambiguous fore pair, so the bound is half the measured value. These
+///   outcomes are quantised — see `probe_duel.toml`'s header — so the number is
+///   not noisy, it is a threshold reading, and the margin is there for a future
+///   retune rather than for variance.
+#[test]
+fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
+    use project_phoenix::entities::config::EntityConfig;
+
+    // The launches have to be attributable to a TUBE, so drop any tube id this
+    // hull also uses for a gun before counting rows under it.
+    let hull = EntityConfig::from_toml(
+        project_phoenix::entities::include_resolve::resolve_from_disk(
+            "assets/entities/alliance_cruiser.toml",
+        )
+        .expect("alliance_cruiser must resolve")
+        .toml
+        .as_str(),
+    )
+    .expect("the shipped player cruiser must parse");
+    let wc = hull
+        .weapons_console
+        .as_ref()
+        .expect("the cruiser declares [weapons_console]");
+    let gun_ids: Vec<String> = wc
+        .phaser_banks
+        .iter()
+        .map(|b| b.id.clone())
+        .chain(wc.blaster_banks.iter().map(|b| b.id.clone()))
+        .collect();
+    let tube_ids: Vec<String> = hull
+        .torpedoes
+        .as_ref()
+        .expect("the cruiser carries torpedo tubes")
+        .tubes
+        .iter()
+        .map(|t| t.id.clone())
+        .filter(|id| !gun_ids.contains(id))
+        .collect();
+    assert!(
+        tube_ids.len() >= 2,
+        "precondition: this hull's tube ids all collide with gun ids ({gun_ids:?}), \
+         so no ledger row can be attributed to a launch"
+    );
+
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/probe_duel.toml".into(),
+        dt,
+        // Twice the 59.8 s this seed takes to close, so a retune that slows the
+        // fight fails on the launch count rather than on the clock.
+        max_ticks: ticks_for_sim_seconds(120.0, dt),
+        // Pinned, and not this world's own `[global] seed` (3, which draws).
+        // Swept at 90 s over seeds 1-12, 34 and 838 after the #929 fix: all 14
+        // put 4 rounds out of the fore pair, and 4, 6, 10, 12 and 34 close in a
+        // kill. 12 is the earliest of those (59.8 s), so it is the one with the
+        // most room under the window above.
+        seed: Some(12),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    let cruiser = report
+        .damage_by_ship
+        .values()
+        .find(|l| l.name_id.as_deref() == Some("entity.alliance_cruiser.name"))
+        .unwrap_or_else(|| {
+            panic!(
+                "the player cruiser has no ledger row at all, so it never fired or took \
+                 anything: {:?}",
+                report.damage_by_ship
+            )
+        });
+    let launched: u64 = tube_ids
+        .iter()
+        .map(|id| cruiser.shots_fired.get(id).copied().unwrap_or(0))
+        .sum();
+
+    assert!(
+        report.ended_in_game_over(),
+        "the duel did not resolve inside the window, so this run says nothing about \
+         launch cadence in a real fight. That is a DIFFERENT failure from the one \
+         this test exists for — re-pick the seed against a fresh sweep rather than \
+         widening the window on a fight that has stopped closing. \
+         final_phase {:?}, cruiser fired {launched} rounds out of {tube_ids:?}",
+        report.final_phase
+    );
+    assert!(
+        launched >= 2,
+        "the player cruiser put {launched} rounds out of its own tubes {tube_ids:?} in a \
+         duel it fought to a conclusion; the authored doctrine spends four. Check the \
+         two halves that have to agree: the tube's `torpedo_launch` guard in \
+         `alliance_cruiser.toml` (is `max_striking_shield_hp` back to a reading this \
+         hull's own beams cannot reach?) and the helm's `torpedo_run_shield_gap` on \
+         both travel axes. A leg whose entry asks LESS than the launcher does cannot \
+         exit, because every exit it has needs a round to have left a tube. \
+         phase_seconds {:?}, whole-world TorpedoLaunched {:?}",
+        cruiser.phase_seconds,
+        report.message_counts.get("TorpedoLaunched")
+    );
+    // The deadlock itself, stated directly rather than inferred from the count: a
+    // bow hold that is working is a SHORT leg, entered on a loaded salvo and left
+    // on a spent one. Measured at 0.0-0.5 s across the sweep above, against
+    // 12-49 s before the fix, so 20 s is a bound neither reading is near.
+    let bow_hold = cruiser
+        .phase_seconds
+        .get("torpedo_run")
+        .copied()
+        .unwrap_or(0.0);
+    assert!(
+        bow_hold < 20.0,
+        "the cruiser spent {bow_hold:.1} s of this duel parked in its `torpedo_run` bow \
+         hold at `torpedo_bearing_speed = 0.0`. That leg is entered on a loaded salvo \
+         and left on a spent one, so a long one means the salvo is not being spent and \
+         the leg has become absorbing — issue #929's failure, whatever the launch count \
+         above says. phase_seconds {:?}",
+        cruiser.phase_seconds
     );
 }
 
@@ -4373,9 +4542,20 @@ fn the_composed_player_battleship_holds_a_leading_gun_line_only_at_red_alert() {
 /// * `probe_duel` — an ACTIVE hostile that closes and shoots. The ring is what
 ///   the hull flies almost throughout, which is where "works its arcs in a
 ///   tightened orbit at red alert" is actually demonstrated.
-/// * `probe_aggressor` — a PASSIVE hostile. Nothing ever strips its shields, so
-///   the torpedo run is entered on the hull's own loaded battery and held; this
-///   is where the run leg, and the tube bearing it exists to buy, are visible.
+/// * `probe_aggressor` — a PASSIVE hostile that never returns fire, so what is
+///   measured there is this hull's own offence and nothing else: whether the
+///   battery the ring exists to point actually gets SPENT.
+///
+/// ## The second half was re-blessed at issue #929
+///
+/// The aggressor half used to assert a hundred ticks HELD in the bow-hold leg,
+/// on the premise that this probe hands the hull "a loaded battery it never gets
+/// to spend". That premise was a defect, not a scenario property — see the note
+/// on that assertion — and the leg count it produced was a measurement of how
+/// long the hull sat parked with its thrust cut. It now asserts the battery is
+/// spent, which is what the doctrine is for; `run` is still collected and still
+/// printed in the failure message, because a leg count going UP again is the
+/// most legible sign of the deadlock returning.
 #[test]
 fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes() {
     use project_phoenix::ship::helm_ai::HelmPassSurface;
@@ -4393,6 +4573,10 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
         /// leg counts are only meaningful against (see below).
         sides_dealing: usize,
         damage_dealt: f32,
+        /// Rounds the PLAYER cruiser put out of its two unambiguous fore tubes
+        /// (issue #929). `aft` names both a tube and a phaser bank on this hull,
+        /// so it is left out and this is a floor on the battery, not a total.
+        tubes_spent: u64,
     }
 
     let sample = |world: &str, secs: f64| -> Legs {
@@ -4424,6 +4608,7 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
             surface_ticks: 0,
             sides_dealing: 0,
             damage_dealt: 0.0,
+            tubes_spent: 0,
         };
         for _ in 0..args.max_ticks {
             run(&mut app, 1);
@@ -4460,6 +4645,17 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
             .filter(|d| d.damage_dealt > 0.0)
             .count();
         l.damage_dealt = report.damage_by_ship.values().map(|d| d.damage_dealt).sum();
+        l.tubes_spent = report
+            .damage_by_ship
+            .values()
+            .find(|d| d.name_id.as_deref() == Some("entity.alliance_cruiser.name"))
+            .map(|d| {
+                ["fore_port", "fore_starboard"]
+                    .iter()
+                    .map(|id| d.shots_fired.get(*id).copied().unwrap_or(0))
+                    .sum()
+            })
+            .unwrap_or(0);
         l
     };
 
@@ -4523,17 +4719,43 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
         duel.orbit
     );
 
-    // THE TORPEDO RUN. Asserted in the aggressor probe, where the hull carries a
-    // loaded battery it never gets to spend, so the leg is entered on its own
-    // readiness and held. This is the leg whose ABSENCE let Channel 3 overwrite
-    // the ring solution every tick, which is what withdrew this doctrine the first
-    // time round.
+    // THE TUBES. Asserted in the aggressor probe, where the hostile never fires
+    // back, so what is measured is this hull's own offence and nothing else.
+    //
+    // RE-BLESSED at issue #929, and the old assertion is worth recording because
+    // it was pinning the defect. It read `aggressor.run > 100` — a hundred ticks
+    // HELD in the bow-hold leg — on the stated premise that this probe gives the
+    // hull "a loaded battery it never gets to spend". That premise was the bug:
+    // the cruiser's tubes asked for a struck-down arc its own beams cannot open,
+    // so no round ever left, and `torpedo_run`'s only exits (`tubes_full < 1`,
+    // `tubes_fillable < 1`) all need one to have left. The leg was therefore
+    // ABSORBING, and the assertion was measuring how long the hull sat in it —
+    // 26.9 s of this 30 s window, thrust cut, 92 damage dealt and zero launches.
+    //
+    // What the leg count cannot distinguish, and what this hull's doctrine is
+    // actually for, is whether the battery gets SPENT. So that is what is
+    // asserted now: 6 rounds — the whole magazine — go out across the same
+    // window, 4 of them from the fore pair counted here, and damage dealt goes
+    // 92 -> 361. The bow-hold leg is no longer entered at all in this probe
+    // (`run` is reported below for the reader, not asserted on): the ring's own
+    // tangent brings a fore tube onto the target before a whole salvo and the
+    // run range coincide, and a tube that can bear does not need the leg. The
+    // leg is still authored, still resolves — `authored_ai_pins::
+    // the_torpedo_run_opens_on_a_loaded_salvo_and_closes_on_the_hulls_own_armament`
+    // pins its transitions on the shipped policy — and is still flown end to end
+    // by the Harrow cruiser in `combat_test`, which keeps the strict
+    // `torpedo_run_shield_gap = 1.0` entry this hull does not.
     assert!(
-        aggressor.run > 100,
-        "the cruiser never broke its ring to bring its tubes to bear ({} run \
-         ticks). With no torpedo leg of its own the hull is dragged bow-on by \
-         `ArcBearingRequest` instead, which is a facing the doctrine did not \
-         choose and cannot see",
+        aggressor.tubes_spent >= 2,
+        "the cruiser put only {} rounds out of its fore tubes across 30 s against a \
+         hostile that never shoots back, having dealt {:.0} damage over {} ring \
+         ticks and {} bow-hold ticks. Its tubes are loaded and its target is inside \
+         `torpedo_run_range` throughout; a battery that stays full here is issue \
+         #929's deadlock again — the launcher asking for a shield gap this hull's \
+         own beams cannot open, and the bow-hold leg with no way back out",
+        aggressor.tubes_spent,
+        aggressor.damage_dealt,
+        aggressor.orbit,
         aggressor.run
     );
 
@@ -4573,40 +4795,35 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
 /// doctrine's withdrawn first attempt held a plausible radius while Channel 3
 /// flew it.
 ///
-/// ## The control was re-measured after issue #896's freeze fix (this batch)
+/// ## The control, and the two re-measurements it has been through
 ///
-/// The doc comment this replaces asserted `requested > 0` on the duel probe —
-/// a standing arc-bearing request against the ring — pinned to a pre-#896
-/// count (367 of 1351 ticks under seed 3) that the world header had flagged
-/// as un-remeasured. Re-measured on the fixed tree (the `[ai_profile]` blocks
-/// that stop an Alliance hull losing AI fidelity mid-manoeuvre): 346 ring
-/// ticks, `requested == 0`, `overwritten == 0`, worst error `0.0`, in BOTH
-/// probes. That is not the control rotting into a false pass; it is a real
-/// change to this doctrine's own geometry:
+/// `overwritten == 0` is the assertion; everything else here exists to stop it
+/// passing vacuously. A hull with no target, or one that never flies the ring,
+/// declines nothing and reads zero for the wrong reason.
 ///
-///   * The two phaser banks' `auto_arc_deg = 180` abut exactly on the ring's
-///     beam line, so at least one bank is always `Ready` there — the phaser
-///     family can never qualify for a request while the hull holds the ring
-///     (see the "not changed" note on `alliance_cruiser.toml`).
-///   * The three torpedo tubes (fore/aft, `fire_arc_deg = 90`) genuinely
-///     cannot bear on the ring — but this hull authors its OWN
-///     `hold_torpedo_bearing` leg (`movement_broadside_orbit.toml`), which now
-///     reliably claims a loaded, ready tube and breaks the ring to fire it
-///     BEFORE Channel 3 ever observes a loaded-but-out-of-arc emitter. Under
-///     the freeze fix combat sustains long enough for that leg to actually
-///     fire (`TorpedoLaunched: 4` in this run) — pre-fix the hull could lose
-///     AI fidelity mid-ring and never complete the leg, which is one way a
-///     stale loaded tube could have stood in front of Channel 3 instead.
+/// The original control was a STANDING REQUEST — 367 of 1351 ring ticks under
+/// seed 3, pre-#896. Between #896's freeze fix and issue #929 that count fell to
+/// zero and this test asserted `requested == 0`, on the reasoning that the hull's
+/// own `hold_torpedo_bearing` leg claimed a loaded tube before Channel 3 could
+/// observe one out of arc. That reasoning was wrong, and #929 says why: the
+/// cruiser's tubes could not fire at all (their launch guard asked for a shield
+/// gap this hull's beams cannot open), so the hull sat in the bow-hold leg with
+/// its thrust cut instead of orbiting. There were barely any RING ticks to raise
+/// a request on, and `requested == 0` was the deadlock's signature rather than
+/// the doctrine's.
 ///
-/// So a standing arc-bearing request is no longer an expected phenomenon for
-/// THIS composed doctrine at all — the doctrine now resolves its own bearing
-/// needs before Channel 3 is asked. The control this test needs is not "a
-/// request stood at some point" but "this was a live, contested duel and not
-/// an idle scenario with nothing to decline" — otherwise `overwritten == 0`
-/// would be trivially true of a hull with no target. That control is now
-/// asserted directly off the same run's report: nonzero damage dealt and at
-/// least one torpedo launch, which only happen if both hulls were actively
-/// fighting across the window.
+/// With the tubes firing again the hull orbits, carries loaded tubes while it
+/// does, and Channel 3 asks: 478 of 1180 ring ticks. So the control is back in
+/// its original shape — a request stood, the ring declined it — and it is
+/// asserted alongside the liveness reading (damage exchanged and a torpedo
+/// actually launched) that was added when the request count went away.
+///
+/// What has NOT changed, and is why the phaser family never appears in that
+/// count: the two banks' `auto_arc_deg = 180` abut exactly on the ring's beam
+/// line, so at least one is always `Ready` there (see the "What is NOT changed"
+/// note on `alliance_cruiser.toml`). Every request in the 478 is the TORPEDO
+/// family's — three 90-degree fore/aft cones that genuinely cannot bear on a
+/// settled ring.
 #[test]
 fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
     use project_phoenix::ai::decode_steering_from_facing;
@@ -4706,19 +4923,35 @@ fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
         duel.ticks
     );
 
-    // The request itself is now expected to be absent on this composed
-    // doctrine: the phasers' abutting 180-degree arcs mean a bank is always
-    // ready on the ring, and the hull's own torpedo-bearing leg now reliably
-    // claims a loaded tube before Channel 3 ever sees it out of arc. A
-    // standing request here would mean one of those two guarantees broke.
-    assert_eq!(
-        duel.requested, 0,
-        "the cruiser's Weapons had a standing arc-bearing request on {} of {} ring \
-         ticks — either a phaser bank went unready with the other out of arc, or \
-         the hull's own torpedo-bearing leg stopped claiming a loaded tube before \
-         Channel 3 saw it. Both are regressions from the composed doctrine this \
-         probe pins",
-        duel.requested, duel.ticks
+    // A STANDING REQUEST IS BACK, and it is what makes `overwritten == 0` below
+    // mean anything (issue #929).
+    //
+    // This assertion read `== 0` between the #896 freeze fix and #929, on the
+    // reasoning that the hull's own torpedo-bearing leg claimed a loaded tube
+    // before Channel 3 ever observed one out of arc. That reasoning was an
+    // artefact of the defect: the cruiser's tubes could not fire at all, so the
+    // hull sat in the bow-hold leg indefinitely and Weapons never saw a loaded,
+    // in-reach, out-of-arc torpedo family on a RING tick — there were barely any
+    // ring ticks. `requested == 0` was therefore a vacuous pass, and the whole
+    // point of #918 (a leg that has CHOSEN a heading declines a request) was
+    // going untested here.
+    //
+    // With the tubes firing again the hull flies its ring, carries loaded tubes
+    // on it, and Channel 3 asks: measured 478 of 1180 ring ticks over this
+    // window. So the request is now the CONTROL, in the shape the pre-#896
+    // revision of this test used: a request stood, the ring declined it, and
+    // `overwritten == 0` is a real refusal rather than a description of an
+    // empty inbox. A `0` here again means either the tubes stopped being loaded
+    // on the ring or the hull went back to parking in the bow hold.
+    assert!(
+        duel.requested > 100,
+        "the cruiser's Weapons raised a standing arc-bearing request on only {} of \
+         {} ring ticks, so `overwritten == 0` below would be vacuous — there was \
+         essentially nothing to decline. Either the tubes are no longer loaded \
+         while the ring is flown, or the hull is back to holding the bow-hold leg \
+         instead of orbiting (issue #929)",
+        duel.requested,
+        duel.ticks
     );
 
     // The `duel` floor was re-blessed from 300 to 250 at issue #907 (observed:

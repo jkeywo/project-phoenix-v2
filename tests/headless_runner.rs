@@ -2257,9 +2257,11 @@ fn requiem_courier_reaches_its_destination_anchor() {
 /// measured pre-#1003. 600 s was re-derived against the floored AI and leaves
 /// headroom the same way the old 400 s did against the old 175.9 s result.
 ///
-/// WHAT THIS TEST DOES NOT PIN. The CRUISER is not a good defender on AI
-/// backfill — it dealt 106 damage in the whole run — so no run *here* clears the
-/// raid. That is a statement about the AI-backfilled cruiser, not about the
+/// WHAT THIS TEST DOES NOT PIN. No run *here* clears the raid, and the reason
+/// has now changed twice. The AI-backfilled cruiser used to be too weak to try
+/// (106 damage in a whole run); post-#929 it is strong enough to win its own
+/// fights and still lose the station standing behind it. Either way that is a
+/// statement about a backfilled player defending a station, not about the
 /// schedule. The schedule is pinned twice over elsewhere:
 /// `combat_test_spawns_its_waves_on_the_clock_in_a_real_run` below flies the
 /// demo destroyer and reads the wave counter against the authored times, and
@@ -2272,43 +2274,62 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
     let args = HeadlessArgs {
         world_path: "assets/worlds/combat_test.toml".into(),
         dt,
-        // RE-MEASURED AND RE-PINNED for issue #929's second pass, and the
-        // scenario now resolves the OTHER WAY. Giving the AI-backfilled cruiser
-        // banks that can collapse a shield arc turned it from the poor defender
-        // the note above describes ("it dealt 106 damage in the whole run") into
-        // one that clears the raid: on seed 9 it now deals 2171 against 490
-        // taken, the starbase survives on 988 taken instead of dying, and 15 of
-        // the 16 spawned hostiles are destroyed — but ONE straggler
-        // (`wave_5_second`, which never engages anything on that seed) leaves
-        // the victory trigger's `on_all_destroyed` unsatisfied, so the run sits
-        // at `InProgress` for the whole budget. That is a true reading; it is
-        // just no longer a run that reaches a terminal phase. The straggler is
-        // filed as issue #1243 — a scenario question, not this issue's.
+        // RE-MEASURED ON MERGED MAIN, where issue #929's stronger cruiser and
+        // issue #1243's unfrozen raid meet for the first time. Each was blessed
+        // alone, against a baseline in which the other did not exist:
         //
-        // Swept at 600 s over seeds 1-5 and 9 when the arcs widened, where seed 1
-        // was the one that closed. RE-SWEPT at 800 s over twelve seeds once
-        // `cycle_jitter` landed — this is the one shipped world where the beam
-        // cycle actually binds, so the jitter re-rolled it. Seeds 1-11 all strand
-        // `wave_5_second`; seed 12 closes in a VICTORY at 412.5 s with every wave
-        // dead, the player on 2467 dealt / 518 taken and 8 kills, and the
-        // starbase's own row on 936 taken — the #936 assault assertion below,
-        // satisfied more strongly than before.
+        //   * #929 alone gave the AI-backfilled cruiser banks that can collapse
+        //     a shield arc, 270-degree AI arcs and jittered beam cycles. That
+        //     turned it from the poor defender the note above describes into one
+        //     that wins its fights — but the raid was still FROZEN. Eleven of
+        //     twelve seeds stranded `wave_5_second` in its thrust-cut bow hold,
+        //     so `on_all_destroyed("hostiles", ...)` never closed and the run sat
+        //     at `InProgress` for the whole budget; seed 12 was the single seed
+        //     that closed, as a VICTORY at 412.5 s.
+        //   * #1243 alone took the Harrow's `torpedo_run_range` override off
+        //     (220 -> the class default 50) and unfroze that hull — but it was
+        //     measured against the PRE-#929 cruiser, which dies at ~150 s and
+        //     ends the scenario before a straggler can matter.
         //
-        // ONE OF TWELVE IS NOT A COMFORTABLE PIN, and saying so is the point.
-        // Whether this scenario reaches a terminal phase now turns on a single
-        // straggler that engages on roughly one seed in twelve, and every tuning
-        // pass in issue #929 has re-rolled which seed that is (600 s: 1 of 6;
-        // 800 s with jitter: 1 of 12). The durable fix is issue #1243, not another
-        // re-pick: if this fails again with every wave dead and the phase still
-        // `InProgress`, RAISE #1243 rather than sweeping for seed thirteen.
+        // Swept together: `combat_test`, 800 s, `--hz 30` (dt = 1/30, the same
+        // step this test drives), `--deterministic`, the shipped default hull,
+        // seeds 1-12. The result is not a re-pick, it is a different scenario:
         //
-        // Budget raised 600 -> 800 s. That is 1.5x the measured 523.97 s rather
-        // than the 3.4x the old 600 gave the old 175.9 s, and the reason is that
-        // the resolution is now bounded BELOW by the wave clock — the eighth
-        // wave is not released until late in the run, so victory cannot arrive
-        // much earlier however the fight goes. A failure here that reads
-        // "InProgress" with every wave dead is issue #1243's straggler, not a
-        // regression in this issue's subject.
+        //   EVERY seed resolves. 12/12 reach GameOver where #929 alone reached
+        //   it on 1/12, and every one of them resolves the SAME WAY — DEFEAT,
+        //   between 312.5 s and 396.0 s (mean 352.7 s), with Starbase Alpha
+        //   destroyed having taken all 1600 of its hull. Not one hull parks in
+        //   `torpedo_run` on any seed, so #1243's fix holds under the stronger
+        //   cruiser rather than being undone by it: `wave_5_second`, which used
+        //   to sit 694 s of an 800 s run in the bow hold with `shots_fired: {}`,
+        //   now spends 0.0 s there on all twelve, fires 16-23 rounds, and lands
+        //   603-851 on the station every time — 38-53% of what kills it.
+        //
+        //   THE PLAYER IS NOT WHAT LOSES THESE RUNS, and that is the balance
+        //   finding rather than a test problem. It survives all twelve seeds on
+        //   453-483 of its 500 hull, dealing 1398-1968 against 198-462 taken —
+        //   and most of what it takes never reaches the hull at all (seed 12:
+        //   339.9 of 373 absorbed by shields). It wins its own fights, kills
+        //   10-13 raiders a run, and the station dies behind it. An untouchable
+        //   player losing an indefensible station is a scenario question, on the
+        //   same shelf #1243 came off; it is recorded here, not tuned away.
+        //
+        // Seed 12 is KEPT — and now for the opposite reason it was picked. It
+        // used to be the one seed in twelve that behaved; it is now
+        // indistinguishable from the other eleven. On it the run resolves at
+        // 331.8 s (tick 19909): player 1711 dealt / 373 taken (33.1 of that to
+        // hull) and 6 of the run's 12 kills, 10 of 14 waves dead, and the
+        // starbase's own row on 1600 taken credited to TEN different waves —
+        // `wave_5_second` alone landing 851 of it. That is #1243's straggler,
+        // the hull that used to freeze, now the largest single contributor to
+        // the assault this test exists to see.
+        //
+        // The 800 s budget is left where #929 put it: 2.4x the seed-12
+        // resolution and 2.0x the slowest seed in the sweep. It is no longer
+        // bounded below by the wave clock the way #929's note describes — the
+        // station falls between wave 7 (t=270) and shortly after wave 8
+        // (t=315), and on seed 3 it falls at 312.5 s with only seven waves ever
+        // released — so the headroom is real rather than nominal.
         max_ticks: ticks_for_sim_seconds(800.0, dt),
         seed: Some(12),
         deterministic: true,
@@ -2321,9 +2342,10 @@ fn combat_test_develops_two_sided_combat_and_resolves() {
     assert_eq!(
         report.final_phase,
         format!("{:?}", GamePhase::GameOver),
-        "combat_test did not resolve within 800s — final_phase {:?}, ship {:?}. If \
-         every wave is dead and the phase is still InProgress, that is issue \
-         #1243's straggler, not this budget",
+        "combat_test did not resolve within 800s — final_phase {:?}, ship {:?}. \
+         Every seed 1-12 resolved between 312.5 s and 396.0 s when this was \
+         re-measured on merged main, so a failure here is the scenario or the \
+         fleet moving, not a budget that got tight",
         report.final_phase,
         report.ship
     );

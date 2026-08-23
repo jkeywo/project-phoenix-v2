@@ -477,6 +477,7 @@ fn the_bounded_duel_resumes_on_the_seed_that_still_diverges() {
     let mut args = args(DUEL, ("cruiser", "destroyer"));
     args.seed = Some(SEED + 7);
     resume_round_trip(DUEL, args, "duel-seed-divergent", CONTINUE_FOR);
+}
 
 /// **A resume lands mid-cycle and continues the SAME cycle (issue #929).**
 ///

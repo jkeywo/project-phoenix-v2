@@ -318,7 +318,7 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "project_phoenix::logging::filter::LogFilterConfig",
     "project_phoenix::regions::server::RegionMembership",
     "project_phoenix::server::viewscreen_border::ShakeState",
-    "project_phoenix::server_app::broadcast::WorldSetupBroadcast",
+    "project_phoenix::server_app::broadcast_publish::WorldSetupBroadcast",
     "project_phoenix::server_app::components::Asteroid",
     "project_phoenix::server_app::components::AsteroidShieldPierce",
     "project_phoenix::server_app::components::CollisionCooldown",

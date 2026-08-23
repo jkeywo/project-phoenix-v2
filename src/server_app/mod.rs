@@ -75,7 +75,12 @@ pub use crate::command_admission::{
 //                      bundles the simulation defines.
 //   * `registration` — `SimPluginOptions`, plugin ordering, and the
 //                      `add_simulation_plugins[_with]` assembly.
-//   * `broadcast`    — the snapshot/HUD/lobby broadcast + publish systems.
+//   * `broadcast`    — the sim-state snapshot builders.
+//   * `broadcast_publish` — the broadcaster factories + publish/HUD systems
+//                      downstream of `broadcast`'s snapshots (issue #1241:
+//                      split out once the combined file ran 2% over the
+//                      ~1,500-line ceiling; neither half calls into the
+//                      other's functions).
 //   * `world_setup`  — world setup and the game-start spawn systems.
 //   * `collision`    — the collision handler (its wide parameter list gathered
 //                      into named SystemParam bundles).
@@ -85,12 +90,14 @@ pub use crate::command_admission::{
 // alone is ~1k lines), and collision is the seam #1199 singled out for the
 // SystemParam-bundling work.
 mod broadcast;
+mod broadcast_publish;
 mod collision;
 mod components;
 mod registration;
 mod world_setup;
 
 pub use broadcast::*;
+pub use broadcast_publish::*;
 pub(crate) use collision::*;
 pub use components::*;
 pub use registration::*;

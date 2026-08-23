@@ -2284,19 +2284,23 @@ fn spawn_template_not_found_warns_and_emits_nothing_directly() {
     );
 }
 
-/// **A `_remove` tombstone in a `spawn_entity` override WARNS** (issue
-/// #911), and the spawn still happens on the unmodified template.
+/// **A `_remove` tombstone in a `spawn_entity` override ERRORS** (issue
+/// #911; elevated from warn to error by issue #1048), and the spawn still
+/// happens on the unmodified template.
 ///
 /// This is the other instance-layer entry point — `entity_loader::
 /// apply_overrides` is the first — and it is the one that cannot fail the
-/// load, so the warning is the only signal an author gets. It must exist:
-/// a tombstone is subtractive, the author asked for something to be GONE,
-/// and before #911's fix it was accepted in silence (`DoctrineObjective`
-/// is not `deny_unknown_fields`, so the marker vanished into serde and the
-/// doctrine survived). Nothing exercised this path's override arm at all
-/// before this test.
+/// load, so this is the only signal an author gets. It must exist: a
+/// tombstone is subtractive, the author asked for something to be GONE, and
+/// before #911's fix it was accepted in silence (`DoctrineObjective` is not
+/// `deny_unknown_fields`, so the marker vanished into serde and the doctrine
+/// survived). Nothing exercised this path's override arm at all before this
+/// test. Issue #1048 moved this whole arm's channel from `warnings` to the
+/// louder `override_failures` (see that field's doc) — this test's assertions
+/// moved with it; the tombstone's OWN behaviour (reported, template kept) is
+/// unchanged.
 #[test]
-fn spawn_entity_override_carrying_a_tombstone_warns_and_keeps_the_template() {
+fn spawn_entity_override_carrying_a_tombstone_errors_and_keeps_the_template() {
     let fx = Fixture::new().with_destroyer();
     let action = TriggerAction::SpawnEntity {
         template_path: DESTROYER_TEMPLATE.to_string(),
@@ -2313,16 +2317,17 @@ fn spawn_entity_override_carrying_a_tombstone_warns_and_keeps_the_template() {
     };
     let out = dispatch_spawn_entity(&action, &fx.ctx());
 
+    assert!(out.warnings.is_empty(), "got {:?}", out.warnings);
     assert_eq!(
-        out.warnings.len(),
+        out.override_failures.len(),
         1,
         "the tombstone must be reported, got {:?}",
-        out.warnings
+        out.override_failures
     );
     assert!(
-        out.warnings[0].contains(crate::entities::entity_override::REMOVE_KEY),
-        "the warning must name the marker so the author can find it, got {:?}",
-        out.warnings[0]
+        out.override_failures[0].contains(crate::entities::entity_override::REMOVE_KEY),
+        "the failure must name the marker so the author can find it, got {:?}",
+        out.override_failures[0]
     );
     // The spawn still happens, on the template as authored — a partial
     // spawn is better than none, exactly as for a failed reparse.
@@ -2355,6 +2360,92 @@ fn spawn_entity_override_without_a_tombstone_still_applies() {
         config.tags,
         vec!["npc".to_string(), "enemy".to_string()],
         "an instance override REPLACES tags — the pre-#911 rule, unchanged"
+    );
+}
+
+// ── Issue #1048: a genuine INTEGER `EntityConfig` field via `overrides` ────
+
+/// The failure this issue exists to catch: an override leaf that renders as a
+/// toml FLOAT (`dynamic_to_toml`'s ambient default for a bare int — the same
+/// shape a script author gets by forgetting the `int(…)` marker) still cannot
+/// deserialize into a genuine integer field. Before #1048 this landed in
+/// `warnings`; it now lands in the louder `override_failures` alongside the
+/// tombstone case, for the same "a whole override map silently vanished"
+/// reason.
+#[test]
+fn spawn_entity_override_with_a_float_on_a_genuine_integer_field_errors_and_keeps_the_template() {
+    let fx = Fixture::new().with_destroyer();
+    let action = TriggerAction::SpawnEntity {
+        template_path: DESTROYER_TEMPLATE.to_string(),
+        name: "wave_1".to_string(),
+        anchor: None,
+        position: Some([0.0, 0.0, 0.0]),
+        rotation: None,
+        scale: None,
+        groups: vec![],
+        // `repair.repair_team_count` is a genuine `u32` (`entities::config::
+        // RepairConfig`). `3.0` is exactly what an unmarked script int, or a
+        // fat-fingered declarative float, produces.
+        overrides: Some(toml::from_str("[repair]\nrepair_team_count = 3.0\n").unwrap()),
+    };
+    let out = dispatch_spawn_entity(&action, &fx.ctx());
+
+    assert!(out.warnings.is_empty(), "got {:?}", out.warnings);
+    assert_eq!(
+        out.override_failures.len(),
+        1,
+        "a float on an integer field must be reported, got {:?}",
+        out.override_failures
+    );
+    assert!(
+        out.override_failures[0].contains("repair_team_count"),
+        "the failure must name the offending field, got {:?}",
+        out.override_failures[0]
+    );
+    // Partial spawn beats none: the bare template still spawns, exactly as
+    // for the tombstone case.
+    assert_eq!(out.commands.len(), 1, "the template still spawns");
+}
+
+/// The fix, end to end through the full merge-then-reparse pipeline (not just
+/// `dynamic_to_toml`'s unit-level conversion): a `toml::Value::Integer`
+/// override leaf — what a scripted `int(3)` marker now produces — merges onto
+/// the template and deserializes cleanly into the genuine `u32` field it
+/// targets. This is acceptance criterion 2, "a script override can
+/// successfully set a genuine integer `EntityConfig` field", pinned at the
+/// dispatch layer the script layer ultimately buffers into.
+#[test]
+fn spawn_entity_override_with_a_genuine_integer_applies_to_the_integer_field() {
+    let fx = Fixture::new().with_destroyer();
+    let action = TriggerAction::SpawnEntity {
+        template_path: DESTROYER_TEMPLATE.to_string(),
+        name: "wave_1".to_string(),
+        anchor: None,
+        position: Some([0.0, 0.0, 0.0]),
+        rotation: None,
+        scale: None,
+        groups: vec![],
+        overrides: Some(toml::from_str("[repair]\nrepair_team_count = 3\n").unwrap()),
+    };
+    let out = dispatch_spawn_entity(&action, &fx.ctx());
+
+    assert!(out.warnings.is_empty(), "got {:?}", out.warnings);
+    assert!(
+        out.override_failures.is_empty(),
+        "got {:?}",
+        out.override_failures
+    );
+    let ActionCmd::SpawnEntity { config, .. } = &out.commands[0] else {
+        panic!("expected a SpawnEntity command, got {:?}", out.commands[0])
+    };
+    assert_eq!(
+        config
+            .repair
+            .as_ref()
+            .expect("the override introduces a [repair] table")
+            .repair_team_count,
+        3,
+        "the integer override must reach the genuine u32 field"
     );
 }
 

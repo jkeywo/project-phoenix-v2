@@ -50,6 +50,14 @@
 //! decimals, which the parity tests pin. `map_f32` and `dynamic_to_toml` accept a
 //! `RealLit` wherever they already accept an int.
 //!
+//! An `overrides` leaf that targets a genuine INTEGER `EntityConfig` field
+//! (issue #1048) is the mirror-image problem: `dynamic_to_toml`'s ambient
+//! numeric-leaf rule renders a bare int as a toml FLOAT, because that is what
+//! the overwhelming majority of `EntityConfig` numeric fields are. A script
+//! that needs the rare int-target field instead says so explicitly with the
+//! `int(3)` marker (an [`IntLit`]), the same escape-hatch shape `flt("…")`
+//! already uses for the opposite rare case.
+//!
 //! [`ActionCmd`]: crate::world::dispatch::ActionCmd
 //! [`TriggerAction`]: crate::world::config::TriggerAction
 //! [`engine::RuntimeHost`]: crate::world::script::engine::RuntimeHost
@@ -79,6 +87,41 @@ use crate::world::script::registry::{host_fn, HostRegistry};
 /// declarative `0.9` does; the override / utility parity tests pin it.
 #[derive(Clone, Debug)]
 pub struct RealLit(pub f64);
+
+/// An integer literal carried as an explicit INTEGER-target marker, the
+/// `no_float`-safe mirror of [`RealLit`] (issue #1048).
+///
+/// # Why a marker, and not schema-aware conversion
+///
+/// `dynamic_to_toml` cannot tell, from a bare Rhai int alone, whether the
+/// author means "the target field is a float, and `200` is shorthand for
+/// `200.0`" (the overwhelming common case — `range`, `base_priority`,
+/// `target_speed`, …) or "the target field is a genuine integer, and `3`
+/// must render as a toml INTEGER" (`repair.repair_team_count`, `volley_count`,
+/// …). Resolving that honestly would mean knowing `EntityConfig`'s declared
+/// field type before rendering the leaf — real schema awareness, which this
+/// codebase has no reflection story for short of either (a) parsing serde's
+/// derive output at compile time (nothing here does that, and bolting it on
+/// for one conversion function is a disproportionate lift), or (b) a
+/// hand-maintained field-name → type table, which is the option the #1048
+/// review explicitly rejected: it rots the moment a new integer field is
+/// added to `EntityConfig` and nothing forces the table to be told.
+///
+/// So the marker: `int(3)` says, at the ONE leaf that needs it, "this is an
+/// integer target" — mirroring `flt("0.9")`'s "this is a fractional value"
+/// for the opposite rare case. Both are opt-in escape hatches over one
+/// ambient default (bare int ⇒ float), so the vastly more common float-target
+/// override needs no annotation at all, exactly as today.
+///
+/// # Why a plain `i64`, not a parsed string like `flt`
+///
+/// `flt` parses a STRING because Rhai's `no_float` build has no float literal
+/// at all — there is no other way to get an `f64` into a script. An integer
+/// target has no such gap: Rhai's native int type already IS the value an
+/// integer field wants, so `int(3)` wraps the `i64` directly. `int("3")`
+/// would add a parse step this marker has no reason to pay for.
+#[derive(Clone, Debug)]
+pub struct IntLit(pub i64);
 
 /// One buffered runtime effect, in authored order in the shared [`EffectSink`].
 ///
@@ -219,11 +262,27 @@ pub fn register_real_lit(engine: &mut Engine) {
     );
 }
 
+/// Register the `no_float`-safe INTEGER-target marker on an engine (issue
+/// #1048). See [`IntLit`] for why this exists and why it wraps an `i64`
+/// directly rather than parsing a string the way `flt` does.
+///
+/// Runtime engine only, unlike [`register_real_lit`]: `int(…)` is only ever
+/// meaningful inside a `spawn_entity` `overrides` map, which is `Effects`
+/// vocabulary (registered by [`register_effects`], runtime-only) — nothing
+/// authored at a unit's top level (the loading engine's whole surface) ever
+/// reaches `dynamic_to_toml`.
+pub fn register_int_lit(engine: &mut Engine) {
+    engine.register_type_with_name::<IntLit>("IntLit");
+    engine.register_fn("int", |i: i64| IntLit(i));
+}
+
 pub(crate) fn register_effects(engine: &mut HostRegistry) {
     engine.register_type_with_name::<EffectSink>("Effects");
 
-    // The `flt(…)` marker is not editor-exposed, so a bare registration.
+    // The `flt(…)` / `int(…)` markers are not editor-exposed, so bare
+    // registrations.
     register_real_lit(engine.engine_mut());
+    register_int_lit(engine.engine_mut());
 
     host_fn!(
         engine,
@@ -873,8 +932,8 @@ fn map_zero_gates(spec: &Map) -> Result<Option<Vec<RawZeroGate>>, String> {
 /// Convert a `spawn_entity` `overrides` subtree (`#{ … }`) into the `toml::Value`
 /// the declarative `overrides` field carries.
 ///
-/// Every numeric leaf renders as a toml FLOAT, NOT an integer: the whole script
-/// API is `no_float`, so an author writes `range: 200` (an INT), but
+/// Every BARE numeric leaf renders as a toml FLOAT, NOT an integer: the whole
+/// script API is `no_float`, so an author writes `range: 200` (an INT), but
 /// `EntityConfig`'s numeric fields are overwhelmingly floats and a declarative
 /// `overrides` authors them as floats — so `200` must become `200.0` to
 /// deserialize into the same config `overrides = { range = 200.0 }` produces.
@@ -882,19 +941,33 @@ fn map_zero_gates(spec: &Map) -> Result<Option<Vec<RawZeroGate>>, String> {
 /// array-of-maps, the radar string arrays). Pinned by the `range: 200 ≡
 /// range = 200.0` structural-parity assertion.
 ///
-/// LIMITATION: because every numeric leaf becomes a float, a scripted override
-/// CANNOT target a genuine INTEGER `EntityConfig` field — it would render as
-/// `field = 3.0`, fail to deserialize into an integer field, and
-/// `dispatch_spawn_entity` drops the whole override (keeping the template) with a
-/// warning. No shipped or target world overrides an integer field (they touch
-/// radar range, doctrine, and faction — all float/string/array); schema-aware
-/// int handling is deferred to a follow-up, because `no_float` gives the author
-/// no way to disambiguate an int-target from a float-target leaf.
+/// A leaf that targets a genuine INTEGER `EntityConfig` field
+/// (`repair.repair_team_count`, `volley_count`, …) is the one case the bare-int
+/// default gets wrong: rendered as a float it would become `field = 3.0`, fail
+/// to deserialize into an integer field, and `dispatch_spawn_entity` would drop
+/// the WHOLE override (keeping the template) — see its `override_failures`
+/// doc. Issue #1048 closed this with an explicit marker, [`IntLit`] /
+/// `int(3)`, checked below: the same opt-in escape hatch [`RealLit`] /
+/// `flt("…")` already is for the opposite rare case (a fractional VALUE a bare
+/// int cannot express at all). A hand-maintained field-name → type table was
+/// considered and rejected (see [`IntLit`]'s doc) — it would let this function
+/// guess the right rendering for an UNMARKED leaf, but the table rots silently
+/// the moment `EntityConfig` grows an integer field nobody remembers to add to
+/// it, whereas a missing `int(…)` marker fails LOUDLY (a deserialize error,
+/// now reported through `override_failures` rather than a bare warning).
 fn dynamic_to_toml(value: &Dynamic) -> Result<toml::Value, String> {
     // Bool before int: the two are distinct `Dynamic` types, so the order is for
     // total coverage, not disambiguation.
     if let Ok(b) = value.as_bool() {
         return Ok(toml::Value::Boolean(b));
+    }
+    if let Some(int_lit) = value.clone().try_cast::<IntLit>() {
+        // An `int(3)` marker (issue #1048): the `no_float`-safe INTEGER-target
+        // leaf. Overrides the ambient bare-int-as-float default below, so it must
+        // be checked first — a `value.as_int()` on a boxed custom type like this
+        // one always fails anyway, but checking here keeps the two markers
+        // textually adjacent to the bare-int branch they both modify.
+        return Ok(toml::Value::Integer(int_lit.0));
     }
     if let Ok(i) = value.as_int() {
         return Ok(toml::Value::Float(i as f64));
@@ -1657,6 +1730,119 @@ mod tests {
         )
         .expect_err("an unparseable flt must raise");
         assert!(err.to_string().contains("flt"), "{err}");
+    }
+
+    // ── Feature B: the `int(…)` integer-target marker (issue #1048) ───────────
+
+    /// The mirror of `flt_override_leaf_matches_declarative_float`: an `int(3)`
+    /// override leaf must produce the IDENTICAL `toml::Value` — a toml INTEGER,
+    /// not the ambient float default — the declarative
+    /// `repair.repair_team_count = 3` carries, AND that value must actually
+    /// deserialize into the genuine `u32` `EntityConfig` field it targets
+    /// (`entities::config::RepairConfig::repair_team_count`). That last step is
+    /// the whole point of #1048: before the marker existed, this same leaf
+    /// rendered as a toml FLOAT and could not deserialize into an integer field
+    /// at all.
+    #[test]
+    fn int_override_leaf_matches_declarative_integer_and_deserializes() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.spawn_entity(#{
+                    template_path: "assets/entities/ship.toml",
+                    name: "x",
+                    position: [0, 0, 0],
+                    overrides: #{
+                        repair: #{
+                            repair_team_count: int(3),
+                        },
+                    },
+                });
+            }"#,
+            "f",
+        );
+        let toml = toml_action(
+            "type = \"spawn_entity\"\n\
+             template_path = \"assets/entities/ship.toml\"\n\
+             name = \"x\"\n\
+             position = [0.0, 0.0, 0.0]\n\
+             overrides = { repair = { repair_team_count = 3 } }",
+        );
+        assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+
+        // Pin the conversion concretely: an `int(3)` leaf is the toml INTEGER
+        // `3`, not the ambient toml FLOAT a bare `3` would render as.
+        let BufferedEffect::Action(TriggerAction::SpawnEntity { overrides, .. }) = &effs[0] else {
+            panic!("expected a spawn action, got {:?}", effs[0]);
+        };
+        let count = overrides
+            .as_ref()
+            .and_then(|o| o.get("repair"))
+            .and_then(|r| r.get("repair_team_count"))
+            .expect("override repair_team_count present");
+        assert_eq!(count, &toml::Value::Integer(3));
+
+        // The crux of #1048: the override actually deserializes into the
+        // genuine integer field. Before the fix this `try_into` would fail
+        // (`invalid type: floating point`3`, expected u32`).
+        let repair: crate::entities::config::RepairConfig = overrides
+            .as_ref()
+            .and_then(|o| o.get("repair"))
+            .cloned()
+            .expect("repair override present")
+            .try_into()
+            .expect("an int(3) leaf must deserialize into RepairConfig's genuine u32 field");
+        assert_eq!(repair.repair_team_count, 3);
+    }
+
+    /// The control, mirroring `spawn_entity_override_without_a_tombstone_still_applies`'s
+    /// role for the tombstone test: an UNMARKED int on the SAME integer-target
+    /// field still renders as the ambient toml FLOAT, exactly as before #1048.
+    /// The marker is opt-in, not a new schema-aware default — pinned here so a
+    /// regression that made `dynamic_to_toml` "smart" about `repair_team_count`
+    /// specifically (the hand-maintained field table issue #1048 explicitly
+    /// rejected) would fail this test, not silently pass it.
+    #[test]
+    fn a_bare_int_on_the_same_integer_field_still_renders_as_the_ambient_float() {
+        let effs = run_buffered(
+            r#"fn f(ctx) {
+                ctx.effects.spawn_entity(#{
+                    template_path: "assets/entities/ship.toml",
+                    name: "x",
+                    position: [0, 0, 0],
+                    overrides: #{
+                        repair: #{
+                            repair_team_count: 3,
+                        },
+                    },
+                });
+            }"#,
+            "f",
+        );
+        let BufferedEffect::Action(TriggerAction::SpawnEntity { overrides, .. }) = &effs[0] else {
+            panic!("expected a spawn action, got {:?}", effs[0]);
+        };
+        let count = overrides
+            .as_ref()
+            .and_then(|o| o.get("repair"))
+            .and_then(|r| r.get("repair_team_count"))
+            .expect("override repair_team_count present");
+        assert_eq!(
+            count,
+            &toml::Value::Float(3.0),
+            "an unmarked int must still render as the ambient float default"
+        );
+        // And, unmarked, it does NOT deserialize into the integer field — the
+        // authoring mistake `int(…)` exists to let an author avoid.
+        let repair_result: Result<crate::entities::config::RepairConfig, _> = overrides
+            .as_ref()
+            .and_then(|o| o.get("repair"))
+            .cloned()
+            .expect("repair override present")
+            .try_into();
+        assert!(
+            repair_result.is_err(),
+            "a float leaf must NOT silently coerce into the integer field"
+        );
     }
 
     /// `spawn_entity(#{…})` — the sharpest parity: the Rhai-int `position:

@@ -2572,10 +2572,17 @@ pub(crate) fn apply_dispatch_result(
         name_to_uuid_inserts,
         entity_group_inserts,
         warnings,
+        override_failures,
     } = result;
 
     for warning in warnings {
         bevy::log::warn!("{log_ctx}: {warning}");
+    }
+    // Louder than `warnings` (issue #1048): today's one producer is a
+    // `spawn_entity` override that could not be applied at all — see
+    // `DispatchResult::override_failures`'s doc for why that warrants ERROR.
+    for failure in override_failures {
+        bevy::log::error!("{log_ctx}: {failure}");
     }
 
     events_out.extend(new_events);

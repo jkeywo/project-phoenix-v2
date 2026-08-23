@@ -24,8 +24,10 @@
 //   `DispatchContext::name_to_uuid` and stops there; the applier does
 //   UUID → `Entity` → component.
 // * **Logging becomes data.** Failure paths push a message onto
-//   `DispatchResult::warnings` instead of calling the Bevy log macros. The
-//   applier logs them at warn level; tests assert on them.
+//   `DispatchResult::warnings` (or, for the one failure severe enough to
+//   warrant it, `override_failures` — issue #1048) instead of calling the
+//   Bevy log macros. The applier logs each at its field's level (warn /
+//   error respectively); tests assert on them.
 // * **Flag mutation is previewed, not performed.** The `parent:` layer walk and
 //   the before/after transition are computed here (mirroring `FlagStore`'s own
 //   semantics exactly); the applier performs the write. This is the idiom
@@ -451,6 +453,22 @@ pub struct DispatchResult {
     pub entity_group_inserts: Vec<(String, String)>,
     /// Messages the applier should log at warn level.
     pub warnings: Vec<String>,
+    /// Messages the applier should log at ERROR level (issue #1048) — louder
+    /// than `warnings`, and deliberately a separate field rather than a
+    /// severity tag inside one shared `Vec<String>`, so the applier's log
+    /// level per message is structural rather than inferred from text.
+    ///
+    /// The one producer today is `dispatch_spawn_entity`'s override-apply
+    /// step: a `spawn_entity` override that was present but could not be
+    /// applied at all (the merged document failed to deserialize back into
+    /// `EntityConfig`) drops the WHOLE override map and spawns the bare
+    /// template — a silent behavioural gap ("hostile" spawns unarmed,
+    /// "elite" spawns undamaged) that ordinary warn-level noise is easy to
+    /// miss in review. A rejected `_remove` tombstone (issue #911) shares
+    /// this channel too: it is reported "on the same channel as a failed
+    /// reparse" by original design (see `dispatch_spawn_entity`), and that
+    /// design is unchanged here — only the shared channel's volume moved.
+    pub override_failures: Vec<String>,
 }
 
 // ── Dispatch ──────────────────────────────────────────────────────────────
@@ -1128,10 +1146,11 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 // override carrying the `_remove` tombstone. That marker is a
                 // FRAGMENT-composition feature, and the merge rejects it here
                 // rather than letting it through — see the note below. It is
-                // reported on the same channel as a failed reparse, because the
-                // consequence is the same (the template spawns unchanged) and
-                // because the one thing that must not happen to a subtractive
-                // marker is silence.
+                // reported on the same channel as a failed reparse (now
+                // `override_failures`, issue #1048 — see that field's doc for
+                // why the whole channel got louder), because the consequence is
+                // the same (the template spawns unchanged) and because the one
+                // thing that must not happen to a subtractive marker is silence.
                 let merged = crate::entities::entity_override::merge_entity_config_toml(
                     &template_value,
                     overrides_val,
@@ -1145,6 +1164,16 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 // but surface the reason so the scenario author sees it rather
                 // than debugging silent inertness.
                 //
+                // Issue #1048 raised the volume on that surfacing: reaching
+                // this arm at all now includes the common authoring slip of a
+                // scripted int-target override leaf missing its `int(…)`
+                // marker (`dynamic_to_toml` still defaults a bare int to a
+                // toml float), which `EntityConfig::from_toml` rejects here
+                // exactly like any other shape mismatch. `override_failures`
+                // is logged at ERROR rather than warn (see its doc), because
+                // a whole-override drop is a bigger behavioural gap than the
+                // rest of this function's warn-level, single-field failures.
+                //
                 // One rejection is reachable from an override that looks
                 // perfectly well-formed on its own. Doctrine entries merge
                 // per-field by id (`merge_keyed_array`), so an override that
@@ -1157,9 +1186,10 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 // []` — is the way through: `behaviour.doctrine.directive_anchors`
                 // is absent from BOTH identity tables (issue #911), so it still
                 // replaces wholesale at this layer and at the compose layer
-                // alike. Because this path warns rather than failing, the hull
-                // otherwise flies the doctrine the author meant to replace, so
-                // the warning below is the only signal there is.
+                // alike. Because this path is non-fatal rather than refusing
+                // the spawn outright, the hull otherwise flies the doctrine the
+                // author meant to replace, so the `override_failures` entry
+                // below is the only signal there is.
                 //
                 // This call is `merge_entity_config_toml`, i.e.
                 // `MergePolicy::InstanceOverride` — unchanged by #911. An
@@ -1182,7 +1212,7 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 });
                 match outcome {
                     Ok(merged_config) => config = merged_config,
-                    Err(e) => out.warnings.push(format!(
+                    Err(e) => out.override_failures.push(format!(
                         "SpawnEntity '{name}' overrides did not apply (kept template): {e}"
                     )),
                 }

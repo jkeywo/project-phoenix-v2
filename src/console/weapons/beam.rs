@@ -100,6 +100,21 @@ pub struct ActiveBeamSlot {
     pub target_uuid: String,
     pub remaining_secs: f32,
     pub damage_accumulator: f32,
+    /// The cooldown this cycle has already BOUGHT, in seconds (issue #929).
+    ///
+    /// Written when the bank lights and read by every site that ends the beam,
+    /// instead of each of them re-deriving `cooldown_secs` from the bank config.
+    /// That is what makes `cycle_jitter` LINKED: one draw produces the firing
+    /// duration and the cooldown together, here, and there is no later moment at
+    /// which the two could disagree or a second draw could be taken.
+    ///
+    /// It also makes the jitter resume-safe for free. Both numbers are ordinary
+    /// slot state on a component the snapshot already captures, so a run
+    /// restored mid-cycle continues the cycle it was in — same remaining burn,
+    /// same cooldown waiting behind it — rather than redrawing. A slot restored
+    /// from a pre-#929 payload reads `0.0` here, which every end site treats as
+    /// "no jittered cooldown was recorded" and falls back to the authored value.
+    pub pending_cooldown_secs: f32,
 }
 
 /// Active phaser beam state, tracked independently **per bank** (issue #790).
@@ -194,13 +209,18 @@ impl ActiveBeam {
             .unwrap_or(0.0)
     }
 
-    /// Light `bank` at `target_uuid` for `duration_secs`. Replaces any beam
+    /// Light `bank` at `target_uuid` for `duration_secs`, with
+    /// `pending_cooldown_secs` the rest this cycle has bought. Replaces any beam
     /// already on that bank (and only that bank).
+    ///
+    /// The two durations arrive together because they are one decision — see
+    /// [`ActiveBeamSlot::pending_cooldown_secs`].
     pub fn start(
         &mut self,
         bank: impl Into<PhaserBank>,
         target_uuid: impl Into<String>,
         duration_secs: f32,
+        pending_cooldown_secs: f32,
     ) {
         self.per_bank.insert(
             bank.into(),
@@ -208,8 +228,18 @@ impl ActiveBeam {
                 target_uuid: target_uuid.into(),
                 remaining_secs: duration_secs,
                 damage_accumulator: 0.0,
+                pending_cooldown_secs,
             },
         );
+    }
+
+    /// The cooldown `bank`'s current cycle bought, or `None` when it is not
+    /// burning or the slot predates issue #929's paired draw.
+    pub fn bank_pending_cooldown(&self, bank: &str) -> Option<f32> {
+        self.per_bank
+            .get(bank)
+            .map(|s| s.pending_cooldown_secs)
+            .filter(|secs| *secs > 0.0)
     }
 
     /// Extinguish `bank`, returning the slot it was burning (if any).
@@ -632,6 +662,9 @@ pub(crate) fn handle_fire_phaser(
     >,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
     entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    // `Option<Res<_>>` for the reason `sim_rng::with_stream` documents: a bare
+    // `Res` fails Bevy parameter validation in every bare-`App` unit fixture.
+    sim_rng: Option<Res<crate::sim_rng::SimRng>>,
 ) {
     use crate::entities::config::PhaserCombatConfig;
 
@@ -773,7 +806,54 @@ pub(crate) fn handle_fire_phaser(
                     }
                 })
                 .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_DURATION_SECS);
-            beam.start(bank_id.clone(), target_uuid.clone(), beam_duration_secs);
+            let cooldown_secs = bank_cfg
+                .map(|b| {
+                    if b.cooldown_secs > 0.0 {
+                        b.cooldown_secs
+                    } else {
+                        PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS
+                    }
+                })
+                .unwrap_or(PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS);
+
+            // ── The per-cycle jitter draw (issue #929) ──────────────────────
+            //
+            // ONE factor, drawn here, applied to BOTH halves of the cycle. A
+            // bank that burns 33 % longer also rests 33 % longer, so the mean
+            // duty cycle is exactly what the two authored numbers say and only
+            // the PHASE moves — which is the whole point. Two banks on a fixed
+            // cadence that once light together stay locked together for ever,
+            // fire together and go cold together, and a focused shield arc
+            // regenerating through the synchronised dead window recovers
+            // everything. Jittered, their phases random-walk apart and the
+            // hull's coverage of the target stops having holes in it.
+            //
+            // Seeded, from `SimStream::BeamCycleJitter` — never wall-clock and
+            // never a thread generator, the same discipline every damage
+            // chokepoint follows. Its own stream so that a jitter draw cannot
+            // shift the sequence `BeamDamage` reads.
+            //
+            // A bank authoring `cycle_jitter = 0.0` (every hull but
+            // `alliance_cruiser`) TAKES NO DRAW AT ALL: the stream's position
+            // does not move, so this field is exactly the fixed cycle that
+            // predates it and no existing world's sequence is perturbed by the
+            // mechanism merely existing.
+            let jitter = bank_cfg.map(|b| b.cycle_jitter).unwrap_or(0.0);
+            let factor = if jitter > 0.0 {
+                crate::sim_rng::with_stream(
+                    sim_rng.as_deref(),
+                    crate::sim_rng::SimStream::BeamCycleJitter,
+                    |rng| 1.0 + (crate::ship::damage::unit_f32(rng) * 2.0 - 1.0) * jitter,
+                )
+            } else {
+                1.0
+            };
+            beam.start(
+                bank_id.clone(),
+                target_uuid.clone(),
+                beam_duration_secs * factor,
+                cooldown_secs * factor,
+            );
 
             commands.trigger(BeamStartedEvent {
                 bank: bank_id,
@@ -1301,9 +1381,15 @@ pub(crate) fn tick_beams_prepare(
             let (tx, tz) = match live_pos {
                 Some(p) => p,
                 None => {
-                    // Target vanished — end this bank's beam.
+                    // Target vanished — end this bank's beam. The rest it
+                    // serves is the one THIS cycle bought (issue #929), not a
+                    // fresh read of the authored number: a jittered cycle that
+                    // is cut short still owes the cooldown it drew.
+                    let served = beam
+                        .bank_pending_cooldown(&active_bank)
+                        .unwrap_or(cooldown_secs);
                     beam.end_bank(&active_bank);
-                    cooldown.start_bank(&active_bank, cooldown_secs);
+                    cooldown.start_bank(&active_bank, served);
                     commands.trigger(BeamEndedEvent {
                         bank: active_bank.clone(),
                         target_uuid,
@@ -1357,8 +1443,13 @@ pub(crate) fn tick_beams_prepare(
             };
 
             if !bank_in_arc {
+                // Same as the vanished-target arm above: this cycle's own
+                // cooldown, not a fresh read (issue #929).
+                let served = beam
+                    .bank_pending_cooldown(&active_bank)
+                    .unwrap_or(cooldown_secs);
                 beam.end_bank(&active_bank);
-                cooldown.start_bank(&active_bank, cooldown_secs);
+                cooldown.start_bank(&active_bank, served);
                 commands.trigger(BeamEndedEvent {
                     bank: active_bank.clone(),
                     target_uuid,
@@ -2125,8 +2216,11 @@ pub(crate) fn tick_beams_tick_lifetimes(
         };
 
         if state.end_beam_early {
+            let served = beam
+                .bank_pending_cooldown(&state.active_bank)
+                .unwrap_or(state.cooldown_secs);
             beam.end_bank(&state.active_bank);
-            cooldown.start_bank(&state.active_bank, state.cooldown_secs);
+            cooldown.start_bank(&state.active_bank, served);
             if state.is_local_shooter {
                 if let Some(ref mut wt) = weapons_target_opt {
                     wt.0 = None;
@@ -2148,8 +2242,14 @@ pub(crate) fn tick_beams_tick_lifetimes(
         };
         slot.remaining_secs -= dt;
         if slot.remaining_secs <= 0.0 {
+            // The ORDINARY end of a cycle, and the one the jitter is for: the
+            // burn ran its drawn length and the rest it paired with follows it
+            // (issue #929).
+            let served = beam
+                .bank_pending_cooldown(&state.active_bank)
+                .unwrap_or(state.cooldown_secs);
             beam.end_bank(&state.active_bank);
-            cooldown.start_bank(&state.active_bank, state.cooldown_secs);
+            cooldown.start_bank(&state.active_bank, served);
             commands.trigger(BeamEndedEvent {
                 bank: state.active_bank.clone(),
                 target_uuid: state.target_uuid.clone(),

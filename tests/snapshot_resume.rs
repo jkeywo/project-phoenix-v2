@@ -422,38 +422,7 @@ fn resume_round_trip(world: &str, args: HeadlessArgs, slot: &str, continue_for: 
 /// (see `EntityState::pass_surface`), alongside the reactor allocation, blaster
 /// volley state, sensor lock and arc-bearing seam that the same measurement found
 /// were also default/missing in the resumed world.
-///
-/// ## IGNORED, issue #1242 — the same class of gap, one layer along
-///
-/// This test fails again, and for the same reason it failed at #997: a helm
-/// DERIVED-STATE surface that the payload does not carry. `HelmMotionPlan`
-/// (`src/ship/helm_planner.rs:80`) and `HelmAiSurfacesFrame` are republished per
-/// AI tick and appear nowhere in `src/snapshot.rs`, so a resumed app's first
-/// continuation tick reads the surfaces its own bootstrap left rather than the
-/// captured ones. Issue #1242 owns closing that; this is ignored rather than
-/// weakened, exactly as #997's own resume test was, because the fix is a payload
-/// widening with a save-format version bump and does not belong to whatever
-/// change happens to trip it.
-///
-/// WHAT TRIPPED IT is worth recording, because it is not a regression in the
-/// thing that tripped it. Issue #929 made the player cruiser lethal enough to
-/// actually fly `movement_broadside_orbit`'s `torpedo_run` leg and return from
-/// it, and that is a stretch of helm state the duel had never reached before.
-/// Measured: with the pre-#929 `alliance_cruiser.toml` and the SAME binary the
-/// test passes on seeds 8622026, 1, 2, 3, 4 and 5; with the new content it fails
-/// on 8622026, 1, 2, 4 and 7 and passes on 3, 5 and 6. Either half of the content
-/// change alone also passes — only the combination reaches the state.
-///
-/// The divergence is one value: the cruiser's steering command on the second
-/// continuation frame (live 0.36964065, resumed 0.0), with frame 1 identical and
-/// every ship-level input identical at the divergence — `SimRng` in full, both
-/// ships' shield facings, positions, torpedoes, `HelmPassSurface`,
-/// `PendingArcBearingRequest`, `AiHighFidelity`, and both helm policy runtimes.
-/// UN-IGNORE THIS WITH #1242, not with a new seed: 5 of 8 sampled seeds fail, so
-/// re-picking would be hiding it, and `CAPTURE_AT` / `CONTINUE_FOR` / `SEED` are
-/// measured constants with their reasons written above them.
 #[test]
-#[ignore = "issue #1242: per-AI-tick derived helm state (HelmMotionPlan, HelmAiSurfacesFrame) is not in the resume payload; un-ignore with that fix, not by re-picking the seed"]
 fn a_bounded_duel_resumes_into_a_fresh_app_and_steps_forward_with_it() {
     resume_round_trip(
         DUEL,
@@ -508,6 +477,97 @@ fn the_bounded_duel_resumes_on_the_seed_that_still_diverges() {
     let mut args = args(DUEL, ("cruiser", "destroyer"));
     args.seed = Some(SEED + 7);
     resume_round_trip(DUEL, args, "duel-seed-divergent", CONTINUE_FOR);
+
+/// **A resume lands mid-cycle and continues the SAME cycle (issue #929).**
+///
+/// `cycle_jitter` draws one factor when a bank lights and applies it to that
+/// cycle's burn and to the cooldown behind it. The cooldown is therefore decided
+/// at light time and has to travel: a payload that dropped it would leave the
+/// resumed ship serving the AUTHORED rest instead of the drawn one, silently
+/// falling back onto the fixed cadence for that cycle — which is the exact
+/// de-synchronisation the field exists to create. That is the class of gap
+/// issue #1242 was filed for, one component along, so it gets its own check
+/// rather than an assumption.
+///
+/// This is a payload round-trip rather than a full world resume on purpose. The
+/// world-level continuation tests above cover the whole fight (issue #1242
+/// closed the gap that once kept one ignored); a property that has to hold for
+/// EVERY bank on every hull is pinned directly here rather than through
+/// whichever manoeuvres one seed happens to reach. What it asserts is the whole of what the field
+/// needs: capture sees it, the artifact carries it, restore puts it back
+/// unchanged, and a restored slot is distinguishable from a freshly-lit one.
+#[test]
+fn a_beams_drawn_cooldown_survives_capture_and_restore() {
+    use project_phoenix::console::weapons::beam::{ActiveBeam, ActiveBeamSlot};
+
+    let mut app = duel();
+    step(&mut app, CAPTURE_AT);
+
+    // Put a bank mid-cycle with a cooldown that could not have come from any
+    // authored number in the fleet, so "restored the drawn value" and "re-read
+    // the config" are impossible to confuse.
+    const DRAWN_COOLDOWN: f32 = 9.75;
+    const DRAWN_REMAINING: f32 = 2.5;
+    let ship = {
+        let mut q = app
+            .world_mut()
+            .query::<(bevy::prelude::Entity, &ActiveBeam)>();
+        q.iter(app.world())
+            .map(|(e, _)| e)
+            .next()
+            .expect("the duel's ships carry ActiveBeam")
+    };
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<ActiveBeam>()
+        .expect("the ship carries ActiveBeam")
+        .restore_live_banks([(
+            "fore".to_string(),
+            ActiveBeamSlot {
+                target_uuid: "resume-probe-target".to_string(),
+                remaining_secs: DRAWN_REMAINING,
+                damage_accumulator: 0.125,
+                pending_cooldown_secs: DRAWN_COOLDOWN,
+            },
+        )]);
+
+    let payload = capture(app.world());
+    let row = payload
+        .entities
+        .iter()
+        .filter_map(|e| e.weapons.as_ref())
+        .find_map(|w| w.beams.iter().find(|(bank, ..)| bank == "fore"))
+        .expect("the capture carries the bank that was mid-cycle");
+    assert_eq!(
+        (row.2, row.3, row.4),
+        (DRAWN_REMAINING, 0.125, DRAWN_COOLDOWN),
+        "capture must carry the burn remaining, the sub-tick damage debt AND the \
+         cooldown this cycle drew — the third is what a jittered cycle cannot be \
+         resumed without"
+    );
+
+    // …and back in. A fresh app, restored, must hold the same three numbers.
+    let mut resumed = duel();
+    step(&mut resumed, 5);
+    restore(resumed.world_mut(), &payload);
+    let slot = {
+        let mut q = resumed.world_mut().query::<&ActiveBeam>();
+        q.iter(resumed.world())
+            .filter_map(|b| b.live_banks().find(|(bank, _)| bank.as_str() == "fore"))
+            .map(|(_, slot)| slot.clone())
+            .next()
+            .expect("the restored world carries the mid-cycle bank")
+    };
+    assert_eq!(
+        (
+            slot.remaining_secs,
+            slot.damage_accumulator,
+            slot.pending_cooldown_secs
+        ),
+        (DRAWN_REMAINING, 0.125, DRAWN_COOLDOWN),
+        "the resumed bank continues the cycle it was in rather than redrawing or \
+         falling back on the authored cooldown"
+    );
 }
 
 /// The acceptance criterion on **its own world**, streamed belts and all.

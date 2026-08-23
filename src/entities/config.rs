@@ -1725,6 +1725,31 @@ pub struct PhaserBankConfig {
     /// `PhaserCombatConfig::DEFAULT_BEAM_COOLDOWN_SECS`.
     #[serde(default)]
     pub cooldown_secs: f32,
+    /// Per-cycle jitter on this bank's firing rhythm, as a fraction
+    /// (issue #929). `0.33` means +/-33 %.
+    ///
+    /// Each time the bank LIGHTS, one factor is drawn uniformly from
+    /// `[1 - cycle_jitter, 1 + cycle_jitter)` — half-open at the top, because the
+    /// draw is `ship::damage::unit_f32`, whose `1.0` is unreachable by
+    /// construction — and applied to BOTH that cycle's
+    /// firing duration AND the cooldown that follows it. Linked deliberately: a
+    /// cycle that burns longer also rests longer, so the mean duty cycle is
+    /// exactly `beam_duration_secs / (beam_duration_secs + cooldown_secs)`
+    /// whatever the jitter is, and only the PHASE moves.
+    ///
+    /// What that buys is de-synchronisation. Two banks that light together stay
+    /// together for ever on a fixed cadence, fire together and go cold together,
+    /// and a shield arc regenerating through the synchronised dead window
+    /// recovers everything; with jitter their phases random-walk apart and the
+    /// hull's coverage of the target becomes near-continuous. The mechanism is
+    /// general and the adoption is per-hull.
+    ///
+    /// `0.0` (the default, and what every hull but `alliance_cruiser` authors)
+    /// is EXACTLY the fixed cycle that predates this field — no draw is taken at
+    /// all, so a hull that does not author it does not touch the seeded stream.
+    /// Must be in `[0.0, 1.0)`; at 1.0 a cycle could be drawn to zero length.
+    #[serde(default)]
+    pub cycle_jitter: f32,
     /// RGBA beam colour as a 4-element float array `[r, g, b, a]` in 0.0–1.0.
     /// When absent (empty vec), the renderer falls back to `beam_render::DEFAULT_BEAM_COLOR`.
     #[serde(default)]
@@ -1984,6 +2009,16 @@ pub fn validate_phaser_banks(banks: &[PhaserBankConfig]) -> Result<(), String> {
             return Err(format!(
                 "phaser bank '{}' has auto_arc_deg={} outside (0, fire_arc_deg={}]",
                 b.id, b.auto_arc_deg, b.fire_arc_deg
+            ));
+        }
+        // `cycle_jitter` scales BOTH halves of the cycle, so 1.0 admits a draw
+        // of exactly zero — a beam that lights and expires in the same tick, and
+        // a cooldown of no length at all. Rejected at load rather than clamped
+        // at apply time, because a hull that authored it meant something by it.
+        if !(b.cycle_jitter >= 0.0 && b.cycle_jitter < 1.0) {
+            return Err(format!(
+                "phaser bank '{}' has cycle_jitter={} outside [0.0, 1.0)",
+                b.id, b.cycle_jitter
             ));
         }
     }

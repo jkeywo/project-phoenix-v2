@@ -642,7 +642,7 @@ fn set_active_beam_target(app: &mut App, uuid: Option<String>) {
                     .bank_slot_mut(&bank)
                     .map(|s| s.remaining_secs)
                     .unwrap_or(0.0);
-                b.start(bank, u, remaining);
+                b.start(bank, u, remaining, 0.0);
             }
         }
     }

@@ -1089,6 +1089,7 @@ fn make_weapons_console_config(beam_range: f32) -> crate::entities::config::Weap
             shield_pierce: Some(0.0),
             marker: None,
             ai: None,
+            cycle_jitter: 0.0,
         }],
         blaster_banks: vec![],
         radar: None,

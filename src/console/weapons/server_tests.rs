@@ -218,6 +218,7 @@ fn test_app() -> App {
                     shield_pierce: None,
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 },
                 crate::entities::config::PhaserBankConfig {
                     id: "starboard".into(),
@@ -232,6 +233,7 @@ fn test_app() -> App {
                     shield_pierce: None,
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 },
             ],
         },
@@ -309,6 +311,7 @@ fn test_app() -> App {
                     shield_pierce: None,
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 },
                 crate::entities::config::PhaserBankConfig {
                     id: "starboard".into(),
@@ -323,6 +326,7 @@ fn test_app() -> App {
                     shield_pierce: None,
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 },
             ],
         }),
@@ -525,7 +529,7 @@ fn set_active_beam_target(app: &mut App, uuid: Option<String>) {
                     .bank_slot_mut(&bank)
                     .map(|s| s.remaining_secs)
                     .unwrap_or(0.0);
-                b.start(bank, u, remaining);
+                b.start(bank, u, remaining, 0.0);
             }
         }
     }
@@ -4457,7 +4461,7 @@ fn npc_beam_tick_applies_damage_to_target_hull() {
     // Activate the beam directly on the per-entity ActiveBeam component.
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", target_uuid_str.to_string(), 10.0);
+        beam.start("", target_uuid_str.to_string(), 10.0, 0.0);
     }
 
     let hp_before = app
@@ -4511,7 +4515,7 @@ fn npc_beam_tick_records_shooter_as_last_attacker() {
     // Activate the beam directly on the per-entity ActiveBeam component.
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", target_uuid_str.to_string(), 10.0);
+        beam.start("", target_uuid_str.to_string(), 10.0, 0.0);
     }
 
     // Tick enough for the beam to reach and hit the target.
@@ -4582,7 +4586,7 @@ fn sustained_beam_marks_last_attacker_changed_exactly_once() {
 
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", target_uuid_str.to_string(), 100.0);
+        beam.start("", target_uuid_str.to_string(), 100.0, 0.0);
     }
 
     // Many ticks of one continuous beam from one shooter.
@@ -4642,7 +4646,7 @@ fn npc_beam_tick_damages_npc_target_not_player() {
             .world_mut()
             .get_mut::<ActiveBeam>(shooter_entity)
             .unwrap();
-        beam.start("", npc_target_uuid.to_string(), 10.0);
+        beam.start("", npc_target_uuid.to_string(), 10.0, 0.0);
     }
 
     let hp_before = app
@@ -4834,7 +4838,7 @@ fn npc_beam_tick_applies_damage_to_local_ship_through_shields() {
     // Activate the beam directly targeting the player ship.
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", player_uuid.to_string(), 10.0);
+        beam.start("", player_uuid.to_string(), 10.0, 0.0);
     }
 
     for _ in 0..10 {
@@ -4897,7 +4901,7 @@ fn npc_beam_cooldown_starts_after_beam_expires() {
 
     {
         let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
-        beam.start("", target_uuid_str.to_string(), 0.001); // expires on first tick
+        beam.start("", target_uuid_str.to_string(), 0.001, 0.0); // expires on first tick
     }
 
     app.update(); // beam expires
@@ -4913,6 +4917,92 @@ fn npc_beam_cooldown_starts_after_beam_expires() {
         cooldown.per_bank.values().any(|&v| v > 0.0),
         "PhaserCooldown must be positive after beam ends: {:?}",
         cooldown.per_bank
+    );
+}
+
+// ── The per-cycle beam jitter (issue #929) ────────────────────────────────
+
+/// **A cycle serves the cooldown IT drew, not the one the hull authored.**
+///
+/// This is the behavioural half of `cycle_jitter`'s resume safety, and it is
+/// what makes the payload round-trip in
+/// `snapshot_resume::a_beams_drawn_cooldown_survives_capture_and_restore` mean
+/// something: a slot carrying a drawn cooldown is indistinguishable, to every
+/// site that ends a beam, from one a restore put there. If the end sites re-read
+/// `cooldown_secs` from the bank config — which is what they all did before
+/// #929 — a resumed ship would silently fall back onto the fixed cadence for
+/// whatever cycle it was in the middle of.
+///
+/// The drawn value is deliberately nothing any hull authors, so "served what the
+/// cycle drew" and "re-read the config" cannot be confused.
+#[test]
+fn a_beam_cycle_serves_the_cooldown_it_drew_rather_than_the_authored_one() {
+    let mut app = test_app();
+    let npc_uuid = "00000000-0000-0000-0000-0000000009a1";
+    let target_uuid_str = "00000000-0000-0000-0000-0000000009a2";
+    let (npc_entity, _target) = setup_npc_shooter(&mut app, npc_uuid, target_uuid_str, 0.0, -10.0);
+
+    const DRAWN: f32 = 9.75;
+    {
+        let mut beam = app.world_mut().get_mut::<ActiveBeam>(npc_entity).unwrap();
+        // A burn that expires on the first tick, carrying a cooldown that could
+        // only have come from a draw.
+        beam.start("", target_uuid_str.to_string(), 0.001, DRAWN);
+    }
+
+    app.update();
+
+    let cooldown = app.world().get::<PhaserCooldown>(npc_entity).unwrap();
+    let served = cooldown.bank_remaining_secs("");
+    assert!(
+        (served - DRAWN).abs() < 0.1,
+        "the ended cycle must serve the {DRAWN}s cooldown it drew, not the bank's \
+         authored one — got {served}. Every site that ends a beam reads the slot, \
+         which is what lets a restored mid-cycle slot continue its own cycle"
+    );
+}
+
+/// **A bank authoring no jitter takes no draw**, so the mechanism existing costs
+/// an unauthored hull exactly nothing.
+///
+/// `cycle_jitter = 0.0` is the default and what every hull but
+/// `alliance_cruiser` carries. The guard is `jitter > 0.0` rather than a
+/// multiply by 1.0, and the difference matters for a reason no damage assertion
+/// would catch: a draw taken and discarded still MOVES the seeded stream, and
+/// every stream position is folded into the authoritative digest. A hull that
+/// does not author the field must leave `SimStream::BeamCycleJitter` exactly
+/// where it found it.
+#[test]
+fn an_unjittered_bank_does_not_move_the_beam_cycle_jitter_stream() {
+    use crate::sim_rng::{SimRng, SimStream};
+
+    let mut app = test_app();
+    app.insert_resource(SimRng::new(4242, crate::sim_rng::SeedSource::Cli));
+    let npc_uuid = "00000000-0000-0000-0000-0000000009b1";
+    let target_uuid_str = "00000000-0000-0000-0000-0000000009b2";
+    let (npc_entity, _target) = setup_npc_shooter(&mut app, npc_uuid, target_uuid_str, 0.0, -10.0);
+
+    // `setup_npc_shooter` authors no `cycle_jitter`, so the bank runs at the
+    // 0.0 default.
+    let before = app.world().resource::<SimRng>().state().streams
+        [SimStream::BeamCycleJitter as usize]
+        .clone();
+
+    // Drive several ticks of ordinary firing, which is where the draw would be
+    // taken if the guard were a multiply instead of a branch.
+    for _ in 0..8 {
+        app.update();
+    }
+    let _ = npc_entity;
+
+    let after = app.world().resource::<SimRng>().state().streams
+        [SimStream::BeamCycleJitter as usize]
+        .clone();
+    assert_eq!(
+        before, after,
+        "a bank at the `cycle_jitter = 0.0` default must take no draw at all — the \
+         stream's position is folded into the authoritative digest, so an idle \
+         draw would perturb every world that never asked for jitter"
     );
 }
 
@@ -5030,6 +5120,7 @@ rank = "Ltn."
                     shield_pierce: Some(0.0),
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 }],
                 blaster_banks: vec![],
                 radar: None,
@@ -5145,7 +5236,7 @@ fn both_localship_and_npc_can_fire_via_per_entity_active_beam() {
             EntityUuid(npc_uuid.to_string()),
             {
                 let mut beam = ActiveBeam::default();
-                beam.start("", target_uuid, 10.0);
+                beam.start("", target_uuid, 10.0, 0.0);
                 beam
             },
             PhaserCooldown::default(),
@@ -5226,6 +5317,7 @@ fn ai_phaser_auto_fire_activates_ai_controlled_npc_beam() {
                     shield_pierce: None,
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 }],
             }),
             AdmittedCommands::default(),
@@ -5308,6 +5400,7 @@ fn spawn_ai_phaser_npc(app: &mut App, npc_uuid: &str, target_uuid: &str) -> Enti
                     shield_pierce: None,
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 }],
             }),
             AdmittedCommands::default(),
@@ -5524,6 +5617,7 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
                     shield_pierce: None,
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 }],
             }),
         ))
@@ -5596,6 +5690,7 @@ fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
                 shield_pierce: None,
                 marker: None,
                 ai: None,
+                cycle_jitter: 0.0,
             }],
         }),
     ));
@@ -5652,6 +5747,7 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
                 shield_pierce: None,
                 marker: None,
                 ai: None,
+                cycle_jitter: 0.0,
             }],
         }),
     ));
@@ -5904,6 +6000,7 @@ fn spawn_two_family_arc_miss(
                 shield_pierce: None,
                 marker: None,
                 ai: None,
+                cycle_jitter: 0.0,
             }],
         }),
         loaded_torpedo_res(0.0, 30.0),
@@ -6389,6 +6486,7 @@ fn npc_handle_fire_phaser_rejects_target_outside_requested_bank_arc() {
             shield_pierce: None,
             marker: None,
             ai: None,
+            cycle_jitter: 0.0,
         }],
     };
     let target_uuid_parsed = uuid::Uuid::parse_str(target_uuid).unwrap();
@@ -11909,6 +12007,7 @@ fn publish_writes_phaser_fore_blackboard_when_bank_configured() {
                 shield_pierce: None,
                 marker: None,
                 ai: None,
+                cycle_jitter: 0.0,
             }];
         }
     }
@@ -12063,6 +12162,7 @@ ai_only = true
                     shield_pierce: None,
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 }],
             }),
             Transform::default(),
@@ -12512,6 +12612,7 @@ fn publish_marks_bank_offline_when_fine_system_in_offline_set() {
                 shield_pierce: None,
                 marker: None,
                 ai: None,
+                cycle_jitter: 0.0,
             }];
         }
     }
@@ -12580,6 +12681,7 @@ fn hull_disabled_console_causes_publish_to_mark_bank_offline() {
                 shield_pierce: None,
                 marker: None,
                 ai: None,
+                cycle_jitter: 0.0,
             }];
         }
     }
@@ -12990,6 +13092,7 @@ fn los_test_app() -> App {
                     shield_pierce: None,
                     marker: None,
                     ai: None,
+                    cycle_jitter: 0.0,
                 }],
             },
         ))
@@ -13069,6 +13172,7 @@ fn spawn_los_ship(
                 shield_pierce: None,
                 marker: None,
                 ai: None,
+                cycle_jitter: 0.0,
             }],
         }),
         crate::ship_plugin::ShipSystemControlSources::default(),
@@ -13115,7 +13219,7 @@ fn spawn_los_asteroid(
 /// Activate a beam on the given ship entity, targeting `target_uuid`.
 fn activate_los_beam(app: &mut App, shooter: bevy::ecs::entity::Entity, target_uuid: &str) {
     let mut beam = app.world_mut().get_mut::<ActiveBeam>(shooter).unwrap();
-    beam.start("port", target_uuid, 10.0);
+    beam.start("port", target_uuid, 10.0, 0.0);
 }
 
 /// Read the total current hull HP from a ship/asteroid entity.
@@ -14099,6 +14203,7 @@ fn wide_bank(id: &str, facing_deg: f32) -> crate::entities::config::PhaserBankCo
         shield_pierce: None,
         marker: None,
         ai: None,
+        cycle_jitter: 0.0,
     }
 }
 

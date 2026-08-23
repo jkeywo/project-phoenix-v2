@@ -806,15 +806,28 @@ pub struct EntityState {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WeaponState {
     /// Every live phaser beam as `(bank, target uuid, remaining_secs,
-    /// damage_accumulator)`, in the bank order `ActiveBeam` already keeps.
+    /// damage_accumulator, pending_cooldown_secs)`, in the bank order
+    /// `ActiveBeam` already keeps.
     ///
     /// `damage_accumulator` is in the tuple deliberately. It is the fractional
     /// damage carried between ticks so that 5 HP/s applies accurately at any
     /// frame rate; a beam restored without it is a beam whose sub-tick debt was
     /// forgiven, and `ActiveBeam::restore_live_banks` exists so that a restore
     /// cannot round-trip through `start` and lose it.
+    ///
+    /// `pending_cooldown_secs` is here for the same class of reason and a
+    /// sharper one (issue #929). A bank with `cycle_jitter` authored draws ONE
+    /// factor when it lights and applies it to that cycle's burn AND to the
+    /// cooldown behind it; the cooldown is therefore decided at light time and
+    /// carried on the slot. A resume that dropped it would serve the AUTHORED
+    /// rest instead of the drawn one — the resumed ship would silently fall back
+    /// onto the fixed cadence for that cycle, which is exactly the
+    /// de-synchronisation the field exists to create. Carrying it means a run
+    /// restored mid-burn continues the cycle it was in rather than redrawing,
+    /// and it is why this mechanism did not need a new snapshot seam at all: the
+    /// state rides on a component the payload already captured.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub beams: Vec<(String, String, f32, f32)>,
+    pub beams: Vec<(String, String, f32, f32, f32)>,
     /// `(bank, remaining_secs)` for every bank still cooling, in bank order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub phaser_cooldowns: Vec<(String, f32)>,
@@ -2613,6 +2626,7 @@ fn weapon_state(
                             slot.target_uuid.clone(),
                             slot.remaining_secs,
                             slot.damage_accumulator,
+                            slot.pending_cooldown_secs,
                         )
                     })
                     .collect()
@@ -4519,13 +4533,14 @@ fn spawn_from_origin(
 fn apply_weapons(entity: &mut EntityWorldMut<'_>, stored: &WeaponState) {
     if let Some(mut beam) = entity.get_mut::<ActiveBeam>() {
         beam.restore_live_banks(stored.beams.iter().map(
-            |(bank, target, remaining, accumulator)| {
+            |(bank, target, remaining, accumulator, pending_cooldown)| {
                 (
                     bank.clone(),
                     ActiveBeamSlot {
                         target_uuid: target.clone(),
                         remaining_secs: *remaining,
                         damage_accumulator: *accumulator,
+                        pending_cooldown_secs: *pending_cooldown,
                     },
                 )
             },

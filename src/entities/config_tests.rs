@@ -4525,6 +4525,44 @@ fn validate_phaser_banks_rejects_auto_arc_greater_than_fire_arc() {
     );
 }
 
+/// `cycle_jitter` is rejected at load outside `[0.0, 1.0)` (issue #929).
+///
+/// The upper bound is the interesting half: the factor scales BOTH the burn and
+/// the cooldown, so at 1.0 a draw of exactly zero is admissible — a beam that
+/// lights and expires in the same tick, followed by no cooldown at all. Rejected
+/// rather than clamped at apply time, because a hull that authored it meant
+/// something by it and a silent clamp would hide the mistake in a balance sweep.
+#[test]
+fn validate_phaser_banks_rejects_cycle_jitter_outside_its_range() {
+    let bank = |jitter: f32| PhaserBankConfig {
+        id: "port".into(),
+        facing_deg: 0.0,
+        fire_arc_deg: 270.0,
+        auto_arc_deg: 270.0,
+        beam_range: 0.0,
+        shield_pierce: None,
+        marker: None,
+        cycle_jitter: jitter,
+        ..Default::default()
+    };
+
+    for bad in [1.0_f32, 1.5, -0.1] {
+        let err = validate_phaser_banks(&[bank(bad)]).unwrap_err();
+        assert!(
+            err.contains("cycle_jitter"),
+            "jitter {bad} must be refused by name: {err}"
+        );
+    }
+    // …and the shipped value, plus the default, are accepted — without which
+    // the rows above would pass on a validator that refused everything.
+    for good in [0.0_f32, 0.33, 0.99] {
+        assert!(
+            validate_phaser_banks(&[bank(good)]).is_ok(),
+            "jitter {good} is authorable"
+        );
+    }
+}
+
 #[test]
 fn validate_phaser_banks_rejects_fire_arc_out_of_range() {
     let banks = vec![PhaserBankConfig {

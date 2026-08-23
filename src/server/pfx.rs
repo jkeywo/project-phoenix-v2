@@ -5136,7 +5136,7 @@ direction = [0.0, 0.0, -1.0]
             ShipPhysics::default(),
             {
                 let mut beam = ActiveBeam::default();
-                beam.start("", target_uuid.clone(), 10.0);
+                beam.start("", target_uuid.clone(), 10.0, 0.0);
                 beam
             },
         ));
@@ -5207,7 +5207,7 @@ direction = [0.0, 0.0, -1.0]
                 ShipPhysics::default(),
                 {
                     let mut beam = ActiveBeam::default();
-                    beam.start("", target_uuid.clone(), 10.0);
+                    beam.start("", target_uuid.clone(), 10.0, 0.0);
                     beam
                 },
                 thrust_command(),
@@ -5275,7 +5275,7 @@ direction = [0.0, 0.0, -1.0]
             ShipPhysics::default(),
             {
                 let mut beam = ActiveBeam::default();
-                beam.start("", target_uuid.clone(), 10.0);
+                beam.start("", target_uuid.clone(), 10.0, 0.0);
                 beam
             },
         ));

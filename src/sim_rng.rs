@@ -83,6 +83,15 @@ pub enum SimStream {
     TorpedoDamage,
     /// `console::weapons::blaster` — blaster impact hull distribution.
     BlasterDamage,
+    /// `console::weapons::beam` — the per-cycle duration/cooldown jitter factor
+    /// a phaser bank draws when it lights (issue #929).
+    ///
+    /// Its own stream rather than a second consumer of [`Self::BeamDamage`], for
+    /// the reason every stream here is separate: a draw taken for one purpose
+    /// must not shift the sequence another purpose reads. Beam DAMAGE is drawn
+    /// per landing tick and jitter once per cycle, so sharing would make the
+    /// damage distribution a function of how often banks happened to relight.
+    BeamCycleJitter,
     /// **Retired, but deliberately still declared (issue #907).**
     ///
     /// This stream used to allocate entity UUIDs. Nothing draws from it any
@@ -107,12 +116,13 @@ pub enum SimStream {
 
 impl SimStream {
     /// Every stream, in declaration order. Used to build the resource.
-    pub const ALL: [SimStream; 6] = [
+    pub const ALL: [SimStream; 7] = [
         SimStream::CollisionDamage,
         SimStream::RegionDamage,
         SimStream::BeamDamage,
         SimStream::TorpedoDamage,
         SimStream::BlasterDamage,
+        SimStream::BeamCycleJitter,
         SimStream::EntityUuid,
     ];
 
@@ -127,6 +137,7 @@ impl SimStream {
             SimStream::BeamDamage => "beam-damage",
             SimStream::TorpedoDamage => "torpedo-damage",
             SimStream::BlasterDamage => "blaster-damage",
+            SimStream::BeamCycleJitter => "beam-cycle-jitter",
             SimStream::EntityUuid => "entity-uuid",
         }
     }
@@ -453,6 +464,7 @@ mod tests {
             (SimStream::BeamDamage, "beam-damage"),
             (SimStream::TorpedoDamage, "torpedo-damage"),
             (SimStream::BlasterDamage, "blaster-damage"),
+            (SimStream::BeamCycleJitter, "beam-cycle-jitter"),
             (SimStream::EntityUuid, "entity-uuid"),
         ] {
             assert_eq!(
@@ -465,7 +477,7 @@ mod tests {
         // variant would go unpinned and be free to be renamed later.
         assert_eq!(
             SimStream::ALL.len(),
-            6,
+            7,
             "a stream was added — pin its name above too"
         );
     }

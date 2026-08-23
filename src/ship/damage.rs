@@ -15,14 +15,17 @@ use vellum_rng::Pcg32;
 /// `2^-24` maps it onto the 2^24 evenly spaced representable multiples of
 /// `2^-24` across `[0, 1)`. Both operands are powers of two and the numerator
 /// is exactly representable, so every product is exact — no rounding, no
-/// platform variation, and `1.0` is unreachable. That last part is load-bearing
+/// platform variation, and `1.0` is unreachable.
+///
+/// `pub(crate)` since issue #929, so the beam-cycle jitter draws its uniform the
+/// same way rather than growing a second conversion with its own rounding. That last part is load-bearing
 /// for the callers: they scale by a total and walk the systems subtracting, and
 /// a draw of exactly `1.0` would fall off the end of the list every time.
 ///
 /// The *high* 24 bits are the ones kept. PCG's XSH-RR output permutation makes
 /// the whole word equally good, so this is a convention rather than a
 /// correction — but it is the convention the sequence is now recorded against.
-fn unit_f32(rng: &mut Pcg32) -> f32 {
+pub(crate) fn unit_f32(rng: &mut Pcg32) -> f32 {
     (rng.next_u32() >> 8) as f32 * (1.0 / 16_777_216.0)
 }
 

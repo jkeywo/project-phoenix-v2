@@ -93,7 +93,25 @@ Break-even is arithmetic, for one bearing bank. Three factors sit between an aut
 
 So `beam_damage_per_sec` ships at **32** on both banks, the first rung of the swept ladder at which all twelve sampled seeds open the launch gate. Over the wider 28-seed sweep the cruiser launches on 28/28, and **wins 25 of the 28 duels against the destroyer, losing 3** — where before the issue it won none of them. That win rate is a consequence of the knee, not a target it was tuned to, and moving it is a ratification question.
 
-The abutting pair was not costing the hull output, it was **staggering** it: the ring rotates, so the target crosses out of one 180° arc and into the other, and a bank came off its 6 s cooldown into a bearing just as its sibling went cold — near-continuous pressure out of two intermittent guns. Overlapping arcs let both fire at once and then both cool at once, and a focused arc regenerating 6.5 hp/s recovers everything inside a synchronised dead window. **Against a self-focusing screen, coverage beats burst.** The lever that would fix that directly is `cooldown_secs`, which no pass has touched.
+**What that table measures, corrected.** The first reading was that the abutting pair *staggered* the banks and the overlapping pair synchronised them. That is withdrawn. Instrumented over 90 s of `probe_duel`, every beam the cruiser lights ends on `!bank_in_arc` and **not one ever runs its 6 s burn to expiry** — so there is no cooldown rhythm on this world to synchronise or stagger. The union figures are **arc dwell**, and what widening the arcs changed is which windows exist and how long the target sits in them. Coverage is still what beats a regenerating screen; on this hull the thing that limits coverage is geometry, and it pays a full 6 s cooldown after every geometry-cut burn.
+
+How much the cycle binds is per-world, and that is worth knowing before reaching for a cadence lever:
+
+| world | beam ends by duration | by arc |
+| --- | --- | --- |
+| `probe_duel` | 0 | 4 |
+| `probe_aggressor` | 1 | 2 |
+| `combat_test` | 6 | 1 |
+
+(Cruiser banks only, over 90 s. On `probe_duel` it lit five beams; four ended on arc, the fifth was still burning at the cutoff, and none ever ran its burn to expiry.)
+
+### `cycle_jitter` (issue #929)
+
+A per-bank TOML fraction, default `0.0`. Each time a bank lights it draws one factor uniformly from `[1 - cycle_jitter, 1 + cycle_jitter]` off the seeded `SimStream::BeamCycleJitter` and applies it to **both** that cycle's burn and the cooldown behind it. Linked, so the mean duty cycle is unchanged and only the phase moves; a pair of banks that lit together drift apart instead of staying locked.
+
+The drawn cooldown is written onto the beam slot at light time and every site that ends a beam reads it there, which is what makes it resume-safe: `ActiveBeamSlot.pending_cooldown_secs` rides in the snapshot payload alongside `remaining_secs`, so a run restored mid-cycle continues the cycle it was in rather than falling back on the authored rest. A bank at the `0.0` default takes **no draw at all**, so the stream never moves for it and no unauthored world's sequence is perturbed.
+
+`alliance_cruiser` authors `0.33` on both banks ([ai] Unratified). On `probe_duel` it measurably does nothing — same ladder, same knee, byte-identical A/B — because that world is arc-limited; on `combat_test`, where the duty cycle does bind, it trades damage dealt for damage taken (737/165 → 516/100 on seed 1) and picks up a kill.
 
 `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it` censuses the fleet for the entry/launcher pairing. A weak entry beside a strict launcher is a deadlock only when the hull carries nothing that bears on its own bow — that corner is provable from authored text and stays asserted empty — and a hull that escapes on its guns instead is named in a bucket beside it, owing the seeded sweep its own file carries.
 

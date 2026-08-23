@@ -109,19 +109,27 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 #   union beam-on-target 34.4 s of 90 (38 %)   28.4 s of 90 (32 %)
 #   enemy arc collapses  5                     3
 #
-# The abutting pair was never costing this hull output — it was STAGGERING it.
-# The ring rotates, so the target crosses out of one 180-degree arc and into the
-# other, and a bank came off its 6 s cooldown into a bearing just as its sibling
-# went cold: near-continuous pressure out of two intermittent guns. Overlapping
-# arcs let both fire at once and then both cool at once, and a focused arc
-# regenerating 6.5 hp/s recovers everything inside a synchronised dead window.
-# Against a self-focusing screen, COVERAGE beats burst.
+# WHAT THAT TABLE MEASURES, corrected. The first reading of it was that the
+# abutting pair STAGGERED the two banks — one coming off cooldown into a bearing
+# as its sibling went cold — and that overlapping arcs let both fire and both
+# cool together. That explanation is WITHDRAWN: instrumented over 90 s on this
+# world, every beam this hull lights ends on `!bank_in_arc` and not one of them
+# ever runs its 6 s burn to expiry, so there is no cooldown rhythm here to
+# synchronise or stagger. The union figures above are ARC DWELL — how long the
+# target stays inside a bank's fire arc — and what widening the arcs changed is
+# which windows exist and how long each lasts, not the duty cycle. The
+# `cycle_jitter` block further down carries the instrumentation and the A/B that
+# settles it. Coverage is still what beats a regenerating screen; the thing that
+# limits coverage on this hull is geometry.
 #
 # So the wider arcs are worth having for the player-facing reason (the AI now
 # fights the ship the way the manual arcs always allowed, and a big burst is a
 # real tactical shape) and are paid for with the higher knee. Anyone revisiting
-# this should look at `cooldown_secs` before `auto_arc_deg`: the duty cycle is
-# what actually binds, and it is the one lever neither pass has touched.
+# this should look at what actually binds first, and on this world that is ARC
+# DWELL and the full cooldown paid after every arc-cut burn — not the duty cycle.
+# `cooldown_secs` is still the untouched lever, and it is now the interesting one
+# for a different reason: this hull pays 6 s of rest for burns that geometry
+# routinely cuts to a fraction of their authored length.
 #
 # Pinned by `the_player_hulls_270_degree_auto_arcs_both_bear_off_the_beam_line`
 # (src/console/weapons/server_tests.rs), which also holds the blind-wedge control
@@ -459,6 +467,83 @@ selects = [ "ship", "station", "asteroid" ]
 # worth less than the arithmetic says — which is the whole finding recorded in
 # the header. `cooldown_secs` is the lever that would change that, and neither
 # it nor any other pass of this issue has touched it.
+# ── `cycle_jitter = 0.33`, and the measurement that qualifies the block above ─
+#
+# [ai] Unratified, both banks. Each time a bank LIGHTS it draws one factor
+# uniformly from [0.67, 1.33) (seeded, `SimStream::BeamCycleJitter`) and applies
+# it to BOTH that cycle's burn AND the cooldown behind it. Linked, so a cycle
+# that fires longer also rests longer: the mean duty cycle is exactly what
+# `beam_duration_secs` and `cooldown_secs` say, and only the PHASE moves. The
+# mechanism is general and defaults to `0.0` — an exact fixed cycle, and no draw
+# taken at all — so only this hull's two banks are affected this round.
+#
+# IT WAS ADDED TO DE-SYNCHRONISE THE PAIR, and on `probe_duel` it does nothing.
+# The swept ladder with jitter is the same ladder without it, rung for rung:
+# D=8 0/12 seeds launching, D=12 6/12, D=16 8/12, D=20 8/12, D=24 10/12,
+# D=32 12/12. Same knee, same 28-seed sweep (28/28 launch, 25 wins, 3 losses).
+# A 30 s A/B at seed 3 with the ONE variable is byte-identical.
+#
+# WHY, and it corrects the block above. The two banks in `probe_duel` are not
+# cadence-limited, they are ARC-limited. Instrumented over 90 s, counting how each
+# beam END was reached (this hull's own banks only):
+#
+#   world             ends by duration   ends by arc
+#   probe_duel        0                  4
+#   probe_aggressor   1                  2
+#   combat_test       6                  1
+#
+# On `probe_duel` the hull lit five beams, four ended on `!bank_in_arc` — the ring
+# takes the target out of the bank's fire arc — the fifth was still burning at the
+# cutoff, and NOT ONE ever ran its 6 s burn to expiry.
+#
+# So on the world the whole ladder is measured on, `beam_duration_secs` is not
+# the constraint and jittering it changes nothing; the cooldown gaps it also
+# jitters are 6 s against arc windows tens of seconds apart, so they do not bind
+# either. The "x0.50 duty cycle" term in the break-even arithmetic above is
+# therefore an UPPER BOUND on this hull's coverage rather than a description of
+# it — the real figure is 30-38 % of the engagement, measured — and the
+# "synchronised dead window" reading of why the 270-degree arcs raised the knee
+# is withdrawn. What the wider arcs actually changed is which arc windows exist
+# and how long the target dwells in them; the union-coverage numbers in that
+# table are arc dwell, not duty.
+#
+# WHERE IT DOES BIND, so the field is not inert everywhere: `combat_test`, where
+# 6 of 7 ends are duration-driven. Same seeds, 150 s, one variable:
+#
+#            jitter 0.0                 jitter 0.33
+#   seed 1   737 dealt / 165 taken      516 / 100, one MORE kill
+#   seed 2   737 / 152                  646 / 126
+#   seed 3   737 / 167                  516 / 100, one MORE kill
+#
+# Less damage dealt and considerably less taken, with a kill more on two of the
+# three. That asymmetry is the honest cost of linking the two halves: when a burn
+# is cut short by geometry the long draws buy nothing, while the long cooldowns
+# are always paid — so against an arc-limited target the mechanism is a small net
+# tax. `beam_damage_per_sec` is NOT re-derived for it (the knee is unmoved), and
+# whether 0.33 earns its place on this hull is exactly the ratification question.
+#
+# WHAT IT COST ELSEWHERE: nothing. A bank at the `0.0` default takes no draw, so
+# `SimStream::BeamCycleJitter` never moves for it and no other world's sequence
+# is perturbed —
+# `an_unjittered_bank_does_not_move_the_beam_cycle_jitter_stream` pins that.
+# Resume safety is structural rather than added: the drawn cooldown is written
+# onto the beam slot when the bank lights and every end site reads it there, so a
+# run restored mid-cycle continues the cycle it was in
+# (`a_beam_cycle_serves_the_cooldown_it_drew_rather_than_the_authored_one`, and
+# `snapshot_resume::a_beams_drawn_cooldown_survives_capture_and_restore`).
+#
+# AI INTERPLAY: nothing downstream assumes the fixed cadence, and the one place
+# it could have leaked in refuses it explicitly. `evaluate_family_arc_request`
+# passes `false` for cooldown with the comment "arc-bearing is a facing request,
+# not a timing one", so whether a bank is mid-cooldown cannot change whether the
+# phaser family qualifies for a Channel-3 request. The blackboard's `on_cooldown`
+# / `cooldown_remaining` are live derivations for the console, read by no
+# doctrine. No authored guard in the fleet reads a beam duration. The one real
+# interaction is with the TARGET: the shields AI focuses on a 4 s recent-damage
+# window, and a jittered gap between bursts is 4.0-8.0 s where it was exactly
+# 6.0 — so the defender's focus lapses on some cycles and not others, which is a
+# consequence of the mechanism rather than a coupling to it.
+#
 [[weapons_console.phaser_banks]]
 id = "fore"
 facing_deg = 0
@@ -468,6 +553,7 @@ beam_range = 40
 beam_damage_per_sec = 32
 beam_duration_secs = 6
 cooldown_secs = 6
+cycle_jitter = 0.33
 beam_color = [ 0.25, 0.75, 1, 1 ]
 marker = "phasers_fore"
 
@@ -508,6 +594,7 @@ beam_range = 40
 beam_damage_per_sec = 32
 beam_duration_secs = 6
 cooldown_secs = 6
+cycle_jitter = 0.33
 beam_color = [ 0.25, 0.75, 1, 1 ]
 marker = "phasers_aft"
 

@@ -4883,7 +4883,7 @@ fn power_increase_respects_bounds_noop_at_four() {
     );
 }
 
-// -- Power ? Modifier wiring integration tests -------------------------
+// -- Power → Modifier wiring integration tests -------------------------
 
 #[test]
 fn increasing_helm_power_updates_max_speed_via_modifiers() {

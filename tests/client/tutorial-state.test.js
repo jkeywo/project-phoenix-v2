@@ -14,6 +14,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   TUTORIAL_DISMISS_ACTION,
   TUTORIAL_PROGRESS_KEY,
+  LEGACY_TUTORIAL_PROGRESS_KEY,
   emptyTutorialProgress,
   normalizeTutorialProgress,
   scopedTutorialKey,
@@ -26,12 +27,14 @@ import {
   loadTutorialProgress,
   saveTutorialProgress,
   tutorialProgressAfterAction,
+  migrateLegacyTutorialProgress,
   hydrateTutorialProgress,
 } from '../../gui/tutorial-state.js';
 
 // ── Fixtures (wire-shaped, string-id content) ───────────────────────────────
 
 const STATION = 'helm';
+const HULL = 'alliance-cruiser-01';
 
 const welcome = {
   id: 'helm-welcome',
@@ -174,6 +177,15 @@ describe('eligibleOverlays', () => {
     expect(ids).toEqual(['helm-welcome', 'helm-joystick']);
   });
 
+  it('progress is hull-scoped: another hull sharing station and control names never leaks', () => {
+    const cruiser = 'alliance-cruiser-01';
+    const destroyer = 'alliance-destroyer-01';
+    let p = progressWithDismissed(emptyTutorialProgress(), scopedTutorialKey(destroyer, STATION, 'helm-welcome'));
+    p = progressWithControlUsed(p, scopedTutorialKey(destroyer, STATION, 'set_helm'));
+    const ids = eligibleOverlays(DEFS, p, { boost_enabled: false, red_alert: false }, cruiser, STATION).map(d => d.id);
+    expect(ids).toEqual(['helm-welcome', 'helm-joystick']);
+  });
+
   it('higher priority preempts the intro queue; equal priority keeps authored order', () => {
     const hot = { boost_enabled: true, red_alert: true };
     const ids = eligibleOverlays(DEFS, emptyTutorialProgress(), hot, STATION).map(d => d.id);
@@ -215,9 +227,10 @@ describe('buildTutorialState', () => {
 // ── Progress reducers ───────────────────────────────────────────────────────
 
 describe('progress reducers', () => {
-  it('scopedTutorialKey formats <station>/<name>', () => {
+  it('scopedTutorialKey formats legacy and hull-scoped keys', () => {
     expect(scopedTutorialKey('helm', 'helm-welcome')).toBe('helm/helm-welcome');
     expect(scopedTutorialKey('tactical', 'set_boost')).toBe('tactical/set_boost');
+    expect(scopedTutorialKey(HULL, 'helm', 'helm-welcome')).toBe('alliance-cruiser-01/helm/helm-welcome');
   });
 
   it('progressWithDismissed / progressWithControlUsed do not mutate their input', () => {
@@ -339,6 +352,18 @@ describe('persistence', () => {
     saveTutorialProgress(storage, p);
     expect(storage._map.has(TUTORIAL_PROGRESS_KEY)).toBe(true);
     expect(loadTutorialProgress(storage)).toEqual(p);
+  });
+
+  it('migrates a v2 record once to the first identified hull without leaking it to another', () => {
+    const legacy = { dismissed: { 'helm/helm-welcome': true }, used: { 'helm/set_helm': true } };
+    const storage = fakeStorage({ [LEGACY_TUTORIAL_PROGRESS_KEY]: JSON.stringify(legacy) });
+    const cruiser = migrateLegacyTutorialProgress(emptyTutorialProgress(), storage, 'alliance-cruiser-01');
+    expect(cruiser).toEqual({
+      dismissed: { 'alliance-cruiser-01/helm/helm-welcome': true },
+      used: { 'alliance-cruiser-01/helm/set_helm': true },
+    });
+    expect(migrateLegacyTutorialProgress(emptyTutorialProgress(), storage, 'alliance-destroyer-01'))
+      .toEqual(emptyTutorialProgress());
   });
 
   it('missing key, corrupt JSON, and throwing storage all yield empty progress', () => {

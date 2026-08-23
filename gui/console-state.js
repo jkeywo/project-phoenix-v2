@@ -85,7 +85,7 @@
  * @param {{ x?: number, position?: number[] }} e
  */
 import { t } from './strings.js';
-import { buildTutorialState } from './tutorial-state.js';
+import { buildTutorialState, migrateTutorialProgressForHull } from './tutorial-state.js';
 
 /**
  * Display name for a station id.
@@ -2166,11 +2166,16 @@ export function withVisitingSystems(consoleName, state, json) {
 
 export function withTutorialOverlay(consoleName, state, json) {
   try {
+    // v2's station-only persistence may be safely carried to the first hull
+    // seen after upgrade; do it before reading overlay eligibility.
+    const storage = typeof localStorage === 'undefined' ? null : localStorage;
+    migrateTutorialProgressForHull(state, storage);
     const obj = JSON.parse(json);
     obj.tutorial = buildTutorialState(
       (state.stationTutorials || {})[consoleName] || [],
       state.tutorialProgress,
       obj,
+      state.hullId,
       consoleName,
     );
     return JSON.stringify(obj);

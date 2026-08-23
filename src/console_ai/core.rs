@@ -167,12 +167,27 @@ pub struct TorpedoAiInput {
 /// the gate for a hull that wanted to spend rounds differently.
 ///
 /// The gate itself has not gone anywhere — it moved into the content that was
-/// always the right home for it. Every armed tube in the fleet now authors
-/// `fact(target_facing_shields) <= 0` in its own `torpedo_launch` guard, which
+/// always the right home for it. Armed tubes author
+/// `fact(target_facing_shields) <= 0` in their own `torpedo_launch` guard, which
 /// is the same text the Harrow tubes already carried, over the same
 /// host-resolved per-arc HP reading (`seed_torpedo_tube_launch_facts`). What
 /// changed is that it is now a threshold a designer can retune — or a doctrine
 /// can decline — rather than a constant compiled into the decision.
+///
+/// **A hull has since retuned it, so "every armed tube in the fleet" — which
+/// this doc used to claim — is no longer true (issue #929).**
+/// `alliance_cruiser.toml`'s three tubes compare against a
+/// `param(max_striking_shield_hp)` authored past any arc reading, which switches
+/// the conjunct off. That hull cannot reach the fleet reading against a shielded
+/// warship: one 180-degree auto-arc phaser bank bears at a time on its own
+/// broadside ring, about 1 dmg/s into an arc the target's own Shields AI focuses
+/// to 6.5 hp/s and halves incoming damage on. Its helm's `torpedo_run` bow hold
+/// exits only on a round having LEFT a tube, so an unreachable launch gate turned
+/// an authored leg into a sink. The point for a reader HERE is narrower than the
+/// balance argument: which tubes are gated on the striking arc is a per-hull fact
+/// about content, not an invariant this function may assume.
+/// `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it`
+/// is the census that keeps the pairing honest.
 ///
 /// `target_facing_shields` stays on [`TorpedoAiInput`] because the host seeds
 /// the fact from it; this function simply no longer reads it.

@@ -884,8 +884,13 @@ fn most_recent_combat(a: &crate::ship::combat_activity::RecentCombatActivity) ->
 ///   moving target can still land on a neighbouring arc. One resolver, two
 ///   moments in the shot's life.) Since issue #956 nothing in Rust compares it
 ///   to anything: it is seeded into the tube's launch snapshot and the tube's
-///   own authored `fact(target_facing_shields) <= 0` guard is what holds fire.
-///   Phasers strip the shields, torpedoes finish the hull — said in TOML.
+///   own authored guard is what holds fire. Phasers strip the shields, torpedoes
+///   finish the hull — said in TOML, and therefore said differently by different
+///   hulls. Most author `fact(target_facing_shields) <= 0`; since issue #929
+///   `alliance_cruiser`'s three tubes author the same comparison against a
+///   `param(max_striking_shield_hp)` set past any arc reading, which switches the
+///   conjunct off, because that hull's own guns cannot open the gap the fleet
+///   reading waits for. Do not read a fleet-wide rule out of this seeding.
 ///
 ///   It is deliberately *not* the sum over all arcs. Summing let three
 ///   healthy REAR arcs veto a shot into a collapsed FRONT arc while the

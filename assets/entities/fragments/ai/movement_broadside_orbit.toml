@@ -195,11 +195,18 @@
 # ── Why the target's SHIELD FACING is deliberately not one of them ───────────
 #
 # `ship_harrow_cruiser.toml`, the hand-authored ancestor of this fragment, adds
-# `target_facing_shield_down` to its own entry, and the launcher really does
-# refuse every shot while the striking arc is up: `auto_fire_torpedo`
-# (`src/console_ai/core.rs`) returns NO tubes at all while
-# `target_facing_shields > 0`, for every hull, player and NPC alike. So the
-# tighter guard is not wrong about the shot. It is wrong about the JOB.
+# `target_facing_shield_down` to its own entry, and on THAT hull the launcher
+# really does refuse every shot while the striking arc is up. So the tighter
+# guard is not wrong about the shot. It is wrong about the JOB.
+#
+# Two corrections to how this paragraph used to put it, both owed to issue #929.
+# The refusal is no longer a RUST fact and has not been since issue #956:
+# `auto_fire_torpedo` (`src/console_ai/core.rs`) is a pure candidate filter now
+# — target locked, tube loaded, tube in arc — and does NOT return an empty list
+# on `target_facing_shields > 0`; the hold is each tube's own authored
+# `torpedo_launch` guard. And it is consequently no longer true "for every hull,
+# player and NPC alike": `alliance_cruiser.toml` authors a
+# `max_striking_shield_hp` threshold past any arc reading and holds for nothing.
 #
 # What this leg exists to own is the channel-3 `ArcBearingRequest`, and that
 # request fires on a strictly WEAKER condition than "the launcher would fire now":
@@ -223,10 +230,34 @@
 # thing its bow hold can be FOR: its rounds author `damage_shields = 0`, and its
 # beams are a 270-degree pair it works from the beam, so bow-on it can neither
 # strip the arc nor use the rounds. Waiting bow-on for a window it is not creating
-# would be a deadlock. A hull whose forward bank bears on its own bow can strip
-# the arc it is about to shoot through, so the same bow hold is self-completing.
-# The shared intent is "only point the bow when pointing it accomplishes
-# something"; the literals differ because the hulls differ.
+# would be a deadlock. The shared intent is "only point the bow when pointing it
+# accomplishes something"; the literals differ because the hulls differ.
+#
+# ── WITHDRAWN, and it is the whole of issue #929 ──────────────────────────────
+#
+# This paragraph used to end: "A hull whose forward bank bears on its own bow can
+# strip the arc it is about to shoot through, so the same bow hold is
+# SELF-COMPLETING." That is false, and it is the precise false premise that let
+# the permissive reading ship next to a strict launcher.
+#
+# A bow hold is self-completing only if the hull can open the gap FASTER than the
+# target closes it, and `alliance_cruiser.toml` cannot. Its two banks'
+# `auto_arc_deg = 180` abut on the beam line, so bow-on it works ONE of them —
+# about 1 dmg/s into the arc, instrumented — while the target's own Shields AI
+# focuses that arc unconditionally on the fleet baseline: `focus_bonus_regen = 4`
+# over `regen_per_sec = 2.5` is 6.5 hp/s, and `focus_focused_damage_multiplier`
+# halves what lands. The hold therefore never completes, and because this leg's
+# only armament exits (`tubes_full`, `tubes_fillable`) both need a round to have
+# LEFT a tube, a launcher that never fires makes the leg ABSORBING: measured on
+# `probe_aggressor`, 86.9 s of a 90 s run parked at `torpedo_bearing_speed = 0.0`
+# with nothing launched.
+#
+# So a permissive `torpedo_run_shield_gap` is only safe beside a launcher that
+# will actually fire on the window it opens. `alliance_cruiser.toml` now authors
+# `max_striking_shield_hp` past any arc reading to make that true of itself, and
+# `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it`
+# censuses the fleet so the mismatched pairing cannot be composed again in
+# silence. A hull that wants the permissive entry owes the matching launcher.
 #
 # So it is a PARAMETER rather than a fork (issue #878, moving
 # `ship_harrow_cruiser.toml` onto this file). `torpedo_run_shield_gap` is the

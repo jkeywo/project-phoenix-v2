@@ -432,22 +432,49 @@ marker = "torpedo_port"
   #
   # ── Why THIS hull authors a threshold no arc can exceed (issue #929) ─────
   #
-  # `max_striking_shield_hp = 1000000.0` is the "a threshold outside the fact's
-  # range is a switch" idiom the movement fragments use for
+  # [ai] Unratified. `max_striking_shield_hp = 1000000.0` is the "a threshold
+  # outside the fact's range is a switch" idiom the movement fragments use for
   # `pressed_min_progress = -1000000.0`, pointed the other way: no arc reading
   # can exceed it, so this conjunct is OFF and the alert gate is the only
-  # doctrine gate left. Three measured reasons, in the order they bind.
+  # doctrine gate left. It is a TUNED BALANCE VALUE with a live cost — see the
+  # duel outcomes below — and belongs on the ratification list, not merely in
+  # the bug's changelog. Three measured reasons, in the order they bind.
   #
-  #   1. THIS HULL CANNOT CREATE THE GAP. Its whole anti-shield output is ONE
-  #      phaser bank at a time: the two banks' `auto_arc_deg = 180` abut on the
-  #      ring's beam line (see "What is NOT changed" in the header), so exactly
-  #      one ever bears, and a bank is 4 dmg/s for 6 s on a 6 s cooldown —
-  #      2 dmg/s time-averaged. An `alliance_destroyer` arc is 80 hp
-  #      regenerating at 2.5/s, scaled x1.25 by the shields power group at its
-  #      rest rung. The gate was not "rarely satisfied" on this hull, it was
-  #      UNSATISFIABLE, and `probe_aggressor` measures it flatly: 90 s, 223
-  #      damage dealt, `hull_taken: 0` on the target — every point of it
-  #      absorbed and regenerated, the striking arc never once down.
+  #   1. THIS HULL CANNOT CREATE THE GAP IT IS WAITING FOR — against a warship
+  #      that focuses its screens, which is every shipped one. Two things
+  #      compound.
+  #
+  #      Its whole anti-shield output is ONE phaser bank at a time: the banks'
+  #      `auto_arc_deg = 180` abut on the ring's beam line (see "What is NOT
+  #      changed" in the header), so exactly one ever bears. A bank is
+  #      `beam_damage_per_sec = 4`, scaled by `ModifierSlot::PhaserDamage` off
+  #      the WEAPONS group — 5 dmg/s at the rung `fleet_baseline.toml` walks to
+  #      at combat stations (3 ⇒ `power_multipliers[2] = 0.25`) — for 6 s on a
+  #      6 s cooldown, so ~2.5 dmg/s while it bears and rather less across a
+  #      whole engagement. The fragment header's own instrumented figure is
+  #      about 1 dmg/s into the arc.
+  #
+  #      The arc, meanwhile, is DEFENDED. An `alliance_destroyer` arc is 80 hp
+  #      at `regen_per_sec = 2.5`, and the SHIELDS power group does nothing to
+  #      that either way: it never bids, so `plan_allocation` reserves it at its
+  #      commanded 2, and `power_multipliers[1] = 0.0` ⇒ `ShieldRegen` x1.0 —
+  #      level 2 is exactly what the `[[shield_arc]]` blocks say. What actually
+  #      holds the arc up is the target's own Shields AI, which focuses an arc
+  #      UNCONDITIONALLY on the fleet baseline (`shield_focus`, `when = "true"`):
+  #      `focus_bonus_regen = 4` takes the focused arc to 6.5 hp/s — the same
+  #      number `movement_broadside_orbit.toml` already records — and
+  #      `focus_focused_damage_multiplier = 0.5` halves what lands on it. (The
+  #      1.25 next to those is `focus_unfocused_damage_multiplier`, an
+  #      attacker-side lever on the OTHER arcs; it never touches regen.)
+  #
+  #      So ~1 dmg/s halved to ~0.5 against 6.5 hp/s of regen. Scoped honestly:
+  #      the fleet gate is not unsatisfiable in general — `target_facing_shields`
+  #      reads 0 for an unshielded hull, an asteroid, or an arc already offline,
+  #      and those shots are taken. It is unsatisfiable for THIS hull against a
+  #      self-focusing warship in a stand-up fight, which is the scenario its
+  #      whole doctrine is authored for. `probe_aggressor` measures it flatly:
+  #      90 s, 223 damage dealt, `hull_taken: 0` on the target — every point of
+  #      it absorbed and regenerated, the striking arc never once down.
   #
   #   2. THE HELM LEG DEADLOCKED ON IT. `movement_broadside_orbit`'s
   #      `torpedo_run` opens on readiness alone here
@@ -475,19 +502,29 @@ marker = "torpedo_port"
   # What it buys, `probe_duel`, 90 s, `--deterministic`, one variable, swept over
   # 28 seeds (1-12, 13, 14, 17, 21, 31, 34, 41, 43, 47, 55, 59, 61, 89, 144, 792,
   # 838): the cruiser goes from ZERO launches on every seed to 4 out of the fore
-  # pair on every seed; `torpedo_run` falls from 12-49 s to 0-4 s, because the leg
-  # now fires on entry and leaves on the spent salvo — the cycle it was authored
-  # to fly — instead of parking in front of the enemy; and damage dealt rises
-  # from 39-104 to 290-489. `combat_test`, 150 s, seeds 1-3, the same shape:
-  # 0 -> 4 launches, 42-82 s parked -> 0.0 s, 108-178 dealt -> 304-392.
+  # pair on every seed, and damage dealt rises from 39-104 to 290-489.
+  # `combat_test`, 150 s, seeds 1-3: 0 -> 4 launches, 108-178 dealt -> 304-392.
+  #
+  # The BOW HOLD is where to look to see the deadlock gone, and it reads two
+  # different ways depending on what the hull is fighting. Against the closing,
+  # shooting destroyer of `probe_duel` it collapses from 12-49 s of a 90 s window
+  # to 0-4 s: the ring's own tangent walks a fore tube onto the target before a
+  # whole salvo and the run range coincide, so the leg is mostly not needed. On
+  # `probe_aggressor` at that world's own seed it is flown properly and the whole
+  # authored cycle is visible — orbit, enter at t=3.1, salvo away at t=4.1, back
+  # to the ring at t=5.4, enter again at t=7.1 — where before the fix it was one
+  # 26.9 s park with nothing fired. A LONG occupancy is not the failure; an
+  # occupancy with no launch in it is.
   #
   # It does NOT win this duel, and the cost is worth stating exactly. Before, the
   # parked cruiser survived the 90 s window on all 14 of the first sweep's seeds
   # — a ship at zero throttle doing nothing is also a ship not pressing an
-  # engagement. After, it fights and DIES inside the window on 5 of those 14. The
-  # cruiser losing this duel is a question about this hull's guns (see "The
-  # throttle, and why the class default is not kept" for the same trade made the
-  # same way), not a reason to leave a whole torpedo battery unfireable.
+  # engagement. After, it fights and DIES inside the window on 5 of those 14 (8
+  # of the wider 28). That is the [ai] Unratified half of this value: the fights
+  # resolve, and the cruiser is the one that loses them. Whether that is the
+  # right balance is a question about this hull's guns (see "The throttle, and
+  # why the class default is not kept" for the same trade made the same way),
+  # not a reason to leave a whole torpedo battery unfireable.
   #
   # Retuning is one number. 0.0 restores the fleet gate exactly; anything between
   # reads "spend the salvo once the arc is worn to N". Whatever is authored here,
@@ -504,6 +541,8 @@ marker = "torpedo_port"
   # `max_striking_shield_hp` is issue #929's retune of the fleet shield gate —
   # see the note above `fore_port`. 0.0 is the fleet reading; this value puts
   # the threshold beyond any arc, which turns the conjunct off.
+  # [ai] Unratified — a tuned balance value: it is what makes this hull's duels
+  # resolve, and what makes it lose them.
   param = { min_alert_to_fire = 1.0, max_striking_shield_hp = 1000000.0 }
 
   [[torpedoes.tubes.ai.rule]]
@@ -548,6 +587,8 @@ marker = "torpedo_starboard"
   # `max_striking_shield_hp` is issue #929's retune of the fleet shield gate —
   # see the note above `fore_port`. 0.0 is the fleet reading; this value puts
   # the threshold beyond any arc, which turns the conjunct off.
+  # [ai] Unratified — a tuned balance value: it is what makes this hull's duels
+  # resolve, and what makes it lose them.
   param = { min_alert_to_fire = 1.0, max_striking_shield_hp = 1000000.0 }
 
   [[torpedoes.tubes.ai.rule]]
@@ -592,6 +633,8 @@ marker = "torpedo_aft"
   # `max_striking_shield_hp` is issue #929's retune of the fleet shield gate —
   # see the note above `fore_port`. 0.0 is the fleet reading; this value puts
   # the threshold beyond any arc, which turns the conjunct off.
+  # [ai] Unratified — a tuned balance value: it is what makes this hull's duels
+  # resolve, and what makes it lose them.
   param = { min_alert_to_fire = 1.0, max_striking_shield_hp = 1000000.0 }
 
   [[torpedoes.tubes.ai.rule]]

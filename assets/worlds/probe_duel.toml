@@ -99,11 +99,39 @@
 #     freeze fix the leg actually completes (this run: `TorpedoLaunched: 4`,
 #     450 damage dealt) instead of the hull losing fidelity mid-leg.
 #
-# A standing arc-bearing request is therefore no longer an expected reading
-# for THIS composed doctrine on this seed; the test's control is now that the
-# run is genuinely live combat (damage dealt and a torpedo launch), not that a
-# request stood. The 367-vs-4 pre-#896 count above is kept only as history of
-# where the control used to come from. The two tests that need the duel to
+# RE-MEASURED AGAIN, AND THE BLOCK ABOVE IS WITHDRAWN (issue #929). Both of
+# its readings were artefacts of a defect, not properties of the doctrine.
+#
+# The cruiser's tubes asked for a struck-down striking arc
+# (`fact(target_facing_shields) <= 0`) that this hull's own guns cannot open —
+# one 180-degree auto-arc bank bears at a time on the ring, about 1 dmg/s, into
+# an arc the destroyer's Shields AI focuses to 6.5 hp/s — while its helm's
+# `torpedo_run` leg opens on readiness alone and exits only on a round having
+# LEFT a tube. The leg was therefore ABSORBING: the hull parked bow-on at
+# `torpedo_bearing_speed = 0.0` for 39.7 s of a 90 s run on this seed and
+# launched nothing. So:
+#
+#   * `TorpedoLaunched: 4` above was the world-spawned DESTROYER's rounds. The
+#     player cruiser launched zero, here and on all 28 seeds swept.
+#   * `requested == 0` followed from the same park: with the ring barely flown
+#     there was almost nothing for Channel 3 to raise a request against, so the
+#     bullet above has the causation backwards — the leg was not claiming a
+#     tube before Channel 3 saw it, the hull was sitting still holding one.
+#
+# On the current tree (`alliance_cruiser.toml`'s `max_striking_shield_hp`), same
+# command line, seed 3 over the 45 s window the ring probes sample:
+#
+#   ring ticks 1180   requested 478   overwritten 0   worst error 0.0
+#   cruiser: orbit 39.3 s, torpedo_run 0.0 s, 4 rounds out of the fore pair,
+#            324 damage dealt (was 45)
+#
+# The standing request is BACK, which is what makes `overwritten == 0` a real
+# refusal again rather than a description of an empty inbox — the same shape the
+# pre-#896 367-vs-4 count had, and the reason that history is still recorded
+# above. `the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request`
+# now asserts `requested > 100` alongside the liveness control (damage dealt and
+# a torpedo launched) that was added while the count was zero. The two tests that
+# need the duel to
 # actually END now pin `seed: Some(34)`
 # themselves (`world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`
 # and `balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves`

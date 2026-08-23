@@ -2848,10 +2848,12 @@ fn ai_crewed_ships_actually_launch_torpedoes_in_a_real_run() {
 ///   message says so.
 /// * WITH MARGIN. All 28 seeds swept at 90 s (1-12, 13, 14, 17, 21, 31, 34, 41,
 ///   43, 47, 55, 59, 61, 89, 144, 792, 838) put exactly 4 rounds out of the
-///   unambiguous fore pair, so the bound is half the measured value. These
-///   outcomes are quantised — see `probe_duel.toml`'s header — so the number is
-///   not noisy, it is a threshold reading, and the margin is there for a future
-///   retune rather than for variance.
+///   unambiguous fore pair — not a mean of 4, the same 4 on every one — so the
+///   bound is half the measured value. That flatness is the evidence the margin
+///   rests on, and it is this measurement's own rather than a property of the
+///   world: `probe_duel.toml`'s header calls the duel chaotically seed-sensitive
+///   and it is, in outcome and damage; the fore pair's count is not, because it
+///   is bounded by a six-round magazine and a reload the engagement outlives.
 #[test]
 fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
     use project_phoenix::entities::config::EntityConfig;
@@ -2950,10 +2952,19 @@ fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
         cruiser.phase_seconds,
         report.message_counts.get("TorpedoLaunched")
     );
-    // The deadlock itself, stated directly rather than inferred from the count: a
-    // bow hold that is working is a SHORT leg, entered on a loaded salvo and left
-    // on a spent one. Measured at 0.0-0.5 s across the sweep above, against
-    // 12-49 s before the fix, so 20 s is a bound neither reading is near.
+    // The deadlock itself, stated directly rather than inferred from the count.
+    // Against the closing, shooting destroyer of THIS world a working bow hold is
+    // a short leg — the ring's own tangent walks a tube onto the target before a
+    // whole salvo and the run range coincide, so measured 0.0-0.5 s across the
+    // sweep above, against 12-49 s before the fix. 20 s is a bound neither
+    // reading is near.
+    //
+    // Not a fleet-wide claim about the leg, and deliberately not asserted on the
+    // other probes: against the PASSIVE target of `probe_aggressor` the same leg
+    // is legitimately held for 24 s of a 30 s window, firing twice inside it, and
+    // `the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes`
+    // asserts a FLOOR on it there. A long hold is not the failure; a hold with no
+    // launch in it is, which is why the two readings sit next to each other here.
     let bow_hold = cruiser
         .phase_seconds
         .get("torpedo_run")
@@ -4546,16 +4557,22 @@ fn the_composed_player_battleship_holds_a_leading_gun_line_only_at_red_alert() {
 ///   measured there is this hull's own offence and nothing else: whether the
 ///   battery the ring exists to point actually gets SPENT.
 ///
-/// ## The second half was re-blessed at issue #929
+/// ## The second half was re-measured at issue #929
 ///
-/// The aggressor half used to assert a hundred ticks HELD in the bow-hold leg,
-/// on the premise that this probe hands the hull "a loaded battery it never gets
-/// to spend". That premise was a defect, not a scenario property — see the note
-/// on that assertion — and the leg count it produced was a measurement of how
-/// long the hull sat parked with its thrust cut. It now asserts the battery is
-/// spent, which is what the doctrine is for; `run` is still collected and still
-/// printed in the failure message, because a leg count going UP again is the
-/// most legible sign of the deadlock returning.
+/// The aggressor half asserted a hundred ticks HELD in the bow hold, on the
+/// premise that this probe hands the hull "a loaded battery it never gets to
+/// spend". That premise was a defect rather than a scenario property: the tubes
+/// asked for a struck-down arc this hull's own guns cannot open, and the leg
+/// exits only on a round having LEFT one, so what the assertion was measuring
+/// was how long the hull sat parked with its thrust cut. It passed for months
+/// over a battery that never fired.
+///
+/// The floor is KEPT — an unreachable leg is the other way this doctrine breaks,
+/// and nothing else here would notice — and joined by the two readings that tell
+/// a manoeuvre from a park: how many times the leg was ENTERED, and how many
+/// rounds actually left the tubes. The sample also moved onto this world's own
+/// `[global] seed`; see the note on `sample` for why the shared pin was hiding
+/// the leg entirely.
 #[test]
 fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes() {
     use project_phoenix::ship::helm_ai::HelmPassSurface;
@@ -4565,6 +4582,9 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
         clear: usize,
         orbit: usize,
         run: usize,
+        /// Rising edges on the bow hold — how many times the leg was ENTERED,
+        /// as opposed to how many ticks were spent in it (issue #929).
+        run_entries: usize,
         orbit_while_clear: usize,
         run_while_clear: usize,
         surface_ticks: usize,
@@ -4579,22 +4599,31 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
         tubes_spent: u64,
     }
 
-    let sample = |world: &str, secs: f64| -> Legs {
+    // PER-WORLD seeds (issue #929). This closure used to pin 3 for both probes,
+    // and the pin was written for `probe_duel` alone — the comment below has
+    // always said so. Carrying it over to `probe_aggressor` was incidental, and
+    // it cost this test its whole torpedo-run measurement: on THAT world seed 3
+    // never opens the leg at all, so the run assertion below could only ever have
+    // been passing on the deadlock (a hull parked in the leg for want of a launch
+    // it could not make). At that world's OWN `[global] seed` the authored cycle
+    // is plainly visible — orbit, enter at 3.1 s, salvo away at 4.1 s, ring again
+    // at 5.4 s, enter again at 7.1 s — which is what this test is for.
+    let sample = |world: &str, secs: f64, seed: u64| -> Legs {
         let dt = 1.0 / 30.0;
         let args = HeadlessArgs {
             world_path: world.into(),
             dt,
             max_ticks: ticks_for_sim_seconds(secs, dt),
-            // Pinned explicitly so a future re-bless of `probe_duel.toml`
-            // cannot silently move the window these leg counts were measured
-            // on — it happens to be that world's own `[global] seed` again
-            // today, as it was before #923, but the two are free to diverge.
+            // `probe_duel` is pinned explicitly so a future re-bless of that
+            // world cannot silently move the window these leg counts were
+            // measured on — 3 happens to be its own `[global] seed` again today,
+            // as it was before #923, but the two are free to diverge.
             // Re-measured for #897's generator swap: the previous pin (838)
             // rings for only 277 of 1351 sampled frames on this generator,
             // well under the floor below, while 3 rings for 1332 of them with
             // both hulls trading fire. See `probe_duel.toml` for the per-seed
             // table.
-            seed: Some(3),
+            seed: Some(seed),
             deterministic: true,
             ..test_args()
         };
@@ -4603,6 +4632,7 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
             clear: 0,
             orbit: 0,
             run: 0,
+            run_entries: 0,
             orbit_while_clear: 0,
             run_while_clear: 0,
             surface_ticks: 0,
@@ -4610,6 +4640,7 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
             damage_dealt: 0.0,
             tubes_spent: 0,
         };
+        let mut was_running = false;
         for _ in 0..args.max_ticks {
             run(&mut app, 1);
             let mut q = app.world_mut().query_filtered::<(
@@ -4633,10 +4664,20 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
             }
             if pass.torpedo_bearing {
                 l.run += 1;
+                // ENTRIES, not just occupancy (issue #929). A leg the hull never
+                // reaches and a leg it reaches and leaves in one tick both read
+                // near-zero on `run`; only the rising edge tells them apart, and
+                // "can this hull open the leg at all" is the question a range
+                // gate authored below the ring's own radius silently answers no
+                // to.
+                if !was_running {
+                    l.run_entries += 1;
+                }
                 if !red {
                     l.run_while_clear += 1;
                 }
             }
+            was_running = pass.torpedo_bearing;
         }
         let report = build_report(&mut app, &args, 0.0);
         l.sides_dealing = report
@@ -4659,8 +4700,9 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
         l
     };
 
-    let duel = sample("assets/worlds/probe_duel.toml", 45.0);
-    let aggressor = sample("assets/worlds/probe_aggressor.toml", 30.0);
+    let duel = sample("assets/worlds/probe_duel.toml", 45.0, 3);
+    // `probe_aggressor`'s own `[global] seed` — see the note on `sample`.
+    let aggressor = sample("assets/worlds/probe_aggressor.toml", 30.0, 842);
 
     // LIVENESS, first — every leg count below is meaningless without it. A duel
     // that stalls at standoff parks the hull in a wide holding pattern that the
@@ -4732,31 +4774,56 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
     // ABSORBING, and the assertion was measuring how long the hull sat in it —
     // 26.9 s of this 30 s window, thrust cut, 92 damage dealt and zero launches.
     //
-    // What the leg count cannot distinguish, and what this hull's doctrine is
-    // actually for, is whether the battery gets SPENT. So that is what is
-    // asserted now: 6 rounds — the whole magazine — go out across the same
-    // window, 4 of them from the fore pair counted here, and damage dealt goes
-    // 92 -> 361. The bow-hold leg is no longer entered at all in this probe
-    // (`run` is reported below for the reader, not asserted on): the ring's own
-    // tangent brings a fore tube onto the target before a whole salvo and the
-    // run range coincide, and a tube that can bear does not need the leg. The
-    // leg is still authored, still resolves — `authored_ai_pins::
-    // the_torpedo_run_opens_on_a_loaded_salvo_and_closes_on_the_hulls_own_armament`
-    // pins its transitions on the shipped policy — and is still flown end to end
-    // by the Harrow cruiser in `combat_test`, which keeps the strict
-    // `torpedo_run_shield_gap = 1.0` entry this hull does not.
+    // The leg count on its own cannot tell a working bow hold from a park — both
+    // read high — so it is now asserted as a PAIR with the thing the leg exists
+    // to produce. Measured at this world's own seed, 30 s: 2 entries, 723 of 900
+    // ticks flown in the leg, 5 rounds out of the fore pair, 221 dealt with 120
+    // of it on the target's HULL (it was 92 dealt and hull_taken 0 before).
+    //
+    //   * ENTERED. `run_entries` is the guard a range gate cannot slip past: set
+    //     `torpedo_run_range` below the radius the ring actually settles at and
+    //     the leg becomes unreachable, which every occupancy and damage reading
+    //     here would survive. `authored_ai_pins::
+    //     the_torpedo_run_range_clears_the_radius_the_ring_settles_at` is the
+    //     same claim made against the authored numbers rather than a run.
+    //   * FLOWN. The original `> 100` floor, restored — it was measuring a park
+    //     at the old seed and measures the manoeuvre at this one.
+    //   * SPENT. The half the old assertion had no way to see. A leg that is
+    //     entered and held while nothing leaves a tube is issue #929's deadlock,
+    //     and it passed `run > 100` for months.
+    assert!(
+        aggressor.run_entries > 0,
+        "the cruiser never once opened its torpedo run across 30 s with a loaded \
+         battery and a passive target inside `torpedo_run_range`. The leg is \
+         unreachable, not merely unused — check that gate against the radius the \
+         ring settles at ({} ring ticks, {} bow-hold ticks, {} rounds spent)",
+        aggressor.orbit,
+        aggressor.run,
+        aggressor.tubes_spent
+    );
+    assert!(
+        aggressor.run > 100,
+        "the cruiser opened its torpedo run {} time(s) but flew it for only {} \
+         ticks, so it is not holding a bearing long enough to be a manoeuvre. \
+         With no torpedo leg of its own the hull is dragged bow-on by \
+         `ArcBearingRequest` instead, which is a facing the doctrine did not \
+         choose and cannot see",
+        aggressor.run_entries,
+        aggressor.run
+    );
     assert!(
         aggressor.tubes_spent >= 2,
         "the cruiser put only {} rounds out of its fore tubes across 30 s against a \
          hostile that never shoots back, having dealt {:.0} damage over {} ring \
-         ticks and {} bow-hold ticks. Its tubes are loaded and its target is inside \
-         `torpedo_run_range` throughout; a battery that stays full here is issue \
-         #929's deadlock again — the launcher asking for a shield gap this hull's \
-         own beams cannot open, and the bow-hold leg with no way back out",
+         ticks and {} bow-hold ticks in {} entries. Its tubes are loaded and its \
+         target is inside `torpedo_run_range` throughout; a battery that stays full \
+         here is issue #929's deadlock again — the launcher asking for a shield gap \
+         this hull's own beams cannot open, and a bow hold with no way back out",
         aggressor.tubes_spent,
         aggressor.damage_dealt,
         aggressor.orbit,
-        aggressor.run
+        aggressor.run,
+        aggressor.run_entries
     );
 
     // THE POSTURE GATE, on both legs and in both worlds. Neither half of the

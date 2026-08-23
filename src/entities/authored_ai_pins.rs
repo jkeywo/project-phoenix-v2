@@ -384,10 +384,17 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     // over a `max_striking_shield_hp` param set past any arc reading, which
     // turns the shield conjunct off and leaves the red-alert gate alone.
     //
-    // It is a departure because this hull is the one that CANNOT satisfy the
-    // fleet reading: its two phaser banks' `auto_arc_deg = 180` abut on the
-    // ring's beam line, so exactly one bears at a time — 4 dmg/s on a 50% duty
-    // cycle against arcs that regenerate faster. The consequence was not merely
+    // It is a departure because this hull is the one that cannot satisfy the
+    // fleet reading against a shielded warship. Its two phaser banks'
+    // `auto_arc_deg = 180` abut on the ring's beam line, so exactly one bears at
+    // a time — `beam_damage_per_sec = 4`, x1.25 from `ModifierSlot::PhaserDamage`
+    // at the weapons rung `fleet_baseline` walks to in combat, on a 6 s / 6 s
+    // duty cycle, instrumented at about 1 dmg/s into the arc — while the TARGET's
+    // own Shields AI focuses an arc unconditionally, which is
+    // `focus_bonus_regen = 4` on top of `regen_per_sec = 2.5` (6.5 hp/s) plus
+    // `focus_focused_damage_multiplier = 0.5` on what lands. The SHIELDS power
+    // group is no part of it: it never bids, so it sits at its commanded 2, where
+    // `ShieldRegen` is x1.0. The consequence was not merely
     // a quiet launcher. `movement_broadside_orbit`'s `torpedo_run` opens on
     // readiness alone here (`torpedo_run_shield_gap = 0.0`, pinned by
     // `the_harrow_cruiser_breaks_its_ring_only_for_a_struck_down_arc`) and every
@@ -3277,8 +3284,8 @@ fn the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap() {
 /// shields, torpedoes finish the hull" — and it sat in Rust, unconditionally,
 /// UPSTREAM of every authored policy: a tube's `torpedo_launch` guard could only
 /// ever narrow it (AND), never authorise a round while the striking arc was up
-/// and never retune the threshold. #956 deleted the clause and every armed tube
-/// in the fleet now authors it.
+/// and never retune the threshold. #956 deleted the clause and the armed tubes
+/// took it up in content.
 ///
 /// This is the truth table that guarantees the move cost nothing, and it is
 /// stronger than what it replaced (four `auto_fire_torpedo` unit tests over a
@@ -3288,9 +3295,17 @@ fn the_harrow_cruiser_leads_with_its_tubes_into_a_shield_gap() {
 /// whose guard reads a fact name nobody seeds.
 ///
 /// The `<= 0` threshold is read as a literal rather than a `param`, because that
-/// is how the shipped content authors it — the two Harrow doctrines have carried
-/// it as a literal since #791, and the baseline now matches them. It is still a
-/// designer's lever: it is one number in a TOML guard.
+/// is how the two hulls sampled here author it — the Harrow doctrines have
+/// carried it as a literal since #791, and the fleet baseline matches them.
+///
+/// **NOT "every armed tube in the fleet", which is what this doc used to claim
+/// and what #929 disproved.** `alliance_cruiser`'s three tubes deliberately
+/// author a `param(max_striking_shield_hp)` past any arc reading, so they hold
+/// for nothing and are listed in [`BESPOKE_DOCTRINES`] for it. That is why this
+/// table samples the fleet baseline (which resolves off `alliance_battleship`)
+/// and the warhawk by name rather than sweeping every hull: the shield clause is
+/// a per-hull decision now, and the sweep that treats it as one is
+/// [`a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it`].
 #[test]
 fn torpedo_launch_shield_gate_truth_table() {
     // (label, the hull's tube policy). The baseline hull holds fire until its
@@ -3384,6 +3399,267 @@ fn torpedo_launch_shield_gate_truth_table() {
              fact name cannot turn a doctrine into an ungated launcher (#779)."
         );
     }
+}
+
+/// **A bow hold the hull can REACH, and a launcher that will answer it
+/// (issue #929).**
+///
+/// The two halves of a salvo doctrine ask about the target's striking arc
+/// separately — the helm's `torpedo_run_shield_gap`, and each tube's own
+/// `torpedo_launch` guard — and nothing made them agree. `movement_broadside_orbit`'s
+/// header states the invariant ("only point the bow when pointing it accomplishes
+/// something") and the hazard note above [`the_torpedo_run_opens_on_a_loaded_salvo_and_closes_on_the_hulls_own_armament`]
+/// spells out the failure, but neither had a pin behind it, and the shipped
+/// cruiser composed the broken pairing for months:
+///
+/// * the helm opened the bow hold on readiness ALONE (`torpedo_run_shield_gap`
+///   at 0.0, so the arc is not asked about), while
+/// * the tubes held every round for a struck-down arc (`<= 0`) that this hull's
+///   own guns cannot produce, and
+/// * the leg's only armament exits (`tubes_full`, `tubes_fillable`) both need a
+///   round to have LEFT a tube.
+///
+/// A weak entry beside a strict launcher is therefore not a balance choice, it
+/// is an ABSORBING state: the hull cuts thrust, holds its bow, and waits for a
+/// window it is not creating. That is the shape enumerated here.
+///
+/// Read behaviourally rather than by name — the bow-hold state is discovered by
+/// the verb it resolves, and both guards are resolved through the real predicate
+/// evaluator over a snapshot with the arc UP — so a hull that spells its states
+/// differently is still classified, and a hull that quietly flips either half
+/// changes bucket rather than slipping through.
+///
+/// Scope is [`ai_hulls`], i.e. top-level `assets/entities/*.toml` with a
+/// `[behaviour]`, which is the same fleet every other census here reads. The
+/// fixtures under `assets/entities/test/` are deliberately outside it (see
+/// [`entity_stems`]) — `rng_coverage_lancer` carries tubes on the fleet gate and
+/// composes only `fleet_baseline.toml`, so it has no bow hold to be absorbed by
+/// and nothing this pin would say about it is about the shipped fleet.
+#[test]
+fn a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it() {
+    // Hulls that hold their bow for a salvo, split by whether the ENTRY asks
+    // about the target's arc; and hulls with tubes but no bow hold at all, split
+    // the same way on the LAUNCHER. Only the first list may not contain a hull
+    // whose launcher is strict.
+    let mut weak_entry_permissive_launcher: Vec<String> = Vec::new();
+    let mut weak_entry_strict_launcher: Vec<String> = Vec::new();
+    let mut strict_entry: Vec<String> = Vec::new();
+    let mut no_bow_hold_strict_launcher: Vec<String> = Vec::new();
+    let mut no_bow_hold_permissive_launcher: Vec<String> = Vec::new();
+
+    for (stem, cfg) in ai_hulls() {
+        let Some(torpedoes) = cfg.torpedoes.as_ref() else {
+            continue;
+        };
+        if torpedoes.tubes.is_empty() {
+            continue;
+        }
+
+        // THE LAUNCHER. Strict when no tube will fire with the striking arc
+        // healthy and every other reading favourable. Resolved through the real
+        // policy, so a `param` threshold and a literal are read the same way.
+        let arc_up = facts(&[
+            ("red_alert", 1.0),
+            ("loaded", 1.0),
+            ("target_valid", 1.0),
+            ("in_range", 1.0),
+            ("in_arc", 1.0),
+            ("tubes_full", 1.0),
+            ("target_facing_shields", 50.0),
+        ]);
+        let strict_launcher = torpedoes.tubes.iter().all(|tube| {
+            let p = policy(
+                tube.ai
+                    .as_ref()
+                    .expect("every shipped tube authors a policy"),
+            );
+            resolve(&p, "torpedo_launch", &arc_up).as_ref() != Some(&AiPolicyVerb::LaunchTorpedo)
+        });
+
+        // THE ENTRY. Find the state whose yaw rule resolves the bow hold, then
+        // ask every OTHER state whether it transitions into it with the arc up.
+        let Some(steering) = cfg
+            .helm_console
+            .as_ref()
+            .and_then(|h| h.steering_ai.as_ref())
+            .map(policy)
+        else {
+            continue;
+        };
+        let Some(machine) = steering.machine() else {
+            if strict_launcher {
+                no_bow_hold_strict_launcher.push(stem);
+            } else {
+                no_bow_hold_permissive_launcher.push(stem);
+            }
+            continue;
+        };
+        let hold = machine.states.iter().find(|s| {
+            s.rules
+                .iter()
+                .any(|r| r.verb == AiPolicyVerb::HoldTorpedoBearing)
+        });
+        let Some(hold) = hold else {
+            if strict_launcher {
+                no_bow_hold_strict_launcher.push(stem);
+            } else {
+                no_bow_hold_permissive_launcher.push(stem);
+            }
+            continue;
+        };
+
+        // Every reading the entry could want, favourable, EXCEPT the arc: it is
+        // up. A transition into the hold on this snapshot is a weak entry.
+        let ready_arc_up = facts(&[
+            ("posture", param(&steering, "press_posture")),
+            ("target_valid", 1.0),
+            ("range_to_target", param(&steering, "torpedo_run_range")),
+            ("tubes_full", 1.0),
+            ("tubes_fillable", 1.0),
+            ("torpedoes_in_flight", 0.0),
+            ("target_facing_shield_down", 0.0),
+        ]);
+        let memory = machine_memory(&steering, 0.0);
+        let weak_entry = machine.states.iter().any(|from| {
+            from.id != hold.id
+                && steering
+                    .resolve_transition(&from.id, &ready_arc_up, &memory, &[])
+                    .is_some_and(|t| t.to == hold.id)
+        });
+
+        match (weak_entry, strict_launcher) {
+            (true, true) => weak_entry_strict_launcher.push(stem),
+            (true, false) => weak_entry_permissive_launcher.push(stem),
+            (false, _) => strict_entry.push(stem),
+        }
+    }
+
+    // THE PIN. A hull may open its bow hold without asking about the arc, and a
+    // hull may hold its rounds for a struck-down arc. Doing BOTH is the deadlock.
+    assert!(
+        weak_entry_strict_launcher.is_empty(),
+        "{weak_entry_strict_launcher:?} open the torpedo-run bow hold on readiness \
+         alone (`torpedo_run_shield_gap` asks nothing about the target's arc) while \
+         every tube aboard holds its round until that arc is DOWN. The leg's only \
+         armament exits need a round to have left a tube, so the hull cuts thrust, \
+         points its bow, and waits for a window nothing is opening — issue #929, \
+         measured at 86.9 s of a 90 s `probe_aggressor` run with zero launches. \
+         Author ONE of the two: `torpedo_run_shield_gap = 1.0` on both helm axes so \
+         the leg only opens on a real gap and is released when it closes (the \
+         `ship_harrow_cruiser` answer), or a `torpedo_launch` guard that will fire \
+         on the window the entry opens (the `alliance_cruiser` answer)."
+    );
+
+    // …and the census, so a NEW hull lands in a bucket a reader has to look at
+    // rather than passing silently. These are lists, not counts: a rename or a
+    // refit shows up as a diff here.
+    assert_eq!(
+        weak_entry_permissive_launcher,
+        ["alliance_cruiser"],
+        "the hulls whose bow hold opens on readiness and whose tubes will fire on \
+         what it opens"
+    );
+    assert_eq!(
+        strict_entry,
+        ["ship_harrow_cruiser"],
+        "the hulls whose bow hold demands a struck-down arc, and are released by \
+         the same reading when it closes"
+    );
+    // The hulls with NO bow hold and a strict launcher are not deadlocked — they
+    // have no leg to be absorbed by — but they are the ones that only ever get a
+    // shot when something else strips the arc for them. Enumerated so the
+    // dependency is visible: give one of these a bow hold and it joins the list
+    // above, where the pin will refuse it until the launcher is settled too.
+    assert_eq!(
+        no_bow_hold_strict_launcher,
+        [
+            "alliance_battleship",
+            "alliance_destroyer",
+            "ship_harrow_warhawk"
+        ],
+        "the hulls that hold their rounds for an arc no leg of their own opens — \
+         they escape DYNAMICALLY, on their guns being able to strip it. The \
+         warhawk is the deliberate case: its fore and aft launchers are \
+         opportunistic close defence taking whatever bearing the artillery hold \
+         gives them (issue #793), so it wants no bow hold and its rounds wait for \
+         a gap its own artillery is making"
+    );
+    assert!(
+        no_bow_hold_permissive_launcher.is_empty(),
+        "unexpected: {no_bow_hold_permissive_launcher:?} carry tubes that fire \
+         through a healthy arc without a bow hold to justify it"
+    );
+}
+
+/// **The torpedo run's range gate clears the radius the ring actually settles at
+/// (issue #929).**
+///
+/// The bow hold opens on `range_to_target <= torpedo_run_range`, and the hull
+/// spends the engagement on a ring of `combat_orbit_range` — so a gate authored
+/// tighter than the radius the ring SETTLES at is a leg that can never open. The
+/// hull keeps circling, its tubes never come round, and every behavioural test
+/// that measures damage or launches still passes, because the ring itself is
+/// unaffected. `alliance_cruiser.toml`'s own header calls this out — "authoring
+/// it TIGHTER than the range the hull settles at is the failure that matters" —
+/// and this is that sentence as an assertion.
+///
+/// The floor is the TURN-RATE one rather than the authored radius, because it is
+/// the one that binds and the one nobody restates when a hull's engine is
+/// retuned. A ring is flown at `combat_orbit_speed x max_speed`, and a hull
+/// cannot hold a circle tighter than `v / max_yaw_rate`; the proportional
+/// controller then settles a little OUTSIDE whichever of that and
+/// `combat_orbit_range` is larger. So `v / max_yaw_rate` is a lower bound on the
+/// settled radius that depends on nothing but authored numbers.
+///
+/// Current margins, and one of them is thin:
+///
+/// * `alliance_cruiser` — 0.7 x 14 / 0.4 = 24.5 against a gate of 25. Half a
+///   unit. `max_speed` went 10 -> 14 without `combat_orbit_speed` moving, which
+///   is what ate it; at 10 the floor was 17.5.
+/// * `ship_harrow_cruiser` — 0.6 x 10 / 0.30 = 20.0 against a gate of 220, which
+///   the hull authors non-binding on purpose.
+#[test]
+fn the_torpedo_run_range_clears_the_radius_the_ring_settles_at() {
+    let mut checked = 0;
+    for (stem, cfg) in ai_hulls() {
+        let Some(helm) = cfg.helm_console.as_ref() else {
+            continue;
+        };
+        let Some(steering) = helm.steering_ai.as_ref().map(policy) else {
+            continue;
+        };
+        // Only the hulls that fly BOTH — a ring to settle on and a bow hold to
+        // break it with — have the two numbers to compare.
+        if steering.params.get("combat_orbit_range").is_none()
+            || steering.params.get("torpedo_run_range").is_none()
+        {
+            continue;
+        }
+        let gate = param(&steering, "torpedo_run_range") as f32;
+        let ring_speed = param(&steering, "combat_orbit_speed") as f32 * helm.max_speed;
+        assert!(
+            helm.max_yaw_rate > 0.0,
+            "{stem}: a hull that flies a ring must author a turn rate"
+        );
+        let turn_floor = ring_speed / helm.max_yaw_rate;
+        let settled_floor = turn_floor.max(param(&steering, "combat_orbit_range") as f32);
+        assert!(
+            gate > settled_floor,
+            "{stem}: `torpedo_run_range = {gate}` is inside the radius this hull's \
+             ring settles at ({settled_floor}: the larger of the authored \
+             `combat_orbit_range` and the {turn_floor} its turn rate forces at \
+             `combat_orbit_speed` x `max_speed` = {ring_speed}). The bow hold's \
+             entry guard can never be satisfied from the ring, so the leg is dead \
+             content and the hull's tubes only ever bear by accident. Open the gate, \
+             slow the ring, or tighten `combat_orbit_range` — issue #929."
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 2,
+        "no shipped hull was found flying both a combat ring and a torpedo run, so \
+         this pin measured nothing"
+    );
 }
 
 /// The unconditional baseline policies fire on an EMPTY fact snapshot.

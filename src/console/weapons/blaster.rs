@@ -511,6 +511,13 @@ pub(crate) fn tick_blaster_system(
     id_mint: Option<Res<crate::world_id::WorldIdMint>>,
 ) {
     let dt = time.delta_secs();
+    // Only the server-gated screenshake push below (issue #638) reads this;
+    // under `--no-default-features` that whole arm compiles away, leaving
+    // this binding unused. Cfg-gate it to match, rather than prefixing `_now`
+    // (which would hide that it IS genuinely read on the default build) —
+    // the same idiom `shake_state` (this fn's other server-only param, above)
+    // already uses.
+    #[cfg(feature = "server")]
     let now = time.elapsed_secs();
 
     // Pre-compute world-space velocity for EVERY ship (see the ParamSet note
@@ -561,6 +568,9 @@ pub(crate) fn tick_blaster_system(
             let bank_id = bank.config.id.clone();
             let visual_scale = bank.config.visual_scale;
             let recoil_impulse = bank.config.recoil_impulse;
+            // Read only by the server-gated screenshake push below (issue
+            // #638); cfg-gated here for the same reason `now` above is.
+            #[cfg(feature = "server")]
             let screenshake_magnitude = bank.config.screenshake_magnitude;
 
             // Resolve one world-space origin per authored barrel marker (issue

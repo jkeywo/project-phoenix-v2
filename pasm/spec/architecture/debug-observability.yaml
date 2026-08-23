@@ -1,0 +1,88 @@
+entities:
+  - component: debug-observability-pipeline
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Debug Observability Pipeline
+      summary: "PRD #1144's one pipeline for making the running simulation inspectable: every debug surface is a serde payload struct (crate::debug::payload) produced by a read-only collect projection off authoritative state, encoded to JSON through the single serde_json seam in src/core/codec.rs, and carried to the host page through a WASM bridge thread-local (src/server/bridge.rs) that a wasm_get_* getter exposes to JS. Station activity (#1145), the AI doctrine pool and host policy view (#1149, #1152), scenario/trigger state (#1148, #1151), and the four migrated legacy text overlays (#1150) all share this one schema/encode/transport pattern rather than inventing their own."
+      rationale:
+        - "[ai] Capture is a read-only projection off authoritative state, so enabling any surface never moves the #894 digest — the counters are always-on on every target (browser host, headless, native) and only the JSON publish is flag-gated, so a determinism check can toggle the flag without touching the seeded digest."
+        - "[ai] Every top-level payload stamps DEBUG_SCHEMA_VERSION (crate::debug::payload) so a consumer refuses or adapts to a mismatch rather than silently misreading a payload from a newer host; additive field growth does not bump it, a rename or a removed/retyped field does."
+        - "[ai] Each encode_* in src/core/codec.rs returns String rather than Result: every payload is String/int/float scalars in Vecs, which serde never fails to encode, so a hypothetical error becomes an empty string a consumer treats as 'no data yet' instead of a panic on the sim thread."
+    architecture:
+      kind: diagnostic-service
+      authority: host-local
+      owns: [debug-station-activity, debug-ai-doctrine, debug-scenario-state, debug-legacy-overlays]
+      reads: [dossier-evidence-state]
+      writes: [debug-station-activity, debug-ai-doctrine, debug-scenario-state, debug-legacy-overlays]
+      produces: [debug-station-activity, debug-ai-doctrine, debug-scenario-state, debug-legacy-overlays]
+      runs_in: [host-browser-runtime, headless-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [src/debug/mod.rs, src/debug/payload.rs, src/core/codec.rs, src/debug/station_activity.rs, src/debug/ai_state.rs, src/debug/scenario.rs, src/debug/modifiers.rs, src/debug/damage.rs, src/debug/entities.rs, src/debug/inspector.rs]
+      symbols: [DebugPlugin, DEBUG_SCHEMA_VERSION]
+      tests: [cargo test]
+
+  - state: debug-station-activity
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Debug Station Activity State
+      summary: Always-on per-station admitted-command activity counters, bucketed by time chunk and split human/AI/offline by control source (issue #1145). Tapped once per tick AFTER admission has fully run, the one point that sees both network-admitted commands and in-process AI emissions that bypass admission entirely. Published as structured JSON behind a flag for the dock's activity chart; excluded from the sim digest as Presentation state.
+    architecture:
+      classification: local
+      owner: debug-observability-pipeline
+      writers: [debug-observability-pipeline]
+    implementation:
+      status: declared
+      paths: [src/debug/station_activity.rs, gui/station-activity-chart.js]
+      symbols: [StationActivityTracker, DebugStationActivityEnabled, StationActivityCapture]
+      tests: [cargo test]
+
+  - state: debug-ai-doctrine
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Debug AI Doctrine State
+      summary: Read-only capture of each AI-controlled ship's scored doctrine candidates and the choice made (issue #1149), plus the per-host policy-machine view added later (#1152) as an additive field on the same payload. Published as structured JSON behind a flag for the dock's per-ship panel; excluded from the sim digest as Presentation state.
+    architecture:
+      classification: local
+      owner: debug-observability-pipeline
+      writers: [debug-observability-pipeline]
+    implementation:
+      status: declared
+      paths: [src/debug/ai_state.rs, gui/ai-doctrine-panel.js]
+      symbols: [DebugAiDoctrineEnabled, AiDoctrineCapture]
+      tests: [cargo test]
+
+  - state: debug-scenario-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Debug Scenario State
+      summary: Read-only capture of scenario flags, deadlines, commitments, objectives, dossier entries, and fired triggers (issues #1148 and #1151), published as structured JSON behind a flag for the dock's scenario panel and the headless report. Trigger-fire recording runs in the same flag-gated window immediately before the publish so the fire ring it folds in is current. Excluded from the sim digest as Presentation state.
+    architecture:
+      classification: local
+      owner: debug-observability-pipeline
+      writers: [debug-observability-pipeline]
+    implementation:
+      status: declared
+      paths: [src/debug/scenario.rs, gui/scenario-state-panel.js]
+      symbols: [DebugScenarioStateEnabled, ScenarioStateCapture, TriggerFireRecorder]
+      tests: [cargo test]
+
+  - state: debug-legacy-overlays
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Debug Legacy Overlay State
+      summary: The four legacy text-overlay capture sinks migrated onto the shared debug payload schema (issue #1150) — modifier, damage, entity behaviour, and entity inspector — each a read-only PostUpdate projection published as JSON behind its own flag, replacing the retired debug_overlay text-format renderers (ShipModifiers::format_debug, DamageLog::format, write_entity_debug_state, update_entity_inspector) with the same serde payload/encode/bridge pattern the other three surfaces use. Excluded from the sim digest as Presentation state.
+    architecture:
+      classification: local
+      owner: debug-observability-pipeline
+      writers: [debug-observability-pipeline]
+    implementation:
+      status: declared
+      paths: [src/debug/modifiers.rs, src/debug/damage.rs, src/debug/entities.rs, src/debug/inspector.rs]
+      symbols: [ModifierDebugCapture, DamageDebugCapture, EntityBehaviorCapture, EntityInspectorCapture]
+      tests: [cargo test]

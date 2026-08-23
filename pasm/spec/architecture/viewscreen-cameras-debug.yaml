@@ -240,10 +240,13 @@ entities:
       confidence: confirmed
       title: Host Debug Simulation Controls
       summary: Server-page controls that pause the simulation, make the local ship invulnerable, or apply instagib damage. They remain available in normal builds. Since issue #940 a connected phone reaches the same pause and god mode through client-debug-control-route, under its own session identity rather than under host authority.
+      rationale:
+        - "[ai] `depends_on: [debug-station-activity, debug-ai-doctrine, debug-scenario-state]` (issue #1241) is a file-granularity artefact, not a conceptual one: `src/server/bridge.rs`'s wasm_get_station_activity / wasm_get_ai_doctrine / wasm_get_scenario_state getters — the debug-observability-pipeline's bridge transport, unrelated to pause/god-mode/instagib — live in the same file this entity's implementation already maps whole. Declared here so the real per-file import edge pasm observes has a home, without inventing a narrower bridge.rs split this entity's existing implementation.paths does not make either."
     architecture:
       kind: host-debug-control
       authority: authoritative
       owns: [host-debug-simulation-override-state]
+      depends_on: [debug-station-activity, debug-ai-doctrine, debug-scenario-state]
       writes: [game-phase-state, authoritative-damage-state]
       runs_in: [host-browser-runtime]
     implementation:

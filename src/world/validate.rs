@@ -541,12 +541,12 @@ struct SpawnedInstance<'a> {
     /// the TEMPLATE's, in a way this validator cannot see (issue #1046).
     ///
     /// Always false for a declarative instance, whose `overrides` table is TOML
-    /// and is merged for real. For a script instance it is true only when the
+    /// and is merged for real. For a script instance it is true whenever the
     /// spawn passes an `overrides` value that could restate a doctrine entry —
-    /// a literal map mentioning `doctrine`, or any value the scan cannot read
-    /// end to end. A spawn with no override, or with a legible override that
-    /// provably never touches doctrine, is judged exactly as strictly as a
-    /// declarative one.
+    /// a literal map that mentions `doctrine`, one that hides a call or a merge
+    /// the scan cannot follow, or any value that is not a literal map at all.
+    /// A spawn with no override, or with a literal map this scan accounted for
+    /// in full, is judged exactly as strictly as a declarative one.
     ///
     /// `overrides: None` beside `doctrine_may_differ: true` is the honest pair:
     /// nothing here to merge, and a reason the merged result is unknowable.
@@ -657,12 +657,15 @@ impl SpawnedInstance<'_> {
 /// * no `overrides` entry at all — the template's doctrine IS the effective
 ///   doctrine, and the check is exactly as sound as for a declarative instance.
 ///   ERROR.
-/// * a literal `#{ … }` map that never mentions `doctrine` — legible end to
-///   end, and provably incapable of standing an entry down. ERROR.
-/// * anything else — a literal map that does touch doctrine, or a value the
-///   scan cannot read at all (`overrides: wave_8_overrides()` is
-///   `combat_test.toml`'s shape, and a helper call is as opaque as a variable).
-///   WARNING, naming what it could not see.
+/// * a literal `#{ … }` map the scan accounted for in FULL and which contained
+///   no doctrine entry: no `doctrine` key, no nested call that could return one
+///   (bar the `flt(…)` / `int(…)` scalar markers), and no top-level `+` merge
+///   with something outside the map. ERROR.
+/// * anything else — a literal map that does touch doctrine, one that hides a
+///   call or a merge, or a value that is not a literal map at all
+///   (`overrides: wave_8_overrides()` is `combat_test.toml`'s shape, and a
+///   helper call is as opaque as a variable). WARNING, naming what it could not
+///   see.
 ///
 /// That middle case is what keeps issue #888 reaching the script surface rather
 /// than softening away on the mere presence of an override: across the shipped

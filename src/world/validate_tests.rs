@@ -1758,11 +1758,10 @@ fn release(ctx) {
     );
 }
 
-/// An override that is legible end to end AND provably never mentions
-/// `doctrine` cannot have stood a doctrine entry down, so the anchor gate stays
-/// at ERROR (issue #1046 review round). This is what makes #888 reach the
-/// script surface rather than softening away on the mere PRESENCE of an
-/// override.
+/// An override this scan accounted for in FULL, and which held no doctrine
+/// entry, cannot have stood one down — so the anchor gate stays at ERROR (issue
+/// #1046 review round). This is what makes #888 reach the script surface rather
+/// than softening away on the mere PRESENCE of an override.
 #[test]
 fn an_override_that_cannot_touch_doctrine_keeps_the_gate_at_full_strength() {
     let root = cfg(r#"
@@ -1920,4 +1919,153 @@ fn release(ctx) {
         Some(7),
         "the finding must name the spawn call: {err:?}"
     );
+}
+
+/// A nested CALL inside an otherwise literal override can restate doctrine
+/// without the word ever appearing, so the map is not accounted for and the
+/// gate softens (issue #1046, second review round).
+#[test]
+fn a_nested_call_in_an_override_softens_the_gate() {
+    for value in [
+        "#{ behaviour: build_behaviour() }",
+        "#{ weapons_console: acquisition_band(), faction: \"f\" }",
+    ] {
+        let root = cfg(&format!(
+            r#"
+[script]
+waves = """
+fn release(ctx) {{
+    ctx.effects.spawn_entity(#{{
+        template_path: "assets/entities/patroller.toml", name: "a",
+        overrides: {value}
+    }});
+}}
+"""
+"#
+        ));
+        let refs = crate::world::config::script_spawned_templates(&root);
+        assert_eq!(
+            refs[0].overrides,
+            Some(crate::world::config::OverrideShape::MayRestateDoctrine),
+            "`{value}` hides a call that could return a doctrine entry"
+        );
+    }
+}
+
+/// …and so can a top-level `+` map merge, whose right operand need not even be
+/// a call.
+#[test]
+fn a_top_level_map_merge_softens_the_gate() {
+    for value in [
+        "#{ faction: \"f\" } + stand_the_patrol_down()",
+        "#{ faction: \"f\" } + saved_overrides",
+    ] {
+        let root = cfg(&format!(
+            r#"
+[script]
+waves = """
+fn release(ctx) {{
+    ctx.effects.spawn_entity(#{{
+        template_path: "assets/entities/patroller.toml", name: "a",
+        overrides: {value}
+    }});
+}}
+"""
+"#
+        ));
+        let refs = crate::world::config::script_spawned_templates(&root);
+        assert_eq!(
+            refs[0].overrides,
+            Some(crate::world::config::OverrideShape::MayRestateDoctrine),
+            "`{value}` merges in something the map does not contain"
+        );
+    }
+}
+
+/// The two SCALAR VALUE MARKERS are the deliberate exception: `flt(…)` and
+/// `int(…)` wrap one number to pin its TOML type across the Rhai boundary and
+/// hand back that same number, so neither can introduce a doctrine entry.
+///
+/// This is not a hypothetical carve-out — three shipped references depend on it
+/// (`falling_skyway.toml` x2, `probe_collapse_min.toml` x1), and without it a
+/// type annotation would soften the gate on all three.
+#[test]
+fn the_scalar_value_markers_do_not_soften_the_gate() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml", name: "a",
+        overrides: #{ hull: #{ max_hp: int(200), armour: flt("0.5") } }
+    });
+}
+"""
+"#);
+    let refs = crate::world::config::script_spawned_templates(&root);
+    assert_eq!(
+        refs[0].overrides,
+        Some(crate::world::config::OverrideShape::ReadableWithoutDoctrine),
+        "a scalar type marker is not an opaque call"
+    );
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    assert!(
+        has_error(&validate_composition_with(
+            &src,
+            &[],
+            &patroller_templates()
+        )),
+        "the anchor gate stays at full strength through a type annotation"
+    );
+}
+
+/// A backtick string is not code. Rhai's other string literal was lexed as
+/// neither comment nor string, so its contents stayed live to every later pass:
+/// one containing a `spawn_entity` call yielded a PHANTOM reference, and an
+/// unmatched `"` inside one desynchronised the scan for the rest of the file.
+#[test]
+fn a_backtick_string_is_not_scanned_as_code() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn describe(ctx) {
+    let help = `call ctx.effects.spawn_entity(#{ template_path: "assets/entities/nowhere.toml" })`;
+    ctx.effects.log(help);
+}
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml", name: "ashrender"
+    });
+}
+"""
+"#);
+    let refs = crate::world::config::script_spawned_templates(&root);
+    assert_eq!(
+        refs.len(),
+        1,
+        "the sample inside the backtick literal is prose, and the real spawn \
+         after it is still seen: {refs:?}"
+    );
+    assert_eq!(refs[0].template_path, "assets/entities/patroller.toml");
+    assert_eq!(refs[0].overrides, None);
+}
+
+/// …including the unmatched-quote half of it, which is the shape that
+/// desynchronised everything downstream.
+#[test]
+fn an_unmatched_quote_in_a_backtick_string_does_not_desync_the_scan() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn describe(ctx) { ctx.effects.log(`the cruiser"s patrol`); }
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml", name: "ashrender"
+    });
+}
+"""
+"#);
+    let refs = crate::world::config::script_spawned_templates(&root);
+    assert_eq!(refs.len(), 1, "{refs:?}");
+    assert_eq!(refs[0].template_path, "assets/entities/patroller.toml");
 }

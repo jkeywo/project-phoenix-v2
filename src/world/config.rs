@@ -2341,11 +2341,13 @@ pub struct ScriptSpawnRef {
     /// `world::validate`'s doctrine-anchor gate — has to ask before it decides
     /// how loud to be. `None` means the template's doctrine IS the effective
     /// doctrine. [`OverrideShape::ReadableWithoutDoctrine`] means the override
-    /// was legible end to end and provably does not restate any doctrine entry,
-    /// which is just as good. Only [`OverrideShape::MayRestateDoctrine`] forces
-    /// a softer answer — and it has to, because two shipped worlds
-    /// (`combat_test.toml`, `probe_artillery_standoff.toml`) stand a template's
-    /// Patrol entry DOWN in exactly this position.
+    /// is a literal map whose every part this scan could account for, and none
+    /// of those parts was a doctrine entry — see [`classify_overrides`] for the
+    /// four conditions that adds up to. Only
+    /// [`OverrideShape::MayRestateDoctrine`] forces a softer answer, and it has
+    /// to: two shipped worlds (`combat_test.toml`,
+    /// `probe_artillery_standoff.toml`) stand a template's Patrol entry DOWN in
+    /// exactly this position.
     pub overrides: Option<OverrideShape>,
 }
 
@@ -2469,25 +2471,119 @@ pub enum OverrideShape {
 
 /// Classify an `overrides` value expression.
 ///
-/// Only a literal map can be ruled out, and only by reading the whole of it: a
-/// call (`wave_8_overrides()` — `combat_test.toml`'s shape) is opaque and has to
-/// be assumed to restate doctrine, because it does.
+/// Only a literal map can be ruled out, and only when the whole of it is
+/// visible. A call (`wave_8_overrides()` — `combat_test.toml`'s shape) is opaque
+/// and has to be assumed to restate doctrine, because it does.
+///
+/// # "Contains no `doctrine`" is not enough on its own
+///
+/// A map can be a literal and still hide doctrine one level down, in two ways
+/// this checks for by name:
+///
+/// * a NESTED CALL — `#{ behaviour: build_behaviour() }` mentions no
+///   `doctrine` and may return an entry that restates one;
+/// * a TOP-LEVEL MERGE — `#{ … } + stand_the_patrol_down()` starts with a
+///   literal map and is not one, and the right operand need not even be a call
+///   (`#{ … } + saved_overrides` is a variable).
+///
+/// The two SCALAR VALUE MARKERS are the deliberate exception.
+/// [`crate::world::script::effects`]' `flt(…)` and `int(…)` wrap a number to pin
+/// its TOML type across the Rhai boundary; they take a literal and return that
+/// same scalar, so neither can introduce a map, an array or a doctrine entry.
+/// Allowing them is what keeps three shipped references on the full-strength arm
+/// (`falling_skyway.toml` x2, `probe_collapse_min.toml` x1) instead of softening
+/// them for a type annotation.
+///
+/// # Why an opaque value is a warning and not an error
+///
+/// `overrides: noop()` — an override laundered through a call that does nothing
+/// — lands on the WARNING arm deliberately, and that is the weaker guarantee
+/// this split exists to make honest rather than a hole in it. Erroring on any
+/// value the scan cannot read would block `combat_test.toml`, whose wave 8
+/// passes `wave_8_overrides()` and is correct; the laundering is not silent
+/// either, because the warning is logged at boot (`boot::log_non_error_findings`)
+/// naming the spawn's own file and line.
 fn classify_overrides(value: &str) -> OverrideShape {
+    /// Calls that cannot introduce doctrine, because their whole job is to wrap
+    /// ONE scalar to pin its TOML type and hand back the same scalar.
+    const SCALAR_MARKERS: [&str; 2] = ["flt", "int"];
+
     let trimmed = value.trim_start();
     let is_literal_map = trimmed.starts_with("#{") || trimmed.starts_with('{');
-    if is_literal_map && !contains_word(value, "doctrine") {
+    let readable = is_literal_map
+        && !contains_word(value, "doctrine")
+        && !has_foreign_call(value, &SCALAR_MARKERS)
+        && !has_top_level_merge(value);
+    if readable {
         OverrideShape::ReadableWithoutDoctrine
     } else {
         OverrideShape::MayRestateDoctrine
     }
 }
 
-/// Blank every comment in `source`, preserving byte offsets and line breaks.
+/// Does `value` call anything that is not in `allowed`?
 ///
-/// Comment bytes become spaces (newlines stay newlines, so line numbers and
-/// offsets both survive) and string literals are copied through untouched. One
-/// pass handles both because the two are mutually disambiguating — see
-/// [`script_spawn_refs`].
+/// A call is an identifier run followed by `(`. Grouping parentheses are
+/// preceded by an operator or a `:`, never by an identifier, so they do not
+/// match; a method call (`x.rounded()`) does, which is the intended reading —
+/// this pass cannot know what one returns either.
+fn has_foreign_call(value: &str, allowed: &[&str]) -> bool {
+    let b = value.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'"' {
+            i = match_string(value, i).map_or(b.len(), |e| e + 1);
+            continue;
+        }
+        if !is_ident_byte(b[i]) || (i > 0 && is_ident_byte(b[i - 1])) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < b.len() && is_ident_byte(b[i]) {
+            i += 1;
+        }
+        let after = skip_ws(b, i);
+        if after < b.len() && b[after] == b'(' && !allowed.contains(&&value[start..i]) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Is there a `+` outside every bracket — i.e. is this expression a MAP MERGE
+/// with something the map itself does not contain?
+fn has_top_level_merge(value: &str) -> bool {
+    let b = value.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i = match_string(value, i).map_or(b.len(), |e| e + 1);
+                continue;
+            }
+            b'{' | b'[' | b'(' => depth += 1,
+            b'}' | b']' | b')' => depth -= 1,
+            b'+' if depth <= 0 => return true,
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Blank every comment and backtick string in `source`, preserving byte offsets
+/// and line breaks.
+///
+/// Blanked bytes become spaces (newlines stay newlines, so line numbers and
+/// offsets both survive); `"…"` literals are copied through untouched, because
+/// a template path is read out of one. ONE pass handles all three, because none
+/// of them is decidable alone: a `//` inside a string is not a comment, a quote
+/// inside a comment is not a string, and a `"` inside a backtick literal is
+/// neither.
+///
+/// See [`script_spawn_refs`].
 fn blank_comments(source: &str) -> String {
     let b = source.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(b.len());
@@ -2508,6 +2604,29 @@ fn blank_comments(source: &str) -> String {
                     }
                     let closing = b[i] == b'"';
                     out.push(b[i]);
+                    i += 1;
+                    if closing {
+                        break;
+                    }
+                }
+            }
+            // Rhai's OTHER string literal, and it is BLANKED rather than copied
+            // through the way a `"…"` one is. Two reasons pulling the same way:
+            // nothing downstream reads a backtick literal — a template path is
+            // matched as `"…"` by [`string_literal`], so blanking one costs no
+            // reference — and its contents are otherwise live code to every pass
+            // after this, so a backtick string carrying
+            // `spawn_entity(#{ template_path: "…" })` (prose, or a code sample
+            // in a message) yielded a phantom spawn. Blanking the DELIMITERS too
+            // is what stops an unmatched `"` inside one from desynchronising the
+            // scan for the rest of the file — the same failure the one-pass
+            // treatment of comments exists to prevent.
+            b'`' => {
+                out.push(b' ');
+                i += 1;
+                while i < b.len() {
+                    let closing = b[i] == b'`';
+                    out.push(if b[i] == b'\n' { b'\n' } else { b' ' });
                     i += 1;
                     if closing {
                         break;

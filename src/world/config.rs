@@ -2324,23 +2324,29 @@ pub struct ScriptSpawnRef {
     /// The literal the map's `template_path` entry names.
     pub template_path: String,
     /// Index into [`WorldConfig::script_sources`] of the body it was found in.
+    ///
+    /// That vec is built from a `toml::Map`, so its order is the TABLE's — which
+    /// `toml` keeps alphabetical by key — not the order the blocks were authored
+    /// in. It is an identity for "which body", never a statement about sequence.
     pub source_index: usize,
     /// 1-based line WITHIN that body. An inline `[script]` body is a slice of
     /// the world TOML, so a finding can equally locate itself by searching the
     /// world source — which is what `world::validate` does, for the same reason
     /// it does so for declarative instances.
     pub line: usize,
-    /// Whether the same `spawn_entity` map also passes an `overrides` key.
+    /// What the same `spawn_entity` map's top-level `overrides` entry looks
+    /// like, or `None` when it passes none at all.
     ///
-    /// `true` means the hull this reference names is NOT necessarily the hull
-    /// that spawns: the override is Rhai, built at call time, and this scan can
-    /// see that one exists but never what it does. A reader that judges the
-    /// template's own content — `world::validate`'s doctrine-anchor gate — has
-    /// to soften to a warning here, because two shipped worlds
+    /// The question a reader that judges the TEMPLATE's own content — such as
+    /// `world::validate`'s doctrine-anchor gate — has to ask before it decides
+    /// how loud to be. `None` means the template's doctrine IS the effective
+    /// doctrine. [`OverrideShape::ReadableWithoutDoctrine`] means the override
+    /// was legible end to end and provably does not restate any doctrine entry,
+    /// which is just as good. Only [`OverrideShape::MayRestateDoctrine`] forces
+    /// a softer answer — and it has to, because two shipped worlds
     /// (`combat_test.toml`, `probe_artillery_standoff.toml`) stand a template's
-    /// Patrol entry DOWN in exactly this position and would otherwise be blocked
-    /// by a validator reading half the picture. See [`map_passes_overrides`].
-    pub overrides_passed: bool,
+    /// Patrol entry DOWN in exactly this position.
+    pub overrides: Option<OverrideShape>,
 }
 
 /// Every literal `spawn_entity` template reference across a world's inline
@@ -2362,181 +2368,401 @@ pub struct ScriptSpawnRef {
 pub fn script_spawned_templates(world: &WorldConfig) -> Vec<ScriptSpawnRef> {
     let mut out = Vec::new();
     for (source_index, source) in world.script_sources.iter().enumerate() {
-        for (template_path, line, overrides_passed) in script_spawn_template_paths(source) {
+        for spawn in script_spawn_refs(source) {
             out.push(ScriptSpawnRef {
-                template_path,
+                template_path: spawn.template_path,
                 source_index,
-                line,
-                overrides_passed,
+                line: spawn.line,
+                overrides: spawn.overrides,
             });
         }
     }
     out
 }
 
-/// Scan an inline Rhai body for the `template_path` string literals its
-/// `spawn_entity` maps name.
+/// Scan an inline Rhai body for the `spawn_entity` calls it makes, and the
+/// literal `template_path` each one names.
 ///
 /// A STATIC scan, because there is nothing else available: a handler's body
 /// never runs at load (`Engine::run_ast` executes only a unit's top level), so
 /// the only thing that can be known about a scripted spawn before preload is
 /// what its source says literally. That is enough for the shape every converted
 /// world authors — a literal `template_path: "assets/entities/….toml"` inside
-/// the map — and the failure mode of a miss is asymmetric: an extra path is a
-/// wasted fetch, a missed one is a wave that never spawns in the browser.
+/// the map — and a computed path (`template_path: hull_for(wave)`) is invisible
+/// to this and always will be.
 ///
-/// `//` line comments are stripped first so prose that mentions the key does not
-/// queue a fetch. A computed path (`template_path: hull_for(wave)`) is invisible
-/// to this and always will be; shipped content authors literals.
+/// # Scoped to the CALL, not to the word
 ///
-/// The third tuple element answers a question issue #1046 has to ask and preload
-/// does not: does the SAME map also pass an `overrides` key? See
-/// [`map_passes_overrides`].
-fn script_spawn_template_paths(source: &str) -> Vec<(String, usize, bool)> {
-    const KEY: &str = "template_path";
+/// The first cut of issue #1046 scanned the whole body for the `template_path`
+/// key and then asked whether the enclosing `{ … }` mentioned `overrides`. That
+/// is too loose in three ways an adversarial reading found, and every one of
+/// them is a FALSE POSITIVE — which for a gate that refuses activation is the
+/// expensive direction:
+///
+/// * `let template_path = "assets/entities/x.toml";` is not a spawn. (The old
+///   scan accepted `=` as a separator, for the TOML shape that predates #985.)
+/// * `#{ w1: #{ template_path: "…", count: 2 } }` is a DATA table, not a spawn
+///   map — a table-driven refactor of `combat_test`'s waves would have been
+///   read as eleven spawns.
+/// * `#{ template_path: "…", extras: #{ overrides: 1 } }` is not an overridden
+///   spawn: a nested sub-map's key silenced the doctrine gate for the map above
+///   it.
+///
+/// So the walk starts at the `spawn_entity` token, takes the map literal that
+/// is its argument, and reads only that map's TOP-LEVEL entries. A call whose
+/// argument is not a literal map (`spawn_entity(build_wave(n))`) contributes
+/// nothing, which is the same "computed is invisible" bargain as a computed
+/// path.
+///
+/// # Comments and strings, in one pass
+///
+/// [`blank_comments`] runs first and handles both together, because neither is
+/// decidable alone: a `//` inside a string literal is not a comment, and a quote
+/// inside a comment is not a string. Doing them separately is what let a
+/// `/* … */` block hide nothing at all (block comments were never stripped, so a
+/// commented-out wave still queued a fetch and still reached the composition
+/// gate) and let an apostrophe in prose desynchronise the brace matcher for the
+/// rest of the file.
+fn script_spawn_refs(source: &str) -> Vec<ScannedSpawn> {
+    let code = blank_comments(source);
     let mut out = Vec::new();
-    let maps = brace_spans(source);
-    // Byte offset of the first character of each line, so a per-line hit can be
-    // located in the whole-source coordinates `maps` is keyed in.
-    let mut line_start = 0usize;
-    for (line_index, line) in source.lines().enumerate() {
-        let this_line_start = line_start;
-        // `lines()` drops the terminator; step over it (both `\n` and `\r\n`,
-        // since the source is whatever the world TOML carried).
-        line_start += line.len();
-        if source[line_start..].starts_with("\r\n") {
-            line_start += 2;
-        } else if source[line_start..].starts_with('\n') {
-            line_start += 1;
-        }
-        let code = match line.find("//") {
-            Some(i) => &line[..i],
-            None => line,
+    for (open, close) in spawn_call_maps(&code) {
+        let entries = top_level_entries(&code, open, close);
+        let Some(path) = entries
+            .iter()
+            .find(|e| e.key == "template_path")
+            .and_then(|e| string_literal(&code[e.value.clone()]))
+        else {
+            continue;
         };
-        let bytes = code.as_bytes();
-        let mut from = 0;
-        while let Some(rel) = code[from..].find(KEY) {
-            let at = from + rel;
-            from = at + KEY.len();
-            // Word boundary, so `xtemplate_path` / `template_pathy` do not match.
-            let before_ok = at == 0 || !is_ident_byte(bytes[at - 1]);
-            let after_ok = from >= bytes.len() || !is_ident_byte(bytes[from]);
-            if !before_ok || !after_ok {
-                continue;
+        let overrides = entries.iter().find(|e| e.key == "overrides");
+        out.push(ScannedSpawn {
+            template_path: path,
+            line: line_of_offset(&code, open),
+            overrides: overrides.map(|e| classify_overrides(&code[e.value.clone()])),
+        });
+    }
+    out
+}
+
+/// One `spawn_entity` call the scan could read a literal template path out of.
+struct ScannedSpawn {
+    template_path: String,
+    /// 1-based line of the call's map literal within its script body.
+    line: usize,
+    /// `None` when the map passes no top-level `overrides` key at all.
+    overrides: Option<OverrideShape>,
+}
+
+/// What a scan can tell about a spawn's `overrides` value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverrideShape {
+    /// A literal `#{ … }` map with no `doctrine` key anywhere inside it. The
+    /// override is fully readable AND demonstrably cannot restate a doctrine
+    /// entry, so a doctrine-anchor judgement on the template still holds.
+    ReadableWithoutDoctrine,
+    /// A literal map that DOES mention `doctrine`, or a value this scan cannot
+    /// read at all (`overrides: wave_8_overrides()`, `overrides: cfg`). Either
+    /// way the effective doctrine may differ from the template's.
+    MayRestateDoctrine,
+}
+
+/// Classify an `overrides` value expression.
+///
+/// Only a literal map can be ruled out, and only by reading the whole of it: a
+/// call (`wave_8_overrides()` — `combat_test.toml`'s shape) is opaque and has to
+/// be assumed to restate doctrine, because it does.
+fn classify_overrides(value: &str) -> OverrideShape {
+    let trimmed = value.trim_start();
+    let is_literal_map = trimmed.starts_with("#{") || trimmed.starts_with('{');
+    if is_literal_map && !contains_word(value, "doctrine") {
+        OverrideShape::ReadableWithoutDoctrine
+    } else {
+        OverrideShape::MayRestateDoctrine
+    }
+}
+
+/// Blank every comment in `source`, preserving byte offsets and line breaks.
+///
+/// Comment bytes become spaces (newlines stay newlines, so line numbers and
+/// offsets both survive) and string literals are copied through untouched. One
+/// pass handles both because the two are mutually disambiguating — see
+/// [`script_spawn_refs`].
+fn blank_comments(source: &str) -> String {
+    let b = source.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                out.push(b'"');
+                i += 1;
+                while i < b.len() {
+                    if b[i] == b'\\' {
+                        out.push(b[i]);
+                        if i + 1 < b.len() {
+                            out.push(b[i + 1]);
+                        }
+                        i += 2;
+                        continue;
+                    }
+                    let closing = b[i] == b'"';
+                    out.push(b[i]);
+                    i += 1;
+                    if closing {
+                        break;
+                    }
+                }
             }
-            // Skip whitespace and the one separator (`:` in Rhai, `=` in TOML).
-            let mut i = from;
-            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+            b'/' if i + 1 < b.len() && b[i + 1] == b'/' => {
+                while i < b.len() && b[i] != b'\n' {
+                    out.push(b' ');
+                    i += 1;
+                }
+            }
+            b'/' if i + 1 < b.len() && b[i + 1] == b'*' => {
+                out.push(b' ');
+                out.push(b' ');
+                i += 2;
+                while i < b.len() {
+                    if b[i] == b'*' && i + 1 < b.len() && b[i + 1] == b'/' {
+                        out.push(b' ');
+                        out.push(b' ');
+                        i += 2;
+                        break;
+                    }
+                    out.push(if b[i] == b'\n' { b'\n' } else { b' ' });
+                    i += 1;
+                }
+            }
+            _ => {
+                out.push(b[i]);
                 i += 1;
             }
-            if i < bytes.len() && (bytes[i] == b':' || bytes[i] == b'=') {
-                i += 1;
-            }
-            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
-                i += 1;
-            }
-            if i >= bytes.len() || bytes[i] != b'"' {
-                continue;
-            }
-            let start = i + 1;
-            if let Some(len) = code[start..].find('"') {
-                let overrides = map_passes_overrides(source, &maps, this_line_start + at);
-                out.push((
-                    code[start..start + len].to_string(),
-                    line_index + 1,
-                    overrides,
-                ));
-                from = start + len + 1;
-            }
+        }
+    }
+    // Only original bytes and ASCII are ever pushed, so this cannot fail; the
+    // fallback keeps the scan best-effort rather than panicking on content.
+    String::from_utf8(out).unwrap_or_else(|_| source.to_string())
+}
+
+/// Byte offsets of the `{ … }` map literal argument of every `spawn_entity`
+/// call in `code` (already comment-blanked), as `(open, close)`.
+///
+/// A call whose argument is not a literal map yields nothing.
+fn spawn_call_maps(code: &str) -> Vec<(usize, usize)> {
+    const CALL: &str = "spawn_entity";
+    let b = code.as_bytes();
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(rel) = code[from..].find(CALL) {
+        let at = from + rel;
+        from = at + CALL.len();
+        let before_ok = at == 0 || !is_ident_byte(b[at - 1]);
+        let after_ok = from >= b.len() || !is_ident_byte(b[from]);
+        if !before_ok || !after_ok {
+            continue;
+        }
+        let mut i = skip_ws(b, from);
+        if i >= b.len() || b[i] != b'(' {
+            continue;
+        }
+        i = skip_ws(b, i + 1);
+        // Rhai object maps are `#{`; a bare `{` is accepted too so the scan does
+        // not hinge on a sigil.
+        if i < b.len() && b[i] == b'#' {
+            i += 1;
+            i = skip_ws(b, i);
+        }
+        if i >= b.len() || b[i] != b'{' {
+            continue;
+        }
+        if let Some(close) = match_brace(code, i) {
+            out.push((i, close));
+            from = close + 1;
         }
     }
     out
 }
 
-/// Is `b` part of a Rust/Rhai identifier?
-fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+/// One top-level `key: value` entry of a map literal.
+struct MapEntry {
+    key: String,
+    value: std::ops::Range<usize>,
 }
 
-/// Every matched `{`…`}` span in a script source, as `(open, close)` byte
-/// offsets, innermost-first within a nesting.
+/// Every TOP-LEVEL `key: value` entry of the map literal spanning
+/// `open ..= close`.
 ///
-/// String literals are stepped over so a brace inside `"…"` cannot open or close
-/// a span. Unbalanced braces simply produce no span for the unmatched opener,
-/// which is the right answer for a source that will fail to compile anyway.
-fn brace_spans(source: &str) -> Vec<(usize, usize)> {
-    let bytes = source.as_bytes();
-    let mut stack: Vec<usize> = Vec::new();
-    let mut spans: Vec<(usize, usize)> = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'"' => {
-                i += 1;
-                while i < bytes.len() && bytes[i] != b'"' {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    }
-                    i += 1;
-                }
+/// Nested maps, arrays and calls are stepped over rather than descended into,
+/// which is what keeps a data sub-map's `template_path` and a sibling sub-map's
+/// `overrides` out of the answer.
+fn top_level_entries(code: &str, open: usize, close: usize) -> Vec<MapEntry> {
+    let b = code.as_bytes();
+    let mut out = Vec::new();
+    let mut i = open + 1;
+    while i < close {
+        i = skip_ws(b, i);
+        if i >= close {
+            break;
+        }
+        if b[i] == b',' {
+            i += 1;
+            continue;
+        }
+        // A key is a bare identifier (or a quoted one) followed by `:`.
+        let key_start = i;
+        while i < close && (is_ident_byte(b[i]) || b[i] == b'"') {
+            i += 1;
+        }
+        if i == key_start {
+            // Not a key — step over whatever this is and carry on.
+            i = step_over(code, i, close);
+            continue;
+        }
+        let key = code[key_start..i].trim_matches('"').to_string();
+        let after_key = skip_ws(b, i);
+        if after_key >= close || b[after_key] != b':' {
+            i = step_over(code, after_key, close);
+            continue;
+        }
+        let value_start = skip_ws(b, after_key + 1);
+        let mut j = value_start;
+        while j < close {
+            match b[j] {
+                b',' => break,
+                b'"' | b'{' | b'[' | b'(' | b'#' => j = step_over(code, j, close),
+                _ => j += 1,
             }
-            b'{' => stack.push(i),
-            b'}' => {
-                if let Some(open) = stack.pop() {
-                    spans.push((open, i));
+        }
+        out.push(MapEntry {
+            key,
+            value: value_start..j.min(close),
+        });
+        i = j;
+    }
+    out
+}
+
+/// Step over one string, map, array or call starting at `i`; otherwise advance
+/// one byte. Never returns a position past `close`.
+fn step_over(code: &str, i: usize, close: usize) -> usize {
+    let b = code.as_bytes();
+    if i >= close {
+        return close;
+    }
+    match b[i] {
+        b'"' => match_string(code, i).map_or(close, |e| (e + 1).min(close)),
+        b'#' => {
+            let j = skip_ws(b, i + 1);
+            if j < close && b[j] == b'{' {
+                match_brace(code, j).map_or(close, |e| (e + 1).min(close))
+            } else {
+                i + 1
+            }
+        }
+        b'{' => match_brace(code, i).map_or(close, |e| (e + 1).min(close)),
+        b'[' => match_delim(code, i, b'[', b']').map_or(close, |e| (e + 1).min(close)),
+        b'(' => match_delim(code, i, b'(', b')').map_or(close, |e| (e + 1).min(close)),
+        _ => i + 1,
+    }
+}
+
+fn skip_ws(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() && b[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    i
+}
+
+/// End offset (the closing quote) of the string literal opening at `i`.
+fn match_string(code: &str, i: usize) -> Option<usize> {
+    let b = code.as_bytes();
+    let mut j = i + 1;
+    while j < b.len() {
+        if b[j] == b'\\' {
+            j += 2;
+            continue;
+        }
+        if b[j] == b'"' {
+            return Some(j);
+        }
+        j += 1;
+    }
+    None
+}
+
+fn match_brace(code: &str, i: usize) -> Option<usize> {
+    match_delim(code, i, b'{', b'}')
+}
+
+/// Offset of the delimiter closing the one that opens at `i`, skipping string
+/// literals so a brace inside `"…"` neither opens nor closes a span.
+fn match_delim(code: &str, i: usize, open: u8, close: u8) -> Option<usize> {
+    let b = code.as_bytes();
+    let mut depth = 0usize;
+    let mut j = i;
+    while j < b.len() {
+        match b[j] {
+            b'"' => j = match_string(code, j)?,
+            c if c == open => depth += 1,
+            c if c == close => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(j);
                 }
             }
             _ => {}
         }
-        i += 1;
+        j += 1;
     }
-    spans
+    None
 }
 
-/// Does the innermost `{ … }` map containing `at` also pass an `overrides` key?
-///
-/// The question issue #1046's composition gate has to ask before it judges a
-/// script-spawned hull's doctrine. A `spawn_entity` map's `overrides` is Rhai
-/// built at CALL time — `overrides: wave_8_overrides()` in `combat_test.toml`,
-/// a literal `#{ … }` in `probe_artillery_standoff.toml` — and either way this
-/// scan cannot know what it merges. What it CAN know is whether one is passed at
-/// all, and that is the difference between "the template's doctrine is the
-/// effective doctrine" and "it may not be".
-///
-/// Deliberately answers on PRESENCE, not content, and deliberately searches the
-/// whole enclosing map including its nested maps. Both choices err the same way
-/// — toward saying yes — because a false yes costs a missed catch and a false no
-/// costs a blocked world.
-fn map_passes_overrides(source: &str, maps: &[(usize, usize)], at: usize) -> bool {
-    const KEY: &str = "overrides";
-    // Innermost enclosing span: the one with the latest opening brace.
-    let Some((open, close)) = maps
-        .iter()
-        .filter(|(o, c)| *o < at && at < *c)
-        .max_by_key(|(o, _)| *o)
-        .copied()
-    else {
-        return false;
-    };
-    let region = &source[open..=close];
-    let bytes = region.as_bytes();
+/// The contents of `value` when it is exactly one string literal, else `None`.
+fn string_literal(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if !trimmed.starts_with('"') {
+        return None;
+    }
+    let end = match_string(trimmed, 0)?;
+    // Anything after the closing quote means the value is an expression
+    // (`"a" + b`), which is computed and therefore not a literal path.
+    if trimmed[end + 1..].trim().is_empty() {
+        Some(trimmed[1..end].to_string())
+    } else {
+        None
+    }
+}
+
+/// Does `haystack` contain `word` as a whole identifier?
+fn contains_word(haystack: &str, word: &str) -> bool {
+    let b = haystack.as_bytes();
     let mut from = 0;
-    while let Some(rel) = region[from..].find(KEY) {
-        let hit = from + rel;
-        from = hit + KEY.len();
-        let before_ok = hit == 0 || !is_ident_byte(bytes[hit - 1]);
-        if !before_ok || from >= bytes.len() || is_ident_byte(bytes[from]) {
-            continue;
-        }
-        let mut i = from;
-        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
-            i += 1;
-        }
-        if i < bytes.len() && (bytes[i] == b':' || bytes[i] == b'=') {
+    while let Some(rel) = haystack[from..].find(word) {
+        let at = from + rel;
+        from = at + word.len();
+        let before_ok = at == 0 || !is_ident_byte(b[at - 1]);
+        let after_ok = from >= b.len() || !is_ident_byte(b[from]);
+        if before_ok && after_ok {
             return true;
         }
     }
     false
+}
+
+/// 1-based line number of `offset` within `code`.
+fn line_of_offset(code: &str, offset: usize) -> usize {
+    code[..offset.min(code.len())]
+        .bytes()
+        .filter(|b| *b == b'\n')
+        .count()
+        + 1
+}
+
+/// Is `b` part of a Rust/Rhai identifier?
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 /// Partition immediate-spawn entity instances into (asteroid_field, other).

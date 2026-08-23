@@ -1203,6 +1203,24 @@ pub(crate) fn spawn_world_entities(
 /// question the spawn is about to ask, rather than a filesystem-backed
 /// approximation of it that can pass where the spawn then fails.
 ///
+/// # What is gated on has widened past `[[entity]]` (issue #1046)
+///
+/// The findings this reads now cover the hulls a world's SCRIPTS spawn as well
+/// as the ones it declares — a scripted `spawn_entity` naming a literal
+/// `template_path` is template-resolved and doctrine-anchor checked like any
+/// other. On native that has teeth here: `SpawnTemplateLoader` is authoritative
+/// about absence, so a script wave pointed at a deleted hull now blanks BOTH
+/// immediate-spawn halves at `Startup` instead of logging once, mid-mission,
+/// when its timer fires.
+///
+/// That is the intended reading of atomicity rather than a side effect — a
+/// world that cannot build one of its waves is as broken as one that cannot
+/// build a planet, and finding out at `Startup` is the whole point of the gate.
+/// It does mean a finding here can now name a spawn site that is not an
+/// `[[entity]]` block, which is why script findings carry the script's own line
+/// (`world::validate`'s `script_spawn_line`): a bare template path with no
+/// authored `name` is otherwise very hard to place.
+///
 /// # A note for whoever writes the next bare-`App` fixture
 ///
 /// [`crate::entities::loader::SpawnTemplateLoader`] takes its authority from the
@@ -3001,9 +3019,11 @@ pub(crate) fn apply_dispatch_result(
     for warning in warnings {
         bevy::log::warn!("{log_ctx}: {warning}");
     }
-    // Louder than `warnings` (issue #1048): today's one producer is a
-    // `spawn_entity` override that could not be applied at all — see
-    // `DispatchResult::override_failures`'s doc for why that warrants ERROR.
+    // Louder than `warnings` (issue #1048). Two producers now, both
+    // `spawn_entity` and both leaving the world short of something it authored:
+    // an override that could not be applied at all, and (issue #1046) a template
+    // that did not resolve. See `DispatchResult::override_failures`'s doc for
+    // why each warrants ERROR.
     for failure in override_failures {
         bevy::log::error!("{log_ctx}: {failure}");
     }

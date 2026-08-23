@@ -1560,9 +1560,13 @@ fn release(ctx) { ctx.effects.log("nothing here"); }
 ///
 /// This is the assertion the change is really made of. The gate went from
 /// seeing `[[entity]]` blocks alone to seeing 41 script-spawned template
-/// references across 16 worlds, and no shipped world may break on the way. The
-/// two carrying an unresolved anchor behind an unreadable override
-/// (`combat_test`, `probe_artillery_standoff`) are warnings by design — see
+/// references across 15 of the 43 shipped worlds, and no shipped world may
+/// break on the way. (Not 16: `duel.toml` authors a `[script]` block and
+/// contributes ZERO references, because every slot in it reaches one
+/// `spawn_slot` body whose map reads `template_path: template` — see
+/// `headless::duel`.) The two worlds carrying an unresolved anchor behind an
+/// override that may restate doctrine (`combat_test`,
+/// `probe_artillery_standoff`) are warnings by design — see
 /// `collect_spawned_instances` — so this asserts on ERRORS.
 ///
 /// The second assertion is the anti-vacuity one, and it is the more important
@@ -1584,9 +1588,10 @@ fn every_shipped_world_still_composes() {
     let mut broken: Vec<String> = Vec::new();
     for path in paths {
         let text = std::fs::read_to_string(&path).expect("world reads");
-        let Ok(config) = parse_world(&text) else {
-            continue;
-        };
+        // A world that does not PARSE is a broken world, and skipping it here
+        // would let the sweep pass over the loudest possible failure.
+        let config = parse_world(&text)
+            .unwrap_or_else(|e| panic!("shipped world {} must parse: {e}", path.display()));
         let rel = format!(
             "assets/worlds/{}",
             path.file_name().expect("file").to_string_lossy()
@@ -1609,5 +1614,310 @@ fn every_shipped_world_still_composes() {
         "the scan found only {scripted_seen} scripted spawns across the shipped \
          worlds — it has stopped seeing inside scripts, and every check built on \
          it is passing vacuously"
+    );
+}
+
+// ── The scan is CALL-SCOPED, and these are the inputs that proved it had to
+// be (issue #1046, review round) ─────────────────────────────────────────────
+//
+// The first cut scanned the whole body for `template_path` and then asked
+// whether the enclosing `{ … }` mentioned `overrides`. Every case below was a
+// FALSE POSITIVE under that reading — and for a gate that refuses activation
+// on native, a false positive is the expensive direction: it blanks both
+// immediate-spawn halves of a world that is not actually broken.
+
+/// A block-commented-out wave is not a spawn. `/* … */` was never stripped at
+/// all, so its `template_path` queued a preload fetch AND reached this gate —
+/// on native, an ERROR that aborts the boot over a hull the author had
+/// deliberately taken out.
+#[test]
+fn a_block_commented_spawn_is_not_a_spawn() {
+    let root = cfg(r#"
+[script]
+waves = """
+/*
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{ template_path: "assets/entities/nowhere.toml", name: "w" });
+}
+*/
+fn live(ctx) { ctx.effects.log("nothing"); }
+"""
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    assert!(
+        crate::world::config::script_spawned_templates(&root).is_empty(),
+        "a commented-out wave must not be scanned as a spawn"
+    );
+    assert!(
+        validate_composition_with(&src, &[], &patroller_templates()).is_empty(),
+        "…and must produce no finding"
+    );
+}
+
+/// An apostrophe in prose must not desynchronise the matcher for the rest of
+/// the file. Comments and strings are stripped in ONE pass precisely because
+/// neither is decidable alone; done separately, the odd quote below opened a
+/// string that swallowed the real spawn after it.
+#[test]
+fn an_odd_quote_in_a_comment_does_not_desync_the_scan() {
+    let root = cfg(r#"
+[script]
+waves = """
+// the cruiser's patrol route isn't staged here
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml", name: "ashrender"
+    });
+}
+"""
+"#);
+    let refs = crate::world::config::script_spawned_templates(&root);
+    assert_eq!(
+        refs.len(),
+        1,
+        "the spawn after the apostrophe is still visible: {refs:?}"
+    );
+    assert_eq!(refs[0].template_path, "assets/entities/patroller.toml");
+    assert_eq!(refs[0].overrides, None);
+}
+
+/// `let template_path = "…"` is an assignment, not a spawn map. The old scan
+/// accepted `=` as a separator (a leftover from the TOML shape that predates
+/// issue #985) and read this as a spawn of a hull the world never spawns.
+#[test]
+fn an_assignment_is_not_a_spawn_map() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn pick(ctx) {
+    let template_path = "assets/entities/nowhere.toml";
+    ctx.flags.chosen = 1;
+}
+"""
+"#);
+    assert!(
+        crate::world::config::script_spawned_templates(&root).is_empty(),
+        "an assignment is not a spawn"
+    );
+}
+
+/// A DATA map that happens to carry a `template_path` key is not a spawn map
+/// either — this is the shape a table-driven refactor of `combat_test`'s waves
+/// would take, and the old scan read every row of it as a spawn.
+#[test]
+fn a_nested_data_map_is_not_a_spawn_map() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn table() {
+    #{ w1: #{ template_path: "assets/entities/nowhere.toml", count: 2 },
+       w2: #{ template_path: "assets/entities/patroller.toml", count: 1 } }
+}
+"""
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    assert!(
+        crate::world::config::script_spawned_templates(&root).is_empty(),
+        "a data table is not a roster of spawns"
+    );
+    assert!(validate_composition_with(&src, &[], &patroller_templates()).is_empty());
+}
+
+/// …and the same scoping in the other direction: a sibling sub-map's
+/// `overrides` key must not silence the doctrine gate for the spawn ABOVE it.
+/// Under the old reading this spawn came out as a WARNING; it is an ERROR,
+/// because nothing here overrides anything.
+#[test]
+fn a_sibling_sub_maps_overrides_does_not_silence_the_spawn() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml",
+        name: "ashrender",
+        extras: #{ overrides: 1 }
+    });
+}
+"""
+"#);
+    let refs = crate::world::config::script_spawned_templates(&root);
+    assert_eq!(refs.len(), 1);
+    assert_eq!(
+        refs[0].overrides, None,
+        "`overrides` inside a nested map is not this map's override"
+    );
+
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.category == "unresolved-anchor" && f.is_error()),
+        "the anchor gate must be at full strength here: {findings:?}"
+    );
+}
+
+/// An override that is legible end to end AND provably never mentions
+/// `doctrine` cannot have stood a doctrine entry down, so the anchor gate stays
+/// at ERROR (issue #1046 review round). This is what makes #888 reach the
+/// script surface rather than softening away on the mere PRESENCE of an
+/// override.
+#[test]
+fn an_override_that_cannot_touch_doctrine_keeps_the_gate_at_full_strength() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml",
+        name: "ashrender",
+        overrides: #{ faction: "cccccccc-3333-4333-8333-cccccccccccc" }
+    });
+}
+"""
+"#);
+    let refs = crate::world::config::script_spawned_templates(&root);
+    assert_eq!(
+        refs[0].overrides,
+        Some(crate::world::config::OverrideShape::ReadableWithoutDoctrine)
+    );
+
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.category == "unresolved-anchor" && f.is_error()),
+        "a faction-only override cannot stand a Patrol down: {findings:?}"
+    );
+}
+
+/// …and an override that DOES restate doctrine softens it again, whether the
+/// map is literal or (as in `combat_test.toml`) hidden behind a helper call.
+/// Both shapes are unreadable in the way that matters.
+#[test]
+fn an_override_that_may_restate_doctrine_softens_the_gate() {
+    for value in [
+        "#{ behaviour: #{ doctrine: [] } }",
+        "wave_8_overrides()",
+        "cfg",
+    ] {
+        let root = cfg(&format!(
+            r#"
+[script]
+waves = """
+fn release(ctx) {{
+    ctx.effects.spawn_entity(#{{
+        template_path: "assets/entities/patroller.toml",
+        name: "ashrender",
+        overrides: {value}
+    }});
+}}
+"""
+"#
+        ));
+        let refs = crate::world::config::script_spawned_templates(&root);
+        assert_eq!(
+            refs[0].overrides,
+            Some(crate::world::config::OverrideShape::MayRestateDoctrine),
+            "`{value}` may restate doctrine"
+        );
+
+        let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+        let findings = validate_composition_with(&src, &[], &patroller_templates());
+        assert!(!has_error(&findings), "`{value}`: {findings:?}");
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "unresolved-anchor" && !f.is_error()),
+            "`{value}` still reports, as a warning: {findings:?}"
+        );
+    }
+}
+
+/// An empty override is legible and mentions no doctrine, so it is the
+/// full-strength arm — the boundary case of the rule above.
+#[test]
+fn an_empty_override_keeps_the_gate_at_full_strength() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml", name: "a", overrides: #{}
+    });
+}
+"""
+"#);
+    let refs = crate::world::config::script_spawned_templates(&root);
+    assert_eq!(
+        refs[0].overrides,
+        Some(crate::world::config::OverrideShape::ReadableWithoutDoctrine)
+    );
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    assert!(has_error(&validate_composition_with(
+        &src,
+        &[],
+        &patroller_templates()
+    )));
+}
+
+/// A bare spawn's ERROR must not be eaten by an overridden spawn's WARNING.
+/// Script instances are labelled by template path, so both spawns below share a
+/// dedup key on (label, anchor) alone — and whichever was walked first silenced
+/// the other.
+#[test]
+fn an_overridden_spawn_does_not_swallow_a_bare_spawns_error() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml", name: "a",
+        overrides: #{ behaviour: #{ doctrine: [] } }
+    });
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml", name: "b"
+    });
+}
+"""
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+    assert!(
+        has_error(&findings),
+        "the bare spawn's error survives the overridden spawn's warning: {findings:?}"
+    );
+}
+
+/// A finding about a script spawn points at the SPAWN, not at the first place
+/// the template path happens to appear in the world file.
+#[test]
+fn a_script_finding_points_at_the_spawn_call() {
+    let toml = r#"[anchors]
+route_a = [1.0, 0.0, 2.0]
+
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml", name: "ashrender"
+    });
+}
+"""
+"#;
+    let root = cfg(toml);
+    let src = WorldSource::new("assets/worlds/scenario.toml", toml, &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+    let err = findings
+        .iter()
+        .find(|f| f.category == "unresolved-anchor")
+        .expect("route_b is undeclared");
+    // Line 7 is `ctx.effects.spawn_entity(#{`, counting the world TOML from 1.
+    assert_eq!(
+        err.source.line,
+        Some(7),
+        "the finding must name the spawn call: {err:?}"
     );
 }

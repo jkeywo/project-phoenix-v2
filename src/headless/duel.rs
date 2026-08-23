@@ -79,15 +79,22 @@
 //! through the same `world::validate::template_doctrine_anchors` table
 //! (`DuelError::UndeclaredDoctrineAnchor`).
 //!
-//! ## Issue #1046 closed the general gap, and this guard still cannot retire
+//! ## Issue #1046 closed the general gap, and this world is the exception
 //!
 //! `collect_spawned_instances` now walks scripted `spawn_entity` calls too, so
 //! a hull a script spawns is template-resolved and anchor-checked like a
-//! declarative one — which covers `duel.toml`'s own authored default roster,
-//! previously named here as unguarded.
+//! declarative one — across the shipped worlds, 41 references the gate could not
+//! previously see.
 //!
-//! It does not cover THIS harness's slots, and the reason is structural rather
-//! than a matter of scan strength. That gate reads a literal `template_path:`
+//! `duel.toml` contributes ZERO of them, harnessed or not, and its authored
+//! default roster is NOT covered despite being ordinary authored content. Every
+//! slot in this world — the ones below the marker as much as the ones the CLI
+//! generates — reaches the same one `spawn_slot` body, so the only
+//! `template_path:` in the file reads `template_path: template`. The scan sees a
+//! computed path and correctly declines to guess.
+//!
+//! The reason it cannot be fixed by a stronger scan is structural. That gate
+//! reads a literal `template_path:`
 //! out of a `spawn_entity` MAP. The generated drivers do not carry one: they
 //! pass the hull POSITIONALLY to `duel.toml`'s own `spawn_slot(ctx, name,
 //! template, faction, group)`, which is the whole point of the design above —

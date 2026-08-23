@@ -24,10 +24,11 @@
 //   `DispatchContext::name_to_uuid` and stops there; the applier does
 //   UUID → `Entity` → component.
 // * **Logging becomes data.** Failure paths push a message onto
-//   `DispatchResult::warnings` (or, for the one failure severe enough to
-//   warrant it, `override_failures` — issue #1048) instead of calling the
-//   Bevy log macros. The applier logs each at its field's level (warn /
-//   error respectively); tests assert on them.
+//   `DispatchResult::warnings` (or, for the failures severe enough to warrant
+//   it, `override_failures` — issue #1048 for a dropped override, issue #1046
+//   for an unresolvable template) instead of calling the Bevy log macros. The
+//   applier logs each at its field's level (warn / error respectively); tests
+//   assert on them.
 // * **Flag mutation is previewed, not performed.** The `parent:` layer walk and
 //   the before/after transition are computed here (mirroring `FlagStore`'s own
 //   semantics exactly); the applier performs the write. This is the idiom
@@ -431,7 +432,8 @@ pub enum ActionCmd {
 /// What one `TriggerAction` decided to do.
 ///
 /// Every field is additive and may be empty — an action that hit a failure path
-/// returns only `warnings`.
+/// returns only its diagnostic, on `warnings` or on `override_failures`
+/// depending which the failure warrants.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DispatchResult {
     /// Side effects for the applier, in the order they must be applied.
@@ -1136,15 +1138,21 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
             // Reported on `override_failures` (ERROR) rather than `warnings`
             // since issue #1046, and for that field's own reason: the spawn is
             // refused and the world is silently short of an entity, which is
-            // the same class of behavioural gap a dropped override is. It is
-            // also the BACKSTOP for the composition gate's one blind spot.
-            // `world::validate::collect_spawned_instances` now walks scripted
-            // `spawn_entity` calls, but only for a LITERAL `template_path`; a
-            // computed one (`duel.toml`'s `spawn_slot(ctx, name, template, …)`,
-            // whose hull comes from `--side-a`/`--side-b`) is invisible to any
-            // load-time scan and stays legal. This is where such a spawn
-            // answers for itself, so the gate's guarantee degrades to a loud
-            // runtime refusal rather than to silence.
+            // the same class of behavioural gap a dropped override is.
+            //
+            // WHICH spawns can still reach here is worth being exact about,
+            // because it differs by host. `world::validate` now walks scripted
+            // `spawn_entity` calls, so a LITERAL `template_path` that does not
+            // resolve is caught at load — and on native, where
+            // `SpawnTemplateLoader` is authoritative about absence, that is a
+            // blocked activation rather than a message here. What is left is
+            // the genuinely undecidable: a COMPUTED path (`duel.toml`'s
+            // `spawn_slot(ctx, name, template, …)`, whose hull comes from
+            // `--side-a`/`--side-b`), which no load-time scan can resolve and
+            // which stays legal; and, on a host whose loader cannot be
+            // authoritative about absence (wasm before the #984 preloader has
+            // served the path), a literal one the gate declined to judge. Both
+            // are exactly the cases that must not pass quietly.
             let Some(mut config) = context.template_loader.load_template(template_path) else {
                 out.override_failures.push(format!(
                     "SpawnEntity '{name}' template '{template_path}' not found"

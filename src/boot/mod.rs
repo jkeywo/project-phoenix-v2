@@ -562,6 +562,18 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     // own findings can carry errors; a broken world aborts the build only where the
     // profile says so.
     let mut invalid: Vec<String> = Vec::new();
+    // Non-blocking findings first, and they have to be LOGGED rather than
+    // counted (issue #1046). `LoadedWorld::findings` had exactly one production
+    // consumer — the `has_error` gate below — and `describe_findings` filters to
+    // errors, so every warning a validator produced was dropped unread. That is
+    // tolerable for a check whose warning is decoration, and fatal for one whose
+    // warning IS the report: `validate_doctrine_anchors_in` softens to a warning
+    // exactly where it cannot prove the defect, and a warning nobody prints is
+    // indistinguishable from no check at all.
+    log_non_error_findings("composition", &loaded.findings);
+    if let Some(scripts) = &loaded.scripts {
+        log_non_error_findings("scripts", &scripts.findings);
+    }
     if crate::world::validate::has_error(&loaded.findings) {
         invalid.push(describe_findings("composition", &loaded.findings));
     }
@@ -587,6 +599,28 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     app.insert_resource(loaded.config);
     app.insert_resource(crate::world::server::PreCompiledScripts(loaded.scripts));
     Ok(())
+}
+
+/// Log every NON-error finding of one gate at warn level (issue #1046).
+///
+/// The sibling of [`describe_findings`], and the reason both exist: an error
+/// rides into [`BootError::WorldInvalid`] and stops the boot, so it is seen
+/// whatever the log level; a warning has nowhere else to go. Each line carries
+/// the category, the source file and — when the validator could resolve one —
+/// the LINE, because the findings that land here are the ones asking an author
+/// to go and look at a specific spawn.
+fn log_non_error_findings(kind: &str, findings: &[crate::world::validate::WorldFinding]) {
+    for finding in findings.iter().filter(|f| !f.is_error()) {
+        let at = match finding.source.line {
+            Some(line) => format!("{}:{line}", finding.source.file),
+            None => finding.source.file.clone(),
+        };
+        bevy::log::warn!(
+            "world {kind} [{}] {at}: {}",
+            finding.category,
+            finding.message
+        );
+    }
 }
 
 /// Render the erroring findings of one gate (`composition` or `scripts`) into the

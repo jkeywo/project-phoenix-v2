@@ -1982,14 +1982,6 @@ fn default_tube_volley_max() -> u32 {
     1
 }
 
-/// Validate a `[[weapons_console.phaser_banks]]` list parsed from TOML.
-///
-/// Rejects:
-///   - empty list (caller may decide to fall back to a single hardcoded
-///     bank — this validator returns `Err` so callers see the empty list)
-///   - duplicate `id` values
-///   - `fire_arc_deg` outside `(0, 360]`
-///   - `auto_arc_deg` outside `(0, fire_arc_deg]`
 /// Load-time validation for the Steering axis's MODIFIER param sets (#929).
 ///
 /// The leg gates around these — [`COMBAT_ORBIT_PARAMS`], `TORPEDO_BEARING_PARAMS`
@@ -2070,6 +2062,14 @@ pub(crate) fn validate_helm_steering_param_sets(
     Ok(())
 }
 
+/// Validate a `[[weapons_console.phaser_banks]]` list parsed from TOML.
+///
+/// Rejects:
+///   - empty list (caller may decide to fall back to a single hardcoded
+///     bank — this validator returns `Err` so callers see the empty list)
+///   - duplicate `id` values
+///   - `fire_arc_deg` outside `(0, 360]`
+///   - `auto_arc_deg` outside `(0, fire_arc_deg]`
 pub fn validate_phaser_banks(banks: &[PhaserBankConfig]) -> Result<(), String> {
     if banks.is_empty() {
         return Err("phaser_banks list is empty".into());

@@ -11820,7 +11820,7 @@ fn every_broadside_fact_the_seeder_writes_is_one_this_host_declares() {
 }
 
 /// A latch under test, with the shipped hull's thresholds.
-fn flip_params(flip: f32, restore: f32, dwell: f32) -> crate::world::flags::AiParams {
+fn flip_params(flip: f64, restore: f64, dwell: f64) -> crate::world::flags::AiParams {
     let mut params = crate::world::flags::AiParams::default();
     params.set(WEAK_SHIELD_FLIP_HP_PARAM, flip);
     params.set(WEAK_SHIELD_RESTORE_HP_PARAM, restore);

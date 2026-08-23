@@ -229,8 +229,9 @@
 # dealt against 0 taken.
 #
 # The "about 1 damage per second" there is the cruiser at
-# `beam_damage_per_sec = 4`, which is what it carried until issue #929's second
-# pass took it to 24 so its own launcher gate could be satisfiable. The GEOMETRY
+# `beam_damage_per_sec = 4` on one bearing bank, which is what it carried until
+# issue #929 took it to 32 across two (`auto_arc_deg = 270`) so its own launcher
+# gate could be satisfiable. The GEOMETRY
 # argument is what this paragraph is for and it does not depend on that number:
 # the request fires on loaded-and-unable-to-point, so a doctrine that breaks its
 # ring only when the shot is already takeable leaves Channel 3 flying the ship
@@ -251,9 +252,9 @@
 # false premise that let the permissive reading ship next to a strict launcher.
 #
 # A bow hold is self-completing only if the hull can open the gap FASTER than the
-# target closes it. `alliance_cruiser.toml` could not. Its two banks'
-# `auto_arc_deg = 180` abut on the beam line, so bow-on it works ONE of them —
-# and at its then-authored `beam_damage_per_sec = 4` that was about 1 dmg/s into
+# target closes it. `alliance_cruiser.toml` could not. Its two banks then authored
+# `auto_arc_deg = 180`, abutting on the beam line, so bow-on it worked ONE of them
+# — and at its then-authored `beam_damage_per_sec = 4` that was about 1 dmg/s into
 # the arc, instrumented — while the target's own Shields AI focuses that arc on
 # the fleet baseline: `focus_bonus_regen = 4` over `regen_per_sec = 2.5` is
 # 6.5 hp/s, and `focus_focused_damage_multiplier` halves what lands. The hold
@@ -271,10 +272,11 @@
 #     entry. No shipped hull does this.
 #   * DYNAMICALLY, by carrying guns that open the arc the launcher is waiting
 #     for. `alliance_battleship`, `alliance_destroyer` and
-#     `ship_harrow_warhawk` have always escaped this way, and since #929's
-#     second pass `alliance_cruiser` does too: its banks are
-#     `beam_damage_per_sec = 24`, which its own file justifies against the
-#     20.8 break-even the arithmetic above implies.
+#     `ship_harrow_warhawk` have always escaped this way, and since #929
+#     `alliance_cruiser` does too: `beam_damage_per_sec = 32` on two banks that
+#     both bear (`auto_arc_deg = 270`), which its own file justifies against a
+#     swept ladder rather than against the arithmetic above — the two-bank case
+#     does NOT halve the single-bank break-even, and that file says why.
 #
 # `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it`
 # censuses the fleet so a hull with neither escape cannot be composed in silence.

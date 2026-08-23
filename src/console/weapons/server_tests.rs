@@ -3695,6 +3695,319 @@ fn torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc() {
     );
 }
 
+// ── The torpedo payload-selection contract (issue #929) ───────────────────
+//
+// `tick_torpedo_lifecycle` picks between the two authored damage fields on the
+// reading of the ONE arc the round flew into, and the four rows of that
+// decision had no direct coverage at all until these. `probe_duel`'s ndjson
+// trace shows the shipped hulls exercising it end to end; what these add is the
+// table itself, at the seam, with everything else held still.
+//
+// Shared fixture: a four-arc player hull at the origin at yaw 0, arcs that do
+// not regen (so the only HP movement is the hit), and a torpedo parked astern
+// so it closes onto the ASTERN arc in one tick — the same geometry
+// `torpedo_hit_from_astern_damages_the_astern_arc_not_the_fore_arc` uses, and
+// for the same reason: a hit routed by a hardcoded bearing would land somewhere
+// else and the reading under test would be the wrong arc's.
+struct PayloadProbe {
+    ship: Entity,
+    astern_arc: usize,
+}
+
+/// Build the fixture. `arc_hp` is what every arc starts at — `0` is how the
+/// shields-DOWN rows are set up, because an arc at zero HP reads 0 through
+/// `hp_facing_bearing` whether it is online or offline.
+fn payload_probe(
+    app: &mut App,
+    arc_hp: i32,
+    damage_hull: i32,
+    damage_shields: i32,
+) -> PayloadProbe {
+    use crate::entities::spawner::EntityUuid;
+    use crate::server_app::LocalShip;
+    use crate::weapons::shield::{ShieldConfig, ShieldSystem};
+
+    start_game_with_weapons(app);
+    let ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<LocalShip>>()
+        .single(app.world())
+        .unwrap();
+
+    let mut shield_sys = ShieldSystem::new(&ShieldConfig {
+        num_facings: 4,
+        max_hp: 100,
+        regen_per_sec: 0.0,
+        offline_duration: 10.0,
+    });
+    for facing in shield_sys.facings.iter_mut() {
+        facing.hp = arc_hp;
+    }
+    app.world_mut().entity_mut(ship).insert((
+        EntityUuid("player-ship".into()),
+        crate::ship::shields::ShipShields(shield_sys, 0.5),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+    ));
+    app.world_mut()
+        .insert_resource(WorldResource(crate::core::messages::WorldData {
+            entities: vec![crate::core::messages::EntitySnapshot {
+                uuid: "player-ship".into(),
+                position: Some([0.0, 0.0, 0.0]),
+                radius: Some(5.0),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+
+    let astern_arc = app
+        .world()
+        .entity(ship)
+        .get::<crate::ship::shields::ShipShields>()
+        .unwrap()
+        .0
+        .facing_index_for_bearing(crate::weapons::shield::attacker_bearing_relative(
+            0.0, 6.0, 0.0, 0.0, 0.0,
+        ));
+
+    set_payload(app, ship, damage_hull, damage_shields);
+    PayloadProbe { ship, astern_arc }
+}
+
+/// Author the two damage fields on every `TorpedoSystem` the tick could read.
+fn set_payload(app: &mut App, ship: Entity, damage_hull: i32, damage_shields: i32) {
+    if let Some(mut ts) = app
+        .world_mut()
+        .entity_mut(ship)
+        .get_mut::<TorpedoSystemResource>()
+    {
+        ts.0.config.damage_hull = damage_hull;
+        ts.0.config.damage_shields = damage_shields;
+    }
+    let mut res = app.world_mut().resource_mut::<TorpedoSystemResource>();
+    res.0.config.damage_hull = damage_hull;
+    res.0.config.damage_shields = damage_shields;
+}
+
+/// Put one round astern of the fixture ship, with the given pierce fraction.
+fn launch_astern(app: &mut App, ship: Entity, shield_pierce: f32) {
+    use crate::weapons::torpedo::Torpedo;
+    let torpedo = Torpedo {
+        uuid: "payload-probe-round".into(),
+        x: 0.0,
+        y: 0.0,
+        z: 6.0,
+        heading: 0.0,
+        pitch: 0.0,
+        lifespan_remaining: 30.0,
+        target_uuid: Some("player-ship".into()),
+        source_uuid: None,
+        tube_id: "aft".into(),
+        shield_pierce,
+    };
+    if let Some(mut ts) = app
+        .world_mut()
+        .entity_mut(ship)
+        .get_mut::<TorpedoSystemResource>()
+    {
+        ts.0.in_flight.push(torpedo.clone());
+    }
+    app.world_mut()
+        .resource_mut::<TorpedoSystemResource>()
+        .0
+        .in_flight
+        .push(torpedo);
+}
+
+fn arc_hp(app: &App, ship: Entity, idx: usize) -> i32 {
+    app.world()
+        .entity(ship)
+        .get::<crate::ship::shields::ShipShields>()
+        .unwrap()
+        .0
+        .facings[idx]
+        .hp
+}
+
+fn hull_total(app: &App, ship: Entity) -> f32 {
+    app.world()
+        .entity(ship)
+        .get::<crate::entities::spawner::EntitySystemHull>()
+        .unwrap()
+        .0
+        .total_current()
+}
+
+/// **Row 1 — the struck arc is UP: the round delivers `damage_shields`, and the
+/// hull is untouched.**
+///
+/// This is the row that makes the gate worth having. 4 points offered to a live
+/// screen against the 40 the same round would put on bare plating.
+#[test]
+fn a_torpedo_meeting_a_live_arc_spends_damage_shields_on_it_and_leaves_the_hull_alone() {
+    let mut app = test_app();
+    let probe = payload_probe(&mut app, 100, 40, 4);
+    let hull_before = hull_total(&app, probe.ship);
+    let arc_before = arc_hp(&app, probe.ship, probe.astern_arc);
+
+    launch_astern(&mut app, probe.ship, 0.0);
+    tick(&mut app);
+
+    assert_eq!(
+        arc_before - arc_hp(&app, probe.ship, probe.astern_arc),
+        4,
+        "a raised arc takes `damage_shields` and nothing else — not the sum of the \
+         two fields, and not `damage_hull`"
+    );
+    assert_eq!(
+        hull_total(&app, probe.ship),
+        hull_before,
+        "…and NOTHING reaches the hull, because `damage_hull` is the other branch. \
+         Before issue #929 this row put 40 points on the hull regardless, which is \
+         what made the tubes' shields-down gate worth 4 points instead of 40"
+    );
+}
+
+/// **Row 2 — the struck arc is DOWN: the round delivers `damage_hull`, whole.**
+///
+/// "Down" is `hp == 0`, which is what `hp_facing_bearing` reports for an arc at
+/// zero charge and for an offline one alike — the same reading the tube's
+/// `fact(target_facing_shields) <= 0` launch guard is seeded from.
+#[test]
+fn a_torpedo_meeting_a_downed_arc_puts_damage_hull_on_the_hull_whole() {
+    let mut app = test_app();
+    let probe = payload_probe(&mut app, 0, 40, 4);
+    let hull_before = hull_total(&app, probe.ship);
+
+    launch_astern(&mut app, probe.ship, 0.0);
+    tick(&mut app);
+
+    assert_eq!(
+        hull_before - hull_total(&app, probe.ship),
+        40.0,
+        "a downed arc is not in the way, so the whole `damage_hull` payload lands — \
+         unabsorbed and unpierced, because there is no screen to pierce"
+    );
+}
+
+/// **Row 3 — an arc ONLINE at exactly 0 HP takes the DOWN branch**, and the
+/// beam path would not.
+///
+/// Since issue #788 a facing legitimately sits at 0 HP while online: that is the
+/// first tick of its regen ramp after an offline window expires.
+/// `hp_facing_bearing` reports 0 for it, so the launch gate opens and this round
+/// takes the shields-down branch.
+///
+/// THE ASYMMETRY WITH THE BEAM PATH IS DELIBERATE AND WORTH NAMING. A beam
+/// arriving at the same arc goes through `ShieldFacing::apply_damage`, whose
+/// overflow branch re-arms `offline_duration` — so a beam SUPPRESSES an arc that
+/// has just come back. This round never touches the shield system on this
+/// branch, so it does not: the just-recovered arc keeps climbing. That is a
+/// difference in favour of the defender and it is intended; the "same seam a
+/// beam takes" claim in `tick_torpedo_lifecycle` is about the arc-UP branch,
+/// which genuinely shares `split_damage_for_pierce` and `apply_damage`.
+#[test]
+fn an_arc_online_at_zero_hp_reads_as_down_and_does_not_get_re_suppressed() {
+    let mut app = test_app();
+    let probe = payload_probe(&mut app, 0, 40, 4);
+    let offline_before = app
+        .world()
+        .entity(probe.ship)
+        .get::<crate::ship::shields::ShipShields>()
+        .unwrap()
+        .0
+        .facings[probe.astern_arc]
+        .offline_remaining;
+    assert_eq!(
+        offline_before, 0.0,
+        "precondition: the arc is ONLINE at zero charge, not offline"
+    );
+    let hull_before = hull_total(&app, probe.ship);
+
+    launch_astern(&mut app, probe.ship, 0.0);
+    tick(&mut app);
+
+    assert_eq!(
+        hull_before - hull_total(&app, probe.ship),
+        40.0,
+        "online at 0 hp reads 0 through the same resolver the launch gate uses, so \
+         the round takes the shields-DOWN branch"
+    );
+    assert_eq!(
+        app.world()
+            .entity(probe.ship)
+            .get::<crate::ship::shields::ShipShields>()
+            .unwrap()
+            .0
+            .facings[probe.astern_arc]
+            .offline_remaining,
+        0.0,
+        "…and the arc is NOT knocked back offline by it, because the down branch \
+         never calls into the shield system. A beam landing here would re-arm the \
+         offline timer through `ShieldFacing::apply_damage`'s overflow branch"
+    );
+}
+
+/// **Row 4 — a victim with no `ShipShields` at all reads DOWN**, so an asteroid
+/// or an unshielded hull still takes the warhead.
+///
+/// The `unwrap_or(0)` on the arc reading is what preserves this, and without a
+/// row for it a future refactor could make "no shields" mean "no damage".
+#[test]
+fn a_victim_with_no_shield_component_takes_damage_hull() {
+    let mut app = test_app();
+    let probe = payload_probe(&mut app, 100, 40, 4);
+    app.world_mut()
+        .entity_mut(probe.ship)
+        .remove::<crate::ship::shields::ShipShields>();
+    let hull_before = hull_total(&app, probe.ship);
+
+    launch_astern(&mut app, probe.ship, 0.0);
+    tick(&mut app);
+
+    assert_eq!(
+        hull_before - hull_total(&app, probe.ship),
+        40.0,
+        "no shield component is the same reading as a downed arc: the hull payload \
+         lands whole. `damage_shields` is never offered to a victim that has \
+         nothing to absorb it"
+    );
+}
+
+/// **`shield_pierce` is a lever on the shields-UP payload only.**
+///
+/// It splits `damage_shields`, never `damage_hull` — which is what its doc
+/// comment has always said and what stopped being true of the old model, where
+/// `damage_hull` bypassed the shield system outright. Half of a 4-point screen
+/// payload is 2 to the hull and 2 to the arc.
+///
+/// Worth pinning even though NO SHIPPED HULL AUTHORS IT: every `[torpedoes]`
+/// block in `assets/entities/` leaves it at the `0.0` default, so this lever is
+/// currently inert in the game and only a test reaches it. That is exactly why
+/// it needs a row — an inert field is one nobody would notice breaking.
+#[test]
+fn torpedo_shield_pierce_splits_the_shields_up_payload_only() {
+    let mut app = test_app();
+    let probe = payload_probe(&mut app, 100, 40, 4);
+    let hull_before = hull_total(&app, probe.ship);
+    let arc_before = arc_hp(&app, probe.ship, probe.astern_arc);
+
+    launch_astern(&mut app, probe.ship, 0.5);
+    tick(&mut app);
+
+    assert_eq!(
+        arc_before - arc_hp(&app, probe.ship, probe.astern_arc),
+        2,
+        "half of the 4-point shields-up payload is offered to the arc"
+    );
+    assert_eq!(
+        hull_before - hull_total(&app, probe.ship),
+        2.0,
+        "…and the pierced half reaches the hull. Note the scale: this is a split of \
+         `damage_shields`, not of `damage_hull` — full pierce on this round is 4 \
+         points, where the shields-DOWN branch is 40"
+    );
+}
+
 // ── Cycle 3: AiEntityDestroyed message written on NPC destruction ─────
 
 #[test]
@@ -14762,11 +15075,12 @@ fn spawn_player_hull_firing_all_banks_at(
 /// `alliance_cruiser` authors `fire_arc_deg = 270` on both banks, and
 /// `handle_fire_phaser` gates on `fire_arc_deg` — so the two arcs genuinely
 /// overlap through 180°, and a target abeam is a real double broadside for a
-/// human. Note the hull's `auto_arc_deg` is only 180: the AI path tells a
-/// different and much narrower story, pinned by
-/// `the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line`
-/// below. This test is deliberately scoped to the manual path and says nothing
-/// about the auto one.
+/// human. Since issue #929's third pass the hull's `auto_arc_deg` is 270 as
+/// well, so the AI path now tells the SAME story rather than the narrower one it
+/// used to; that half is pinned by
+/// `the_player_hulls_270_degree_auto_arcs_both_bear_off_the_beam_line` below.
+/// This test stays scoped to the manual path all the same, because the two gates
+/// are different fields and a hull may separate them again.
 ///
 /// This is still the symmetry proof, because the mechanism is shared:
 /// `handle_fire_phaser` reads `AdmittedCommands` and carries no origin branch at
@@ -14805,23 +15119,39 @@ fn the_player_hulls_270_degree_banks_both_light_on_the_manual_fire_path() {
     }
 }
 
-/// The other half of the player hull's story, and the reason the test above is
-/// scoped to the manual path.
+/// The other half of the player hull's story: the AI path now reaches the same
+/// double broadside the manual path does.
 ///
-/// `alliance_cruiser` authors `auto_arc_deg = 180` on both banks, and
-/// `ai_phaser_auto_fire` gates on `auto_arc_deg`. Two 180-degree arcs centred
-/// fore and aft do not overlap — they abut, sharing only the beam line itself —
-/// so an AI-operated alliance cruiser gets ONE bank at any bearing off that
-/// line, not the double broadside the wide manual arcs give.
+/// **This test's CONTRACT WAS INVERTED by issue #929's third pass, at the
+/// owner's direction.** It used to be
+/// `the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line`,
+/// and it pinned the opposite reading: `alliance_cruiser` authored
+/// `auto_arc_deg = 180` on both banks, two 180-degree arcs centred fore and aft
+/// abut rather than overlap, and an AI-operated cruiser therefore got ONE bank at
+/// any bearing off the seam. That test's own doc said widening the hull to 270
+/// "would fail this - which is the intent: it is a player-facing balance change,
+/// not a refactor". The balance change has now been made deliberately, so the pin
+/// follows it rather than blocking it: the hull authors `auto_arc_deg = 270` on
+/// both banks and `ai_phaser_auto_fire` gates on it, so the AI arcs overlap
+/// through 180 degrees exactly as the manual `fire_arc_deg` pair does.
 ///
-/// The bearing is the whole point. Exactly abeam, `in_arc`'s `<=` admits both
-/// arcs by bit-exact equality on the shared boundary, which reads as an overlap
-/// that is not there; `OFF_BOUNDARY_STARBOARD` stands 11 degrees abaft the beam
-/// so the answer is the real one. Widening the hull's `auto_arc_deg` to 270
-/// would fail this — which is the intent: it is a player-facing balance change,
-/// not a refactor, and issue #790 is scoped to the Harrow cruiser.
+/// SCOPE. `alliance_cruiser` only, read off the shipped hull. No other hull's
+/// arcs moved - `alliance_battleship` still authors 180 on both banks, as does
+/// `ship_harrow_patrol` - so "abutting auto arcs" remains a real and reachable
+/// configuration. It is simply no longer this hull's.
+///
+/// The bearing is still the whole point, and it now matters the other way round.
+/// Exactly abeam, `in_arc`'s `<=` admits both arcs by bit-exact equality on a
+/// shared boundary, which would read as an overlap whether or not one existed;
+/// `OFF_BOUNDARY_STARBOARD` stands 11 degrees abaft the beam, so both banks
+/// answering there is the arcs genuinely overlapping rather than a float tie.
+///
+/// The negative control is the second half below, and without it "both banks
+/// burn" would be indistinguishable from "the auto-arc check stopped being
+/// applied": dead ahead is the aft bank's blind wedge at 270 degrees (it sweeps
+/// 45..315), so exactly one bank may answer there.
 #[test]
-fn the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line() {
+fn the_player_hulls_270_degree_auto_arcs_both_bear_off_the_beam_line() {
     let mut app = test_app();
     app.init_resource::<crate::ai::server::AiTokenRegistry>();
     let ship = spawn_policy_phaser_npc_at(
@@ -14834,9 +15164,26 @@ fn the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line() {
     app.update();
     assert_eq!(
         live_banks_of(&app, ship),
-        vec!["aft".to_string()],
-        "abaft the beam is outside the fore bank's 180-degree AUTO arc: only the aft \
-         bank may burn, however wide the manual fire arc is"
+        vec!["aft".to_string(), "fore".to_string()],
+        "11 degrees abaft the beam is inside BOTH 270-degree AUTO arcs, so an          AI-operated cruiser must burn both banks there - the same double broadside          the manual path has always had"
+    );
+
+    // ...and the blind wedge, so the assertion above is about the arcs and not
+    // about the check having been deleted.
+    let mut app = test_app();
+    app.init_resource::<crate::ai::server::AiTokenRegistry>();
+    let ahead = spawn_policy_phaser_npc_at(
+        &mut app,
+        "cc000000-0000-0000-0000-0000000007b5",
+        "cc000000-0000-0000-0000-0000000007b6",
+        shipped_banks(ALLIANCE_CRUISER_HULL),
+        DEAD_AHEAD,
+    );
+    app.update();
+    assert_eq!(
+        live_banks_of(&app, ahead),
+        vec!["fore".to_string()],
+        "dead ahead is the AFT bank's blind wedge at 270 degrees: only the fore bank          may burn, which is what keeps these arcs 270 rather than 360"
     );
 }
 

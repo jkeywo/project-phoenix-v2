@@ -123,12 +123,13 @@ pub struct ActiveBeamSlot {
 /// The shape is [`PhaserCooldown`]'s, deliberately: per-bank state that already
 /// worked keyed by the same `PhaserBankConfig.id` used everywhere else. Nothing
 /// here branches on who owns the hull (AGENTS.md #6) — how many banks bear is
-/// decided entirely by the arcs a hull authors. The player's `alliance_cruiser`
-/// authors `fire_arc_deg = 270` but `auto_arc_deg = 180`, and `handle_fire_phaser`
-/// gates on the former while `ai_phaser_auto_fire` gates on the latter, so it
-/// gets the same double broadside on the MANUAL path; its two auto arcs abut on
-/// the beam line rather than overlapping. `ship_harrow_cruiser` authors 270° on
-/// both, and double-broadsides on both paths.
+/// decided entirely by the arcs a hull authors, and the two gates are separate
+/// fields: `handle_fire_phaser` reads `fire_arc_deg`, `ai_phaser_auto_fire` reads
+/// `auto_arc_deg`. The player's `alliance_cruiser` authored 270 and 180
+/// respectively until issue #929 and so double-broadsided on the MANUAL path
+/// only; it now authors 270 on both and double-broadsides on either.
+/// `ship_harrow_cruiser` has always authored 270 on both. `alliance_battleship`
+/// is the remaining split case, with abutting 180-degree auto arcs.
 ///
 /// ## Why `BTreeMap` and not `HashMap`
 ///

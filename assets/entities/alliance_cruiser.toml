@@ -88,15 +88,46 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 # all three orbit names being present on the STEERING axis, and "one authoring the
 # throttle but not the range would fly a tangent of a ring of radius zero".
 #
-# ── What is NOT changed, and stays not changed ───────────────────────────────
+# ── The AI arcs WIDENED, and what that did and did not buy ──────────────────
 #
-# Both phaser banks keep `auto_arc_deg = 180`. Their AI arcs abut on exactly the
-# line the ring parks the target on, so one bank bears at any bearing off the seam
-# — the ring costs the double broadside a 270-degree pair would give, it does not
-# silence the beams. Widening them is a player-facing balance change, pinned as
-# deliberate by
-# `the_player_hulls_180_degree_auto_arcs_do_not_both_bear_off_the_beam_line`, and
-# is not an implementer's call.
+# Both phaser banks author `auto_arc_deg = 270`, matching their `fire_arc_deg`,
+# so an AI-operated hull double-broadsides on the beam exactly as a human gunner
+# always could. Owner-directed, issue #929's third pass. Until then both banks
+# authored 180, and this block said the opposite — that the abutting pair was
+# deliberate and widening it "is a player-facing balance change, not an
+# implementer's call". It was, and it has now been made.
+#
+# WHAT IT BOUGHT IS NOT WHAT IT LOOKS LIKE, and this is the finding worth
+# keeping. The expectation was that two banks bearing instead of one halves the
+# `beam_damage_per_sec` the hull needs. Measured, it RAISED it: the swept knee
+# went from 24 to 32 (the ladder is above the `fore` bank). Instrumented on
+# `probe_duel` seed 3, same seed, same damage, one variable:
+#
+#                       auto 180 (abutting)   auto 270 (overlapping)
+#   beam activations     7                     7
+#   simultaneous pairs   0                     1
+#   union beam-on-target 34.4 s of 90 (38 %)   28.4 s of 90 (32 %)
+#   enemy arc collapses  5                     3
+#
+# The abutting pair was never costing this hull output — it was STAGGERING it.
+# The ring rotates, so the target crosses out of one 180-degree arc and into the
+# other, and a bank came off its 6 s cooldown into a bearing just as its sibling
+# went cold: near-continuous pressure out of two intermittent guns. Overlapping
+# arcs let both fire at once and then both cool at once, and a focused arc
+# regenerating 6.5 hp/s recovers everything inside a synchronised dead window.
+# Against a self-focusing screen, COVERAGE beats burst.
+#
+# So the wider arcs are worth having for the player-facing reason (the AI now
+# fights the ship the way the manual arcs always allowed, and a big burst is a
+# real tactical shape) and are paid for with the higher knee. Anyone revisiting
+# this should look at `cooldown_secs` before `auto_arc_deg`: the duty cycle is
+# what actually binds, and it is the one lever neither pass has touched.
+#
+# Pinned by `the_player_hulls_270_degree_auto_arcs_both_bear_off_the_beam_line`
+# (src/console/weapons/server_tests.rs), which also holds the blind-wedge control
+# — dead ahead is still the aft bank's 90-degree gap, so these are 270 and not
+# 360. [ai] Unratified: the arc width is a balance decision with a measured cost
+# and belongs on the ratification list beside the damage value.
 #
 # Resolution happens at authoring time. The runtime never sees a fragment — it
 # sees one resolved document, and PRD #774's "every AI-capable fine system
@@ -329,12 +360,14 @@ range = 50
 shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
 selects = [ "ship", "station", "asteroid" ]
 
-# ── `beam_damage_per_sec = 24`: what a bank has to be worth once torpedoes
-#    stop ignoring shields (issue #929, second pass) ─────────────────────────
+# ── `beam_damage_per_sec = 32`: what a bank has to be worth once torpedoes
+#    stop ignoring shields (issue #929) ────────────────────────────────────────
 #
-# [ai] Unratified, both banks. Was 4. This is the hull's whole anti-shield
-# tuning and it belongs on the ratification list; the argument, the arithmetic
-# and the swept ladder are all here so a ratifier can move it on evidence.
+# [ai] Unratified, both banks. Was 4, went to 24 on the second pass with
+# `auto_arc_deg = 180`, and is 32 now that both banks bear (see "The AI arcs
+# WIDENED" in the header). This is the hull's whole anti-shield tuning and it
+# belongs on the ratification list; the argument, the arithmetic and both swept
+# ladders are here so a ratifier can move it on evidence.
 #
 # WHY IT HAD TO MOVE AT ALL. Torpedoes no longer bypass a raised arc: a round
 # delivers `damage_shields = 4` into a live screen and `damage_hull = 40` into a
@@ -360,60 +393,79 @@ selects = [ "ship", "station", "asteroid" ]
 #           `tick_shield_focus_ai` focuses whichever arc took >= 50 % of the
 #           recent damage window, which is the arc this hull is shooting.
 #
-# Only ONE bank ever contributes: `auto_arc_deg = 180` on both, abutting on the
-# ring's beam line (see "What is NOT changed" in the header — widening them is
-# not an implementer's call and is pinned as deliberate).
-#
-# So the arc loses `D x 1.25 x 0.5 x 0.5 = 0.3125 D` hp/s, against an
+# So the arc loses `D x 0.3125` hp/s per bearing bank, against an
 # `alliance_destroyer` focused arc regenerating at `2.5 + focus_bonus_regen 4 =
-# 6.5` hp/s. Break-even is `D = 20.8`. Below it the gate is UNSATISFIABLE against
-# that hull and the helm's `torpedo_run` leg goes back to being a sink — which is
-# exactly what issue #929 was filed for.
+# 6.5` hp/s. With ONE bank that is break-even at D = 20.8. THE NAIVE READING OF
+# TWO BANKS — halve it to 10.4 — IS WRONG, and the measurement says so
+# emphatically. Two banks that bear TOGETHER also cool together, so the naive
+# doubling assumes a coverage the hull does not get; what the abutting pair used
+# to give it was a STAGGER (the header has the instrumented numbers). Coverage
+# beats burst against a screen that regenerates, so the real knee went UP.
 #
 # THE LADDER, `probe_duel --deterministic --hz 30 --sim-seconds 90`, seeds 1-12,
-# one variable, everything else at the values shipped here:
+# one variable, at the shipped `auto_arc_deg = 270`:
 #
-#   D    launches>0   mean bow hold   cruiser deals   duels that resolve
-#   4      0/12          22.2 s            63           0/12
-#   8      0/12          27.4 s           143           0/12   <- x2, still zero
-#   12     5/12          24.5 s           270           0/12
-#   16     8/12          23.5 s           378           2/12
-#   20     9/12          21.1 s           504           6/12
-#   24    12/12          14.1 s           542          10/12   <- shipped
+#   D    launches>0   mean bow hold   cruiser deals   duels resolving
+#   6      0/12          26.0 s           107          0/12
+#   8      0/12          26.0 s           144          0/12
+#   10     3/12          25.1 s           208          0/12
+#   12     6/12          23.5 s           274          0/12
+#   14     8/12          24.3 s           336          1/12
+#   16     8/12          23.7 s           401          2/12
+#   18     8/12          23.6 s           402          2/12
+#   20     8/12          23.4 s           437          4/12
+#   22     8/12          23.8 s           471          7/12
+#   24    10/12          23.5 s           520          8/12
+#   28    10/12          19.4 s           540          8/12
+#   32    12/12          10.6 s           516         10/12   <- shipped
+#   40    12/12           5.8 s           517         11/12
 #
-# 24 is the KNEE, not a preference: it is the first rung at which every seed
-# opens the gate, and it sits just above the 20.8 the arithmetic predicts. Swept
-# wider at 24 — the same 28 seeds #929's first pass used — 28/28 launch (2-5
-# rounds), 23/28 resolve, and the cruiser wins 22 of them having previously won
-# none. Below 24 the ladder is not a milder version of the same thing; it is the
-# deadlock, on however many seeds fall short that run.
+# …and the same ladder at the PREVIOUS `auto_arc_deg = 180`, kept because it is
+# the evidence that the wider arcs cost rather than saved:
 #
-# WHAT 24 IS NOT. It is not the fleet's heaviest battery, though it is the
-# largest single `beam_damage_per_sec` number in it, and the difference is the
-# point. Time-averaged over duty cycle and counting only banks that can bear
-# together:
+#   D     4     8    12    16    20    24
+#   seeds 0/12  0/12 5/12  8/12  9/12  12/12   <- knee was 24
 #
-#   ship_harrow_warhawk   12 x 2 banks (auto 270, overlapping) x 8/12  = 16 /s
-#   this hull at 24       24 x 1 bank  (auto 180, abutting)    x 6/12  = 12 /s
-#   ship_harrow_cruiser    6 x 2 banks (auto 270, overlapping) x 5/9   = 6.7 /s
-#   ship_harrow_patrol     8 x 2 banks (auto 180, abutting)    x 5/9   = 4.4 /s
-#   alliance_battleship    8 x 1 bank  (auto 180, abutting)    x 6/12  = 4 /s
-#   alliance_destroyer     3 x 1 omni  (auto 360)              x 4/8   = 1.5 /s
+# 32 is the KNEE, not a preference: the first rung at which every seed opens the
+# gate. Swept wider at 32 — the same 28 seeds the earlier passes used — 28/28
+# launch (2-4 rounds), 25/28 resolve inside 90 s and 28/28 inside 180 s, and this
+# hull WINS 25 of the 28 and loses 3.
 #
-# The headline number is large because the hull throws away three quarters of it
-# on geometry and cooldown. A ratifier who would rather see a smaller number has
-# two levers that would buy it — `cooldown_secs` (the duty half) and
-# `auto_arc_deg` (the one-bank-at-a-time half) — and both are deliberately NOT
-# taken here: the second is pinned as a design decision, and the first was left
-# alone because the directive for this pass was to tune damage first and reach
-# for other levers only if damage could not get there. It could.
+# WHAT 32 IS NOT, AND WHAT IT IS. On paper this is now the fleet's heaviest beam
+# battery, and the comparison only means anything if the BEARING is stated —
+# where a pair overlaps depends on where the banks point, and no two hulls here
+# agree. Time-averaged over each bank's own duty cycle:
+#
+#   hull                 banks              peak (both bear)   abeam
+#   this hull at 32      0/180, auto 270    32 /s              32 /s
+#   ship_harrow_warhawk  -90/+90, auto 270  16 /s              8 /s
+#   ship_harrow_cruiser  0/180, auto 270    6.7 /s             6.7 /s
+#   ship_harrow_patrol   -90/+90, auto 180  never doubles      4.4 /s
+#   alliance_battleship  0/180, auto 180    never doubles      4 /s (fore) / 2 (aft)
+#   alliance_destroyer   one omni, auto 360 1.5 /s             1.5 /s
+#
+# The two shapes differ in WHERE they double. Banks on the centreline (this hull,
+# `ship_harrow_cruiser`) overlap through the BEAM quadrants, which is exactly
+# where a broadside ring holds its target — so the peak is the number this
+# doctrine actually gets. Banks on the beam (`ship_harrow_warhawk`,
+# `ship_harrow_patrol`) overlap dead ahead and dead astern instead, so a warhawk
+# working a target abeam is on 8 /s and reaches 16 only on a bow or stern
+# aspect. The battleship's abut on the beam line and never overlap at all.
+#
+# So this hull is genuinely the heaviest in the geometry its own doctrine flies,
+# by a factor of four over the warhawk abeam. The honest gloss is that the paper
+# figure overstates it even so: all 32 /s arrives inside a 6-second window and
+# then nothing arrives for six, and against a focused screen the dead half is
+# worth less than the arithmetic says — which is the whole finding recorded in
+# the header. `cooldown_secs` is the lever that would change that, and neither
+# it nor any other pass of this issue has touched it.
 [[weapons_console.phaser_banks]]
 id = "fore"
 facing_deg = 0
 fire_arc_deg = 270
-auto_arc_deg = 180
+auto_arc_deg = 270
 beam_range = 40
-beam_damage_per_sec = 24
+beam_damage_per_sec = 32
 beam_duration_secs = 6
 cooldown_secs = 6
 beam_color = [ 0.25, 0.75, 1, 1 ]
@@ -440,8 +492,9 @@ marker = "phasers_fore"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
-# `beam_damage_per_sec = 24` here too, and for the same reason — the argument,
-# the arithmetic and the swept ladder are written out once above the `fore` bank.
+# `beam_damage_per_sec = 32` here too, and for the same reason — the argument,
+# the arithmetic and both swept ladders are written out once above the `fore`
+# bank.
 # The pair is deliberately symmetric: the ring puts whichever bank is on the
 # inside onto the target, and a hull whose two broadsides were worth different
 # amounts would make the orbit direction a balance lever nobody authored.
@@ -450,9 +503,9 @@ marker = "phasers_fore"
 id = "aft"
 facing_deg = 180
 fire_arc_deg = 270
-auto_arc_deg = 180
+auto_arc_deg = 270
 beam_range = 40
-beam_damage_per_sec = 24
+beam_damage_per_sec = 32
 beam_duration_secs = 6
 cooldown_secs = 6
 beam_color = [ 0.25, 0.75, 1, 1 ]
@@ -537,11 +590,12 @@ marker = "torpedo_port"
   #      x0.5 incoming — measured at about 1 dmg/s into the arc, with
   #      `hull_taken: 0` on the target across a whole `probe_aggressor` run.
   #      That was true, and the answer is the bank, not the gate:
-  #      `beam_damage_per_sec` is 24 (the ladder above the `fore` phaser bank
-  #      shows break-even at 20.8 and the measured knee at 24). Over the same 28
-  #      seeds the striking arc now collapses 3-5 times a run, and every round
-  #      this hull launches detonates on a DOWN arc for its full 40 — traced
-  #      tick by tick on seeds 3, 12 and 34.
+  #      `beam_damage_per_sec` is 32 on both banks, which both bear since the
+  #      arcs widened to 270 (the ladder above the `fore` phaser bank has the
+  #      sweep, and the header has why the wider arcs RAISED the knee rather
+  #      than halving it). Over the same 28 seeds the striking arc now collapses
+  #      3-4 times a run, and every round this hull launches detonates on a DOWN
+  #      arc for its full 40 — traced tick by tick on seeds 3, 12 and 34.
   #
   #   3. THE HELM LEG STILL ASKS THE WEAKER QUESTION, AND THAT IS NOW SAFE.
   #      `movement_broadside_orbit`'s `torpedo_run` opens on readiness alone here
@@ -559,25 +613,41 @@ marker = "torpedo_port"
   # (1-14, 17, 21, 31, 34, 41, 43, 47, 55, 59, 61, 89, 144, 792, 838), against
   # the first pass's shipped state on the same command line:
   #
-  #                       first pass (gate off, 4 dmg/s)   here (gate on, 24)
-  #   launches, this hull  4 on every seed                  2-5, 28/28 seeds
-  #   bow hold             0.0-3.9 s                        12.2-27.2 s
-  #   damage dealt         290-489 (mean 341)               350-623 (mean 536)
-  #   damage taken         348-852 (mean 706)               186-785 (mean 475)
-  #   target hull damage   240 on 26 of 28 seeds            396-433
-  #   duels that resolve   12/28, ALL of them this hull     23/28, this hull
-  #                        dying                            winning 22
+  #                      first pass    second pass   HERE
+  #                      (gate off,    (gate on,     (gate on, 270 arcs,
+  #                       4 dmg/s)      180, 24)      32)
+  #   launches            4 every seed  2-5, 28/28    2-4, 28/28
+  #   bow hold            0.0-3.9 s     12.2-27.2 s   0.5-13.4 s
+  #   damage dealt        290-489       350-623       272-591 (mean 524)
+  #   damage taken        348-852       186-785       190-707 (mean 414)
+  #   target hull damage  240 on 25/28  198-433       150-422
+  #                       (240-306)     (mean 385)    (mean 389)
+  #   resolve in 90 s     12/28         23/28         25/28
+  #   THIS HULL WINS      0 of 28       22 of 28      25 of 28
+  #   this hull DIES      12 of 28      1 of 28       0 of 28 (3 at 180 s)
   #
   # That 240 is the sharpest line in the table: it is 6 rounds x 40 of torpedo
-  # pierce and nothing else, on nearly every seed, because the beams never once
-  # reached hull. `combat_test`, 150 s, seeds 1-3: 4 launches either way, but
-  # damage taken 551-738 -> 93-94, and this hull now makes a kill on all three.
-  # `probe_aggressor`: the passive target, previously never killed inside 90 s,
-  # dies at 16.8-17.7 s.
+  # pierce and nothing else, on 25 of the 28 seeds, because the beams never once
+  # reached hull. (The three that differ — 31, 55 and 838 — read 268, 306 and 273,
+  # i.e. the same magazine plus a few points of collision or region damage. The
+  # RANGES on the two later columns are the full 28 seeds and their low tails are
+  # the seeds the fight does not finish inside the window, not a weaker salvo: at
+  # 32 the three unresolved seeds give 150, 267 and 312 against a mean of 389.) At 180 s every one of the 28 resolves and the split is 25 wins
+  # to 3 losses (the hull dies on seeds 9 at 95.0 s, 2 at 142.1 s and 89 at
+  # 176.7 s). `combat_test`, 150 s, seeds 1-3: 4 launches, 737 dealt against
+  # 152-167 taken, two kills apiece. `probe_aggressor`: the passive target,
+  # previously never killed inside 90 s, dies at 17.2-17.4 s.
   #
-  # The bow hold GREW, and that is the leg being flown rather than skipped: the
-  # first pass measured 0.0-3.9 s because a hull that may launch at any moment
-  # never needs to hold for a window. A long occupancy is not the failure; an
+  # AN 89 PER CENT WIN RATE AGAINST A DESTROYER IS A RATIFICATION QUESTION, not a
+  # claim this file is making. It is what the measured knee produces, and the knee
+  # was chosen to satisfy the LAUNCH criterion (every seed opens the gate) rather
+  # than to hit a target win rate. Turning the rate down is a separate tuning pass
+  # with its own sweep; the levers are the same ones named above the `fore` bank.
+  #
+  # The bow hold moved twice and is worth reading as a pair: 0.0-3.9 s when the
+  # launcher was unconditional (a hull that may fire at any moment never has to
+  # hold for a window), 12.2-27.2 s when the gate came back at 24, and 0.5-13.4 s
+  # now that the guns open the arc sooner. A long occupancy is not the failure; an
   # occupancy with no launch in it is, and there are none of those left.
   #
   # Retuning is still one number, and it is now the fleet's: `0` is what every
@@ -625,7 +695,7 @@ marker = "torpedo_starboard"
   # `fact(target_facing_shields) <= 0` (issue #929's second pass: a round meets
   # the arc it flew into, and only a DOWN arc buys it the 40-point hull payload
   # — 4 into a live one — so the wait is worth ten times the round, and this
-  # hull's 24 dmg/s banks can now open the arc to end it) is written out once,
+  # hull's 32 dmg/s banks can now open the arc to end it) is written out once,
   # above the `fore_port` tube.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
@@ -667,7 +737,7 @@ marker = "torpedo_aft"
   # `fact(target_facing_shields) <= 0` (issue #929's second pass: a round meets
   # the arc it flew into, and only a DOWN arc buys it the 40-point hull payload
   # — 4 into a live one — so the wait is worth ten times the round, and this
-  # hull's 24 dmg/s banks can now open the arc to end it) is written out once,
+  # hull's 32 dmg/s banks can now open the arc to end it) is written out once,
   # above the `fore_port` tube.
   [torpedoes.tubes.ai]
   # The RED-ALERT fire gate (issue #872). `red_alert` is a host-seeded typed
@@ -1413,9 +1483,24 @@ verb = "release_torpedo"
 # against uncomposed's 14, deals a mean 29.0 against 22.5 and takes a mean 189
 # against 281. The regression is gone rather than merely narrowed, on all three.
 #
-# What is NOT claimed: that this hull WINS `probe_duel`. At every throttle tried,
-# composed or not, the best result against that destroyer is a draw. The doctrine
-# improves a fight the cruiser still does not win.
+# WITHDRAWN (issue #929). This paragraph read: "What is NOT claimed: that this
+# hull WINS `probe_duel`. At every throttle tried, composed or not, the best
+# result against that destroyer is a draw. The doctrine improves a fight the
+# cruiser still does not win." That was true of the hull it was measured on and
+# is now flatly false — the cruiser wins 25 of 28 `probe_duel` seeds and loses 3.
+# Nothing about the throttle changed; the guns did (`beam_damage_per_sec` 4 -> 32
+# with both banks bearing) and torpedoes stopped bypassing raised screens.
+#
+# READ EVERY NUMBER IN THIS SECTION AS HISTORICAL. The whole throttle sweep above
+# was measured at `beam_damage_per_sec = 4` under the old torpedo impact model,
+# so its damage totals (62-67 dealt on `probe_aggressor`, "a mean 29.0 against
+# 22.5") and its survival counts belong to that hull. What survives the change is
+# the SHAPE the sweep establishes and the reason 0.7 is authored: a flat optimum
+# across 0.60-0.85 on the aggressor probe, a cliff at 0.82 on the duel, and a
+# yaw-authority argument that is pure geometry (`v / r` against `max_yaw_rate`)
+# and does not depend on the guns at all. Re-running the sweep against the
+# current guns is a ratification job, not a correction — none of the evidence
+# above argues for a different value, it merely no longer measures this hull.
 #
 # ── The torpedo run's range gate ─────────────────────────────────────────────
 #

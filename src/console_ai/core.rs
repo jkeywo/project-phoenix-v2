@@ -183,9 +183,10 @@ pub struct TorpedoAiInput {
 /// the fleet reading against a self-focusing warship — and its helm's
 /// `torpedo_run` bow hold exits only on a round having LEFT a tube, so an
 /// unreachable launch gate turned an authored leg into a sink. #929's second pass
-/// restored the fleet text there and paid for it on the guns instead (24 dmg/s a
-/// bank), which it could do because a round no longer bypasses a raised arc: the
-/// gate is now worth ten times the round it delays. Either way the point for a
+/// restored the fleet text there and paid for it on the guns instead (32 dmg/s a
+/// bank since the third pass, across two that both bear), which it could do
+/// because a round no longer bypasses a raised arc: the gate is now worth ten
+/// times the round it delays. Either way the point for a
 /// reader HERE is the narrow one — which tubes gate on the striking arc, and
 /// against what threshold, is per-hull content, and this function reads none of
 /// it. `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it`

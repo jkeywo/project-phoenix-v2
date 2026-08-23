@@ -393,8 +393,8 @@ const BESPOKE_DOCTRINES: &[(&str, &str)] = &[
     //
     // #929's second pass moved the OTHER half. Torpedoes stopped bypassing a
     // raised arc, which made holding the round worth ten times spending it, and
-    // the banks went to 24 dmg/s so the gate is reachable — measured, 28/28
-    // `probe_duel` seeds. The tubes are back on the fleet text word for word and
+    // the banks went to 24 dmg/s so the gate is reachable, and to 32 across a
+    // widened pair on the third pass — measured, 28/28 `probe_duel` seeds. The tubes are back on the fleet text word for word and
     // must not be listed here: the unanimity check below is what would notice
     // them drifting off it again.
     // ── The composed HARROW doctrines (issue #878) ───────────────────────────
@@ -3443,7 +3443,20 @@ fn torpedo_launch_shield_gate_truth_table() {
 /// the pin does not try to prove it. What it can prove is the corner where no
 /// escape of either kind is even possible — a hull that points its bow, waits
 /// for a gap, and carries nothing that BEARS on the bow to make one — and that
-/// list must stay empty. The named bucket beside it is the reader's half: a hull
+/// list must stay empty.
+///
+/// BE CLEAR ABOUT HOW WEAK THAT PREDICATE IS. `armed_bow` is PRESENCE-ONLY: it
+/// asks whether a bow-bearing bank exists and is authored to hurt something at
+/// all, and it cannot tell 24 dmg/s from 1. A hull whose banks were retuned from
+/// 32 down to 4 would still land in the armed bucket and still pass, while its
+/// launch gate quietly became unreachable again — which is precisely what
+/// issue #929 was filed for. This pin is therefore a NECESSARY condition and
+/// never a sufficient one; the sufficiency guard is the seeded sweep the hull's
+/// own file carries, backed by
+/// `tests/headless_runner.rs::the_player_cruisers_own_tubes_fire_in_a_resolving_duel`,
+/// which measures the gate opening in a real fight rather than inferring it.
+///
+/// The named bucket beside the empty one is therefore the reader's half: a hull
 /// in it owes seeded evidence in its own file that its guns actually open the
 /// arc, the way `alliance_cruiser.toml` carries a 28-seed `probe_duel` sweep.
 ///
@@ -3453,10 +3466,15 @@ fn torpedo_launch_shield_gate_truth_table() {
 /// HP — the weapons power rung (x1.25 at the combat rung), the bank's duty cycle
 /// (x0.5 at 6 s on 6 s), and `focus_focused_damage_multiplier` (x0.5). Against an
 /// `alliance_destroyer` arc regenerating 6.5 hp/s focused, break-even is 20.8
-/// dmg/s a bank; the cruiser's banks are 24. That steady state is PESSIMISTIC —
-/// the target's focus follows the damage with a lag, an unfocused arc takes
-/// x1.25 and regenerates 1.5, and a target losing systems defends worse — which
-/// is why the number that settles it is the sweep and not this paragraph.
+/// dmg/s for ONE bearing bank; the cruiser's banks are 32 and both bear. Do not
+/// read that as slack: two banks that bear together also COOL together, so the
+/// naive halving of the single-bank figure is wrong and the measured knee went
+/// UP when the arcs widened, not down (`alliance_cruiser.toml` has the
+/// instrumented comparison). The steady state is also PESSIMISTIC in the other
+/// direction — the target's focus follows the damage with a lag, an unfocused arc
+/// takes x1.25 and regenerates 1.5, and a target losing systems defends worse.
+/// Both of which is why the number that settles it is the sweep and not this
+/// paragraph.
 ///
 /// Read behaviourally rather than by name — the bow-hold state is discovered by
 /// the verb it resolves, and both guards are resolved through the real predicate

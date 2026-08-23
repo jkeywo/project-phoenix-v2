@@ -2774,6 +2774,17 @@ pub struct TorpedoesConfig {
     /// A lever on the shields-UP payload only: the shields-down payload
     /// (`damage_hull`) meets no screen and so has nothing to pierce
     /// (issue #929).
+    ///
+    /// CURRENTLY INERT ACROSS THE SHIPPED FLEET. No `[torpedoes]` block in
+    /// `assets/entities/` authors it, so every hull runs at the `0.0` default and
+    /// the whole shields-up payload goes to the arc. The `shield_pierce` values
+    /// that DO appear in those files are on beam and blaster banks, which are a
+    /// different field on a different struct. Note the scale before reaching for
+    /// it: it splits `damage_shields`, so full pierce on an Alliance round is 4
+    /// points where the shields-down branch is 40. Pinned by
+    /// `console::weapons::server_tests::torpedo_shield_pierce_splits_the_shields_up_payload_only`,
+    /// which exists precisely because an inert field is one nobody would notice
+    /// breaking.
     #[serde(default)]
     pub shield_pierce: f32,
     /// Per-tube torpedo definitions parsed from `[[torpedoes.tubes]]`.

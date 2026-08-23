@@ -1463,6 +1463,19 @@ pub(crate) fn tick_torpedo_lifecycle(
                 // its doc comment has always said, and the remainder goes into
                 // the facing with the overflow spilling to hull — the same three
                 // lines `console::weapons::beam` runs.
+                //
+                // "The same seam a beam takes" is a claim about THIS branch only,
+                // and the `_` branch below differs from a beam in one way worth
+                // naming. An arc ONLINE at exactly 0 HP — the first tick of the
+                // regen ramp after an offline window expires (issue #788) — reads
+                // 0 here and takes the shields-DOWN branch, which never calls into
+                // the shield system at all. A beam landing on that same arc goes
+                // through `ShieldFacing::apply_damage`, whose overflow branch
+                // re-arms `offline_duration`, so a beam SUPPRESSES an arc that has
+                // just come back and a torpedo does not. That asymmetry is
+                // deliberate and it favours the defender: a screen that has
+                // survived long enough to start climbing keeps climbing. Pinned by
+                // `server_tests::an_arc_online_at_zero_hp_reads_as_down_and_does_not_get_re_suppressed`.
                 Some(ref mut shields) if struck_arc_hp > 0 => {
                     let (pierced, absorbed) =
                         crate::ship::damage::split_damage_for_pierce(payload, det.shield_pierce);

@@ -76,11 +76,24 @@ No authored number had to move: every hull already writes `damage_hull` an order
 
 ### The cruiser, and why the fix was the guns
 
-`alliance_cruiser` is the hull that could not reach the fleet reading. Against a shielded warship — the only thing its doctrine is written for; the fact still reads 0 for an unshielded hull, an asteroid, or an arc already offline, and those shots are taken — two things compound. Its two phaser banks' `auto_arc_deg = 180` abut on the beam line its own broadside ring holds the target on, so exactly one bears. And the arc is actively defended: not by the **shields** power group, which never bids and sits at its commanded 2 where `ShieldRegen` is ×1.0, but by the target's own Shields AI, which focuses the arc taking the damage — `focus_bonus_regen = 4` takes an `alliance_destroyer` arc from 2.5 to 6.5 hp/s while `focus_focused_damage_multiplier = 0.5` halves what lands on it.
+`alliance_cruiser` is the hull that could not reach the fleet reading. Against a shielded warship — the only thing its doctrine is written for; the fact still reads 0 for an unshielded hull, an asteroid, or an arc already offline, and those shots are taken — two things compounded. Its two phaser banks then authored `auto_arc_deg = 180`, abutting on the beam line its own broadside ring holds the target on, so exactly one bore. And the arc is actively defended: not by the **shields** power group, which never bids and sits at its commanded 2 where `ShieldRegen` is ×1.0, but by the target's own Shields AI, which focuses the arc taking the damage — `focus_bonus_regen = 4` takes an `alliance_destroyer` arc from 2.5 to 6.5 hp/s while `focus_focused_damage_multiplier = 0.5` halves what lands on it.
 
 That is a real cost, because the helm's `torpedo_run` bow hold exits only on `tubes_full < 1` / `tubes_fillable < 1`, both of which need a round to have left a tube: a launcher that can never fire turns the leg into a sink and the hull parks in front of its target with thrust cut. #929's first pass answered it by switching the launcher gate off; its second pass answered it on the attack side instead, because with the impact model above the gate is worth keeping.
 
-Break-even is arithmetic. Three factors sit between an authored `beam_damage_per_sec` and the arc's HP — `ModifierSlot::PhaserDamage` at the combat weapons rung (×1.25), the bank's 6 s / 6 s duty cycle (×0.5), and the focus multiplier (×0.5) — so the arc loses `D × 0.3125` hp/s against 6.5 hp/s of regen, and `D` must clear 20.8. Both banks went 4 → 24, which a swept `probe_duel` ladder confirms is the knee: at 8 no seed of twelve opens the gate, at 16 eight do, at 20 nine, at 24 all twelve (and 28 of 28 on the wider sweep). 24 is the fleet's largest single `beam_damage_per_sec` but not its heaviest battery — time-averaged over duty and counting only banks that bear together, `ship_harrow_warhawk` is 16 dmg/s against this hull's 12.
+Break-even is arithmetic, for one bearing bank. Three factors sit between an authored `beam_damage_per_sec` and the arc's HP — `ModifierSlot::PhaserDamage` at the combat weapons rung (×1.25), the bank's 6 s / 6 s duty cycle (×0.5), and the focus multiplier (×0.5) — so the arc loses `D × 0.3125` hp/s against 6.5 hp/s of regen, and `D` must clear 20.8. With the abutting 180° auto arcs the swept knee was exactly there, at 24.
+
+**Then the arcs widened to 270° on both banks, and the knee went UP rather than down.** The naive reading — two banks bearing instead of one halves the requirement, to about 10.4 — is wrong, and the measurement is emphatic: the swept knee moved 24 → 32. Instrumented on `probe_duel` seed 3, one variable:
+
+| | auto 180° (abutting) | auto 270° (overlapping) |
+| --- | --- | --- |
+| beam activations | 7 | 7 |
+| simultaneous pairs | 0 | 1 |
+| union beam-on-target | 34.4 s of 90 (38%) | 28.4 s of 90 (32%) |
+| enemy arc collapses | 5 | 3 |
+
+So `beam_damage_per_sec` ships at **32** on both banks, the first rung of the swept ladder at which all twelve sampled seeds open the launch gate. Over the wider 28-seed sweep the cruiser launches on 28/28, and **wins 25 of the 28 duels against the destroyer, losing 3** — where before the issue it won none of them. That win rate is a consequence of the knee, not a target it was tuned to, and moving it is a ratification question.
+
+The abutting pair was not costing the hull output, it was **staggering** it: the ring rotates, so the target crosses out of one 180° arc and into the other, and a bank came off its 6 s cooldown into a bearing just as its sibling went cold — near-continuous pressure out of two intermittent guns. Overlapping arcs let both fire at once and then both cool at once, and a focused arc regenerating 6.5 hp/s recovers everything inside a synchronised dead window. **Against a self-focusing screen, coverage beats burst.** The lever that would fix that directly is `cooldown_secs`, which no pass has touched.
 
 `authored_ai_pins::a_bow_hold_a_hull_can_reach_and_a_launcher_that_can_answer_it` censuses the fleet for the entry/launcher pairing. A weak entry beside a strict launcher is a deadlock only when the hull carries nothing that bears on its own bow — that corner is provable from authored text and stays asserted empty — and a hull that escapes on its guns instead is named in a bucket beside it, owing the seeded sweep its own file carries.
 
@@ -120,7 +133,7 @@ Break-even is arithmetic. Three factors sit between an authored `beam_damage_per
 | Resource | Purpose |
 |---|---|
 | `TacticalRadarSelection` | Currently locked target UUID (`None` if no lock); the ship's Combat Lock, lifted into `ViewscreenBlackboard::combat_lock` (#829) |
-| `ActiveBeam` | Active phaser beams, tracked **per bank** (issue #790): an ordered `bank -> {target UUID, remaining seconds, damage accumulator}` map. A hull whose arcs overlap burns both banks at once on a target abeam, and the two shipped fore/aft pairs overlap by different amounts: `ship_harrow_cruiser` authors 270° on **both** `fire_arc_deg` and `auto_arc_deg`, so it double-broadsides on the manual (`handle_fire_phaser`) and AI (`ai_phaser_auto_fire`) paths alike; `alliance_cruiser` authors `fire_arc_deg = 270` but `auto_arc_deg = 180`, so it double-broadsides on the manual path only — its two auto arcs abut on the beam line rather than overlapping. Same shape as `PhaserCooldown`, ordered rather than hashed so the per-tick shooter snapshots (and the seeded damage draws they feed) stay deterministic |
+| `ActiveBeam` | Active phaser beams, tracked **per bank** (issue #790): an ordered `bank -> {target UUID, remaining seconds, damage accumulator}` map. A hull whose arcs overlap burns both banks at once on a target abeam, and the two shipped fore/aft pairs overlap by different amounts: `ship_harrow_cruiser` authors 270° on **both** `fire_arc_deg` and `auto_arc_deg`, so it double-broadsides on the manual (`handle_fire_phaser`) and AI (`ai_phaser_auto_fire`) paths alike; `alliance_cruiser` authored `fire_arc_deg = 270` with `auto_arc_deg = 180` until issue #929 and so double-broadsided on the manual path only; it now authors 270° on both and double-broadsides on either. `alliance_battleship` is the remaining split case, with abutting 180° auto arcs. Same shape as `PhaserCooldown`, ordered rather than hashed so the per-tick shooter snapshots (and the seeded damage draws they feed) stay deterministic |
 | `PhaserCooldown` | Post-beam cooldown (duration sourced from `PhaserCombatConfigResource`) |
 | `CurrentPhaserMode` | Auto or Manual phaser mode |
 | `PhaserRenderConfig` | Beam colour and max render range, populated from ship TOML during world setup |
@@ -168,31 +181,43 @@ It does **not** read `ShipModifiers`. Since issue #955 a bank reaches its author
 
 Produces `ServerMessage::WeaponsUpdate` sent to the Tactical console holder at 10 Hz.
 
-## NPC shields (#471)
+## Shields, and how weapon damage reaches an arc
 
-Single-facing shield component for NPCs and stations. Distinct from the player ship's four-quadrant `ShipShields` resource: NPCs carry an `EntityShield` ECS component (`src/entities/spawner.rs`) populated from a top-level `[shields]` block on the entity TOML:
+Every ship in the world — player and NPC alike — carries the same
+`ship::shields::ShipShields` (a `weapons::shield::ShieldSystem` of one or more
+`[[shield_arc]]` facings), and one `tick_shields` advances all of them. The
+separate single-facing `EntityShield` component this page used to describe, with
+its float `current_hp`, its permanent `broken` latch and its own
+`tick_npc_shield_regen`, was retired by issue #597's PR-7 and no longer exists in
+`src/`; a hull with one arc is now simply a hull whose `[[shield_arc]]` list has
+one entry, and it collapses and recovers by the shared rules
+(`offline_duration`, then a climb from zero at `regen_per_sec` since #788).
 
-```toml
-[shields]
-max_hp        = 60.0
-regen_per_sec = 1.0
-```
-
-Damage routing — three paths route NPC-bound damage through the shield:
+Damage routing — the paths that put weapon damage on an arc:
 
 | Path | System | Pierce source |
 |---|---|---|
-| Player phaser → NPC | `tick_beams_apply_damage` (`beam.rs`) | Active bank's `shield_pierce` (Option<f32>) |
-| Player torpedo → NPC | `tick_torpedo_lifecycle` (`torpedo.rs`) | `TorpedoDetonation.shield_pierce` (snapshot at launch) |
-| NPC phaser → NPC/station | `tick_beams_apply_damage` (`beam.rs`) | Active bank's `shield_pierce` (per-entity `PhaserCombatConfigResource`) |
+| phaser → any hull | `tick_beams_apply_damage` (`beam.rs`) | active bank's `shield_pierce` |
+| blaster → any hull | `handle_blaster_hits` (`blaster.rs`) | bank's `shield_pierce` |
+| torpedo → any hull | `tick_torpedo_lifecycle` (`torpedo.rs`) | `TorpedoDetonation.shield_pierce` (snapshotted at launch) |
+| region damage zone | `regions::server` | the zone's authored `shield_pierce` |
 
-Each path applies `split_damage_for_pierce(damage, pierce)`: the `pierced` portion lands on hull directly, `absorbed` hits the shield, and any overflow leaks back to hull. Damage with no shield component falls through to the legacy hull-direct path unchanged (zero regression for asteroids and shieldless stations).
+Each applies `split_damage_for_pierce(damage, pierce)`: the `pierced` portion
+lands on hull directly, `absorbed` goes to the facing the bearing resolves to,
+and any overflow past that facing's remaining HP leaks back to hull. A victim
+with no shield component at all takes the whole amount on the hull.
 
-On the torpedo path the `damage` fed into that split is `damage_shields`, and it is only fed in at all when the struck arc is up — a round meeting a downed arc, or a victim with no shields, delivers `damage_hull` straight to the hull instead, unsplit (issue #929, above). `shield_pierce` therefore governs only what gets past a **live** screen.
+On the torpedo path the `damage` fed into that split is `damage_shields`, and it
+is only fed in at all when the struck arc is UP — a round meeting a downed arc,
+or a victim with no shields, delivers `damage_hull` straight to the hull instead,
+unsplit (issue #929, above). `shield_pierce` therefore governs only what gets
+past a **live** screen, and no shipped hull currently authors it on `[torpedoes]`
+at all.
 
-**Permanent break semantics** — once `current_hp` reaches `0.0`, the shield latches `broken = true` and never recovers. All subsequent damage skips the shield routing entirely and goes straight to hull regardless of the attacker's `shield_pierce`. There is no offline timer / recovery model (unlike the player ship). `tick_npc_shield_regen` (Physics set) advances `current_hp` by `regen_per_sec * dt` only while `!broken && current_hp < max_hp`.
-
-**Wire format** — `EntitySnapshot.shield_fraction: Option<f32>` and `EntityStateSnapshot.shield_fraction: Option<f32>` carry the live shield ratio (`Some(current/max)` for shielded entities, broken shields read as `Some(0.0)`, shieldless entities omit the field). Used by the Sensors panel target-info row (#473).
+**Wire format** — `EntitySnapshot.shield_fraction: Option<f32>` and
+`EntityStateSnapshot.shield_fraction: Option<f32>` carry the live shield ratio
+for shielded entities; shieldless entities omit the field. Used by the Sensors
+panel target-info row (#473).
 
 ## Test placement
 

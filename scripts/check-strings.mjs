@@ -342,6 +342,16 @@ const UNLOCALISED_FILES = new Set([
   // Its player-adjacent section titles already go through t() and stay validated
   // by the id-existence check above (section 2, which does not consult this set).
   'gui/debug-overlays.js',
+  // The console input-to-feedback latency table (issue #1169, PRD #1144). The
+  // same category as the four above: an operator diagnostic that renders only
+  // behind a debug flag in a dev build. Its cells are machine values — action
+  // ids and millisecond figures — and its column heads are the payload's own
+  // field names (`send_to_ack`, `p50/p75/max`), deliberately identical to what
+  // the headless run report's JSON calls them so a table and a report read as
+  // one vocabulary. Its player-adjacent prose (title, caption, empty state,
+  // surface names) already goes through t() and stays validated by the
+  // id-existence check above.
+  'gui/console-latency-panel.js',
 ]);
 
 // The rules live in scripts/strings-literals.mjs and scripts/strings-markup.mjs

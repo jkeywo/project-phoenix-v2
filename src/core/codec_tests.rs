@@ -256,6 +256,21 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
             ClientMessageDiscriminants::TogglePause,
             ClientMessage::TogglePause,
         ),
+        // The client half of console input-to-feedback latency (issue #1169) —
+        // durations only, measured on the reporting client's own clock, never
+        // timestamps. Same `#[cfg]` as its two neighbours above.
+        #[cfg(not(phoenix_demo_build))]
+        (
+            ClientMessageDiscriminants::ReportConsoleLatency,
+            ClientMessage::ReportConsoleLatency {
+                samples: vec![crate::core::messages::ConsoleLatencySample {
+                    action: "fire_phaser".into(),
+                    surface: crate::core::messages::LatencySurface::PhoneConsole,
+                    input_to_send_ms: 2.5,
+                    send_to_ack_ms: 48.0,
+                }],
+            },
+        ),
     ]
 }
 

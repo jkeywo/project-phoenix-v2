@@ -480,6 +480,89 @@ fn a_real_run_carries_the_always_on_station_activity_series_with_no_flag() {
     );
 }
 
+/// The wiring seam for console input-to-feedback latency in the report (issue
+/// #1169, PRD #1144), and the counterpart to the station-activity test above.
+///
+/// Two claims, and the CONTRAST between them is the point:
+///
+///  1. **Off by default, and off means nothing was measured.** Unlike its
+///     always-on station-activity neighbour, a plain run must take no
+///     wall-clock reading at all — `Instant::now()` is not something an unasked
+///     simulation may call — so the field is present, versioned and empty.
+///  2. **`--console-latency` measures, and only what a headless run CAN
+///     measure.** There is no browser and no phone, so every entry is the
+///     simulation's own `SimHost` admission→broadcast window; the client
+///     segments must be absent rather than zeroed.
+///
+/// Runs on `probe_duel.toml` for the same reason the test above does: both
+/// ships' AI-crewed stations admit commands, so there is something to measure.
+#[test]
+fn a_real_run_measures_console_latency_only_when_asked() {
+    let dt = 1.0 / 30.0;
+    let base = HeadlessArgs {
+        world_path: "assets/worlds/probe_duel.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(30.0, dt),
+        deterministic: true,
+        ..test_args()
+    };
+
+    // 1. The default: no measurement at all.
+    let mut app = build_headless_app(&base).expect("app should build");
+    run(&mut app, base.max_ticks);
+    let quiet = build_report(&mut app, &base, 0.0);
+    assert!(
+        quiet.console_latency.actions.is_empty(),
+        "a run that did not ask for measurement must take no readings: {:?}",
+        quiet.console_latency
+    );
+
+    // 2. `--console-latency`: the host's own service window, per action.
+    let args = HeadlessArgs {
+        console_latency: true,
+        ..base
+    };
+    let mut app = build_headless_app(&args).expect("app should build");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    assert!(
+        !report.console_latency.actions.is_empty(),
+        "a 30s duel admits commands, so the measured run must record some — is \
+         `DebugPlugin` still adding the bracketing systems, and does \
+         `build_headless_app` honour `--console-latency`?"
+    );
+    for entry in &report.console_latency.actions {
+        assert_eq!(
+            entry.surface,
+            project_phoenix::core::messages::LatencySurface::SimHost,
+            "a headless run has no console client, so no client surface can appear"
+        );
+        assert!(
+            entry.admit_to_broadcast.is_some(),
+            "the host segment is the one a headless run can measure: {entry:?}"
+        );
+        assert!(
+            entry.input_to_send.is_none() && entry.send_to_ack.is_none(),
+            "the host cannot observe a client's input event or its refresh: {entry:?}"
+        );
+    }
+
+    // And it serialises into the report JSON as the schema the dock parses.
+    let json = report.to_json();
+    let parsed: serde_json::Value = serde_json::from_str(&json)
+        .unwrap_or_else(|e| panic!("report is not valid JSON: {e}\n{json}"));
+    assert_eq!(parsed["console_latency"]["schema_version"], 1);
+    let first = &parsed["console_latency"]["actions"][0];
+    assert_eq!(first["surface"], "SimHost");
+    assert!(
+        first["admit_to_broadcast"]["p50_ms"].is_number()
+            && first["admit_to_broadcast"]["p75_ms"].is_number()
+            && first["admit_to_broadcast"]["max_ms"].is_number(),
+        "the report must carry the p50/p75/max distribution: {json}"
+    );
+}
+
 /// The seed is part of the report whether or not one was asked for, so a run
 /// that surprises you can always be replayed. `combat_test.toml` authors
 /// `[global] seed`, which is the middle tier of the precedence chain.

@@ -882,6 +882,114 @@ pub struct HostBlockedView {
     pub guard: String,
 }
 
+// ── Console input-to-feedback latency surface (issue #1169) ──────────────────
+//
+// The one surface on this pipeline whose data does not come only from the
+// simulation host: two of its three `LatencySurface`s are measured by a CLIENT,
+// on the client's own clock, and reported up through
+// `ClientMessage::ReportConsoleLatency`. The wire sample type therefore lives in
+// `crate::core::messages` (it crosses the wire) and is re-exported here, exactly
+// as `AiDirective` / `ObjectiveStatus` are for the scenario surface — payload
+// convention 1 is "one module to import to know the vocabulary", not "every type
+// is declared here".
+//
+// Everything below is a DURATION. No wall-clock timestamp appears in this schema,
+// in `ConsoleLatencyTracker`, or anywhere a digest can reach: see
+// `crate::debug::console_latency` for why that is a hard constraint rather than
+// a style choice.
+
+pub use crate::core::messages::{ConsoleLatencySample, LatencySurface};
+
+/// One segment's distribution over the samples in the tracker's window
+/// (issue #1169).
+///
+/// p50/p75/max rather than a mean: the polish bar PRD #1144 sets is "frequent
+/// actions acknowledge within ~100 ms", which is a claim about the *tail* a
+/// player actually notices. A mean hides the tail; p75 and max are where a
+/// stutter shows up. Percentiles are nearest-rank over the retained window
+/// (see [`crate::debug::console_latency`]), which is the same definition
+/// `vellum-perf` uses, so a number here and a number in a perf capture of the
+/// same run mean the same thing.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LatencySummary {
+    /// How many samples this distribution was computed over.
+    pub count: u32,
+    /// Median.
+    pub p50_ms: f32,
+    /// 75th percentile.
+    pub p75_ms: f32,
+    /// The worst sample retained.
+    pub max_ms: f32,
+}
+
+/// One (surface, action) pair's latency distributions (issue #1169).
+///
+/// Every segment is `Option` because **which segments exist depends on the
+/// path**, and an absent segment must read as absent rather than as zero:
+///
+/// | surface | `input_to_send` | `send_to_ack` | `input_to_ack` | `admit_to_broadcast` |
+/// |---|---|---|---|---|
+/// | `BrowserHost` / `PhoneConsole` | yes | yes | yes (derived) | no |
+/// | `SimHost` | no | no | no | yes |
+///
+/// A client cannot observe the host's internal schedule and the host cannot
+/// observe a client's input event, so neither invents the other's numbers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActionLatencyEntry {
+    /// Which surface measured these samples.
+    pub surface: LatencySurface,
+    /// The action label. A console action name (`fire_phaser`) for a client
+    /// surface; a `SystemControlPayload` variant name (`FirePhaser`) for
+    /// `SimHost`, which never sees the client's vocabulary.
+    pub action: String,
+    /// Samples retained for this entry — the largest segment count, so a
+    /// consumer can tell a well-populated entry from a single tap.
+    pub count: u32,
+    /// Input event → transport hand-off (client surfaces only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_to_send: Option<LatencySummary>,
+    /// Transport hand-off → issuing surface handed fresh state (client surfaces
+    /// only). The whole round trip, transport included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_to_ack: Option<LatencySummary>,
+    /// The end-to-end number the ~100 ms bar is about: the per-sample sum of the
+    /// two above, summarised (client surfaces only). Summarising the sums rather
+    /// than summing the summaries — p75(a+b) is not p75(a)+p75(b).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_to_ack: Option<LatencySummary>,
+    /// The simulation host's own service window: wall time from the tick's
+    /// command admission to the end of the tick's `SimSet::Broadcast`
+    /// (`SimHost` only). This is the slice of `send_to_ack` the host is
+    /// responsible for; whatever the two disagree by is transport plus client
+    /// work, which nothing here measures directly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admit_to_broadcast: Option<LatencySummary>,
+}
+
+/// The console-latency surface's whole payload (issue #1169).
+///
+/// Produced by `crate::debug::console_latency::ConsoleLatencyTracker::report`,
+/// encoded by `crate::core::codec::encode_console_latency`, read by the dock
+/// panel (`gui/console-latency-panel.js`) and embedded in the headless run
+/// report. `actions` is sorted by `(surface, action)` so two hosts folding the
+/// same samples produce byte-identical JSON (payload convention 4).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ConsoleLatencyPayload {
+    /// [`DEBUG_SCHEMA_VERSION`] at the time the host produced this payload.
+    pub schema_version: u32,
+    /// One entry per (surface, action), sorted.
+    pub actions: Vec<ActionLatencyEntry>,
+}
+
+impl Default for ConsoleLatencyPayload {
+    fn default() -> Self {
+        Self {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            actions: Vec::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -925,5 +1033,41 @@ mod tests {
         let payload = AiStatePayload::default();
         assert_eq!(payload.schema_version, DEBUG_SCHEMA_VERSION);
         assert!(payload.ships.is_empty());
+    }
+
+    #[test]
+    fn default_console_latency_payload_carries_the_current_schema_version() {
+        let payload = ConsoleLatencyPayload::default();
+        assert_eq!(payload.schema_version, DEBUG_SCHEMA_VERSION);
+        assert!(payload.actions.is_empty());
+    }
+
+    /// A `SimHost` entry must not serialise empty client segments as zeroed
+    /// distributions — an absent segment is absent, not "0 ms".
+    #[test]
+    fn absent_latency_segments_are_omitted_rather_than_zeroed() {
+        let entry = ActionLatencyEntry {
+            surface: LatencySurface::SimHost,
+            action: "FirePhaser".into(),
+            count: 3,
+            input_to_send: None,
+            send_to_ack: None,
+            input_to_ack: None,
+            admit_to_broadcast: Some(LatencySummary {
+                count: 3,
+                p50_ms: 1.0,
+                p75_ms: 2.0,
+                max_ms: 3.0,
+            }),
+        };
+        let json = crate::core::codec::encode_console_latency(&ConsoleLatencyPayload {
+            schema_version: DEBUG_SCHEMA_VERSION,
+            actions: vec![entry],
+        });
+        assert!(json.contains("admit_to_broadcast"), "{json}");
+        assert!(
+            !json.contains("input_to_send"),
+            "an unmeasured segment must be omitted, not zeroed: {json}"
+        );
     }
 }

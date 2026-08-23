@@ -96,8 +96,15 @@ fn dispatch(
         // carry `#[cfg(not(phoenix_demo_build))]` — in a demo build they do
         // not exist and neither does this arm, and a `#[cfg]` cannot be
         // hung on one alternative of a pattern.
+        // `ReportConsoleLatency` (issue #1169) joins that arm for both reasons:
+        // it is drained frame-driven too (by
+        // `debug::console_latency::drain_console_latency_reports`, into a
+        // `Presentation` tracker the digest never folds), and it carries the same
+        // demo-build `#[cfg]`.
         #[cfg(not(phoenix_demo_build))]
-        ClientMessage::ToggleDebugFlag { .. } | ClientMessage::TogglePause => LobbyHandlerResult {
+        ClientMessage::ToggleDebugFlag { .. }
+        | ClientMessage::TogglePause
+        | ClientMessage::ReportConsoleLatency { .. } => LobbyHandlerResult {
             new_phase: None,
             outbound: Vec::new(),
             station_rating_update: None,

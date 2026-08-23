@@ -75,6 +75,12 @@
        fans iframe pushes out through window.dirtyConsolesFor instead of
        per-console push wrappers. -->
   <script type="module" src="gui/dirty-consoles.js"></script>
+  <!-- Console input-to-feedback measurement (issue #1169, PRD #1144): this
+       phone's own round-trip clock. Publishes window.ConsoleLatencyMeter for
+       the inline glue below, which stamps each dispatch and resolves it when
+       the issuing console's surface is next handed fresh state — both stamps on
+       THIS device, so no cross-clock arithmetic is involved. -->
+  <script type="module" src="gui/console-latency.js"></script>
   <script type="module" src="gui/action-map.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
        (window.lobbyState / simState / commsState) with an apply(serverMessage)
@@ -1269,7 +1275,11 @@
     // -- Click sound --------------------------------------------------------
     // Message types that should NOT trigger a click (continuous / connection
     // setup messages that are not the result of a deliberate button press).
-    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName', 'ReportStationEligibility']);
+    // `ReportConsoleLatency` (issue #1169) belongs here for a reason sharper than
+    // "not a button press": it is a diagnostic report sent WHILE latency is being
+    // measured, so a click on it would put an audio decode on the very path whose
+    // timing is the subject.
+    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName', 'ReportStationEligibility', 'ReportConsoleLatency']);
 
     const CLICK_PITCH_VARIANCE = 0.08; // +/- 8% playback-rate jitter so repeated clicks don't sound identical
 
@@ -2411,12 +2421,57 @@
         ? window.iframeIdFor(name) : (name + '-iframe');
     }
 
+    // ── Console input-to-feedback latency (issue #1169, PRD #1144) ───────────
+    // The phone measures its OWN round trip: `console-core.sendAction` stamps
+    // the input event inside the console document, the dispatch below stamps the
+    // hand-off to the transport, and `pushConsoleStateFor` — the one place a
+    // console's payload is rebuilt and handed back to its iframe — is the
+    // acknowledgement. All three stamps are on this device, so nothing here
+    // subtracts a host clock from a phone clock. Only durations are reported.
+    //
+    // The meter is created lazily and tolerates its module not having executed
+    // yet, exactly as `pushDirtyConsoles` tolerates `dirtyConsolesFor` missing:
+    // this is diagnostic, and a dropped early sample costs nothing.
+    let _latencyMeter = null;
+    function latencyMeter() {
+      if (_latencyMeter) return _latencyMeter;
+      if (typeof window.ConsoleLatencyMeter !== 'function') return null;
+      _latencyMeter = new window.ConsoleLatencyMeter({ surface: 'PhoneConsole' });
+      return _latencyMeter;
+    }
+
+    /** Follow the host's flag and ship whatever has finished measuring. */
+    let _latencyFlushedAt = 0;
+    const LATENCY_FLUSH_MS = 2000;
+    function maybeReportConsoleLatency() {
+      const meter = latencyMeter();
+      if (!meter || typeof window.isConsoleLatencyEnabled !== 'function') return;
+      // The host owns the switch; a client never measures on its own initiative.
+      const on = window.isConsoleLatencyEnabled(window.simState && window.simState.debugFlags);
+      if (on !== meter.enabled) meter.setEnabled(on);
+      if (!on) return;
+      // Batched on a timer rather than sent per sample: a tapping player would
+      // otherwise turn one diagnostic into a stream of tiny frames on the very
+      // data channel whose latency is being measured.
+      const now = window.consoleLatencyNowMs ? window.consoleLatencyNowMs() : Date.now();
+      if (now - _latencyFlushedAt < LATENCY_FLUSH_MS) return;
+      const samples = meter.drain();
+      _latencyFlushedAt = now;
+      if (samples.length === 0) return;
+      const msg = window.consoleLatencyMessage(samples);
+      send(msg.type, msg.data);
+    }
+
     function pushConsoleStateFor(name) {
       if (!name) return;
       const json = (typeof window.buildConsoleState === 'function' && window.simState)
         ? window.buildConsoleState(name, window.simState)
         : '{}';
       _pushIframe($(consoleIframeId(name)), name, json);
+      // This console's surface just received fresh server-derived state, which
+      // is the acknowledgement every action still pending on it was waiting for.
+      const meter = latencyMeter();
+      if (meter) meter.noteAck(name);
     }
 
     function pushActiveConsoleState() {
@@ -2602,6 +2657,15 @@
         if (tut.handled) return;
       }
       if (typeof window.dispatchConsoleAction === 'function') {
+        // Console-latency dispatch stamp (issue #1169), taken immediately before
+        // the envelope reaches the transport so `input_to_send` covers exactly
+        // the client-local hop — the console's postMessage plus the action-map
+        // lookup — and nothing else. `action.__input_ms` is the console
+        // document's own stamp and stops here; the action map builds its
+        // outbound `ClientMessage` from named fields, so it never crosses the
+        // wire.
+        const meter = latencyMeter();
+        if (meter) meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
         // Optimistic local patches (weaponsTarget / sensorsTarget) land on the
         // one sim store; simState.weaponsTarget has a setter for this path.
         window.dispatchConsoleAction(action, send, (patch) => {
@@ -2710,6 +2774,12 @@
       // ratings have folded in (issue #1103): only the ineligible station-id set
       // — no reason, no setting — goes back to the host.
       maybeReportEligibility(msg);
+      // Console input-to-feedback latency (issue #1169), on the same "report a
+      // locally-derived minimum" footing as the eligibility report above: only
+      // durations this device measured for itself leave the phone, batched.
+      // Driven off inbound traffic rather than a timer so a disconnected phone
+      // stops reporting by itself.
+      maybeReportConsoleLatency();
       if (result.shouldRender) scheduleRender();
     }
 

@@ -1720,7 +1720,15 @@ pub enum RepairTarget {
 /// `ClientMessage` variants that runtime handlers still consume.
 /// (`SetPhaserFrequency`'s legacy top-level variant was deleted by #804 —
 /// the envelope form targeting `phaser-control` is the only wire path.)
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+///
+/// `SystemControlPayloadDiscriminants` (from `strum::EnumDiscriminants`) is the
+/// fieldless companion enum — the *action name* with no operands. Issue #1169
+/// keys its per-action console-latency series off it, so the label a latency
+/// distribution is filed under is the variant name and never the carried data
+/// (which would make every distinct throttle value its own "action"). Same
+/// device `headless::report::variant_name` uses for `ServerMessage`.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, strum::EnumDiscriminants)]
+#[strum_discriminants(name(SystemControlPayloadDiscriminants), derive(Hash))]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
     /// Set the ship's Red Alert state to an explicit desired value (issue
@@ -2226,6 +2234,117 @@ pub enum ClientMessage {
     /// instead — the same schedule the host page's own pause toggle uses.
     #[cfg(not(phoenix_demo_build))]
     TogglePause,
+    /// A client's own console input-to-feedback measurements (issue #1169,
+    /// PRD #1144).
+    ///
+    /// The **only** way the phone consoles' latency reaches anywhere it can be
+    /// read. Both ends of every sample are stamped by the *reporting client's
+    /// own clock* — the console raised the action, the console's surface got the
+    /// answer — so what crosses this wire is already a DURATION. No timestamp
+    /// crosses, and therefore no cross-device clock skew can enter the numbers;
+    /// see [`ConsoleLatencySample`].
+    ///
+    /// Modelled on [`ClientMessage::ReportStationEligibility`]: the client
+    /// derives something locally and reports the derived minimum, the host
+    /// stores it in a side surface, and there is no outbound reply. Here the
+    /// side surface is `debug::ConsoleLatencyTracker`, a
+    /// `StateClass::Presentation` resource `world_digest` never folds — a
+    /// wall-clock reading may never enter authoritative state (AGENTS.md
+    /// determinism contract), and this one does not.
+    ///
+    /// Sent only while the reporting client sees [`DebugFlag::ConsoleLatency`]
+    /// on in `ServerMessage::DebugState`, in bounded batches of at most
+    /// [`MAX_CONSOLE_LATENCY_SAMPLES`]. **Absent from a demo build**, like its
+    /// `ToggleDebugFlag` neighbour and for the same reason: the whole
+    /// diagnostic route is compiled out rather than refused at runtime.
+    #[cfg(not(phoenix_demo_build))]
+    ReportConsoleLatency {
+        samples: Vec<ConsoleLatencySample>,
+    },
+}
+
+/// The most samples one [`ClientMessage::ReportConsoleLatency`] batch may carry
+/// (issue #1169).
+///
+/// A bound on the wire, not a preference: the host folds whatever arrives into a
+/// bounded per-action window, and a client that has been tapping for an hour must
+/// not be able to hand the host an unbounded vector. A client with more than this
+/// many pending samples drops the oldest — a latency surface that stops
+/// measuring because it is behind is worse than one that shows the recent past.
+pub const MAX_CONSOLE_LATENCY_SAMPLES: usize = 64;
+
+/// Which client surface produced a console-latency sample (issue #1169).
+///
+/// The two client surfaces differ in the one thing the measurement exists to
+/// separate — what the command crosses to reach the simulation — so a sample
+/// carries which it is rather than being averaged into one number:
+///
+/// * [`Self::BrowserHost`] — a console on the host page (`server.html`). Its
+///   command reaches the simulation in-process through the WASM bridge; there is
+///   no network in the round trip at all.
+/// * [`Self::PhoneConsole`] — a console on a connected phone (`client.html`).
+///   Its command crosses the WebRTC data channel in both directions, which is
+///   exactly the segment PRD #1144 observes was unmeasured.
+/// * [`Self::SimHost`] — not a client at all: the simulation host's own
+///   admission→broadcast service window (see
+///   `debug::console_latency`). It shares the enum so one payload can carry the
+///   whole picture, and so a consumer reads one list rather than three.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LatencySurface {
+    BrowserHost,
+    PhoneConsole,
+    SimHost,
+}
+
+impl LatencySurface {
+    /// A stable lower-case label, for a renderer that groups by surface.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LatencySurface::BrowserHost => "browser-host",
+            LatencySurface::PhoneConsole => "phone-console",
+            LatencySurface::SimHost => "sim-host",
+        }
+    }
+}
+
+/// One console action's client-measured round trip (issue #1169).
+///
+/// # Why this carries durations and not timestamps
+///
+/// Both stamps behind each field are taken on the SAME device: the console
+/// document raises the action and the same page observes the issuing surface
+/// receive fresh state. Differencing them there and shipping the difference is
+/// what makes the number meaningful at all — a phone's clock and the host's
+/// clock have no defined relationship, so any host-side subtraction of a
+/// phone-side stamp would measure their disagreement as much as the latency.
+///
+/// # What the two segments cover
+///
+/// * `input_to_send_ms` — from the console control's handler raising the action
+///   to the shell handing the envelope to its transport. Client-local work only.
+/// * `send_to_ack_ms` — from that hand-off to the moment the *issuing* console's
+///   surface is next handed fresh server-derived state. It contains the whole
+///   round trip: transport out, the host's queue wait, admission, the tick, the
+///   broadcast, transport back, and the client's own fold. It deliberately does
+///   NOT claim to reach painted pixels — no client-side measurement here can
+///   observe the compositor.
+///
+/// Their sum is the end-to-end number the ~100 ms polish bar is about; the host
+/// derives it rather than the client sending a third field.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ConsoleLatencySample {
+    /// The console action name (`gui/action-map.js`'s own key, e.g.
+    /// `fire_phaser`) — the client's vocabulary for "what the player did",
+    /// which is not always a `SystemControlPayload` variant (some actions send
+    /// a lobby-level message instead).
+    pub action: String,
+    /// Which client surface measured it.
+    pub surface: LatencySurface,
+    /// Input event → transport hand-off, in milliseconds.
+    pub input_to_send_ms: f32,
+    /// Transport hand-off → the issuing surface receiving fresh state, in
+    /// milliseconds.
+    pub send_to_ack_ms: f32,
 }
 
 /// One host-page debug overlay a settings menu can flip (issue #940).
@@ -2275,6 +2394,16 @@ pub enum DebugFlag {
     /// scenario state is authoritative already, so only the flag-gated projection
     /// exists.
     ScenarioState,
+    /// Console input-to-feedback latency (`debug::DebugConsoleLatencyEnabled`,
+    /// issue #1169). A JSON surface like its neighbours, but the only flag on
+    /// the pipeline that gates *measurement* rather than only rendering: the
+    /// stamps behind it are wall-clock reads, and a wall-clock read is not
+    /// something the simulation may take unasked (PRD #1144's "no observable
+    /// overhead when off"). It is also the one flag a CLIENT acts on rather
+    /// than merely echoing — a phone that sees it on starts measuring its own
+    /// round trips and reporting them via
+    /// [`ClientMessage::ReportConsoleLatency`].
+    ConsoleLatency,
 }
 
 impl DebugFlag {
@@ -2283,7 +2412,7 @@ impl DebugFlag {
     /// A fixed slice rather than map iteration, so identical state always
     /// produces an identical message — the client's fold diffs it and the
     /// codec test pins its shape.
-    pub const ALL: [DebugFlag; 8] = [
+    pub const ALL: [DebugFlag; 9] = [
         DebugFlag::Regions,
         DebugFlag::Modifiers,
         DebugFlag::Damage,
@@ -2292,6 +2421,7 @@ impl DebugFlag {
         DebugFlag::StationActivity,
         DebugFlag::AiDoctrine,
         DebugFlag::ScenarioState,
+        DebugFlag::ConsoleLatency,
     ];
 }
 
@@ -2341,6 +2471,9 @@ pub enum DebugToggleKind {
     /// Scenario-state panel (`debug::DebugScenarioStateEnabled`), the second
     /// structured surface on the pipeline (issue #1148).
     ScenarioState,
+    /// Console input-to-feedback latency (`debug::DebugConsoleLatencyEnabled`,
+    /// issue #1169).
+    ConsoleLatency,
 }
 
 impl From<DebugFlag> for DebugToggleKind {
@@ -2367,6 +2500,7 @@ impl From<DebugFlag> for DebugToggleKind {
             DebugFlag::StationActivity => DebugToggleKind::StationActivity,
             DebugFlag::AiDoctrine => DebugToggleKind::AiDoctrine,
             DebugFlag::ScenarioState => DebugToggleKind::ScenarioState,
+            DebugFlag::ConsoleLatency => DebugToggleKind::ConsoleLatency,
         }
     }
 }

@@ -222,6 +222,20 @@ pub struct RunReport {
     /// finished with. `None` when no world was loaded. A read-only projection
     /// off `WorldContentRuntime` — capturing it never moves the seeded digest.
     pub scenario: Option<crate::debug::payload::ScenarioStatePayload>,
+    /// Console input-to-feedback latency (issue #1169, PRD #1144): the
+    /// per-action p50/p75/max distributions the tracker held at run end.
+    ///
+    /// **Only populated under `--console-latency`** (which `--perf-capture`
+    /// implies), unlike its always-on `station_activity` neighbour. The reason is
+    /// the whole point of the surface: the numbers come from `Instant::now()`,
+    /// and a wall-clock reading is not something an unasked simulation may take —
+    /// so a plain run measures nothing and reports `actions: []`.
+    ///
+    /// A headless run has no client, so the only segment present is the
+    /// simulation host's own `admit_to_broadcast` service window. The client
+    /// segments (`input_to_send`, `send_to_ack`) exist only where a browser or
+    /// phone console measured them; see `crate::debug::console_latency`.
+    pub console_latency: crate::debug::payload::ConsoleLatencyPayload,
 }
 
 impl RunReport {
@@ -328,6 +342,14 @@ impl RunReport {
                 Some(payload) => crate::core::codec::encode_scenario_state(payload),
                 None => "null".to_string(),
             }
+        ));
+        // Console input-to-feedback latency (issue #1169). Always emitted — an
+        // unmeasured run reports `{"schema_version":N,"actions":[]}`, which says
+        // "nothing was measured" without a reader having to know whether the flag
+        // was on. Encoded through the one `serde_json` seam like every sibling.
+        s.push_str(&format!(
+            "  \"console_latency\": {},\n",
+            crate::core::codec::encode_console_latency(&self.console_latency)
         ));
         // `OutcomeReport::to_json` emits `"outcome": ..., "sides": {...}` as a
         // body, so it slots straight in as the final two report fields.
@@ -500,6 +522,16 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
                 .unwrap_or(&default_recorder);
             crate::debug::scenario::collect_scenario_state_with_fires(runtime, objectives, recorder)
         });
+    // Console input-to-feedback latency (issue #1169): the tracker's read-only
+    // projection, read straight off the resource. Empty unless the run was
+    // started with `--console-latency` — the tracker only takes a wall-clock
+    // reading when the flag says so. `unwrap_or_default` covers a bare fixture
+    // app that never added `DebugPlugin`.
+    let console_latency = app
+        .world()
+        .get_resource::<crate::debug::ConsoleLatencyTracker>()
+        .map(|tracker| tracker.report())
+        .unwrap_or_default();
 
     RunReport {
         ticks,
@@ -522,6 +554,7 @@ pub fn build_report(app: &mut App, args: &HeadlessArgs, wall_seconds: f64) -> Ru
         ai_doctrine,
         station_activity,
         scenario,
+        console_latency,
     }
     .tap_stream(app, args)
 }
@@ -798,6 +831,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            console_latency: Default::default(),
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)
@@ -845,6 +879,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            console_latency: Default::default(),
         };
         let parsed: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
         assert!(parsed["ship"].is_null());
@@ -904,6 +939,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: StationActivityPayload::default(),
             scenario: None,
+            console_latency: Default::default(),
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)
@@ -970,6 +1006,7 @@ mod tests {
             ai_doctrine: String::new(),
             station_activity: payload,
             scenario: None,
+            console_latency: Default::default(),
         };
         let json = report.to_json();
         let parsed: serde_json::Value = serde_json::from_str(&json)
@@ -987,5 +1024,70 @@ mod tests {
         assert_eq!(stations[1]["station"], "weapons");
         assert_eq!(stations[1]["ai"], 21);
         assert_eq!(stations[1]["human"], 0);
+    }
+
+    /// The console-latency surface (issue #1169) reaches the report JSON with
+    /// its per-action distributions, and a run that measured nothing says so
+    /// with an empty list rather than being absent.
+    #[test]
+    fn report_json_carries_the_console_latency_distributions() {
+        use crate::debug::ConsoleLatencyTracker;
+
+        let mut tracker = ConsoleLatencyTracker::default();
+        for ms in [4.0, 8.0, 12.0, 40.0] {
+            tracker.record_host("FirePhaser", ms);
+        }
+
+        let mut report = RunReport {
+            ticks: 10,
+            sim_seconds: 1.0,
+            seed: 7,
+            seed_source: SeedSource::Cli.as_str().to_string(),
+            wall_seconds: 0.0,
+            ticks_per_second: 0.0,
+            final_phase: "InProgress".into(),
+            game_over_reason: None,
+            entity_count: 1,
+            ship: None,
+            message_counts: BTreeMap::new(),
+            damage_by_ship: BTreeMap::new(),
+            outcome_report: crate::core::balance::classify(
+                false,
+                None,
+                SideMargins::default(),
+                SideMargins::default(),
+            ),
+            ai_doctrine: String::new(),
+            station_activity: StationActivityPayload::default(),
+            scenario: None,
+            console_latency: Default::default(),
+        };
+
+        // An unmeasured run: present, versioned, and empty.
+        let parsed: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
+        assert_eq!(parsed["console_latency"]["schema_version"], 1);
+        assert_eq!(
+            parsed["console_latency"]["actions"]
+                .as_array()
+                .expect("actions is a list")
+                .len(),
+            0,
+            "a run with the flag off reports no measurements, not a missing field"
+        );
+
+        report.console_latency = tracker.report();
+        let parsed: serde_json::Value = serde_json::from_str(&report.to_json()).unwrap();
+        let entry = &parsed["console_latency"]["actions"][0];
+        assert_eq!(entry["surface"], "SimHost");
+        assert_eq!(entry["action"], "FirePhaser");
+        // Nearest-rank over [4, 8, 12, 40]: p50 = 2nd, p75 = 3rd, max = 4th.
+        assert_eq!(entry["admit_to_broadcast"]["p50_ms"], 8.0);
+        assert_eq!(entry["admit_to_broadcast"]["p75_ms"], 12.0);
+        assert_eq!(entry["admit_to_broadcast"]["max_ms"], 40.0);
+        // The host cannot observe a client's input event, so it must not claim to.
+        assert!(
+            entry.get("input_to_send").is_none(),
+            "a host-measured entry must not carry client segments"
+        );
     }
 }

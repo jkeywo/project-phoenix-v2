@@ -89,7 +89,19 @@ fn main() {
     // decided: a run that ends in GameOver still measured something, and
     // throwing the evidence away because of the exit path would be the one
     // case where the numbers are most interesting.
-    if let (Some(sampler), Some(path)) = (sampler, args.perf_capture_path.as_deref()) {
+    if let (Some(mut sampler), Some(path)) = (sampler, args.perf_capture_path.as_deref()) {
+        // Console input-to-feedback (issue #1169). The samples were taken inside
+        // the run by the PRD #1144 debug tracker — `--perf-capture` implies
+        // `--console-latency`, so they exist — and are folded into the capture
+        // here rather than measured a second time, so the run report and the
+        // perf capture can never disagree about the same window. A run whose
+        // tracker is empty contributes no metric at all.
+        if let Some(tracker) = app
+            .world()
+            .get_resource::<project_phoenix::debug::ConsoleLatencyTracker>()
+        {
+            perf::console::sample_console_latency(sampler.recorder_mut(), tracker);
+        }
         let capture = sampler.finish(&args.perf_scenario, perf::profile(perf::tick::RUNTIME));
         let json = capture.to_json();
         match path {

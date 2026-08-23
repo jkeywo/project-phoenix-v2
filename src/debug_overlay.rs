@@ -233,6 +233,7 @@ pub fn report_debug_state(
     station_activity: Res<crate::debug::DebugStationActivityEnabled>,
     ai_doctrine: Res<crate::debug::DebugAiDoctrineEnabled>,
     scenario_state: Res<crate::debug::DebugScenarioStateEnabled>,
+    console_latency: Res<crate::debug::DebugConsoleLatencyEnabled>,
     god_mode: Option<Res<crate::server_app::GodMode>>,
     mut last: ResMut<LastReportedDebugState>,
     mut writer: MessageWriter<crate::lobby::OutboundMessage>,
@@ -267,6 +268,10 @@ pub fn report_debug_state(
                 DebugFlag::StationActivity => station_activity.0,
                 DebugFlag::AiDoctrine => ai_doctrine.0,
                 DebugFlag::ScenarioState => scenario_state.0,
+                // The one flag a client acts on rather than only painting
+                // (issue #1169): seeing this on is what makes a phone start
+                // measuring its own console round trips and reporting them.
+                DebugFlag::ConsoleLatency => console_latency.0,
             };
             (*flag, on)
         })

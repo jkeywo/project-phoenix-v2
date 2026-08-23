@@ -899,6 +899,26 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         ),
     );
 
+    // Console input-to-feedback latency, client half (issue #1169). Connected
+    // clients measure their OWN console round trips — both stamps on one device's
+    // clock — and report the durations; this folds them into the same tracker the
+    // host's own admission→broadcast window lands in, so one payload carries the
+    // whole picture.
+    //
+    // `PreUpdate` and not `FixedUpdate`, deliberately: this is a session
+    // diagnostic, it changes no simulation outcome, and putting it in the fixed
+    // schedule would tie a non-deterministic reading to the tick a replay
+    // re-derives. Gated on the flag and on `Sessions` for the same reason its
+    // `drain_client_debug_flags` neighbour is — a headless run has no phone to
+    // hear from — and compiled out of a demo build with the message it reads.
+    #[cfg(not(phoenix_demo_build))]
+    app.add_systems(
+        PreUpdate,
+        crate::debug::console_latency::drain_console_latency_reports
+            .run_if(resource_exists::<crate::lobby::Sessions>)
+            .run_if(|flag: Res<crate::debug::DebugConsoleLatencyEnabled>| flag.0),
+    );
+
     // Structured debug observability (PRD #1144, issue #1145). Always-on
     // station-activity counters read the tick's fully-populated `AdmittedCommands`
     // after `SimSet::Broadcast` — the same window the unrouted lint below uses,

@@ -54,6 +54,19 @@ describe('sendAction — transport selection', () => {
 
   afterEach(() => { if (cleanup) cleanup(); cleanup = null; });
 
+  // Every envelope carries `__input_ms`, the console-latency input stamp
+  // (issue #1169) — a live clock reading, so these transport tests compare the
+  // envelope's FIELDS rather than its exact JSON text. What they are about is
+  // which transport was chosen and that it got the whole envelope, not the
+  // byte order of a stamp that changes every run. The stamp itself is pinned by
+  // its own tests in the 'sendAction — envelope shape' block below.
+  function envelopeOf(json) {
+    const env = JSON.parse(json);
+    expect(Number.isFinite(env.__input_ms)).toBe(true);
+    delete env.__input_ms;
+    return env;
+  }
+
   it('posts to parent when window !== window.parent (iframe mode)', () => {
     const parentPostMessage = vi.fn();
     // Simulate being inside an iframe: parent is a different object
@@ -64,10 +77,11 @@ describe('sendAction — transport selection', () => {
     const { bc } = setup();
     sendAction('fire_phaser', { bank: 'fore' });
 
-    expect(parentPostMessage).toHaveBeenCalledWith(
-      { type: 'console_action', payload: JSON.stringify({ action: 'fire_phaser', console: 'Test', bank: 'fore' }) },
-      '*'
-    );
+    expect(parentPostMessage).toHaveBeenCalledTimes(1);
+    expect(parentPostMessage.mock.calls[0][0].type).toBe('console_action');
+    expect(envelopeOf(parentPostMessage.mock.calls[0][0].payload))
+      .toEqual({ action: 'fire_phaser', console: 'Test', bank: 'fore' });
+    expect(parentPostMessage.mock.calls[0][1]).toBe('*');
     expect(bc.instance.postMessage).not.toHaveBeenCalled();
 
     if (savedParent) {
@@ -81,8 +95,8 @@ describe('sendAction — transport selection', () => {
     const ipcPost = vi.fn();
     setup({ ipc: { postMessage: ipcPost } });
     sendAction('helm_input', { thrust: 0.5, steering: 0.0 });
-    const expected = JSON.stringify({ action: 'helm_input', console: 'Test', thrust: 0.5, steering: 0.0 });
-    expect(ipcPost).toHaveBeenCalledWith(expected);
+    expect(envelopeOf(ipcPost.mock.calls[0][0]))
+      .toEqual({ action: 'helm_input', console: 'Test', thrust: 0.5, steering: 0.0 });
   });
 
   it('routes via window.__sendAction on the WASM host page (issue #822)', () => {
@@ -91,8 +105,8 @@ describe('sendAction — transport selection', () => {
     const sendActionFn = vi.fn();
     setup({ wasmBindings: { wasm_receive_message: vi.fn() }, __sendAction: sendActionFn });
     sendAction('set_red_alert', {});
-    const expected = JSON.stringify({ action: 'set_red_alert', console: 'Test' });
-    expect(sendActionFn).toHaveBeenCalledWith(expected);
+    expect(envelopeOf(sendActionFn.mock.calls[0][0]))
+      .toEqual({ action: 'set_red_alert', console: 'Test' });
   });
 
   it('falls through to BroadcastChannel when wasmBindings exist without __sendAction', () => {
@@ -106,17 +120,17 @@ describe('sendAction — transport selection', () => {
     const sendActionFn = vi.fn();
     setup({ __sendAction: sendActionFn });
     sendAction('set_red_alert', {});
-    const expected = JSON.stringify({ action: 'set_red_alert', console: 'Test' });
-    expect(sendActionFn).toHaveBeenCalledWith(expected);
+    expect(envelopeOf(sendActionFn.mock.calls[0][0]))
+      .toEqual({ action: 'set_red_alert', console: 'Test' });
   });
 
   it('uses BroadcastChannel as final fallback', () => {
     const { bc } = setup();
     sendAction('dispatch_repair_team', { team_idx: 0, target: 'Helm' });
-    const expected = JSON.stringify({ action: 'dispatch_repair_team', console: 'Test', team_idx: 0, target: 'Helm' });
-    expect(bc.instance.postMessage).toHaveBeenCalledWith(
-      { type: 'console_action', payload: expected }
-    );
+    expect(bc.instance.postMessage).toHaveBeenCalledTimes(1);
+    expect(bc.instance.postMessage.mock.calls[0][0].type).toBe('console_action');
+    expect(envelopeOf(bc.instance.postMessage.mock.calls[0][0].payload))
+      .toEqual({ action: 'dispatch_repair_team', console: 'Test', team_idx: 0, target: 'Helm' });
   });
 });
 
@@ -160,7 +174,28 @@ describe('sendAction — envelope shape', () => {
   it('omits extra fields when payload is empty or absent', () => {
     sendAction('cancel_impulse');
     const env = capturedPayload();
-    expect(Object.keys(env).sort()).toEqual(['action', 'console']);
+    // `__input_ms` is the console-latency input stamp (issue #1169) and is part
+    // of every envelope; it is consumed by the shell and never crosses the wire.
+    expect(Object.keys(env).sort()).toEqual(['__input_ms', 'action', 'console']);
+  });
+
+  // ── Console-latency input stamp (issue #1169) ─────────────────────────────
+
+  it('stamps the input event on every envelope', () => {
+    const before = performance.timeOrigin + performance.now();
+    sendAction('cancel_impulse');
+    const after = performance.timeOrigin + performance.now();
+    const stamp = capturedPayload().__input_ms;
+    expect(Number.isFinite(stamp)).toBe(true);
+    // Same axis as the shell's own clock — that is the whole point, since the
+    // two stamps that bracket `input_to_send` are taken in different documents.
+    expect(stamp).toBeGreaterThanOrEqual(before);
+    expect(stamp).toBeLessThanOrEqual(after);
+  });
+
+  it('does not let a caller override the input stamp', () => {
+    sendAction('set_target', { __input_ms: 1 });
+    expect(capturedPayload().__input_ms).toBeGreaterThan(1);
   });
 });
 

@@ -32,6 +32,7 @@ import { isDemoBuild } from './build-flags.js';
 import { renderStationActivityChart } from './station-activity-chart.js';
 import { renderAiDoctrinePanel } from './ai-doctrine-panel.js';
 import { renderScenarioStatePanel } from './scenario-state-panel.js';
+import { renderConsoleLatencyPanel } from './console-latency-panel.js';
 import {
   renderModifierDebug,
   renderDamageDebug,
@@ -74,6 +75,10 @@ export const DEBUG_OUTPUTS = [
   // a per-ship candidate table rather than printed as text.
   { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', toggle: 'wasm_toggle_ai_doctrine', read: 'wasm_get_ai_doctrine', render: renderAiDoctrinePanel },
   { id: 'scenario-state', labelId: 'settings.debug.scenario', toggle: 'wasm_toggle_scenario_state', read: 'wasm_get_scenario_state', render: renderScenarioStatePanel },
+  // Console input-to-feedback latency (issue #1169). The one output whose
+  // toggle starts and stops MEASUREMENT rather than only rendering — see
+  // `clickOutput` and `opts.onOutputToggled`.
+  { id: 'console-latency', labelId: 'settings.debug.console_latency', toggle: 'wasm_toggle_console_latency', read: 'wasm_get_console_latency', render: renderConsoleLatencyPanel },
 ];
 
 /** Cheats and world-drawing toggles, each with an authoritative read-back. */
@@ -152,6 +157,7 @@ export function selectOutput(state, id) {
  *   bindings?: object,   // defaults to `window`
  *   isDemo?: () => boolean,
  *   autoRefresh?: boolean,
+ *   onOutputToggled?: (id: string, enabled: boolean) => void,
  * }} opts
  * @returns {{ open: function, close: function, isOpen: function,
  *             refresh: function, selectTab: function, destroy: function }}
@@ -271,8 +277,16 @@ export function mountServerSettings(opts = {}) {
     // replaced the old "opening the dock enables all four" bundle.
     const entry = DEBUG_OUTPUTS.find((o) => o.id === next.flipped);
     if (entry) invoke(entry.toggle);
+    const wasOn = outputs.enabled.indexOf(next.flipped) >= 0;
     outputs = { enabled: next.enabled, viewing: next.viewing };
     paintOutput();
+    // One output does more than draw: console latency (issue #1169) gates
+    // MEASUREMENT, and the host page's own meter has to start and stop with the
+    // simulation's flag. The page has no read-back export for these resources —
+    // this module is their only caller — so this click is where the page learns.
+    if (typeof opts.onOutputToggled === 'function') {
+      opts.onOutputToggled(next.flipped, !wasOn);
+    }
   }
 
   // ── Tab bodies ─────────────────────────────────────────────────────────────

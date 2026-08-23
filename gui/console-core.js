@@ -72,6 +72,11 @@ import { phAdoptConsoleStyles } from './components/ph-console-styles.js';
 // passes through, before `render` ever sees it. See normalizeConsolePayload's
 // own doc comment for the full contract.
 import { normalizeConsolePayload } from './console-payload.js';
+// Console input-to-feedback latency (issue #1169, PRD #1144). `sendAction` is
+// the ONE place in a console document where a control's handler turns into an
+// outbound action, so it is the only honest place to stamp "the input event
+// happened". See `__input_ms` in `sendAction` below.
+import { nowMs } from './console-latency.js';
 
 export function initConsole({ name, family, render }) {
   // Resolve the global object: `window` in browsers, `globalThis` in Node/tests.
@@ -169,6 +174,22 @@ export function initConsole({ name, family, render }) {
   // stringifies it, then dispatches via the first available transport.
   function sendAction(action, payload) {
     var env = Object.assign({ action: action, console: name }, payload || {});
+    // The input-event stamp for console latency (issue #1169). This function is
+    // called synchronously from the control's own handler, so `nowMs()` here IS
+    // the input event; by the time the shell sees the postMessage, the hop it
+    // measures has already happened.
+    //
+    // Stamped unconditionally, not behind the debug flag, because a console
+    // document has no way to learn the flag: it receives state payloads, not
+    // `DebugState`. The cost is one clock read per player tap — a few hundred
+    // nanoseconds at human input rates — which is not observable overhead in the
+    // sense PRD #1144 means (the SIMULATION takes no reading when the flag is
+    // off, and the shell throws this value away).
+    //
+    // Underscore-prefixed and stripped at the shell: every `gui/action-map.js`
+    // handler builds its outbound `ClientMessage` from NAMED fields, so this key
+    // reaches the shell and stops there. It never crosses the wire.
+    env.__input_ms = nowMs();
     var json = JSON.stringify(env);
     // Re-resolve window each call so tests can swap out global.window per test.
     var _win = (typeof window !== 'undefined') ? window : null;

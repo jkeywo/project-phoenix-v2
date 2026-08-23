@@ -567,6 +567,15 @@ pub fn build_headless_app_with(
         headless_auto_start.before(crate::sim_sets::SimSet::Input),
     );
 
+    // Console input-to-feedback latency (issue #1169). `DebugPlugin` installs
+    // this flag `false` on every target; a headless run turns it on only when
+    // asked, so a plain run takes no wall-clock reading and its digest is
+    // byte-identical to one built before this existed
+    // (`tests/console_latency.rs`).
+    if args.console_latency {
+        app.insert_resource(crate::debug::DebugConsoleLatencyEnabled(true));
+    }
+
     // Telemetry. `collect_outbound` and `collect_balance_events` run in `Last`
     // and stamp each record with `Res<SimTick>` (issue #895); `register_sim_tick`
     // inside `add_simulation_plugins_with` guarantees that resource exists.

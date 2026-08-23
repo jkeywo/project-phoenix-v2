@@ -147,6 +147,20 @@ pub fn encode_entity_inspector(p: &crate::debug::payload::EntityInspectorPayload
     serde_json::to_string(p).unwrap_or_default()
 }
 
+/// Encode a console input-to-feedback latency payload to JSON (issue #1169,
+/// PRD #1144).
+///
+/// The single seam where `crate::debug::payload::ConsoleLatencyPayload` becomes
+/// the JSON the dock panel (`gui/console-latency-panel.js`) parses and the
+/// headless run report embeds — the same `serde_json`-confined encoder every
+/// PRD #1144 surface uses (AGENTS.md Key Constraint 1). Returns `String` (not
+/// `Result`) for [`encode_station_activity`]'s reason: the payload is
+/// String/int/float scalars in `Vec`s that serde never fails to encode, so an
+/// error becomes an empty string a consumer treats as "no data yet".
+pub fn encode_console_latency(p: &crate::debug::payload::ConsoleLatencyPayload) -> String {
+    serde_json::to_string(p).unwrap_or_default()
+}
+
 /// Decode inbound JSON from the HTML/PeerJS bridge.
 ///
 /// The wire shape is a full `ClientMessage` — every emitter (phone consoles,

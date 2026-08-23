@@ -5,14 +5,18 @@
 //! consumer. What lives here is the part the crate excludes by charter: the
 //! collectors, and where the baseline files live.
 //!
-//! Four collectors, one contract:
+//! Five collectors, one contract:
 //!
 //! - [`tick`] — the headless harness loop, native.
 //! - [`assets`] — the shipped asset inventory, native, no run required.
 //! - [`mesh`] — the mesh interior read through Bevy's own loader, native.
 //! - [`browser`] — boot, preload and frame timing in the browser host, wasm.
+//! - [`console`] — the simulation's admission→broadcast service window (issue
+//!   #1169), native. The odd one out: it takes no measurement of its own, it
+//!   bridges samples the PRD #1144 debug pipeline already holds into a
+//!   `Recorder`, so one run cannot report two different numbers for one thing.
 //!
-//! [`baseline`] is the fifth piece and not a collector: recording a baseline
+//! [`baseline`] is the sixth piece and not a collector: recording a baseline
 //! *from* a capture, so the numbers a runner is held to are the numbers that
 //! runner produced.
 //!
@@ -91,6 +95,8 @@ pub mod baseline;
 #[cfg(target_arch = "wasm32")]
 pub mod browser;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod console;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mesh;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod tick;
@@ -126,6 +132,9 @@ fn metric_direction(metric: &str) -> MetricDirection {
     match metric {
         "sim.tick"
         | "sim.run"
+        // Console input-to-feedback (issue #1169): a longer wait between a
+        // player's tap and the simulation's answer is unambiguously worse.
+        | "sim.console_ack"
         | "browser.boot"
         | "browser.preload"
         | "browser.frame"

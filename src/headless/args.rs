@@ -169,6 +169,18 @@ REPLAY (issue #901)
                           like with like; this flag chooses the interval a
                           --record run writes down.
 
+OBSERVABILITY (issue #1169)
+    --console-latency     Measure console input-to-feedback latency and report
+                          the per-action p50/p75/max under 'console_latency'
+                          [default: off, and off costs nothing: no wall-clock
+                          reading is taken at all]. A headless run has no
+                          console client, so the only segment it can measure is
+                          the simulation's own admission-to-broadcast service
+                          window — the slice of a player's round trip the host
+                          is answerable for. Implied by --perf-capture, which
+                          files the same samples under the 'sim.console_ack'
+                          perf metric.
+
     -h, --help            Show this help
 ";
 
@@ -239,6 +251,16 @@ pub struct HeadlessArgs {
     /// (`--digest-every`, issue #901). `0` — the default — is off, and costs
     /// nothing: no digest is computed at all.
     pub digest_every: u64,
+    /// Measure console input-to-feedback latency (`--console-latency`, issue
+    /// #1169). Off by default, and off costs nothing: the simulation takes no
+    /// wall-clock reading at all, exactly as `--digest-every 0` computes no
+    /// digest.
+    ///
+    /// **Implied by `--perf-capture`**, because a run that was asked to measure
+    /// performance wants the metric the #868 budget compares
+    /// (`sim.console_ack`), and requiring two flags to get one number is how a
+    /// CI job silently stops producing it.
+    pub console_latency: bool,
 }
 
 impl Default for HeadlessArgs {
@@ -262,6 +284,7 @@ impl Default for HeadlessArgs {
             record_path: None,
             replay_path: None,
             digest_every: 0,
+            console_latency: false,
         }
     }
 }
@@ -369,6 +392,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
                     format!("--digest-every expects a whole number of ticks, got {v:?}")
                 })?;
             }
+            "--console-latency" => out.console_latency = true,
             "--deterministic" => out.deterministic = true,
             "--seed" => {
                 let v = value()?;
@@ -448,6 +472,14 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ParseOutcom
     // not — the second run would re-draw every stream from the OS. Rejected at
     // argument time rather than at write time, so the failure costs a
     // millisecond instead of a whole run.
+    // A perf capture wants every metric the #868 budget knows how to compare,
+    // and `sim.console_ack` (issue #1169) only exists if the run measured it.
+    // Implied rather than required so a CI perf job that predates the metric
+    // starts producing it without being edited — the one way a budget can stop
+    // being checked without anyone deciding to stop checking it.
+    if out.perf_capture_path.is_some() {
+        out.console_latency = true;
+    }
     if out.record_path.is_some() && out.seed.is_none() {
         return Err(
             "--record needs --seed: without one the recorded run cannot be reproduced".into(),
@@ -796,6 +828,32 @@ mod tests {
             ])
             .world_path,
             "assets/worlds/combat_test.toml"
+        );
+    }
+
+    // ── Console-latency measurement (issue #1169) ────────────────────────────
+
+    /// Measurement is opt-in: an ordinary run must take no wall-clock reading,
+    /// which is what makes "capture off costs nothing" true rather than a claim.
+    #[test]
+    fn console_latency_measurement_is_off_by_default() {
+        assert!(!parse(&[]).console_latency);
+    }
+
+    #[test]
+    fn console_latency_parses() {
+        assert!(parse(&["--console-latency"]).console_latency);
+    }
+
+    /// Asking for a perf capture asks for every metric the budget compares,
+    /// including `sim.console_ack` — otherwise a CI job would have to be edited
+    /// to keep producing it.
+    #[test]
+    fn perf_capture_implies_console_latency() {
+        let a = parse(&["--perf-capture", "target/perf/capture.json"]);
+        assert!(
+            a.console_latency,
+            "--perf-capture must imply the measurement its metric is built from"
         );
     }
 

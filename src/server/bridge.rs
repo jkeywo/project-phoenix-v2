@@ -77,6 +77,7 @@ use {
 ///
 /// Returns `true` if `*paused` was flipped, so the caller (the Bevy drain
 /// system) knows to (un)pause `Time<Virtual>` as a side effect.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_pending_toggles(
     pending: impl IntoIterator<Item = DebugToggleKind>,
     regions: &mut bool,
@@ -88,6 +89,7 @@ pub fn apply_pending_toggles(
     station_activity: &mut bool,
     ai_doctrine: &mut bool,
     scenario_state: &mut bool,
+    console_latency: &mut bool,
 ) -> bool {
     let mut pause_changed = false;
     // Dedupe in case the same kind was queued multiple times between drains.
@@ -106,6 +108,7 @@ pub fn apply_pending_toggles(
             DebugToggleKind::StationActivity => *station_activity = !*station_activity,
             DebugToggleKind::AiDoctrine => *ai_doctrine = !*ai_doctrine,
             DebugToggleKind::ScenarioState => *scenario_state = !*scenario_state,
+            DebugToggleKind::ConsoleLatency => *console_latency = !*console_latency,
         }
     }
     pause_changed
@@ -145,6 +148,7 @@ pub fn drain_client_debug_flags(
     mut station_activity: ResMut<crate::debug::DebugStationActivityEnabled>,
     mut ai_doctrine: ResMut<crate::debug::DebugAiDoctrineEnabled>,
     mut scenario_state: ResMut<crate::debug::DebugScenarioStateEnabled>,
+    mut console_latency: ResMut<crate::debug::DebugConsoleLatencyEnabled>,
 ) {
     let mut requests: Vec<(String, crate::core::messages::DebugFlag)> = Vec::new();
     for ev in reader.read() {
@@ -176,6 +180,7 @@ pub fn drain_client_debug_flags(
         &mut station_activity.0,
         &mut ai_doctrine.0,
         &mut scenario_state.0,
+        &mut console_latency.0,
     );
     debug_assert!(
         !pause_changed,
@@ -500,6 +505,13 @@ thread_local! {
     /// Like station activity this is structured JSON, not pre-formatted text —
     /// the dock parses it and draws a panel (`gui/scenario-state-panel.js`).
     static SCENARIO_STATE_STRING: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// The console input-to-feedback latency payload as JSON (issue #1169),
+    /// written by `debug::console_latency::publish_console_latency` each tick
+    /// while the console-latency flag is on. Read by `wasm_get_console_latency()`
+    /// from JS. Structured JSON like its two neighbours above; the dock parses it
+    /// and draws a per-action table (`gui/console-latency-panel.js`).
+    static CONSOLE_LATENCY_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
     /// Pending force-start request from `wasm_force_start()`. Drained by
     /// `drain_force_start_input` each `PreUpdate` frame into the
@@ -1964,6 +1976,42 @@ pub fn set_scenario_state_string(text: String) {
     SCENARIO_STATE_STRING.with(|v| *v.borrow_mut() = text);
 }
 
+/// Called by JS (the settings cog's Debug/Cheat tab) to toggle console
+/// input-to-feedback latency measurement at runtime (issue #1169).
+///
+/// The same transport pattern as `wasm_toggle_station_activity`, with one
+/// difference worth knowing at the call site: this flag gates MEASUREMENT, not
+/// only the publish. With it off the simulation takes no wall-clock reading at
+/// all and the page's own `gui/console-latency.js` stops stamping, so turning it
+/// on is what starts the numbers — an empty payload right after enabling is
+/// expected, not a fault.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_toggle_console_latency() {
+    PENDING_TOGGLES.with(|set| {
+        set.borrow_mut().insert(DebugToggleKind::ConsoleLatency);
+    });
+}
+
+/// Called by JS each animation frame to read the latest console-latency payload
+/// as JSON while the panel is visible (issue #1169).
+///
+/// Returns the raw JSON string `debug::console_latency::publish_console_latency`
+/// wrote; the dock parses it and draws a per-action table. Empty until the first
+/// publish.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_console_latency() -> String {
+    CONSOLE_LATENCY_STRING.with(|v| v.borrow().clone())
+}
+
+/// Called by the Bevy `publish_console_latency` system to update the
+/// console-latency JSON that JS reads via `wasm_get_console_latency()`.
+#[cfg(target_arch = "wasm32")]
+pub fn set_console_latency_string(text: String) {
+    CONSOLE_LATENCY_STRING.with(|v| *v.borrow_mut() = text);
+}
+
 /// Called by JS (lobby "Launch AI Ship" button) to start the game with no
 /// human players — all stations run under AI/backfill control.
 ///
@@ -2703,6 +2751,7 @@ fn drain_debug_toggles(
     mut station_activity_enabled: ResMut<crate::debug::DebugStationActivityEnabled>,
     mut ai_doctrine_enabled: ResMut<crate::debug::DebugAiDoctrineEnabled>,
     mut scenario_state_enabled: ResMut<crate::debug::DebugScenarioStateEnabled>,
+    mut console_latency_enabled: ResMut<crate::debug::DebugConsoleLatencyEnabled>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
     let pending: Vec<DebugToggleKind> =
@@ -2722,6 +2771,7 @@ fn drain_debug_toggles(
         &mut station_activity_enabled.0,
         &mut ai_doctrine_enabled.0,
         &mut scenario_state_enabled.0,
+        &mut console_latency_enabled.0,
     );
 
     // Region-wireframe state also lives in a thread-local (read back by
@@ -3209,6 +3259,7 @@ mod tests {
         let mut station_activity = false;
         let mut ai_doctrine = false;
         let mut scenario_state = false;
+        let mut console_latency = false;
 
         let pause_changed = apply_pending_toggles(
             [DebugToggleKind::Regions],
@@ -3221,6 +3272,7 @@ mod tests {
             &mut station_activity,
             &mut ai_doctrine,
             &mut scenario_state,
+            &mut console_latency,
         );
 
         assert!(regions, "Regions flag should have flipped to true");
@@ -3244,6 +3296,7 @@ mod tests {
         let mut station_activity = false;
         let mut ai_doctrine = false;
         let mut scenario_state = false;
+        let mut console_latency = false;
 
         let pause_changed = apply_pending_toggles(
             std::iter::empty(),
@@ -3256,6 +3309,7 @@ mod tests {
             &mut station_activity,
             &mut ai_doctrine,
             &mut scenario_state,
+            &mut console_latency,
         );
 
         assert!(regions, "previous state must be preserved, not re-toggled");
@@ -3271,6 +3325,7 @@ mod tests {
         let mut station_activity = false;
         let mut ai_doctrine = false;
         let mut scenario_state = false;
+        let mut console_latency = false;
 
         let pause_changed = apply_pending_toggles(
             [DebugToggleKind::Pause],
@@ -3283,6 +3338,7 @@ mod tests {
             &mut station_activity,
             &mut ai_doctrine,
             &mut scenario_state,
+            &mut console_latency,
         );
 
         assert!(paused);
@@ -3298,6 +3354,7 @@ mod tests {
         let mut station_activity = false;
         let mut ai_doctrine = false;
         let mut scenario_state = false;
+        let mut console_latency = false;
 
         apply_pending_toggles(
             [
@@ -3317,6 +3374,7 @@ mod tests {
             &mut station_activity,
             &mut ai_doctrine,
             &mut scenario_state,
+            &mut console_latency,
         );
 
         assert!(!regions);
@@ -3340,6 +3398,7 @@ mod tests {
         let mut station_activity = false;
         let mut ai_doctrine = false;
         let mut scenario_state = false;
+        let mut console_latency = false;
 
         apply_pending_toggles(
             [DebugToggleKind::Entities, DebugToggleKind::Entities],
@@ -3352,6 +3411,7 @@ mod tests {
             &mut station_activity,
             &mut ai_doctrine,
             &mut scenario_state,
+            &mut console_latency,
         );
 
         assert!(entities, "should have flipped once (false -> true)");
@@ -3372,6 +3432,7 @@ mod tests {
         let mut station_activity = false;
         let mut ai_doctrine = false;
         let mut scenario_state = false;
+        let mut console_latency = false;
         let pending =
             crate::debug_overlay::admitted_flag_toggles([("phone", DebugFlag::Damage)], |token| {
                 token == "phone"
@@ -3387,6 +3448,7 @@ mod tests {
             &mut station_activity,
             &mut ai_doctrine,
             &mut scenario_state,
+            &mut console_latency,
         );
         assert!(damage, "the named flag must flip");
         assert!(!pause_changed);

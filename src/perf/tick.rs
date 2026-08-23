@@ -47,6 +47,18 @@ impl TickSampler {
         self.recorder.sample(TICK_METRIC, Unit::Millis, elapsed);
     }
 
+    /// Borrow the recorder so a collector that did not do its own timing can
+    /// fold its samples into this run's capture.
+    ///
+    /// The one such collector today is [`crate::perf::console`], which bridges
+    /// samples the PRD #1144 debug pipeline already holds (issue #1169). It is
+    /// exposed rather than the recorder being made public because the invariant
+    /// this module exists for is unchanged: measurement stays outside the `App`,
+    /// and the caller — not a Bevy system — decides what enters a capture.
+    pub fn recorder_mut(&mut self) -> &mut Recorder {
+        &mut self.recorder
+    }
+
     /// Close the run and produce the capture artifact.
     pub fn finish(mut self, scenario: &str, profile: Profile) -> Capture {
         let run_secs = self.run_started.elapsed().as_secs_f64();

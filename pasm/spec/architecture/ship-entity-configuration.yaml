@@ -120,15 +120,30 @@ entities:
     architecture:
       kind: lifecycle-service
       authority: authoritative
-      owns: [spawned-entity-state]
+      owns: [spawned-entity-state, entity-mass-state]
       reads: [entity-template-state, world-configuration-state, ship-station-system-topology-state]
-      produces: [spawned-entity-state]
+      produces: [spawned-entity-state, entity-mass-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
       paths: [src/entities/spawner.rs, src/world/server.rs]
       symbols: [spawn_entity]
       tests: [cargo test]
+
+  - state: entity-mass-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Entity Mass State
+      summary: Every spawned entity's authored mass (issue #1154), copied verbatim from its resolved template at spawn time and never mutated afterward — content identity, not simulation state, exactly like the entity's stable UUID.
+    architecture:
+      classification: derived
+      owner: entity-spawn-orchestrator
+      writers: [entity-spawn-orchestrator]
+    implementation:
+      status: declared
+      paths: [src/entities/spawner.rs]
+      symbols: [EntityMass]
 
   - state: spawned-entity-state
     core:

@@ -334,9 +334,15 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             )
             // Cache of the presentation-only debug flags (issue #940):
             // `report_debug_state` compares against it to skip re-announcing.
+            // "debug-overlay-state" is the PASM state entity in
+            // pasm/spec/architecture/viewscreen-cameras-debug.yaml owned by
+            // `debug-overlay-controller` (src/debug_overlay.rs) — every
+            // `crate::debug_overlay` type below shares it (issue #1241
+            // reconciled a drifted "debug-overlay-flags-state" spelling here
+            // back onto the real entity rather than adding a duplicate one).
             .declare_state::<crate::debug_overlay::LastReportedDebugState>(
                 StateClass::Cache,
-                "debug-overlay-flags-state",
+                "debug-overlay-state",
             )
             // Cleared-at-fold: real inter-system-message state, but structurally
             // empty by the `RenderInterp` fold point on every correct instance.
@@ -357,23 +363,23 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             // presence in the census the enumeration guard scans.
             .declare_state::<crate::debug_overlay::DebugRegionsEnabled>(
                 StateClass::Presentation,
-                "debug-overlay-flags-state",
+                "debug-overlay-state",
             )
             .declare_state::<crate::debug_overlay::DebugOverlayEnabled>(
                 StateClass::Presentation,
-                "debug-overlay-flags-state",
+                "debug-overlay-state",
             )
             .declare_state::<crate::debug_overlay::DebugDamageEnabled>(
                 StateClass::Presentation,
-                "debug-overlay-flags-state",
+                "debug-overlay-state",
             )
             .declare_state::<crate::debug_overlay::DebugEntitiesEnabled>(
                 StateClass::Presentation,
-                "debug-overlay-flags-state",
+                "debug-overlay-state",
             )
             .declare_state::<crate::debug_overlay::DebugEntityInspectorEnabled>(
                 StateClass::Presentation,
-                "debug-overlay-flags-state",
+                "debug-overlay-state",
             )
             // Derived: mass is inserted once at spawn from `EntityConfig.mass`
             // (`src/entities/spawner.rs`) and only ever read — it rides the content

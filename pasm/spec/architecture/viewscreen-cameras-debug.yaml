@@ -179,12 +179,29 @@ entities:
     architecture:
       kind: presentation-layer
       authority: derived
+      owns: [viewscreen-motion-state]
       reads: [viewscreen-resolution-state, shield-status-blackboard-state]
+      produces: [viewscreen-motion-state]
       renders: [viewscreen-resolution-state]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
       paths: [src/server/viewscreen_border.rs, src/core/messages.rs]
+
+  - state: viewscreen-motion-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Viewscreen Motion State
+      summary: The host's reduced-motion comfort preference and shake-intensity scale — forwarded from the DOM's prefers-reduced-motion on WASM, or the PHOENIX_REDUCED_MOTION env var on native — read by camera shake and vignette intensity so both render paths honour the same comfort setting. Host/native-local only; never replicated and never read by the fixed tick.
+    architecture:
+      classification: local-view
+      owner: viewscreen-hud-effects
+      writers: [viewscreen-hud-effects]
+    implementation:
+      status: declared
+      paths: [src/server/viewscreen_border.rs, src/server/bridge.rs]
+      symbols: [ViewscreenMotion]
 
   - component: debug-overlay-controller
     core:

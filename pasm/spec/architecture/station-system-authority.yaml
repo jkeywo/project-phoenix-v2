@@ -76,6 +76,40 @@ entities:
       paths: [src/ship/components.rs, src/server_app/broadcast.rs, src/core/messages.rs, gui/sim-state.js, gui/hero-bar.js]
       symbols: [VisitingStationHosts, StationHostSnapshot]
 
+  - component: station-importance-tracker
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Station Importance Tracker
+      summary: "Folds each tick's authoritative objective transitions and Red Alert condition into two independent per-Station attention flags for the Hero Bar (issue #1101): an edge-triggered `unread` (an objective completed/failed off-screen, cleared only when the Station is visited) and a level-triggered `critical` (a Station attributed to the current Red Alert, tracking the condition live). Presentation surface only — it drives which tab asks for attention, never what the tick computes."
+    architecture:
+      kind: projection-service
+      authority: derived
+      owns: [station-importance-state]
+      reads: [objective-runtime-state, authoritative-red-alert-state]
+      produces: [station-importance-state]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/station_importance.rs, src/server_app/broadcast.rs]
+      symbols: [StationImportance, StationImportanceRes]
+      tests: [cargo test]
+
+  - state: station-importance-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Station Importance State
+      summary: Per-Station `unread`/`critical` attention flags the Hero Bar renders, kept strictly apart from Station health. Presentation state excluded from the sim digest — nothing in the fixed tick reads it back.
+    architecture:
+      classification: derived
+      owner: station-importance-tracker
+      writers: [station-importance-tracker]
+    implementation:
+      status: declared
+      paths: [src/station_importance.rs, src/server_app/broadcast.rs, src/core/messages.rs, gui/hero-bar.js]
+      symbols: [StationImportanceSnapshot]
+
   - component: system-kind-registry
     core:
       status: implemented

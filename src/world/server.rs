@@ -224,7 +224,7 @@ pub struct WorldRuntime {
     pub flags: crate::world::flags::FlagStore,
     /// Path of the layer whose trigger called `LoadWorld(path)` to bring
     /// this layer in. `None` = loaded at startup (base world's
-    /// `extra_worlds`) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the loader is the base world itself, so
+    /// `extra_worlds`) — the loader is the base world itself, so
     /// `parent:` from this layer walks straight to the base
     /// `WorldContentRuntime.flags` store.
     pub loader_path: Option<String>,
@@ -249,7 +249,7 @@ pub struct WorldRuntime {
     pub script_units: Vec<String>,
 }
 
-/// Map of `path ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ WorldRuntime` for sub-worlds loaded via `LoadWorld` / `extra_worlds`.
+/// Map of `path → WorldRuntime` for sub-worlds loaded via `LoadWorld` / `extra_worlds`.
 ///
 /// Each entry is keyed by the world TOML path so `UnloadWorld` can remove it by
 /// the same path. Stored as a Bevy `Resource`; an empty map is the initial state.
@@ -398,7 +398,7 @@ pub struct PendingWorldLayerChanges(pub Vec<WorldLayerChange>);
 #[derive(Debug)]
 pub enum WorldLayerChange {
     /// Load a sub-world. `loader_path` is the layer whose trigger called
-    /// `LoadWorld(path)` to enqueue this ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â `None` for startup-time loads
+    /// `LoadWorld(path)` to enqueue this — `None` for startup-time loads
     /// (base world's `extra_worlds`). Recorded on the new
     /// `WorldRuntime.loader_path` so `parent:` walks from the loaded
     /// layer reach the right outer flag store (PRD #397 fix 1).
@@ -885,7 +885,7 @@ impl Plugin for WorldPlugin {
 /// Looks up the region entity's UUID via `RegionMembership.region_uuids`
 /// (populated each tick by `update_region_membership`, and persisted after
 /// the entity despawns). Drops the event silently if no UUID is cached
-/// (e.g. a region entity spawned without an `EntityUuid` component ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â not
+/// (e.g. a region entity spawned without an `EntityUuid` component — not
 /// expected in production paths but possible in narrow unit tests).
 ///
 /// Single-fire-per-transition is provided by the region containment
@@ -910,7 +910,7 @@ fn handle_region_entered_event(
     let ev = trigger.event();
     // World triggers fire only on player-ship boundary crossings; NPC ships
     // (also tracked in RegionMembership after PRD #597 PR 9) are silently
-    // dropped here â€” they still receive region effects via the other
+    // dropped here — they still receive region effects via the other
     // observers/systems.
     if local_ship_q.get(ev.subject).is_err() {
         return;
@@ -955,7 +955,7 @@ fn handle_region_exited_event(
 ///
 /// On native (no WASM bridge) `get_world_config()` returns `None` and this
 /// system is a no-op; downstream systems that iterate world entities
-/// simply see an empty world (native unit tests only â€” production always
+/// simply see an empty world (native unit tests only — production always
 /// loads a world TOML through the WASM bridge).
 pub(crate) fn insert_world_config_resource(mut commands: Commands) {
     if let Some(world_config) = crate::entities::config_cache::get_world_config() {
@@ -1166,7 +1166,7 @@ pub(crate) fn spawn_world_entities(
 
     let config_cache = crate::entities::config_cache::get_config_cache();
     let world_snapshot = world_config.clone();
-    // `ship_power` is seeded on `OnEnter(InProgress)` â€” not available at
+    // `ship_power` is seeded on `OnEnter(InProgress)` — not available at
     // Startup. Pass the runtime flags so any Immediate-path predicates that
     // don't depend on ship_power still evaluate correctly.
     let flags = runtime.as_ref().map(|r| &r.flags);
@@ -1285,7 +1285,7 @@ pub fn world_activation_blocked(
 ///
 /// `flags` is the world flag/counter store used to evaluate optional `when`
 /// predicates on entity entries. Pass `None` (or a store where `ship_power`
-/// is unset) at Startup time â€” `ship_power` is seeded on
+/// is unset) at Startup time — `ship_power` is seeded on
 /// `OnEnter(GamePhase::InProgress)` before `spawn_game_start_entities`, so
 /// `Immediate` entries evaluated here will see `ship_power = 0`.
 pub fn spawn_immediate_entities_internal(
@@ -1361,7 +1361,7 @@ pub fn spawn_immediate_entities_internal(
             }
         };
         // Resolve optional `anchor` reference into a concrete world-space offset
-        // applied to the streaming spawner. Missing anchor ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ warn + fall back
+        // applied to the streaming spawner. Missing anchor → warn + fall back
         // to world origin so a typo never silently relocates the field.
         if let Some(field) = config.asteroid_field.as_mut() {
             if let Some(anchor_name) = field.anchor.as_ref() {
@@ -1369,7 +1369,7 @@ pub fn spawn_immediate_entities_internal(
                     Some(pos) => field.anchor_offset = *pos,
                     None => {
                         bevy::log::warn!(
-                            "spawn_world_entities: asteroid field '{}' references unknown anchor '{}' ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â falling back to world origin",
+                            "spawn_world_entities: asteroid field '{}' references unknown anchor '{}' — falling back to world origin",
                             entity_inst.template_path, anchor_name
                         );
                         field.anchor_offset = [0.0, 0.0, 0.0];
@@ -1397,7 +1397,7 @@ pub fn spawn_immediate_entities_internal(
 
     // Named non-asteroid entries MUST use the UUID already registered in
     // `world_config.name_to_uuid` so triggers / comms resolve to a real
-    // entity. A missing registration is a programmer error â€” log and skip
+    // entity. A missing registration is a programmer error — log and skip
     // rather than allocate a fresh UUID (which would silently desync).
     for entity_inst in named {
         if !predicate_allows(entity_inst) {
@@ -1411,7 +1411,7 @@ pub fn spawn_immediate_entities_internal(
             Some(u) => u.clone(),
             None => {
                 bevy::log::error!(
-                    "spawn_world_entities: named entity '{}' has no UUID in WorldConfig.name_to_uuid ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â skipping",
+                    "spawn_world_entities: named entity '{}' has no UUID in WorldConfig.name_to_uuid — skipping",
                     name
                 );
                 continue;
@@ -2299,7 +2299,7 @@ pub(crate) fn tick_trigger_pipeline(
 
     let name_to_uuid = runtime.name_to_uuid.clone();
 
-    // Build UUID â†’ ECS Entity map once per tick so the six per-entity
+    // Build UUID → ECS Entity map once per tick so the six per-entity
     // modifier/flag arms below can resolve their `entity` target in O(1)
     // instead of scanning `entity_uuid_query` each time. Used by
     // `ApplyModifier` / `RemoveModifier` / `ApplyFlag` / `RemoveFlag` /
@@ -3895,7 +3895,7 @@ pub(crate) fn tick_script_callbacks(
     }
 }
 
-/// Build a `UUID Ã¢â€ â€™ faction UUID` map from every entity that carries a
+/// Build a `UUID → faction UUID` map from every entity that carries a
 /// `FactionComponent`. Used by `revalidate_ai_targets_after_faction_change`
 /// to resolve a controller's `blackboard.target` UUID back to a faction so
 /// the new `is_enemy` relationship can be evaluated.
@@ -3943,7 +3943,7 @@ pub struct WorldLayerParams<'w> {
 /// spawned with a `ShipModifiers` Component (`src/entities/spawner.rs`
 /// and `spawn_game_start_entities`), so `.get_mut(entity)` is the correct
 /// primary write target after the name is resolved through
-/// `WorldContentRuntime.name_to_uuid` â†’ UUID â†’ ECS `Entity`.
+/// `WorldContentRuntime.name_to_uuid` → UUID → ECS `Entity`.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct ShipModifiersParams<'w, 's> {
     pub components: Query<'w, 's, &'static mut crate::modifiers::ShipModifiers>,
@@ -4042,7 +4042,7 @@ pub(crate) fn revalidate_ai_targets_after_faction_change(
 use crate::entities::spawner::BehaviourSection;
 use crate::entities::spawner::EntityUuid;
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Pending scenario load system ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ── Pending scenario load system ─────────────────────────────────────────────
 
 /// Bevy system: drain `PendingScenarioLoad`, reading and recording each world
 /// TOML — and merging NOTHING.
@@ -4143,7 +4143,7 @@ fn apply_pending_scenario_loads(
     }
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ World layer system (LoadWorld / UnloadWorld) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ── World layer system (LoadWorld / UnloadWorld) ──────────────────────────────
 
 /// Build a `ConfigCache` suitable for spawning entities from a world layer.
 ///

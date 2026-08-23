@@ -1766,8 +1766,8 @@ fn on_entity_destroyed_trigger_fires() {
 // The following six tests exercise dispatch of the per-entity trigger
 // actions (`ApplyModifier`, `RemoveModifier`, `ApplyFlag`, `RemoveFlag`,
 // `ApplyIntModifier`, `RemoveIntModifier`) and prove that the action lands
-// on the target entity's per-entity `ShipModifiers` Component â€” not the
-// legacy global Resource â€” and that non-target entities (e.g. the player
+// on the target entity's per-entity `ShipModifiers` Component — not the
+// legacy global Resource — and that non-target entities (e.g. the player
 // ship) remain unaffected. These are the regression tests for the
 // audit-report bug where world triggers silently misrouted every
 // named-entity write to whichever ship happened to own the global Resource.
@@ -2045,7 +2045,7 @@ fn ai_events_apply_modifier_unknown_entity_name_is_ignored() {
 fn ai_events_apply_modifier_registered_name_without_ecs_entity_is_ignored() {
     let mut app = ai_trigger_test_app();
     let (npc, _player) = spawn_two_modifier_targets(&mut app);
-    // Register a phantom name â†’ UUID mapping with no matching ECS entity.
+    // Register a phantom name → UUID mapping with no matching ECS entity.
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime
@@ -2076,7 +2076,7 @@ fn ai_events_apply_modifier_registered_name_without_ecs_entity_is_ignored() {
 #[test]
 fn ai_events_apply_modifier_target_entity_without_component_is_ignored() {
     // Guards the third defensive branch: name resolves + UUID resolves +
-    // Entity exists but has no `ShipModifiers` Component â†’ warn+continue.
+    // Entity exists but has no `ShipModifiers` Component → warn+continue.
     let mut app = ai_trigger_test_app();
     let (npc, _player) = spawn_two_modifier_targets(&mut app);
     // Spawn an entity with a UUID but WITHOUT a ShipModifiers component.
@@ -2097,7 +2097,7 @@ fn ai_events_apply_modifier_target_entity_without_component_is_ignored() {
             bonus: 5.0,
         }],
     );
-    // The NPC should NOT have been affected â€” no silent misroute.
+    // The NPC should NOT have been affected — no silent misroute.
     let npc_mods = app
         .world()
         .entity(npc)
@@ -2213,7 +2213,7 @@ fn when_predicate_suppresses_the_fire_but_keeps_the_trigger_live() {
             last_fired_elapsed: None,
         }];
     }
-    // First firing: flag unset ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ no objective.
+    // First firing: flag unset → no objective.
     app.world_mut()
         .resource_mut::<Messages<AiEntityDestroyed>>()
         .write(AiEntityDestroyed {
@@ -2875,7 +2875,7 @@ fn spawn_world_entities_populates_name_to_uuid_for_named_entity() {
     use crate::world::config::WorldEntity;
 
     // Build a unified WorldConfig with one named entry (no template
-    // resolution needed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the helper that mutates `name_to_uuid` runs
+    // resolution needed — the helper that mutates `name_to_uuid` runs
     // independently of the asteroid-field spawning path).
     let mut world_cfg = UnifiedWorldConfig::default();
     world_cfg.entities.push(WorldEntity {
@@ -2959,7 +2959,7 @@ fn init_world_runtime_preserves_existing_name_to_uuid() {
     // PRD #341: `spawn_world_entities` runs before `init_world_runtime`
     // and writes names from the unified [[entity]] pipeline into
     // `WorldContentRuntime.name_to_uuid`. `init_world_runtime` (which
-    // folds `WorldConfig.name_to_uuid` in) must NOT overwrite those ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
+    // folds `WorldConfig.name_to_uuid` in) must NOT overwrite those —
     // otherwise trigger and comms lookups for unified-pipeline names
     // would silently disappear.
     use crate::world::config::WorldConfig as UnifiedWorldConfig;
@@ -3009,10 +3009,10 @@ fn init_world_runtime_preserves_existing_name_to_uuid() {
 #[test]
 fn spawn_immediate_entities_spawns_named_non_asteroid_with_registered_uuid() {
     // PRD #339 slice 2 (rejection fix): named [[entity]] entries MUST be
-    // spawned as real Bevy entities ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â otherwise triggers / comms resolve
+    // spawned as real Bevy entities — otherwise triggers / comms resolve
     // to a UUID that has no Transform behind it. The spawned entity's
     // `EntityUuid` component must equal the UUID already registered in
-    // `WorldConfig.name_to_uuid` for that name (single source of truth ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
+    // `WorldConfig.name_to_uuid` for that name (single source of truth —
     // no fresh UUID allocation inside the spawn loop).
     use crate::entities::config::EntityConfig;
     use crate::entities::spawner::EntityUuid;
@@ -3048,7 +3048,7 @@ fn spawn_immediate_entities_spawns_named_non_asteroid_with_registered_uuid() {
         .insert("starbase_alpha".into(), "stable-station-uuid".into());
 
     // Build a fixture ConfigCache with the templates referenced above.
-    // Empty EntityConfig is sufficient ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no asteroid_field section, so
+    // Empty EntityConfig is sufficient — no asteroid_field section, so
     // `is_owned_by_unified_pipeline` routes by `name.is_some()`.
     let mut m: HashMap<String, EntityConfig> = HashMap::new();
     m.insert(
@@ -3075,7 +3075,7 @@ fn spawn_immediate_entities_spawns_named_non_asteroid_with_registered_uuid() {
     // Exactly one entity from the unified pipeline.
     assert_eq!(spawned.len(), 1, "only the named entry must be spawned");
 
-    // Its EntityUuid must equal the registered UUID ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â not a fresh one.
+    // Its EntityUuid must equal the registered UUID — not a fresh one.
     let uuid_component = app
         .world()
         .get::<EntityUuid>(spawned[0])
@@ -3448,7 +3448,7 @@ fn spawn_immediate_entities_resolves_anchor_position_for_named_entry() {
 #[test]
 fn spawn_immediate_entities_wires_behaviour_for_npc_with_anchor() {
     // PRD #337 slice 3: a named [[entity]] whose template carries a
-    // [behaviour] block must end up with a BehaviourSection ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the
+    // [behaviour] block must end up with a BehaviourSection — the
     // AiPlugin's `attach_controllers_on_spawn` system reads that to
     // wire the AiController. This guarantees NPCs migrated from
     // [[spawn]] to [[entity]] still get AI on spawn.
@@ -3764,7 +3764,7 @@ fn spawn_immediate_entities_falls_back_to_origin_when_anchor_unknown() {
     use std::collections::HashMap;
 
     let mut world_cfg = UnifiedWorldConfig::default();
-    // Note: NO anchor named "typo_anchor" ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â only "real_anchor".
+    // Note: NO anchor named "typo_anchor" — only "real_anchor".
     world_cfg
         .anchors
         .insert("real_anchor".into(), [999.0, 0.0, 999.0]);
@@ -3822,7 +3822,7 @@ fn spawn_immediate_entities_falls_back_to_origin_when_anchor_unknown() {
     assert_eq!(
         spawned.len(),
         1,
-        "unknown anchor must NOT block spawn ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fallback to origin keeps the field alive"
+        "unknown anchor must NOT block spawn — fallback to origin keeps the field alive"
     );
     let section = app
         .world()
@@ -3835,7 +3835,7 @@ fn spawn_immediate_entities_falls_back_to_origin_when_anchor_unknown() {
     );
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ extra_worlds + LoadWorld / UnloadWorld (issue #352) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ── extra_worlds + LoadWorld / UnloadWorld (issue #352) ──────────────────
 
 /// Helper: build an `App` with `WorldLayerMap`, `WorldContentRuntime`, and
 /// the `apply_world_layer_changes` system wired in.  No LobbyPlugin needed.
@@ -5144,7 +5144,7 @@ fn unload_world_resolves_layer_delayed_actions_when_policy_is_resolve() {
 }
 
 /// Two `LoadWorld` commands for the same path queued within a single tick
-/// produce exactly one load ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no duplicate entities, no duplicate trigger
+/// produce exactly one load — no duplicate entities, no duplicate trigger
 /// states, no duplicate `WorldLayerMap` entry (issue #413).
 #[test]
 fn two_load_world_same_path_same_tick_is_single_load() {
@@ -5259,7 +5259,7 @@ fn unload_world_unknown_path_is_noop() {
     assert!(runtime.trigger_states.is_empty());
 }
 
-// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Entity spawn / despawn via LoadWorld / UnloadWorld (issue #352) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// ── Entity spawn / despawn via LoadWorld / UnloadWorld (issue #352) ───────
 
 /// Write a minimal world TOML and a stub entity template to temp files,
 /// return `(world_path, template_path)` as `String`s.
@@ -6205,7 +6205,7 @@ use crate::regions::shape::RegionShape;
 /// Build a minimal app that wires the region membership system + the issue-#416
 /// observers + `tick_trigger_pipeline` into the same world. Skips the
 /// heavyweight `WorldPlugin`/`AiPlugin`/`LobbyPlugin` bootstrap so the
-/// test focuses on the region-event ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ trigger-fire path.
+/// test focuses on the region-event → trigger-fire path.
 fn region_trigger_test_app() -> App {
     let mut app = App::new();
     app.add_plugins(bevy::time::TimePlugin)
@@ -6399,7 +6399,7 @@ fn ship_entering_region_fires_on_entered_region_trigger_exactly_once() {
         },
     );
 
-    // Tick 1: ship outside (at origin), no enter ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ no fire.
+    // Tick 1: ship outside (at origin), no enter → no fire.
     app.update();
     assert!(
         !trigger_fired(&app, idx),
@@ -6408,7 +6408,7 @@ fn ship_entering_region_fires_on_entered_region_trigger_exactly_once() {
 
     // Move ship inside. The membership system runs in Physics and
     // queues a WorldEvent via the observer; `tick_trigger_pipeline` (also
-    // in Physics) drains the queue on the NEXT tick ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â matching the
+    // in Physics) drains the queue on the NEXT tick — matching the
     // documented `WorldLoaded` two-tick pattern.
     set_ship_pos(&mut app, 110.0, 0.0);
     app.update(); // queues EnteredRegion
@@ -6426,7 +6426,7 @@ fn ship_entering_region_fires_on_entered_region_trigger_exactly_once() {
         "pending_world_events must be drained"
     );
 
-    // Stay inside on subsequent ticks ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â membership system must not
+    // Stay inside on subsequent ticks — membership system must not
     // re-emit `RegionEntered`, so no new events queue up.
     app.update();
     app.update();
@@ -6460,7 +6460,7 @@ fn ship_exiting_region_fires_on_exited_region_trigger() {
         "exit trigger must not fire on entry"
     );
 
-    // Now move outside ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ RegionExited ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ queued ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ drained next tick.
+    // Now move outside → RegionExited → queued → drained next tick.
     set_ship_pos(&mut app, 200.0, 0.0);
     app.update();
     app.update();
@@ -6490,7 +6490,7 @@ fn region_despawn_while_ship_inside_fires_on_exited_region_trigger() {
     app.update();
     assert!(!trigger_fired(&app, idx));
 
-    // Despawn the region while ship is inside ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â membership system
+    // Despawn the region while ship is inside — membership system
     // emits an implicit RegionExited.
     app.world_mut().despawn(region_entity);
     app.update(); // queues ExitedRegion

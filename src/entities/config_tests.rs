@@ -8873,7 +8873,7 @@ fn comms_config_is_none_when_section_absent() {
     assert!(config.comms.is_none(), "no [comms] → field is None");
 }
 
-// â"€â"€ LOD selection â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── LOD selection ──────────────────
 
 /// Two levels: GLB near (< 50), sphere fallback beyond.
 fn two_level_lods() -> Vec<LodLevel> {

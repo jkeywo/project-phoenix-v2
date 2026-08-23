@@ -1270,6 +1270,69 @@ pub(crate) fn build_pass_surface(
         _ => (false, 0.0, 0.0, 0.0),
     };
 
+    // ── Arc-keeping: trade throttle for turn authority (issue #929) ──────────
+    //
+    // The ring's whole job is to hold the target abeam, and the measurement that
+    // prompted this says it does not: instrumented on `probe_duel`, every beam
+    // the player cruiser lights ends because the target left the bank's arc, not
+    // because the burn expired. The banks are ARC-limited, and arc dwell is what
+    // is actually being wasted.
+    //
+    // So when the target is within the authored margin of an arc edge, fly the
+    // ring slower. The mechanism that turns that into a tighter turn already
+    // exists in the physics and predates this issue entirely:
+    // `ShipPhysicsConfig::low_speed_turn_boost` gives
+    // `max_yaw_rate * (1 + boost * (1 - speed_fraction))`, so a hull that backs
+    // off the throttle out-turns the one that did not. This is the doctrine
+    // finally spending a capability the hull was already carrying — the player
+    // cruiser has authored `low_speed_turn_boost = 0.2` all along.
+    //
+    // Both params are required together, and a hull that authors neither flies
+    // exactly the ring it always did. The reading is absent when there is no
+    // target, which is also when there is no ring to fly.
+    let combat_orbit_speed = match (
+        combat_orbit,
+        steering_policy.params.get(ARC_KEEP_MARGIN_DEG_PARAM),
+        steering_policy.params.get(ARC_KEEP_SPEED_PARAM),
+        facts.get(OWN_BANK_ARC_MARGIN_DEG_FACT),
+    ) {
+        (true, Some(margin_at), Some(slow_speed), Some(margin)) if margin <= margin_at => {
+            slow_speed as f32
+        }
+        _ => combat_orbit_speed,
+    };
+
+    // ── The weak-broadside flip (issue #929) ────────────────────────────────
+    //
+    // Owner's priority order: shield protection beats arc-keeping. When the arc
+    // this hull is presenting has been beaten down past its authored floor, the
+    // ring reverses so the healthy broadside takes over while the hurt side
+    // recovers. Mirroring the DIRECTION is the whole lever — same radius, same
+    // speed, same tangent geometry, other side — so the torpedo run still opens
+    // from either broadside and nothing else in the doctrine has to know.
+    //
+    // The latch (and its hysteresis) is folded once per tick in
+    // `fold_state_memory`; this reads it. It is deliberately applied to the
+    // published direction rather than to the memory slot itself: the drawn
+    // `orbit_direction` stays the direction this hull CHOSE when it entered the
+    // ring, so unflipping returns it to that side rather than to a fresh draw.
+    let orbit_direction = {
+        let base = steering_state
+            .memory
+            .get(ORBIT_DIRECTION_MEMORY)
+            .unwrap_or(1.0) as f32;
+        if steering_state
+            .memory
+            .get(BROADSIDE_FLIP_MEMORY)
+            .unwrap_or(0.0)
+            > 0.0
+        {
+            -base
+        } else {
+            base
+        }
+    };
+
     // ── The torpedo-opportunity bow hold (issue #791) ────────────────────────
     //
     // Gated independently of both ring sets, and of the pass throttles: the
@@ -1349,10 +1412,7 @@ pub(crate) fn build_pass_surface(
         // one of two, so this is a structural fallback rather than a gameplay
         // value — and it is unreachable in practice: the slot is written on the
         // tick the recovery state is entered, before any leg reads it.
-        orbit_direction: steering_state
-            .memory
-            .get(ORBIT_DIRECTION_MEMORY)
-            .unwrap_or(1.0) as f32,
+        orbit_direction,
         orbit_speed,
         orbit_spiral_gain,
         reengage_speed,

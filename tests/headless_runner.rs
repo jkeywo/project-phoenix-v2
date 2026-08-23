@@ -660,7 +660,25 @@ fn world_spawned_alliance_hull_returns_fire_and_the_duel_resolves() {
         // stopped being able to exercise the player-death path at all, and this
         // `GameOver` / `RunOutcome::Defeat` coverage has to move to a world that
         // can (an escort matchup, or this one with the roster reversed).
-        seed: Some(9),
+        //
+        // THAT NEXT PASS IS #929's HELM DOCTRINE, and the note above is the
+        // reason this re-bless is a seed move and not a shrug. Seed 9 stopped
+        // killing the player: at 180 s it is one of four seeds that no longer
+        // resolve at all (755 dealt against 866 taken, neither dead). Re-swept
+        // at 180 s over the same 28 seeds: the player still dies on exactly
+        // three of them — 2 at 79.6 s, 4 at 93.1 s, 21 at 100.2 s — so the count
+        // the note set its trigger on has NOT reached zero and the coverage
+        // stays in this world. The pin moves to 2, the earliest of the three:
+        // 79.6 s inside a 180 s window is 100 s of margin, where the outgoing
+        // pin had 85 s and the pass before that had 3.3 s. The destroyer deals
+        // 780 against the cruiser's 399 on it, which is the lopsidedness the
+        // both-sides-engaged assertions below want.
+        //
+        // Worth recording that this hull got WEAKER here while getting better
+        // elsewhere: the doctrine trades beam damage (32 → 24 dmg/s) for time in
+        // arc, so the destroyer's three wins survive a change that lifted the
+        // cruiser's own win rate.
+        seed: Some(2),
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("app should build");
@@ -3124,19 +3142,28 @@ fn the_player_cruisers_own_tubes_fire_in_a_resolving_duel() {
     let args = HeadlessArgs {
         world_path: "assets/worlds/probe_duel.toml".into(),
         dt,
-        // Well over twice the 49.2 s this seed takes to close, so a retune that
-        // slows the fight fails on the launch count rather than on the clock.
+        // Well over three times the 34.9 s this seed takes to close, so a retune
+        // that slows the fight fails on the launch count rather than on the clock.
         max_ticks: ticks_for_sim_seconds(120.0, dt),
-        // Pinned, and not this world's own `[global] seed` (3, which also closes
-        // now, 24 s later). KEPT at 12 across #929's second pass, which is worth
-        // saying because everything else about the run moved under it: the same
-        // seed now closes at 49.2 s instead of 59.8 s, with the DESTROYER dying
-        // rather than the cruiser, and the fore pair still puts 4 rounds out.
-        // Re-swept at 180 s over 28 seeds (1-14, 17, 21, 31, 34, 41, 43, 47, 55,
-        // 59, 61, 89, 144, 792, 838): all 28 resolve and all 28 launch. 12 stays
-        // the pin because it is among the fastest to close and because keeping it
-        // makes the before/after readable on one seed.
-        seed: Some(12),
+        // Pinned, and not this world's own `[global] seed` (3, which also closes,
+        // 3.5 s later). MOVED from 12 to 7 at #929's helm-doctrine pass, and the
+        // reason is the one the assertion below spells out: seed 12 stopped
+        // closing. It is not a marginal loss — at 180 s the cruiser and the
+        // destroyer are still trading on it, 551 dealt against 960 taken with
+        // neither dead. Arc-keeping cut the beam damage this hull needs (32 back
+        // down to 24 dmg/s, which is what the ladder re-derived to) while also
+        // cutting what it takes, and the pair of those turns a handful of seeds
+        // into grinds. Widening the window would have hidden that; re-picking
+        // says it.
+        //
+        // Re-swept at 180 s over the same 28 seeds `alliance_cruiser.toml`
+        // records (1-14, 17, 21, 31, 34, 41, 43, 47, 55, 59, 61, 89, 144, 792,
+        // 838): 24 of 28 resolve — 8, 9, 12 and 61 are the grinds — and all 28
+        // launch. 7 is the pin because it is the fastest close that still puts a
+        // full FOUR rounds out (34.9 s, 4 rounds, both hostiles dead), so the
+        // launch assertion below has margin over its floor of 2 rather than
+        // sitting on it.
+        seed: Some(7),
         deterministic: true,
         ..test_args()
     };
@@ -5034,9 +5061,23 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
     //
     // The leg count on its own cannot tell a working bow hold from a park — both
     // read high — so it is now asserted as a PAIR with the thing the leg exists
-    // to produce. Measured at this world's own seed, 30 s: 2 entries, 723 of 900
-    // ticks flown in the leg, 5 rounds out of the fore pair, 221 dealt with 120
-    // of it on the target's HULL (it was 92 dealt and hull_taken 0 before).
+    // to produce.
+    //
+    // RE-BLESSED AGAIN at #929's helm-doctrine pass, and this time the occupancy
+    // floor came OUT rather than moving. The reason is in the leg's own exits,
+    // quoted two paragraphs up: `tubes_full < 1` and `tubes_fillable < 1` both
+    // require a round to have LEFT. Occupancy is therefore inversely related to
+    // how well the tubes work — the leg is held exactly as long as the hull
+    // cannot spend it. The 723-tick reading was a hull that entered, could not
+    // launch, and sat; the 14-tick reading below is a hull that entered,
+    // launched, and left. A floor on that number rewards the defect.
+    //
+    // Measured at this world's own seed, 30 s (900 ticks): 1 entry, 14 ticks
+    // flown in the leg, 2 rounds out of the fore pair, 544 dealt, 357 ring
+    // ticks. The window no longer contains 30 s of fighting at all — arc-keeping
+    // holds the target in the broadside and the hull kills this passive hostile
+    // at 12.6 s, so ~380 ticks is the whole engagement and `run > 100` would
+    // demand a quarter of it be spent bow-on.
     //
     //   * ENTERED. `run_entries` is the guard a range gate cannot slip past: set
     //     `torpedo_run_range` below the radius the ring actually settles at and
@@ -5044,11 +5085,27 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
     //     here would survive. `authored_ai_pins::
     //     the_torpedo_run_range_clears_the_radius_the_ring_settles_at` is the
     //     same claim made against the authored numbers rather than a run.
-    //   * FLOWN. The original `> 100` floor, restored — it was measuring a park
-    //     at the old seed and measures the manoeuvre at this one.
+    //   * NOT PARKED. The defect stated as a proportion instead of a count, so
+    //     it does not have to be re-blessed every time the guns move. #929's
+    //     deadlock was the leg CROWDING OUT the ring (723 ticks bow-on against a
+    //     handful of ring ticks); a bow hold that is a manoeuvre cannot be the
+    //     majority of the time the hull spends in contact. 14 against 357 here.
+    //     The sibling assertion in `the_composed_cruisers_ring_is_not_
+    //     overwritten_by_an_arc_bearing_request` records why a bare number was
+    //     the wrong instrument — that one was re-blessed downward twice inside a
+    //     single issue before being replaced by a property.
     //   * SPENT. The half the old assertion had no way to see. A leg that is
     //     entered and held while nothing leaves a tube is issue #929's deadlock,
     //     and it passed `run > 100` for months.
+    //
+    // The fear the removed floor's message named — "with no torpedo leg of its
+    // own the hull is dragged bow-on by `ArcBearingRequest` instead, a facing
+    // the doctrine did not choose and cannot see" — is not inferred here, it is
+    // MEASURED, and by a different test: `the_composed_cruisers_ring_is_not_
+    // overwritten_by_an_arc_bearing_request` counts ring ticks flown at a yaw
+    // the ship's own planner did not solve and asserts zero of them, on this
+    // same aggressor sample. It is green across this pass. A short leg and a
+    // hijacked heading are separable, and that test is what separates them.
     assert!(
         aggressor.run_entries > 0,
         "the cruiser never once opened its torpedo run across 30 s with a loaded \
@@ -5060,14 +5117,19 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
         aggressor.tubes_spent
     );
     assert!(
-        aggressor.run > 100,
-        "the cruiser opened its torpedo run {} time(s) but flew it for only {} \
-         ticks, so it is not holding a bearing long enough to be a manoeuvre. \
-         With no torpedo leg of its own the hull is dragged bow-on by \
-         `ArcBearingRequest` instead, which is a facing the doctrine did not \
-         choose and cannot see",
+        aggressor.run <= aggressor.orbit,
+        "the cruiser spent {} of its {} contact ticks bow-on in the torpedo run \
+         and only {} of them on the fighting ring, so the leg is a park rather \
+         than a manoeuvre — it is being HELD, not flown. That is issue #929's \
+         deadlock shape: `torpedo_run` only exits once a round has left, so a \
+         hull that cannot spend its tubes sits in the leg with the thrust cut \
+         ({} entries, {} rounds spent, {:.0} dealt)",
+        aggressor.run,
+        aggressor.run + aggressor.orbit,
+        aggressor.orbit,
         aggressor.run_entries,
-        aggressor.run
+        aggressor.tubes_spent,
+        aggressor.damage_dealt
     );
     assert!(
         aggressor.tubes_spent >= 2,

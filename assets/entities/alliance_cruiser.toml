@@ -368,12 +368,13 @@ range = 50
 shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
 selects = [ "ship", "station", "asteroid" ]
 
-# ── `beam_damage_per_sec = 32`: what a bank has to be worth once torpedoes
+# ── `beam_damage_per_sec = 24`: what a bank has to be worth once torpedoes
 #    stop ignoring shields (issue #929) ────────────────────────────────────────
 #
 # [ai] Unratified, both banks. Was 4, went to 24 on the second pass with
-# `auto_arc_deg = 180`, and is 32 now that both banks bear (see "The AI arcs
-# WIDENED" in the header). This is the hull's whole anti-shield tuning and it
+# `auto_arc_deg = 180`, went to 32 when both banks began to bear (see "The AI
+# arcs WIDENED" in the header), and is back to 24 now that the helm keeps the
+# guns on the target instead of buying coverage with raw damage. This is the hull's whole anti-shield tuning and it
 # belongs on the ratification list; the argument, the arithmetic and both swept
 # ladders are here so a ratifier can move it on evidence.
 #
@@ -425,7 +426,7 @@ selects = [ "ship", "station", "asteroid" ]
 #   22     8/12          23.8 s           471          7/12
 #   24    10/12          23.5 s           520          8/12
 #   28    10/12          19.4 s           540          8/12
-#   32    12/12          10.6 s           516         10/12   <- shipped
+#   32    12/12          10.6 s           516         10/12
 #   40    12/12           5.8 s           517         11/12
 #
 # …and the same ladder at the PREVIOUS `auto_arc_deg = 180`, kept because it is
@@ -434,10 +435,35 @@ selects = [ "ship", "station", "asteroid" ]
 #   D     4     8    12    16    20    24
 #   seeds 0/12  0/12 5/12  8/12  9/12  12/12   <- knee was 24
 #
-# 32 is the KNEE, not a preference: the first rung at which every seed opens the
-# gate. Swept wider at 32 — the same 28 seeds the earlier passes used — 28/28
-# launch (2-4 rounds), 25/28 resolve inside 90 s and 28/28 inside 180 s, and this
-# hull WINS 25 of the 28 and loses 3.
+# 32 WAS the knee on that ladder — the first rung at which every seed opens the
+# gate — and it is not any more. RE-DERIVED once the arc-keeping and
+# weak-broadside doctrine landed (see `[helm_console.steering_ai.param]`), on the
+# same command line and the same 12 seeds:
+#
+#   D    launches>0   mean bow hold   cruiser deals   duels resolving
+#   8      0/12          27.0 s           168          2/12
+#   12     7/12          25.0 s           323          3/12
+#   16    11/12           7.3 s           467          8/12
+#   20    12/12           9.2 s           509          9/12
+#   24    12/12          14.7 s           510          8/12
+#   32    12/12           0.5 s           503         12/12
+#
+# Twelve seeds put the knee at 20; the WIDER 28-seed sweep does not confirm it —
+# 20 reaches only 25/28 — so the shipped value is 24, the first rung that opens
+# the gate on every one of the 28. Down from 32, which is the drop a helm that
+# keeps its guns on the target was expected to buy.
+#
+#   28 seeds, 90 s     D=20     D=24 (shipped)   D=32
+#   launches>0         25/28    28/28            28/28
+#   duels resolving    18/28    22/28            28/28
+#   this hull wins     17/28    21/28            28/28
+#   damage taken       555      495              299
+#
+# THE COST IS STATED PLAINLY: 32 is still better on every quality reading, and 24
+# is chosen because the KNEE is the launch criterion this issue has used at every
+# pass — "torpedo cadence restored on effectively all seeds" — not because 24
+# fights better. A ratifier who wants the fight rather than the cadence should
+# read that table and put it back up.
 #
 # WHAT 32 IS NOT, AND WHAT IT IS. On paper this is now the fleet's heaviest beam
 # battery, and the comparison only means anything if the BEARING is stated —
@@ -550,7 +576,7 @@ facing_deg = 0
 fire_arc_deg = 270
 auto_arc_deg = 270
 beam_range = 40
-beam_damage_per_sec = 32
+beam_damage_per_sec = 24
 beam_duration_secs = 6
 cooldown_secs = 6
 cycle_jitter = 0.33
@@ -578,7 +604,7 @@ marker = "phasers_fore"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
-# `beam_damage_per_sec = 32` here too, and for the same reason — the argument,
+# `beam_damage_per_sec = 24` here too, and for the same reason — the argument,
 # the arithmetic and both swept ladders are written out once above the `fore`
 # bank.
 # The pair is deliberately symmetric: the ring puts whichever bank is on the
@@ -591,7 +617,7 @@ facing_deg = 180
 fire_arc_deg = 270
 auto_arc_deg = 270
 beam_range = 40
-beam_damage_per_sec = 32
+beam_damage_per_sec = 24
 beam_duration_secs = 6
 cooldown_secs = 6
 cycle_jitter = 0.33
@@ -1617,6 +1643,84 @@ torpedo_run_range = 25.0
 combat_orbit_range = 22.0
 combat_orbit_speed = 0.7
 torpedo_run_range = 25.0
+
+# ── Arc-keeping and the weak-broadside flip (issue #929) ─────────────────────
+#
+# [ai] Unratified, all four. They are the doctrine half of the arc-dwell finding:
+# instrumented on `probe_duel`, EVERY beam this hull lights ends because the
+# target left the burning bank's arc, not because the burn expired. The banks are
+# arc-limited, so arc dwell is what is actually being wasted, and these are the
+# two levers the ring has to spend on it.
+#
+# ARC-KEEPING. `arc_keep_margin_deg` is how close to an arc EDGE the target may
+# drift before the ring stops flying for position and starts flying for the guns;
+# `arc_keep_speed` is the throttle it drops to when that happens.
+#
+# The mechanism this leans on is NOT new and this hull already carried it:
+# `[helm_console] low_speed_turn_boost = 0.2` (below) makes the effective yaw
+# rate `max_yaw_rate * (1 + 0.2 * (1 - speed_fraction))`, so backing the throttle
+# from 0.7 to 0.3 of the cap buys about 8 % more turn authority — and, the larger
+# half of the effect, shortens the arc the ring has to sweep per second. The
+# doctrine is finally spending a capability the physics has always offered.
+#
+# WHICH READING IT ACTS ON took a correction worth recording. The obvious one —
+# the best-bearing bank's margin — is useless here: two 270-degree arcs on the
+# centreline overlap so heavily that their union has no gap, and the best margin
+# never falls below 45 degrees at ANY bearing, so a threshold under 45 could
+# never fire and one over it would fire always. `tick_beams_prepare` asks about
+# the ONE bank that is burning, so the reading a helm can act on is the MINIMUM
+# over bearing banks: how soon the broadside goes from two guns to one. At 20 the
+# lever fires on about 83 of a 90 s run's AI ticks.
+#
+# THE FLIP. `weak_shield_flip_hp` / `weak_shield_restore_hp` reverse the ring so
+# the OTHER broadside faces the enemy once the presented arc has been beaten
+# down, and hold it reversed until the hurt side has genuinely recovered. Owner's
+# priority order: shield protection beats arc-keeping, and the flip is allowed to
+# cost arc dwell — the guns swap sides and the target crosses the blind wedge to
+# get there. Measured active on about 399 of that same run's AI ticks, so this
+# hull spends a real fraction of a fight presenting its good side.
+#
+# The pair is a DEADBAND and the gap between them is the whole point. This hull's
+# arcs are 100 hp and regenerate 2 (7 focused), so a single threshold would have
+# the ring reversing every few ticks as the arc bobbed across it. 25 to flip and
+# 60 to come back is thirty-five points of travel in each direction.
+#
+# Nothing else in the doctrine has to know. The flip mirrors the DIRECTION only:
+# same radius, same speed, same tangent geometry, other side — so the
+# `torpedo_run` bow hold opens from either broadside exactly as it did, and the
+# 28-seed launch count is unmoved by it.
+#
+# WHAT THEY BOUGHT, `probe_duel --deterministic --hz 30 --sim-seconds 90`, 12
+# seeds, one variable at a time, at the `beam_damage_per_sec = 32` this hull
+# carried when they were written:
+#
+#                     arc off   arc off   arc ON    arc ON
+#                     flip off  flip ON   flip off  flip ON
+#   duels resolving    10/12     10/12     12/12     12/12
+#   this hull kills    10/12     10/12     12/12     12/12
+#   damage taken       479       479       296       270
+#   damage dealt       516       513       511       503
+#   bow hold (mean)    10.6 s    10.6 s     0.5 s     0.5 s
+#
+# Arc-keeping is the large effect and it is not subtle: a 38 % cut in damage
+# taken, every duel resolving, and a bow hold that all but disappears because a
+# hull that keeps its guns on the target does not need to break the ring to point
+# them. The flip is a smaller, additive win on the same axis — another 9 % off
+# damage taken for about 1 % of damage dealt, which is the trade it was asked
+# for.
+#
+# WHAT THEY DID NOT BUY, recorded because it was the stated goal. "Beam-on-target
+# coverage", measured as the distinct sim ticks on which a phaser bank actually
+# landed damage, does NOT rise: 4.5-5.3 % of ticks before, 4.2-5.5 % after, noise
+# either way. The gain is real but it is not dwell — the ring holds a better
+# firing position and takes far less in return, and the coverage proxy is
+# dominated by how fast damage accumulates per landing tick rather than by how
+# long a bank bears. A future pass wanting to measure dwell directly should count
+# BURNING ticks at the beam site, not landing ticks from the balance ledger.
+arc_keep_margin_deg = 20.0
+arc_keep_speed = 0.3
+weak_shield_flip_hp = 25.0
+weak_shield_restore_hp = 60.0
 
 # ── AI sensing horizon ───────────────────────────────────────────────────────
 #

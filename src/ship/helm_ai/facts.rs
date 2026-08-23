@@ -427,6 +427,118 @@ pub(crate) const COMBAT_ORBIT_SPEED_PARAM: &str = "combat_orbit_speed";
 /// the orbit spirals back onto the ring from inside or outside it.
 pub(crate) const COMBAT_ORBIT_SPIRAL_GAIN_PARAM: &str = "combat_orbit_spiral_gain";
 
+// ── The broadside's own two readings (issue #929) ────────────────────────────
+//
+// Both are pure functions of authoritative state this host already holds, and
+// both exist because the fighting ring has two things to trade against each
+// other that no existing fact could express: how close the target is to falling
+// out of the guns, and how badly the side of the ship pointed at it is hurt.
+
+/// How many degrees of margin the target has before the NEXT phaser bank drops
+/// it (issue #929).
+///
+/// Positive is margin in hand; `0` is exactly on an edge; negative means no bank
+/// bears at all and is how far outside the nearest one the target sits.
+///
+/// THE MINIMUM over the banks that currently bear, and the choice matters. The
+/// obvious reading — the best-bearing bank's margin — is useless on the hull
+/// this was written for: two 270-degree arcs on the centreline overlap so
+/// heavily that their union has no gap at all, and the best margin never falls
+/// below 45 degrees at ANY bearing. Yet the measurement that prompted this says
+/// beams end on `!bank_in_arc` constantly, because `tick_beams_prepare` asks
+/// about the ONE bank that is burning, not about the best one. So the reading a
+/// helm can act on is how soon the FIRST bearing bank will lose it — that is the
+/// broadside going from two guns to one.
+///
+/// When no bank bears the minimum is over an empty set, so the fallback is the
+/// nearest arc's (negative) margin: "how far outside" is the only useful thing
+/// left to say.
+///
+/// Why the AUTO arc and not `fire_arc_deg`: this is a reading an AI crew acts
+/// on, and `ai_phaser_auto_fire` gates on `auto_arc_deg`. A hull whose two gates
+/// differ (`alliance_battleship` today) would otherwise slow down to protect an
+/// arc its own AI will not fire through.
+///
+/// Zero-damage banks are skipped — a bank authored to hurt nothing is not a
+/// reason to give away the ring — and a hull with no phaser banks at all seeds
+/// nothing, so an authored guard on it reads false rather than "wide open".
+pub(crate) const OWN_BANK_ARC_MARGIN_DEG_FACT: &str = "own_bank_arc_margin_deg";
+
+/// The HP of this ship's OWN shield arc facing the target (issue #929).
+///
+/// The mirror of `target_facing_shields`, pointed the other way: that fact asks
+/// what is in the way of my torpedo, this one asks what is in the way of the
+/// enemy's. Resolved through `ShieldSystem::hp_facing_bearing` — the same
+/// resolver the damage path routes an incoming hit through — so the arc this
+/// reports is the arc that will actually take the next broadside.
+///
+/// An OFFLINE arc reads `0`, exactly as `hp_facing_attacker` does, because an
+/// arc that is passing damage through is not protecting anything. A hull with no
+/// `ShipShields` seeds nothing rather than `0`: "no shields at all" is not "my
+/// shields are down", and a doctrine that flipped its broadside for a hull that
+/// never had one would be reacting to its own absence.
+pub(crate) const OWN_FACING_SHIELD_HP_FACT: &str = "own_facing_shield_hp";
+
+/// Seed the two broadside readings above from this ship's own components.
+///
+/// Reads [`BEARING_TO_TARGET_FACT`] rather than re-deriving the bearing, so this
+/// cannot disagree with the fact every other guard on this axis is reading; with
+/// no target the bearing is absent and neither reading is seeded, which is the
+/// honest answer to "which of my arcs is facing it".
+pub(crate) fn seed_own_broadside_facts(
+    facts: &mut crate::world::flags::AiFacts,
+    own_shields: Option<&crate::ship::shields::ShipShields>,
+    phasers: Option<&crate::entities::config::PhaserCombatConfig>,
+) {
+    let Some(bearing_rad) = facts.get(BEARING_TO_TARGET_FACT) else {
+        return;
+    };
+    let bearing_rad = bearing_rad as f32;
+
+    if let Some(shields) = own_shields {
+        facts.set(
+            OWN_FACING_SHIELD_HP_FACT,
+            shields.0.hp_facing_bearing(bearing_rad) as f64,
+        );
+    }
+
+    if let Some(cfg) = phasers {
+        let bearing_deg = bearing_rad.to_degrees();
+        let margins: Vec<f32> = cfg
+            .banks
+            .iter()
+            .filter(|b| b.beam_damage_per_sec > 0.0 && b.auto_arc_deg > 0.0)
+            .map(|b| {
+                // Signed angular distance from the bank's centreline, folded
+                // into (-180, 180] so a bank facing astern measures the short
+                // way round rather than through 360.
+                let mut delta = bearing_deg - b.facing_deg;
+                while delta > 180.0 {
+                    delta -= 360.0;
+                }
+                while delta <= -180.0 {
+                    delta += 360.0;
+                }
+                b.auto_arc_deg * 0.5 - delta.abs()
+            })
+            .collect();
+        // The soonest bearing bank to drop out; failing that, the nearest arc.
+        let bearing_min = margins
+            .iter()
+            .copied()
+            .filter(|m| *m > 0.0)
+            .fold(f32::INFINITY, f32::min);
+        let margin = if bearing_min.is_finite() {
+            bearing_min
+        } else {
+            margins.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+        };
+        if margin.is_finite() {
+            facts.set(OWN_BANK_ARC_MARGIN_DEG_FACT, margin as f64);
+        }
+    }
+}
+
 /// Every scalar the combat-orbit arm needs, gated as ONE unit by
 /// [`combat_orbit_params_authored`].
 ///
@@ -786,6 +898,60 @@ pub(crate) const TUBES_FULL_FACT: &str = "tubes_full";
 /// ONE slot for both orbit legs, deliberately: a ship circles one way at a time,
 /// and the two legs are mutually exclusive (a state resolves exactly one yaw
 /// verb). What differs between them is the RADIUS, and that has its own field.
+/// ── Arc-keeping (issue #929) ────────────────────────────────────────────────
+///
+/// The margin, in degrees, at which the ring stops caring about speed and starts
+/// caring about staying pointed. When [`OWN_BANK_ARC_MARGIN_DEG_FACT`] falls to
+/// or below this, the ring is flown at [`ARC_KEEP_SPEED_PARAM`] instead of
+/// [`COMBAT_ORBIT_SPEED_PARAM`].
+///
+/// The two are a pair and are gated together: a margin with no slower speed to
+/// fall back to would be a reading nothing acts on, and a speed with no margin
+/// would apply always. A hull that authors neither flies exactly the ring it
+/// always did.
+pub(crate) const ARC_KEEP_MARGIN_DEG_PARAM: &str = "arc_keep_margin_deg";
+/// The throttle fraction flown while the target is near an arc edge.
+///
+/// Lower than `combat_orbit_speed` is the whole point, and the mechanism it
+/// leans on is already in the physics: `[helm_console] low_speed_turn_boost`
+/// gives `max_yaw_rate * (1 + boost * (1 - speed_fraction))`, so backing off the
+/// throttle buys turn authority. Slowing to hold the target in arc is therefore
+/// not a new capability, it is the doctrine finally spending one the hull has
+/// always had.
+pub(crate) const ARC_KEEP_SPEED_PARAM: &str = "arc_keep_speed";
+
+/// ── The weak-broadside flip (issue #929) ────────────────────────────────────
+///
+/// At or below this many HP on [`OWN_FACING_SHIELD_HP_FACT`], the ring reverses
+/// so the OTHER broadside faces the enemy while the hurt side recovers.
+///
+/// Owner's priority order: shield protection beats arc-keeping. A flip costs arc
+/// dwell — the guns swap sides and the target crosses the blind wedge to get
+/// there — and that cost is accepted deliberately.
+pub(crate) const WEAK_SHIELD_FLIP_HP_PARAM: &str = "weak_shield_flip_hp";
+/// The HP the once-weak arc has to climb back to before the ring will flip BACK.
+///
+/// Strictly the higher of the pair, and the reason is thrash: an arc sitting on
+/// the flip threshold regenerating a point a second would otherwise reverse the
+/// ring every few ticks, which is worse than either side of the choice. Authored
+/// rather than derived so the width of the deadband is a designer's decision;
+/// validated as `>= weak_shield_flip_hp` where the pair is read.
+pub(crate) const WEAK_SHIELD_RESTORE_HP_PARAM: &str = "weak_shield_restore_hp";
+
+/// Private-memory slot: is the ring currently flown REVERSED to protect a weak
+/// broadside (issue #929)? `1.0` flipped, `0.0` (or absent) normal.
+///
+/// A latch rather than a per-tick derivation, because hysteresis needs to know
+/// which side of the deadband it came from. Host-written in the same per-tick
+/// fold as `min_range_seen`, read when the pass surface mirrors
+/// [`ORBIT_DIRECTION_MEMORY`]; no authored guard reads it, exactly like the
+/// direction slot it modifies.
+///
+/// Living in policy MEMORY is what makes it resume-safe for nothing: memory
+/// travels in the snapshot payload as `PolicyState.memory`, so a run restored
+/// mid-flip keeps circling the way it was — the lesson issue #1242 charged for.
+pub(crate) const BROADSIDE_FLIP_MEMORY: &str = "broadside_flip";
+
 pub(crate) const ORBIT_DIRECTION_MEMORY: &str = "orbit_direction";
 /// Private-memory slot: how many times this machine has entered an orbiting
 /// state since its last reset (issues #788, #790).

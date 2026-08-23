@@ -452,6 +452,11 @@ pub(crate) fn ai_policy_state_tick(
             // runtime, so unlike the tubes above this carries no ordering
             // question — no system in the schedule writes the field this reads.
             Option<&crate::console::weapons::BlasterSystemResource>,
+            // This ship's OWN phaser banks (issue #929), read for `facing_deg` /
+            // `auto_arc_deg` / `beam_damage_per_sec` alone, to derive how much
+            // arc margin the target has left. Config, so it carries no ordering
+            // question for the same reason the blaster banks above do not.
+            Option<&crate::console::weapons::PhaserCombatConfigResource>,
             // The SHIP field of the orbit-direction composite key.
             Option<&crate::entities::spawner::EntityUuid>,
             HelmPolicyRuntime,
@@ -511,6 +516,7 @@ pub(crate) fn ai_policy_state_tick(
         shields,
         torpedoes,
         blasters,
+        phaser_cfg,
         entity_uuid,
         mut runtime,
     ) in ships.iter_mut()
@@ -587,6 +593,13 @@ pub(crate) fn ai_policy_state_tick(
             torpedoes.map(|t| &t.0),
             sources,
         );
+        // The broadside's own two readings (issue #929): how much arc margin the
+        // target has left inside the bank that is shooting it, and how hurt the
+        // shield arc pointed at it is. Both are pure functions of components this
+        // host already holds and of the bearing seeded above, so neither adds an
+        // ordering question — `tick_shields` is the single writer of the arcs and
+        // bank CONFIG never changes at runtime.
+        seed_own_broadside_facts(&mut facts, shields, phaser_cfg.map(|c| &c.0));
 
         // ── Engines ──────────────────────────────────────────────────────────
         tick_policy_machine(
@@ -896,6 +909,40 @@ where
                 state.memory.set(MIN_RANGE_TARGET_MEMORY, fingerprint);
             }
         }
+    }
+
+    // ── The weak-broadside flip latch (issue #929) ───────────────────────────
+    //
+    // A LATCH rather than a per-tick comparison, because the decision needs
+    // hysteresis and hysteresis needs to know which side of the deadband it came
+    // from. Flip when the arc facing the enemy falls to the authored floor;
+    // unflip only once it has climbed back to the authored (higher) restore
+    // reading. An arc regenerating a point a second across a single threshold
+    // would otherwise reverse the ring every few ticks, which is worse than
+    // either side of the choice.
+    //
+    // Folded here, in the one per-tick memory site, so it moves on the same tick
+    // as the readings the surface will pair it with. Only the axis that AUTHORS
+    // the pair folds anything — every other axis (and every hull that never
+    // authors it) leaves the slot untouched and the ring unmirrored.
+    if let (Some(flip_at), Some(restore_at), Some(hp)) = (
+        policy.params.get(WEAK_SHIELD_FLIP_HP_PARAM),
+        policy.params.get(WEAK_SHIELD_RESTORE_HP_PARAM),
+        facts.get(OWN_FACING_SHIELD_HP_FACT),
+    ) {
+        // A restore floor below the flip floor is not a deadband, it is a
+        // thrash generator with extra steps; treat the pair as the single
+        // threshold the author appears to have meant rather than oscillating.
+        let restore_at = restore_at.max(flip_at);
+        let flipped = state.memory.get(BROADSIDE_FLIP_MEMORY).unwrap_or(0.0) > 0.0;
+        let now_flipped = if flipped {
+            hp < restore_at
+        } else {
+            hp <= flip_at
+        };
+        state
+            .memory
+            .set(BROADSIDE_FLIP_MEMORY, if now_flipped { 1.0 } else { 0.0 });
     }
 
     // The private bag is seeded from THIS fine system's own state component and

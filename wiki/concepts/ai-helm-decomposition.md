@@ -97,6 +97,32 @@ What each fidelity level runs:
 
 Entirely separate, client-visual only. `MeshConfig.lod: Vec<LodLevel>` (`src/entities/config.rs`) declares near→far distance bands; each `LodLevel` is a GLB (`model`) or procedural (`shape`) level with optional per-band visual overrides falling back to the flat `MeshConfig` fields. `select_lod` picks the band for the camera distance with a `LOD_HYSTERESIS_MARGIN = 5.0` world-unit band against flip-flopping. `update_mesh_lod` (`src/server_app.rs`) drives entities carrying the `MeshLods` component, swapping the active visual (GLB scene child vs procedural mesh on the parent) when the level changes.
 
+## The fighting ring's two levers (issue #929)
+
+A broadside orbit exists to hold the target abeam so the guns bear. Instrumented on `probe_duel`, it was not managing it: **every** beam the player cruiser lit ended because the target left the burning bank's arc, never because the burn expired. The banks are arc-limited, so arc dwell — not damage, not duty cycle — is what the ring was wasting.
+
+Two authored levers on the steering axis now trade against that, both absent-by-default so an unauthored hull flies exactly the ring it always did.
+
+**Arc-keeping** — `arc_keep_margin_deg` / `arc_keep_speed`. When the target drifts within the authored margin of an arc edge, the ring is flown at the slower throttle. The mechanism it leans on is older than the issue: `ShipPhysicsConfig::low_speed_turn_boost` gives `max_yaw_rate * (1 + boost * (1 - speed_fraction))`, so backing off the throttle buys turn authority. The cruiser had authored `low_speed_turn_boost = 0.2` long before anything spent it.
+
+The fact it reads is `own_bank_arc_margin_deg`, and it is the **minimum over bearing banks**, not the best one. Two 270° arcs on the centreline overlap so heavily that their union has no gap — the best margin never falls below 45° at any bearing — while `tick_beams_prepare` asks about the one bank that is *burning*. The actionable reading is how soon the broadside goes from two guns to one.
+
+**The weak-broadside flip** — `weak_shield_flip_hp` / `weak_shield_restore_hp`. When the arc the hull is presenting has been beaten down, the ring reverses so the healthy side faces the enemy. The fact is `own_facing_shield_hp`, this ship's own arc facing the target through `ShieldSystem::hp_facing_bearing` — the mirror of `target_facing_shields`, resolved through the same router the damage path uses. Priority order is deliberate: **shield protection beats arc-keeping**, and the flip is allowed to cost dwell.
+
+The pair is a deadband, and the latch lives in policy memory (`broadside_flip`), folded per tick beside `min_range_seen`. Hysteresis is load-bearing: an arc regenerating across a single threshold would reverse the ring every few ticks. Because policy memory travels in the snapshot payload as `PolicyState.memory`, a run restored mid-flip keeps circling the way it was — resume safety by construction rather than by a new seam.
+
+The flip mirrors **direction only** — same radius, same speed, same tangent geometry — so the `torpedo_run` bow hold opens from either broadside and nothing else in the doctrine has to know.
+
+Measured, 12 seeds of `probe_duel` at 90 s, one variable at a time:
+
+| | arc off, flip off | arc ON, flip off | arc ON, flip ON |
+| --- | --- | --- | --- |
+| duels resolving | 10/12 | 12/12 | 12/12 |
+| damage taken | 479 | 296 | 270 |
+| bow hold (mean) | 10.6 s | 0.5 s | 0.5 s |
+
+Arc-keeping is the large effect: a 38% cut in damage taken and a bow hold that all but disappears, because a hull that keeps its guns on the target does not need to break its ring to point them. **What it did not buy is coverage** — distinct ticks on which a bank landed damage sit at 4.5–5.3% before and 4.2–5.5% after. The gain is a better firing position and far less return fire, not dwell; a pass wanting to measure dwell should count *burning* ticks at the beam site rather than landing ticks from the balance ledger.
+
 ## Cross-references
 
 - [Helm Runtime](./helm-control-intent.md) — the human/console side of the same intent surface

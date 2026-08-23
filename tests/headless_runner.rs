@@ -17077,3 +17077,107 @@ fn every_new_operations_systems_state_is_present_in_the_digest() {
         }
     }
 }
+
+/// **No hostile in `combat_test` parks in its bow hold and stops fighting
+/// (issue #1243).**
+///
+/// The straggler that made this world unresolvable was not lost, mis-factioned
+/// or out of range of the fight. It was FROZEN, by its own doctrine, in a leg
+/// that cuts thrust:
+///
+/// * `ship_harrow_cruiser`'s bow hold opens at `range_to_target <=
+///   torpedo_run_range` and is flown at `torpedo_bearing_speed = 0.0`.
+/// * The hull authored that gate at 220 — far outside its 55-unit beams and
+///   outside the 200-unit acquisition band this world hands its raid — on the
+///   reasoning that `torpedo_run_shield_gap = 1.0` would bind first.
+/// * Against `station_axiom.toml`, which authors no `[shields]` at all,
+///   `target_facing_shield_down` reads 1.0 for ever, so the shield gate binds at
+///   no range and the leg opened at 220.
+/// * Every armament exit the leg has needs a round to have LEFT a tube, and a
+///   hull parked where it cannot lock anything never fires one.
+///
+/// Measured before the fix: 694 s of an 800 s seed-3 run in `torpedo_run` with
+/// `shots_fired: {}` — and one such hull holds
+/// `on_all_destroyed("hostiles", …)` open for the rest of the run, whatever else
+/// the crew does.
+///
+/// # Why this pins the freeze and not the outcome
+///
+/// Deliberately says nothing about who wins. That is
+/// `combat_test_develops_two_sided_combat_and_resolves`' job, and it is a moving
+/// target — the raid's effectiveness and the player hull's survivability are
+/// both actively tuned. A hull that stops fighting for ten minutes is a defect at
+/// any balance point, so this asserts exactly that and stays still while the
+/// balance moves.
+///
+/// The player hull is the BATTLESHIP rather than the default cruiser, and that
+/// is the whole reason this bug hid for so long: with a player that dies at
+/// ~150 s the scenario resolves on its death and no straggler ever gets the
+/// chance to matter. A player that survives is what exposes the freeze.
+#[test]
+fn no_combat_test_hostile_parks_in_its_bow_hold() {
+    let dt = 1.0 / 30.0;
+    let args = HeadlessArgs {
+        world_path: "assets/worlds/combat_test.toml".into(),
+        // See the doc above: a surviving player is the precondition for
+        // observing the defect at all.
+        ship_path: "assets/entities/alliance_battleship.toml".into(),
+        dt,
+        max_ticks: ticks_for_sim_seconds(300.0, dt),
+        // Pinned: one of the three seeds issue #1243 measured the straggler on.
+        // Pre-fix this seed parks `wave_2_bonus` from ~t=106 s onward, so the
+        // window below sees ~190 s of it — three times the bound.
+        seed: Some(3),
+        deterministic: true,
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("combat_test must build an app");
+    run(&mut app, args.max_ticks);
+    let report = build_report(&mut app, &args, 0.0);
+
+    // Anti-vacuity: this has to be a run in which the raid actually arrived and
+    // fought, or "nobody parked" would be true of an empty sky.
+    let fighting = report
+        .damage_by_ship
+        .values()
+        .filter(|l| {
+            l.name_id.as_deref().is_some_and(|n| n.starts_with("wave_")) && l.damage_dealt > 0.0
+        })
+        .count();
+    assert!(
+        fighting >= 3,
+        "only {fighting} hostiles landed a shot in 300 s, so this run measured no \
+         raid at all: {:?}",
+        report.damage_by_ship
+    );
+
+    // The freeze itself: a long stretch in the bow hold with nothing fired.
+    // `torpedo_run` is entered on a loaded salvo and left on a spent one, so a
+    // minute of it without a single shot is not a slow engagement, it is a hull
+    // that has stopped.
+    let parked: Vec<String> = report
+        .damage_by_ship
+        .values()
+        .filter(|l| {
+            l.phase_seconds.get("torpedo_run").copied().unwrap_or(0.0) > 60.0
+                && l.shots_fired.is_empty()
+        })
+        .map(|l| {
+            format!(
+                "{} ({:.0} s in torpedo_run, {} dealt, {} taken)",
+                l.name_id.as_deref().unwrap_or("<unnamed>"),
+                l.phase_seconds.get("torpedo_run").copied().unwrap_or(0.0),
+                l.damage_dealt,
+                l.damage_taken
+            )
+        })
+        .collect();
+    assert!(
+        parked.is_empty(),
+        "these hulls sat in their thrust-cut bow hold without firing: {parked:?}. \
+         A hull that opens `torpedo_run` outside the range it can lock a target at \
+         can never satisfy the leg's armament exits, so it never leaves — check \
+         `torpedo_run_range` against the hull's own beams and against this world's \
+         `acquisition_band` (issue #1243)."
+    );
+}

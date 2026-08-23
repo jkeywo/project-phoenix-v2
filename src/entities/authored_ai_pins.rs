@@ -3662,6 +3662,83 @@ fn the_torpedo_run_range_clears_the_radius_the_ring_settles_at() {
     );
 }
 
+/// **The bow hold opens inside the guns it is being held for (issue #1243).**
+///
+/// [`the_torpedo_run_range_clears_the_radius_the_ring_settles_at`] bounds
+/// `torpedo_run_range` from BELOW — a gate under the radius the ring settles at
+/// is a leg that can never open. This is the other side of it, and it is the
+/// side that shipped broken.
+///
+/// The bow hold is flown at `torpedo_bearing_speed = 0.0`: entering it CUTS
+/// THRUST. So whatever range it opens at is a range the hull then stops and
+/// fights from, and a hull that stops outside its own direct-fire envelope has
+/// stopped somewhere it cannot shoot from — and, because every armament exit the
+/// leg has (`tubes_full < 1`, `tubes_fillable < 1`) needs a round to have LEFT a
+/// tube, somewhere it may not be able to leave either.
+///
+/// `ship_harrow_cruiser` authored 220 against a 55-unit beam envelope, on the
+/// reasoning that its `torpedo_run_shield_gap = 1.0` binds first: the run cannot
+/// open until the arc facing it is down, and it can only strip that arc from
+/// inside 55. Sound — until the target has no `[shields]` at all, at which point
+/// `target_facing_shield_down` reads 1.0 permanently (see that fact's doc) and
+/// the shield gate never binds at any range. `combat_test.toml`'s Starbase Alpha
+/// is exactly that target, and the cruiser froze: bow-on, thrust cut, ~211 units
+/// out, 694 s of an 800 s run in `torpedo_run` with `shots_fired: {}`, taking
+/// and dealing nothing, and holding that world's `on_all_destroyed("hostiles")`
+/// victory permanently out of reach.
+///
+/// So the range gate cannot be delegated to the shield gate. It is checked here
+/// against the hull's own beams because those are the guns that make the hold a
+/// fighting position rather than a parking space — the torpedo reach is the
+/// wrong bound (this hull's is 270, which 220 cleared while still being wrong).
+#[test]
+fn the_torpedo_run_opens_inside_the_hulls_own_beam_envelope() {
+    let mut checked = 0;
+    for (stem, cfg) in ai_hulls() {
+        let Some(helm) = cfg.helm_console.as_ref() else {
+            continue;
+        };
+        let Some(steering) = helm.steering_ai.as_ref().map(policy) else {
+            continue;
+        };
+        let Some(gate) = steering.params.get("torpedo_run_range") else {
+            continue;
+        };
+        // The hull's longest BEAM reach. A hull that flies a bow hold with no
+        // beams at all has nothing to be judged against here.
+        let Some(beam_range) = cfg
+            .weapons_console
+            .as_ref()
+            .and_then(|wc| {
+                wc.phaser_banks
+                    .iter()
+                    .map(|b| b.beam_range)
+                    .fold(None::<f32>, |acc, r| Some(acc.map_or(r, |a: f32| a.max(r))))
+            })
+            .filter(|r| *r > 0.0)
+        else {
+            continue;
+        };
+        assert!(
+            gate as f32 <= beam_range,
+            "{stem}: `torpedo_run_range = {gate}` opens the bow hold beyond this \
+             hull's own {beam_range}-unit beam envelope. The hold cuts thrust, so \
+             that is a range the hull STOPS at — and its only armament exits need a \
+             round to have left a tube, so a hull that stops where it cannot shoot \
+             may never leave. Do not lean on `torpedo_run_shield_gap` to bind \
+             instead: `target_facing_shield_down` reads 1.0 permanently for a \
+             target with no `[shields]` block, so against a station the shield gate \
+             is open at every range (issue #1243)."
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 2,
+        "no shipped hull was found authoring a torpedo run, so this pin measured \
+         nothing"
+    );
+}
+
 /// The unconditional baseline policies fire on an EMPTY fact snapshot.
 ///
 /// This is what "baseline preserving" means for them: the pre-policy hosts

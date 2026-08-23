@@ -1160,6 +1160,31 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 return out;
             };
 
+            // 2a. The content-ledger residual, said out loud once (issue #1047).
+            //
+            // `eager_record_world_entities` now walks every template a world's
+            // scripts name with a LITERAL path, so those are in the frozen set and
+            // an edit to one refuses a save exactly as an edit to a
+            // declaratively-listed hull does. What cannot be walked is a COMPUTED
+            // path — `duel.toml`'s `spawn_slot(ctx, name, template, …)`, whose hull
+            // arrives from `--side-a`/`--side-b` — and reaching this line with an
+            // uncovered path is the only moment anything in the system learns such
+            // a template exists at all.
+            //
+            // It reports rather than records: folding it in late would make the
+            // content digest depend on how far a session got, so a save taken after
+            // this spawn would carry a digest a freshly-booted resume could not
+            // reproduce, and the resume would refuse a perfectly valid save. See
+            // `content_ledger::note_uncovered_spawn` for that argument in full.
+            if crate::content_ledger::note_uncovered_spawn(template_path) {
+                out.warnings.push(format!(
+                    "SpawnEntity '{name}' template '{template_path}' is not in the frozen \
+                     content set, so a save will not refuse to load if this file changes \
+                     (issue #1047); a computed template_path cannot be walked at load — \
+                     naming it literally is what binds it"
+                ));
+            }
+
             // 2b. Apply overrides if present.
             if let Some(overrides_val) = overrides {
                 // Serialise **losslessly** (issue #838): `to_toml_value` re-emits

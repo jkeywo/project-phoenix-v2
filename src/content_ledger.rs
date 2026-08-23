@@ -67,6 +67,12 @@ thread_local! {
     /// The ledger's state at the moment [`freeze`] was last called, or `None`
     /// before the first freeze (and after [`reset`]).
     static FROZEN: RefCell<Option<ContentLedger>> = const { RefCell::new(None) };
+
+    /// Paths [`note_uncovered_spawn`] has already reported, so a wave that
+    /// spawns the same computed hull sixty times says so once (issue #1047).
+    /// Cleared by [`reset`] with the rest of the load's state.
+    static NOTED_UNCOVERED: RefCell<std::collections::BTreeSet<String>> =
+        const { RefCell::new(std::collections::BTreeSet::new()) };
 }
 
 /// Canonicalise a ledger key exactly the way `entity_includes::
@@ -131,6 +137,7 @@ impl LedgerDigest {
 pub fn reset() {
     LEDGER.with(|l| l.borrow_mut().clear());
     FROZEN.with(|f| *f.borrow_mut() = None);
+    NOTED_UNCOVERED.with(|n| n.borrow_mut().clear());
 }
 
 /// A point-in-time copy of the live ledger.
@@ -151,6 +158,65 @@ pub fn freeze() {
 /// test or a not-yet-frozen caller gets rather than an empty ledger.
 pub fn frozen_or_live() -> ContentLedger {
     FROZEN.with(|f| f.borrow().clone()).unwrap_or_else(snapshot)
+}
+
+/// Whether [`freeze`] has run since the last [`reset`] — i.e. whether there is a
+/// settled content digest for anything to be measured against.
+pub fn is_frozen() -> bool {
+    FROZEN.with(|f| f.borrow().is_some())
+}
+
+/// Whether the frozen content set already covers `path` — i.e. whether an edit
+/// to that file would move the digest a save is checked against.
+pub fn frozen_covers(path: &str) -> bool {
+    let key = normalize_key(path);
+    FROZEN.with(|f| match f.borrow().as_ref() {
+        Some(frozen) => frozen.0.contains_key(&key),
+        // Not frozen yet: the live ledger is what `frozen_or_live` would hand a
+        // digest caller, so it is what "covered" means at this moment.
+        None => LEDGER.with(|l| l.borrow().contains_key(&key)),
+    })
+}
+
+/// Report — ONCE per path per load — that a spawn resolved a template the frozen
+/// content set does not cover (issue #1047). Returns `true` the first time, so
+/// the caller logs once rather than every wave.
+///
+/// # Why this reports rather than records
+///
+/// The template it names is real content this run depended on, so the obvious
+/// move is to fold it in late and let a save taken afterwards bind to it. That
+/// would be a bug, and a worse one than the gap it closes.
+///
+/// [`freeze`] exists to make the content digest a function of the WORLD, not of
+/// how far a session got — see the module docs. A template first seen at spawn
+/// time is by definition session-progress-dependent: fold it in and a save taken
+/// after wave three carries a digest a freshly-booted resume (which has spawned
+/// nothing) cannot reproduce, so the resume refuses a save that is in fact
+/// perfectly valid. Trading a missed detection for a false refusal is not a trade
+/// worth making — a false refusal costs the player their run.
+///
+/// So the residual stands, and this makes it VISIBLE instead of silent: the run
+/// says, once, which template its content digest does not cover. Every
+/// statically-visible path is already covered by
+/// [`eager_record_world_entities`]; what reaches here is the genuinely computed
+/// path, which no load-time scan can resolve. A designer who wants the binding
+/// turns the computed path into a literal one, and this line is what tells them
+/// there is something to turn.
+pub fn note_uncovered_spawn(path: &str) -> bool {
+    // No frozen set means no claim to make. "Uncovered" is a statement RELATIVE
+    // to the content digest a save would be stamped with, and until [`freeze`]
+    // has run there is no such digest — a bare-`App` fixture, a unit test
+    // dispatching one action, or any host mid-load would otherwise be told every
+    // spawn is uncovered, which is noise rather than news.
+    if !is_frozen() {
+        return false;
+    }
+    if frozen_covers(path) {
+        return false;
+    }
+    let key = normalize_key(path);
+    NOTED_UNCOVERED.with(|n| n.borrow_mut().insert(key))
 }
 
 /// A folded set of `(path, digest)` pairs, sorted by path.
@@ -199,8 +265,9 @@ impl ContentLedger {
     }
 }
 
-/// Eagerly resolve and record every entity template a world's `[[entity]]`
-/// list references, recursively through nested asteroid-field variants.
+/// Eagerly resolve and record every entity template a world can spawn — its
+/// `[[entity]]` roster AND the templates its scripts name — recursively through
+/// nested asteroid-field variants.
 ///
 /// Native's answer to the browser's JS-driven preload (which fetches the same
 /// declared set before `wasm_init`): without this, native only learns a
@@ -209,15 +276,55 @@ impl ContentLedger {
 /// finished — which is precisely the load-order sensitivity [`freeze`]
 /// exists to avoid. Call this BEFORE [`freeze`], after the world config is
 /// parsed and before anything spawns.
+///
+/// # Scripted spawns are part of the declared set (issue #1047)
+///
+/// It walked `entities` alone, so a hull only a script spawned never entered the
+/// ledger and never entered the frozen digest — and a save taken in such a world
+/// loaded happily after that template changed on disk, while the same edit to a
+/// declaratively-listed hull refused it. Issue #864 closed the script SOURCE half
+/// of that gap (`CompiledScripts::content_hash` binds a save to the exact script
+/// text); this is the template FILES half.
+///
+/// # Why here rather than on the `LedgerPlan`
+///
+/// Issue #1241 made [`crate::world::load::load`] return its ledger writes as data
+/// instead of making them, and this walk deliberately stays out of that plan: it
+/// needs a [`TemplateLoader`](crate::entities::loader::TemplateLoader) to resolve
+/// each path's composed bytes, and `load` has none — it reads world TOML through
+/// a `WorldReader` and knows nothing about entity templates. Putting the walk on
+/// the plan would mean giving the load sequence a second I/O seam to do work its
+/// one caller already does here, immediately after applying that plan and
+/// immediately before [`freeze`]. The static ENUMERATION is pure and shared; only
+/// the resolution is I/O, and the I/O stays with the eager walk that owns it.
+///
+/// # What it still cannot see
+///
+/// A COMPUTED `template_path` — `duel.toml`'s `spawn_slot(ctx, name, template,
+/// …)`, whose hull comes from `--side-a`/`--side-b` — is invisible to any static
+/// scan and always will be, so it cannot be in the frozen set.
+/// [`note_uncovered_spawn`] is what makes that residual visible at the moment it
+/// bites; see its docs for why such a template is deliberately NOT folded in
+/// late.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn eager_record_world_entities(world_config: &crate::world::config::WorldConfig) {
     use crate::entities::loader::TemplateLoader;
     use std::collections::HashSet;
 
+    // The `[[entity]]` roster AND every template the world's scripts name
+    // (issue #1047). The second half is `script_spawned_templates`, the same
+    // enumeration `entity_template_paths` feeds the browser preload from — so a
+    // scripted hull is recorded on native for the same reason it is fetched (and
+    // therefore recorded) on wasm.
     let mut queue: Vec<String> = world_config
         .entities
         .iter()
         .map(|e| e.template_path.clone())
+        .chain(
+            crate::world::config::script_spawned_templates(world_config)
+                .into_iter()
+                .map(|spawn| spawn.template_path),
+        )
         .collect();
     let mut visited: HashSet<String> = HashSet::new();
 
@@ -306,6 +413,155 @@ mod tests {
             snapshot().len(),
             1,
             "the two spellings of the same path must collapse to one entry"
+        );
+        reset();
+    }
+    // ── Script-spawned templates (issue #1047) ───────────────────────────────
+
+    /// The issue's exact shape: a world where ONLY a script names a template.
+    ///
+    /// The eager walk used to see `[[entity]]` alone, so this hull never entered
+    /// the ledger — and a save taken in such a world loaded happily after the
+    /// template changed on disk, while the same edit to a declaratively-listed
+    /// hull refused it.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_eager_walk_records_a_template_only_a_script_names() {
+        const HULL: &str = "assets/entities/ship_harrow_destroyer.toml";
+        let world = crate::world::config::parse_world(&format!(
+            "[global]
+seed = 1
+
+[script]
+setup = \"\"\"
+             fn wave(ctx) {{
+             ctx.effects.spawn_entity(#{{ template_path: \"{HULL}\", name: \"r1\" }});
+             }}
+\"\"\"
+"
+        ))
+        .expect("fixture world parses");
+        assert!(
+            world.entities.is_empty(),
+            "the point of the fixture: nothing declarative names the hull"
+        );
+        assert_eq!(
+            crate::world::config::script_spawned_templates(&world)
+                .into_iter()
+                .map(|s| s.template_path)
+                .collect::<Vec<_>>(),
+            vec![HULL.to_string()],
+            "and the shared enumeration does see it"
+        );
+
+        reset();
+        eager_record_world_entities(&world);
+        assert!(
+            snapshot().get(HULL).is_some(),
+            "a script-only hull must be recorded: {:?}",
+            snapshot().entries().map(|(k, _)| k).collect::<Vec<_>>()
+        );
+        reset();
+    }
+
+    /// The acceptance, stated as the save-compat check sees it: editing that
+    /// script-only template moves the content digest, which is what refuses the
+    /// save. Before #1047 the two digests were equal and the save loaded.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn editing_a_script_only_template_moves_the_content_digest() {
+        const HULL: &str = "assets/entities/ship_harrow_destroyer.toml";
+        let world = crate::world::config::parse_world(&format!(
+            "[global]
+seed = 1
+
+[script]
+setup = \"\"\"
+             fn wave(ctx) {{
+             ctx.effects.spawn_entity(#{{ template_path: \"{HULL}\", name: \"r1\" }});
+             }}
+\"\"\"
+"
+        ))
+        .expect("fixture world parses");
+
+        // The digest a save would be stamped with at load time.
+        reset();
+        eager_record_world_entities(&world);
+        freeze();
+        let at_save = crate::snapshot::content_digest(&frozen_or_live());
+
+        // The same world after the hull file changed on disk. Simulated by
+        // recording different bytes under the same key — what the walk would do
+        // for real on the next boot, without this test editing the repo.
+        reset();
+        eager_record_world_entities(&world);
+        record(
+            HULL,
+            "# edited by a designer
+",
+        );
+        freeze();
+        let at_load = crate::snapshot::content_digest(&frozen_or_live());
+
+        assert_ne!(
+            at_save, at_load,
+            "an edit to a script-spawned hull must move the content digest —              equality here is the #1047 bug"
+        );
+        reset();
+    }
+
+    /// The computed-path arm: a template the static walk cannot see is reported
+    /// once, and only while it is genuinely uncovered.
+    #[test]
+    fn an_uncovered_spawn_is_reported_once_and_a_covered_one_never() {
+        const COMPUTED: &str = "assets/entities/computed_hull.toml";
+        const DECLARED: &str = "assets/entities/declared_hull.toml";
+
+        reset();
+        record(
+            DECLARED, "[hull]
+",
+        );
+        freeze();
+
+        assert!(
+            note_uncovered_spawn(COMPUTED),
+            "the first spawn of an uncovered template reports"
+        );
+        assert!(
+            !note_uncovered_spawn(COMPUTED),
+            "and a wave that spawns it sixty more times says nothing further"
+        );
+        assert!(
+            !note_uncovered_spawn(DECLARED),
+            "a template the frozen set covers is never reported"
+        );
+
+        // Deliberately: reporting does NOT fold it in. A save taken after this
+        // spawn must carry the same digest a freshly-booted resume computes, or
+        // the resume refuses a valid save.
+        assert!(
+            !frozen_covers(COMPUTED),
+            "note_uncovered_spawn must not quietly extend the frozen set"
+        );
+        reset();
+    }
+
+    /// `reset` clears the reported set with everything else, so a second world
+    /// load in one process reports its own uncovered spawns rather than
+    /// inheriting the previous world's silence.
+    #[test]
+    fn reset_re_arms_the_uncovered_spawn_report() {
+        const COMPUTED: &str = "assets/entities/computed_hull.toml";
+        reset();
+        freeze();
+        assert!(note_uncovered_spawn(COMPUTED));
+        reset();
+        freeze();
+        assert!(
+            note_uncovered_spawn(COMPUTED),
+            "a new load must be able to report the same path again"
         );
         reset();
     }

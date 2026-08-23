@@ -1097,8 +1097,13 @@ fn spawn_entity_without_anchor_or_position_warns_and_emits_nothing() {
 /// resolve must produce NO command and NO name/group inserts — only a
 /// warning. Before #715 this gate was the applier's `spawn_failed` local,
 /// exercisable only through a full Bevy app.
+/// An unresolvable template refuses the spawn, and says so on the LOUD channel
+/// (issue #1046 moved it there from `warnings`; see
+/// `DispatchResult::override_failures`). It is the runtime backstop for the one
+/// thing the composition gate cannot see — a computed `template_path` — so it
+/// must not read as routine noise.
 #[test]
-fn spawn_entity_template_not_found_warns_and_emits_nothing() {
+fn spawn_entity_template_not_found_errors_and_emits_nothing() {
     // No `.with_destroyer()`: the loader has no templates at all.
     let fx = Fixture::new();
     let out = dispatch_action(&spawn(None, Some([0.0, 0.0, 0.0]), vec!["wave"]), &fx.ctx());
@@ -1106,8 +1111,13 @@ fn spawn_entity_template_not_found_warns_and_emits_nothing() {
     assert!(out.commands.is_empty());
     assert!(out.name_to_uuid_inserts.is_empty());
     assert!(out.entity_group_inserts.is_empty());
+    assert!(
+        out.warnings.is_empty(),
+        "not the warn channel: {:?}",
+        out.warnings
+    );
     assert_eq!(
-        out.warnings,
+        out.override_failures,
         vec![
             "SpawnEntity 'wave_1' template 'assets/entities/destroyer.toml' not found".to_string()
         ]
@@ -2267,7 +2277,7 @@ fn spawn_template_loads_with_patched_name_and_inserts_directly() {
 /// the applier (`spawn_failed`), where a #710 review flagged it had only
 /// throwaway coverage.
 #[test]
-fn spawn_template_not_found_warns_and_emits_nothing_directly() {
+fn spawn_template_not_found_errors_and_emits_nothing_directly() {
     // No `.with_destroyer()`: the loader has no templates at all.
     let fx = Fixture::new();
     let out = dispatch_spawn_entity(&spawn(None, Some([1.0, 2.0, 3.0]), vec!["wave"]), &fx.ctx());
@@ -2275,7 +2285,8 @@ fn spawn_template_not_found_warns_and_emits_nothing_directly() {
     assert_eq!(
         out,
         DispatchResult {
-            warnings: vec![
+            // `override_failures`, not `warnings` — issue #1046.
+            override_failures: vec![
                 "SpawnEntity 'wave_1' template 'assets/entities/destroyer.toml' not found"
                     .to_string()
             ],
@@ -2465,7 +2476,8 @@ fn spawn_failed_template_load_does_not_consume_a_uuid_directly() {
         ..fx.ctx()
     };
 
-    // A template the loader does not know: warns, draws nothing.
+    // A template the loader does not know: reports — on the ERROR channel since
+    // issue #1046 — and draws nothing.
     let missing = TriggerAction::SpawnEntity {
         template_path: "assets/entities/missing.toml".to_string(),
         name: "wave_1".to_string(),
@@ -2477,7 +2489,7 @@ fn spawn_failed_template_load_does_not_consume_a_uuid_directly() {
         overrides: None,
     };
     let out = dispatch_spawn_entity(&missing, &ctx);
-    assert_eq!(out.warnings.len(), 1);
+    assert_eq!(out.override_failures.len(), 1);
     assert_eq!(counter.get(), 0, "a failed spawn must not consume a uuid");
 
     // The next successful spawn draws the FIRST uuid, not the second.

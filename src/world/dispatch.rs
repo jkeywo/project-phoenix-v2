@@ -458,7 +458,7 @@ pub struct DispatchResult {
     /// severity tag inside one shared `Vec<String>`, so the applier's log
     /// level per message is structural rather than inferred from text.
     ///
-    /// The one producer today is `dispatch_spawn_entity`'s override-apply
+    /// The first producer was `dispatch_spawn_entity`'s override-apply
     /// step: a `spawn_entity` override that was present but could not be
     /// applied at all (the merged document failed to deserialize back into
     /// `EntityConfig`) drops the WHOLE override map and spawns the bare
@@ -468,6 +468,15 @@ pub struct DispatchResult {
     /// this channel too: it is reported "on the same channel as a failed
     /// reparse" by original design (see `dispatch_spawn_entity`), and that
     /// design is unchanged here — only the shared channel's volume moved.
+    ///
+    /// Issue #1046 added the second: a `spawn_entity` whose TEMPLATE does not
+    /// resolve. The gap is larger than a dropped override — the entity does not
+    /// arrive at all — and it is the runtime half of that issue's contract.
+    /// `world::validate` now catches a literal `template_path` at load, so a
+    /// miss reaching here is either a computed path (legal, and unreachable by
+    /// any load-time scan) or a host whose loader could not be authoritative
+    /// about absence at validate time. Both are exactly the cases that must not
+    /// pass quietly.
     pub override_failures: Vec<String>,
 }
 
@@ -1123,8 +1132,21 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
             };
 
             // 2. Load the template — the contingency gate (see doc comment).
+            //
+            // Reported on `override_failures` (ERROR) rather than `warnings`
+            // since issue #1046, and for that field's own reason: the spawn is
+            // refused and the world is silently short of an entity, which is
+            // the same class of behavioural gap a dropped override is. It is
+            // also the BACKSTOP for the composition gate's one blind spot.
+            // `world::validate::collect_spawned_instances` now walks scripted
+            // `spawn_entity` calls, but only for a LITERAL `template_path`; a
+            // computed one (`duel.toml`'s `spawn_slot(ctx, name, template, …)`,
+            // whose hull comes from `--side-a`/`--side-b`) is invisible to any
+            // load-time scan and stays legal. This is where such a spawn
+            // answers for itself, so the gate's guarantee degrades to a loud
+            // runtime refusal rather than to silence.
             let Some(mut config) = context.template_loader.load_template(template_path) else {
-                out.warnings.push(format!(
+                out.override_failures.push(format!(
                     "SpawnEntity '{name}' template '{template_path}' not found"
                 ));
                 return out;

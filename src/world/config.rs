@@ -2303,14 +2303,74 @@ pub fn entity_template_paths(world: &WorldConfig, curated_ships: &[String]) -> V
     //    is the only source of a *dynamic* spawn's template path: the
     //    `[[trigger.action]]` and `[[comms.response.action]]` arrays steps 3
     //    and 4 used to walk no longer parse.
-    for source in &world.script_sources {
-        for path in script_spawn_template_paths(source) {
-            if seen.insert(path.clone()) {
-                out.push(path);
-            }
+    for spawn in script_spawned_templates(world) {
+        if seen.insert(spawn.template_path.clone()) {
+            out.push(spawn.template_path);
         }
     }
 
+    out
+}
+
+/// One `spawn_entity` a world's inline scripts name with a LITERAL
+/// `template_path` (issues #984, #1046).
+///
+/// Deliberately not "one entity a script spawns": a handler body never runs at
+/// load, so whether — or how many times — the call is reached is unknowable
+/// here. It is one *reference* to a template, sited well enough to hang a
+/// finding on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptSpawnRef {
+    /// The literal the map's `template_path` entry names.
+    pub template_path: String,
+    /// Index into [`WorldConfig::script_sources`] of the body it was found in.
+    pub source_index: usize,
+    /// 1-based line WITHIN that body. An inline `[script]` body is a slice of
+    /// the world TOML, so a finding can equally locate itself by searching the
+    /// world source — which is what `world::validate` does, for the same reason
+    /// it does so for declarative instances.
+    pub line: usize,
+    /// Whether the same `spawn_entity` map also passes an `overrides` key.
+    ///
+    /// `true` means the hull this reference names is NOT necessarily the hull
+    /// that spawns: the override is Rhai, built at call time, and this scan can
+    /// see that one exists but never what it does. A reader that judges the
+    /// template's own content — `world::validate`'s doctrine-anchor gate — has
+    /// to soften to a warning here, because two shipped worlds
+    /// (`combat_test.toml`, `probe_artillery_standoff.toml`) stand a template's
+    /// Patrol entry DOWN in exactly this position and would otherwise be blocked
+    /// by a validator reading half the picture. See [`map_passes_overrides`].
+    pub overrides_passed: bool,
+}
+
+/// Every literal `spawn_entity` template reference across a world's inline
+/// script bodies, in source-then-line order.
+///
+/// THE one enumeration of "templates reachable from this world's scripts",
+/// shared rather than re-derived per reader:
+///
+/// * [`entity_template_paths`] queues them for preload (issue #984), because a
+///   handler that spawns a wave does not run until long after preload finishes.
+/// * `world::validate::collect_spawned_instances` hands them to the composition
+///   gate (issue #1046), so a script-spawned hull is template-resolved and
+///   doctrine-anchor checked exactly like a declarative one.
+///
+/// Scope is the boundary [`WorldConfig::script_sources`] documents: inline
+/// `[script]` bodies only. A sibling `script = "combat.rhai"` is unreadable
+/// without a resolver, which `parse_world` has not got; no shipped world uses
+/// that form.
+pub fn script_spawned_templates(world: &WorldConfig) -> Vec<ScriptSpawnRef> {
+    let mut out = Vec::new();
+    for (source_index, source) in world.script_sources.iter().enumerate() {
+        for (template_path, line, overrides_passed) in script_spawn_template_paths(source) {
+            out.push(ScriptSpawnRef {
+                template_path,
+                source_index,
+                line,
+                overrides_passed,
+            });
+        }
+    }
     out
 }
 
@@ -2328,10 +2388,27 @@ pub fn entity_template_paths(world: &WorldConfig, curated_ships: &[String]) -> V
 /// `//` line comments are stripped first so prose that mentions the key does not
 /// queue a fetch. A computed path (`template_path: hull_for(wave)`) is invisible
 /// to this and always will be; shipped content authors literals.
-fn script_spawn_template_paths(source: &str) -> Vec<String> {
+///
+/// The third tuple element answers a question issue #1046 has to ask and preload
+/// does not: does the SAME map also pass an `overrides` key? See
+/// [`map_passes_overrides`].
+fn script_spawn_template_paths(source: &str) -> Vec<(String, usize, bool)> {
     const KEY: &str = "template_path";
     let mut out = Vec::new();
-    for line in source.lines() {
+    let maps = brace_spans(source);
+    // Byte offset of the first character of each line, so a per-line hit can be
+    // located in the whole-source coordinates `maps` is keyed in.
+    let mut line_start = 0usize;
+    for (line_index, line) in source.lines().enumerate() {
+        let this_line_start = line_start;
+        // `lines()` drops the terminator; step over it (both `\n` and `\r\n`,
+        // since the source is whatever the world TOML carried).
+        line_start += line.len();
+        if source[line_start..].starts_with("\r\n") {
+            line_start += 2;
+        } else if source[line_start..].starts_with('\n') {
+            line_start += 1;
+        }
         let code = match line.find("//") {
             Some(i) => &line[..i],
             None => line,
@@ -2363,7 +2440,12 @@ fn script_spawn_template_paths(source: &str) -> Vec<String> {
             }
             let start = i + 1;
             if let Some(len) = code[start..].find('"') {
-                out.push(code[start..start + len].to_string());
+                let overrides = map_passes_overrides(source, &maps, this_line_start + at);
+                out.push((
+                    code[start..start + len].to_string(),
+                    line_index + 1,
+                    overrides,
+                ));
                 from = start + len + 1;
             }
         }
@@ -2374,6 +2456,87 @@ fn script_spawn_template_paths(source: &str) -> Vec<String> {
 /// Is `b` part of a Rust/Rhai identifier?
 fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Every matched `{`…`}` span in a script source, as `(open, close)` byte
+/// offsets, innermost-first within a nesting.
+///
+/// String literals are stepped over so a brace inside `"…"` cannot open or close
+/// a span. Unbalanced braces simply produce no span for the unmatched opener,
+/// which is the right answer for a source that will fail to compile anyway.
+fn brace_spans(source: &str) -> Vec<(usize, usize)> {
+    let bytes = source.as_bytes();
+    let mut stack: Vec<usize> = Vec::new();
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            b'{' => stack.push(i),
+            b'}' => {
+                if let Some(open) = stack.pop() {
+                    spans.push((open, i));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    spans
+}
+
+/// Does the innermost `{ … }` map containing `at` also pass an `overrides` key?
+///
+/// The question issue #1046's composition gate has to ask before it judges a
+/// script-spawned hull's doctrine. A `spawn_entity` map's `overrides` is Rhai
+/// built at CALL time — `overrides: wave_8_overrides()` in `combat_test.toml`,
+/// a literal `#{ … }` in `probe_artillery_standoff.toml` — and either way this
+/// scan cannot know what it merges. What it CAN know is whether one is passed at
+/// all, and that is the difference between "the template's doctrine is the
+/// effective doctrine" and "it may not be".
+///
+/// Deliberately answers on PRESENCE, not content, and deliberately searches the
+/// whole enclosing map including its nested maps. Both choices err the same way
+/// — toward saying yes — because a false yes costs a missed catch and a false no
+/// costs a blocked world.
+fn map_passes_overrides(source: &str, maps: &[(usize, usize)], at: usize) -> bool {
+    const KEY: &str = "overrides";
+    // Innermost enclosing span: the one with the latest opening brace.
+    let Some((open, close)) = maps
+        .iter()
+        .filter(|(o, c)| *o < at && at < *c)
+        .max_by_key(|(o, _)| *o)
+        .copied()
+    else {
+        return false;
+    };
+    let region = &source[open..=close];
+    let bytes = region.as_bytes();
+    let mut from = 0;
+    while let Some(rel) = region[from..].find(KEY) {
+        let hit = from + rel;
+        from = hit + KEY.len();
+        let before_ok = hit == 0 || !is_ident_byte(bytes[hit - 1]);
+        if !before_ok || from >= bytes.len() || is_ident_byte(bytes[from]) {
+            continue;
+        }
+        let mut i = from;
+        while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+            i += 1;
+        }
+        if i < bytes.len() && (bytes[i] == b':' || bytes[i] == b'=') {
+            return true;
+        }
+    }
+    false
 }
 
 /// Partition immediate-spawn entity instances into (asteroid_field, other).

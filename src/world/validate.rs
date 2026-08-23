@@ -31,6 +31,7 @@
 // Flags live in a layered `FlagStore`; entity names live in per-world
 // namespaces — different resolution domains, different syntaxes.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use crate::entities::include_resolve::FragmentSource;
@@ -496,19 +497,100 @@ pub fn validate_objectives(
 /// One entity instance a world spawns: the label to name it by in a finding,
 /// the template it is built from, and any inline `overrides` merged on top.
 ///
-/// Covers both spawn paths — a static `[[entity]]` block and a `spawn_entity`
-/// trigger/comms action — because both hand the same hull the same doctrine.
+/// Covers every spawn path — a static `[[entity]]` block, a `spawn_entity`
+/// trigger/comms action, and a `ctx.effects.spawn_entity` call inside a script
+/// (issue #1046) — because they all hand the same hull the same doctrine.
 struct SpawnedInstance<'a> {
     /// Best-effort identity for diagnostics: the authored `name`, else the
     /// authored `id`, else the template path.
     label: String,
-    template_path: &'a str,
+    /// Borrowed for a declarative instance; owned for a script-scanned one,
+    /// which reads a literal out of a script body and has nothing to borrow.
+    template_path: Cow<'a, str>,
+    /// The instance `overrides` table, when this validator can see one.
+    ///
+    /// Always `None` for a script-authored spawn — see
+    /// [`collect_spawned_instances`].
     overrides: Option<&'a toml::Value>,
+    /// This spawn passes an `overrides` map the validator cannot READ (issue
+    /// #1046). Always false for a declarative instance, whose table is TOML and
+    /// is merged for real.
+    ///
+    /// Judging the template's own content is then a statement about a hull that
+    /// may not be the hull that spawns, so a check which would otherwise error
+    /// softens to a warning. `overrides: None` beside `unreadable_overrides:
+    /// true` is the honest pair: nothing to merge, and a reason the merged
+    /// result is unknowable.
+    unreadable_overrides: bool,
 }
 
-/// Every entity instance a world config spawns, static blocks first, then the
-/// `spawn_entity` actions across every authored action list (triggers *and*
-/// comms responses — `collect_action_lists` walks both).
+/// Every entity instance a world config spawns: static `[[entity]]` blocks,
+/// then the `spawn_entity` actions of every authored action list, then every
+/// literal `spawn_entity` its inline scripts name (issue #1046).
+///
+/// # How a validator sees inside a script, and what it cannot see
+///
+/// The third source is a STATIC scan
+/// ([`crate::world::config::script_spawned_templates`]) for literal
+/// `template_path: "…"` entries, and the choice of mechanism was made for it
+/// twice already: `validate_flag_opassign` (issue #994) and
+/// `validate_on_pick_fns` (issue #984) both wanted to read inside script bodies,
+/// and both settled on a lexical scan because a true `AST::walk` over
+/// `Stmt`/`Expr` needs Rhai's `internals` feature, which this build does not
+/// enable, and `vellum_script` exposes no walk helper. A handler body never runs
+/// at load either — `Engine::run_ast` executes only a unit's top level — so what
+/// the source says literally is the whole of what is knowable here.
+///
+/// A COMPUTED path is therefore invisible, and stays legal. `duel.toml` ships
+/// one: its single authored `spawn_slot(ctx, name, template, …)` body passes
+/// `template_path: template`, because the hull comes from `--side-a`/`--side-b`
+/// at run time and cannot be written down in the world. A gate that demanded a
+/// literal, or a declaration of every path a script might reach for, would
+/// either refuse that world or force it to declare what it does not know. The
+/// asymmetry the sibling passes chose applies unchanged: for a LOAD-TIME gate a
+/// false positive that blocks a legitimate world is strictly worse than a missed
+/// catch. The backstop is at spawn time, and issue #1046 made it loud —
+/// `dispatch_spawn_entity` reports an unresolvable template on
+/// `DispatchResult::override_failures` (ERROR) rather than the warn-level
+/// channel it shared with routine misses.
+///
+/// # Overrides, and the finding that has to soften because of them
+///
+/// A script instance carries `overrides: None`, because its map is Rhai built at
+/// CALL time out of values a load-time pass has not got. For
+/// [`validate_template_resolution_in`] that is simply correct: there is no table
+/// to merge, so the merge half does not run and the path half — which is a
+/// literal or nothing — runs in full.
+///
+/// [`doctrine_anchor_refs`] is the hard case, and the first cut of this change
+/// got it wrong in a way worth recording. It judges the TEMPLATE's own doctrine,
+/// on the reasoning that an override cannot REMOVE what the template authored
+/// (`behaviour.doctrine` reconciles by id), so every anchor the template names
+/// survives the merge. The entry survives; the ANCHOR REFERENCE does not have
+/// to. An override may restate an entry by id with `directive_kind = "None"`,
+/// and a directive of kind None reads no anchors at all — which is not a corner
+/// case but the shipped idiom, documented at length in both worlds that use it:
+///
+/// * `combat_test.toml`'s wave 8 spawns `ship_harrow_patrol.toml`, whose
+///   `patrol-ironveil` entry names `ironveil_patrol_a`/`_b`; the picket line
+///   those anchors belonged to was deleted in #960 and the spawn stands the
+///   entry down rather than declaring a route nothing flies.
+/// * `probe_artillery_standoff.toml` does the same to `patrol-warhawk`.
+///
+/// Judged on the template alone, both come out as unresolved anchors, and both
+/// would have been blocked by an ERROR — including the one selectable scenario.
+/// So the severity follows what can be SEEN: the scan reports whether the spawn
+/// map passes an `overrides` key at all
+/// ([`crate::world::config::ScriptSpawnRef::overrides_passed`]), and
+/// [`validate_doctrine_anchors_in`] errors only when it does not. With no
+/// override the template's doctrine IS the effective doctrine and the check is
+/// exactly as sound as for a declarative instance; with one, the same finding is
+/// a warning that names what it cannot see.
+///
+/// What stays invisible either way: an anchor an override *introduces*, and a
+/// `directive_target` it retargets. That is the script surface's share of the
+/// "computed is invisible" bargain above, and it fails at runtime as it always
+/// did.
 fn collect_spawned_instances(config: &WorldConfig) -> Vec<SpawnedInstance<'_>> {
     let mut out: Vec<SpawnedInstance<'_>> = config
         .entities
@@ -519,8 +601,9 @@ fn collect_spawned_instances(config: &WorldConfig) -> Vec<SpawnedInstance<'_>> {
                 .clone()
                 .or_else(|| e.id.clone())
                 .unwrap_or_else(|| e.template_path.clone()),
-            template_path: &e.template_path,
+            template_path: Cow::Borrowed(e.template_path.as_str()),
             overrides: e.overrides.as_ref(),
+            unreadable_overrides: false,
         })
         .collect();
 
@@ -535,11 +618,26 @@ fn collect_spawned_instances(config: &WorldConfig) -> Vec<SpawnedInstance<'_>> {
             {
                 out.push(SpawnedInstance {
                     label: name.clone(),
-                    template_path,
+                    template_path: Cow::Borrowed(template_path.as_str()),
                     overrides: overrides.as_ref(),
+                    unreadable_overrides: false,
                 });
             }
         }
+    }
+
+    for spawn in crate::world::config::script_spawned_templates(config) {
+        out.push(SpawnedInstance {
+            // No `name` to reach for: the scan sees one map entry, not the map.
+            // The template path is the identity a finding can offer, and it is
+            // also what `line_of` locates — an inline `[script]` body IS a slice
+            // of the world TOML, so the spawn site is findable in the source the
+            // finding names.
+            label: spawn.template_path.clone(),
+            template_path: Cow::Owned(spawn.template_path),
+            overrides: None,
+            unreadable_overrides: spawn.overrides_passed,
+        });
     }
 
     out
@@ -575,7 +673,7 @@ fn doctrine_anchor_refs(
     inst: &SpawnedInstance,
     loader: &dyn TemplateLoader,
 ) -> Vec<(String, &'static str)> {
-    let Some(template) = loader.load_template(inst.template_path) else {
+    let Some(template) = loader.load_template(&inst.template_path) else {
         return Vec::new();
     };
     let config = match inst.overrides {
@@ -633,8 +731,9 @@ pub fn template_doctrine_anchors(
     doctrine_anchor_refs(
         &SpawnedInstance {
             label: String::new(),
-            template_path,
+            template_path: Cow::Borrowed(template_path),
             overrides: None,
+            unreadable_overrides: false,
         },
         loader,
     )
@@ -685,20 +784,50 @@ fn validate_doctrine_anchors_in(
             if !reported.insert((inst.label.clone(), anchor.clone())) {
                 continue;
             }
+            // A spawn whose `overrides` map this validator cannot read is a
+            // statement about the TEMPLATE, not about the hull that arrives
+            // (issue #1046). Standing the offending entry down in that map is
+            // the shipped answer to this very finding — `combat_test.toml`'s
+            // `wave_8_overrides()` and `probe_artillery_standoff.toml`'s literal
+            // both do it, and both say so at length — so erroring here would
+            // block two working worlds for content that is already correct.
+            // Reported all the same, because the other half of the time it is a
+            // real unresolved anchor and nothing else will say so.
+            let (severity, message) = if inst.unreadable_overrides {
+                (
+                    Severity::Warning,
+                    format!(
+                        "script spawn of template '{}' has a {kind} doctrine directive \
+                         referencing anchor '{anchor}', which no world in the composition \
+                         declares, in '{}'. The spawn passes an `overrides` map this \
+                         validator cannot read, so the entry may already be stood down \
+                         there (`directive_kind = \"None\"` and every field its old kind \
+                         owned) — if it is not, this anchor resolves to nothing on every \
+                         tick and the hull silently never pursues it",
+                        inst.template_path, src.path
+                    ),
+                )
+            } else {
+                (
+                    Severity::Error,
+                    format!(
+                        "entity '{}' (template '{}') has a {kind} doctrine directive \
+                         referencing anchor '{anchor}', which no world in the composition \
+                         declares, in '{}'",
+                        inst.label, inst.template_path, src.path
+                    ),
+                )
+            };
             findings.push(WorldFinding {
-                severity: Severity::Error,
+                severity,
                 category: "unresolved-anchor",
-                message: format!(
-                    "entity '{}' (template '{}') has a {kind} doctrine directive referencing \
-                     anchor '{anchor}', which no world in the composition declares, in '{}'",
-                    inst.label, inst.template_path, src.path
-                ),
+                message,
                 source: SourceLocation {
                     file: src.path.clone(),
                     // The anchor name is absent from this world by definition,
                     // so point at the spawn site instead.
                     line: line_of(src.toml, &inst.label)
-                        .or_else(|| line_of(src.toml, inst.template_path)),
+                        .or_else(|| line_of(src.toml, &inst.template_path)),
                     reference: anchor.clone(),
                 },
             });
@@ -714,7 +843,7 @@ fn validate_doctrine_anchors_in(
 /// that cannot be loaded or whose override merge fails yields nothing, because
 /// both are *different* defects with their own findings.
 fn civilian_route_ref(inst: &SpawnedInstance, loader: &dyn TemplateLoader) -> Option<String> {
-    let template = loader.load_template(inst.template_path)?;
+    let template = loader.load_template(&inst.template_path)?;
     let config = match inst.overrides {
         None => template,
         Some(overrides) => crate::entities::loader::apply_overrides(&template, overrides).ok()?,
@@ -799,7 +928,7 @@ fn validate_civilian_routes_in(
             source: SourceLocation {
                 file: src.path.clone(),
                 line: line_of(src.toml, &inst.label)
-                    .or_else(|| line_of(src.toml, inst.template_path)),
+                    .or_else(|| line_of(src.toml, &inst.template_path)),
                 reference: route,
             },
         });
@@ -847,12 +976,12 @@ fn validate_template_composition_in(
         // two findings for one broken include, which is exactly the duplication
         // this set exists to prevent.
         if !seen.insert(crate::entities::include_resolve::canonical_template_path(
-            inst.template_path,
+            &inst.template_path,
         )) {
             continue;
         }
         let Some(mut finding) =
-            crate::entities::include_resolve::composition_finding(inst.template_path, fragments)
+            crate::entities::include_resolve::composition_finding(&inst.template_path, fragments)
         else {
             continue;
         };
@@ -976,12 +1105,12 @@ fn validate_template_resolution_in(
 
     let mut findings = Vec::new();
     for inst in collect_spawned_instances(src.config) {
-        let Some(template) = loader.load_template(inst.template_path) else {
+        let Some(template) = loader.load_template(&inst.template_path) else {
             if !absence_is_final {
                 continue;
             }
             if !seen.insert(crate::entities::include_resolve::canonical_template_path(
-                inst.template_path,
+                &inst.template_path,
             )) {
                 continue;
             }
@@ -997,7 +1126,7 @@ fn validate_template_resolution_in(
                 ),
                 source: SourceLocation {
                     file: src.path.clone(),
-                    line: line_of(src.toml, inst.template_path)
+                    line: line_of(src.toml, &inst.template_path)
                         .or_else(|| line_of(src.toml, &inst.label)),
                     reference: inst.template_path.to_string(),
                 },
@@ -1032,7 +1161,7 @@ fn validate_template_resolution_in(
                     source: SourceLocation {
                         file: src.path.clone(),
                         line: line_of(src.toml, &inst.label)
-                            .or_else(|| line_of(src.toml, inst.template_path)),
+                            .or_else(|| line_of(src.toml, &inst.template_path)),
                         reference: inst.template_path.to_string(),
                     },
                 });
@@ -1141,7 +1270,7 @@ fn validate_override_table_presence(
                 file: src.path.clone(),
                 line: line_of(src.toml, key)
                     .or_else(|| line_of(src.toml, &inst.label))
-                    .or_else(|| line_of(src.toml, inst.template_path)),
+                    .or_else(|| line_of(src.toml, &inst.template_path)),
                 reference: key.clone(),
             },
         });

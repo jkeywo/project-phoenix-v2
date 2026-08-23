@@ -1373,3 +1373,241 @@ fn evidence_and_corroborate_overrides_never_warn_override_absent_table() {
         );
     }
 }
+
+// ── Script-authored spawns reach the composition gate (issue #1046) ──────
+//
+// `collect_action_lists` has been vacuous since #985 — the declarative
+// `[[trigger.action]]` / `[[comms.response.action]]` arrays it walked no longer
+// parse — so before this the gate saw `[[entity]]` blocks and nothing else, and
+// every hull a shipped world spawns from script was unvalidated. These pin the
+// cases that matter: a path that does not resolve, a doctrine anchor nothing
+// declares, and the two shapes that must NOT be errored on (a computed path,
+// and a template judged through an override the validator cannot read).
+
+/// A `[script]` body whose `spawn_entity` names a template that does not exist
+/// fails the composition gate, exactly as an `[[entity]]` block would.
+#[test]
+fn script_spawn_of_a_missing_template_is_rejected() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/nowhere.toml",
+        name: "wave_1", position: [0, 0, 0]
+    });
+}
+"""
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+    let err = findings
+        .iter()
+        .find(|f| f.category == "unresolvable-template")
+        .unwrap_or_else(|| panic!("a scripted spawn's template must resolve: {findings:?}"));
+    assert!(err.is_error());
+    assert_eq!(err.source.reference, "assets/entities/nowhere.toml");
+    assert!(
+        has_error(&findings),
+        "an unresolvable scripted template blocks the world"
+    );
+}
+
+/// …and its doctrine is anchor-checked the same way too — issue #888's guard
+/// reaching a script-spawned hull for the first time.
+///
+/// No `overrides` key in the spawn map, so the template's doctrine IS the
+/// effective doctrine and the finding is an ERROR: the same severity the
+/// declarative twin (`doctrine_anchor_declared_nowhere_is_rejected`) gets.
+#[test]
+fn script_spawn_with_an_undeclared_doctrine_anchor_is_rejected() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml",
+        name: "ashrender", position: [0, 0, 0]
+    });
+}
+"""
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+
+    let errs: Vec<_> = findings
+        .iter()
+        .filter(|f| f.category == "unresolved-anchor" && f.is_error())
+        .collect();
+    assert_eq!(
+        errs.len(),
+        2,
+        "one error per unresolved route waypoint, as for a declarative spawn: {findings:?}"
+    );
+    for (err, anchor) in errs.iter().zip(["route_a", "route_b"]) {
+        assert_eq!(err.source.reference, *anchor);
+    }
+    assert!(has_error(&findings));
+}
+
+/// Declaring the anchors clears it, which is what makes the check above a
+/// statement about the WORLD rather than about the template.
+#[test]
+fn script_spawn_resolves_once_the_world_declares_the_anchors() {
+    let root = cfg(r#"
+[anchors]
+route_a = [10.0, 0.0, 20.0]
+route_b = [30.0, 0.0, 40.0]
+
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml",
+        name: "ashrender", position: [0, 0, 0]
+    });
+}
+"""
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+    assert!(!has_error(&findings), "{findings:?}");
+}
+
+/// **The shipped idiom must not be blocked.** A spawn that passes an
+/// `overrides` map may be standing the offending doctrine entry down inside it
+/// — `combat_test.toml` and `probe_artillery_standoff.toml` both do exactly
+/// that, and both document it — and this validator cannot read a Rhai map built
+/// at call time. The finding softens to a warning rather than being dropped:
+/// the other half of the time it is a real unresolved anchor, and nothing else
+/// reports it at all.
+#[test]
+fn script_spawn_passing_overrides_warns_instead_of_blocking() {
+    let root = cfg(r#"
+[script]
+waves = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/patroller.toml",
+        name: "ashrender", position: [0, 0, 0],
+        overrides: stand_the_patrol_down()
+    });
+}
+"""
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+    assert!(
+        !has_error(&findings),
+        "an override this pass cannot read must not block the world: {findings:?}"
+    );
+    let warns: Vec<_> = findings
+        .iter()
+        .filter(|f| f.category == "unresolved-anchor")
+        .collect();
+    assert_eq!(
+        warns.len(),
+        2,
+        "still reported, just not fatally: {findings:?}"
+    );
+    assert!(warns.iter().all(|f| !f.is_error()));
+    assert!(
+        warns[0].message.contains("overrides"),
+        "the message has to say WHY it is only a warning: {}",
+        warns[0].message
+    );
+}
+
+/// A computed `template_path` is invisible and stays legal — `duel.toml` ships
+/// one, because its hull comes from `--side-a`/`--side-b` at run time. The gate
+/// must find nothing to say about it rather than guessing at a name.
+#[test]
+fn a_computed_script_template_path_is_not_guessed_at() {
+    let root = cfg(r#"
+[script]
+arena = """
+fn spawn_slot(ctx, name, template) {
+    ctx.effects.spawn_entity(#{ template_path: template, name: name, anchor: name });
+}
+"""
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+    assert!(
+        findings.is_empty(),
+        "a path this pass cannot compute must produce no finding at all: {findings:?}"
+    );
+}
+
+/// The scan reads CODE, not prose: a `template_path` inside a `//` comment is
+/// not a spawn.
+#[test]
+fn script_spawn_scan_ignores_comments() {
+    let root = cfg(r#"
+[script]
+notes = """
+// A wave spawns with template_path: "assets/entities/nowhere.toml" one day.
+fn release(ctx) { ctx.effects.log("nothing here"); }
+"""
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "", &root);
+    let findings = validate_composition_with(&src, &[], &patroller_templates());
+    assert!(findings.is_empty(), "{findings:?}");
+}
+
+/// Every shipped world's composition still validates — issue #1046's own
+/// shipped-world impact statement, kept as a test.
+///
+/// This is the assertion the change is really made of. The gate went from
+/// seeing `[[entity]]` blocks alone to seeing 41 script-spawned template
+/// references across 16 worlds, and no shipped world may break on the way. The
+/// two carrying an unresolved anchor behind an unreadable override
+/// (`combat_test`, `probe_artillery_standoff`) are warnings by design — see
+/// `collect_spawned_instances` — so this asserts on ERRORS.
+///
+/// The second assertion is the anti-vacuity one, and it is the more important
+/// of the two: every check here is built on the scan finding something, and a
+/// scan that silently stopped seeing inside scripts would leave the whole suite
+/// above passing over nothing.
+#[test]
+fn every_shipped_world_still_composes() {
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/worlds");
+    let mut paths: Vec<_> = std::fs::read_dir(&dir)
+        .expect("assets/worlds must be readable")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+        .collect();
+    paths.sort();
+    assert!(paths.len() > 20, "the world set did not load");
+
+    let mut scripted_seen = 0usize;
+    let mut broken: Vec<String> = Vec::new();
+    for path in paths {
+        let text = std::fs::read_to_string(&path).expect("world reads");
+        let Ok(config) = parse_world(&text) else {
+            continue;
+        };
+        let rel = format!(
+            "assets/worlds/{}",
+            path.file_name().expect("file").to_string_lossy()
+        );
+        scripted_seen += crate::world::config::script_spawned_templates(&config).len();
+        let src = WorldSource::new(&rel, &text, &config);
+        for f in validate_composition(&src, &[]) {
+            if f.is_error() {
+                broken.push(format!("{rel}: [{}] {}", f.category, f.message));
+            }
+        }
+    }
+    assert!(
+        broken.is_empty(),
+        "shipped worlds must still compose:\n{}",
+        broken.join("\n")
+    );
+    assert!(
+        scripted_seen > 30,
+        "the scan found only {scripted_seen} scripted spawns across the shipped \
+         worlds — it has stopped seeing inside scripts, and every check built on \
+         it is passing vacuously"
+    );
+}

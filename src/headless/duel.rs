@@ -77,10 +77,32 @@
 //! `validate_doctrine_anchors_in` walks the *declarative* config, and a
 //! script-authored slot is not in it. The harness checks each hull it fields
 //! through the same `world::validate::template_doctrine_anchors` table
-//! (`DuelError::UndeclaredDoctrineAnchor`). Hulls a SCRIPT spawns without the
-//! harness — including `duel.toml`'s own authored default roster — are still
-//! unguarded; that is a general script-spawn validation gap, tracked apart from
-//! this harness.
+//! (`DuelError::UndeclaredDoctrineAnchor`).
+//!
+//! ## Issue #1046 closed the general gap, and this guard still cannot retire
+//!
+//! `collect_spawned_instances` now walks scripted `spawn_entity` calls too, so
+//! a hull a script spawns is template-resolved and anchor-checked like a
+//! declarative one — which covers `duel.toml`'s own authored default roster,
+//! previously named here as unguarded.
+//!
+//! It does not cover THIS harness's slots, and the reason is structural rather
+//! than a matter of scan strength. That gate reads a literal `template_path:`
+//! out of a `spawn_entity` MAP. The generated drivers do not carry one: they
+//! pass the hull POSITIONALLY to `duel.toml`'s own `spawn_slot(ctx, name,
+//! template, faction, group)`, which is the whole point of the design above —
+//! the harness generates drivers, never spawn bodies, so `--side-a`/`--side-b`
+//! cannot drift from the arena's doctrine. Inside `spawn_slot` the map reads
+//! `template_path: template`, a computed path no load-time scan can resolve.
+//! Following the literal from the call site to the parameter is interprocedural
+//! constant propagation over a Rhai AST this build cannot even walk (Rhai's
+//! `internals` feature is off — see `world::validate::collect_spawned_instances`).
+//!
+//! So the per-slot check stays, and stays the only thing standing between a
+//! `--side-b ship_harrow_warhawk` and a ship pursuing a goal that resolves to
+//! nothing. It shares `template_doctrine_anchors` with the load-time gate, so
+//! the two cannot disagree about which fields are anchors; what differs is only
+//! which spawns each can see.
 //!
 //! VICTORY is `on_all_destroyed group = "side_b"` → `game_over` victory. The
 //! transform simply DOES NOT EMIT that registration when `side_b` is empty, so a

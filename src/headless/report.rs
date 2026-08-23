@@ -232,9 +232,19 @@ pub struct RunReport {
     /// so a plain run measures nothing and reports `actions: []`.
     ///
     /// A headless run has no client, so the only segment present is the
-    /// simulation host's own `admit_to_broadcast` service window. The client
-    /// segments (`input_to_send`, `send_to_ack`) exist only where a browser or
-    /// phone console measured them; see `crate::debug::console_latency`.
+    /// simulation host's own `admit_to_broadcast` service window — wall time
+    /// from a tick's command admission to the end of that tick's broadcast, and
+    /// **the only per-command truth this surface carries**. It is the segment a
+    /// processing regression moves, and the one the #868 budget compares.
+    ///
+    /// The client segments (`input_to_send`, `send_to_ack`) exist only where a
+    /// phone console measured them, and they mean something narrower than their
+    /// names suggest: `send_to_ack` ends when the issuing console next received
+    /// server state, so it is a *perceived-feedback proxy* bounded below by the
+    /// host's broadcast cadence rather than a per-command service time. Read
+    /// `expired` beside them — an unanswered action produces no duration at all,
+    /// so an outage is invisible in the distributions alone. See
+    /// `crate::debug::console_latency`.
     pub console_latency: crate::debug::payload::ConsoleLatencyPayload,
 }
 

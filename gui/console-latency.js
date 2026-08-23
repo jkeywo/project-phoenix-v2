@@ -16,7 +16,9 @@
  * so any host-side subtraction of a phone-side stamp would measure how far apart
  * the two clocks are set as much as how long the player waited. What crosses the
  * wire (`ClientMessage::ReportConsoleLatency`) is therefore durations, never
- * timestamps.
+ * timestamps — and no surface name either: the host assigns that from the fact
+ * that the report arrived over a session at all, so a client cannot file against
+ * a series it does not own.
  *
  * Even within one device, `performance.now()` is relative to each DOCUMENT's own
  * `timeOrigin`, and a console iframe's origin is not its parent's — so
@@ -26,50 +28,101 @@
  *
  * ## The two segments, and what they honestly cover
  *
- * - `input_to_send` — the console control's handler raising the action (stamped
- *   in `gui/console-core.js`'s `sendAction`) → the shell handing the envelope to
- *   its transport. Client-local work: postMessage hop, the action-map lookup,
- *   envelope construction.
- * - `send_to_ack` — that hand-off → the moment the acknowledging surface is next
- *   handed fresh server-derived state. The whole round trip: transport out, the
- *   host's wait for its next fixed tick, admission, the tick, the broadcast,
+ * - `input_to_send` — from the console control's handler raising the action
+ *   (stamped in `gui/console-core.js`'s `sendAction`) to the shell handing the
+ *   envelope to its transport. Client-local work: postMessage hop, the
+ *   action-map lookup, envelope construction.
+ * - `send_to_ack` — from that hand-off until the issuing console's surface is
+ *   next handed fresh server-derived state. The whole round trip: transport out,
+ *   the host's wait for its next fixed tick, admission, the tick, the broadcast,
  *   transport back, and the client's own fold.
  *
- * **It stops at fresh state, not at pixels.** No code in a page can observe its
- * own compositor, so nothing here claims to. The name is `ack`, not `paint`.
+ * ### `send_to_ack` is a perceived-feedback proxy, not per-command service time
  *
- * ## What counts as the acknowledging surface differs per path
+ * The client cannot see which broadcast its command caused. A `SimState` alone
+ * dirties several consoles at 10 Hz, so what this actually measures is *the wait
+ * until the surface next showed something new* — a figure bounded below by the
+ * host's broadcast cadence rather than by how long the command took to process.
  *
- * - **Phone console** (`client.html`): the ISSUING console's own next state
- *   push. `pushConsoleStateFor(name)` is the one place a console's payload is
- *   rebuilt and handed to its iframe, so it is the ack.
- * - **Browser host** (`server.html`): the host page has no console iframes — it
- *   is the viewscreen. Its equivalent surface is the `hud` host channel, the one
- *   push that hands the page fresh server-derived ship state.
+ * That is the right number for the ~100 ms bar, which is a claim about what a
+ * player perceives. It is the WRONG number for detecting a per-command
+ * processing regression: that lives in the host-side `admit_to_broadcast`
+ * segment and nowhere else. (Issue #1169 review, finding C1.)
  *
- * Both are "the surface the player is looking at got a new answer". Neither is
- * a causal proof that THIS action caused THAT refresh — a broadcast the action
- * did not cause can arrive first — so the number is honestly "how long until the
- * issuing surface next showed something new", which is what a player perceives
- * and is what the ~100 ms bar is about.
+ * It also stops at fresh state, not at painted pixels — no page can observe its
+ * own compositor. The name is `ack`, not `paint`.
  *
- * Pure and DOM-free so it runs under vitest in Node; the shells inject their own
+ * ## Not every refresh is an acknowledgement
+ *
+ * A console's payload is re-pushed for several reasons that have nothing to do
+ * with the host answering: a local re-render on rotation or resize, a freshly
+ * (re)loaded iframe getting the current snapshot, client-local tutorial
+ * progress. Treating any of those as an ack records a plausible-looking duration
+ * for a command the host may never even have received — a 40 ms "ack" across a
+ * stalled data channel (issue #1169 review, finding B1).
+ *
+ * So an ack must name its cause, and only {@link PUSH_CAUSE.SERVER_MESSAGE}
+ * qualifies. {@link ackEligible} is the one place that decision is made, and it
+ * lives here — not in a shell's inline script — precisely so it is testable.
+ *
+ * ## There is no browser-host series
+ *
+ * The host page (`server.html`) mounts no console surface that receives state:
+ * the inbound half of its console relay went with issue #818. With no feedback
+ * path there is nothing to acknowledge, so the host page runs no meter at all.
+ * The first implementation acked off the `hud` host channel, which is
+ * change-gated on six coarse fields — it therefore both missed real acks and
+ * invented false ones from unrelated heading ticks, and an absent metric beats a
+ * fabricated one (issue #1169 review, finding B2).
+ *
+ * Pure and DOM-free so it runs under vitest in Node; the shell injects its own
  * transport and clock.
  */
 
 /**
- * The most samples one `ReportConsoleLatency` batch carries.
- * Mirrors `core::messages::MAX_CONSOLE_LATENCY_SAMPLES` — the host truncates at
- * the same number, so sending more would only be discarded.
+ * The most records of each kind one `ReportConsoleLatency` batch carries.
+ * Mirrors `core::messages::MAX_CONSOLE_LATENCY_SAMPLES` — the host folds at most
+ * this many from each list, so sending more would only be discarded.
  */
 export const MAX_BATCH = 64;
 
 /** `DebugFlag` variant name this measurement is gated on. */
 export const CONSOLE_LATENCY_FLAG = 'ConsoleLatency';
 
-/** The `LatencySurface` variant names, as the Rust enum spells them. */
-export const SURFACE_BROWSER_HOST = 'BrowserHost';
-export const SURFACE_PHONE_CONSOLE = 'PhoneConsole';
+/**
+ * Why a console's payload was pushed to its surface.
+ *
+ * The shell knows this at each call site and nothing else does, so it is passed
+ * in rather than inferred. Anything not on this list is treated as
+ * non-acknowledging by {@link ackEligible}, which is the safe direction: a new
+ * push site that forgets to name its cause under-reports rather than inventing
+ * samples.
+ */
+export const PUSH_CAUSE = Object.freeze({
+  /** An inbound host message carried or dirtied state for this console. */
+  SERVER_MESSAGE: 'server-message',
+  /** A local re-render: rotation, resize, tab switch, phase change. */
+  RENDER: 'render',
+  /** A (re)loaded iframe being handed the current snapshot. */
+  IFRAME_LOAD: 'iframe-load',
+  /** Client-local tutorial progress, which never leaves the device. */
+  TUTORIAL: 'tutorial',
+});
+
+/**
+ * Whether a push of this cause may acknowledge a pending action.
+ *
+ * Only a push the HOST caused counts. The other three are client-local: they
+ * would happily "acknowledge" an action while the data channel was stalled and
+ * the host had never seen it, which is the exact false reading this predicate
+ * exists to refuse.
+ *
+ * @param {string} cause a {@link PUSH_CAUSE} value
+ * @returns {boolean}
+ */
+export function ackEligible(cause) {
+  return cause === PUSH_CAUSE.SERVER_MESSAGE;
+}
 
 /**
  * Epoch-relative high-resolution time in milliseconds.
@@ -110,45 +163,54 @@ export function isConsoleLatencyEnabled(debug) {
 }
 
 /**
- * The `ClientMessage::ReportConsoleLatency` envelope for a batch of samples.
+ * The `ClientMessage::ReportConsoleLatency` envelope for one batch.
  *
- * @param {Array<object>} samples
- * @returns {{type: string, data: {samples: Array<object>}}}
+ * @param {Array<object>} samples  measured round trips
+ * @param {Array<object>} [expired] per-action counts of actions never answered
+ * @returns {{type: string, data: {samples: Array<object>, expired: Array<object>}}}
  */
-export function consoleLatencyMessage(samples) {
-  return { type: 'ReportConsoleLatency', data: { samples: samples.slice(0, MAX_BATCH) } };
+export function consoleLatencyMessage(samples, expired = []) {
+  return {
+    type: 'ReportConsoleLatency',
+    data: {
+      samples: samples.slice(0, MAX_BATCH),
+      expired: expired.slice(0, MAX_BATCH),
+    },
+  };
 }
 
 /**
- * Measures console actions on one client surface and batches the results.
+ * Measures console actions on this device and batches the results.
  *
  * Lifecycle per action:
  *
- *   noteDispatch(action, target, inputMs)   ← the shell is about to transmit
+ *   noteDispatch(action, target, inputMs)      ← the shell is about to transmit
  *        ... server round trip ...
- *   noteAck(target)                         ← that surface got fresh state
+ *   noteAck(target, PUSH_CAUSE.SERVER_MESSAGE) ← the host answered that surface
  *        → one sample joins the outgoing batch
+ *
+ * An action the host never answers is dropped after `expiryMs` and COUNTED. It
+ * has to be counted: an unanswered action yields no duration, so an outage would
+ * otherwise be invisible — a link that stopped delivering and a link nobody is
+ * using produce the same (empty) distribution. The count travels with the batch
+ * and lands beside the distributions it qualifies.
  *
  * Everything is bounded, because everything here is driven by a player who may
  * tap faster than the host answers: at most `maxPending` unanswered actions per
- * target, at most `maxBatch` finished samples waiting to be sent, and an
- * unanswered action is discarded after `expiryMs` rather than held forever.
- * Dropping the OLDEST in each case is deliberate — a surface that stopped
- * measuring because it fell behind would go quiet exactly when it got
- * interesting.
+ * target, at most `maxBatch` finished samples waiting to be sent. Dropping the
+ * OLDEST in each case is deliberate — a surface that stopped measuring because
+ * it fell behind would go quiet exactly when it got interesting.
  */
 export class ConsoleLatencyMeter {
   /**
    * @param {{
-   *   surface: string,      // a `LatencySurface` variant name
    *   maxPending?: number,  // unanswered actions retained per target
    *   maxBatch?: number,    // finished samples retained before a flush
    *   expiryMs?: number,    // how long an unanswered action stays pending
    *   now?: () => number,   // clock, injectable for tests
-   * }} opts
+   * }} [opts]
    */
-  constructor({ surface, maxPending = 8, maxBatch = MAX_BATCH, expiryMs = 5000, now = nowMs } = {}) {
-    this.surface = surface;
+  constructor({ maxPending = 8, maxBatch = MAX_BATCH, expiryMs = 5000, now = nowMs } = {}) {
     this.maxPending = maxPending;
     this.maxBatch = maxBatch;
     this.expiryMs = expiryMs;
@@ -158,6 +220,8 @@ export class ConsoleLatencyMeter {
     this._pending = new Map();
     /** @type {Array<object>} */
     this._samples = [];
+    /** @type {Map<string, number>} action → unanswered count since the last drain */
+    this._expired = new Map();
   }
 
   get enabled() {
@@ -167,9 +231,11 @@ export class ConsoleLatencyMeter {
   /**
    * Switch measurement on or off, following the host's reported flag.
    *
-   * Switching OFF discards everything in flight. A half-measured action whose
-   * ack lands after a re-enable would carry a `send_to_ack` spanning the gap,
-   * and a made-up outlier is worse than a missing sample.
+   * A CHANGE either way discards everything in flight and every undelivered
+   * count. A half-measured action whose ack lands after a re-enable would carry
+   * a `send_to_ack` spanning the gap, and a made-up outlier is worse than a
+   * missing sample. The host's tracker clears itself on the same edge, so the
+   * two halves start each measurement session together.
    *
    * @param {boolean} on
    * @returns {boolean} the new state
@@ -179,6 +245,7 @@ export class ConsoleLatencyMeter {
     if (next !== this._enabled) {
       this._pending.clear();
       this._samples.length = 0;
+      this._expired.clear();
     }
     this._enabled = next;
     return this._enabled;
@@ -188,43 +255,50 @@ export class ConsoleLatencyMeter {
    * Record that an action is being handed to the transport now.
    *
    * @param {string} action    the console action name (`gui/action-map.js` key)
-   * @param {string} target    the surface whose next refresh acknowledges it
+   * @param {string} target    the console whose next server-caused refresh acks it
    * @param {number} [inputMs] the input-event stamp from `console-core.sendAction`
    */
   noteDispatch(action, target, inputMs) {
     if (!this._enabled || typeof action !== 'string' || !action) return;
     const sendMs = this._now();
-    // An action raised by something that is not a console control (the host
-    // page's own scenario picker, a synthetic dispatch) carries no input stamp.
-    // Report zero client-local time rather than guessing one: the round trip is
-    // still worth having, and a fabricated first segment would inflate the
-    // end-to-end figure the ~100 ms bar is read against.
+    // An action raised by something that is not a console control (a shell's own
+    // scenario picker, a synthetic dispatch) carries no input stamp. Report zero
+    // client-local time rather than guessing one: the round trip is still worth
+    // having, and a fabricated first segment would inflate the end-to-end figure
+    // the ~100 ms bar is read against.
     const inputToSend =
       Number.isFinite(inputMs) && inputMs > 0 ? Math.max(0, sendMs - inputMs) : 0;
     const key = String(target || '');
     const queue = this._pending.get(key) || [];
     queue.push({ action, sendMs, inputToSend });
-    while (queue.length > this.maxPending) queue.shift();
+    // Over the per-target cap the oldest is dropped — and counted, because it is
+    // an action this surface never answered.
+    while (queue.length > this.maxPending) this._countExpired(queue.shift());
     this._pending.set(key, queue);
   }
 
   /**
-   * Record that `target`'s surface has just been handed fresh server state.
-   * Every action still waiting on that surface resolves into a sample.
+   * Record that `target`'s surface has been handed a payload, and resolve the
+   * actions waiting on it **if the push was caused by the host**.
+   *
+   * A render-driven, iframe-load or tutorial push is not an acknowledgement of
+   * anything: see {@link ackEligible}. Expiry still runs for any cause, so a
+   * long-unanswered action is retired on the next push whatever caused it.
    *
    * @param {string} target
+   * @param {string} cause a {@link PUSH_CAUSE} value
    */
-  noteAck(target) {
+  noteAck(target, cause) {
     if (!this._enabled) return;
     const ackMs = this._now();
     this._expire(ackMs);
+    if (!ackEligible(cause)) return;
     const key = String(target || '');
     const queue = this._pending.get(key);
     if (!queue || queue.length === 0) return;
     for (const item of queue) {
       this._push({
         action: item.action,
-        surface: this.surface,
         input_to_send_ms: item.inputToSend,
         send_to_ack_ms: Math.max(0, ackMs - item.sendMs),
       });
@@ -233,13 +307,21 @@ export class ConsoleLatencyMeter {
   }
 
   /**
-   * Take the finished samples, leaving the meter empty.
-   * @returns {Array<object>} oldest first; empty when there is nothing to send
+   * Take the finished samples and outage counts, leaving the meter empty.
+   *
+   * @returns {{samples: Array<object>, expired: Array<{action: string, count: number}>}}
    */
   drain() {
-    const out = this._samples;
+    const samples = this._samples;
+    const expired = Array.from(this._expired, ([action, count]) => ({ action, count }));
     this._samples = [];
-    return out;
+    this._expired.clear();
+    return { samples, expired };
+  }
+
+  /** Whether a flush would carry anything. */
+  hasPayload() {
+    return this._samples.length > 0 || this._expired.size > 0;
   }
 
   /** How many actions are still waiting for an acknowledgement. */
@@ -250,20 +332,31 @@ export class ConsoleLatencyMeter {
   }
 
   /**
-   * Drop actions that were never acknowledged.
+   * Retire actions the host never answered, counting each.
    *
    * An action whose surface never refreshed produced no observable feedback at
-   * all. That is a real finding, but it is not a LATENCY, and turning it into a
-   * multi-second sample would poison the very tail the surface exists to show.
+   * all. Turning that into a multi-second duration would poison the very tail
+   * the surface exists to show, and dropping it silently would hide an outage —
+   * so it leaves the distributions and joins the count.
    *
    * @param {number} nowMsValue
    */
   _expire(nowMsValue) {
     for (const [key, queue] of this._pending) {
-      const kept = queue.filter((item) => nowMsValue - item.sendMs <= this.expiryMs);
+      const kept = [];
+      for (const item of queue) {
+        if (nowMsValue - item.sendMs <= this.expiryMs) kept.push(item);
+        else this._countExpired(item);
+      }
       if (kept.length === 0) this._pending.delete(key);
       else if (kept.length !== queue.length) this._pending.set(key, kept);
     }
+  }
+
+  /** @param {{action: string}|undefined} item */
+  _countExpired(item) {
+    if (!item) return;
+    this._expired.set(item.action, (this._expired.get(item.action) || 0) + 1);
   }
 
   /** @param {object} sample */
@@ -273,11 +366,12 @@ export class ConsoleLatencyMeter {
   }
 }
 
-// Expose for the classic-script bootstraps in client.html / server.html, which
-// wire the meter into their own dispatch and refresh paths.
+// Expose for the classic-script bootstrap in client.html, which wires the meter
+// into its own dispatch and console-refresh paths.
 if (typeof window !== 'undefined') {
   window.ConsoleLatencyMeter = ConsoleLatencyMeter;
   window.consoleLatencyMessage = consoleLatencyMessage;
   window.isConsoleLatencyEnabled = isConsoleLatencyEnabled;
   window.consoleLatencyNowMs = nowMs;
+  window.CONSOLE_PUSH_CAUSE = PUSH_CAUSE;
 }

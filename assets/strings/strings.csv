@@ -688,10 +688,9 @@ settings.debug.ai_doctrine_col_directive,Server settings menu — AI doctrine ca
 settings.debug.ai_doctrine_col_target,Server settings menu — AI doctrine candidate table column header for the resolved target,Target
 settings.debug.ai_doctrine_col_status,Server settings menu — AI doctrine candidate table column header for the objective status,Status
 settings.debug.console_latency,Server settings menu — debug output showing how long a console action takes to be acknowledged on the surface that issued it,Console Latency
-settings.debug.console_latency_caption,Server settings menu — console-latency table caption explaining that the figures are milliseconds and that a dash means the segment is not measurable on that path,"milliseconds; — means the segment does not exist on that path"
+settings.debug.console_latency_caption,"Server settings menu — console-latency table caption: the figures are milliseconds, a dash means the segment cannot be measured on that path, the phone figure is time-until-next-refresh rather than processing time, and expired counts actions that were never answered","ms · — = not measurable on this path · phone = time until the console next received server state, not processing time · expired = actions never answered"
 settings.debug.console_latency_empty,Server settings menu — console-latency table placeholder shown before any console action has been measured,No console actions measured yet.
 settings.debug.console_latency_phone,Server settings menu — console-latency table row label for measurements taken by a phone console over the wireless bridge,Phone
-settings.debug.console_latency_host_page,Server settings menu — console-latency table row label for measurements taken by a console on the host page itself,Host page
 settings.debug.console_latency_sim,Server settings menu — console-latency table row label for the simulation's own time between accepting a command and broadcasting the result,Simulation
 settings.debug.scenario,"Server settings menu — debug output showing the running scenario's working state (flags, objectives, triggers, queues, commitments, dossier)",Scenario State
 settings.debug.scenario_empty,Server settings menu — scenario-state panel placeholder shown before any scenario state exists,No scenario state.

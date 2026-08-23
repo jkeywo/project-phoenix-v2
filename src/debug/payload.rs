@@ -885,20 +885,20 @@ pub struct HostBlockedView {
 // ── Console input-to-feedback latency surface (issue #1169) ──────────────────
 //
 // The one surface on this pipeline whose data does not come only from the
-// simulation host: two of its three `LatencySurface`s are measured by a CLIENT,
-// on the client's own clock, and reported up through
-// `ClientMessage::ReportConsoleLatency`. The wire sample type therefore lives in
-// `crate::core::messages` (it crosses the wire) and is re-exported here, exactly
+// simulation host: the `PhoneConsole` series is measured by a CLIENT, on the
+// client's own clock, and reported up through
+// `ClientMessage::ReportConsoleLatency`. The wire types therefore live in
+// `crate::core::messages` (they cross the wire) and are re-exported here, exactly
 // as `AiDirective` / `ObjectiveStatus` are for the scenario surface — payload
 // convention 1 is "one module to import to know the vocabulary", not "every type
 // is declared here".
 //
-// Everything below is a DURATION. No wall-clock timestamp appears in this schema,
-// in `ConsoleLatencyTracker`, or anywhere a digest can reach: see
+// Everything below is a DURATION or a COUNT. No wall-clock timestamp appears in
+// this schema, in `ConsoleLatencyTracker`, or anywhere a digest can reach: see
 // `crate::debug::console_latency` for why that is a hard constraint rather than
 // a style choice.
 
-pub use crate::core::messages::{ConsoleLatencySample, LatencySurface};
+pub use crate::core::messages::{ConsoleLatencyExpiry, ConsoleLatencySample, LatencySurface};
 
 /// One segment's distribution over the samples in the tracker's window
 /// (issue #1169).
@@ -927,10 +927,10 @@ pub struct LatencySummary {
 /// Every segment is `Option` because **which segments exist depends on the
 /// path**, and an absent segment must read as absent rather than as zero:
 ///
-/// | surface | `input_to_send` | `send_to_ack` | `input_to_ack` | `admit_to_broadcast` |
-/// |---|---|---|---|---|
-/// | `BrowserHost` / `PhoneConsole` | yes | yes | yes (derived) | no |
-/// | `SimHost` | no | no | no | yes |
+/// | surface | `input_to_send` | `send_to_ack` | `input_to_ack` | `admit_to_broadcast` | `expired` |
+/// |---|---|---|---|---|---|
+/// | `PhoneConsole` | yes | yes | yes (derived) | no | yes |
+/// | `SimHost` | no | no | no | yes | always 0 |
 ///
 /// A client cannot observe the host's internal schedule and the host cannot
 /// observe a client's input event, so neither invents the other's numbers.
@@ -945,11 +945,29 @@ pub struct ActionLatencyEntry {
     /// Samples retained for this entry — the largest segment count, so a
     /// consumer can tell a well-populated entry from a single tap.
     pub count: u32,
+    /// Actions of this kind the client raised that its surface never
+    /// acknowledged, cumulative over the run (client surfaces only; always 0 for
+    /// `SimHost`, whose window always closes).
+    ///
+    /// **Read this before reading the distributions.** An unanswered action
+    /// contributes no duration, so an outage is invisible in `send_to_ack`
+    /// alone: a link that stopped delivering and a link that is quiet produce
+    /// the same p50. A rising count beside a healthy-looking distribution means
+    /// the distribution is describing only the actions that got through.
+    #[serde(default)]
+    pub expired: u32,
     /// Input event → transport hand-off (client surfaces only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_to_send: Option<LatencySummary>,
-    /// Transport hand-off → issuing surface handed fresh state (client surfaces
-    /// only). The whole round trip, transport included.
+    /// Transport hand-off → the issuing surface next receiving server state
+    /// (client surfaces only). The whole round trip, transport included.
+    ///
+    /// A **perceived-feedback proxy, not per-command service time.** The client
+    /// cannot see which broadcast its command caused, so this is the wait until
+    /// the surface next showed something new — bounded below by the host's
+    /// broadcast cadence. Right for the ~100 ms polish bar; wrong for detecting a
+    /// per-command processing regression, which is what
+    /// [`Self::admit_to_broadcast`] is for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_to_ack: Option<LatencySummary>,
     /// The end-to-end number the ~100 ms bar is about: the per-sample sum of the
@@ -959,9 +977,13 @@ pub struct ActionLatencyEntry {
     pub input_to_ack: Option<LatencySummary>,
     /// The simulation host's own service window: wall time from the tick's
     /// command admission to the end of the tick's `SimSet::Broadcast`
-    /// (`SimHost` only). This is the slice of `send_to_ack` the host is
-    /// responsible for; whatever the two disagree by is transport plus client
-    /// work, which nothing here measures directly.
+    /// (`SimHost` only).
+    ///
+    /// The only per-command truth on this surface, and therefore the only
+    /// segment that can honestly detect a processing regression. It is the slice
+    /// of `send_to_ack` the host is answerable for; whatever the two disagree by
+    /// is transport, broadcast cadence and client work, which nothing here
+    /// measures directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admit_to_broadcast: Option<LatencySummary>,
 }
@@ -1050,6 +1072,7 @@ mod tests {
             surface: LatencySurface::SimHost,
             action: "FirePhaser".into(),
             count: 3,
+            expired: 0,
             input_to_send: None,
             send_to_ack: None,
             input_to_ack: None,

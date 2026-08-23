@@ -265,9 +265,12 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
             ClientMessage::ReportConsoleLatency {
                 samples: vec![crate::core::messages::ConsoleLatencySample {
                     action: "fire_phaser".into(),
-                    surface: crate::core::messages::LatencySurface::PhoneConsole,
                     input_to_send_ms: 2.5,
                     send_to_ack_ms: 48.0,
+                }],
+                expired: vec![crate::core::messages::ConsoleLatencyExpiry {
+                    action: "set_impulse".into(),
+                    count: 3,
                 }],
             },
         ),
@@ -2958,6 +2961,90 @@ fn the_client_pause_route_is_absent_from_a_demo_build() {
             JsonCodec.decode_client(frame).is_ok(),
             !crate::build_flags::is_demo_cfg(),
             "a demo build must not understand {frame} from any phone"
+        );
+    }
+}
+
+/// A demo binary cannot be told console-latency measurements by a phone
+/// (issue #1169): the variant is not compiled, so the frame does not parse.
+///
+/// The same reasoning as its two siblings above, applied to a route that carries
+/// diagnostics rather than commands. A demo build has no Debug/Cheat tab, so
+/// nothing there would ever ask a phone to measure — and "nothing asks" is a
+/// UI fact, which is exactly the kind that is forgeable. The wire shape goes too.
+#[test]
+fn the_client_console_latency_route_is_absent_from_a_demo_build() {
+    for frame in [
+        r#"{"type":"ReportConsoleLatency","data":{"samples":[],"expired":[]}}"#,
+        // The `expired` list is `#[serde(default)]`, so a client that predates it
+        // still decodes in a dev build — and still must not in a demo build.
+        r#"{"type":"ReportConsoleLatency","data":{"samples":[{"action":"fire_phaser","input_to_send_ms":1.0,"send_to_ack_ms":40.0}]}}"#,
+    ] {
+        assert_eq!(
+            JsonCodec.decode_client(frame).is_ok(),
+            !crate::build_flags::is_demo_cfg(),
+            "a demo build must not understand {frame} from any phone"
+        );
+    }
+}
+
+/// A client does not name its own surface (issue #1169 review, finding on
+/// forgery). There is no field for it, so a peer trying to file against the
+/// host's own `SimHost` series — the one a CI perf budget compares — has nothing
+/// to put the claim in; the host assigns `PhoneConsole` to everything that
+/// arrives over a session.
+#[cfg(not(phoenix_demo_build))]
+#[test]
+fn a_console_latency_report_carries_no_surface_to_forge() {
+    let encoded = JsonCodec
+        .encode_client(&ClientMessage::ReportConsoleLatency {
+            samples: vec![crate::core::messages::ConsoleLatencySample {
+                action: "fire_phaser".into(),
+                input_to_send_ms: 1.0,
+                send_to_ack_ms: 40.0,
+            }],
+            expired: vec![crate::core::messages::ConsoleLatencyExpiry {
+                action: "set_impulse".into(),
+                count: 2,
+            }],
+        })
+        .expect("encodes");
+    assert!(
+        !encoded.contains("surface") && !encoded.contains("SimHost"),
+        "the wire must carry no surface field for a client to claim: {encoded}"
+    );
+
+    // A frame that tries to name one anyway is simply ignored by serde — the
+    // field does not exist — rather than honoured.
+    let forged = r#"{"type":"ReportConsoleLatency","data":{"samples":[{"action":"x","surface":"SimHost","input_to_send_ms":0.0,"send_to_ack_ms":0.0}]}}"#;
+    let decoded = JsonCodec.decode_client(forged).expect("decodes");
+    assert!(matches!(
+        decoded,
+        ClientMessage::ReportConsoleLatency { .. }
+    ));
+}
+
+/// The host page's settings cog paints from the simulation's own flag
+/// read-back (issue #1169 review, C2), so the encoder that feeds it has to key
+/// by the flag names JS asks for and stay deterministic.
+#[test]
+fn debug_flag_readback_encodes_a_flat_object_keyed_by_flag_name() {
+    use crate::core::messages::DebugFlag;
+    let json = crate::core::codec::encode_debug_flags(&[
+        (DebugFlag::ConsoleLatency, true),
+        (DebugFlag::Regions, false),
+    ]);
+    assert_eq!(json, r#"{"ConsoleLatency":true,"Regions":false}"#);
+
+    // Every flag the wire reports must be reachable by the name the client
+    // settings table spells, so a new flag cannot be silently unpaintable.
+    let all: Vec<_> = DebugFlag::ALL.iter().map(|f| (*f, false)).collect();
+    let encoded = crate::core::codec::encode_debug_flags(&all);
+    let parsed: serde_json::Value = serde_json::from_str(&encoded).expect("valid JSON");
+    for flag in DebugFlag::ALL {
+        assert!(
+            parsed.get(format!("{flag:?}")).is_some(),
+            "{flag:?} is missing from the cog read-back: {encoded}"
         );
     }
 }

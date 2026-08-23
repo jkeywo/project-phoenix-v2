@@ -1207,71 +1207,19 @@
       var action;
       try { action = JSON.parse(json); } catch (_) { return; }
       if (typeof window.dispatchConsoleAction === 'function') {
-        // Console input-to-feedback latency, host-page path (issue #1169).
-        // Stamped immediately before the transport hand-off, so `input_to_send`
-        // covers exactly the client-local hop from the console document's own
-        // `__input_ms` stamp to here. Every pending action resolves on the next
-        // `hud` host-channel push (see the handler table near the top of the
-        // page), which is this page's equivalent of a phone's console refresh.
-        window.__noteConsoleLatencyDispatch(action);
+        // No console-latency measurement on this page (issue #1169 review,
+        // finding B2). This page mounts no console surface that receives state —
+        // the inbound half of the console relay went with issue #818 — so an
+        // action dispatched here has no feedback event to be acknowledged by.
+        // The first attempt acked off the `hud` host channel, which is
+        // change-gated on six coarse fields: it missed real acks and invented
+        // false ones from unrelated heading ticks. An absent metric beats a
+        // fabricated one. The `__input_ms` stamp every envelope carries is
+        // simply unused here; a phone's shell is what reads it.
         window.dispatchConsoleAction(action, window.__localConsoleSend);
       } else {
         console.warn('[Phoenix] dropped console action before action-map loaded:', json);
       }
-    };
-
-    // ── Console input-to-feedback latency, host-page meter (issue #1169) ─────
-    //
-    // The host page's own round-trip clock, and the FLOOR the phone figures are
-    // read against: a console here reaches the simulation in-process, with no
-    // network in the round trip at all. Both stamps are on this device.
-    //
-    // The measurement is switched on and off with the simulation's own flag,
-    // which this page owns: the settings cog calls back here whenever the
-    // console-latency output is toggled (`onOutputToggled`, gui/server-settings.js).
-    // There is no read-back export for those resources, so this callback is how
-    // the page learns — which also means the meter and the simulation can never
-    // be measuring on different terms.
-    //
-    // These are `window` functions rather than closures because the two call
-    // sites are in different scripts on this page (the classic prelude above and
-    // the host-channel module island near the top). Both tolerate the meter's
-    // module not having executed yet: this is diagnostic, and a dropped early
-    // sample costs nothing.
-    var _hostLatencyMeter = null;
-    var _hostLatencyFlushedAt = 0;
-    var HOST_LATENCY_TARGET = 'host';
-    window.__hostLatencyMeter = function() {
-      if (_hostLatencyMeter) return _hostLatencyMeter;
-      if (typeof window.ConsoleLatencyMeter !== 'function') return null;
-      _hostLatencyMeter = new window.ConsoleLatencyMeter({ surface: 'BrowserHost' });
-      return _hostLatencyMeter;
-    };
-    window.__setConsoleLatencyEnabled = function(on) {
-      var meter = window.__hostLatencyMeter();
-      if (meter) meter.setEnabled(on);
-    };
-    window.__noteConsoleLatencyDispatch = function(action) {
-      var meter = window.__hostLatencyMeter();
-      if (meter && action) {
-        meter.noteDispatch(action.action, HOST_LATENCY_TARGET, action.__input_ms);
-      }
-    };
-    window.__noteConsoleLatencyAck = function() {
-      var meter = window.__hostLatencyMeter();
-      if (!meter || !meter.enabled) return;
-      meter.noteAck(HOST_LATENCY_TARGET);
-      // The host page reports into the SAME inbound route a phone uses
-      // (`ClientMessage::ReportConsoleLatency` via `__localConsoleSend`), so the
-      // two surfaces are folded by one drain into one payload and cannot drift
-      // into two shapes. Batched on the same 2 s cadence as the phone's.
-      var now = window.consoleLatencyNowMs ? window.consoleLatencyNowMs() : Date.now();
-      if (now - _hostLatencyFlushedAt < 2000) return;
-      var samples = meter.drain();
-      _hostLatencyFlushedAt = now;
-      if (samples.length === 0 || typeof window.consoleLatencyMessage !== 'function') return;
-      var msg = window.consoleLatencyMessage(samples);
-      window.__localConsoleSend(msg.type, msg.data);
     };
 
     // ── WASM panic capture ─────────────────────────────────────────────────
@@ -1565,11 +1513,6 @@
        ClientMessage path the phone clients use. The module publishes
        window.dispatchConsoleAction for the classic-script __sendAction shim. -->
   <script type="module" src="gui/action-map.js"></script>
-  <!-- Console input-to-feedback measurement (issue #1169, PRD #1144): this
-       page's own round-trip clock, and the no-network floor the phone figures
-       are read against. Publishes window.ConsoleLatencyMeter for the classic
-       __sendAction / host-channel glue below. -->
-  <script type="module" src="gui/console-latency.js"></script>
   <!-- Page chrome (issue #1227): connection-status dot, Screen Wake Lock,
        fullscreen toggle, and the mechanical half of the #conn-diag
        renderer — gui/page-chrome.js is the single source server.html and
@@ -1675,12 +1618,7 @@
     import { t, has, localiseTree } from './gui/strings.js';
     const hostChannelDispatch = createHostChannel({
       handlers: {
-        // The `hud` push is this page's "the surface got fresh server-derived
-        // state" event — the host-page analogue of a phone's console state push
-        // — so it is where a pending console action's round trip closes
-        // (issue #1169). Stamped before the render so the number is the wait,
-        // not the wait plus this page's own draw.
-        hud:          function(p) { window.__noteConsoleLatencyAck(); window.__updateHud(p); },
+        hud:          function(p) { window.__updateHud(p); },
         lobby:        function(p) { window.__updateLobby(p); },
         chatter:      function(p) { window.__updateChatter(p); },
         audio_config: function(p) { window.__audioConfig(p); },
@@ -3917,16 +3855,7 @@ window.addEventListener('TrunkApplicationStarted', () => {
        window binding published by the classic scripts above. -->
   <script type="module">
     import { mountServerSettings } from './gui/server-settings.js';
-    mountServerSettings({
-      // Console latency (issue #1169) is the one output whose toggle starts and
-      // stops MEASUREMENT rather than only rendering, so this page's own meter
-      // has to follow it. Every other id is ignored.
-      onOutputToggled(id, enabled) {
-        if (id === 'console-latency' && typeof window.__setConsoleLatencyEnabled === 'function') {
-          window.__setConsoleLatencyEnabled(enabled);
-        }
-      },
-    });
+    mountServerSettings();
   </script>
 </body>
 </html>

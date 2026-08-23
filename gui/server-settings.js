@@ -75,11 +75,56 @@ export const DEBUG_OUTPUTS = [
   // a per-ship candidate table rather than printed as text.
   { id: 'ai-doctrine', labelId: 'settings.debug.ai_doctrine', toggle: 'wasm_toggle_ai_doctrine', read: 'wasm_get_ai_doctrine', render: renderAiDoctrinePanel },
   { id: 'scenario-state', labelId: 'settings.debug.scenario', toggle: 'wasm_toggle_scenario_state', read: 'wasm_get_scenario_state', render: renderScenarioStatePanel },
-  // Console input-to-feedback latency (issue #1169). The one output whose
-  // toggle starts and stops MEASUREMENT rather than only rendering — see
-  // `clickOutput` and `opts.onOutputToggled`.
-  { id: 'console-latency', labelId: 'settings.debug.console_latency', toggle: 'wasm_toggle_console_latency', read: 'wasm_get_console_latency', render: renderConsoleLatencyPanel },
+  // Console input-to-feedback latency (issue #1169). The one output carrying
+  // `set` + `flag` instead of `toggle`: it starts and stops MEASUREMENT rather
+  // than only rendering, so a stale button is not cosmetic — it would show a
+  // live surface over a simulation that had stopped measuring and was silently
+  // dropping every batch a phone sent. See `clickOutput` and `reconcileOutputs`.
+  { id: 'console-latency', labelId: 'settings.debug.console_latency', set: 'wasm_set_console_latency', flag: 'ConsoleLatency', read: 'wasm_get_console_latency', render: renderConsoleLatencyPanel },
 ];
+
+/**
+ * Reconcile this module's own idea of which outputs are enabled with the flags
+ * the simulation reports (issue #1169 review, finding C2).
+ *
+ * The debug outputs had no read-back, so this module painted from its memory of
+ * what it had last clicked. That memory is not authoritative: a connected PHONE
+ * can flip the same flags through `ClientMessage::ToggleDebugFlag`. For a
+ * render-only overlay the cost of disagreeing was a wrong highlight; for console
+ * latency, which gates measurement, it was a cog reading "on" over a simulation
+ * measuring nothing.
+ *
+ * Only entries that declare a `flag` are reconciled — the rest have no read-back
+ * to reconcile against and keep their previous behaviour exactly. A null
+ * `reported` (the simulation has not reported yet, or the export is absent)
+ * leaves everything alone rather than guessing OFF.
+ *
+ * Pure, so the awkward part — an output a phone turned off while the panel was
+ * open, and what the panel should then be VIEWING — is testable without a DOM.
+ *
+ * @param {{ enabled: string[], viewing: string|null }} state
+ * @param {Object<string, boolean>|null} reported  flag name → on, from the sim
+ * @param {Array<{id: string, flag?: string}>} [outputs]
+ * @returns {{ enabled: string[], viewing: string|null }}
+ */
+export function reconcileOutputs(state, reported, outputs = DEBUG_OUTPUTS) {
+  if (!reported) return state;
+  const enabled = state.enabled.slice();
+  for (const entry of outputs) {
+    if (!entry.flag || typeof reported[entry.flag] !== 'boolean') continue;
+    const at = enabled.indexOf(entry.id);
+    if (reported[entry.flag] && at < 0) enabled.push(entry.id);
+    if (!reported[entry.flag] && at >= 0) enabled.splice(at, 1);
+  }
+  // Never leave the panel pointed at an output that is no longer live: fall back
+  // to another enabled one, or close the panel — exactly what `selectOutput`
+  // does when the operator turns off what they were watching.
+  let viewing = state.viewing;
+  if (viewing && enabled.indexOf(viewing) < 0) {
+    viewing = enabled.length > 0 ? enabled[0] : null;
+  }
+  return { enabled, viewing };
+}
 
 /** Cheats and world-drawing toggles, each with an authoritative read-back. */
 export const DEBUG_TOGGLES = [
@@ -157,7 +202,6 @@ export function selectOutput(state, id) {
  *   bindings?: object,   // defaults to `window`
  *   isDemo?: () => boolean,
  *   autoRefresh?: boolean,
- *   onOutputToggled?: (id: string, enabled: boolean) => void,
  * }} opts
  * @returns {{ open: function, close: function, isOpen: function,
  *             refresh: function, selectTab: function, destroy: function }}
@@ -242,8 +286,32 @@ export function mountServerSettings(opts = {}) {
 
   // ── Output panel ───────────────────────────────────────────────────────────
 
+  /**
+   * The debug flags the simulation reports, or `null` before its first report.
+   *
+   * `wasm_get_debug_flags` (issue #1169 review, C2) mirrors the same set
+   * `ServerMessage::DebugState` carries, written by the one system that already
+   * computes it — so the host page and a connected phone read the same answer
+   * from the same place, and neither can paint a button the simulation would
+   * disagree with.
+   */
+  function reportedFlags() {
+    const raw = invoke('wasm_get_debug_flags');
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Show/hide `#debug-dock` and paint the visible stream. */
   function paintOutput() {
+    // Follow the simulation before painting anything: this is polled each frame
+    // while the panel is open, so a flag a phone flipped is reflected within a
+    // frame rather than sticking until the operator clicks.
+    outputs = reconcileOutputs(outputs, reportedFlags());
     const viewing = outputs.viewing;
     if (outputHost) {
       if (viewing) outputHost.classList.add('open');
@@ -272,21 +340,26 @@ export function mountServerSettings(opts = {}) {
   }
 
   function clickOutput(id) {
+    // Reconcile FIRST, so the click acts on the simulation's state rather than
+    // on a memory a phone may have invalidated since the last paint.
+    outputs = reconcileOutputs(outputs, reportedFlags());
+    const wasOn = outputs.enabled.indexOf(id) >= 0;
     const next = selectOutput(outputs, id);
     // Exactly one resource flips per click — the per-toggle behaviour that
     // replaced the old "opening the dock enables all four" bundle.
     const entry = DEBUG_OUTPUTS.find((o) => o.id === next.flipped);
-    if (entry) invoke(entry.toggle);
-    const wasOn = outputs.enabled.indexOf(next.flipped) >= 0;
+    if (entry && entry.set) {
+      // An ABSOLUTE set (issue #1169 review, C2). A relative toggle raced
+      // against a phone flipping the same flag lands on the opposite value from
+      // the one the operator asked for — silently, and for console latency that
+      // means the simulation stops measuring while this button reads "on". So
+      // this route sends the value it wants, computed from the read-back above.
+      invoke(entry.set, !wasOn);
+    } else if (entry) {
+      invoke(entry.toggle);
+    }
     outputs = { enabled: next.enabled, viewing: next.viewing };
     paintOutput();
-    // One output does more than draw: console latency (issue #1169) gates
-    // MEASUREMENT, and the host page's own meter has to start and stop with the
-    // simulation's flag. The page has no read-back export for these resources —
-    // this module is their only caller — so this click is where the page learns.
-    if (typeof opts.onOutputToggled === 'function') {
-      opts.onOutputToggled(next.flipped, !wasOn);
-    }
   }
 
   // ── Tab bodies ─────────────────────────────────────────────────────────────

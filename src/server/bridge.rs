@@ -513,6 +513,24 @@ thread_local! {
     /// and draws a per-action table (`gui/console-latency-panel.js`).
     static CONSOLE_LATENCY_STRING: RefCell<String> = const { RefCell::new(String::new()) };
 
+    /// The debug-flag read-back as JSON (issue #1169), mirrored by
+    /// `debug_overlay::report_debug_state` — the one system that already computes
+    /// this set for `ServerMessage::DebugState`. Read by `wasm_get_debug_flags()`
+    /// so the host cog paints from the simulation's own answer rather than from
+    /// its memory of what it last clicked; a connected phone can flip the same
+    /// flags, and for console latency a stale button meant the operator saw a
+    /// live surface that was measuring nothing.
+    static DEBUG_FLAGS_STRING: RefCell<String> = const { RefCell::new(String::new()) };
+
+    /// Pending ABSOLUTE console-latency state from `wasm_set_console_latency()`
+    /// (issue #1169), drained by `drain_debug_toggles` each `PreUpdate` frame.
+    ///
+    /// Its own thread-local rather than a `PENDING_TOGGLES` member because it
+    /// carries a VALUE, not a request to invert one — see
+    /// `wasm_set_console_latency` for why this flag alone cannot use the
+    /// relative route.
+    static PENDING_CONSOLE_LATENCY: RefCell<Option<bool>> = const { RefCell::new(None) };
+
     /// Pending force-start request from `wasm_force_start()`. Drained by
     /// `drain_force_start_input` each `PreUpdate` frame into the
     /// `PendingForceStart` resource; `apply_force_start` (in `FixedUpdate`,
@@ -1976,21 +1994,61 @@ pub fn set_scenario_state_string(text: String) {
     SCENARIO_STATE_STRING.with(|v| *v.borrow_mut() = text);
 }
 
-/// Called by JS (the settings cog's Debug/Cheat tab) to toggle console
-/// input-to-feedback latency measurement at runtime (issue #1169).
+/// Called by JS (the settings cog's Debug/Cheat tab) to switch console
+/// input-to-feedback latency measurement on or off (issue #1169).
 ///
-/// The same transport pattern as `wasm_toggle_station_activity`, with one
-/// difference worth knowing at the call site: this flag gates MEASUREMENT, not
-/// only the publish. With it off the simulation takes no wall-clock reading at
-/// all and the page's own `gui/console-latency.js` stops stamping, so turning it
-/// on is what starts the numbers — an empty payload right after enabling is
-/// expected, not a fault.
+/// # An absolute set, not a toggle — deliberately unlike its neighbours
+///
+/// Every other debug surface on this bridge is flipped by a relative toggle,
+/// which is fine when the only thing that can desync is a button's highlight. It
+/// is not fine here (issue #1169 review, finding C2): a connected phone can flip
+/// the SAME flag through `ClientMessage::ToggleDebugFlag`, and a relative toggle
+/// sent from a cog painted before that arrived lands on the opposite value from
+/// the one the operator asked for. The failure is silent and total — the cog
+/// reads "on" while the simulation measures nothing and drops every batch a
+/// phone sends — so this route carries the value it wants rather than a request
+/// to invert whatever happens to be there.
+///
+/// The cog computes that value from [`wasm_get_debug_flags`], the simulation's
+/// own read-back, rather than from a local memory of what it last clicked.
+///
+/// One more difference worth knowing at the call site: this flag gates
+/// MEASUREMENT, not only the publish. With it off the simulation takes no
+/// wall-clock reading at all, so an empty payload right after enabling is
+/// expected rather than a fault — enabling deliberately clears the previous
+/// window (`debug::console_latency::clear_console_latency_on_enable`).
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn wasm_toggle_console_latency() {
-    PENDING_TOGGLES.with(|set| {
-        set.borrow_mut().insert(DebugToggleKind::ConsoleLatency);
-    });
+pub fn wasm_set_console_latency(on: bool) {
+    PENDING_CONSOLE_LATENCY.with(|v| *v.borrow_mut() = Some(on));
+}
+
+/// Called by JS while the settings cog is open, to read the debug flags the
+/// simulation actually holds (issue #1169).
+///
+/// Returns the JSON object `debug_overlay::report_debug_state` mirrors here —
+/// `{"Regions":false,"ConsoleLatency":true,…}`, keyed by the `DebugFlag` variant
+/// names — or an empty string before the first report.
+///
+/// # Why the cog needed a read-back at all
+///
+/// The debug OUTPUT resources had no read-back export, so the cog painted from
+/// its own module-local memory of what it had clicked. A phone flipping the same
+/// flag left the two disagreeing, and for console latency that disagreement is
+/// not cosmetic (see [`wasm_set_console_latency`]). The mirror is written by the
+/// one system that already computes this set for the wire, so the host page and
+/// a connected phone read the same answer derived from the same place.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_get_debug_flags() -> String {
+    DEBUG_FLAGS_STRING.with(|v| v.borrow().clone())
+}
+
+/// Called by the Bevy `report_debug_state` system to mirror the debug-flag
+/// read-back JS reads via [`wasm_get_debug_flags`].
+#[cfg(target_arch = "wasm32")]
+pub fn set_debug_flags_string(text: String) {
+    DEBUG_FLAGS_STRING.with(|v| *v.borrow_mut() = text);
 }
 
 /// Called by JS each animation frame to read the latest console-latency payload
@@ -2754,6 +2812,24 @@ fn drain_debug_toggles(
     mut console_latency_enabled: ResMut<crate::debug::DebugConsoleLatencyEnabled>,
     mut virtual_time: ResMut<Time<bevy::time::Virtual>>,
 ) {
+    // The one ABSOLUTE route on this drain (issue #1169): the cog sends the
+    // value it wants rather than a request to invert whatever is there, because
+    // a phone can flip the same flag and a relative toggle raced against that
+    // lands on the opposite state — silently, and for this flag that means the
+    // simulation stops measuring while the cog still reads "on". Applied
+    // unconditionally, ahead of the relative set below and outside its
+    // early-return, so it works whether or not anything else is pending.
+    if let Some(on) = PENDING_CONSOLE_LATENCY.with(|v| v.borrow_mut().take()) {
+        // Assigned through `set_if_neq` semantics by hand: writing the same value
+        // would still tick Bevy's change detection, and
+        // `clear_console_latency_on_enable` reads that edge to empty the tracker.
+        // A cog repaint that re-sends the current value must not wipe a live
+        // window.
+        if console_latency_enabled.0 != on {
+            console_latency_enabled.0 = on;
+        }
+    }
+
     let pending: Vec<DebugToggleKind> =
         PENDING_TOGGLES.with(|set| set.borrow_mut().drain().collect());
     if pending.is_empty() {

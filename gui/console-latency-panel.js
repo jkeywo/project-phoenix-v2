@@ -8,21 +8,32 @@
  *
  * ## Reading the table
  *
- * The surface groups answer different questions and are NOT comparable as one
- * number, which is why the table shows them apart rather than averaging them:
+ * The two surface groups answer different questions and are NOT comparable as
+ * one number, which is why the table shows them apart rather than averaging:
  *
- * - **Phone** — a real player's whole round trip over the WebRTC bridge. The
- *   number the ~100 ms polish bar is actually about.
- * - **Host page** — the same measurement with no network in it: the host page's
- *   own consoles reach the simulation in-process. The floor the phone row is
- *   read against.
- * - **Simulation** — the host's own admission→broadcast service window. The
- *   slice of the phone's round trip this repository is answerable for; whatever
- *   the phone row exceeds it by is transport and client work.
+ * - **Phone** — a real player's whole round trip over the WebRTC bridge, ending
+ *   when their console next received server state. The number the ~100 ms polish
+ *   bar is about. It is a PERCEIVED-FEEDBACK proxy: the client cannot see which
+ *   broadcast its command caused, so this is bounded below by the host's
+ *   broadcast cadence and must not be read as per-command processing time.
+ * - **Simulation** — the host's own admission→broadcast service window, and the
+ *   only per-command truth here. This is the segment a processing regression
+ *   moves; whatever the phone row exceeds it by is transport, cadence and client
+ *   work.
  *
  * A blank cell means that segment does not exist on that path — the host cannot
  * see a player's input event and a client cannot see the host's schedule — not
  * that it measured zero.
+ *
+ * `expired` counts actions the phone raised that its surface never answered.
+ * **Read it before the distributions**: an unanswered action contributes no
+ * duration, so a link that stopped delivering and a quiet link produce the same
+ * p50. A rising count means the distribution beside it is describing only the
+ * actions that got through.
+ *
+ * There is no host-page row: `server.html` mounts no console surface that
+ * receives state, so it has no acknowledgement to measure (issue #1169 review,
+ * finding B2).
  *
  * Nothing here talks to the simulation: it is a pure function of the payload, so
  * it is unit-tested in jsdom without a browser or a WASM bundle, following the
@@ -40,7 +51,6 @@ import { t } from './strings.js';
 /** `LatencySurface` variant name → the string id naming it in the table. */
 const SURFACE_LABELS = Object.freeze({
   PhoneConsole: 'settings.debug.console_latency_phone',
-  BrowserHost: 'settings.debug.console_latency_host_page',
   SimHost: 'settings.debug.console_latency_sim',
 });
 
@@ -116,7 +126,7 @@ export function buildConsoleLatencyTable(payload, opts = {}) {
   // Machine column heads: the segment names are the payload's own field names
   // and the statistics are p50/p75/max, so an operator reading this table and an
   // operator reading the run report's JSON see the same words.
-  for (const label of ['surface', 'action', 'n', ...SEGMENTS.map((s) => `${s} p50/p75/max`)]) {
+  for (const label of ['surface', 'action', 'n', 'expired', ...SEGMENTS.map((s) => `${s} p50/p75/max`)]) {
     const th = doc.createElement('th');
     th.textContent = label;
     head.appendChild(th);
@@ -144,6 +154,15 @@ export function buildConsoleLatencyTable(payload, opts = {}) {
     count.className = 'cl-count';
     count.textContent = String(entry.count | 0);
     row.appendChild(count);
+
+    // The outage counter (issue #1169 review, C1), beside the distributions it
+    // qualifies rather than hidden behind them.
+    const expired = doc.createElement('td');
+    expired.className = 'cl-expired';
+    expired.setAttribute('data-expired', String(entry.expired | 0));
+    if ((entry.expired | 0) > 0) expired.classList.add('cl-expired-warn');
+    expired.textContent = String(entry.expired | 0);
+    row.appendChild(expired);
 
     for (const segment of SEGMENTS) {
       const cell = doc.createElement('td');

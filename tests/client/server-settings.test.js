@@ -18,6 +18,7 @@ import { t } from '../../gui/strings.js';
 import {
   mountServerSettings,
   selectOutput,
+  reconcileOutputs,
   visibleTabs,
   DEBUG_OUTPUTS,
 } from '../../gui/server-settings.js';
@@ -589,5 +590,108 @@ describe('server.html host-page guards', () => {
     expect(lobbyWrap[1]).toMatch(
       /padding-left:\s*max\([^)]*\([^)]*\),\s*var\(--settings-cog-keepout\)\)/,
     );
+  });
+});
+
+// ── Following the simulation's own flags (issue #1169 review, finding C2) ────
+//
+// The debug outputs had no read-back, so this module painted from its memory of
+// what it had last clicked. That memory is not authoritative: a connected PHONE
+// can flip the same flags. For a render-only overlay a stale highlight is
+// cosmetic; for console latency, which gates MEASUREMENT, it meant a cog reading
+// "on" over a simulation measuring nothing and dropping every batch a phone sent.
+
+describe('reconcileOutputs', () => {
+  const OUTPUTS = [
+    { id: 'console-latency', flag: 'ConsoleLatency' },
+    { id: 'station-activity' }, // no flag: no read-back to reconcile against
+  ];
+
+  it('turns an output ON when the simulation says it is', () => {
+    const next = reconcileOutputs(
+      { enabled: [], viewing: null },
+      { ConsoleLatency: true },
+      OUTPUTS,
+    );
+    expect(next.enabled).toEqual(['console-latency']);
+  });
+
+  it('turns an output OFF when a phone turned it off behind the cog', () => {
+    const next = reconcileOutputs(
+      { enabled: ['console-latency'], viewing: 'console-latency' },
+      { ConsoleLatency: false },
+      OUTPUTS,
+    );
+    expect(next.enabled).toEqual([]);
+    expect(next.viewing).toBeNull();
+  });
+
+  it('falls back to another live output rather than showing a dead panel', () => {
+    const next = reconcileOutputs(
+      { enabled: ['station-activity', 'console-latency'], viewing: 'console-latency' },
+      { ConsoleLatency: false },
+      OUTPUTS,
+    );
+    expect(next.viewing).toBe('station-activity');
+  });
+
+  it('leaves outputs with no read-back exactly as they were', () => {
+    const state = { enabled: ['station-activity'], viewing: 'station-activity' };
+    const next = reconcileOutputs(state, { ConsoleLatency: true }, OUTPUTS);
+    expect(next.enabled).toContain('station-activity');
+  });
+
+  it('never guesses: no report from the simulation changes nothing', () => {
+    const state = { enabled: ['console-latency'], viewing: 'console-latency' };
+    expect(reconcileOutputs(state, null, OUTPUTS)).toBe(state);
+    expect(reconcileOutputs(state, {}, OUTPUTS).enabled).toEqual(['console-latency']);
+  });
+
+  it('is idempotent, since it runs on every paint', () => {
+    const once = reconcileOutputs({ enabled: [], viewing: null }, { ConsoleLatency: true }, OUTPUTS);
+    const twice = reconcileOutputs(once, { ConsoleLatency: true }, OUTPUTS);
+    expect(twice.enabled).toEqual(once.enabled);
+  });
+});
+
+describe('console-latency output — absolute set, not toggle', () => {
+  it('declares a `set` binding and a `flag`, unlike every render-only output', () => {
+    const entry = DEBUG_OUTPUTS.find((o) => o.id === 'console-latency');
+    expect(entry.set).toBe('wasm_set_console_latency');
+    expect(entry.flag).toBe('ConsoleLatency');
+    expect(entry.toggle).toBeUndefined();
+  });
+
+  /** Open the cog on the Debug tab with a scripted flag read-back. */
+  function cogWithFlags(flags) {
+    const sets = [];
+    const bindings = makeBindings({
+      wasm_get_debug_flags: () => JSON.stringify(flags),
+      wasm_set_console_latency: (on) => sets.push(on),
+    });
+    ({ menu: mounted } = mount({ bindings }));
+    mounted.open();
+    mounted.selectTab('debug');
+    return sets;
+  }
+
+  it('sends the value it wants, computed from the simulation read-back', () => {
+    const sets = cogWithFlags({ ConsoleLatency: false });
+    control('console-latency').click();
+    expect(sets).toEqual([true]);
+  });
+
+  it('a phone that turned it on behind the cog makes the next click turn it OFF', () => {
+    // The simulation says ON even though this cog never clicked it.
+    const sets = cogWithFlags({ ConsoleLatency: true });
+    control('console-latency').click();
+    // A relative toggle would have turned it on AGAIN — silently leaving the
+    // simulation measuring nothing while the button read "on".
+    expect(sets).toEqual([false]);
+  });
+
+  it('paints the button from the simulation, not from what it last clicked', () => {
+    cogWithFlags({ ConsoleLatency: true });
+    expect(control('console-latency').getAttribute('aria-pressed')).toBe('true');
   });
 });

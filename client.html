@@ -2424,10 +2424,19 @@
     // ── Console input-to-feedback latency (issue #1169, PRD #1144) ───────────
     // The phone measures its OWN round trip: `console-core.sendAction` stamps
     // the input event inside the console document, the dispatch below stamps the
-    // hand-off to the transport, and `pushConsoleStateFor` — the one place a
-    // console's payload is rebuilt and handed back to its iframe — is the
-    // acknowledgement. All three stamps are on this device, so nothing here
-    // subtracts a host clock from a phone clock. Only durations are reported.
+    // hand-off to the transport, and a SERVER-CAUSED push of the issuing
+    // console's payload is the acknowledgement. All three stamps are on this
+    // device, so nothing here subtracts a host clock from a phone clock, and
+    // only durations are reported — never a timestamp, and never a surface name
+    // (the host assigns that, so a client cannot claim a series it does not own).
+    //
+    // WHICH push counts is the whole correctness question (issue #1169 review,
+    // finding B1). `pushConsoleStateFor` is also called by a local re-render, by
+    // a freshly loaded iframe, and by client-local tutorial progress; acking on
+    // those records a plausible 40 ms "response" for a command a stalled data
+    // channel never delivered. So every call site names its cause and
+    // `ackEligible` (gui/console-latency.js, unit-tested) decides — the decision
+    // deliberately does not live in this inline script.
     //
     // The meter is created lazily and tolerates its module not having executed
     // yet, exactly as `pushDirtyConsoles` tolerates `dirtyConsolesFor` missing:
@@ -2436,14 +2445,19 @@
     function latencyMeter() {
       if (_latencyMeter) return _latencyMeter;
       if (typeof window.ConsoleLatencyMeter !== 'function') return null;
-      _latencyMeter = new window.ConsoleLatencyMeter({ surface: 'PhoneConsole' });
+      _latencyMeter = new window.ConsoleLatencyMeter();
       return _latencyMeter;
+    }
+
+    /** The `PUSH_CAUSE` vocabulary, or a safe stand-in before the module loads. */
+    function pushCause() {
+      return window.CONSOLE_PUSH_CAUSE || {};
     }
 
     /** Follow the host's flag and ship whatever has finished measuring. */
     let _latencyFlushedAt = 0;
     const LATENCY_FLUSH_MS = 2000;
-    function maybeReportConsoleLatency() {
+    function maybeReportConsoleLatency(force) {
       const meter = latencyMeter();
       if (!meter || typeof window.isConsoleLatencyEnabled !== 'function') return;
       // The host owns the switch; a client never measures on its own initiative.
@@ -2452,30 +2466,50 @@
       if (!on) return;
       // Batched on a timer rather than sent per sample: a tapping player would
       // otherwise turn one diagnostic into a stream of tiny frames on the very
-      // data channel whose latency is being measured.
+      // data channel whose latency is being measured. `force` skips the timer
+      // for the page-teardown flush, where there is no next chance.
       const now = window.consoleLatencyNowMs ? window.consoleLatencyNowMs() : Date.now();
-      if (now - _latencyFlushedAt < LATENCY_FLUSH_MS) return;
-      const samples = meter.drain();
+      if (!force && now - _latencyFlushedAt < LATENCY_FLUSH_MS) return;
+      if (!meter.hasPayload()) return;
+      const batch = meter.drain();
       _latencyFlushedAt = now;
-      if (samples.length === 0) return;
-      const msg = window.consoleLatencyMessage(samples);
+      const msg = window.consoleLatencyMessage(batch.samples, batch.expired);
       send(msg.type, msg.data);
     }
 
-    function pushConsoleStateFor(name) {
+    // Ship what has been measured before the page goes away (issue #1169 review).
+    // `pagehide` is the reliable teardown signal on mobile Safari, where `unload`
+    // never fires; `visibilitychange` to hidden covers a backgrounded tab the OS
+    // may never resume. Without these, up to a flush interval of real
+    // measurements is lost exactly when a player puts the phone down.
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('pagehide', () => maybeReportConsoleLatency(true));
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') maybeReportConsoleLatency(true);
+      });
+    }
+
+    /**
+     * Push one console's payload to its iframe.
+     *
+     * `cause` is a `PUSH_CAUSE` value naming WHY (issue #1169): only
+     * `SERVER_MESSAGE` — an inbound host message that carried or dirtied state
+     * for this console — may acknowledge a pending action. Omitting it is
+     * treated as non-acknowledging, so a future call site that forgets
+     * under-reports rather than fabricating samples.
+     */
+    function pushConsoleStateFor(name, cause) {
       if (!name) return;
       const json = (typeof window.buildConsoleState === 'function' && window.simState)
         ? window.buildConsoleState(name, window.simState)
         : '{}';
       _pushIframe($(consoleIframeId(name)), name, json);
-      // This console's surface just received fresh server-derived state, which
-      // is the acknowledgement every action still pending on it was waiting for.
       const meter = latencyMeter();
-      if (meter) meter.noteAck(name);
+      if (meter) meter.noteAck(name, cause);
     }
 
-    function pushActiveConsoleState() {
-      pushConsoleStateFor(activeConsole);
+    function pushActiveConsoleState(cause) {
+      pushConsoleStateFor(activeConsole, cause);
     }
 
     // Resolve the active console's iframe the same way pushConsoleStateFor
@@ -2512,7 +2546,12 @@
       const stationSystems = window.simState ? window.simState.stationSystems : null;
       const alwaysPush = window.DIRTY_ALWAYS_PUSH || new Set();
       for (const name of window.dirtyConsolesFor(msg, stationSystems)) {
-        if (alwaysPush.has(name) || activeConsole === name) pushConsoleStateFor(name);
+        // The one acknowledging push (issue #1169): this fan-out runs only for
+        // consoles an INBOUND host message dirtied, which is exactly the
+        // causality `send_to_ack` claims.
+        if (alwaysPush.has(name) || activeConsole === name) {
+          pushConsoleStateFor(name, pushCause().SERVER_MESSAGE);
+        }
       }
     }
 
@@ -2526,7 +2565,10 @@
         // Push the freshly-loaded iframe its current snapshot. Generic so it
         // covers every station id the ship mounts (including engineering /
         // science aggregates the old per-name switch never handled).
-        pushConsoleStateFor(consoleName);
+        // NOT an acknowledgement (issue #1169): a reloaded iframe is handed a
+        // snapshot that may be seconds old and owes nothing to the host having
+        // answered anything.
+        pushConsoleStateFor(consoleName, pushCause().IFRAME_LOAD);
         // Re-apply the private Accessibility profile to this same-origin console
         // now that its document has (re)loaded — a reload otherwise resets the
         // iframe :root, losing the text-scale var until the next apply (#1102).
@@ -2541,7 +2583,9 @@
       // it covers the aggregate cruiser/destroyer consoles (engineering,
       // science, …) as well as the standalone ones — all resolve to their
       // iframe via the registry.
-      pushActiveConsoleState();
+      // NOT an acknowledgement (issue #1169): a render fires on rotation,
+      // resize and tab switches, none of which mean the host answered.
+      pushActiveConsoleState(pushCause().RENDER);
     }
 
     function renderStationHero(s, inGame) {
@@ -2653,7 +2697,9 @@
         let tutStorage = null;
         try { tutStorage = window.localStorage; } catch (_) { /* privacy mode */ }
         const tut = window.applyTutorialAction(window.simState, action, tutStorage);
-        if (tut.changed) pushConsoleStateFor(action.console || activeConsole);
+        // NOT an acknowledgement (issue #1169): tutorial progress is entirely
+        // client-local and never leaves the device.
+        if (tut.changed) pushConsoleStateFor(action.console || activeConsole, pushCause().TUTORIAL);
         if (tut.handled) return;
       }
       if (typeof window.dispatchConsoleAction === 'function') {

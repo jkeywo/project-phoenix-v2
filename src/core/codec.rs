@@ -161,6 +161,29 @@ pub fn encode_console_latency(p: &crate::debug::payload::ConsoleLatencyPayload) 
     serde_json::to_string(p).unwrap_or_default()
 }
 
+/// Encode the debug-flag read-back for the host page's settings cog (issue
+/// #1169 review, finding C2).
+///
+/// `[(DebugFlag, bool)]` — the exact list `ServerMessage::DebugState` carries —
+/// as a flat object keyed by each flag's own variant name:
+/// `{"ConsoleLatency":true,"Regions":false,…}`. Flat rather than the wire's pair
+/// list because the only consumer asks about one named flag at a time, and
+/// `gui/server-settings.js` should not have to know the wire's ordering to answer
+/// that. A `BTreeMap`, so the JSON is deterministic.
+///
+/// Confined here with every other `serde_json` call (AGENTS.md Key Constraint 1)
+/// and returns `String` for [`encode_station_activity`]'s reason: the value is
+/// string keys and booleans, which serde never fails to encode, so an error
+/// becomes the empty string the cog already treats as "the simulation has not
+/// reported yet".
+pub fn encode_debug_flags(flags: &[(crate::core::messages::DebugFlag, bool)]) -> String {
+    let map: std::collections::BTreeMap<String, bool> = flags
+        .iter()
+        .map(|(flag, on)| (format!("{flag:?}"), *on))
+        .collect();
+    serde_json::to_string(&map).unwrap_or_default()
+}
+
 /// Decode inbound JSON from the HTML/PeerJS bridge.
 ///
 /// The wire shape is a full `ClientMessage` — every emitter (phone consoles,

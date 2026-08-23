@@ -1727,8 +1727,15 @@ pub enum RepairTarget {
 /// distribution is filed under is the variant name and never the carried data
 /// (which would make every distinct throttle value its own "action"). Same
 /// device `headless::report::variant_name` uses for `ServerMessage`.
+/// The discriminants also derive [`strum::IntoStaticStr`], so the label is a
+/// `&'static str` read straight out of the enum rather than a `format!` per
+/// admitted command — the per-command allocation the #1169 review's perf finding
+/// (C4) called out, on a path that runs inside the measured tick.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, strum::EnumDiscriminants)]
-#[strum_discriminants(name(SystemControlPayloadDiscriminants), derive(Hash))]
+#[strum_discriminants(
+    name(SystemControlPayloadDiscriminants),
+    derive(Hash, strum::IntoStaticStr)
+)]
 #[serde(tag = "type", content = "data")]
 pub enum SystemControlPayload {
     /// Set the ship's Red Alert state to an explicit desired value (issue
@@ -2253,45 +2260,72 @@ pub enum ClientMessage {
     /// determinism contract), and this one does not.
     ///
     /// Sent only while the reporting client sees [`DebugFlag::ConsoleLatency`]
-    /// on in `ServerMessage::DebugState`, in bounded batches of at most
-    /// [`MAX_CONSOLE_LATENCY_SAMPLES`]. **Absent from a demo build**, like its
+    /// on in `ServerMessage::DebugState`. **Absent from a demo build**, like its
     /// `ToggleDebugFlag` neighbour and for the same reason: the whole
     /// diagnostic route is compiled out rather than refused at runtime.
+    ///
+    /// # The sender does not name its own surface
+    ///
+    /// There is deliberately no surface field. A client cannot be trusted to say
+    /// which surface it is — that would let any connected peer file samples
+    /// against a series it does not own — so the host derives the surface from
+    /// the fact that this arrived over the session at all: everything here is
+    /// [`LatencySurface::PhoneConsole`]. The host's own `SimHost` series is
+    /// reachable by no wire message whatsoever.
     #[cfg(not(phoenix_demo_build))]
     ReportConsoleLatency {
+        /// Round trips this client measured and matched to a surface refresh.
         samples: Vec<ConsoleLatencySample>,
+        /// Actions this client sent that its surface never answered, counted per
+        /// action (issue #1169 review, finding C1). Without these an outage is
+        /// invisible: an unanswered action produces no sample, so a link that
+        /// stopped delivering would read as a quiet, healthy p50.
+        #[serde(default)]
+        expired: Vec<ConsoleLatencyExpiry>,
     },
 }
 
-/// The most samples one [`ClientMessage::ReportConsoleLatency`] batch may carry
-/// (issue #1169).
+/// The most records of each kind one [`ClientMessage::ReportConsoleLatency`]
+/// batch contributes (issue #1169).
 ///
-/// A bound on the wire, not a preference: the host folds whatever arrives into a
-/// bounded per-action window, and a client that has been tapping for an hour must
-/// not be able to hand the host an unbounded vector. A client with more than this
-/// many pending samples drops the oldest — a latency surface that stops
-/// measuring because it is behind is worse than one that shows the recent past.
+/// A bound on the FOLD, not on decode. `serde` has already materialised the
+/// whole vector by the time this applies, so a peer can still hand the host a
+/// large frame — that exposure is inherited from every other `ClientMessage` and
+/// belongs to the transport, not here. What this guarantees is narrower and
+/// still worth having: however long a batch is, only this many records of it
+/// enter the tracker, so a client that has been tapping for an hour cannot
+/// dominate a bounded window. The client-side meter caps its own outgoing batch
+/// at the same number, dropping the oldest, so the two halves agree about which
+/// records survive.
 pub const MAX_CONSOLE_LATENCY_SAMPLES: usize = 64;
 
-/// Which client surface produced a console-latency sample (issue #1169).
+/// Which surface a console-latency series was measured on (issue #1169).
 ///
-/// The two client surfaces differ in the one thing the measurement exists to
-/// separate — what the command crosses to reach the simulation — so a sample
-/// carries which it is rather than being averaged into one number:
-///
-/// * [`Self::BrowserHost`] — a console on the host page (`server.html`). Its
-///   command reaches the simulation in-process through the WASM bridge; there is
-///   no network in the round trip at all.
 /// * [`Self::PhoneConsole`] — a console on a connected phone (`client.html`).
 ///   Its command crosses the WebRTC data channel in both directions, which is
-///   exactly the segment PRD #1144 observes was unmeasured.
+///   exactly the segment PRD #1144 observes was unmeasured. Assigned by the HOST
+///   to every client report; never carried on the wire (see
+///   [`ClientMessage::ReportConsoleLatency`]).
 /// * [`Self::SimHost`] — not a client at all: the simulation host's own
-///   admission→broadcast service window (see
-///   `debug::console_latency`). It shares the enum so one payload can carry the
-///   whole picture, and so a consumer reads one list rather than three.
+///   admission→broadcast service window (see `debug::console_latency`). It
+///   shares the enum so one payload carries the whole picture, and so a consumer
+///   reads one list rather than two.
+///
+/// # There is no browser-host variant, and that is a finding rather than an
+/// omission
+///
+/// The host page (`server.html`) mounts no console surfaces: the inbound
+/// `__updateConsole` half of its console relay was removed in issue #818 when
+/// Rust stopped producing `ConsoleStateChanged`, so a console opened as its own
+/// tab against the host page sends actions and is never handed state back. With
+/// no feedback path there is no acknowledgement to measure, and the review that
+/// found this (#1169, finding B2) ruled that an absent metric beats a fabricated
+/// one — the first attempt acked off the `hud` host channel, which is
+/// change-gated on six coarse fields and so both missed real acks and invented
+/// false ones. The variant returns when the host page regains a console surface
+/// that receives state.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LatencySurface {
-    BrowserHost,
     PhoneConsole,
     SimHost,
 }
@@ -2300,7 +2334,6 @@ impl LatencySurface {
     /// A stable lower-case label, for a renderer that groups by surface.
     pub fn as_str(self) -> &'static str {
         match self {
-            LatencySurface::BrowserHost => "browser-host",
             LatencySurface::PhoneConsole => "phone-console",
             LatencySurface::SimHost => "sim-host",
         }
@@ -2318,19 +2351,28 @@ impl LatencySurface {
 /// clock have no defined relationship, so any host-side subtraction of a
 /// phone-side stamp would measure their disagreement as much as the latency.
 ///
-/// # What the two segments cover
+/// # What the two segments cover, and what they do NOT
 ///
 /// * `input_to_send_ms` — from the console control's handler raising the action
 ///   to the shell handing the envelope to its transport. Client-local work only.
-/// * `send_to_ack_ms` — from that hand-off to the moment the *issuing* console's
-///   surface is next handed fresh server-derived state. It contains the whole
-///   round trip: transport out, the host's queue wait, admission, the tick, the
-///   broadcast, transport back, and the client's own fold. It deliberately does
-///   NOT claim to reach painted pixels — no client-side measurement here can
-///   observe the compositor.
+/// * `send_to_ack_ms` — from that hand-off until the *issuing* console's surface
+///   is next handed fresh server-derived state **because an inbound host message
+///   dirtied it**. It contains the whole round trip: transport out, the host's
+///   wait for its next fixed tick, admission, the tick, the broadcast, transport
+///   back, and the client's own fold.
 ///
-/// Their sum is the end-to-end number the ~100 ms polish bar is about; the host
-/// derives it rather than the client sending a third field.
+/// `send_to_ack_ms` is a **perceived-feedback proxy, not per-command service
+/// time**, and the difference matters when reading it. The client cannot see
+/// which broadcast its command caused, so what it actually measures is the wait
+/// until the surface next showed something new — which is bounded below by the
+/// host's broadcast cadence (`SimState` alone dirties several consoles at
+/// 10 Hz). It is the right number for the ~100 ms polish bar, because that bar
+/// is about what a player perceives. It is the WRONG number for detecting a
+/// per-command processing regression: that is what the host-side
+/// `admit_to_broadcast` segment carries, and only that.
+///
+/// It also stops at fresh state, not at painted pixels — no page can observe its
+/// own compositor.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ConsoleLatencySample {
     /// The console action name (`gui/action-map.js`'s own key, e.g.
@@ -2338,13 +2380,26 @@ pub struct ConsoleLatencySample {
     /// which is not always a `SystemControlPayload` variant (some actions send
     /// a lobby-level message instead).
     pub action: String,
-    /// Which client surface measured it.
-    pub surface: LatencySurface,
     /// Input event → transport hand-off, in milliseconds.
     pub input_to_send_ms: f32,
     /// Transport hand-off → the issuing surface receiving fresh state, in
     /// milliseconds.
     pub send_to_ack_ms: f32,
+}
+
+/// Actions a client raised that its surface never acknowledged (issue #1169).
+///
+/// The client drops a pending action after its own expiry window and counts it
+/// here. Reporting the count rather than swallowing it is the point: an
+/// unanswered action yields no duration, so a link that has stopped delivering
+/// looks — in the distributions alone — exactly like a quiet, healthy one. This
+/// is the counter that tells those two apart.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ConsoleLatencyExpiry {
+    /// The console action name, same vocabulary as [`ConsoleLatencySample`].
+    pub action: String,
+    /// How many of this action expired unanswered since the last report.
+    pub count: u32,
 }
 
 /// One host-page debug overlay a settings menu can flip (issue #940).

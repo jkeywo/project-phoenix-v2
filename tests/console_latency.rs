@@ -134,10 +134,95 @@ fn no_admission_stamp_means_no_sample() {
     )]));
     app.add_systems(Update, record_admit_to_broadcast);
     app.update();
+    // Twice: the stamp is never set, so a second pass must not find a stale one
+    // either (the recorder CONSUMES the stamp — issue #1169 review).
+    app.update();
 
     assert!(
         app.world().resource::<ConsoleLatencyTracker>().is_empty(),
         "a recorder with no open window must record nothing"
+    );
+}
+
+/// Closing the window CONSUMES the stamp (issue #1169 review). A tick whose
+/// stamp system did not run — the flag went off between the two halves, or a
+/// fixture registered only the recorder — must find nothing rather than
+/// difference against an instant from an earlier tick and file a wildly
+/// inflated window.
+#[test]
+fn the_admission_stamp_is_consumed_by_the_measurement_that_closes_it() {
+    let mut app = App::new();
+    app.init_resource::<ConsoleLatencyTracker>();
+    app.init_resource::<TickAdmissionInstant>();
+    app.world_mut().spawn(AdmittedCommands(vec![admitted(
+        SystemControlPayload::SetRepairPriority {
+            team_idx: 0,
+            priority: 1,
+        },
+    )]));
+    app.add_systems(
+        Update,
+        (stamp_admission_instant, record_admit_to_broadcast).chain(),
+    );
+    app.update();
+
+    assert!(
+        app.world().resource::<TickAdmissionInstant>().0.is_none(),
+        "the measurement that closed the window must have spent the stamp"
+    );
+    let count = app
+        .world()
+        .resource::<ConsoleLatencyTracker>()
+        .report()
+        .actions[0]
+        .admit_to_broadcast
+        .as_ref()
+        .expect("host segment")
+        .count;
+    assert_eq!(count, 1, "exactly one measured tick, exactly one sample");
+}
+
+/// Switching measurement ON empties the tracker and the last published payload
+/// (issue #1169 review, finding C3).
+///
+/// Two problems, one edge. The client meters discard their in-flight work on the
+/// same edge, so without this the two halves disagree and a re-enable
+/// republishes a window measured under conditions nobody is watching any more.
+/// And it is the recovery path for a surface whose action budget a misbehaving
+/// client filled — which previously needed a page reload.
+#[test]
+fn enabling_measurement_clears_the_previous_window() {
+    use project_phoenix::debug::console_latency::clear_console_latency_on_enable;
+    use project_phoenix::debug::DebugConsoleLatencyEnabled;
+
+    let mut app = App::new();
+    app.init_resource::<ConsoleLatencyTracker>();
+    app.init_resource::<ConsoleLatencyCapture>();
+    app.insert_resource(DebugConsoleLatencyEnabled(false));
+    app.add_systems(Update, clear_console_latency_on_enable);
+
+    // A window from a previous measurement session, and the payload it produced.
+    app.world_mut()
+        .resource_mut::<ConsoleLatencyTracker>()
+        .record_host("FirePhaser", 4.0);
+    app.world_mut().resource_mut::<ConsoleLatencyCapture>().0 = Some("stale".into());
+
+    // A frame in which the flag did not change leaves everything alone.
+    app.update();
+    assert!(!app.world().resource::<ConsoleLatencyTracker>().is_empty());
+
+    // Flipping it ON is the edge that clears.
+    app.world_mut()
+        .resource_mut::<DebugConsoleLatencyEnabled>()
+        .0 = true;
+    app.update();
+    assert!(
+        app.world().resource::<ConsoleLatencyTracker>().is_empty(),
+        "enabling must start from an empty window"
+    );
+    assert!(
+        app.world().resource::<ConsoleLatencyCapture>().0.is_none(),
+        "the stale payload must go with the window it described"
     );
 }
 

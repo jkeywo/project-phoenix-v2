@@ -205,6 +205,20 @@ impl Plugin for DebugPlugin {
                 .run_if(|flag: Res<DebugConsoleLatencyEnabled>| flag.0),
         );
 
+        // Switching measurement ON empties the tracker (issue #1169 review, C3).
+        // It matches the client meters, which discard their own in-flight work on
+        // the same edge — without it the two halves disagreed and a re-enable
+        // republished a window measured under conditions nobody is watching any
+        // more — and it is the recovery path for a surface whose action budget a
+        // misbehaving client filled.
+        //
+        // `PreUpdate` and UNGATED, unlike its three neighbours: this system reads
+        // the flag's change EDGE, so a `run_if` on the flag's value would have to
+        // observe the same edge to let it run at all. It is a cheap no-op on
+        // every frame the flag did not change, and it must see the edge whatever
+        // the game phase — a flag flipped in the lobby still has to arrive clean.
+        app.add_systems(PreUpdate, console_latency::clear_console_latency_on_enable);
+
         // AI doctrine-pool projection (issue #1149): flag-gated, after
         // `SimSet::Broadcast` so the tick's viewscreen pool (written in
         // `SimSet::PublishAggregate`) is final. Read-only, so it never moves the

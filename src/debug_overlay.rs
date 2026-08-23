@@ -282,6 +282,18 @@ pub fn report_debug_state(
         return;
     }
     last.0 = Some(current.clone());
+    // Mirror the same set into the bridge read-back the HOST PAGE's own settings
+    // cog paints from (issue #1169 review, finding C2). Before this the cog
+    // painted from its module-local memory of what it had last clicked, so a
+    // phone flipping a flag left the two disagreeing — and for console latency
+    // that meant a cog reading "on" over a simulation that had stopped
+    // measuring. Written here, by the one system that already computes this set
+    // for the wire, so the page and a connected phone can never be told
+    // different things.
+    #[cfg(all(target_arch = "wasm32", feature = "server"))]
+    crate::server::bridge::set_debug_flags_string(crate::core::codec::encode_debug_flags(
+        &current.0,
+    ));
     writer.write(crate::lobby::OutboundMessage {
         target: crate::lobby::Target::All,
         msg: crate::core::messages::ServerMessage::DebugState {

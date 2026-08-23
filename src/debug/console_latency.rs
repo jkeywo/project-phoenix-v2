@@ -19,19 +19,41 @@
 //!
 //! | segment | clock | paths it exists on |
 //! |---|---|---|
-//! | `input_to_send` (①) | the client's | browser host, phone |
-//! | `send_to_ack` (②+③+④) | the client's | browser host, phone |
-//! | `input_to_ack` (sum) | the client's | browser host, phone |
+//! | `input_to_send` (①) | the client's | phone console |
+//! | `send_to_ack` (②+③+④) | the client's | phone console |
+//! | `input_to_ack` (sum) | the client's | phone console |
 //! | `admit_to_broadcast` (③) | the host's | browser host, native, headless |
 //!
 //! The client half is measured in `gui/console-latency.js` and arrives here as
 //! already-differenced durations via [`ClientMessage::ReportConsoleLatency`].
 //! This module owns the host half and the folding of both into one payload.
 //!
-//! **Pixels are deliberately not claimed.** `send_to_ack` ends when the issuing
-//! console's surface is handed fresh server-derived state, which is the last
-//! moment any of this code can observe. The compositor is past that line, so no
-//! number here pretends to include it.
+//! # Two things this deliberately does not claim
+//!
+//! **Pixels.** `send_to_ack` ends when the issuing console's surface is handed
+//! fresh server-derived state, which is the last moment any of this code can
+//! observe. The compositor is past that line.
+//!
+//! **Per-command service time, on the client segments.** A client cannot see
+//! which broadcast its command caused, so `send_to_ack` measures the wait until
+//! the surface next received server state — a *perceived-feedback proxy*,
+//! bounded below by the host's broadcast cadence (`SimState` alone dirties
+//! several consoles at 10 Hz). That is the right number for the ~100 ms polish
+//! bar, which is about what a player perceives, and the WRONG number for
+//! detecting a per-command processing regression. Per-command truth lives in
+//! `admit_to_broadcast` and nowhere else. (Issue #1169 review, finding C1.)
+//!
+//! There is no browser-host client series: the host page mounts no console
+//! surface that receives state, so it has no acknowledgement to measure — see
+//! [`LatencySurface`] for the full reasoning and what would bring it back.
+//!
+//! # Outages are counted, not swallowed
+//!
+//! A client action its surface never answers yields no duration at all, so an
+//! outage would otherwise read — in the distributions alone — exactly like a
+//! quiet, healthy link. The client counts those expiries per action and reports
+//! them; [`ActionLatencyEntry::expired`] carries the count beside the
+//! distributions it qualifies.
 //!
 //! # The host segment: `admit_to_broadcast`
 //!
@@ -69,7 +91,7 @@ use std::collections::BTreeMap;
 use std::collections::VecDeque;
 
 use crate::core::messages::{
-    ConsoleLatencySample, LatencySurface, SystemControlPayloadDiscriminants,
+    ConsoleLatencyExpiry, ConsoleLatencySample, LatencySurface, SystemControlPayloadDiscriminants,
 };
 use crate::debug::payload::{
     ActionLatencyEntry, ConsoleLatencyPayload, LatencySummary, DEBUG_SCHEMA_VERSION,
@@ -83,12 +105,19 @@ use crate::debug::payload::{
 /// fixed tick reads it.
 pub const DEFAULT_WINDOW: usize = 256;
 
-/// How many distinct (surface, action) series the tracker will open.
+/// How many distinct action series the tracker will open **per surface**.
 ///
-/// A bound on untrusted input as much as on memory: the action label for a
-/// client surface is a STRING chosen by the client, so an unbounded map would be
-/// a client-controlled allocation. Once the cap is reached, samples for unseen
-/// actions are dropped rather than evicting a live series.
+/// A bound on untrusted input as much as on memory: a client surface's action
+/// label is a STRING the client chose, so an unbounded map would be a
+/// client-controlled allocation. Once a surface's cap is reached, samples for
+/// unseen actions on THAT surface are dropped rather than evicting a live one.
+///
+/// **Per surface, not global** (issue #1169 review, finding C3). A single global
+/// cap made the surfaces share one budget, so two batches naming 96 junk actions
+/// permanently starved the host's own `SimHost` rows — the series a CI budget
+/// compares — with no recovery short of a page reload. Each surface now has its
+/// own budget, and `SimHost` is reachable by no wire message at all, so a client
+/// can exhaust only the space its own reports occupy.
 pub const MAX_TRACKED_ACTIONS: usize = 96;
 
 /// Longest action label accepted from a client. Every real one is far shorter
@@ -147,13 +176,18 @@ fn percentile(sorted: &[f32], p: f32) -> f32 {
     sorted[(rank - 1).min(sorted.len() - 1)]
 }
 
-/// The four segments one (surface, action) pair can carry.
+/// The four segments one (surface, action) pair can carry, plus its
+/// unanswered-action count.
 #[derive(Clone, Debug, Default)]
 struct ActionSeries {
     input_to_send: Series,
     send_to_ack: Series,
     input_to_ack: Series,
     admit_to_broadcast: Series,
+    /// Actions of this kind the client raised that its surface never answered.
+    /// Cumulative rather than windowed: an outage is a fact about the run, and a
+    /// rolling window would let it age out of sight while it was still happening.
+    expired: u32,
 }
 
 /// The bounded per-(surface, action) latency windows (issue #1169).
@@ -189,17 +223,42 @@ impl ConsoleLatencyTracker {
         self.series.is_empty()
     }
 
-    /// Fold one client-measured sample in.
+    /// Forget every series.
     ///
-    /// Every field is screened before it is kept: the label is trimmed to
-    /// [`MAX_ACTION_LABEL`], the durations must be finite and non-negative, and
-    /// a `SimHost` surface is refused outright — that surface is the host's own
-    /// and a client claiming it would forge the one number CI compares against a
-    /// baseline. A rejected sample is dropped silently; this is a diagnostic
-    /// surface, and a client that mis-reports gets no data rather than a
-    /// complaint on the sim thread.
-    pub fn record_client(&mut self, sample: &ConsoleLatencySample) {
-        if sample.surface == LatencySurface::SimHost {
+    /// Called when the flag is switched ON (issue #1169 review, finding C3), for
+    /// two reasons that point the same way. It matches the client meters, which
+    /// discard their own in-flight work on every enable change — without it the
+    /// two halves disagree, and a re-enable republishes a window measured under
+    /// conditions nobody is looking at any more. And it is the recovery path for
+    /// a surface whose action budget a misbehaving client filled: switching the
+    /// surface off and on again empties it, rather than the reload the first
+    /// implementation required.
+    pub fn clear(&mut self) {
+        self.series.clear();
+    }
+
+    /// Fold one client-measured sample in, against the surface the HOST assigned.
+    ///
+    /// `surface` is a parameter and not a field of `sample` on purpose: a client
+    /// does not name its own surface. It is derived from the fact that the report
+    /// arrived over a session at all, so a peer cannot file against a series it
+    /// does not own — and `SimHost`, the series a CI budget compares, is
+    /// reachable by no wire message whatsoever (the drain passes
+    /// [`LatencySurface::PhoneConsole`] and nothing else).
+    ///
+    /// The remaining fields are still screened: the label is trimmed to
+    /// [`MAX_ACTION_LABEL`] and the durations must be finite and non-negative. A
+    /// rejected sample is dropped silently; this is a diagnostic surface, and a
+    /// client that mis-reports gets no data rather than a complaint on the sim
+    /// thread.
+    pub fn record_client(&mut self, surface: LatencySurface, sample: &ConsoleLatencySample) {
+        // Defence in depth rather than an assertion: the wire carries no surface
+        // field and the only caller passes a constant, so reaching this arm is a
+        // programming error — but the series behind it is the one a CI budget
+        // compares against a baseline, and a silent refusal is the right failure
+        // mode for a diagnostic. Pinned by
+        // `tests::a_client_fold_can_never_write_the_sim_host_surface`.
+        if surface == LatencySurface::SimHost {
             return;
         }
         let (Some(send), Some(ack)) = (
@@ -209,7 +268,7 @@ impl ConsoleLatencyTracker {
             return;
         };
         let window = self.window;
-        let Some(entry) = self.entry(sample.surface, &sample.action) else {
+        let Some(entry) = self.entry(surface, &sample.action) else {
             return;
         };
         entry.input_to_send.push(send, window);
@@ -218,6 +277,21 @@ impl ConsoleLatencyTracker {
         // assembled from the two summaries: p75 of a sum is not the sum of the
         // p75s, and the ~100 ms bar is a claim about the whole trip.
         entry.input_to_ack.push(send + ack, window);
+    }
+
+    /// Fold one client-reported outage count in (issue #1169 review, C1).
+    ///
+    /// Opens a series for an action that has produced no successful sample at
+    /// all, which is exactly the case worth seeing: an action whose surface has
+    /// never once answered appears here and nowhere else.
+    pub fn record_client_expiry(&mut self, surface: LatencySurface, expiry: &ConsoleLatencyExpiry) {
+        if surface == LatencySurface::SimHost || expiry.count == 0 {
+            return;
+        }
+        let Some(entry) = self.entry(surface, &expiry.action) else {
+            return;
+        };
+        entry.expired = entry.expired.saturating_add(expiry.count);
     }
 
     /// Fold one host-measured `admit_to_broadcast` sample in.
@@ -250,6 +324,7 @@ impl ConsoleLatencyTracker {
                     .input_to_ack
                     .len()
                     .max(series.admit_to_broadcast.len()) as u32,
+                expired: series.expired,
                 input_to_send: series.input_to_send.summary(),
                 send_to_ack: series.send_to_ack.summary(),
                 input_to_ack: series.input_to_ack.summary(),
@@ -281,16 +356,31 @@ impl ConsoleLatencyTracker {
             })
     }
 
-    /// The series for one (surface, action), opening it if there is room.
-    /// `None` once [`MAX_TRACKED_ACTIONS`] distinct series exist and this is not
-    /// one of them.
+    /// The series for one (surface, action), opening it if that SURFACE has room.
+    ///
+    /// `None` once this surface holds [`MAX_TRACKED_ACTIONS`] distinct actions
+    /// and this is not one of them. The budget is counted per surface, so a
+    /// client filling its own cannot displace another surface's series — see
+    /// [`MAX_TRACKED_ACTIONS`] for the starvation this closes.
     fn entry(&mut self, surface: LatencySurface, action: &str) -> Option<&mut ActionSeries> {
         let label = label_of(action);
         let key = (surface, label);
-        if !self.series.contains_key(&key) && self.series.len() >= MAX_TRACKED_ACTIONS {
+        if !self.series.contains_key(&key) && self.surface_len(surface) >= MAX_TRACKED_ACTIONS {
             return None;
         }
         Some(self.series.entry(key).or_default())
+    }
+
+    /// How many distinct actions one surface currently holds.
+    ///
+    /// A range scan over the `BTreeMap`, so it walks only that surface's block
+    /// rather than the whole map — the keys are `(surface, action)` and
+    /// `LatencySurface` is `Ord`, so one surface's entries are contiguous.
+    fn surface_len(&self, surface: LatencySurface) -> usize {
+        self.series
+            .range((surface, String::new())..)
+            .take_while(|((s, _), _)| *s == surface)
+            .count()
     }
 }
 
@@ -337,10 +427,28 @@ pub struct ConsoleLatencyCapture(pub Option<String>);
 
 /// The instant this tick's command admission finished (issue #1169).
 ///
-/// `None` outside a measured tick. Wall-clock, therefore
-/// `StateClass::Presentation` and never folded — see the module docs.
+/// `None` outside a measured tick, and that is enforced rather than merely
+/// documented: [`record_admit_to_broadcast`] TAKES the stamp when it closes the
+/// window, so a tick whose stamp system did not run (the flag went off between
+/// the two, or a fixture registered only the recorder) finds `None` and records
+/// nothing instead of differencing against a stale instant from some earlier
+/// tick.
+///
+/// Wall-clock, therefore `StateClass::Presentation` and never folded — see the
+/// module docs.
 #[derive(Resource, Default, Debug)]
 pub struct TickAdmissionInstant(pub Option<Instant>);
+
+/// How often the flag-gated JSON publish runs, in Hz of simulation time.
+///
+/// The publish clones every label, sorts up to [`DEFAULT_WINDOW`] floats per
+/// series and encodes JSON. At the shipped 30–60 Hz tick that was happening
+/// every tick, INSIDE the window `sim.tick` measures — so a `--perf-capture` run
+/// was charging the metric for the cost of producing the metric (issue #1169
+/// review, finding C4). 4 Hz is far above what a dock chart or a run report can
+/// use and far below the tick rate, so the projection stops distorting the thing
+/// it is projecting.
+const PUBLISH_HZ: f32 = 4.0;
 
 /// Stamp the moment this tick's admission finished (flag-gated).
 ///
@@ -373,33 +481,56 @@ pub fn stamp_admission_instant(mut stamp: ResMut<TickAdmissionInstant>) {
 ///
 /// The stamp is taken as late as possible and read as early as possible in this
 /// system so the two clock reads bracket the schedule rather than the query.
+/// Closing the window CONSUMES the stamp, so no later tick can difference
+/// against it — see [`TickAdmissionInstant`].
 pub fn record_admit_to_broadcast(
-    stamp: Res<TickAdmissionInstant>,
+    mut stamp: ResMut<TickAdmissionInstant>,
     ships: Query<&crate::core::messages::AdmittedCommands>,
     mut tracker: ResMut<ConsoleLatencyTracker>,
 ) {
-    let Some(started) = stamp.0 else {
+    let Some(started) = stamp.0.take() else {
         return;
     };
-    let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let elapsed_ms = (started.elapsed().as_secs_f64() * 1000.0) as f32;
     for admitted in ships.iter() {
         for command in admitted.0.iter() {
-            let action = SystemControlPayloadDiscriminants::from(&command.payload);
-            tracker.record_host(&format!("{action:?}"), elapsed_ms as f32);
+            // `&'static str` straight out of the discriminant enum, not
+            // `format!("{:?}")`: this runs once per admitted command inside the
+            // window `sim.tick` measures, and an allocation there is the
+            // measurement charging for itself (issue #1169 review, C4).
+            let action: &'static str =
+                SystemControlPayloadDiscriminants::from(&command.payload).into();
+            tracker.record_host(action, elapsed_ms);
         }
     }
 }
 
-/// Project the windows to JSON when capture is enabled (flag-gated).
+/// Project the windows to JSON when capture is enabled (flag-gated, throttled).
 ///
 /// Read-only: it never touches an authoritative resource, so its running or not
 /// cannot move the digest. On the browser host it also feeds the WASM bridge
 /// thread-local the dock panel reads; every target keeps the JSON in
 /// [`ConsoleLatencyCapture`].
+///
+/// Throttled to [`PUBLISH_HZ`] of simulation time rather than run every tick.
+/// The interval is derived from the authored `sim_tick_hz` and rounded to whole
+/// ticks, so it is integer and independent of frame pacing — the same shape
+/// `StationActivityTracker::configure` uses. `SimTick` and `WorldConfig` are
+/// `Option` so a bare-`App` fixture that registered neither still publishes
+/// (every tick, from tick 0).
 pub fn publish_console_latency(
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
     tracker: Res<ConsoleLatencyTracker>,
     mut capture: ResMut<ConsoleLatencyCapture>,
 ) {
+    if let (Some(tick), Some(wc)) = (sim_tick.as_deref(), world_config.as_deref()) {
+        let interval = publish_interval_ticks(wc.global.sim_tick_hz);
+        if tick.0 % interval != 0 {
+            return;
+        }
+    }
+
     let payload = tracker.report();
     let json = crate::core::codec::encode_console_latency(&payload);
 
@@ -407,6 +538,44 @@ pub fn publish_console_latency(
     crate::server::bridge::set_console_latency_string(json.clone());
 
     capture.0 = Some(json);
+}
+
+/// Whole ticks between publishes at the authored tick rate, always `>= 1`.
+fn publish_interval_ticks(sim_tick_hz: f32) -> u64 {
+    let ticks = (sim_tick_hz / PUBLISH_HZ) as f64;
+    if ticks.is_finite() && ticks >= 1.0 {
+        ticks.round() as u64
+    } else {
+        1
+    }
+}
+
+/// Empty the tracker whenever measurement is switched ON (issue #1169 review,
+/// finding C3).
+///
+/// Two problems, one fix. The client meters discard their in-flight work on
+/// every enable change, so without this the two halves disagreed and a re-enable
+/// republished a window measured under conditions nobody is looking at any more.
+/// And a surface whose action budget a misbehaving client had filled had no
+/// recovery short of a page reload; now switching the surface off and on again
+/// is the recovery.
+///
+/// Runs in `PreUpdate` on the change edge only — `Res::is_changed` covers both
+/// the drain that flips it from a phone and the host cog's absolute set.
+pub fn clear_console_latency_on_enable(
+    flag: Res<DebugConsoleLatencyEnabled>,
+    mut tracker: ResMut<ConsoleLatencyTracker>,
+    mut capture: ResMut<ConsoleLatencyCapture>,
+) {
+    if !flag.is_changed() || !flag.0 {
+        return;
+    }
+    tracker.clear();
+    // The last published JSON described the window just cleared; leaving it
+    // would show a stale table until the next publish lands.
+    capture.0 = None;
+    #[cfg(all(target_arch = "wasm32", feature = "server"))]
+    crate::server::bridge::set_console_latency_string(String::new());
 }
 
 /// Fold connected clients' own latency reports in (issue #1169).
@@ -419,6 +588,14 @@ pub fn publish_console_latency(
 /// `Presentation` resource, and every value it carries is screened by
 /// [`ConsoleLatencyTracker::record_client`].
 ///
+/// # The surface is assigned here, not read off the wire
+///
+/// Every report that reaches this drain arrived over a client session, so its
+/// surface is [`LatencySurface::PhoneConsole`] and the message carries no field
+/// to say otherwise. That is what makes forgery structurally impossible rather
+/// than merely refused: there is no other surface a client could name, and the
+/// host's own `SimHost` series has no wire route at all.
+///
 /// **Not compiled into a demo build**, and neither is the message it reads.
 #[cfg(not(phoenix_demo_build))]
 pub fn drain_console_latency_reports(
@@ -427,11 +604,14 @@ pub fn drain_console_latency_reports(
 ) {
     use crate::core::messages::{ClientMessage, MAX_CONSOLE_LATENCY_SAMPLES};
     for ev in reader.read() {
-        let ClientMessage::ReportConsoleLatency { samples } = &ev.msg else {
+        let ClientMessage::ReportConsoleLatency { samples, expired } = &ev.msg else {
             continue;
         };
         for sample in samples.iter().take(MAX_CONSOLE_LATENCY_SAMPLES) {
-            tracker.record_client(sample);
+            tracker.record_client(LatencySurface::PhoneConsole, sample);
+        }
+        for outage in expired.iter().take(MAX_CONSOLE_LATENCY_SAMPLES) {
+            tracker.record_client_expiry(LatencySurface::PhoneConsole, outage);
         }
     }
 }
@@ -440,17 +620,20 @@ pub fn drain_console_latency_reports(
 mod tests {
     use super::*;
 
-    fn client_sample(
-        action: &str,
-        surface: LatencySurface,
-        send: f32,
-        ack: f32,
-    ) -> ConsoleLatencySample {
+    const PHONE: LatencySurface = LatencySurface::PhoneConsole;
+
+    fn client_sample(action: &str, send: f32, ack: f32) -> ConsoleLatencySample {
         ConsoleLatencySample {
             action: action.into(),
-            surface,
             input_to_send_ms: send,
             send_to_ack_ms: ack,
+        }
+    }
+
+    fn expiry(action: &str, count: u32) -> ConsoleLatencyExpiry {
+        ConsoleLatencyExpiry {
+            action: action.into(),
+            count,
         }
     }
 
@@ -467,12 +650,7 @@ mod tests {
     #[test]
     fn a_single_sample_is_its_own_p50_p75_and_max() {
         let mut tracker = ConsoleLatencyTracker::default();
-        tracker.record_client(&client_sample(
-            "fire_phaser",
-            LatencySurface::PhoneConsole,
-            4.0,
-            60.0,
-        ));
+        tracker.record_client(PHONE, &client_sample("fire_phaser", 4.0, 60.0));
         let payload = tracker.report();
         assert_eq!(payload.actions.len(), 1);
         let entry = &payload.actions[0];
@@ -489,58 +667,26 @@ mod tests {
     fn end_to_end_summarises_sums_rather_than_summing_summaries() {
         let mut tracker = ConsoleLatencyTracker::default();
         // Sample A: slow send, fast round trip. Sample B: the reverse.
-        tracker.record_client(&client_sample(
-            "set_impulse",
-            LatencySurface::PhoneConsole,
-            30.0,
-            10.0,
-        ));
-        tracker.record_client(&client_sample(
-            "set_impulse",
-            LatencySurface::PhoneConsole,
-            1.0,
-            50.0,
-        ));
+        tracker.record_client(PHONE, &client_sample("set_impulse", 30.0, 10.0));
+        tracker.record_client(PHONE, &client_sample("set_impulse", 1.0, 50.0));
         let entry = &tracker.report().actions[0];
         let end_to_end = entry.input_to_ack.clone().expect("client surface has it");
         // Sums are 40 and 51; the max of the sums is 51, NOT max(30) + max(50).
         assert_eq!(end_to_end.max_ms, 51.0);
     }
 
-    /// The two client surfaces are separate series: a phone's WebRTC round trip
-    /// must never be averaged into the host page's in-process one.
+    /// The host's own series is not reachable from the client fold at all: the
+    /// surface is a parameter the drain supplies, and it never supplies
+    /// `SimHost`. This pins the guard that would otherwise be the only thing
+    /// between a peer and the series a CI budget compares.
     #[test]
-    fn the_two_client_surfaces_are_kept_apart() {
+    fn a_client_fold_can_never_write_the_sim_host_surface() {
         let mut tracker = ConsoleLatencyTracker::default();
-        tracker.record_client(&client_sample(
-            "fire_phaser",
-            LatencySurface::BrowserHost,
-            1.0,
-            2.0,
-        ));
-        tracker.record_client(&client_sample(
-            "fire_phaser",
-            LatencySurface::PhoneConsole,
-            1.0,
-            90.0,
-        ));
-        let payload = tracker.report();
-        assert_eq!(payload.actions.len(), 2, "one series per surface");
-        assert_eq!(payload.actions[0].surface, LatencySurface::BrowserHost);
-        assert_eq!(payload.actions[1].surface, LatencySurface::PhoneConsole);
-    }
-
-    /// A client may not file samples under the host's own surface — that is the
-    /// series a CI budget compares against a baseline.
-    #[test]
-    fn a_client_cannot_report_against_the_sim_host_surface() {
-        let mut tracker = ConsoleLatencyTracker::default();
-        tracker.record_client(&client_sample(
-            "FirePhaser",
+        tracker.record_client(
             LatencySurface::SimHost,
-            0.0,
-            0.0,
-        ));
+            &client_sample("FirePhaser", 0.0, 0.0),
+        );
+        tracker.record_client_expiry(LatencySurface::SimHost, &expiry("FirePhaser", 5));
         assert!(tracker.is_empty(), "SimHost samples are the host's alone");
     }
 
@@ -550,7 +696,7 @@ mod tests {
     fn non_finite_and_negative_durations_are_refused() {
         let mut tracker = ConsoleLatencyTracker::default();
         for (send, ack) in [(-1.0, 5.0), (5.0, f32::NAN), (f32::INFINITY, 5.0)] {
-            tracker.record_client(&client_sample("x", LatencySurface::PhoneConsole, send, ack));
+            tracker.record_client(PHONE, &client_sample("x", send, ack));
         }
         assert!(tracker.is_empty());
     }
@@ -575,22 +721,65 @@ mod tests {
     fn distinct_action_labels_are_capped() {
         let mut tracker = ConsoleLatencyTracker::default();
         for i in 0..(MAX_TRACKED_ACTIONS + 50) {
-            tracker.record_client(&client_sample(
-                &format!("action_{i}"),
-                LatencySurface::PhoneConsole,
-                1.0,
-                1.0,
-            ));
+            tracker.record_client(PHONE, &client_sample(&format!("action_{i}"), 1.0, 1.0));
         }
         assert_eq!(tracker.report().actions.len(), MAX_TRACKED_ACTIONS);
     }
 
+    /// The cap is PER SURFACE (issue #1169 review, C3). A client that fills its
+    /// own budget with junk must not be able to starve the host's own rows —
+    /// the series a CI budget compares — which a single global cap allowed.
+    #[test]
+    fn a_flooded_client_surface_cannot_starve_the_host_surface() {
+        let mut tracker = ConsoleLatencyTracker::default();
+        for i in 0..(MAX_TRACKED_ACTIONS * 2) {
+            tracker.record_client(PHONE, &client_sample(&format!("junk_{i}"), 1.0, 1.0));
+        }
+        // The host's own tap still opens its series afterwards.
+        tracker.record_host("FirePhaser", 3.0);
+        let payload = tracker.report();
+        assert!(
+            payload
+                .actions
+                .iter()
+                .any(|e| e.surface == LatencySurface::SimHost && e.action == "FirePhaser"),
+            "a flooded phone surface must not consume the host's budget"
+        );
+        assert_eq!(
+            payload
+                .actions
+                .iter()
+                .filter(|e| e.surface == PHONE)
+                .count(),
+            MAX_TRACKED_ACTIONS,
+            "the client surface is still bounded by its own cap"
+        );
+    }
+
+    /// Switching measurement on empties the tracker: it matches the client
+    /// meters' own reset, and it is the recovery path for a surface whose budget
+    /// a misbehaving client filled.
+    #[test]
+    fn clearing_frees_a_flooded_surface() {
+        let mut tracker = ConsoleLatencyTracker::default();
+        for i in 0..(MAX_TRACKED_ACTIONS * 2) {
+            tracker.record_client(PHONE, &client_sample(&format!("junk_{i}"), 1.0, 1.0));
+        }
+        tracker.clear();
+        assert!(tracker.is_empty());
+        tracker.record_client(PHONE, &client_sample("fire_phaser", 1.0, 2.0));
+        assert_eq!(tracker.report().actions.len(), 1);
+    }
+
     #[test]
     fn a_long_action_label_is_trimmed_on_a_character_boundary() {
-        let long = "é".repeat(200);
+        let long = "e\u{0301}".repeat(200);
         let trimmed = label_of(&long);
         assert!(trimmed.len() <= MAX_ACTION_LABEL + 2, "trimmed to the cap");
-        assert!(trimmed.chars().all(|c| c == 'é'), "no split character");
+        assert!(
+            trimmed.chars().all(|c| c == 'e' || c == '\u{0301}'),
+            "no split character"
+        );
     }
 
     /// A host entry carries only the host segment, and a client entry only the
@@ -599,12 +788,7 @@ mod tests {
     fn each_surface_carries_only_the_segments_it_can_observe() {
         let mut tracker = ConsoleLatencyTracker::default();
         tracker.record_host("FirePhaser", 3.0);
-        tracker.record_client(&client_sample(
-            "fire_phaser",
-            LatencySurface::PhoneConsole,
-            1.0,
-            2.0,
-        ));
+        tracker.record_client(PHONE, &client_sample("fire_phaser", 1.0, 2.0));
         let payload = tracker.report();
 
         let host = payload
@@ -616,14 +800,46 @@ mod tests {
         assert!(host.input_to_send.is_none());
         assert!(host.send_to_ack.is_none());
         assert!(host.input_to_ack.is_none());
+        assert_eq!(host.expired, 0, "the host's window always closes");
 
         let phone = payload
             .actions
             .iter()
-            .find(|e| e.surface == LatencySurface::PhoneConsole)
+            .find(|e| e.surface == PHONE)
             .expect("phone entry");
         assert!(phone.admit_to_broadcast.is_none());
         assert!(phone.input_to_send.is_some());
+    }
+
+    /// An outage is COUNTED, not swallowed (issue #1169 review, C1). Without
+    /// this, an action whose surface never answers produces no record at all and
+    /// a dead link reads as a quiet one.
+    #[test]
+    fn unanswered_actions_are_counted_beside_the_distributions() {
+        let mut tracker = ConsoleLatencyTracker::default();
+        tracker.record_client(PHONE, &client_sample("fire_phaser", 1.0, 40.0));
+        tracker.record_client_expiry(PHONE, &expiry("fire_phaser", 3));
+        tracker.record_client_expiry(PHONE, &expiry("fire_phaser", 2));
+
+        let entry = &tracker.report().actions[0];
+        assert_eq!(entry.expired, 5, "expiries accumulate across reports");
+        assert!(
+            entry.send_to_ack.is_some(),
+            "the distribution still describes the actions that DID get through"
+        );
+    }
+
+    /// An action that has never once been answered exists only as an outage
+    /// count — which is exactly the case worth surfacing.
+    #[test]
+    fn an_action_that_never_answers_still_appears() {
+        let mut tracker = ConsoleLatencyTracker::default();
+        tracker.record_client_expiry(PHONE, &expiry("set_impulse", 7));
+        let entry = &tracker.report().actions[0];
+        assert_eq!(entry.action, "set_impulse");
+        assert_eq!(entry.expired, 7);
+        assert_eq!(entry.count, 0);
+        assert!(entry.send_to_ack.is_none(), "nothing was ever measured");
     }
 
     #[test]
@@ -644,6 +860,22 @@ mod tests {
                 ("FirePhaser".to_string(), 2.0),
                 ("SetThrottle".to_string(), 5.0),
             ]
+        );
+    }
+
+    /// The publish throttle is derived from the authored tick rate and is always
+    /// a whole number of ticks — the projection must not run every tick inside
+    /// the window `sim.tick` measures (issue #1169 review, C4).
+    #[test]
+    fn the_publish_interval_is_whole_ticks_at_the_authored_rate() {
+        assert_eq!(publish_interval_ticks(60.0), 15, "60 Hz / 4 Hz");
+        assert_eq!(publish_interval_ticks(30.0), 8, "30 Hz / 4 Hz, rounded");
+        assert_eq!(publish_interval_ticks(4.0), 1, "never below one tick");
+        assert_eq!(publish_interval_ticks(1.0), 1);
+        assert_eq!(
+            publish_interval_ticks(f32::NAN),
+            1,
+            "degenerate input is safe"
         );
     }
 }

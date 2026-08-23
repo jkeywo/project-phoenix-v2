@@ -2225,7 +2225,14 @@
       // textContent. The line-building logic here (multi-client ICE stages)
       // is host-specific and stays local; see that module's doc comment for
       // why it isn't unified with client.html's own renderDiag.
-      const writeDiagLines = _pageChrome.mountConnDiag('conn-diag');
+      // _pageChrome can still be null here: this async function resumes
+      // after the getIceServers() await, and nothing guarantees the
+      // page-chrome module island has mounted (fired
+      // window.__pageChromeReady) by then — the other three bridge calls
+      // above all guard the same race. mountConnDiag returns a value rather
+      // than firing a queueable side effect, so a no-op fallback (not the
+      // queue) is the guard here.
+      const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
       const clientIceStages = new Map(); // shortId → troubled ICE state
       function renderConnDiag() {
         const lines = [];

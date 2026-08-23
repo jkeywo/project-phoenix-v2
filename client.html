@@ -2859,7 +2859,14 @@
         // directly below for the show/hide toggle, which isn't part of the
         // shared renderer's job.
         const diagEl = document.getElementById('conn-diag');
-        const writeDiagLines = _pageChrome.mountConnDiag('conn-diag');
+        // _pageChrome can still be null here: this async function resumes
+        // after the fetchIceServers() await, and nothing guarantees the
+        // page-chrome module island has mounted (fired
+        // window.__pageChromeReady) by then — the other three bridge calls
+        // above all guard the same race. mountConnDiag returns a value
+        // rather than firing a queueable side effect, so a no-op fallback
+        // (not the queue) is the guard here.
+        const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
         const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable, relaySource };
         function renderDiag() {
           const lines = [];

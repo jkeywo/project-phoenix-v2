@@ -1,0 +1,32 @@
+# Scripted layer fixture "A" for the script-in-layers tests (issue #1045).
+#
+# A layer contributes ENTITIES and SCRIPTS. This one is deliberately
+# entity-free so the tests it feeds are about the scenario logic alone; the
+# entity half of the contract is pinned by `layer_entities.toml` beside it.
+#
+# Paired with `layer_scripted_b.toml`, which is identical apart from its names.
+# The two exist together so a test can load both, unload THIS one, and prove
+# that B's surviving trigger still resolves B's handler — the parallel-vec
+# invariant on `WorldScriptRuntime::handlers`, which a removal from the middle
+# of the table is what breaks.
+#
+# `on_flag_set("parent:probe", …)` reads the BASE world's store rather than this
+# layer's own: a scripted flag write emits `target_layer: None`, so `probe` is a
+# base-world flag and a layer trigger has to walk one step out to see it.
+
+[global]
+seed = 7
+
+[script]
+setup = """
+on_world_loaded("layer_a_loaded");
+on_flag_set("parent:probe", "layer_a_probed");
+
+fn layer_a_loaded(ctx) {
+    ctx.flags.layer_a_loaded = 1;
+}
+
+fn layer_a_probed(ctx) {
+    ctx.flags.layer_a_probed = 1;
+}
+"""

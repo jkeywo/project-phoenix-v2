@@ -1,0 +1,22 @@
+# Scripted layer fixture "B" for the script-in-layers tests (issue #1045).
+#
+# The twin of `layer_scripted_a.toml` — see that file for what the pair is for.
+# Only the flag and handler names differ, so a test that unloads A and probes B
+# can tell WHICH handler ran from the flag that ends up set.
+
+[global]
+seed = 7
+
+[script]
+setup = """
+on_world_loaded("layer_b_loaded");
+on_flag_set("parent:probe", "layer_b_probed");
+
+fn layer_b_loaded(ctx) {
+    ctx.flags.layer_b_loaded = 1;
+}
+
+fn layer_b_probed(ctx) {
+    ctx.flags.layer_b_probed = 1;
+}
+"""

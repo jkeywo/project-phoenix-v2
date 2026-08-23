@@ -528,7 +528,7 @@ fn scripted_on_destroyed_completes_objective_through_the_live_pipeline() {
         // No declarative triggers; merge appends the scripted one and builds
         // the parallel handler table.
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
         assert_eq!(runtime.trigger_states.len(), 1);
     }
     assert_eq!(sr.handlers.len(), 1);
@@ -585,7 +585,7 @@ fn scripted_open_comms_queues_on_the_runtime_through_the_live_pipeline() {
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     assert!(
         sr.pending_comms_opens.is_empty(),
@@ -660,7 +660,7 @@ fn scripted_flag_write_chains_a_declarative_on_flag_set() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -725,7 +725,7 @@ fn scripted_flag_clear_chains_a_declarative_on_flag_cleared() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -792,7 +792,7 @@ fn scripted_flag_increment_chains_a_declarative_on_flag_set() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -859,7 +859,7 @@ fn scripted_and_dispatched_spawn_mint_the_same_entity_uuid() {
                 .name_to_uuid
                 .insert("raider".to_string(), raider_uuid.to_string());
             runtime.trigger_states = Vec::new();
-            merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+            merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
         }
         app.world_mut().insert_resource(sr);
         app.world_mut()
@@ -982,7 +982,7 @@ fn a_scripted_destroy_chains_on_destroyed_in_the_same_tick() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -1068,7 +1068,7 @@ fn a_scripted_destroy_of_the_last_group_member_fires_on_all_destroyed() {
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -1140,7 +1140,7 @@ fn a_scripted_destroy_of_an_unknown_name_warns_and_keeps_the_rest_of_the_call() 
             seen_destroyed: HashSet::new(),
             last_fired_elapsed: None,
         }];
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
@@ -1199,7 +1199,7 @@ fn a_name_freed_by_a_scripted_destroy_is_reusable_by_a_later_spawn() {
             .name_to_uuid
             .insert("cue".to_string(), "cue-uuid-1033d".to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 
@@ -1321,7 +1321,7 @@ fn scripted_callback_fires_after_the_delay_not_immediately() {
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
@@ -1398,7 +1398,7 @@ fn scripted_callback_can_reschedule_another_callback() {
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     {
@@ -1477,7 +1477,7 @@ fn scripted_callback_rescheduled_at_delay_zero_defers_to_the_next_tick() {
             .name_to_uuid
             .insert("raider".to_string(), raider_uuid.to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
     {
@@ -3943,10 +3943,10 @@ fn unload_world_action_queues_pending_layer_change() {
 
 /// How many ECS entities were spawned by the layer at `path`.
 ///
-/// The layer contract's one observable: a loaded layer contributes ENTITIES
-/// and — until script-in-layers (#1045) — nothing else, because issue #985
-/// deleted the `[[trigger]]` parser that was a layer's only way to author
-/// scenario logic. See `tests/fixtures/layer_entities.toml`.
+/// One half of the layer contract's observables: a loaded layer contributes
+/// ENTITIES (this) and, since script-in-layers (#1045), the trigger states and
+/// handlers its `[script]` block compiles to. See
+/// `tests/fixtures/layer_entities.toml`.
 fn layer_entity_count(app: &App, path: &str) -> usize {
     app.world()
         .resource::<WorldLayerMap>()
@@ -3954,6 +3954,372 @@ fn layer_entity_count(app: &App, path: &str) -> usize {
         .get(path)
         .map(|layer| layer.spawned_entities.len())
         .unwrap_or(0)
+}
+
+// ── Script-in-layers (issue #1045) ───────────────────────────────────────────
+
+const LAYER_A: &str = "tests/fixtures/layer_scripted_a.toml";
+const LAYER_B: &str = "tests/fixtures/layer_scripted_b.toml";
+
+/// `layer_test_app` plus the trigger pipeline, so a layer's merged scripted
+/// trigger can actually be seen to FIRE rather than merely to be present.
+///
+/// `apply_world_layer_changes` is ordered before `collect_world_events` so a
+/// layer that lands this tick has its `WorldLoaded` drained in the same tick it
+/// was queued.
+fn scripted_layer_test_app() -> App {
+    let mut app = ai_trigger_test_app();
+    app.init_resource::<WorldLayerMap>()
+        .init_resource::<PendingWorldLayerChanges>()
+        .add_systems(
+            Update,
+            apply_world_layer_changes.before(collect_world_events),
+        );
+    app
+}
+
+/// Queue a `Load` for `path` and step until it lands in the layer map.
+///
+/// Two ticks rather than one for the FIRST scripted layer of a session: the
+/// applier inserts an empty `WorldScriptRuntime` and re-queues, so the merge (and
+/// the `WorldLoaded` it fires from) happens on the tick after. See
+/// `apply_world_layer_changes`' docs;
+/// `the_first_scripted_layer_lands_a_tick_after_it_is_queued` pins that directly.
+fn load_layer(app: &mut App, path: &str) {
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: path.into(),
+            loader_path: None,
+        });
+    for _ in 0..3 {
+        app.update();
+        if app.world().resource::<WorldLayerMap>().0.contains_key(path) {
+            return;
+        }
+    }
+    panic!("layer {path} never landed in WorldLayerMap");
+}
+
+/// Queue an `Unload` for `path` and step one tick.
+fn unload_layer(app: &mut App, path: &str) {
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Unload(path.into()));
+    app.update();
+}
+
+/// The base-world flag store's value for `name` (scripted writes land here —
+/// a script emits `MutateFlag { target_layer: None }`).
+fn base_counter(app: &App, name: &str) -> i64 {
+    app.world()
+        .resource::<WorldContentRuntime>()
+        .flags
+        .counter(name)
+}
+
+/// The acceptance case (issue #1045): a layer that authors a `[script]` block
+/// has it COMPILED at load, merged into the live runtime, and its
+/// `on_world_loaded` handler fires from the `WorldLoaded` the load queues —
+/// exactly as the same script would on the standalone/base-world path.
+///
+/// Before this issue the compiled set reached the applier and was dropped, so
+/// the flag below stayed 0 and a scripted layer was silently inert.
+#[test]
+fn a_layer_script_compiles_and_its_trigger_fires_after_load() {
+    let mut app = scripted_layer_test_app();
+    load_layer(&mut app, LAYER_A);
+
+    assert_eq!(
+        base_counter(&app, "layer_a_loaded"),
+        1,
+        "the layer's on_world_loaded handler must run"
+    );
+
+    let sr = app.world().resource::<WorldScriptRuntime>();
+    assert!(
+        sr.asts.contains_key(&format!("{LAYER_A}#script.setup")),
+        "the layer's unit is retained under its virtual path: {:?}",
+        sr.asts.keys().collect::<Vec<_>>()
+    );
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert_eq!(
+        runtime.trigger_states.len(),
+        2,
+        "on_world_loaded + on_flag_set"
+    );
+    assert!(
+        runtime
+            .trigger_states
+            .iter()
+            .all(|s| s.origin_layer.as_deref() == Some(LAYER_A)),
+        "each merged state is tagged with the layer that brought it"
+    );
+    assert_eq!(
+        sr.handlers.len(),
+        runtime.trigger_states.len(),
+        "handlers stays index-aligned with trigger_states"
+    );
+}
+
+/// A script-free base world has no `WorldScriptRuntime` at all, so the first
+/// scripted layer to arrive inserts an empty one and waits a tick to merge into
+/// it (issue #1045).
+///
+/// The wait is the design, not an accident: a `Commands` insert lands at the
+/// schedule's sync point, so merging in the same body would publish the layer's
+/// trigger states and its `WorldLoaded` a tick before the `handlers` describing
+/// them — and the pipeline would latch each `on_world_loaded` as fired against an
+/// absent runtime, losing the layer's opening handler outright.
+#[test]
+fn the_first_scripted_layer_lands_a_tick_after_it_is_queued() {
+    let mut app = scripted_layer_test_app();
+    assert!(
+        app.world().get_resource::<WorldScriptRuntime>().is_none(),
+        "a script-free world starts with no script runtime"
+    );
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: LAYER_A.into(),
+            loader_path: None,
+        });
+
+    app.update();
+    assert!(
+        app.world().get_resource::<WorldScriptRuntime>().is_some(),
+        "tick one inserts the landing pad"
+    );
+    assert!(
+        !app.world()
+            .resource::<WorldLayerMap>()
+            .0
+            .contains_key(LAYER_A),
+        "and re-queues the layer rather than merging it"
+    );
+    assert_eq!(base_counter(&app, "layer_a_loaded"), 0);
+
+    app.update();
+    assert!(
+        app.world()
+            .resource::<WorldLayerMap>()
+            .0
+            .contains_key(LAYER_A),
+        "tick two merges it"
+    );
+    assert_eq!(
+        base_counter(&app, "layer_a_loaded"),
+        1,
+        "and its opening handler runs on the same tick its states appear"
+    );
+}
+
+/// Two scripted layers queued in ONE batch both merge, and into the same runtime.
+#[test]
+fn two_scripted_layers_in_one_batch_both_merge() {
+    let mut app = scripted_layer_test_app();
+    {
+        let mut pending = app.world_mut().resource_mut::<PendingWorldLayerChanges>();
+        pending.0.push(WorldLayerChange::Load {
+            path: LAYER_A.into(),
+            loader_path: None,
+        });
+        pending.0.push(WorldLayerChange::Load {
+            path: LAYER_B.into(),
+            loader_path: None,
+        });
+    }
+    // Tick one inserts the landing pad and re-queues both; tick two merges them.
+    app.update();
+    app.update();
+
+    let sr = app.world().resource::<WorldScriptRuntime>();
+    assert_eq!(sr.handlers.len(), 4, "two triggers from each layer");
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len(),
+        4
+    );
+    assert_eq!(base_counter(&app, "layer_a_loaded"), 1);
+    assert_eq!(base_counter(&app, "layer_b_loaded"), 1);
+}
+
+/// THE parallel-vec guard (issue #1045 acceptance): unloading a layer whose
+/// trigger states sit BEFORE another layer's must take their `handlers` entries
+/// with them.
+///
+/// Filtering `trigger_states` alone leaves `handlers` one entry too long and
+/// shifted, so the surviving trigger at index 0 resolves the UNLOADED layer's
+/// handler — `layer_a_probed` would be written instead of `layer_b_probed`.
+/// Both the structural check and the behavioural probe below catch that.
+#[test]
+fn unloading_a_layer_keeps_handlers_aligned_for_the_layers_that_remain() {
+    let mut app = scripted_layer_test_app();
+    load_layer(&mut app, LAYER_A);
+    load_layer(&mut app, LAYER_B);
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .trigger_states
+            .len(),
+        4,
+        "two triggers per layer"
+    );
+
+    unload_layer(&mut app, LAYER_A);
+
+    // Structural: the two vecs are the same length, and every survivor is B's.
+    let sr = app.world().resource::<WorldScriptRuntime>();
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert_eq!(runtime.trigger_states.len(), 2, "only B's triggers remain");
+    assert_eq!(
+        sr.handlers.len(),
+        runtime.trigger_states.len(),
+        "handlers must shrink WITH trigger_states, not stay behind"
+    );
+    assert!(
+        runtime
+            .trigger_states
+            .iter()
+            .all(|s| s.origin_layer.as_deref() == Some(LAYER_B)),
+        "A's states are gone"
+    );
+    assert!(
+        sr.handlers.iter().all(|h| h
+            .as_ref()
+            .is_some_and(|h| h.fn_name.starts_with("layer_b_"))),
+        "and so are A's handlers: {:?}",
+        sr.handlers
+    );
+    assert!(
+        !sr.asts.contains_key(&format!("{LAYER_A}#script.setup")),
+        "A's unit is retracted too"
+    );
+    assert!(
+        sr.asts.contains_key(&format!("{LAYER_B}#script.setup")),
+        "B's is not"
+    );
+
+    // Behavioural: probe the surviving trigger and see WHICH handler runs. A
+    // desynced `handlers` would run A's here.
+    app.world_mut()
+        .resource_mut::<WorldContentRuntime>()
+        .pending_world_events
+        .push(WorldEvent::FlagSet {
+            name: "probe".into(),
+            origin_layer: None,
+        });
+    app.update();
+
+    assert_eq!(
+        base_counter(&app, "layer_b_probed"),
+        1,
+        "the surviving trigger must resolve its OWN handler"
+    );
+    assert_eq!(
+        base_counter(&app, "layer_a_probed"),
+        0,
+        "and never the unloaded layer's"
+    );
+}
+
+/// The PURE half of the same guard, over the two functions that own both vecs:
+/// a BASE world's triggers, then two layers', then a removal of the MIDDLE one.
+///
+/// The App test above cannot reach this shape — its base world is script-free —
+/// and it is the shape that matters most: base-world entries are the ones no
+/// unload can ever retract, so a filter that shifted them would silently repoint
+/// the base world's own handlers.
+#[test]
+fn removing_a_layers_triggers_keeps_every_survivors_own_handler() {
+    fn staged(source: &str, handler: &str) -> ScriptTrigger {
+        ScriptTrigger {
+            trigger: crate::world::config::scripted_trigger(TriggerCondition::OnWorldLoaded),
+            handler: handler.to_string(),
+            source_path: source.to_string(),
+        }
+    }
+    fn handler_names(sr: &WorldScriptRuntime) -> Vec<&str> {
+        sr.handlers
+            .iter()
+            .map(|h| {
+                h.as_ref()
+                    .expect("every index is scripted")
+                    .fn_name
+                    .as_str()
+            })
+            .collect()
+    }
+
+    let mut states: Vec<TriggerState> = Vec::new();
+    let mut sr = WorldScriptRuntime::empty();
+
+    sr.triggers = vec![
+        staged("base.toml#script.setup", "base_a"),
+        staged("base.toml#script.setup", "base_b"),
+    ];
+    merge_script_triggers(&mut states, &mut sr, None);
+    sr.triggers = vec![staged("l1.toml#script.setup", "l1_a")];
+    merge_script_triggers(&mut states, &mut sr, Some("l1.toml"));
+    sr.triggers = vec![staged("l2.toml#script.setup", "l2_a")];
+    merge_script_triggers(&mut states, &mut sr, Some("l2.toml"));
+
+    assert_eq!(states.len(), 4);
+    assert_eq!(sr.handlers.len(), 4, "one handler per appended state");
+
+    assert_eq!(
+        remove_layer_script_triggers(&mut states, &mut sr.handlers, "l1.toml"),
+        1
+    );
+    assert_eq!(states.len(), 3);
+    assert_eq!(
+        sr.handlers.len(),
+        3,
+        "handlers shrinks with the table, not after it"
+    );
+    assert_eq!(
+        handler_names(&sr),
+        vec!["base_a", "base_b", "l2_a"],
+        "every survivor kept the handler it arrived with"
+    );
+    assert_eq!(
+        states
+            .iter()
+            .map(|s| s.origin_layer.as_deref())
+            .collect::<Vec<_>>(),
+        vec![None, None, Some("l2.toml")]
+    );
+
+    // Unloading a path that contributed nothing takes nothing.
+    assert_eq!(
+        remove_layer_script_triggers(&mut states, &mut sr.handlers, "never_loaded.toml"),
+        0
+    );
+    assert_eq!(states.len(), 3);
+    assert_eq!(sr.handlers.len(), 3);
+}
+
+/// The shipped-set guard: a script-free layer — `reinforcements.toml` and every
+/// other layer any shipped world loads — conjures no script runtime and
+/// contributes no trigger state, exactly as before issue #1045.
+#[test]
+fn a_scriptless_layer_still_merges_nothing() {
+    let mut app = scripted_layer_test_app();
+    load_layer(&mut app, "tests/fixtures/layer_entities.toml");
+    assert!(
+        app.world().get_resource::<WorldScriptRuntime>().is_none(),
+        "no [script] block, no runtime"
+    );
+    assert!(app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .trigger_states
+        .is_empty());
 }
 
 /// `apply_world_layer_changes` with a `Load` reads the TOML on native,
@@ -4699,7 +5065,7 @@ fn trigger_chain_exceeding_max_passes_stops_at_the_cap() {
     {
         let mut runtime = app.world_mut().resource_mut::<WorldContentRuntime>();
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
         runtime.pending_world_events.push(WorldEvent::WorldLoaded);
     }
     app.world_mut().insert_resource(sr);
@@ -6263,7 +6629,7 @@ fn when_predicate_suppresses_a_scripted_spawn() {
             .name_to_uuid
             .insert("src".to_string(), "src-uuid".to_string());
         runtime.trigger_states = Vec::new();
-        merge_script_triggers(&mut runtime.trigger_states, &mut sr);
+        merge_script_triggers(&mut runtime.trigger_states, &mut sr, None);
     }
     app.world_mut().insert_resource(sr);
 

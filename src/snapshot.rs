@@ -1343,12 +1343,13 @@ pub struct LayerFlags {
 /// [`Self::script_callbacks`]. Widening to the action queue is a separate
 /// issue's commitment, not a line to slip in here.
 ///
-/// Per-layer trigger state (`WorldRuntime::trigger_states`) is not here either,
-/// for a narrower reason: a layer's states are *merged into* the base
-/// `trigger_states` vec at load and removed from it at unload, so
-/// [`Self::triggers`] already carries every trigger that can fire. The per-layer
-/// copy is the load-time snapshot `evaluate_layer_unload` matches against, and a
-/// resumed world rebuilds it by re-running the same layer loads.
+/// A layer's own trigger state is not stored separately either, for a narrower
+/// reason: a layer's states are *merged into* the base `trigger_states` vec when
+/// its `[script]` set compiles at load (issue #1045) and removed from it at
+/// unload, so [`Self::triggers`] already carries every trigger that can fire.
+/// What identifies them is the `origin_layer` tag on each state — matched by
+/// `world::server::remove_layer_script_triggers` — and a resumed world rebuilds
+/// them by re-running the same layer loads.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ScenarioState {
     /// Mission-elapsed seconds at the capture — see the type docs for why this
@@ -3561,15 +3562,21 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
 /// only mean anything against the retained ASTs, and ASTs are not serialisable
 /// at all. It does not need to be, either. `compile_world_scripts` runs at
 /// `Startup` on the bootstrapped world and `init_world_runtime` calls
-/// `merge_script_triggers` immediately after, which rebuilds `handlers` from
-/// scratch: `None` for each declarative index, then one `Some` per compiled
-/// `ScriptTrigger` appended in compile order — the same two deterministic walks
-/// (`merge_script_triggers` over the compiled script set, then the load's
-/// registration order) that produced the captured table. So the resumed world's
-/// index *i* names the same trigger and the same handler the capture's did,
-/// before this function writes a single byte, and the only thing left to check
-/// is that the two tables are the same length — which is
-/// [`RestoreGap::ScenarioTriggersMoved`].
+/// `merge_script_triggers` immediately after, which builds `handlers` beside the
+/// table it fills: one `Some` per compiled `ScriptTrigger`, appended in compile
+/// order — the same two deterministic walks (`merge_script_triggers` over the
+/// compiled script set, then the load's registration order) that produced the
+/// captured table. So the resumed world's index *i* names the same trigger and
+/// the same handler the capture's did, before this function writes a single byte,
+/// and the only thing left to check is that the two tables are the same length —
+/// which is [`RestoreGap::ScenarioTriggersMoved`].
+///
+/// A world that had a scripted LAYER loaded at capture (issue #1045) rebuilds the
+/// same way and for the same reason: the layer's own `[script]` set compiles at
+/// `LoadWorld` and appends through the same `merge_script_triggers`, so a resumed
+/// world that re-runs the same layer loads reaches the same table in the same
+/// order. Until it has, the length check is what refuses the mismatch — the same
+/// answer [`ScenarioState::triggers`] already gives for per-layer state.
 ///
 /// # The per-tick budget is reset, not restored
 ///

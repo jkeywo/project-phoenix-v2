@@ -545,6 +545,20 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // consumer in issue #1194 (the sim→presentation boundary lift), so its full
     // type-path key is the `world::server::` one below, not the old `server::`
     // bridge one.
+    //
+    // Issue #1045's SCRIPT-IN-LAYERS registers nothing new, and it is the seam's
+    // most invasive slice so far. A layer's `[script]` block now compiles at
+    // `LoadWorld` and merges into the SAME `WorldScriptRuntime` this list already
+    // covers — its ASTs, its `handlers` vec, its `deadline_handlers` — and its
+    // trigger states into `WorldContentRuntime::trigger_states` above. The one new
+    // field is `WorldRuntime::script_units`, the AST keys a layer added so its
+    // unload can retract exactly them; `WorldRuntime` carries no
+    // `#[derive(Resource)]` of its own — it lives inside `WorldLayerMap`, already
+    // covered — so nothing new appears in the registry this guard scans. The empty
+    // `WorldScriptRuntime` a scripted layer inserts when the base world authored
+    // none is that same registered type, instantiated where a script-free world
+    // previously had nothing. See `src/world/layers.rs` and the parallel-vec
+    // invariant documented on `WorldScriptRuntime::handlers`.
     "project_phoenix::world::server::BridgeWorldSource",
     "project_phoenix::world::server::PreCompiledScripts",
     "project_phoenix::world::server::RawWorldSource",

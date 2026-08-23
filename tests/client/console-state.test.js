@@ -3871,6 +3871,124 @@ describe('withTutorialOverlay (destroyer engineering station, issue #921)', () =
   });
 });
 
+// ── Cruiser station tutorial merges (issue #1080) ───────────────────────────
+//
+// The cruiser has six claimable stations. Each definition below mirrors its
+// `[[station.tutorial]]` entry in assets/entities/alliance_cruiser.toml and
+// goes through the payload builder that the station's iframe receives. This
+// catches a bad state path or control name in authored content without adding
+// per-hull tutorial framework code.
+describe('withTutorialOverlay (cruiser stations, issue #1080)', () => {
+  const stations = [
+    {
+      id: 'captain',
+      defs: [
+        { id: 'captain-rating', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.captain.tutorial.rating.title', text: 'entity.alliance_cruiser.station.captain.tutorial.rating.text' },
+        { id: 'captain-welcome', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.captain.tutorial.welcome.title', text: 'entity.alliance_cruiser.station.captain.tutorial.welcome.text', anchor: 'camera-select' },
+        { id: 'captain-viewscreen', trigger: { kind: 'control_unused', control: 'set_view' }, title: 'entity.alliance_cruiser.station.captain.tutorial.viewscreen.title', text: 'entity.alliance_cruiser.station.captain.tutorial.viewscreen.text', anchor: 'camera-select' },
+        { id: 'captain-objectives', trigger: { kind: 'control_unused', control: 'set_objective_priority' }, title: 'entity.alliance_cruiser.station.captain.tutorial.objectives.title', text: 'entity.alliance_cruiser.station.captain.tutorial.objectives.text', anchor: 'objective-list' },
+        { id: 'captain-red-alert', trigger: { kind: 'control_unused', control: 'set_red_alert' }, title: 'entity.alliance_cruiser.station.captain.tutorial.red_alert.title', text: 'entity.alliance_cruiser.station.captain.tutorial.red_alert.text', anchor: 'red-alert' },
+      ],
+      build: state => buildSystemStationConsoleState('captain', { ...state, stationSystems: { captain: ['captain', 'red-alert', 'viewscreen'] } }),
+    },
+    {
+      id: 'helm',
+      defs: [
+        { id: 'helm-rating', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.helm.tutorial.rating.title', text: 'entity.alliance_cruiser.station.helm.tutorial.rating.text' },
+        { id: 'helm-welcome', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.helm.tutorial.welcome.title', text: 'entity.alliance_cruiser.station.helm.tutorial.welcome.text', anchor: 'helm-radar' },
+        { id: 'helm-joystick', trigger: { kind: 'control_unused', control: 'set_helm' }, title: 'entity.alliance_cruiser.station.helm.tutorial.joystick.title', text: 'entity.alliance_cruiser.station.helm.tutorial.joystick.text', anchor: 'helm-joystick' },
+        { id: 'helm-lateral', trigger: { kind: 'control_unused', control: 'set_lateral_thrust' }, title: 'entity.alliance_cruiser.station.helm.tutorial.lateral.title', text: 'entity.alliance_cruiser.station.helm.tutorial.lateral.text', anchor: 'lateral-thrust-joystick' },
+        { id: 'helm-impulse', trigger: { kind: 'control_unused', control: 'start_impulse_charge' }, title: 'entity.alliance_cruiser.station.helm.tutorial.impulse.title', text: 'entity.alliance_cruiser.station.helm.tutorial.impulse.text', anchor: 'impulse-btn' },
+        { id: 'helm-boost', priority: 5, trigger: { kind: 'state', path: 'boost_enabled', op: 'truthy', control: 'set_boost' }, title: 'entity.alliance_cruiser.station.helm.tutorial.boost.title', text: 'entity.alliance_cruiser.station.helm.tutorial.boost.text', anchor: 'boost-btn' },
+      ],
+      build: buildHelmConsoleState,
+    },
+    {
+      id: 'tactical',
+      defs: [
+        { id: 'tactical-rating', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.tactical.tutorial.rating.title', text: 'entity.alliance_cruiser.station.tactical.tutorial.rating.text' },
+        { id: 'tactical-welcome', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.tactical.tutorial.welcome.title', text: 'entity.alliance_cruiser.station.tactical.tutorial.welcome.text', anchor: 'tactical-radar' },
+        { id: 'tactical-lock-target', trigger: { kind: 'control_unused', control: 'set_target' }, title: 'entity.alliance_cruiser.station.tactical.tutorial.lock_target.title', text: 'entity.alliance_cruiser.station.tactical.tutorial.lock_target.text', anchor: 'tactical-radar' },
+        { id: 'tactical-phasers', trigger: { kind: 'control_unused', control: 'fire_phaser' }, title: 'entity.alliance_cruiser.station.tactical.tutorial.phasers.title', text: 'entity.alliance_cruiser.station.tactical.tutorial.phasers.text', anchor: 'phasers-controls' },
+        { id: 'tactical-torpedoes', trigger: { kind: 'control_unused', control: 'fire_torpedo' }, title: 'entity.alliance_cruiser.station.tactical.tutorial.torpedoes.title', text: 'entity.alliance_cruiser.station.tactical.tutorial.torpedoes.text', anchor: 'torpedo-controls' },
+      ],
+      build: state => buildSystemStationConsoleState('tactical', { ...state, stationSystems: { tactical: ['tactical-radar', 'phaser-control', 'phaser-fore', 'phaser-aft', 'torpedo-magazine', 'torpedo-tube-fore-port', 'torpedo-tube-fore-starboard', 'torpedo-tube-aft'] } }),
+    },
+    {
+      id: 'science',
+      defs: [
+        { id: 'science-welcome', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.science.tutorial.welcome.title', text: 'entity.alliance_cruiser.station.science.tutorial.welcome.text', anchor: 'sensor-radar' },
+        { id: 'science-select-contact', trigger: { kind: 'control_unused', control: 'set_sensors_target' }, title: 'entity.alliance_cruiser.station.science.tutorial.select_contact.title', text: 'entity.alliance_cruiser.station.science.tutorial.select_contact.text', anchor: 'sensor-radar' },
+        { id: 'science-shield-focus', trigger: { kind: 'control_unused', control: 'set_shield_focus' }, title: 'entity.alliance_cruiser.station.science.tutorial.shield_focus.title', text: 'entity.alliance_cruiser.station.science.tutorial.shield_focus.text', anchor: 'shield-facings' },
+      ],
+      build: state => buildSystemStationConsoleState('science', { ...state, stationSystems: { science: ['sensors', 'sensor-radar', 'shields-system'] } }),
+    },
+    {
+      id: 'engineering',
+      defs: [
+        { id: 'engineering-rating', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.engineering.tutorial.rating.title', text: 'entity.alliance_cruiser.station.engineering.tutorial.rating.text' },
+        { id: 'engineering-welcome', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.engineering.tutorial.welcome.title', text: 'entity.alliance_cruiser.station.engineering.tutorial.welcome.text', anchor: 'hull-integrity' },
+        { id: 'engineering-power', trigger: { kind: 'control_unused', control: 'set_power' }, title: 'entity.alliance_cruiser.station.engineering.tutorial.power.title', text: 'entity.alliance_cruiser.station.engineering.tutorial.power.text', anchor: 'power-controls' },
+        { id: 'engineering-repair', trigger: { kind: 'control_unused', control: 'dispatch_repair_team' }, title: 'entity.alliance_cruiser.station.engineering.tutorial.repair.title', text: 'entity.alliance_cruiser.station.engineering.tutorial.repair.text', anchor: 'repair-teams' },
+      ],
+      build: state => buildSystemStationConsoleState('engineering', { ...state, stationSystems: { engineering: ['power-reactor', 'power-battery', 'repair'] } }),
+    },
+    {
+      id: 'comms',
+      defs: [
+        { id: 'comms-welcome', trigger: { kind: 'first_visit' }, title: 'entity.alliance_cruiser.station.comms.tutorial.welcome.title', text: 'entity.alliance_cruiser.station.comms.tutorial.welcome.text', anchor: 'navigation-map' },
+        { id: 'comms-waypoint', trigger: { kind: 'control_unused', control: 'set_navigation_waypoint' }, title: 'entity.alliance_cruiser.station.comms.tutorial.waypoint.title', text: 'entity.alliance_cruiser.station.comms.tutorial.waypoint.text', anchor: 'navigation-map' },
+        { id: 'comms-hail', trigger: { kind: 'control_unused', control: 'hail' }, title: 'entity.alliance_cruiser.station.comms.tutorial.hail.title', text: 'entity.alliance_cruiser.station.comms.tutorial.hail.text', anchor: 'comms-contact-list' },
+        { id: 'comms-respond', trigger: { kind: 'control_unused', control: 'respond_to_message' }, title: 'entity.alliance_cruiser.station.comms.tutorial.respond.title', text: 'entity.alliance_cruiser.station.comms.tutorial.respond.text', anchor: 'comms-current-message' },
+      ],
+      build: state => buildSystemStationConsoleState('comms', { ...state, stationSystems: { comms: ['navigation', 'comms'] } }),
+    },
+  ];
+
+  for (const station of stations) {
+    it(`resolves and retires every ${station.id} tutorial trigger through its live payload builder`, () => {
+      const fresh = {
+        hullId: 'alliance-cruiser-01',
+        stationTutorials: { [station.id]: station.defs },
+        tutorialProgress: { dismissed: {}, used: {} },
+      };
+      const initial = parse(withTutorialOverlay(station.id, fresh, station.build(fresh)));
+      expect(initial.tutorial.active.id).toBe(station.defs[0].id);
+
+      for (const def of station.defs) {
+        expect(getTable().has(def.title)).toBe(true);
+        expect(getTable().has(def.text)).toBe(true);
+      }
+
+      const dismissed = Object.fromEntries(station.defs
+        .filter(def => def.trigger.kind === 'first_visit')
+        .map(def => [`alliance-cruiser-01/${station.id}/${def.id}`, true]));
+      const used = Object.fromEntries(station.defs
+        .map(def => def.trigger.control)
+        .filter(Boolean)
+        .map(control => [`alliance-cruiser-01/${station.id}/${control}`, true]));
+      const complete = {
+        ...fresh,
+        tutorialProgress: { dismissed, used },
+      };
+      const settled = parse(withTutorialOverlay(station.id, complete, station.build(complete)));
+      expect(settled.tutorial).toBeNull();
+    });
+  }
+
+  it('preempts Helm’s introduction with the boost state from the rendered Helm payload', () => {
+    const helm = stations.find(station => station.id === 'helm');
+    const fresh = {
+      stationTutorials: { helm: helm.defs },
+      tutorialProgress: { dismissed: {}, used: {} },
+      blackboards: { helm: { boost_enabled: true } },
+    };
+    const payload = parse(withTutorialOverlay('helm', fresh, helm.build(fresh)));
+    expect(payload.boost_enabled).toBe(true);
+    expect(payload.tutorial.active.id).toBe('helm-boost');
+  });
+});
+
 // ── human-seeking hosts (issue #984) ─────────────────────────────────────────
 
 describe('soughtSystemHosts', () => {

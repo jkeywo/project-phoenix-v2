@@ -1049,6 +1049,43 @@ automated_systems = []
 name = "Simplified"
 automated_systems = ["red-alert"]
 
+# #1059 has not shipped its lobby depth picker yet, so this content describes
+# the current Std/Simplified rating selector, not selectable star rungs.
+# #1059 RECHECK: revise this wording when #1083 follows the depth framework.
+[[station.tutorial]]
+id = "captain-rating"
+title = "entity.alliance_cruiser.station.captain.tutorial.rating.title"
+text = "entity.alliance_cruiser.station.captain.tutorial.rating.text"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "captain-welcome"
+title = "entity.alliance_cruiser.station.captain.tutorial.welcome.title"
+text = "entity.alliance_cruiser.station.captain.tutorial.welcome.text"
+anchor = "camera-select"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "captain-viewscreen"
+title = "entity.alliance_cruiser.station.captain.tutorial.viewscreen.title"
+text = "entity.alliance_cruiser.station.captain.tutorial.viewscreen.text"
+anchor = "camera-select"
+trigger = { kind = "control_unused", control = "set_view" }
+
+[[station.tutorial]]
+id = "captain-objectives"
+title = "entity.alliance_cruiser.station.captain.tutorial.objectives.title"
+text = "entity.alliance_cruiser.station.captain.tutorial.objectives.text"
+anchor = "objective-list"
+trigger = { kind = "control_unused", control = "set_objective_priority" }
+
+[[station.tutorial]]
+id = "captain-red-alert"
+title = "entity.alliance_cruiser.station.captain.tutorial.red_alert.title"
+text = "entity.alliance_cruiser.station.captain.tutorial.red_alert.text"
+anchor = "red-alert"
+trigger = { kind = "control_unused", control = "set_red_alert" }
+
 [[station]]
 id = "helm"
 name = "Helm"
@@ -1065,6 +1102,50 @@ automated_systems = []
 [[station.rating]]
 name = "Simplified"
 automated_systems = ["helm-lateral-thrust"]
+
+# #1059 RECHECK: this documents the current Std/Simplified lobby selector,
+# not the future star-rung picker.
+[[station.tutorial]]
+id = "helm-rating"
+title = "entity.alliance_cruiser.station.helm.tutorial.rating.title"
+text = "entity.alliance_cruiser.station.helm.tutorial.rating.text"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "helm-welcome"
+title = "entity.alliance_cruiser.station.helm.tutorial.welcome.title"
+text = "entity.alliance_cruiser.station.helm.tutorial.welcome.text"
+anchor = "helm-radar"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "helm-joystick"
+title = "entity.alliance_cruiser.station.helm.tutorial.joystick.title"
+text = "entity.alliance_cruiser.station.helm.tutorial.joystick.text"
+anchor = "helm-joystick"
+trigger = { kind = "control_unused", control = "set_helm" }
+
+[[station.tutorial]]
+id = "helm-lateral"
+title = "entity.alliance_cruiser.station.helm.tutorial.lateral.title"
+text = "entity.alliance_cruiser.station.helm.tutorial.lateral.text"
+anchor = "lateral-thrust-joystick"
+trigger = { kind = "control_unused", control = "set_lateral_thrust" }
+
+[[station.tutorial]]
+id = "helm-impulse"
+title = "entity.alliance_cruiser.station.helm.tutorial.impulse.title"
+text = "entity.alliance_cruiser.station.helm.tutorial.impulse.text"
+anchor = "impulse-btn"
+trigger = { kind = "control_unused", control = "start_impulse_charge" }
+
+[[station.tutorial]]
+id = "helm-boost"
+priority = 5
+title = "entity.alliance_cruiser.station.helm.tutorial.boost.title"
+text = "entity.alliance_cruiser.station.helm.tutorial.boost.text"
+anchor = "boost-btn"
+trigger = { kind = "state", path = "boost_enabled", op = "truthy", control = "set_boost" }
 
 [[station]]
 id = "tactical"
@@ -1083,6 +1164,42 @@ automated_systems = []
 name = "Simplified"
 automated_systems = ["phaser-fore", "phaser-aft"]
 
+# #1059 RECHECK: this documents the current Std/Simplified lobby selector,
+# not the future star-rung picker.
+[[station.tutorial]]
+id = "tactical-rating"
+title = "entity.alliance_cruiser.station.tactical.tutorial.rating.title"
+text = "entity.alliance_cruiser.station.tactical.tutorial.rating.text"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "tactical-welcome"
+title = "entity.alliance_cruiser.station.tactical.tutorial.welcome.title"
+text = "entity.alliance_cruiser.station.tactical.tutorial.welcome.text"
+anchor = "tactical-radar"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "tactical-lock-target"
+title = "entity.alliance_cruiser.station.tactical.tutorial.lock_target.title"
+text = "entity.alliance_cruiser.station.tactical.tutorial.lock_target.text"
+anchor = "tactical-radar"
+trigger = { kind = "control_unused", control = "set_target" }
+
+[[station.tutorial]]
+id = "tactical-phasers"
+title = "entity.alliance_cruiser.station.tactical.tutorial.phasers.title"
+text = "entity.alliance_cruiser.station.tactical.tutorial.phasers.text"
+anchor = "phasers-controls"
+trigger = { kind = "control_unused", control = "fire_phaser" }
+
+[[station.tutorial]]
+id = "tactical-torpedoes"
+title = "entity.alliance_cruiser.station.tactical.tutorial.torpedoes.title"
+text = "entity.alliance_cruiser.station.tactical.tutorial.torpedoes.text"
+anchor = "torpedo-controls"
+trigger = { kind = "control_unused", control = "fire_torpedo" }
+
 [[station]]
 id = "science"
 name = "Science"
@@ -1095,6 +1212,27 @@ manual_overview = "You run sensors and the shield grid. Sweep the long-range rad
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.tutorial]]
+id = "science-welcome"
+title = "entity.alliance_cruiser.station.science.tutorial.welcome.title"
+text = "entity.alliance_cruiser.station.science.tutorial.welcome.text"
+anchor = "sensor-radar"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "science-select-contact"
+title = "entity.alliance_cruiser.station.science.tutorial.select_contact.title"
+text = "entity.alliance_cruiser.station.science.tutorial.select_contact.text"
+anchor = "sensor-radar"
+trigger = { kind = "control_unused", control = "set_sensors_target" }
+
+[[station.tutorial]]
+id = "science-shield-focus"
+title = "entity.alliance_cruiser.station.science.tutorial.shield_focus.title"
+text = "entity.alliance_cruiser.station.science.tutorial.shield_focus.text"
+anchor = "shield-facings"
+trigger = { kind = "control_unused", control = "set_shield_focus" }
 
 [[station]]
 id = "engineering"
@@ -1113,6 +1251,35 @@ automated_systems = []
 name = "Simplified"
 automated_systems = ["repair"]
 
+# #1059 RECHECK: this documents the current Std/Simplified lobby selector,
+# not the future star-rung picker.
+[[station.tutorial]]
+id = "engineering-rating"
+title = "entity.alliance_cruiser.station.engineering.tutorial.rating.title"
+text = "entity.alliance_cruiser.station.engineering.tutorial.rating.text"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "engineering-welcome"
+title = "entity.alliance_cruiser.station.engineering.tutorial.welcome.title"
+text = "entity.alliance_cruiser.station.engineering.tutorial.welcome.text"
+anchor = "hull-integrity"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "engineering-power"
+title = "entity.alliance_cruiser.station.engineering.tutorial.power.title"
+text = "entity.alliance_cruiser.station.engineering.tutorial.power.text"
+anchor = "power-controls"
+trigger = { kind = "control_unused", control = "set_power" }
+
+[[station.tutorial]]
+id = "engineering-repair"
+title = "entity.alliance_cruiser.station.engineering.tutorial.repair.title"
+text = "entity.alliance_cruiser.station.engineering.tutorial.repair.text"
+anchor = "repair-teams"
+trigger = { kind = "control_unused", control = "dispatch_repair_team" }
+
 [[station]]
 id = "comms"
 name = "Comms"
@@ -1125,6 +1292,34 @@ manual_overview = "You handle communications and navigation. Hail contacts, read
 [[station.rating]]
 name = "Std"
 automated_systems = []
+
+[[station.tutorial]]
+id = "comms-welcome"
+title = "entity.alliance_cruiser.station.comms.tutorial.welcome.title"
+text = "entity.alliance_cruiser.station.comms.tutorial.welcome.text"
+anchor = "navigation-map"
+trigger = { kind = "first_visit" }
+
+[[station.tutorial]]
+id = "comms-waypoint"
+title = "entity.alliance_cruiser.station.comms.tutorial.waypoint.title"
+text = "entity.alliance_cruiser.station.comms.tutorial.waypoint.text"
+anchor = "navigation-map"
+trigger = { kind = "control_unused", control = "set_navigation_waypoint" }
+
+[[station.tutorial]]
+id = "comms-hail"
+title = "entity.alliance_cruiser.station.comms.tutorial.hail.title"
+text = "entity.alliance_cruiser.station.comms.tutorial.hail.text"
+anchor = "comms-contact-list"
+trigger = { kind = "control_unused", control = "hail" }
+
+[[station.tutorial]]
+id = "comms-respond"
+title = "entity.alliance_cruiser.station.comms.tutorial.respond.title"
+text = "entity.alliance_cruiser.station.comms.tutorial.respond.text"
+anchor = "comms-current-message"
+trigger = { kind = "control_unused", control = "respond_to_message" }
 
 [[system]]
 id = "captain"

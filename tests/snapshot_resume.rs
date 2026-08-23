@@ -593,8 +593,6 @@ fn a_beams_drawn_cooldown_survives_capture_and_restore() {
 /// health, that never tripped anything.
 #[test]
 fn a_mid_flip_broadside_survives_a_save_and_restore() {
-    use project_phoenix::server_app::HelmSteeringAiPolicyState;
-
     // Values no authored number and no live run could produce, so "restored what
     // was captured" and "re-derived something plausible" cannot be confused.
     const FLIPPED: f64 = 1.0;
@@ -604,42 +602,28 @@ fn a_mid_flip_broadside_survives_a_save_and_restore() {
     let mut app = duel();
     step(&mut app, CAPTURE_AT);
 
-    let ship = {
-        let mut q = app
-            .world_mut()
-            .query::<(bevy::prelude::Entity, &HelmSteeringAiPolicyState)>();
-        q.iter(app.world())
-            .map(|(e, _)| e)
-            .next()
-            .expect("the duel's ships run a stateful Steering policy")
-    };
-    {
-        let mut state = app
-            .world_mut()
-            .entity_mut(ship)
-            .get_mut::<HelmSteeringAiPolicyState>()
-            .expect("the ship carries HelmSteeringAiPolicyState");
-        state.0.memory.set("broadside_flip", FLIPPED);
-        state.0.memory.set("broadside_flip_arc", LATCHED_ARC);
-        state.0.memory.set("broadside_flip_since", LATCHED_AT);
-    }
-
-    let payload = capture(app.world());
+    let mut payload = capture(app.world());
     let steering = payload
         .entities
-        .iter()
-        .filter_map(|e| e.helm_policies.as_ref())
-        .find(|p| p[1].memory.get("broadside_flip").is_some())
-        .map(|p| p[1].memory.clone())
+        .iter_mut()
+        .filter_map(|e| {
+            e.control
+                .as_mut()
+                .and_then(|control| control.helm_policies.as_mut())
+        })
+        .next()
         .expect(
             "the capture must carry the STEERING policy's memory — index 1 of the \
              (engines, steering, boost) triple",
         );
+    steering[1].memory.set("broadside_flip", FLIPPED);
+    steering[1].memory.set("broadside_flip_arc", LATCHED_ARC);
+    steering[1].memory.set("broadside_flip_since", LATCHED_AT);
     assert_eq!(
         (
-            steering.get("broadside_flip"),
-            steering.get("broadside_flip_arc"),
-            steering.get("broadside_flip_since"),
+            steering[1].memory.get("broadside_flip"),
+            steering[1].memory.get("broadside_flip_arc"),
+            steering[1].memory.get("broadside_flip_since"),
         ),
         (Some(FLIPPED), Some(LATCHED_ARC), Some(LATCHED_AT)),
         "the artifact must carry the latch, the arc it named and the clock its \
@@ -650,12 +634,13 @@ fn a_mid_flip_broadside_survives_a_save_and_restore() {
     // …and back in, through a fresh app that has never flipped anything.
     let mut resumed = duel();
     step(&mut resumed, 5);
-    let before = {
-        let mut q = resumed.world_mut().query::<&HelmSteeringAiPolicyState>();
-        q.iter(resumed.world())
-            .filter_map(|s| s.0.memory.get("broadside_flip"))
-            .next()
-    };
+    let before = capture(resumed.world())
+        .entities
+        .iter()
+        .filter_map(|e| e.control.as_ref())
+        .filter_map(|control| control.helm_policies.as_ref())
+        .filter_map(|policies| policies[1].memory.get("broadside_flip"))
+        .next();
     assert_eq!(
         before, None,
         "precondition: the fresh app has not latched a flip, so the assertion \
@@ -663,13 +648,15 @@ fn a_mid_flip_broadside_survives_a_save_and_restore() {
     );
 
     restore(resumed.world_mut(), &payload);
-    let memory = {
-        let mut q = resumed.world_mut().query::<&HelmSteeringAiPolicyState>();
-        q.iter(resumed.world())
-            .map(|s| s.0.memory.clone())
-            .find(|m| m.get("broadside_flip").is_some())
-            .expect("the restored world carries the mid-flip ship")
-    };
+    let restored_payload = capture(resumed.world());
+    let memory = restored_payload
+        .entities
+        .iter()
+        .filter_map(|e| e.control.as_ref())
+        .filter_map(|control| control.helm_policies.as_ref())
+        .map(|policies| &policies[1].memory)
+        .find(|memory| memory.get("broadside_flip").is_some())
+        .expect("the restored world carries the mid-flip ship");
     assert_eq!(
         (
             memory.get("broadside_flip"),

@@ -1078,7 +1078,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-bc672be253e49a87.js" crossorigin="anonymous" integrity="sha384-9aKDePdfq7VH35B+GY5zxXA4FLoYJeP043P0VwrDbsrMVHSNvmzf0Cv/WM+K8W53"><link rel="preload" href="./project-phoenix-bc672be253e49a87_bg.wasm" crossorigin="anonymous" integrity="sha384-mbzTx+AQi4BdU4oYGEqBsKp21h+PFmjfHS/LyosjFJiMJoiJf3VL13sfGVVSSQP1" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-b292f15b206ec0d7.js" crossorigin="anonymous" integrity="sha384-npQqZWLMd0fbuNJeU4POkuvUPr/qQ5YUsA+rS+XgwNfc4CXG2hj6oL5X/OV1TBmA"><link rel="preload" href="./project-phoenix-b292f15b206ec0d7_bg.wasm" crossorigin="anonymous" integrity="sha384-GnGTv5uiHaowloRjbmE6mDtQXYtq1gasTXnz0PBuZMPnPqBViJF+9CgdeyL3BjYt" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1207,6 +1207,15 @@
       var action;
       try { action = JSON.parse(json); } catch (_) { return; }
       if (typeof window.dispatchConsoleAction === 'function') {
+        // No console-latency measurement on this page (issue #1169 review,
+        // finding B2). This page mounts no console surface that receives state —
+        // the inbound half of the console relay went with issue #818 — so an
+        // action dispatched here has no feedback event to be acknowledged by.
+        // The first attempt acked off the `hud` host channel, which is
+        // change-gated on six coarse fields: it missed real acks and invented
+        // false ones from unrelated heading ticks. An absent metric beats a
+        // fabricated one. The `__input_ms` stamp every envelope carries is
+        // simply unused here; a phone's shell is what reads it.
         window.dispatchConsoleAction(action, window.__localConsoleSend);
       } else {
         console.warn('[Phoenix] dropped console action before action-map loaded:', json);
@@ -1470,8 +1479,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-bc672be253e49a87.js';
-const wasm = await init({ module_or_path: './project-phoenix-bc672be253e49a87_bg.wasm' });
+import init, * as bindings from './project-phoenix-b292f15b206ec0d7.js';
+const wasm = await init({ module_or_path: './project-phoenix-b292f15b206ec0d7_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2236,7 +2245,14 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
       // textContent. The line-building logic here (multi-client ICE stages)
       // is host-specific and stays local; see that module's doc comment for
       // why it isn't unified with client.html's own renderDiag.
-      const writeDiagLines = _pageChrome.mountConnDiag('conn-diag');
+      // _pageChrome can still be null here: this async function resumes
+      // after the getIceServers() await, and nothing guarantees the
+      // page-chrome module island has mounted (fired
+      // window.__pageChromeReady) by then — the other three bridge calls
+      // above all guard the same race. mountConnDiag returns a value rather
+      // than firing a queueable side effect, so a no-op fallback (not the
+      // queue) is the guard here.
+      const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
       const clientIceStages = new Map(); // shortId → troubled ICE state
       function renderConnDiag() {
         const lines = [];
@@ -3350,6 +3366,23 @@ function finishInit() {
   // the pool it projects is authoritative state.
   window.wasm_toggle_ai_doctrine = wasmBindings.wasm_toggle_ai_doctrine;
   window.wasm_get_ai_doctrine = wasmBindings.wasm_get_ai_doctrine;
+  // Console input-to-feedback latency (issue #1169). The getter returns a
+  // ConsoleLatencyPayload as JSON, which the cog's console-latency output draws
+  // as a per-action table (gui/console-latency-panel.js).
+  //
+  // Two differences from every neighbour above, both from the #1169 review. It
+  // is an absolute SET, not a toggle: a connected phone can flip the same flag,
+  // and a relative toggle raced against that lands on the opposite value —
+  // silently leaving the simulation measuring nothing while the cog reads "on".
+  // And the flag gates MEASUREMENT rather than only the publish, so enabling
+  // clears the previous window and the payload starts empty.
+  //
+  // `wasm_get_debug_flags` is the read-back the cog paints from, mirrored by the
+  // one system that already computes that set for the wire — so this page and a
+  // connected phone can never be shown different answers.
+  window.wasm_set_console_latency = wasmBindings.wasm_set_console_latency;
+  window.wasm_get_console_latency = wasmBindings.wasm_get_console_latency;
+  window.wasm_get_debug_flags = wasmBindings.wasm_get_debug_flags;
   window.wasm_toggle_god_mode = wasmBindings.wasm_toggle_god_mode;
   window.wasm_get_god_mode = wasmBindings.wasm_get_god_mode;
   window.wasm_toggle_instagib = wasmBindings.wasm_toggle_instagib;

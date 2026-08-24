@@ -199,6 +199,19 @@ range = 80.0
   when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_blaster"
 
+# Why this fixture still reaches the torpedo damage chokepoint under the
+# shields-aware impact model (issue #929). A round now delivers `damage_shields`
+# into a live arc and `damage_hull` into a downed one, and this hull authors
+# `damage_shields = 0` — so a round spent on a screened target would land
+# nothing, never take the `hull_damage > 0` branch, and draw no
+# `SimStream::TorpedoDamage`. That is not what happens here:
+# `rng_determinism.rs::strip_local_ship_shields` zeroes every facing on the
+# player before the window it measures, precisely so the tube's own
+# `fact(target_facing_shields) <= 0` guard will open. A zeroed facing reads 0,
+# the round takes the shields-down branch, and all 3 points land on hull exactly
+# as they did when `damage_hull` bypassed the shield system unconditionally.
+# Keep those two halves together: raise `damage_shields` here and the fixture
+# still works; drop the shield-stripping there and the chokepoint goes quiet.
 [torpedoes]
 count = 40
 burst_interval_secs = 0.4

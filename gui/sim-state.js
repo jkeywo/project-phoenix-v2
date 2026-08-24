@@ -237,6 +237,8 @@ export class ClientSimState {
      * `withTutorialOverlay` in gui/console-state.js.
      */
     this.stationTutorials = {};
+    /** Current player hull identity from Welcome ship_config.hull_id. */
+    this.hullId = null;
     /**
      * Client-LOCAL tutorial progress (issue #916): which overlays the player
      * has dismissed and which console actions they have used. Not server
@@ -356,6 +358,7 @@ export class ClientSimState {
         // Store ship_config radar ranges (data-driven from TOML via server).
         // Used by console-state.js builders; fall back to server defaults.
         const sc = d.ship_config || {};
+        this.hullId = sc.hull_id || null;
         this.weaponsRadarRange = sc.tactical_radar_range ?? 300.0;
         this.helmRadarRange    = sc.helm_radar_range    ?? 500.0;
         this.sensorsRadarRange = sc.sensors_radar_range ?? 500.0;

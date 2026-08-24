@@ -469,11 +469,13 @@ maintain_range = 40.0
 # the single-family dispatch in gui/console-state.js keys on the owned family, so
 # the `engineering` seat id need not equal the family name). tactical mounts
 # battleship/tactical.html, which renders this hull's blaster banks. The seat's
-# owned families ⊆ its console's families AND the payload shape (flat vs
-# system-keyed) is checked in tests/client/npc-hull-console-coverage.test.js
-# (spec map in gui/console-families.js) so a family gap OR a shape mismatch fails
-# CI loudly instead of mounting a blank seat. `manual_overview` is still omitted —
-# the ship manual is published for the player's own hull.
+# owned families are a subset of its console's families, and the payload shape
+# (flat vs system-keyed) must match — this is authored by hand rather than
+# machine-checked today: tests/client/npc-hull-console-coverage.test.js, which
+# used to assert it against the gui/console-families.js spec map, was deleted
+# (642f544f) as content validation better suited to a load-time check than a
+# vitest suite, and no such load-time check has replaced it yet. `manual_overview`
+# is still omitted — the ship manual is published for the player's own hull.
 #
 # Only the AUTO-GENERATED systems stay ownerless + `ai_only`: the
 # `shield-arc-all` system synthesised from `[[shield_arc]]` above (no shields

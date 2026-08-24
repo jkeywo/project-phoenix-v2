@@ -30,11 +30,10 @@
  * Nothing here touches display text.
  *
  * Progress is client-local presentation state — NOT server state. The shape
- * is `{ dismissed: { ['<station>/<overlayId>']: true },
- *       used: { ['<station>/<action>']: true } }` — every key is scoped per
- * station (see scopedTutorialKey), so overlay ids only need to be unique
- * within their own station's `[[station.tutorial]]` list and using a control
- * on one station never retires another station's tips. Persisted to
+ * is `{ dismissed: { ['<hull>/<station>/<overlayId>']: true },
+ *       used: { ['<hull>/<station>/<action>']: true } }` — every key is scoped
+ * per hull and station (see scopedTutorialKey), so a tutorial action on one
+ * hull can never retire a same-named tip on another. Persisted to
  * localStorage via the load/save helpers below.
  *
  * DOM-free; the ONE import-time side effect is hydrating
@@ -54,19 +53,21 @@ import { simState } from './sim-state.js';
  *  Handled entirely client-side by client.html — never forwarded to the host. */
 export const TUTORIAL_DISMISS_ACTION = 'tutorial_dismiss';
 
-/** localStorage key the tutorial progress persists under. The `-v2` suffix
- *  versions the record shape (v2 = station-scoped keys); bump it whenever the
- *  shape or key scoping changes so stale records are discarded, not migrated. */
-export const TUTORIAL_PROGRESS_KEY = 'phoenix-tutorial-progress-v2';
+/** localStorage key for hull-and-station-scoped tutorial progress. */
+export const TUTORIAL_PROGRESS_KEY = 'phoenix-tutorial-progress-v3';
+/** The station-scoped record written before hull identity was included. */
+export const LEGACY_TUTORIAL_PROGRESS_KEY = 'phoenix-tutorial-progress-v2';
+const LEGACY_TUTORIAL_MIGRATION_KEY = 'phoenix-tutorial-progress-v3-migrated';
 
 /**
- * Progress-record key for one overlay id or control name on one station:
- * `'<station>/<name>'`. ALL dismissed/used bookkeeping is station-scoped —
- * two stations may author the same overlay id without sharing dismissal
- * state, and `used` controls are tracked per console.
+ * Progress-record key for one overlay id or control name on one station of
+ * one hull: `'<hull>/<station>/<name>'`.
  */
-export function scopedTutorialKey(station, name) {
-  return `${station}/${name}`;
+export function scopedTutorialKey(hull, station, name) {
+  // A pre-hull-identity host retains the v2 station key. Identified hulls
+  // always use the three-part form, which is the normal runtime path.
+  if (name === undefined) return `${hull}/${station}`;
+  return hull ? `${hull}/${station}/${name}` : `${station}/${name}`;
 }
 
 /** A fresh, empty progress record. */
@@ -184,18 +185,23 @@ export function evaluateTrigger(trigger, payload) {
  * @param {Array} defs      overlay definitions for one station (wire shape)
  * @param {object} progress tutorial progress record (may be null/undefined)
  * @param {object} payload  the console payload the overlay merges into
- * @param {string} station  station id the defs belong to — scopes every
- *                          progress lookup (see scopedTutorialKey)
+ * @param {string} hull     current hull id, from Welcome ship_config
+ * @param {string} station  station id the defs belong to
  * @returns {Array} eligible definitions
  */
-export function eligibleOverlays(defs, progress, payload, station) {
+export function eligibleOverlays(defs, progress, payload, hull, station) {
+  // Compatibility for callers that have no hull identity (pre-Welcome).
+  if (station === undefined) {
+    station = hull;
+    hull = undefined;
+  }
   const p = progress || emptyTutorialProgress();
   const dismissed = p.dismissed || {};
   const used = p.used || {};
   const eligible = (defs || []).filter(def => {
     if (!def || !def.id || !def.trigger) return false;
-    if (dismissed[scopedTutorialKey(station, def.id)]) return false;
-    if (def.trigger.control && used[scopedTutorialKey(station, def.trigger.control)]) return false;
+    if (dismissed[scopedTutorialKey(hull, station, def.id)]) return false;
+    if (def.trigger.control && used[scopedTutorialKey(hull, station, def.trigger.control)]) return false;
     return evaluateTrigger(def.trigger, payload);
   });
   // Array.prototype.sort is stable, so equal priorities keep authored order.
@@ -212,11 +218,12 @@ export function eligibleOverlays(defs, progress, payload, station) {
  * @param {Array} defs
  * @param {object} progress
  * @param {object} payload
- * @param {string} station  station id the defs belong to (scopes progress keys)
+ * @param {string} hull     current hull id, from Welcome ship_config
+ * @param {string} station  station id the defs belong to
  * @returns {{ active: object, remaining: number }|null}
  */
-export function buildTutorialState(defs, progress, payload, station) {
-  const eligible = eligibleOverlays(defs, progress, payload, station);
+export function buildTutorialState(defs, progress, payload, hull, station) {
+  const eligible = eligibleOverlays(defs, progress, payload, hull, station);
   if (eligible.length === 0) return null;
   return { active: eligible[0], remaining: eligible.length };
 }
@@ -255,12 +262,47 @@ export function saveTutorialProgress(storage, progress, key = TUTORIAL_PROGRESS_
 }
 
 /**
+ * Preserve a v2 record for the first identified hull a player visits. A v2
+ * key has no hull identity, so applying it to every hull would recreate the
+ * leak this version fixes. The migration marker makes this a one-time choice.
+ */
+export function migrateLegacyTutorialProgress(progress, storage, hull) {
+  if (!storage || !hull) return progress;
+  try {
+    if (storage.getItem(LEGACY_TUTORIAL_MIGRATION_KEY)) return progress;
+    const legacy = loadTutorialProgress(storage, LEGACY_TUTORIAL_PROGRESS_KEY);
+    const next = normalizeTutorialProgress(progress);
+    for (const field of ['dismissed', 'used']) {
+      for (const key of Object.keys(legacy[field])) {
+        const [station, name, ...extra] = key.split('/');
+        if (station && name && extra.length === 0) next[field][scopedTutorialKey(hull, station, name)] = true;
+      }
+    }
+    storage.setItem(LEGACY_TUTORIAL_MIGRATION_KEY, '1');
+    return next;
+  } catch (_) {
+    return progress;
+  }
+}
+
+/** Ensure the in-memory record has received its one safe v2 migration. */
+export function migrateTutorialProgressForHull(sim, storage) {
+  if (!sim || !sim.hullId) return false;
+  const before = sim.tutorialProgress || emptyTutorialProgress();
+  const next = migrateLegacyTutorialProgress(before, storage, sim.hullId);
+  if (next === before) return false;
+  sim.tutorialProgress = next;
+  saveTutorialProgress(storage, next);
+  return true;
+}
+
+/**
  * Fold one console action envelope into the progress record. The envelope's
  * `console` field (injected by every console's sendAction, gui/console-core.js)
  * scopes the bookkeeping keys; an envelope without one records nothing (fail
  * closed — never guess a station).
  *
- * - `tutorial_dismiss` records `<console>/<overlay_id>` as dismissed and is
+ * - `tutorial_dismiss` records `<hull>/<console>/<overlay_id>` as dismissed and is
  *   HANDLED locally: the caller must not forward it to the host (it is
  *   presentation state, not a ship command).
  * - Every other action records `<console>/<action>` as used, completing any
@@ -271,19 +313,19 @@ export function saveTutorialProgress(storage, progress, key = TUTORIAL_PROGRESS_
  * @param {{ action?: string, console?: string, overlay_id?: string }} action
  * @returns {{ progress: object, changed: boolean, handled: boolean }}
  */
-export function tutorialProgressAfterAction(progress, action) {
+export function tutorialProgressAfterAction(progress, action, hull) {
   const name = action && action.action;
   const station = action && action.console;
   if (!name) return { progress, changed: false, handled: false };
   if (name === TUTORIAL_DISMISS_ACTION) {
     // Handled even when malformed — a dismiss must never reach the host.
     const next = (station && action.overlay_id)
-      ? progressWithDismissed(progress, scopedTutorialKey(station, action.overlay_id))
+      ? progressWithDismissed(progress, scopedTutorialKey(hull, station, action.overlay_id))
       : progress;
     return { progress: next, changed: next !== progress, handled: true };
   }
   if (!station) return { progress, changed: false, handled: false };
-  const next = progressWithControlUsed(progress, scopedTutorialKey(station, name));
+  const next = progressWithControlUsed(progress, scopedTutorialKey(hull, station, name));
   return { progress: next, changed: next !== progress, handled: false };
 }
 
@@ -323,7 +365,9 @@ if (typeof window !== 'undefined') {
   window.applyTutorialAction = function applyTutorialAction(simState, action, storage) {
     if (!simState) return { changed: false, handled: false };
     const before = simState.tutorialProgress || emptyTutorialProgress();
-    const { progress, changed, handled } = tutorialProgressAfterAction(before, action);
+    migrateTutorialProgressForHull(simState, storage);
+    const current = simState.tutorialProgress || before;
+    const { progress, changed, handled } = tutorialProgressAfterAction(current, action, simState.hullId);
     if (changed) {
       simState.tutorialProgress = progress;
       saveTutorialProgress(storage, progress);

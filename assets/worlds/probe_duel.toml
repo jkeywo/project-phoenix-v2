@@ -89,9 +89,12 @@
 # change to this doctrine's own geometry, now that combat reliably sustains
 # long enough to observe it in full:
 #
-#   * The phasers' `auto_arc_deg = 180` banks abut exactly on the ring's beam
-#     line, so one bank is always `Ready` there and the phaser family can
-#     never qualify for a request while the hull holds the ring.
+#   * The phasers' `auto_arc_deg` banks always have at least one emitter
+#     `Ready` on the ring's beam line, so the phaser family can never qualify
+#     for a request while the hull holds the ring. (At the time this was
+#     measured the pair abutted at 180 degrees; since issue #929 they overlap
+#     at 270 and BOTH bear there, which makes the conclusion stronger rather
+#     than different.)
 #   * The torpedo tubes still cannot bear on the ring (90-degree fore/aft
 #     arcs), but this hull's own `hold_torpedo_bearing` leg now reliably
 #     claims a loaded, ready tube and breaks the ring to fire it BEFORE
@@ -99,22 +102,97 @@
 #     freeze fix the leg actually completes (this run: `TorpedoLaunched: 4`,
 #     450 damage dealt) instead of the hull losing fidelity mid-leg.
 #
-# A standing arc-bearing request is therefore no longer an expected reading
-# for THIS composed doctrine on this seed; the test's control is now that the
-# run is genuinely live combat (damage dealt and a torpedo launch), not that a
-# request stood. The 367-vs-4 pre-#896 count above is kept only as history of
-# where the control used to come from. The two tests that need the duel to
-# actually END now pin `seed: Some(34)`
-# themselves (`world_spawned_alliance_hull_returns_fire_and_the_duel_resolves`
-# and `balance_logging_systems_run_with_an_enabled_filter_and_the_duel_resolves`
-# in tests/headless_runner.rs), which is the same discipline
-# `ai_crewed_ships_actually_launch_torpedoes_in_a_real_run` already applies with
-# its own pin of 10.
+# RE-MEASURED AGAIN, AND THE BLOCK ABOVE IS WITHDRAWN (issue #929). Both of
+# its readings were artefacts of a defect, not properties of the doctrine.
 #
-# `ai_crewed_ships_actually_launch_torpedoes_in_a_real_run`
-# (tests/headless_runner.rs) still pins 10 explicitly under its own
-# independent sweep, and still passes on it: that test's pin and this world's
-# default agreed only incidentally under #923 and do not need to.
+# The cruiser's tubes asked for a struck-down striking arc
+# (`fact(target_facing_shields) <= 0`) that this hull's own guns could not open —
+# one 180-degree auto-arc bank bears at a time on the ring, about 1 dmg/s at the
+# `beam_damage_per_sec = 4` it then carried, into an arc the destroyer's Shields
+# AI focuses to 6.5 hp/s — while its helm's `torpedo_run` leg opens on readiness
+# alone and exits only on a round having LEFT a tube. The leg was therefore
+# ABSORBING: the hull parked bow-on at `torpedo_bearing_speed = 0.0` for 39.7 s
+# of a 90 s run on this seed and launched nothing. So:
+#
+#   * `TorpedoLaunched: 4` above was the world-spawned DESTROYER's rounds. The
+#     player cruiser launched zero, here and on all 28 seeds swept.
+#   * `requested == 0` followed from the same park: with the ring barely flown
+#     there was almost nothing for Channel 3 to raise a request against, so the
+#     bullet above has the causation backwards — the leg was not claiming a
+#     tube before Channel 3 saw it, the hull was sitting still holding one.
+#
+# #929's FIRST PASS answered that by switching the launcher's shield conjunct
+# off (`max_striking_shield_hp` past any arc reading). Its SECOND PASS reverted
+# that and answered on the attack side instead: a torpedo no longer bypasses a
+# raised arc, so the gate is worth ten times the round it delays, and the
+# cruiser's phaser banks went `beam_damage_per_sec` 4 -> 24 to make the gate
+# reachable. Everything below is the current tree.
+#
+# `phoenix-headless --world assets/worlds/probe_duel.toml --seed 3 --hz 30
+# --sim-seconds 90 --deterministic --report-format json`, seed 3, over the 45 s
+# window the ring probes sample:
+#
+#   ring ticks 654   requested 36   overwritten 0   worst error 0.0
+#
+# The standing request is BACK, which is what makes `overwritten == 0` a real
+# refusal again rather than a description of an empty inbox — the same shape the
+# pre-#896 367-vs-4 count had, and the reason that history is still recorded
+# above. `the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request`
+# asserts a floor below half the measured 36, alongside the liveness control
+# (damage dealt and a torpedo launched) that was added while the count was zero.
+#
+# The count has fallen twice across #929 and the trend is worth reading:
+#
+#   first pass  (gate off,  4 dmg/s, auto arcs 180)   478 of 1180 ring ticks
+#   second pass (gate on,  24 dmg/s, auto arcs 180)    81 of  675
+#   third pass  (gate on,  32 dmg/s, auto arcs 270)    36 of  654
+#
+# One mechanism drives both drops. The stronger the cruiser's guns, the sooner it
+# opens the striking arc; the sooner it opens the arc, the sooner it spends the
+# salvo — so "a loaded, in-reach, out-of-arc torpedo family" is a state the hull
+# passes THROUGH rather than sits in, and that state is exactly what raises the
+# request. The ring shrinks a little for the same reason, the bow-hold leg being
+# genuinely flown now rather than skipped.
+#
+# Over the whole 90 s window on the same seed, and across the 28-seed sweep
+# `alliance_cruiser.toml` records in full:
+#
+#                       first pass    second pass   current
+#                       (gate off,    (gate on,     (gate on, 270 arcs,
+#                        4 dmg/s)      180, 24)      32)
+#   cruiser launches     4 every seed  2-5, 28/28    2-4, 28/28
+#   torpedo_run          0.0-3.9 s     12.2-27.2 s   0.5-13.4 s
+#   cruiser dealt        290-489       350-623       272-591
+#   destroyer hull dmg   240 on 25/28  198-433       150-422
+#                        (240-306)     (mean 385)    (mean 389)
+#   resolve inside 90 s  12/28         23/28         25/28
+#   CRUISER WINS         0 of 28       22 of 28      25 of 28
+#   cruiser DIES         12 of 28      1 of 28       0 in 90 s, 3 in 180 s
+#
+# THE DUEL NOW CLOSES, and which way. That 240 was the cruiser's whole six-round
+# magazine at 40 points of pierce apiece and nothing else — its beams never once
+# reached the destroyer's hull — on 25 of the 28 seeds; the three that differ (31,
+# 55, 838) read 268, 306 and 273, the same magazine plus a few points from
+# elsewhere. The RANGES in the two later columns are the full 28 seeds, and their
+# low tails are the seeds the fight does not finish inside the window rather than
+# a weaker salvo. With the beams able to collapse an arc the fight
+# is two-sided and the bigger hull wins it: on seed 3 the destroyer dies at
+# 60.7 s. At 180 s every one of the 28 resolves, 25 as cruiser wins and 3 as
+# cruiser deaths (seeds 9 at 95.0 s, 2 at 142.1 s, 89 at 176.7 s) — which is the
+# whole supply of player-death seeds this world still has, and the reason the two
+# tests that need one pin it explicitly.
+#
+# Note that `outcome` still reports `draw` for a run the cruiser WINS — the run
+# classifier ends a run on the PLAYER's death, so a cruiser win reads
+# `InProgress` with the hostile simply absent from the world. Read
+# `damage_by_ship`'s `death` / `kills` rather than `final_phase` when sweeping
+# this world.
+#
+# Tests that need a particular ENDING pin their own seeds rather than leaning on
+# this world's default, which is the discipline
+# `ai_crewed_ships_actually_launch_torpedoes_in_a_real_run` already applied with
+# its own pin of 10: that test's pin and this world's default agreed only
+# incidentally under #923 and do not need to.
 seed = 3
 ai_helm_tick_hz = 30.0
 

@@ -96,6 +96,12 @@ export const CLIENT_DEBUG_FLAGS = [
   // Scenario state (issue #1148) is the same: host-viewscreen panel, phone
   // toggle only.
   { id: 'scenario-state', labelId: 'settings.debug.scenario', flag: 'ScenarioState' },
+  // Console latency (issue #1169) is the one entry a phone does more than
+  // toggle: the host's read-back of this flag is what makes THIS device start
+  // measuring its own console round trips and reporting the durations
+  // (`ClientMessage::ReportConsoleLatency`). The table itself still draws only
+  // on the host viewscreen, like every other output here.
+  { id: 'console-latency', labelId: 'settings.debug.console_latency', flag: 'ConsoleLatency' },
 ];
 
 /**

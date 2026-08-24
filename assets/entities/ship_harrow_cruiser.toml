@@ -287,28 +287,62 @@ trail_lifetime_secs = 0.55
 # two and its rounds author `damage_shields = 0`. The fragment header carries the
 # full argument for both readings.
 #
-# `torpedo_run_range = 220.0` — this hull's `engage_range`, i.e. NON-BINDING, and
-# that is a decision rather than an oversight. The class gate exists to stop the
-# bow hold — flown at `torpedo_bearing_speed = 0.0`, so entering it cuts thrust —
-# freezing the RUN-IN at whatever range the tubes happened to finish loading at.
-# On a hull whose entry is range-and-readiness alone (the class default) that is a
-# real hazard and the player cruiser authors a tight 25. On THIS hull the binding
-# gate is `torpedo_run_shield_gap`: the run cannot open until the cruiser has
+# `torpedo_run_range` — NOT overridden any more, so this hull takes the class
+# default of 50. It used to author 220, this hull's own `engage_range`, i.e.
+# non-binding, and the argument for that is worth keeping because it is the thing
+# that was wrong (issue #1243).
+#
+# The withdrawn reasoning ran: the class gate exists to stop the bow hold —
+# flown at `torpedo_bearing_speed = 0.0`, so entering it cuts thrust — freezing
+# the RUN-IN at whatever range the tubes happened to finish loading at; on a hull
+# whose entry is range-and-readiness alone that is a real hazard and the player
+# cruiser authors a tight 25; but on THIS hull the binding gate is
+# `torpedo_run_shield_gap = 1.0`, so the run cannot open until the cruiser has
 # already stripped the arc facing it, which it can only do from inside its own
-# 55-unit beam envelope, so the shot is never a hopeful one and the range gate has
-# nothing left to protect. Authoring it at the range the ring itself is joined
-# reproduces #791's ungated entry exactly, which is what "behaves equivalently"
-# means here; anything tighter would refuse opportunities the hull used to take
-# whenever the settled ring sat wide of the number.
+# 55-unit beam envelope — the shot is therefore never a hopeful one and the range
+# gate has nothing left to protect.
+#
+# Every step of that holds against a target WITH SHIELDS, and the conclusion
+# fails against one without. `target_facing_shield_down` reads 1.0 — permanently
+# — for a target that carries no `[shields]` block at all; its own doc says so
+# ("a station, a probe, a hull authored without the block… there is genuinely no
+# arc in the way and there never will be"). So against such a target the shield
+# gate is open from the first tick, nothing had to be stripped, no beam envelope
+# was ever entered, and the range gate is the ONLY thing left — set, on that
+# reasoning, to 220.
+#
+# `combat_test.toml`'s Starbase Alpha (`station_axiom.toml`) is exactly that
+# target, and the result was a hull frozen solid. It crossed 220 with a loaded
+# salvo, opened the bow hold, cut thrust, and coasted to a stop ~211 units out —
+# beyond the 200-unit acquisition band that world gives its raid, so it could not
+# lock the thing it had stopped to shoot. It never fired; the leg's only armament
+# exits (`tubes_full < 1`, `tubes_fillable < 1`) both need a round to have LEFT a
+# tube; `press_posture = 0.0` makes the posture exit unreachable; the starbase
+# stayed alive so `target_valid` held; and the shield exit (`< 1.0`) can never
+# fire against a shieldless hull. Measured: 694 s of an 800 s run in
+# `torpedo_run`, `shots_fired: {}`, zero damage in either direction — and one
+# such straggler makes that world's `on_all_destroyed("hostiles", …)` victory
+# unreachable for the rest of the run.
+#
+# 50 is the class default and needs no special pleading: the fragment sizes it
+# against `combat_orbit_range`, and this hull's ring is 42 and settles at ~43.5,
+# so the bow hold opens just outside the ring it is breaking — the same shape
+# `alliance_cruiser.toml` authors with 22/25. It is inside every envelope this
+# hull has (beams 55, torpedo reach `speed 45` x `lifespan 6` = 270), so a hull
+# that stops to shoot can always see what it stopped for.
+#
+# What this gives up is the "opportunities the hull used to take whenever the
+# settled ring sat wide of the number" the old note claimed. Against a shielded
+# target those are opportunities from inside the beam envelope anyway, so 50
+# covers them; against a shieldless one they were never opportunities, because
+# the gap was not something this hull had opened.
 [helm_console.engines_ai.param]
 press_posture = 0.0
 torpedo_run_shield_gap = 1.0
-torpedo_run_range = 220.0
 
 [helm_console.steering_ai.param]
 press_posture = 0.0
 torpedo_run_shield_gap = 1.0
-torpedo_run_range = 220.0
 
 # ── Weapons ───────────────────────────────────────────────────────────────────
 #
@@ -472,6 +506,16 @@ marker = "phasers_aft"
 #   what goes through the hole the beams made. A shot that arrives after the arc
 #   is back does nothing at all — which is the cost of a phase entered too early,
 #   and the reason the abort transition exists.
+#
+#   That sentence was ASPIRATIONAL when it was written and is now literal
+#   (issue #929). Until #929's second pass `damage_hull` bypassed the shield
+#   system unconditionally, so a round arriving at a recovered arc still landed
+#   all 34 of its points and this bullet described a cost the hull never paid. A
+#   round now meets the ONE arc it flew into and that arc's own reading picks the
+#   payload: `damage_shields`, i.e. nothing, if the arc is up; `damage_hull = 34`
+#   whole on the plating if it is down. Neither number moved and the doctrine
+#   around them did not either — the simulation caught up with what this file
+#   already claimed.
 # * a short `lifespan` and a low `turn_rate_deg_per_sec`. Barely homing: the
 #   bow-on line-up is what aims them, not the seeker. It is also what makes
 #   "every projectile has hit, missed or EXPIRED" a state the phase actually

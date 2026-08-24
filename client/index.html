@@ -75,6 +75,12 @@
        fans iframe pushes out through window.dirtyConsolesFor instead of
        per-console push wrappers. -->
   <script type="module" src="gui/dirty-consoles.js"></script>
+  <!-- Console input-to-feedback measurement (issue #1169, PRD #1144): this
+       phone's own round-trip clock. Publishes window.ConsoleLatencyMeter for
+       the inline glue below, which stamps each dispatch and resolves it when
+       the issuing console's surface is next handed fresh state — both stamps on
+       THIS device, so no cross-clock arithmetic is involved. -->
+  <script type="module" src="gui/console-latency.js"></script>
   <script type="module" src="gui/action-map.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
        (window.lobbyState / simState / commsState) with an apply(serverMessage)
@@ -1269,7 +1275,11 @@
     // -- Click sound --------------------------------------------------------
     // Message types that should NOT trigger a click (continuous / connection
     // setup messages that are not the result of a deliberate button press).
-    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName', 'ReportStationEligibility']);
+    // `ReportConsoleLatency` (issue #1169) belongs here for a reason sharper than
+    // "not a button press": it is a diagnostic report sent WHILE latency is being
+    // measured, so a click on it would put an audio decode on the very path whose
+    // timing is the subject.
+    const NO_CLICK = new Set(['SetThrust', 'SetSteering', 'LateralThrustInput', 'Identify', 'SetName', 'ReportStationEligibility', 'ReportConsoleLatency']);
 
     const CLICK_PITCH_VARIANCE = 0.08; // +/- 8% playback-rate jitter so repeated clicks don't sound identical
 
@@ -2411,16 +2421,103 @@
         ? window.iframeIdFor(name) : (name + '-iframe');
     }
 
-    function pushConsoleStateFor(name) {
+    // ── Console input-to-feedback latency (issue #1169, PRD #1144) ───────────
+    // The phone measures its OWN round trip: `console-core.sendAction` stamps
+    // the input event inside the console document, the dispatch below stamps the
+    // hand-off to the transport, and a SERVER-CAUSED push of the issuing
+    // console's payload is the acknowledgement. All three stamps are on this
+    // device, so nothing here subtracts a host clock from a phone clock, and
+    // only durations are reported — never a timestamp, and never a surface name
+    // (the host assigns that, so a client cannot claim a series it does not own).
+    //
+    // WHICH push counts is the whole correctness question (issue #1169 review,
+    // finding B1). `pushConsoleStateFor` is also called by a local re-render, by
+    // a freshly loaded iframe, and by client-local tutorial progress; acking on
+    // those records a plausible 40 ms "response" for a command a stalled data
+    // channel never delivered. So every call site names its cause and
+    // `ackEligible` (gui/console-latency.js, unit-tested) decides — the decision
+    // deliberately does not live in this inline script.
+    //
+    // The meter is created lazily and tolerates its module not having executed
+    // yet, exactly as `pushDirtyConsoles` tolerates `dirtyConsolesFor` missing:
+    // this is diagnostic, and a dropped early sample costs nothing.
+    let _latencyMeter = null;
+    function latencyMeter() {
+      if (_latencyMeter) return _latencyMeter;
+      if (typeof window.ConsoleLatencyMeter !== 'function') return null;
+      _latencyMeter = new window.ConsoleLatencyMeter();
+      return _latencyMeter;
+    }
+
+    /** The `PUSH_CAUSE` vocabulary, or a safe stand-in before the module loads. */
+    function pushCause() {
+      return window.CONSOLE_PUSH_CAUSE || {};
+    }
+
+    /** Follow the host's flag and ship whatever has finished measuring. */
+    let _latencyFlushedAt = 0;
+    const LATENCY_FLUSH_MS = 2000;
+    function maybeReportConsoleLatency(force) {
+      const meter = latencyMeter();
+      if (!meter || typeof window.isConsoleLatencyEnabled !== 'function') return;
+      // The host owns the switch; a client never measures on its own initiative.
+      const on = window.isConsoleLatencyEnabled(window.simState && window.simState.debugFlags);
+      if (on !== meter.enabled) meter.setEnabled(on);
+      if (!on) return;
+      // The batching decision itself lives in gui/console-latency.js
+      // (`shouldFlush`, unit-tested) rather than in this inline script: batching
+      // is why measuring does not change what is measured, and `force` is the
+      // teardown path where there is no next chance.
+      const now = window.consoleLatencyNowMs ? window.consoleLatencyNowMs() : Date.now();
+      if (typeof window.consoleLatencyShouldFlush !== 'function') return;
+      const go = window.consoleLatencyShouldFlush({
+        enabled: on,
+        hasPayload: meter.hasPayload(),
+        now,
+        lastFlushedAt: _latencyFlushedAt,
+        force: !!force,
+        intervalMs: LATENCY_FLUSH_MS,
+      });
+      if (!go) return;
+      const batch = meter.drain();
+      _latencyFlushedAt = now;
+      const msg = window.consoleLatencyMessage(batch.samples, batch.expired);
+      send(msg.type, msg.data);
+    }
+
+    // Ship what has been measured before the page goes away (issue #1169 review).
+    // `pagehide` is the reliable teardown signal on mobile Safari, where `unload`
+    // never fires; `visibilitychange` to hidden covers a backgrounded tab the OS
+    // may never resume. Without these, up to a flush interval of real
+    // measurements is lost exactly when a player puts the phone down.
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('pagehide', () => maybeReportConsoleLatency(true));
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') maybeReportConsoleLatency(true);
+      });
+    }
+
+    /**
+     * Push one console's payload to its iframe.
+     *
+     * `cause` is a `PUSH_CAUSE` value naming WHY (issue #1169): only
+     * `SERVER_MESSAGE` — an inbound host message that carried or dirtied state
+     * for this console — may acknowledge a pending action. Omitting it is
+     * treated as non-acknowledging, so a future call site that forgets
+     * under-reports rather than fabricating samples.
+     */
+    function pushConsoleStateFor(name, cause) {
       if (!name) return;
       const json = (typeof window.buildConsoleState === 'function' && window.simState)
         ? window.buildConsoleState(name, window.simState)
         : '{}';
       _pushIframe($(consoleIframeId(name)), name, json);
+      const meter = latencyMeter();
+      if (meter) meter.noteAck(name, cause);
     }
 
-    function pushActiveConsoleState() {
-      pushConsoleStateFor(activeConsole);
+    function pushActiveConsoleState(cause) {
+      pushConsoleStateFor(activeConsole, cause);
     }
 
     // Resolve the active console's iframe the same way pushConsoleStateFor
@@ -2457,7 +2554,12 @@
       const stationSystems = window.simState ? window.simState.stationSystems : null;
       const alwaysPush = window.DIRTY_ALWAYS_PUSH || new Set();
       for (const name of window.dirtyConsolesFor(msg, stationSystems)) {
-        if (alwaysPush.has(name) || activeConsole === name) pushConsoleStateFor(name);
+        // The one acknowledging push (issue #1169): this fan-out runs only for
+        // consoles an INBOUND host message dirtied, which is exactly the
+        // causality `send_to_ack` claims.
+        if (alwaysPush.has(name) || activeConsole === name) {
+          pushConsoleStateFor(name, pushCause().SERVER_MESSAGE);
+        }
       }
     }
 
@@ -2471,7 +2573,10 @@
         // Push the freshly-loaded iframe its current snapshot. Generic so it
         // covers every station id the ship mounts (including engineering /
         // science aggregates the old per-name switch never handled).
-        pushConsoleStateFor(consoleName);
+        // NOT an acknowledgement (issue #1169): a reloaded iframe is handed a
+        // snapshot that may be seconds old and owes nothing to the host having
+        // answered anything.
+        pushConsoleStateFor(consoleName, pushCause().IFRAME_LOAD);
         // Re-apply the private Accessibility profile to this same-origin console
         // now that its document has (re)loaded — a reload otherwise resets the
         // iframe :root, losing the text-scale var until the next apply (#1102).
@@ -2486,7 +2591,9 @@
       // it covers the aggregate cruiser/destroyer consoles (engineering,
       // science, …) as well as the standalone ones — all resolve to their
       // iframe via the registry.
-      pushActiveConsoleState();
+      // NOT an acknowledgement (issue #1169): a render fires on rotation,
+      // resize and tab switches, none of which mean the host answered.
+      pushActiveConsoleState(pushCause().RENDER);
     }
 
     function renderStationHero(s, inGame) {
@@ -2598,10 +2705,21 @@
         let tutStorage = null;
         try { tutStorage = window.localStorage; } catch (_) { /* privacy mode */ }
         const tut = window.applyTutorialAction(window.simState, action, tutStorage);
-        if (tut.changed) pushConsoleStateFor(action.console || activeConsole);
+        // NOT an acknowledgement (issue #1169): tutorial progress is entirely
+        // client-local and never leaves the device.
+        if (tut.changed) pushConsoleStateFor(action.console || activeConsole, pushCause().TUTORIAL);
         if (tut.handled) return;
       }
       if (typeof window.dispatchConsoleAction === 'function') {
+        // Console-latency dispatch stamp (issue #1169), taken immediately before
+        // the envelope reaches the transport so `input_to_send` covers exactly
+        // the client-local hop — the console's postMessage plus the action-map
+        // lookup — and nothing else. `action.__input_ms` is the console
+        // document's own stamp and stops here; the action map builds its
+        // outbound `ClientMessage` from named fields, so it never crosses the
+        // wire.
+        const meter = latencyMeter();
+        if (meter) meter.noteDispatch(action.action, action.console || activeConsole, action.__input_ms);
         // Optimistic local patches (weaponsTarget / sensorsTarget) land on the
         // one sim store; simState.weaponsTarget has a setter for this path.
         window.dispatchConsoleAction(action, send, (patch) => {
@@ -2710,6 +2828,12 @@
       // ratings have folded in (issue #1103): only the ineligible station-id set
       // — no reason, no setting — goes back to the host.
       maybeReportEligibility(msg);
+      // Console input-to-feedback latency (issue #1169), on the same "report a
+      // locally-derived minimum" footing as the eligibility report above: only
+      // durations this device measured for itself leave the phone, batched.
+      // Driven off inbound traffic rather than a timer so a disconnected phone
+      // stops reporting by itself.
+      maybeReportConsoleLatency();
       if (result.shouldRender) scheduleRender();
     }
 
@@ -2859,7 +2983,14 @@
         // directly below for the show/hide toggle, which isn't part of the
         // shared renderer's job.
         const diagEl = document.getElementById('conn-diag');
-        const writeDiagLines = _pageChrome.mountConnDiag('conn-diag');
+        // _pageChrome can still be null here: this async function resumes
+        // after the fetchIceServers() await, and nothing guarantees the
+        // page-chrome module island has mounted (fired
+        // window.__pageChromeReady) by then — the other three bridge calls
+        // above all guard the same race. mountConnDiag returns a value
+        // rather than firing a queueable side effect, so a no-op fallback
+        // (not the queue) is the guard here.
+        const writeDiagLines = _pageChrome ? _pageChrome.mountConnDiag('conn-diag') : () => {};
         const diag = { attempt: 0, ice: '', types: [], probe: null, relayAvailable, relaySource };
         function renderDiag() {
           const lines = [];

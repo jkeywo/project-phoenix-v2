@@ -446,6 +446,22 @@ range = 35
   when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_blaster"
 
+# The two damage fields are ALTERNATIVES, not two halves of one payload
+# (issue #929): a round meets the one arc it flew into, and that arc's own
+# reading picks which of them it delivers — `damage_shields = 5` into a live
+# screen, through the same absorption seam a beam takes, or `damage_hull = 45`
+# whole onto bare plating. Both numbers are unchanged; the 45 is now
+# CONDITIONAL on the tubes' `fact(target_facing_shields) <= 0` guard having been
+# right about the arc.
+#
+# THIS HULL'S EFFECTIVE OUTPUT DROPS, and it is worth saying where it went.
+# `probe_duel` puts this destroyer against the player cruiser, and over 28 seeds
+# at 90 s the damage it deals falls from a mean of 706 to 475. Only part of that
+# is the torpedo change: it is also being SHOT more, because the cruiser's own
+# beams can now open an arc and its systems start failing. What this hull did not
+# lose is the opening — its two 45-degree blaster banks land 16 points a shot in
+# a lump, which is how it collapses a 100 hp cruiser arc in the first place, and
+# the rounds still go through the hole afterwards.
 [torpedoes]
 count = 12
 burst_interval_secs = 0.4

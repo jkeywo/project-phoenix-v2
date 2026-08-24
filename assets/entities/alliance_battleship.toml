@@ -403,6 +403,20 @@ offset_secs = 1.2
   verb = "fire_blaster"
 
 # 5-tube torpedo layout: 3 fore + 2 aft, volley_max=3, 30-round magazine, burst_interval=0.5s
+#
+# The two damage fields are ALTERNATIVES, not two halves of one payload
+# (issue #929): a round meets the one arc it flew into, and that arc's own
+# reading picks which of them it delivers. `damage_shields = 4` if the arc is up
+# — offered to it through the same absorption seam a beam takes — and
+# `damage_hull = 40` whole on the plating if it is down. Both numbers are
+# unchanged and both keep their meaning; what changed is that the 40 is now
+# CONDITIONAL, and the ten-to-one gap between them is precisely what the tubes'
+# `fact(target_facing_shields) <= 0` guard below is buying.
+#
+# This hull's effective torpedo output therefore FALLS against a screened target
+# and is unchanged against a stripped one, which is the intended shape: it has
+# two phaser banks and a heavy bow blaster to open an arc with, and thirty rounds
+# to spend once one is open.
 [torpedoes]
 count = 30
 damage_hull = 40

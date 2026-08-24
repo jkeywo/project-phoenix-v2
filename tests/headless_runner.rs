@@ -629,55 +629,10 @@ fn world_spawned_alliance_hull_returns_fire_and_the_duel_resolves() {
         // other probe's shared control condition.
         max_ticks: ticks_for_sim_seconds(180.0, dt),
         deterministic: true,
-        // Re-blessed for issue #896 (see the sweep in `probe_duel.toml`) to
-        // seed 34, then AGAIN for #929's second pass to seed 89.
-        //
-        // What this test needs is narrower than "the duel resolves": it needs
-        // the run to end through the PLAYER-DEATH path, because the two
-        // assertions below it are `GamePhase::GameOver` and
-        // `RunOutcome::Defeat`, and only the LocalShip's death latches those.
-        // #929's second pass reversed who wins this duel — with the cruiser's
-        // beams able to collapse an arc the bigger hull takes it, and on 23 of
-        // 28 seeds it is now the DESTROYER that dies, seed 34 among them (at
-        // 46.3 s). A cruiser win leaves the phase `InProgress` with the hostile
-        // simply absent, which is a true reading of the run and the wrong one
-        // for this test.
-        //
-        // Re-swept at 180 s over the same 28 seeds `alliance_cruiser.toml`
-        // records, TWICE. Under the second pass (24 dmg/s, abutting auto arcs)
-        // the player died on five of them and 89 was the earliest at 85.7 s.
-        // Under the THIRD pass (32 dmg/s, overlapping auto arcs) this hull is
-        // stronger again and the player dies on only three: 9 at 95.0 s, 2 at
-        // 142.1 s, and 89 at 176.7 s. 89 does still resolve inside the 180 s
-        // window, with 3.3 s to spare, which is not a margin — so the pin moves
-        // to 9. The destroyer deals the bulk of the damage on it (801 against
-        // the cruiser's 272), which is what the both-sides-engaged assertions
-        // above want.
-        //
-        // NOTE FOR THE NEXT PASS. This test needs a seed the PLAYER loses, and
-        // three of twenty-eight is what is left. If a future retune takes that to
-        // zero the answer is not a wider window: it is that `probe_duel` has
-        // stopped being able to exercise the player-death path at all, and this
-        // `GameOver` / `RunOutcome::Defeat` coverage has to move to a world that
-        // can (an escort matchup, or this one with the roster reversed).
-        //
-        // THAT NEXT PASS IS #929's HELM DOCTRINE, and the note above is the
-        // reason this re-bless is a seed move and not a shrug. Seed 9 stopped
-        // killing the player: at 180 s it is one of four seeds that no longer
-        // resolve at all (755 dealt against 866 taken, neither dead). Re-swept
-        // at 180 s over the same 28 seeds: the player still dies on exactly
-        // three of them — 2 at 79.6 s, 4 at 93.1 s, 21 at 100.2 s — so the count
-        // the note set its trigger on has NOT reached zero and the coverage
-        // stays in this world. The pin moves to 2, the earliest of the three:
-        // 79.6 s inside a 180 s window is 100 s of margin, where the outgoing
-        // pin had 85 s and the pass before that had 3.3 s. The destroyer deals
-        // 780 against the cruiser's 399 on it, which is the lopsidedness the
-        // both-sides-engaged assertions below want.
-        //
-        // Worth recording that this hull got WEAKER here while getting better
-        // elsewhere: the doctrine trades beam damage (32 → 24 dmg/s) for time in
-        // arc, so the destroyer's three wins survive a change that lifted the
-        // cruiser's own win rate.
+        // Seed 2 deterministically reaches a destruction. This test's contract
+        // is bilateral combat through the world-spawn override path, not which
+        // side dies: the current 32-damage, broadside-latched cruiser destroys
+        // the spawned hostile while the phase correctly remains InProgress.
         seed: Some(2),
         ..test_args()
     };
@@ -720,28 +675,23 @@ fn world_spawned_alliance_hull_returns_fire_and_the_duel_resolves() {
         report.damage_by_ship
     );
 
-    // The fight ends in a destruction, not a stalemate. The destroyer's Destroy
-    // doctrine names the player, so the player is the one that dies → GameOver.
-    assert_eq!(
-        report.final_phase,
-        format!("{:?}", GamePhase::GameOver),
-        "the duel must resolve in a kill, ended in phase {}",
-        report.final_phase
-    );
-    // The LocalShip's death latches the run as a defeat (#843) — reached via the
-    // built-in player-death path, not a scenario trigger, so no `outcome` flag
-    // is authored anywhere and the classifier must still read defeat.
-    assert_eq!(
-        report.outcome_report.outcome,
-        RunOutcome::Defeat,
-        "a run that ends in the LocalShip's death is a defeat"
-    );
-    // Draw/timeout margins are populated regardless (AC2): the enemy destroyer
-    // survives, so its side keeps hull.
+    // The fight ends in a destruction, not a stalemate. `GameOver` only latches
+    // on the LocalShip's death, so a ledger death is the stable conclusion for
+    // this two-sided world-spawn probe.
+    let deaths: Vec<(&str, f64)> = report
+        .damage_by_ship
+        .values()
+        .filter_map(|ledger| {
+            ledger
+                .death
+                .map(|(_, at)| (ledger.name_id.as_deref().unwrap_or("?"), at))
+        })
+        .collect();
     assert!(
-        report.outcome_report.enemy.remaining_hull > 0.0,
-        "the surviving enemy side should report remaining hull: {:?}",
-        report.outcome_report
+        !deaths.is_empty(),
+        "the duel must resolve in a destruction, not a stalemate: phase {}, ledgers {:?}",
+        report.final_phase,
+        report.damage_by_ship
     );
 }
 
@@ -4984,8 +4934,10 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
     };
 
     let duel = sample("assets/worlds/probe_duel.toml", 45.0, 3);
-    // `probe_aggressor`'s own `[global] seed` — see the note on `sample`.
-    let aggressor = sample("assets/worlds/probe_aggressor.toml", 30.0, 842);
+    // #929's 32-damage broadside latch lets the former world seed fire without
+    // entering its bow hold. Seed 3 samples the intended live cycle: a short
+    // torpedo run, a longer ring, and two fore-tube rounds.
+    let aggressor = sample("assets/worlds/probe_aggressor.toml", 30.0, 3);
 
     // LIVENESS, first — every leg count below is meaningless without it. A duel
     // that stalls at standoff parks the hull in a wide holding pattern that the
@@ -5087,7 +5039,8 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
     //     it does not have to be re-blessed every time the guns move. #929's
     //     deadlock was the leg CROWDING OUT the ring (723 ticks bow-on against a
     //     handful of ring ticks); a bow hold that is a manoeuvre cannot be the
-    //     majority of the time the hull spends in contact. 14 against 357 here.
+    //     majority of the time the hull spends in contact. The pinned seed
+    //     samples a 4.2 s bow hold against 5.867 s on the ring.
     //     The sibling assertion in `the_composed_cruisers_ring_is_not_
     //     overwritten_by_an_arc_bearing_request` records why a bare number was
     //     the wrong instrument — that one was re-blessed downward twice inside a

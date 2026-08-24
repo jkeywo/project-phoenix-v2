@@ -11,6 +11,7 @@ import {
   runFileName,
   evaluateThresholds,
   formatThresholds,
+  failedThresholds,
   formatStationActivity,
 } from '../../scripts/balance-runs.mjs';
 
@@ -391,6 +392,24 @@ describe('formatThresholds', () => {
     expect(md).toContain('| m | max_failures | 0 | 0.00 | PASS |');
     expect(md).toContain('| m | max_ttk_median | 60 | — | no data |');
     expect(formatThresholds([])).toBe('');
+  });
+
+  it('labels an opted-in threshold report as gating', () => {
+    expect(formatThresholds([], { enforced: true })).toBe('');
+    expect(formatThresholds([
+      { matchup: 'm', metric: 'max_failures', limit: 0, actual: 0, pass: true },
+    ], { enforced: true })).toContain('### Thresholds (gating)');
+  });
+});
+
+describe('failedThresholds', () => {
+  it('rejects both failed and unavailable required metrics for a gate', () => {
+    const checks = [
+      { matchup: 'm', metric: 'min_win_rate', pass: true },
+      { matchup: 'm', metric: 'max_ttk_median', pass: false },
+      { matchup: 'm', metric: 'min_damage_margin', pass: null },
+    ];
+    expect(failedThresholds(checks)).toEqual([checks[1], checks[2]]);
   });
 });
 

@@ -779,15 +779,15 @@ jobs:
           path: target/perf/
           retention-days: 14
 
-  # ── Demo balance regression report (issue #915, non-gating) ───────────────────
+  # ── Balance evidence + cruiser regression gate (issues #915, #1082) ───────────
   #
   # Runs the standing destroyer-vs-each-combat_test-enemy matchup batch
   # (scripts/balance-runs.demo.toml) on fixed seeds and uploads the merged
   # summary plus every per-run AAR report as an artifact. Like `perf`, this job
   # REPORTS rather than gates: it is not in `deploy`'s `needs`, and the config's
-  # thresholds are recorded in the output, never enforced — the job only goes
-  # red on infrastructure failure (binary won't build, runner crashes). Gating
-  # starts once the recorded numbers have proven stable across reports.
+  # thresholds remain recorded-only. The ratified cruiser matrix covers the
+  # same four enemy classes with fixed seeds and fails this job if a regression
+  # threshold is missed; its source AARs are uploaded with the report.
   balance:
     needs: [test, native-build]
     runs-on: ubuntu-latest
@@ -828,12 +828,18 @@ jobs:
       - name: Run the demo matchup batch
         run: node scripts/balance-runs.mjs scripts/balance-runs.demo.toml --out target/balance
 
+      - name: Gate the cruiser matchup batch
+        run: node scripts/balance-runs.mjs scripts/balance-runs.cruiser.toml --out target/balance-cruiser
+
       - name: Publish summary
         if: always()
         run: |
           {
-            echo '## Demo balance report (recorded thresholds, non-gating)'
+            echo '## Destroyer balance report (recorded thresholds, non-gating)'
             cat target/balance/summary.md 2>/dev/null || echo 'no summary produced'
+            echo
+            echo '## Cruiser balance report (gating thresholds)'
+            cat target/balance-cruiser/summary.md 2>/dev/null || echo 'no summary produced'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload balance report
@@ -841,7 +847,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: balance-report
-          path: target/balance/
+          path: |
+            target/balance/
+            target/balance-cruiser/
           retention-days: 14
 
   # ── Deploy (main branch only, requires both test + smoke to pass) ─────────────

@@ -43,13 +43,13 @@
 //     the player side out-damaged the enemy.
 //
 // The pure exports (mergeReports / formatMarkdown / formatMatrix / expandMatchups
-// / resolveSeeds / evaluateThresholds / formatThresholds / formatPhases /
+// / resolveSeeds / evaluateThresholds / formatThresholds / failedThresholds / formatPhases /
 // formatStationActivity / runFileName) are unit-tested in
 // tests/client/balance-runs.test.js with
 // fabricated report objects — no simulation required. Everything that spawns a
 // process lives in main() and its helpers.
 //
-// ── Recorded thresholds (issue #915 — non-gating) ────────────────────────────
+// ── Regression thresholds (issue #915) ──────────────────────────────────────
 //
 // A config may declare regression thresholds, globally and/or per-[[matchup]]:
 //
@@ -67,8 +67,8 @@
 // min_ttk_median / max_ttk_median (seconds), min_damage_margin /
 // max_damage_margin (mean player-minus-enemy damage), max_failures.
 // Threshold results are RECORDED — written into merged.json and summary.md —
-// and never change the exit code. Gating comes later, once the numbers have
-// been observed stable across enough runs to mean regression rather than noise.
+// and never change the exit code unless the ratified config explicitly sets
+// `enforce_thresholds = true`.
 
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -533,10 +533,10 @@ export function evaluateThresholds(summary, matchups, globalThresholds = {}) {
 /**
  * Render threshold records as a markdown table. PURE. Returns '' for none.
  */
-export function formatThresholds(checks) {
+export function formatThresholds(checks, { enforced = false } = {}) {
   if (!checks.length) return '';
   const lines = [];
-  lines.push('### Thresholds (recorded, non-gating)');
+  lines.push(`### Thresholds (${enforced ? 'gating' : 'recorded, non-gating'})`);
   lines.push('');
   lines.push('| Matchup | Metric | Limit | Actual | Status |');
   lines.push('|---|---|---:|---:|:---:|');
@@ -546,6 +546,11 @@ export function formatThresholds(checks) {
     lines.push(`| ${c.matchup} | ${c.metric} | ${c.limit} | ${actual} | ${status} |`);
   }
   return lines.join('\n');
+}
+
+/** A ratified gate rejects both failed and unmeasurable required metrics. */
+export function failedThresholds(checks) {
+  return checks.filter((check) => check.pass !== true);
 }
 
 // ── Side-effecting run machinery (kept out of the pure exports) ──────────────
@@ -672,8 +677,9 @@ Reads <config.toml>, fans out phoenix-headless across every (matchup × seed),
 and merges the per-run reports. Markdown summary → stdout; with --out <dir>,
 merged.json + summary.md + the per-run AAR reports (runs/<matchup>-seed<N>.json)
 are also written there (keep that dir out of git). A config [thresholds] table
-(and per-[[matchup]] overrides) is evaluated and RECORDED in both outputs but
-never gates the exit code.
+(and per-[[matchup]] overrides) is evaluated and recorded in both outputs.
+Set enforce_thresholds = true in a ratified config to fail the batch when a
+threshold is exceeded or cannot be measured.
 
 Requires: npm install, and a release binary at target/release/phoenix-headless
 (build with: cargo build --release --features headless --bin phoenix-headless).`;
@@ -724,10 +730,11 @@ async function main() {
   // Per-station busyness next to the win rates (issue #1147).
   const stationActivity = formatStationActivity(summary);
   if (stationActivity) out = `${out}\n\n${stationActivity}`;
-  // Recorded thresholds (issue #915): evaluated and WRITTEN, never enforced —
-  // the exit code does not depend on them.
+  // Every config records its threshold observations; only an explicitly
+  // ratified config promotes them to a gate.
   const thresholds = evaluateThresholds(summary, matchups, config.thresholds ?? {});
-  if (thresholds.length) out = `${out}\n\n${formatThresholds(thresholds)}`;
+  const enforceThresholds = config.enforce_thresholds === true;
+  if (thresholds.length) out = `${out}\n\n${formatThresholds(thresholds, { enforced: enforceThresholds })}`;
   console.log(out);
 
   if (cli.out) {
@@ -749,6 +756,17 @@ async function main() {
     console.error(
       `[balance-runs] wrote ${path.join(cli.out, 'merged.json')}, summary.md, and ${persisted} per-run reports under runs/`,
     );
+  }
+
+  if (enforceThresholds) {
+    const failed = failedThresholds(thresholds);
+    if (failed.length) {
+      console.error(
+        `[balance-runs] ${failed.length} gating threshold${failed.length === 1 ? '' : 's'} failed: ` +
+        failed.map((check) => `${check.matchup}/${check.metric}`).join(', '),
+      );
+      process.exitCode = 1;
+    }
   }
 }
 

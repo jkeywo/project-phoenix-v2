@@ -6,6 +6,7 @@
     "build:client": "node scripts/build-client.mjs",
     "dev:viewer": "node scripts/dev-viewer.mjs",
     "balance:demo": "cargo build --release --features headless --bin phoenix-headless && node scripts/balance-runs.mjs scripts/balance-runs.demo.toml --out .balance-out",
+    "balance:cruiser": "cargo build --release --features headless --bin phoenix-headless && node scripts/balance-runs.mjs scripts/balance-runs.cruiser.toml --out .balance-out",
     "lods": "node scripts/generate-lods.mjs",
     "lods:check": "node scripts/generate-lods.mjs --check"
   },

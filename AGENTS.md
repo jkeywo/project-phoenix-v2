@@ -86,6 +86,10 @@ cargo run --features headless --bin phoenix-headless -- --help
 # release binary above built + `npm install` (for smol-toml). Markdown → stdout;
 # `--out <dir>` also writes merged.json + summary.md (keep that dir out of git).
 node scripts/balance-runs.mjs scripts/balance-runs.example.toml [--out <dir>]
+# Ratified Alliance Cruiser gate (issue #1082): the same 4-opponent fixed-seed
+# duel matrix the CI `balance` job makes blocking. The output directory contains
+# merged metrics plus every source AAR; all stations are Backfill in headless.
+npm run balance:cruiser
 
 # Local dev — client page (pure HTML/JS, no WASM)
 node scripts/build-client.mjs                  # → dist/client/, then serve dist/ statically
@@ -241,7 +245,8 @@ git diff perf/baselines
 #   perf         phoenix-perf assets|mesh|report — GATES on the `assets`
 #                scenario only (report --gate, exit 3); every other scenario
 #                reports into the job summary and the perf-capture artifact
-#   balance      scripts/balance-runs.demo.toml — reports, never gates
+#   balance      destroyer report (non-gating) plus the ratified cruiser matrix
+#                (`scripts/balance-runs.cruiser.toml`, gating)
 #   deploy       peaceiris/actions-gh-pages@v4 — publishes dist/ to GitHub
 #                Pages; main branch only, no gate of its own
 #

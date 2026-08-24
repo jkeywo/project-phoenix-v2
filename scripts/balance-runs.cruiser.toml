@@ -1,0 +1,60 @@
+# Alliance Cruiser balance ratification (issue #1082).
+#
+# The fixed seed matrix is intentionally parallel to the established destroyer
+# report: the player slot is the selected cruiser and every station is Backfill
+# operated by the same composed #876 doctrine used in a normal unmanned game.
+# Keep seeds and duration stable; any retune must re-run this exact command and
+# update the evidence plus thresholds together.
+#
+#   cargo build --release --features headless --bin phoenix-headless
+#   node scripts/balance-runs.mjs scripts/balance-runs.cruiser.toml --out .balance-out
+
+seeds       = [1, 2, 3, 4, 5]
+sim_seconds = 120
+world       = "assets/worlds/duel.toml"
+
+# Ratified against the report produced on 2026-08-24 by the command above:
+# 5/5 cruiser wins in every row, with medians 4.8 / 13.9 / 8.6 / 15.4 seconds
+# and mean damage margins +163.0 / +283.6 / +310.2 / +90.9. These retain
+# deliberate headroom while preserving the intended all-class sweep. The
+# runner writes the full source AARs into the CI balance-report artifact.
+enforce_thresholds = true
+
+[thresholds]
+max_failures = 0
+
+[[matchup]]
+name   = "cruiser_vs_harrow_destroyer"
+side_a = ["cruiser"]
+side_b = ["ship_harrow_destroyer"]
+  [matchup.thresholds]
+  min_win_rate      = 1.0
+  max_ttk_median    = 10.0
+  min_damage_margin = 100.0
+
+[[matchup]]
+name   = "cruiser_vs_harrow_cruiser"
+side_a = ["cruiser"]
+side_b = ["ship_harrow_cruiser"]
+  [matchup.thresholds]
+  min_win_rate      = 1.0
+  max_ttk_median    = 25.0
+  min_damage_margin = 200.0
+
+[[matchup]]
+name   = "cruiser_vs_harrow_patrol"
+side_a = ["cruiser"]
+side_b = ["ship_harrow_patrol"]
+  [matchup.thresholds]
+  min_win_rate      = 1.0
+  max_ttk_median    = 20.0
+  min_damage_margin = 200.0
+
+[[matchup]]
+name   = "cruiser_vs_harrow_warhawk"
+side_a = ["cruiser"]
+side_b = ["ship_harrow_warhawk"]
+  [matchup.thresholds]
+  min_win_rate      = 1.0
+  max_ttk_median    = 25.0
+  min_damage_margin = 50.0

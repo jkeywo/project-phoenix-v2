@@ -7,8 +7,8 @@ power_rating = 90
 css = "gui/themes/cruiser.css"
 # Authored mass (issue #1154), the game's own mass unit — the deterministic
 # input a mass-driven mechanic (the tow/tractor helm penalty) reads instead of
-# guessing from the hull's other stats. [ai] Unratified — a cruiser-class
-# weight, between the destroyer and the battleship.
+# guessing from the hull's other stats. [ai] #1154 tuning, separately ratified
+# as a mass-mechanic input rather than by #1082's combat matrix.
 mass = 24000.0
 # Player identity (the `player` tag + `playerShip` radar icon) is NOT authored
 # here — it is injected onto the selected hull at the player game-start spawn
@@ -134,8 +134,9 @@ faction = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"
 # Pinned by `the_player_hulls_270_degree_auto_arcs_both_bear_off_the_beam_line`
 # (src/console/weapons/server_tests.rs), which also holds the blind-wedge control
 # — dead ahead is still the aft bank's 90-degree gap, so these are 270 and not
-# 360. [ai] Unratified: the arc width is a balance decision with a measured cost
-# and belongs on the ratification list beside the damage value.
+# 360. [ai] Ratified by #1082's fixed five-seed, four-opponent report
+# (`scripts/balance-runs.cruiser.toml`): its all-Backfill cruiser wins every
+# row; the gate protects the resulting envelope alongside the damage value.
 #
 # Resolution happens at authoring time. The runtime never sees a fragment — it
 # sees one resolved document, and PRD #774's "every AI-capable fine system
@@ -368,13 +369,15 @@ range = 50
 shows = [ "player", "ship", "asteroid", "station", "missile", "torpedo", "region" ]
 selects = [ "ship", "station", "asteroid" ]
 
-# ── `beam_damage_per_sec = 24`: what a bank has to be worth once torpedoes
+# ── `beam_damage_per_sec = 32`: what a bank has to be worth once torpedoes
 #    stop ignoring shields (issue #929) ────────────────────────────────────────
 #
-# [ai] Unratified, both banks. Was 4, went to 24 on the second pass with
-# `auto_arc_deg = 180`, went to 32 when both banks began to bear (see "The AI
-# arcs WIDENED" in the header), and is back to 24 now that the helm keeps the
-# guns on the target instead of buying coverage with raw damage. This is the hull's whole anti-shield tuning and it
+# [ai] Ratified by #1082's fixed five-seed, four-opponent report
+# (`scripts/balance-runs.cruiser.toml`), which records 20/20 Backfill wins and
+# gates the outcome. Was 4, went to 24 on the second pass with
+# `auto_arc_deg = 180`, then 32 when both banks began to bear (see "The AI
+# arcs WIDENED" in the header), and remains 32 after the damaged-arc latch
+# keeps that broadside on target. This is the hull's whole anti-shield tuning and it
 # belongs on the ratification list; the argument, the arithmetic and both swept
 # ladders are here so a ratifier can move it on evidence.
 #
@@ -449,21 +452,19 @@ selects = [ "ship", "station", "asteroid" ]
 #   32    12/12           0.5 s           503         12/12
 #
 # Twelve seeds put the knee at 20; the WIDER 28-seed sweep does not confirm it —
-# 20 reaches only 25/28 — so the shipped value is 24, the first rung that opens
-# the gate on every one of the 28. Down from 32, which is the drop a helm that
-# keeps its guns on the target was expected to buy.
+# 20 reaches only 25/28. This table records the earlier 24-damage pass; the
+# current ratified value is 32 after the damaged-arc latch changed the broadside
+# hold behaviour.
 #
-#   28 seeds, 90 s     D=20     D=24 (shipped)   D=32
+#   28 seeds, 90 s     D=20     D=24 (historical) D=32
 #   launches>0         25/28    28/28            28/28
 #   duels resolving    18/28    22/28            28/28
 #   this hull wins     17/28    21/28            28/28
 #   damage taken       555      495              299
 #
-# THE COST IS STATED PLAINLY: 32 is still better on every quality reading, and 24
-# is chosen because the KNEE is the launch criterion this issue has used at every
-# pass — "torpedo cadence restored on effectively all seeds" — not because 24
-# fights better. A ratifier who wants the fight rather than the cadence should
-# read that table and put it back up.
+# THE COST IS STATED PLAINLY: 32 was better on every quality reading in this
+# earlier sweep. The current fixed five-seed report above is the ratification
+# evidence for retaining it with the damaged-arc latch.
 #
 # WHAT 32 IS NOT, AND WHAT IT IS. On paper this is now the fleet's heaviest beam
 # battery, and the comparison only means anything if the BEARING is stated —
@@ -495,7 +496,8 @@ selects = [ "ship", "station", "asteroid" ]
 # it nor any other pass of this issue has touched it.
 # ── `cycle_jitter = 0.33`, and the measurement that qualifies the block above ─
 #
-# [ai] Unratified, both banks. Each time a bank LIGHTS it draws one factor
+# [ai] Ratified by #1082's fixed five-seed, four-opponent report
+# (`scripts/balance-runs.cruiser.toml`). Each time a bank LIGHTS it draws one factor
 # uniformly from [0.67, 1.33) (seeded, `SimStream::BeamCycleJitter`) and applies
 # it to BOTH that cycle's burn AND the cooldown behind it. Linked, so a cycle
 # that fires longer also rests longer: the mean duty cycle is exactly what
@@ -604,13 +606,14 @@ marker = "phasers_fore"
   when = "fact(red_alert) >= param(min_alert_to_fire)"
   verb = "fire_phaser"
 
-# `beam_damage_per_sec = 24` here too, and for the same reason — the argument,
+# `beam_damage_per_sec = 32` here too, and for the same reason — the argument,
 # the arithmetic and both swept ladders are written out once above the `fore`
 # bank.
 # The pair is deliberately symmetric: the ring puts whichever bank is on the
 # inside onto the target, and a hull whose two broadsides were worth different
 # amounts would make the orbit direction a balance lever nobody authored.
-# [ai] Unratified, with `fore`.
+# [ai] Ratified with `fore` by #1082's fixed five-seed, four-opponent report
+# (`scripts/balance-runs.cruiser.toml`).
 [[weapons_console.phaser_banks]]
 id = "aft"
 facing_deg = 180
@@ -1680,6 +1683,11 @@ verb = "release_torpedo"
 
 # ── Doctrine tuning: parameters only (issue #876 AC3) ────────────────────────
 #
+# [ai] The four values below are ratified by #1082's fixed five-seed,
+# four-opponent report (`scripts/balance-runs.cruiser.toml`). The report's
+# station-activity rows are Human=0, Offline=0, AI>0 for every active station,
+# so this is explicitly the composed #876 Backfill path, not a legacy AI route.
+#
 # The whole specialisation of a shared class doctrine, and the entire authoring
 # interface a hull has to it. No rule, state or transition is restated here: the
 # `param` table is an ordinary TOML table and deep-merges, so naming one key
@@ -1841,7 +1849,8 @@ torpedo_run_range = 25.0
 
 # ── Arc-keeping and the weak-broadside flip (issue #929) ─────────────────────
 #
-# [ai] Unratified, all four. They are the doctrine half of the arc-dwell finding:
+# [ai] Ratified by #1082's fixed five-seed, four-opponent report
+# (`scripts/balance-runs.cruiser.toml`). They are the doctrine half of the arc-dwell finding:
 # instrumented on `probe_duel`, EVERY beam this hull lights ends because the
 # target left the burning bank's arc, not because the burn expired. The banks are
 # arc-limited, so arc dwell is what is actually being wasted, and these are the
@@ -1936,5 +1945,8 @@ weak_shield_flip_dwell_secs = 4.0
 # below is sized to the doctrine this hull flies, so the ship stays decided-for
 # across its own manoeuvre.
 [ai_profile]
+# [ai] The selected aggression and sensing envelope participate in the #1082
+# four-opponent Backfill report and are therefore ratified with the combat
+# doctrine above; do not retune them outside the same seeded matrix.
 aggression = 0.8
 sensor_range = 350.0

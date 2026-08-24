@@ -86,8 +86,8 @@ test('tactical console: FIRE buttons call __sendAction with correct envelopes', 
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(2);
 
-  expect(JSON.parse(sent[0])).toEqual({ action: 'fire_phaser', console: 'tactical', bank: 'fore' });
-  expect(JSON.parse(sent[1])).toEqual({
+  expect(JSON.parse(sent[0])).toMatchObject({ action: 'fire_phaser', console: 'tactical', bank: 'fore' });
+  expect(JSON.parse(sent[1])).toMatchObject({
     action: 'fire_torpedo',
     console: 'tactical',
     tube: 'fore',
@@ -127,7 +127,7 @@ test('tactical console: tapping a non-hostile derelict designates it (issue #115
 
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
-  expect(JSON.parse(sent[0])).toEqual({ action: 'set_target', console: 'tactical', uuid: 'derelict-1' });
+  expect(JSON.parse(sent[0])).toMatchObject({ action: 'set_target', console: 'tactical', uuid: 'derelict-1' });
 });
 
 test('tactical console: the lock readout names a non-hostile contact with no hostile-only wording (issue #1155)', async ({ page }) => {

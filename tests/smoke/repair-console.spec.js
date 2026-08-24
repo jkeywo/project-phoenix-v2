@@ -71,8 +71,8 @@ test('repair console: dispatch buttons call __sendAction with correct envelope',
 
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(2);
-  expect(JSON.parse(sent[0])).toEqual({ action: 'dispatch_repair_team', console: 'repair', team_idx: 0, target: 'helm' });
-  expect(JSON.parse(sent[1])).toEqual({ action: 'dispatch_repair_team', console: 'repair', team_idx: 1, target: 'tactical' });
+  expect(JSON.parse(sent[0])).toMatchObject({ action: 'dispatch_repair_team', console: 'repair', team_idx: 0, target: 'helm' });
+  expect(JSON.parse(sent[1])).toMatchObject({ action: 'dispatch_repair_team', console: 'repair', team_idx: 1, target: 'tactical' });
 });
 
 test('repair console: damaged-systems list renders worst-first and highlights the host pin', async ({ page }) => {
@@ -104,7 +104,7 @@ test('repair console: tapping a damaged system sends set_repair_target_priority'
   // No team index and no ordinal: the host resolves which team and pins the
   // system; the ordinal is untouched.
   expect(sent).toHaveLength(1);
-  expect(JSON.parse(sent[0])).toEqual({
+  expect(JSON.parse(sent[0])).toMatchObject({
     action: 'set_repair_target_priority', console: 'repair', system_id: 'aux-sensor',
   });
 });

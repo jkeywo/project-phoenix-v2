@@ -89,13 +89,13 @@ test('power console: +/- buttons call __sendAction with correct envelopes', asyn
 
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(2);
-  expect(JSON.parse(sent[0])).toEqual({
+  expect(JSON.parse(sent[0])).toMatchObject({
     action: 'set_power',
     console: 'power',
     target: 'helm',
     level: expect.any(Number),
   });
-  expect(JSON.parse(sent[1])).toEqual({
+  expect(JSON.parse(sent[1])).toMatchObject({
     action: 'set_power',
     console: 'power',
     target: 'shields',

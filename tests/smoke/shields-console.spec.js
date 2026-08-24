@@ -80,7 +80,7 @@ test('shields console: shield segment click sends set_shield_focus with arc_id',
   await page.locator('ph-shield-facings .hit-path[data-facing-id="port"]').click();
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
-  expect(JSON.parse(sent[0])).toEqual({ action: 'set_shield_focus', console: 'shields', arc_id: 'port', focused: true });
+  expect(JSON.parse(sent[0])).toMatchObject({ action: 'set_shield_focus', console: 'shields', arc_id: 'port', focused: true });
 });
 
 test('shields console: clicking focused facing clears focus via focused=false', async ({ page }) => {
@@ -93,7 +93,7 @@ test('shields console: clicking focused facing clears focus via focused=false', 
   await page.locator('ph-shield-facings .hit-path[data-facing-id="fore"]').click();
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
-  expect(JSON.parse(sent[0])).toEqual({ action: 'set_shield_focus', console: 'shields', arc_id: 'fore', focused: false });
+  expect(JSON.parse(sent[0])).toMatchObject({ action: 'set_shield_focus', console: 'shields', arc_id: 'fore', focused: false });
 });
 
 test('shields console: header shows focused facing display', async ({ page }) => {

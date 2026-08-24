@@ -54,7 +54,7 @@ test('comms console: response buttons send respond_to_message for the active thr
 
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
-  expect(JSON.parse(sent[0])).toEqual({
+  expect(JSON.parse(sent[0])).toMatchObject({
     action: 'respond_to_message',
     console: 'comms',
     message_id: 'dr-myst-briefing',

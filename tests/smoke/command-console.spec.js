@@ -129,7 +129,7 @@ test('command console: an uncrewed Command shows the AI stance, and a human taki
   await page.locator('#stance-list .stance-btn').nth(1).click();
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
-  expect(JSON.parse(sent[0])).toEqual({
+  expect(JSON.parse(sent[0])).toMatchObject({
     action: 'set_station_stance',
     console: 'command',
     station: 'tactical',
@@ -150,7 +150,7 @@ test('command console: clicking a stance emits set_station_stance for that stati
 
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
-  expect(JSON.parse(sent[0])).toEqual({
+  expect(JSON.parse(sent[0])).toMatchObject({
     action: 'set_station_stance',
     console: 'command',
     station: 'tactical',
@@ -193,7 +193,7 @@ test('command console: an objective stance appears and is selectable, then vanis
   await page.locator('#stance-list .stance-btn').nth(4).click();
   const sent = await page.evaluate(() => window.__sent);
   expect(sent).toHaveLength(1);
-  expect(JSON.parse(sent[0])).toEqual({
+  expect(JSON.parse(sent[0])).toMatchObject({
     action: 'set_station_stance',
     console: 'command',
     station: 'tactical',

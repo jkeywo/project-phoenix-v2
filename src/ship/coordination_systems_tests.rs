@@ -1968,8 +1968,9 @@ fn every_shipped_hull_authors_seeking_comms_and_navigation_on_the_station_it_dec
             let system = config
                 .system(&system_id)
                 .unwrap_or_else(|| panic!("{stem} must declare {:?}", system_id.0));
-            if (stem == &"alliance_destroyer" || stem == &"alliance_cruiser")
-                && (system_id.0 == "navigation" || system_id.0 == "comms")
+            if (stem == &"alliance_destroyer"
+                && (system_id.0 == "navigation" || system_id.0 == "comms"))
+                || (stem == &"alliance_cruiser" && system_id.0 == "navigation")
             {
                 assert!(
                     config

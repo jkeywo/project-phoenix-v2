@@ -1591,7 +1591,7 @@ fn an_intent_advisory_is_delivered_verbatim_through_the_popup_surface() {
 const SEEKING_HULLS: &[(&str, &str, &str)] = &[
     // hull, comms system's station, navigation system's station
     ("alliance_battleship", "comms", "navigation"),
-    ("alliance_cruiser", "comms", "comms"),
+    ("alliance_cruiser", "comms", "navigation"),
     ("alliance_destroyer", "comms", "navigation"),
     ("alliance_courier", "captain", "captain"),
 ];
@@ -1968,7 +1968,7 @@ fn every_shipped_hull_authors_seeking_comms_and_navigation_on_the_station_it_dec
             let system = config
                 .system(&system_id)
                 .unwrap_or_else(|| panic!("{stem} must declare {:?}", system_id.0));
-            if stem == &"alliance_destroyer"
+            if (stem == &"alliance_destroyer" || stem == &"alliance_cruiser")
                 && (system_id.0 == "navigation" || system_id.0 == "comms")
             {
                 assert!(

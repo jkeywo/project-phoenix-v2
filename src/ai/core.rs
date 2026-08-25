@@ -1044,14 +1044,18 @@ fn helm_destroy(
     let stop_surface_distance = effective_range * 0.8;
     let surface_distance = surface_distance_xz(
         [pos[0], 0.0, pos[1]],
-        world_view.self_radius,
+        // Doctrine ranges are measured from the ship's navigation origin.
+        // Only the entity being approached expands that origin into its
+        // visible surface; charging the self radius here would silently shift
+        // every existing hold envelope.
+        0.0,
         target_pos,
         target_entity.radius,
     );
     let at_station = surface_distance <= stop_surface_distance;
     // `offset_approach_target` still works in centre coordinates, so convert
     // the authored surface clearance back once at its boundary.
-    let stop_dist = stop_surface_distance + world_view.self_radius + target_entity.radius;
+    let stop_dist = stop_surface_distance + target_entity.radius;
 
     // When holding station, steer to face the target so the phaser forward-arc
     // gate passes. When approaching, steer toward the offset approach point.

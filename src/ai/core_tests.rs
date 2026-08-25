@@ -1105,7 +1105,8 @@ fn helm_destroy_reduced_thrust_inside_decel_zone() {
     let target_uuid = Uuid::new_v4();
     let target_speed = 0.8_f32;
     let maintain_range = 25.0_f32;
-    // stop_dist = 20, decel_start = 30; midpoint = 25
+    // Surface stop distance = 20, decel_start = 30; the centre at 25 is the
+    // midpoint clearance for this point-sized target.
     let world = WorldView {
         entity_pos: [0.0, 0.0, 0.0],
         entity_yaw: 0.0,
@@ -1113,7 +1114,7 @@ fn helm_destroy_reduced_thrust_inside_decel_zone() {
         entities: vec![AiWorldEntity {
             uuid: target_uuid,
             name: Some("enemy".into()),
-            position: [0.0, 0.0, -25.0], // dist = 25
+            position: [0.0, 0.0, -25.0], // surface distance = 25
             ..Default::default()
         }],
         ..Default::default()

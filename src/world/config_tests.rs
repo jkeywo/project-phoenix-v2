@@ -2301,10 +2301,9 @@ fn parse_world_combat_test_toml_is_script_authored_with_8_timed_waves() {
                 target: target.clone(),
             }
         );
-        // Two-ship waves list both hulls; the directive still names one.
         assert!(
-            targets.contains(&target),
-            "{id} must list {target} among its targets, got {targets:?}"
+            targets.is_empty(),
+            "{id} must hide its wave from navigation, got {targets:?}"
         );
         assert_eq!(*base_priority, 80.0);
     }
@@ -2325,6 +2324,12 @@ fn parse_world_combat_test_toml_is_script_authored_with_8_timed_waves() {
             .iter()
             .all(|(_, o)| o.from == "world.entity.starbase_alpha.name"),
         "every report comes from the station the scenario defends"
+    );
+    assert!(
+        opens
+            .iter()
+            .all(|(_, o)| o.thread_id.as_deref() == Some("combat_test_starbase")),
+        "Combat Test Starbase reports must stay in one chronological dialogue thread"
     );
     let comms_timed: Vec<f32> = opens
         .iter()

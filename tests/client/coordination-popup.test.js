@@ -8,10 +8,10 @@ import { t } from '../../gui/strings.js';
 // chatter resolves, which is what makes the two surfaces render identically.
 
 describe('normalizeCoordinationPayload — sender', () => {
-  it('uses the sender label, appending the target when present', () => {
+  it('keeps the localised sender and destination as a route header', () => {
     expect(normalizeCoordinationPayload({ type: 'Alert' }, 'Helm AI').sender).toBe('Helm AI');
-    expect(normalizeCoordinationPayload({ type: 'Alert', target: 'tactical' }, 'Helm AI').sender)
-      .toBe('Helm AI ? tactical');
+    expect(normalizeCoordinationPayload({ type: 'Alert' }, 'Helm AI', 'Tactical'))
+      .toMatchObject({ sender: 'Helm AI → Tactical', from: 'Helm AI', to: 'Tactical' });
   });
 
   it('falls back to the AI id when no label is given', () => {

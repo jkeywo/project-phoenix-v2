@@ -181,6 +181,11 @@ pub(crate) struct MeshLods {
     /// Flat mesh config supplying fallback fields (colour/radius/emissive/size/
     /// minor_radius) and the shared `variant` for levels that omit them.
     base: crate::entities::config::MeshConfig,
+    /// The primary rig, retained so generated tiers that explicitly declare an
+    /// identity sidecar inherit the base offset/rotation without applying its
+    /// scale twice.  Their GLBs are decimated raw exports, not pre-oriented
+    /// game-space models.
+    base_rig: crate::entities::model_rig::ModelRig,
     /// The primary model sidecar's `[base].scale`. Every LOD tier of one model
     /// shares the SAME base sidecar (`ModelRig::lod`), but each tier's own GLB
     /// resolves its OWN sidecar in `spawn_glb_visual` — so only the near tier,
@@ -355,6 +360,7 @@ pub(crate) fn render_spawned_entities(
                     commands.entity(entity).insert(MeshLods {
                         levels: rig.lod.clone(),
                         base: cfg.clone(),
+                        base_rig: rig.clone(),
                         base_scale: rig.base.scale,
                         tier_scale: None,
                         current: None,
@@ -614,6 +620,17 @@ pub(crate) fn update_mesh_lod(
             // for every hull model in the scene. Any other tier's sidecar hasn't
             // been resolved yet this frame; let spawn_glb_visual resolve it.
             let declared = crate::entities::glb_visual::declared_tier_rig(&level);
+            // Generated tiers declare `tier_rig = "identity"` because no
+            // sidecar exists beside their GLB.  Identity must mean "do not
+            // fetch another sidecar", not "discard the primary hull's base
+            // orientation": the latter flips every 180°-corrected hull as it
+            // crosses an LOD boundary.  The parent already carries the base
+            // scale, so inherit only offset + rotation on the child.
+            let inherited_tier_rig = declared.as_ref().map(|_| {
+                let mut rig = lods.base_rig.clone();
+                rig.base.scale = [1.0, 1.0, 1.0];
+                rig
+            });
             match spawn_glb_visual(
                 &mut commands,
                 &asset_server,
@@ -622,7 +639,7 @@ pub(crate) fn update_mesh_lod(
                 model_path,
                 variant.as_deref(),
                 pending,
-                declared.as_ref(),
+                inherited_tier_rig.as_ref().or(declared.as_ref()),
             ) {
                 // Keep the current visual until the new GLB resolves — avoids a
                 // visible gap. `current` is left unchanged so we retry next frame.
@@ -888,6 +905,7 @@ mod tests {
             let mut lods = MeshLods {
                 levels: Vec::new(),
                 base: bare_mesh_config(),
+                base_rig: crate::entities::model_rig::ModelRig::default(),
                 base_scale: [1.0, 1.0, 1.0],
                 tier_scale: None,
                 current: Some(0),
@@ -971,6 +989,7 @@ mod tests {
             let mut lods = MeshLods {
                 levels: Vec::new(),
                 base: bare_mesh_config(),
+                base_rig: crate::entities::model_rig::ModelRig::default(),
                 base_scale: [1.0, 1.0, 1.0],
                 tier_scale: None,
                 current: None,

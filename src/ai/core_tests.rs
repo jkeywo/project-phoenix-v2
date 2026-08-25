@@ -5,6 +5,14 @@ use super::*;
 /// 0, so this is "the ship is at the start of any route it has".
 const NO_CURSORS: &[crate::ai::patrol_cursor::PatrolCursor] = &[];
 
+#[test]
+fn surface_distance_xz_removes_both_hull_radii() {
+    assert_eq!(
+        surface_distance_xz([0.0, 0.0, 0.0], 10.0, [40.0, 0.0, 0.0], 5.0),
+        25.0
+    );
+}
+
 // ── hostile_arc_exposure: the all-round case (issue #874) ─────────────
 
 /// A hostile carrying an all-round bank (`fire_arc_deg = 360`, which the

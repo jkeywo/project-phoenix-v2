@@ -313,10 +313,10 @@ describe('routeMessage — no-render cases', () => {
   });
 
   it('CoordinationPopup emits the popup effect and never renders', () => {
-    const msg = { type: 'CoordinationPopup', data: { payload: { type: 'Alert' }, sender_label: 'Helm AI' } };
+    const msg = { type: 'CoordinationPopup', data: { target: 'tactical', payload: { type: 'Alert' }, sender_label: 'Helm AI' } };
     const r = routeMessage(msg, ctx(baseUiState()));
     expect(r.sideEffects).toEqual([{
-      effect: 'coordination-popup', payload: { type: 'Alert' }, senderLabel: 'Helm AI',
+      effect: 'coordination-popup', payload: { type: 'Alert' }, senderLabel: 'Helm AI', targetLabel: 'tactical',
     }]);
     expect(r.shouldRender).toBe(false);
   });

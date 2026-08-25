@@ -153,6 +153,22 @@ pub const IMMINENT_COLLISION_FACING_THRESHOLD: f32 = 1.0;
 /// reaches zero thrust, preventing overshoot oscillation near targets.
 pub const APPROACH_DECEL_FACTOR: f32 = 1.5;
 
+/// Planar clearance between two entity surfaces.
+///
+/// Combat movement and direct-fire reach are authored in visible hull-to-hull
+/// units, not centre-to-centre units.  Keeping that conversion here prevents a
+/// large starbase from silently consuming a weapon's useful range.
+pub fn surface_distance_xz(
+    a_position: [f32; 3],
+    a_radius: f32,
+    b_position: [f32; 3],
+    b_radius: f32,
+) -> f32 {
+    let dx = b_position[0] - a_position[0];
+    let dz = b_position[2] - a_position[2];
+    (dx * dx + dz * dz).sqrt() - a_radius.max(0.0) - b_radius.max(0.0)
+}
+
 /// Angular tolerance for engaging impulse: the target bearing must be within
 /// this many radians of dead-ahead to qualify.
 pub const IMPULSE_ANGLE_TOLERANCE_RAD: f32 = 0.08;
@@ -1025,8 +1041,17 @@ fn helm_destroy(
     }
 
     let effective_range = world_view.entity_weapons_range.unwrap_or(maintain_range);
-    let stop_dist = effective_range * 0.8;
-    let at_station = dist <= stop_dist;
+    let stop_surface_distance = effective_range * 0.8;
+    let surface_distance = surface_distance_xz(
+        [pos[0], 0.0, pos[1]],
+        world_view.self_radius,
+        target_pos,
+        target_entity.radius,
+    );
+    let at_station = surface_distance <= stop_surface_distance;
+    // `offset_approach_target` still works in centre coordinates, so convert
+    // the authored surface clearance back once at its boundary.
+    let stop_dist = stop_surface_distance + world_view.self_radius + target_entity.radius;
 
     // When holding station, steer to face the target so the phaser forward-arc
     // gate passes. When approaching, steer toward the offset approach point.
@@ -1071,9 +1096,10 @@ fn helm_destroy(
     let thrust = if at_station {
         0.0
     } else {
-        let decel_start = stop_dist * APPROACH_DECEL_FACTOR;
-        if dist < decel_start {
-            let t = (dist - stop_dist) / (decel_start - stop_dist);
+        let decel_start = stop_surface_distance * APPROACH_DECEL_FACTOR;
+        if surface_distance < decel_start {
+            let t =
+                (surface_distance - stop_surface_distance) / (decel_start - stop_surface_distance);
             target_speed * t.clamp(0.0, 1.0)
         } else {
             target_speed

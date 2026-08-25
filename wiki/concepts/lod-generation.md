@@ -3,13 +3,18 @@ title: LOD Generation
 type: concept
 tags: [tooling, assets, models, rendering, ci]
 sources: [scripts/generate-lods.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/viewer-lods.test.js]
-updated: 2026-08-11
+updated: 2026-08-25
 ---
 
 # LOD Generation
 
 How a model's decimated LOD levels are produced, and how CI knows the ones in
 the tree still match what the sidecars ask for (issue #919).
+
+Generated GLB tiers that declare `tier_rig = "identity"` have no sibling
+sidecar to fetch, but still inherit the primary model rig's offset and rotation
+at runtime. Their scale remains on the LOD parent, so it is applied exactly
+once. This keeps 180°-corrected hulls nose-forward across every LOD transition.
 
 ## The sidecar declares the whole ladder
 

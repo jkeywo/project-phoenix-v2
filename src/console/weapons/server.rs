@@ -1569,6 +1569,14 @@ fn ai_target_selection(
         // candidate is pre-filtered to `within_range` here (AC5), so the
         // selector's own authored horizon is a static outer bound only.
         let top_destroy = top_destroy_objective_target(Some(&*blackboards));
+        // A Patrol objective that names a visible entity is a defend marker:
+        // Backfill still flies its route, but when hostiles arrive it chooses
+        // the attacker closest to the protected hull rather than the one
+        // closest to itself.  Ordinary patrols with only anchors remain the
+        // historical nearest-to-self behaviour.
+        let defend_target = top_defend_objective_target(Some(&*blackboards)).and_then(|name| {
+            resolve_objective_target_uuid(name, Some(ai_env.content_runtime()), &other_ships_q)
+        });
         // An *untargeted* Destroy directive — `Destroy { target: "" }` — is
         // standing "engage any hostile you detect" doctrine (every shipped
         // hostile TOML). It is the only case that licenses the nearest-hostile
@@ -1643,37 +1651,38 @@ fn ai_target_selection(
         // Nearest faction-hostile (issue #703), delegating the faction verdict
         // and distance ordering to `ai::core::find_nearest_hostile` over a
         // `WorldView` built here rather than open-coding "hostile"/"nearest".
-        let nearest_hostile = |registry: &crate::ai::faction::FactionRegistry| -> Option<String> {
-            let self_faction_uuid = self_faction.map(|f| f.0)?;
-            let self_uuid_str = self_uuid.map(|u| u.0.as_str()).unwrap_or("");
-            let entities: Vec<crate::ai::AiWorldEntity> = hostile_scan_q
-                .iter()
-                .filter(|(u, _, _)| u.0 != self_uuid_str)
-                .filter_map(|(u, t, faction)| {
-                    // Only canonically-UUID'd entities can take part: an
-                    // unparseable id would collapse to the nil UUID and let
-                    // two entities alias each other in the scan.
-                    let parsed = uuid::Uuid::parse_str(&u.0).ok()?;
-                    Some(crate::ai::AiWorldEntity {
-                        uuid: parsed,
-                        position: [t.translation.x, t.translation.y, t.translation.z],
-                        faction: faction.map(|f| f.0),
-                        ..Default::default()
+        let nearest_hostile =
+            |origin: [f32; 3], registry: &crate::ai::faction::FactionRegistry| -> Option<String> {
+                let self_faction_uuid = self_faction.map(|f| f.0)?;
+                let self_uuid_str = self_uuid.map(|u| u.0.as_str()).unwrap_or("");
+                let entities: Vec<crate::ai::AiWorldEntity> = hostile_scan_q
+                    .iter()
+                    .filter(|(u, _, _)| u.0 != self_uuid_str)
+                    .filter_map(|(u, t, faction)| {
+                        // Only canonically-UUID'd entities can take part: an
+                        // unparseable id would collapse to the nil UUID and let
+                        // two entities alias each other in the scan.
+                        let parsed = uuid::Uuid::parse_str(&u.0).ok()?;
+                        Some(crate::ai::AiWorldEntity {
+                            uuid: parsed,
+                            position: [t.translation.x, t.translation.y, t.translation.z],
+                            faction: faction.map(|f| f.0),
+                            ..Default::default()
+                        })
                     })
+                    .collect();
+                let world_view = crate::ai::WorldView {
+                    entity_pos: origin,
+                    entity_yaw: physics.yaw,
+                    entities,
+                    self_faction: Some(self_faction_uuid),
+                    ..crate::ai::WorldView::default()
+                };
+                let found = crate::ai::find_nearest_hostile(&world_view, registry)?;
+                hostile_scan_q.iter().find_map(|(u, _, _)| {
+                    (uuid::Uuid::parse_str(&u.0).ok() == Some(found)).then(|| u.0.clone())
                 })
-                .collect();
-            let world_view = crate::ai::WorldView {
-                entity_pos: [physics.x, 0.0, physics.z],
-                entity_yaw: physics.yaw,
-                entities,
-                self_faction: Some(self_faction_uuid),
-                ..crate::ai::WorldView::default()
             };
-            let found = crate::ai::find_nearest_hostile(&world_view, registry)?;
-            hostile_scan_q.iter().find_map(|(u, _, _)| {
-                (uuid::Uuid::parse_str(&u.0).ok() == Some(found)).then(|| u.0.clone())
-            })
-        };
 
         use crate::ai::selector::SelectorCandidate;
         let mut candidates: Vec<SelectorCandidate> = Vec::new();
@@ -1691,11 +1700,13 @@ fn ai_target_selection(
             }
         }
         // Source: objective-destroy — the explicit named Destroy target.
-        if let Some(obj) = objective_target.as_deref() {
-            if let Some(c) =
-                make_candidate(obj, crate::entities::ai_flag_hosts::SOURCE_OBJECTIVE.name())
-            {
-                candidates.push(c);
+        if defend_target.is_none() {
+            if let Some(obj) = objective_target.as_deref() {
+                if let Some(c) =
+                    make_candidate(obj, crate::entities::ai_flag_hosts::SOURCE_OBJECTIVE.name())
+                {
+                    candidates.push(c);
+                }
             }
         }
         // Source: objective-operate (issue #1162) — the target an active
@@ -1730,13 +1741,15 @@ fn ai_target_selection(
         // retain the standing lock regardless of faction (a human or
         // objective-driven assault lock on scenery). The eligibility guard
         // admits `source_retained` without a hostility check for that reason.
-        if let Some(cur) = current_lock.as_deref() {
-            let combat_appropriate = !destroy_is_untargeted || is_hostile(cur);
-            if combat_appropriate {
-                if let Some(c) =
-                    make_candidate(cur, crate::entities::ai_flag_hosts::SOURCE_RETAINED.name())
-                {
-                    candidates.push(c);
+        if defend_target.is_none() {
+            if let Some(cur) = current_lock.as_deref() {
+                let combat_appropriate = !destroy_is_untargeted || is_hostile(cur);
+                if combat_appropriate {
+                    if let Some(c) =
+                        make_candidate(cur, crate::entities::ai_flag_hosts::SOURCE_RETAINED.name())
+                    {
+                        candidates.push(c);
+                    }
                 }
             }
         }
@@ -1747,8 +1760,12 @@ fn ai_target_selection(
         // its entire job; every candidate still passes the selector's own
         // hostility + detectability + radar-horizon eligibility, so this only
         // ever locks a hostile actually in range.
-        if destroy_is_untargeted || is_static_point_defence {
-            if let Some(nearest) = nearest_hostile(registry) {
+        if destroy_is_untargeted || is_static_point_defence || defend_target.is_some() {
+            let origin = defend_target
+                .as_deref()
+                .and_then(|uuid| target_xz(uuid).map(|(x, z)| [x, 0.0, z]))
+                .unwrap_or([physics.x, 0.0, physics.z]);
+            if let Some(nearest) = nearest_hostile(origin, registry) {
                 if let Some(c) = make_candidate(
                     &nearest,
                     crate::entities::ai_flag_hosts::SOURCE_RADAR.name(),
@@ -2018,6 +2035,30 @@ fn top_destroy_objective_target(
             crate::core::messages::AiDirective::Destroy { target } => Some(target.as_str()),
             _ => None,
         }
+    })
+}
+
+/// Return the entity named by the highest-scored Patrol objective, when that
+/// objective explicitly presents a protected target.  This deliberately uses
+/// the human snapshot target rather than inventing a second directive variant:
+/// route-only Patrol objectives have no target and therefore retain their
+/// normal target-selection behaviour.
+fn top_defend_objective_target(
+    blackboards: Option<&crate::server_app::ShipSystemBlackboards>,
+) -> Option<&str> {
+    let bb = blackboards?
+        .0
+        .get(&crate::ship::system_registry::viewscreen_system_id())?;
+    let crate::core::messages::SystemBlackboard::Viewscreen(viewscreen) = bb else {
+        return None;
+    };
+    viewscreen.scored_objectives.iter().find_map(|objective| {
+        (objective.score > 0.0)
+            .then_some(&objective.directive)
+            .filter(|directive| {
+                matches!(directive, crate::core::messages::AiDirective::Patrol { .. })
+            })
+            .and_then(|_| objective.snapshot.targets.first().map(String::as_str))
     })
 }
 

@@ -1324,6 +1324,22 @@ text = "entity.alliance_cruiser.station.comms.tutorial.respond.text"
 anchor = "comms-current-message"
 trigger = { kind = "control_unused", control = "respond_to_message" }
 
+[[station]]
+id = "navigation"
+name = "Navigation"
+description = "entity.alliance_cruiser.station.comms.description"
+rank = "Ens."
+short_code = "NAV"
+console = "gui/cruiser/comms.html"
+human_seeking = true
+host_order = ["comms", "captain", "helm", "tactical", "science", "engineering"]
+visiting_rating = "Std"
+auxiliary = true
+
+[[station.rating]]
+name = "Std"
+automated_systems = []
+
 [[system]]
 id = "captain"
 kind = "captain"
@@ -1471,8 +1487,7 @@ power_group = "shields"
 [[system]]
 id = "navigation"
 kind = "navigation"
-station = "comms"
-human_seeking = true
+station = "navigation"
 
 [[system]]
 id = "power-reactor"

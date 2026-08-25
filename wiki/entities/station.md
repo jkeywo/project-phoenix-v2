@@ -3,7 +3,7 @@ title: Station
 type: entity
 tags: [station, lobby, roster, rating, ai, human-seeking]
 sources: [src/ship/config.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/lobby/stations_config.rs, src/ship/components.rs, src/ship/rating_systems.rs, assets/entities/alliance_destroyer.toml]
-updated: 2026-08-19
+updated: 2026-08-25
 ---
 
 # Station
@@ -15,6 +15,10 @@ seat.
 
 A fixed bridge seat a player can claim in the lobby. Stations replaced the
 old per-player-count console bundles in B1–B3 (issue #518).
+
+The Alliance Cruiser's Navigation is an auxiliary, human-seeking station. It
+is hosted first by Comms and retains its own Navigation system ownership when
+opened as a visiting console, without adding a claimable lobby seat.
 
 Each hull carries an authored roster of stations. A station owns one or more
 [Systems](./system.md); a console is chosen by the station's authored

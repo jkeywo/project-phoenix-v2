@@ -2115,7 +2115,7 @@
     // `from_label` and any id-bearing payload field are already resolved by
     // localiseHostPayload; the normaliser only fills the sentence template.
     if (typeof window.normalizeCoordinationPayload !== 'function') return;
-    const norm = window.normalizeCoordinationPayload(payload, from_label);
+    const norm = window.normalizeCoordinationPayload(payload, from_label, to_label);
 
     const container = document.getElementById('chatter-container');
     if (!container) return;
@@ -2131,9 +2131,9 @@
     // Create bubble element
     const bubble = document.createElement('div');
     bubble.className = 'chatter-bubble';
-    bubble.innerHTML = '<span class="chatter-from">' + escapeHtml(from_label)
-      + '</span><span class="chatter-arrow">→</span><span class="chatter-to">' + escapeHtml(to_label)
-      + '</span><span class="chatter-text">' + escapeHtml(text) + '</span>';
+    bubble.innerHTML = '<span class="chatter-from">[' + escapeHtml(norm.from)
+      + ']</span><span class="chatter-arrow"> → </span><span class="chatter-to">[' + escapeHtml(norm.to)
+      + ']</span><span class="chatter-text">: ' + escapeHtml(text) + '</span>';
 
     container.appendChild(bubble);
 

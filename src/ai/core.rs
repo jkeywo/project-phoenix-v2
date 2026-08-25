@@ -1043,7 +1043,7 @@ fn helm_destroy(
     let effective_range = world_view.entity_weapons_range.unwrap_or(maintain_range);
     let stop_surface_distance = effective_range * 0.8;
     let surface_distance = surface_distance_xz(
-        [pos[0], 0.0, pos[1]],
+        pos,
         // Doctrine ranges are measured from the ship's navigation origin.
         // Only the entity being approached expands that origin into its
         // visible surface; charging the self radius here would silently shift

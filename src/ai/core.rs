@@ -1045,9 +1045,11 @@ fn helm_destroy(
     // Moving ships already negotiate their shared combat envelope through the
     // doctrine/radar loop.  Static targets need their visible radius folded
     // into approach, otherwise a starbase's centre is treated as its hull.
-    let target_radius = (!target_entity.movable)
-        .then_some(target_entity.radius)
-        .unwrap_or(0.0);
+    let target_radius = if !target_entity.movable {
+        target_entity.radius
+    } else {
+        0.0
+    };
     let surface_distance = surface_distance_xz(
         pos,
         // Doctrine ranges are measured from the ship's navigation origin.

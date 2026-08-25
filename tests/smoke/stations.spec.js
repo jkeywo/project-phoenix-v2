@@ -137,8 +137,9 @@ test('ReleaseStation returns player to spectator', async ({ context }) => {
 // or losing a station broke it, and worse, a hull losing one would have made it
 // pass vacuously (the "overflow" player would just have taken the free seat).
 // The roster now comes off the wire from `Welcome.ship_stations`, which is the
-// same list the real lobby renders, so the test means "one more player than the
-// ship has seats becomes a spectator" for whatever ship is loaded.
+// same list the real lobby renders. Auxiliary stations are hosted tabs rather
+// than claimable seats, so the test fills only the direct roster before adding
+// one more player.
 test('a connector arriving after every station is filled becomes a spectator', async ({ context }) => {
   const serverPage = await createServerPage(context);
   const hostId = await readHostPeerId(serverPage);
@@ -147,7 +148,7 @@ test('a connector arriving after every station is filled becomes a spectator', a
   const welcome = await first.page.evaluate(
     () => window.__messages.find((m) => m.type === 'Welcome'),
   );
-  const roster = welcome.data.ship_stations.stations;
+  const roster = welcome.data.ship_stations.stations.filter((station) => !station.auxiliary);
   expect(roster.length, 'the ship must declare at least one station to fill').toBeGreaterThan(0);
 
   // `SelectStation` accepts either the station's display name or its id

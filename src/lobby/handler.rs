@@ -213,7 +213,11 @@ pub(crate) fn handle_identify(
                 .map(|p| p.station.is_some())
                 .unwrap_or(false);
             if !player_has_station {
-                let capacity = ship_stations.stations.len() as u32;
+                let capacity = ship_stations
+                    .stations
+                    .iter()
+                    .filter(|station| !station.auxiliary)
+                    .count() as u32;
                 let at_capacity = connected_with_stations >= capacity;
                 if at_capacity {
                     outbound.push((

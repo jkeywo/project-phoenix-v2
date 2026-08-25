@@ -2178,6 +2178,70 @@ fn joining_player_is_never_auto_assigned_a_station_in_lobby() {
 }
 
 #[test]
+fn joining_player_at_direct_seat_capacity_is_told_they_are_a_spectator() {
+    let stations = ShipStations {
+        stations: vec![
+            StationDef {
+                id: StationId("captain".into()),
+                name: "Captain".into(),
+                description: "Command the bridge.".into(),
+                rank: "Cpt.".into(),
+                short_code: "CPT".into(),
+                console: None,
+                ratings: vec!["Std".into()],
+                human_seeking: false,
+                host_order: vec![],
+                visiting_rating: None,
+                auxiliary: false,
+            },
+            StationDef {
+                id: StationId("navigation".into()),
+                name: "Navigation".into(),
+                description: "Plan the route.".into(),
+                rank: "Ens.".into(),
+                short_code: "NAV".into(),
+                console: None,
+                ratings: vec!["Std".into()],
+                human_seeking: true,
+                host_order: vec![StationId("captain".into())],
+                visiting_rating: Some("Std".into()),
+                auxiliary: true,
+            },
+        ],
+    };
+    let mut sessions = sessions_with("t1", "Alice");
+    sessions.set_station("t1", Some(StationId("captain".into())));
+    let msg = ClientMessage::Identify {
+        token: "t2".into(),
+        name: "Bob".into(),
+    };
+
+    let result = dispatch(
+        "t2",
+        &msg,
+        &mut sessions,
+        GamePhase::Lobby,
+        None,
+        &stations,
+        &default_ship_config(),
+        true,
+        &HashMap::new(),
+    );
+
+    assert!(result.outbound.iter().any(|(target, message)| {
+        matches!(target, Target::Token(token) if token == "t2")
+            && matches!(
+                message,
+                ServerMessage::StationAssigned {
+                    token,
+                    station: None,
+                    station_id: None,
+                } if token == "t2"
+            )
+    }));
+}
+
+#[test]
 fn existing_assigned_player_follows_next_when_second_player_joins() {
     let stations = ship_stations();
     let mut sessions = SessionManager::new();

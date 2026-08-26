@@ -1,0 +1,28 @@
+[global]
+seed = 1
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_destroyer.toml"
+name = "composition_gate_witness"
+
+[[deadline]]
+id = "composition_gate_deadline"
+label = "world.test.composition_gate_deadline.label"
+due_secs = 60.0
+visible_to = ["captain"]
+
+[script]
+setup = """
+on_world_loaded("composition_gate_arrived");
+on_deadline("composition_gate_deadline", "composition_gate_due");
+
+fn composition_gate_arrived(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/definitely_missing_from_composition_gate.toml"
+    });
+}
+
+fn composition_gate_due(ctx) {
+    ctx.flags.set("composition_gate_deadline_fired");
+}
+"""

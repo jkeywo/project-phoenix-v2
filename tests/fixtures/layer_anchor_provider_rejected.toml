@@ -1,0 +1,15 @@
+[global]
+seed = 1
+
+[anchors]
+ironveil_patrol_a = [10.0, 0.0, 0.0]
+ironveil_patrol_b = [20.0, 0.0, 0.0]
+
+[script]
+setup = """
+fn invalid_provider(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/definitely_missing_anchor_provider.toml"
+    });
+}
+"""

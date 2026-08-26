@@ -2351,6 +2351,27 @@ pub struct ScriptSpawnRef {
     pub overrides: Option<OverrideShape>,
 }
 
+/// One literal script-spawn reference with the resolved script unit that
+/// authored it (issue #1046).
+///
+/// Unlike [`ScriptSpawnRef`], whose `source_index` is meaningful only while
+/// scanning [`WorldConfig::script_sources`], this is stable after the script
+/// loader has resolved a sibling `.rhai` file or assigned an inline block its
+/// virtual path. Composition validation carries these references alongside the
+/// compiled set so findings can point at the actual script file and line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedScriptSpawnRef {
+    /// The resolved sibling path or inline virtual path
+    /// (`world.toml#script.<key>`).
+    pub source_path: String,
+    /// 1-based line within that resolved script unit.
+    pub line: usize,
+    /// The literal the call's `template_path` entry names.
+    pub template_path: String,
+    /// Whether the call's `overrides` entry can be accounted for statically.
+    pub overrides: Option<OverrideShape>,
+}
+
 /// Every literal `spawn_entity` template reference across a world's inline
 /// script bodies, in source-then-line order.
 ///
@@ -2380,6 +2401,29 @@ pub fn script_spawned_templates(world: &WorldConfig) -> Vec<ScriptSpawnRef> {
         }
     }
     out
+}
+
+/// Scan one resolved Rhai unit for literal `spawn_entity` template references.
+///
+/// This is the resolver-facing form of [`script_spawned_templates`]. Both
+/// routes delegate to the same lexical implementation below: callers must not
+/// grow a second parser for sibling scripts. Results retain lexical order
+/// within the unit and carry the unit's resolved path plus the exact 1-based
+/// source line.
+pub fn resolved_script_spawn_refs(
+    source_path: impl Into<String>,
+    source: &str,
+) -> Vec<ResolvedScriptSpawnRef> {
+    let source_path = source_path.into();
+    script_spawn_refs(source)
+        .into_iter()
+        .map(|spawn| ResolvedScriptSpawnRef {
+            source_path: source_path.clone(),
+            line: spawn.line,
+            template_path: spawn.template_path,
+            overrides: spawn.overrides,
+        })
+        .collect()
 }
 
 /// Scan an inline Rhai body for the `spawn_entity` calls it makes, and the

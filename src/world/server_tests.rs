@@ -1284,6 +1284,59 @@ fn compile_and_init_wire_a_scripted_trigger_into_the_runtime() {
     );
 }
 
+#[test]
+fn raw_root_sibling_spawn_composition_error_blocks_script_runtime() {
+    const WORLD_PATH: &str = "tests/fixtures/root_sibling_composition_rejected.toml";
+    let world_toml = std::fs::read_to_string(WORLD_PATH).expect("root fixture reads");
+    let world_config = crate::world::config::parse_world(&world_toml).expect("world parses");
+    let raw_value: toml::Value = toml::from_str(&world_toml).expect("valid toml");
+
+    set_script_activation_blocked(false);
+    let mut app = App::new();
+    app.insert_resource(world_config)
+        .insert_resource(RawWorldSource {
+            path: WORLD_PATH.to_string(),
+            toml: raw_value,
+        })
+        .add_systems(Startup, compile_world_scripts);
+    app.update();
+
+    assert!(
+        script_activation_blocked(),
+        "the resolved sibling spawn finding joins the existing atomic gate"
+    );
+    assert!(
+        !app.world().contains_resource::<WorldScriptRuntime>(),
+        "a rejected root installs no script runtime"
+    );
+    set_script_activation_blocked(false);
+}
+
+#[test]
+fn precompiled_root_scripts_are_not_composition_gated_a_second_time_at_startup() {
+    let compiled = crate::world::script::load::compile_scripts(&[
+        vellum_script::ScriptSource {
+            path: "fixture/precompiled.rhai".to_string(),
+            source: "fn release(ctx) { ctx.effects.spawn_entity(#{ template_path: \"assets/entities/missing_precompiled_1046.toml\", name: \"missing\", position: [0, 0, 0] }); }".to_string(),
+        },
+    ]);
+    assert_eq!(compiled.spawned_templates.len(), 1);
+
+    set_script_activation_blocked(false);
+    let mut app = App::new();
+    app.insert_resource(crate::world::config::WorldConfig::default())
+        .insert_resource(PreCompiledScripts(Some(compiled)))
+        .add_systems(Startup, compile_world_scripts);
+    app.update();
+
+    assert!(
+        !script_activation_blocked(),
+        "LoadPolicy::Activate already gated the precompiled branch"
+    );
+    assert!(app.world().contains_resource::<WorldScriptRuntime>());
+    set_script_activation_blocked(false);
+}
+
 /// Whether the objective manager reports `id` as `Completed`.
 fn objective_is_completed(app: &App, id: &str) -> bool {
     app.world()
@@ -3966,6 +4019,10 @@ const SHARED_Y: &str = "tests/fixtures/layer_shared_y.toml";
 const LAYER_DEADLINE: &str = "tests/fixtures/layer_deadline.toml";
 const NESTED_PARENT: &str = "tests/fixtures/layer_nested_parent.toml";
 const NESTED_CHILD: &str = "tests/fixtures/layer_nested_child.toml";
+const COMPOSITION_REJECTED: &str = "tests/fixtures/layer_composition_rejected.toml";
+const ANCHOR_PROVIDER: &str = "tests/fixtures/layer_anchor_provider.toml";
+const REJECTED_ANCHOR_PROVIDER: &str = "tests/fixtures/layer_anchor_provider_rejected.toml";
+const ANCHOR_CONSUMER: &str = "tests/fixtures/layer_anchor_consumer.toml";
 
 /// `layer_test_app` plus the trigger pipeline, so a layer's merged scripted
 /// trigger can be seen to FIRE rather than merely to be present.
@@ -4100,6 +4157,116 @@ fn a_layer_script_compiles_and_its_trigger_fires_after_load() {
         sr.handlers.len(),
         runtime.trigger_states.len(),
         "handlers stays index-aligned with trigger_states"
+    );
+}
+
+/// A composition finding refuses the complete layer before any part of its
+/// already-compiled script/entity payload reaches live state (issue #1046).
+#[test]
+fn a_composition_rejected_layer_merges_nothing_and_emits_no_world_loaded() {
+    let mut app = scripted_layer_test_app();
+    let entities_before = app
+        .world_mut()
+        .query::<&crate::entities::spawner::EntityUuid>()
+        .iter(app.world())
+        .count();
+
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: COMPOSITION_REJECTED.into(),
+            loader_path: None,
+        });
+    app.update();
+
+    let layer = app
+        .world()
+        .resource::<WorldLayerMap>()
+        .0
+        .get(COMPOSITION_REJECTED)
+        .expect("a refused layer is retained as the terminal failed sentinel");
+    assert!(!layer.is_active);
+    assert!(layer.spawned_entities.is_empty(), "no entity was spawned");
+    let entities_after = app
+        .world_mut()
+        .query::<&crate::entities::spawner::EntityUuid>()
+        .iter(app.world())
+        .count();
+    assert_eq!(entities_after, entities_before, "the ECS gained no entity");
+
+    assert!(
+        !app.world().contains_resource::<WorldScriptRuntime>(),
+        "no AST, handler table, deadline handler, or callback queue was installed"
+    );
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert!(
+        runtime.trigger_states.is_empty(),
+        "no scripted handler merged"
+    );
+    assert!(runtime.deadlines.is_empty(), "no layer deadline was armed");
+    assert!(
+        runtime
+            .pending_world_events
+            .iter()
+            .all(|event| !matches!(event, WorldEvent::WorldLoaded)),
+        "a refused layer must never become observable as WorldLoaded"
+    );
+}
+
+/// The validation context is rebuilt for each item in one drained layer-change
+/// batch (issue #1046): only providers that have already activated contribute
+/// anchors to a later layer.
+#[test]
+fn same_drain_layer_anchor_visibility_is_ordered_and_active_only() {
+    fn queue_pair(app: &mut App, first: &str, second: &str) {
+        let mut pending = app.world_mut().resource_mut::<PendingWorldLayerChanges>();
+        for path in [first, second] {
+            pending.0.push(WorldLayerChange::Load {
+                path: path.to_string(),
+                loader_path: None,
+            });
+        }
+    }
+
+    fn active(app: &App, path: &str) -> bool {
+        app.world()
+            .resource::<WorldLayerMap>()
+            .0
+            .get(path)
+            .is_some_and(|layer| layer.is_active)
+    }
+
+    let mut provider_first = scripted_layer_test_app();
+    queue_pair(&mut provider_first, ANCHOR_PROVIDER, ANCHOR_CONSUMER);
+    provider_first.update();
+    provider_first.update(); // applies the consumer deferred for its first AST set
+    assert!(active(&provider_first, ANCHOR_PROVIDER));
+    assert!(
+        active(&provider_first, ANCHOR_CONSUMER),
+        "a provider activated earlier in the same drain satisfies the consumer"
+    );
+
+    let mut consumer_first = scripted_layer_test_app();
+    queue_pair(&mut consumer_first, ANCHOR_CONSUMER, ANCHOR_PROVIDER);
+    consumer_first.update();
+    assert!(active(&consumer_first, ANCHOR_PROVIDER));
+    assert!(
+        !active(&consumer_first, ANCHOR_CONSUMER),
+        "a later provider cannot retroactively satisfy an already-refused consumer"
+    );
+
+    let mut rejected_provider = scripted_layer_test_app();
+    queue_pair(
+        &mut rejected_provider,
+        REJECTED_ANCHOR_PROVIDER,
+        ANCHOR_CONSUMER,
+    );
+    rejected_provider.update();
+    assert!(!active(&rejected_provider, REJECTED_ANCHOR_PROVIDER));
+    assert!(
+        !active(&rejected_provider, ANCHOR_CONSUMER),
+        "an inactive failed sentinel contributes none of its authored anchors"
     );
 }
 

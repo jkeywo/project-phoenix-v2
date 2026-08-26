@@ -1413,12 +1413,97 @@ fn release(ctx) {
     );
 }
 
+/// Once a caller supplies the exact resolved source set, it replaces the
+/// config's inline-only scan rather than being appended to it. This is the
+/// anti-duplication edge for #1046 and the seam sibling `.rhai` layers use.
+#[test]
+fn resolved_script_refs_replace_the_inline_config_scan_and_own_the_finding_site() {
+    let layer = cfg(r#"
+[script]
+setup = """
+fn inline(ctx) {
+    ctx.effects.spawn_entity(#{ template_path: "assets/entities/missing_inline.toml" });
+}
+"""
+"#);
+    let resolved = crate::world::config::resolved_script_spawn_refs(
+        "assets/worlds/resolved_wave.rhai",
+        "fn resolved(ctx) {\n    ctx.effects.spawn_entity(#{ template_path: \"assets/entities/missing_resolved.toml\" });\n}",
+    );
+    let source = WorldSource::new("assets/worlds/layer.toml", "", &layer)
+        .with_resolved_script_spawns(&resolved);
+    let fragments = std::collections::BTreeMap::<String, String>::new();
+    let findings = validate_supporting_world(
+        &source,
+        &MemoryTemplateLoader::authoritative_empty(),
+        &fragments,
+        &[],
+    );
+
+    let unresolved: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding.category == "unresolvable-template")
+        .collect();
+    assert_eq!(
+        unresolved.len(),
+        1,
+        "resolved refs are not appended: {findings:?}"
+    );
+    assert_eq!(
+        unresolved[0].source.reference,
+        "assets/entities/missing_resolved.toml"
+    );
+    assert_eq!(
+        unresolved[0].source.file,
+        "assets/worlds/resolved_wave.rhai"
+    );
+    assert_eq!(unresolved[0].source.line, Some(2));
+    assert!(
+        findings
+            .iter()
+            .all(|finding| { finding.source.reference != "assets/entities/missing_inline.toml" }),
+        "the config-derived inline ref must not be scanned a second time: {findings:?}"
+    );
+}
+
 /// …and its doctrine is anchor-checked the same way too — issue #888's guard
 /// reaching a script-spawned hull for the first time.
 ///
 /// No `overrides` key in the spawn map, so the template's doctrine IS the
 /// effective doctrine and the finding is an ERROR: the same severity the
 /// declarative twin (`doctrine_anchor_declared_nowhere_is_rejected`) gets.
+#[test]
+fn resolved_root_script_gate_is_narrow_and_doctrine_keeps_the_sibling_site() {
+    let root = cfg(r#"
+[[entity]]
+template_path = "assets/entities/missing_static.toml"
+name = "static"
+
+[script]
+setup = "fn inline(ctx) { ctx.effects.spawn_entity(#{ template_path: \"assets/entities/missing_inline.toml\" }); }"
+"#);
+    let resolved = crate::world::config::resolved_script_spawn_refs(
+        "assets/worlds/root_wave.rhai",
+        "fn release(ctx) {\n    ctx.effects.spawn_entity(#{ template_path: \"assets/entities/patroller.toml\", name: \"wave\", position: [0, 0, 0] });\n}",
+    );
+    let fragments = std::collections::BTreeMap::<String, String>::new();
+    let findings =
+        validate_resolved_script_spawns(&root, &resolved, &patroller_templates(), &fragments);
+
+    assert!(findings.iter().all(|finding| {
+        finding.source.reference != "assets/entities/missing_static.toml"
+            && finding.source.reference != "assets/entities/missing_inline.toml"
+    }));
+    let anchors: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding.category == "unresolved-anchor" && finding.is_error())
+        .collect();
+    assert_eq!(anchors.len(), 2, "findings: {findings:?}");
+    assert!(anchors.iter().all(|finding| {
+        finding.source.file == "assets/worlds/root_wave.rhai" && finding.source.line == Some(2)
+    }));
+}
+
 #[test]
 fn script_spawn_with_an_undeclared_doctrine_anchor_is_rejected() {
     let root = cfg(r#"

@@ -326,6 +326,8 @@ entities:
       status: implemented
       confidence: confirmed
       title: Rhai Script Loader and Cross-Reference Validation (M1, #994)
+      rationale:
+        - "Issue #1046 scans literal `ctx.effects.spawn_entity` template references from the exact path-sorted `ScriptSource` set the loader resolved. `CompiledScripts.spawned_templates` retains the resolved sibling or inline-virtual path and 1-based line. A validation pass that receives this set uses it instead of re-scanning `WorldConfig`'s inline-only bodies, so sibling `.rhai` spawns are covered and inline references are not duplicated. Computed paths remain legal and are guarded only when dispatched at runtime."
       summary: "Issues #979 and #994. `load.rs` resolves `script = \"…\"` sibling `.rhai` files and lifts inline `[script.*]` TOML blocks to virtual paths through a single injected `ScriptResolver`, landing ASTs in a sorted-path `BTreeMap<String, AST>` (`CompiledScripts`) that feeds `vellum_script::content_hash`. `validate.rs` walks `AST::iter_functions()` to prove every registered handler name and every TOML `script = \"fn\"` reference (both `[[trigger]]` and `[[comms]]`) resolves at load, emitting `crate::world::validate::WorldFinding`s so the atomic activation gate keeps working. Issue #994 adds `validate_flag_opassign`: a lexical load-time lint that REJECTS `+=` on the `flags` accessor (`FLAG_OPASSIGN_NOT_COMPOSABLE`), because Rhai silently degrades it to a non-composable absolute set. Issue #864 turns that content hash into a SAVE BINDING: `load_world_scripts` records it into `content_ledger` under `script_ledger_key` (`<world path>#scripts`), so `snapshot::content_digest` folds the compiled script set and `vellum_save::Versions::check` refuses a save whose scripts have since moved — the same dimension an edited entity template moves. On wasm the ledger is frozen in `wasm_init` before `Startup` compiles, so a browser save binds through the world TOML's own recorded text (which carries every inline `[script]` block, i.e. the whole shipped set) rather than through this record."
     architecture:
       kind: content-loader
@@ -334,9 +336,11 @@ entities:
     implementation:
       status: observed
       paths:
+        - src/world/config.rs
         - src/world/script/load.rs
         - src/world/script/validate.rs
-      symbols: [ScriptResolver, CompiledScripts, lift_world_scripts, compile_scripts, load_world_scripts, script_ledger_key, validate_registrations, validate_script_triggers, validate_flag_opassign, FLAG_OPASSIGN_NOT_COMPOSABLE]
+        - src/world/validate.rs
+      symbols: [ScriptResolver, CompiledScripts, ResolvedScriptSpawnRef, resolved_script_spawn_refs, lift_world_scripts, compile_scripts, load_world_scripts, script_ledger_key, validate_registrations, validate_script_triggers, validate_flag_opassign, FLAG_OPASSIGN_NOT_COMPOSABLE]
       tests: [cargo test]
 
   - component: scenario-script-editor-host

@@ -168,6 +168,12 @@ pub struct WorldSource<'a> {
     pub path: String,
     pub toml: &'a str,
     pub config: &'a WorldConfig,
+    /// Spawn references scanned from the exact resolved script set compiled for
+    /// this source (issue #1046). `None` retains the inline-config scan used by
+    /// callers that have not compiled scripts; `Some`, including an empty slice,
+    /// is authoritative and replaces that scan so inline units are not counted
+    /// twice and sibling `.rhai` units are not missed.
+    resolved_script_spawns: Option<&'a [crate::world::config::ResolvedScriptSpawnRef]>,
 }
 
 impl<'a> WorldSource<'a> {
@@ -176,7 +182,18 @@ impl<'a> WorldSource<'a> {
             path: path.into(),
             toml,
             config,
+            resolved_script_spawns: None,
         }
+    }
+
+    /// Use the literal spawn references from this source's resolved compiled
+    /// script set for composition validation.
+    pub fn with_resolved_script_spawns(
+        mut self,
+        spawns: &'a [crate::world::config::ResolvedScriptSpawnRef],
+    ) -> Self {
+        self.resolved_script_spawns = Some(spawns);
+        self
     }
 
     /// The child-world alias for this source: the file stem of its path
@@ -551,14 +568,24 @@ struct SpawnedInstance<'a> {
     /// `overrides: None` beside `doctrine_may_differ: true` is the honest pair:
     /// nothing here to merge, and a reason the merged result is unknowable.
     doctrine_may_differ: bool,
-    /// Where a script instance was scanned from: `(source_index, line)` into
-    /// [`WorldConfig::script_sources`]. `None` for a declarative instance, whose
-    /// site is found in the world TOML by name.
+    /// Where a script instance was scanned from. `None` for a declarative
+    /// instance, whose site is found in the world TOML by name.
     ///
     /// Carried so a finding can point at the SPAWN CALL rather than at the first
     /// textual occurrence of the template path — which, for a hull a world both
     /// declares and re-spawns, is a different place entirely.
-    script_site: Option<(usize, usize)>,
+    script_site: Option<ScriptSpawnSite>,
+}
+
+/// Exact source provenance for a script-authored spawn reference.
+#[derive(Clone, Debug)]
+enum ScriptSpawnSite {
+    /// The legacy/config-only scan: index into `WorldConfig::script_sources`,
+    /// with a line relative to that inline body.
+    Inline { source_index: usize, line: usize },
+    /// A resolved compiled unit: sibling path or inline virtual path, with a
+    /// line relative to that unit.
+    Resolved { source_path: String, line: usize },
 }
 
 impl SpawnedInstance<'_> {
@@ -587,8 +614,20 @@ impl SpawnedInstance<'_> {
     }
 
     fn exact_site(&self, src: &WorldSource) -> Option<usize> {
-        let (source_index, line) = self.script_site?;
-        script_spawn_line(src, source_index, line)
+        match self.script_site.as_ref()? {
+            ScriptSpawnSite::Inline { source_index, line } => {
+                script_spawn_line(src, *source_index, *line)
+            }
+            ScriptSpawnSite::Resolved { line, .. } => Some(*line),
+        }
+    }
+
+    /// The authored file that should own a finding for this instance.
+    fn site_file(&self, src: &WorldSource) -> String {
+        match self.script_site.as_ref() {
+            Some(ScriptSpawnSite::Resolved { source_path, .. }) => source_path.clone(),
+            _ => src.path.clone(),
+        }
     }
 }
 
@@ -676,19 +715,25 @@ impl SpawnedInstance<'_> {
 /// "computed is invisible" bargain above, and it fails at runtime as it always
 /// did.
 ///
-/// # Where this gate does not run at all
+/// # Root activation and later supporting layers
 ///
-/// Not a property of this walk, but the thing most likely to mislead a reader
-/// who has just been told the gate now sees inside scripts: it runs for the
-/// world the boot ACTIVATES and its `extra_worlds` children, and not for a
-/// layer loaded later. `world::load`'s [`LoadPolicy::Merge`] arm — the path
-/// `world::layers` and the scenario applier take — returns
-/// `findings: Vec::new()` unconditionally, so nothing here is consulted for a
-/// merged layer's entities, declarative or scripted. A layer that spawns a hull
-/// from script is exactly as unchecked as it was before issue #1046.
+/// The boot [`LoadPolicy::Activate`] gate runs this walk over the full root +
+/// `extra_worlds` composition. A later [`LoadPolicy::Merge`] still returns no
+/// whole-composition findings itself, because its caller is joining an already
+/// active world. Before applying that result, `world::layers` instead calls
+/// [`validate_supporting_world`] over the candidate's declarative and exact
+/// resolved-script spawn surface. That narrow gate checks template
+/// composition/resolution and doctrine before UUID minting or runtime merge.
+///
+/// Its root + currently-active + candidate anchor union is deliberately a
+/// permissive VALIDATION namespace, not proof that runtime doctrine lookup can
+/// resolve an anchor owned only by a child. The runtime lookup remains a
+/// separate concern; validation must not reject a composition the authored
+/// layer contract permits.
 ///
 /// [`LoadPolicy::Merge`]: crate::world::load::LoadPolicy::Merge
-fn collect_spawned_instances(config: &WorldConfig) -> Vec<SpawnedInstance<'_>> {
+fn collect_spawned_instances<'a>(src: &'a WorldSource<'a>) -> Vec<SpawnedInstance<'a>> {
+    let config = src.config;
     let mut out: Vec<SpawnedInstance<'_>> = config
         .entities
         .iter()
@@ -725,21 +770,42 @@ fn collect_spawned_instances(config: &WorldConfig) -> Vec<SpawnedInstance<'_>> {
         }
     }
 
-    for spawn in crate::world::config::script_spawned_templates(config) {
-        out.push(SpawnedInstance {
-            // No `name` to reach for: the scan reads the spawn map, and the
-            // name entry is as likely to be computed as the template is. The
-            // path is the identity a finding can offer; the SITE comes from
-            // `script_site` below, which is exact.
-            label: spawn.template_path.clone(),
-            template_path: Cow::Owned(spawn.template_path),
-            overrides: None,
-            doctrine_may_differ: matches!(
-                spawn.overrides,
-                Some(crate::world::config::OverrideShape::MayRestateDoctrine)
-            ),
-            script_site: Some((spawn.source_index, spawn.line)),
-        });
+    if let Some(resolved) = src.resolved_script_spawns {
+        for spawn in resolved {
+            out.push(SpawnedInstance {
+                label: spawn.template_path.clone(),
+                template_path: Cow::Owned(spawn.template_path.clone()),
+                overrides: None,
+                doctrine_may_differ: matches!(
+                    spawn.overrides,
+                    Some(crate::world::config::OverrideShape::MayRestateDoctrine)
+                ),
+                script_site: Some(ScriptSpawnSite::Resolved {
+                    source_path: spawn.source_path.clone(),
+                    line: spawn.line,
+                }),
+            });
+        }
+    } else {
+        for spawn in crate::world::config::script_spawned_templates(config) {
+            out.push(SpawnedInstance {
+                // No `name` to reach for: the scan reads the spawn map, and the
+                // name entry is as likely to be computed as the template is. The
+                // path is the identity a finding can offer; the SITE comes from
+                // `script_site` below, which is exact.
+                label: spawn.template_path.clone(),
+                template_path: Cow::Owned(spawn.template_path),
+                overrides: None,
+                doctrine_may_differ: matches!(
+                    spawn.overrides,
+                    Some(crate::world::config::OverrideShape::MayRestateDoctrine)
+                ),
+                script_site: Some(ScriptSpawnSite::Inline {
+                    source_index: spawn.source_index,
+                    line: spawn.line,
+                }),
+            });
+        }
     }
 
     out
@@ -885,7 +951,7 @@ fn validate_doctrine_anchors_in(
     // silenced the other. The error is the one that has to survive.
     let mut reported: HashSet<(String, String, bool)> = HashSet::new();
 
-    for inst in collect_spawned_instances(src.config) {
+    for inst in collect_spawned_instances(src) {
         for (anchor, kind) in doctrine_anchor_refs(&inst, loader) {
             if declared_anchors.contains(anchor.as_str()) {
                 continue;
@@ -933,7 +999,7 @@ fn validate_doctrine_anchors_in(
                 category: "unresolved-anchor",
                 message,
                 source: SourceLocation {
-                    file: src.path.clone(),
+                    file: inst.site_file(src),
                     // The anchor name is absent from this world by definition,
                     // so point at the spawn site instead.
                     line: inst.site_line(src),
@@ -1025,7 +1091,7 @@ fn validate_civilian_routes_in(
     let mut findings = Vec::new();
     // Severity in the key, for the reason `validate_doctrine_anchors_in` gives.
     let mut reported: HashSet<(String, String, bool)> = HashSet::new();
-    for inst in collect_spawned_instances(src.config) {
+    for inst in collect_spawned_instances(src) {
         let Some(route) = civilian_route_ref(&inst, loader) else {
             continue;
         };
@@ -1066,7 +1132,7 @@ fn validate_civilian_routes_in(
             category: "unresolved-route",
             message,
             source: SourceLocation {
-                file: src.path.clone(),
+                file: inst.site_file(src),
                 line: inst.site_line(src),
                 reference: route,
             },
@@ -1107,7 +1173,7 @@ fn validate_template_composition_in(
     seen: &mut HashSet<String>,
 ) -> Vec<WorldFinding> {
     let mut findings = Vec::new();
-    for inst in collect_spawned_instances(src.config) {
+    for inst in collect_spawned_instances(src) {
         // Key on the CANONICAL path, matching what `composition_finding` does
         // internally. Authored spellings of one template vary freely —
         // `./assets/x.toml`, `assets/./x.toml`, backslashes on Windows — and
@@ -1243,7 +1309,7 @@ fn validate_template_resolution_in(
     let absence_is_final = loader.absence_is_final();
 
     let mut findings = Vec::new();
-    for inst in collect_spawned_instances(src.config) {
+    for inst in collect_spawned_instances(src) {
         let Some(template) = loader.load_template(&inst.template_path) else {
             if !absence_is_final {
                 continue;
@@ -1264,7 +1330,7 @@ fn validate_template_resolution_in(
                     inst.label, inst.template_path, src.path
                 ),
                 source: SourceLocation {
-                    file: src.path.clone(),
+                    file: inst.site_file(src),
                     line: inst.site_line_by_path(src),
                     reference: inst.template_path.to_string(),
                 },
@@ -1297,7 +1363,7 @@ fn validate_template_resolution_in(
                         inst.label, inst.template_path, src.path
                     ),
                     source: SourceLocation {
-                        file: src.path.clone(),
+                        file: inst.site_file(src),
                         line: inst.site_line(src),
                         reference: inst.template_path.to_string(),
                     },
@@ -1431,6 +1497,79 @@ pub fn validate_template_composition(
     let src = WorldSource::new(path, toml, config);
     let mut seen = HashSet::new();
     validate_template_composition_in(&src, fragments, &mut seen)
+}
+
+/// Validate the spawnable template surface contributed by one additive
+/// supporting world (issue #1046).
+///
+/// A layer joins an already-active composition, so it must not re-run the
+/// root's full authoring gate or reinterpret root-local entity/objective
+/// namespaces. The relevant additive contract is narrower: every template the
+/// new world may spawn must compose and resolve, and its effective doctrine may
+/// name only anchors declared by the active composition or by the new layer
+/// itself. Any error refuses that layer before UUID assignment or runtime merge.
+pub fn validate_supporting_world(
+    source: &WorldSource,
+    template_loader: &dyn TemplateLoader,
+    fragments: &dyn FragmentSource,
+    active_anchors: &[String],
+) -> Vec<WorldFinding> {
+    let mut findings = Vec::new();
+
+    let mut composed_seen = HashSet::new();
+    findings.extend(validate_template_composition_in(
+        source,
+        fragments,
+        &mut composed_seen,
+    ));
+
+    let mut resolve_seen = HashSet::new();
+    findings.extend(validate_template_resolution_in(
+        source,
+        template_loader,
+        &mut resolve_seen,
+    ));
+
+    let mut declared_anchors: HashSet<&str> = active_anchors.iter().map(String::as_str).collect();
+    declared_anchors.extend(source.config.anchors.keys().map(String::as_str));
+    findings.extend(validate_doctrine_anchors_in(
+        source,
+        &declared_anchors,
+        template_loader,
+    ));
+
+    findings
+}
+
+/// Validate only the literal spawn-template references from one root world's
+/// already-resolved script source set (issue #1046).
+///
+/// The browser compiles its root scripts in the pre-spawn Startup chain rather
+/// than through [`crate::world::load::LoadPolicy::Activate`]. This is its narrow
+/// companion to the full root-composition gate: it checks composition,
+/// resolution/overrides and doctrine for the exact compiled references, while
+/// leaving declarative/static instances to [`activation_findings`] so those
+/// surfaces are not revalidated here.
+///
+/// `config.anchors` is a permissive VALIDATION namespace. Supplying an anchor
+/// here says only that the authored composition permits the reference; it does
+/// not add an anchor to, or prove lookup against, the runtime's base-world
+/// resolution table.
+pub fn validate_resolved_script_spawns(
+    config: &WorldConfig,
+    spawns: &[crate::world::config::ResolvedScriptSpawnRef],
+    template_loader: &dyn TemplateLoader,
+    fragments: &dyn FragmentSource,
+) -> Vec<WorldFinding> {
+    // A deliberately empty declarative surface: `with_resolved_script_spawns`
+    // is authoritative, and only the anchors are retained for doctrine's
+    // permissive validation namespace.
+    let script_surface = WorldConfig {
+        anchors: config.anchors.clone(),
+        ..WorldConfig::default()
+    };
+    let source = WorldSource::new("", "", &script_surface).with_resolved_script_spawns(spawns);
+    validate_supporting_world(&source, template_loader, fragments, &[])
 }
 
 /// Reject an `[[entity]]` whose `transform.relative_to` names nothing this

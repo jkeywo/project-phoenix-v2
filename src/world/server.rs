@@ -17,7 +17,7 @@ use crate::world::dispatch::{
     dispatch_action, ActionCmd, DispatchContext, DispatchResult, LayerView,
     WORLD_MODIFIER_SOURCE_ID,
 };
-use crate::world::layers::{evaluate_layer_load, LayerLoadOutcome};
+use crate::world::layers::{evaluate_layer_load, LayerLoadOutcome, LayerValidationContext};
 use crate::world::load::{load, LoadError, LoadPolicy, LoadRequest, MemoryReader};
 use crate::world::script::effects::BufferedEffect;
 use crate::world::script::engine::{RuntimeHost, ScriptTrigger};
@@ -1060,10 +1060,18 @@ pub(crate) fn insert_raw_world_source_resource(
 /// and inserts no runtime. Headless additionally hard-fails the build for a
 /// script error (see `build_headless_app`), so a broken script never reaches a
 /// running authoritative host.
+///
+/// The browser's [`RawWorldSource`] arm also validates the exact compiled
+/// script-spawn references for template composition/resolution and doctrine,
+/// because browser boot does not pass through `LoadPolicy::Activate`. The
+/// [`PreCompiledScripts`] arm deliberately does not repeat that gate: native
+/// Activate already consumed the same compiled references before handing them
+/// here.
 pub(crate) fn compile_world_scripts(
     mut commands: Commands,
     pre: Option<ResMut<PreCompiledScripts>>,
     raw: Option<Res<RawWorldSource>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
 ) {
     // Reset the per-load gate: every world load writes it fresh, so a script-free
     // world (or an app that never runs this system) reads `false`.
@@ -1077,6 +1085,7 @@ pub(crate) fn compile_world_scripts(
     // there, which short-circuits exactly as the absent-`script`-key arm below.
     // The browser (no `PreCompiledScripts`) falls through to the `RawWorldSource`
     // compile it always did.
+    let mut resolved_spawn_findings = Vec::new();
     let compiled = if let Some(mut pre) = pre {
         let Some(compiled) = pre.0.take() else {
             return;
@@ -1105,16 +1114,55 @@ pub(crate) fn compile_world_scripts(
         if let Some(digest) = &compiled.ledger_digest {
             digest.apply();
         }
+        // Browser boot does not pass through `LoadPolicy::Activate`, so its
+        // already-compiled exact source set needs the root script-spawn half of
+        // the composition gate here, before any runtime or spawn can land.
+        // Deliberately confined to RawWorldSource: PreCompiledScripts came from
+        // the native Activate gate and must not be validated twice.
+        if let Some(config) = world_config.as_deref() {
+            let cache = crate::entities::config_cache::get_config_cache();
+            let templates = crate::entities::loader::SpawnTemplateLoader {
+                cache: &cache,
+                host: &crate::entities::loader::WasmTemplateLoader,
+            };
+            resolved_spawn_findings = crate::world::validate::validate_resolved_script_spawns(
+                config,
+                &compiled.spawned_templates,
+                &templates,
+                &crate::entities::include_resolve::HostFragmentSource,
+            );
+        }
         compiled
     };
 
-    if crate::world::validate::has_error(&compiled.findings) {
+    let script_blocked = crate::world::validate::has_error(&compiled.findings);
+    let spawn_blocked = crate::world::validate::has_error(&resolved_spawn_findings);
+    if script_blocked || spawn_blocked {
         for f in compiled.findings.iter().filter(|f| f.is_error()) {
             bevy::log::error!(
                 target: "world",
                 "compile_world_scripts: script [error] {}: {}",
                 f.category, f.message
             );
+        }
+        for f in resolved_spawn_findings.iter().filter(|f| f.is_error()) {
+            match f.source.line {
+                Some(line) => bevy::log::error!(
+                    target: "world",
+                    "compile_world_scripts: composition [error] {}:{} [{}] {}",
+                    f.source.file,
+                    line,
+                    f.category,
+                    f.message
+                ),
+                None => bevy::log::error!(
+                    target: "world",
+                    "compile_world_scripts: composition [error] {} [{}] {}",
+                    f.source.file,
+                    f.category,
+                    f.message
+                ),
+            }
         }
         // Block activation atomically with the composition gate — spawn nothing.
         set_script_activation_blocked(true);
@@ -4396,6 +4444,33 @@ fn apply_loaded_layer(
 /// timestep it is a few seconds of retrying before the log says so.
 const MAX_TOML_RETRIES: u32 = 300;
 
+/// Snapshot the doctrine-anchor namespace visible to one layer evaluation.
+///
+/// Rebuilt immediately before every load decision, rather than once per drain:
+/// a scriptless layer applied earlier in the same authored batch is already in
+/// `layer_map` and may legitimately provide an anchor to the next layer. Failed
+/// sentinels and inactive entries contribute nothing.
+fn layer_validation_context<'a>(
+    base_world: Option<&crate::world::config::WorldConfig>,
+    layer_map: &WorldLayerMap,
+    template_loader: &'a dyn crate::entities::loader::TemplateLoader,
+    fragment_source: &'a dyn crate::entities::include_resolve::FragmentSource,
+) -> LayerValidationContext<'a> {
+    let root_anchors = base_world
+        .into_iter()
+        .flat_map(|world| world.anchors.keys().cloned());
+    let layer_anchors = layer_map
+        .0
+        .values()
+        .filter(|layer| layer.is_active)
+        .flat_map(|layer| layer.anchors.keys().cloned());
+    LayerValidationContext::new(
+        template_loader,
+        fragment_source,
+        root_anchors.chain(layer_anchors),
+    )
+}
+
 /// Bevy system: drain `PendingWorldLayerChanges` and apply each `LoadWorld` or
 /// `UnloadWorld` command to `WorldLayerMap` and `WorldContentRuntime`.
 ///
@@ -4476,6 +4551,8 @@ fn apply_world_layer_changes(
     // drain: `world::layers` keeps the read injected so the decision stays pure,
     // and this applier is the impure half that owns filesystem / bridge access.
     let script_resolver = crate::entities::config_cache::production_script_resolver();
+    let template_loader = crate::entities::loader::WasmTemplateLoader;
+    let fragment_source = crate::entities::include_resolve::HostFragmentSource;
 
     for change in changes {
         match change {
@@ -4552,11 +4629,18 @@ fn apply_world_layer_changes(
                         }
                     }
                 }
+                let validation = layer_validation_context(
+                    base_world.as_deref(),
+                    &layer_map,
+                    &template_loader,
+                    &fragment_source,
+                );
                 let result = evaluate_layer_load(
                     &path,
                     already_loaded,
                     toml_str.as_deref(),
                     &script_resolver,
+                    &validation,
                     || {
                         crate::world_id::mint_id_with(
                             id_mint.as_deref(),
@@ -4677,11 +4761,18 @@ fn apply_world_layer_changes(
                             layer_map.0.insert(path, WorldRuntime::default());
                         }
                         WorldFetchState::Ready(_) => {
+                            let validation = layer_validation_context(
+                                base_world.as_deref(),
+                                &layer_map,
+                                &template_loader,
+                                &fragment_source,
+                            );
                             let result = evaluate_layer_load(
                                 &path,
                                 layer_map.0.contains_key(&path),
                                 Some(&toml),
                                 &script_resolver,
+                                &validation,
                                 || {
                                     crate::world_id::mint_id_with(
                                         id_mint.as_deref(),

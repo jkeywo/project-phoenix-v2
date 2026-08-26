@@ -2,7 +2,7 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/world/config.rs, src/world/server.rs, src/world/deadlines.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/include_resolve.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
+sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/include_resolve.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
 updated: 2026-08-26
 ---
 
@@ -61,6 +61,23 @@ requests that sibling through the existing overlay-aware fetch bridge before
 attempting activation. Pending, failed and legitimately empty script sources
 are distinct states. A missing sibling refuses the whole layer once—entities,
 handlers and deadlines never activate partially.
+
+After compilation, the layer owns a deterministic list of literal
+`ctx.effects.spawn_entity(...)` references from the exact resolved source set,
+ordered by source path and then lexical line. Composition validation consumes
+that list instead of rescanning the inline script, so a sibling reference is
+not missed and an inline reference is not reported twice. Each error points at
+the script file and line that authored it. Computed template-path expressions
+remain legal and are resolved only when the script executes.
+
+The candidate is composition-gated before entity UUID allocation, AST/handler
+registration, deadline arming or `WorldLoaded`. Its doctrine anchors are the
+union of the root world's anchors, anchors from currently active supporting
+layers, and its own declarations. The union is recomputed before every queued
+change: a successfully activated earlier layer can satisfy a later layer in
+the same batch, while a later or rejected provider cannot. Browser validation
+uses the overlay-aware template and fragment sources and preserves their
+non-final pending-cache semantics.
 
 Layer script state is owned by the layer path. The same sibling AST may be
 shared by several layers, but triggers, callbacks, delayed effects, Comms opens
@@ -238,7 +255,7 @@ mechanism fixtures, deliberately outside `assets/entities/` where every
 3. **Renderer backdrop:** `RendererPlugin` attaches the shared `assets/skybox/phoenix_space_cubemap.png` cubemap to `GameCamera`; it is independent of world TOML content.
 4. **`spawn_world_ambient_light` (`PostStartup`)** reads `WorldConfig.ambient_light` and inserts the `AmbientLight` resource.
 5. **`WorldSetup` broadcast** carries the per-instance entity snapshots to clients on `GameStart` and re-broadcasts via `Welcome` to late joiners.
-6. **Supporting layer changes:** `apply_world_layer_changes` atomically activates retained TOML/script/entities/triggers/deadlines and publishes `WorldLoaded` only afterwards. It runs before scripted callback draining, so an unload on a callback's due tick retracts the callback deterministically.
+6. **Supporting layer changes:** `apply_world_layer_changes` composition-validates retained TOML and its exact resolved script sources before UUID minting, then atomically activates entities/triggers/deadlines and publishes `WorldLoaded` only afterwards. Validation sees root + currently active + candidate doctrine anchors and is recomputed per queued change. It runs before scripted callback draining, so an unload on a callback's due tick retracts the callback deterministically.
 7. **For the rest of the session:** anchors and ambient light are immutable. Entities can be destroyed (asteroids, hull-zero stations); triggers, callbacks, deadlines, Comms and objectives mutate through authoritative runtime state.
 
 ## Migration notes (2026-05 entity-schema refactor)

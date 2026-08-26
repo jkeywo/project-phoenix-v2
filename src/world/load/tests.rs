@@ -17,6 +17,25 @@ impl ScriptResolver for NoScriptResolver {
     }
 }
 
+/// One resolver-backed sibling with an observable read count, so the root
+/// regression proves the reorder compiles once rather than validating through a
+/// second compile.
+struct CountingScriptResolver {
+    expected_path: &'static str,
+    source: &'static str,
+    reads: std::cell::Cell<usize>,
+}
+
+impl ScriptResolver for CountingScriptResolver {
+    fn read(&self, path: &str) -> Option<String> {
+        if path != self.expected_path {
+            return None;
+        }
+        self.reads.set(self.reads.get() + 1);
+        Some(self.source.to_string())
+    }
+}
+
 /// A one-line valid inline script block that compiles with zero findings.
 const INLINE_SCRIPT_WORLD: &str =
     "[global]\nseed = 5\n[script]\non_alpha = \"fn on_alpha(ctx) { }\"\n";
@@ -237,6 +256,75 @@ fn activate_loads_children_and_records_the_whole_composition() {
         ],
         "the ledger plan records the root then each child, in order"
     );
+}
+
+#[test]
+fn activate_validates_a_root_sibling_scripts_spawn_with_exact_provenance_once() {
+    const ROOT: &str = "script = \"root_wave.rhai\"\n[global]\nseed = 1\n";
+    const SCRIPT_PATH: &str = "assets/worlds/root_wave.rhai";
+    const MISSING: &str = "assets/entities/missing_root_sibling_1046.toml";
+    const SCRIPT: &str = "fn release(ctx) {\n    ctx.effects.spawn_entity(#{ template_path: \"assets/entities/missing_root_sibling_1046.toml\", name: \"missing\", position: [0, 0, 0] });\n}\n";
+
+    let reader = MemoryReader::new([("assets/worlds/root.toml", ROOT)]);
+    let resolver = CountingScriptResolver {
+        expected_path: SCRIPT_PATH,
+        source: SCRIPT,
+        reads: std::cell::Cell::new(0),
+    };
+    let loaded = load(request(
+        "assets/worlds/root.toml",
+        &reader,
+        &resolver,
+        LoadPolicy::Activate,
+    ))
+    .expect("the load returns source-located composition findings");
+
+    assert_eq!(resolver.reads.get(), 1, "the root sibling compiles once");
+    let unresolved: Vec<_> = loaded
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding.category == "unresolvable-template" && finding.source.reference == MISSING
+        })
+        .collect();
+    assert_eq!(unresolved.len(), 1, "findings: {:?}", loaded.findings);
+    assert_eq!(unresolved[0].source.file, SCRIPT_PATH);
+    assert_eq!(unresolved[0].source.line, Some(2));
+}
+
+#[test]
+fn activate_uses_resolved_inline_refs_instead_of_scanning_them_twice() {
+    const MISSING: &str = "assets/entities/missing_root_inline_1046.toml";
+    const ROOT: &str = r#"
+[script]
+setup = """
+fn release(ctx) {
+    ctx.effects.spawn_entity(#{ template_path: "assets/entities/missing_root_inline_1046.toml", name: "missing", position: [0, 0, 0] });
+}
+"""
+"#;
+    let reader = MemoryReader::new([("assets/worlds/root_inline.toml", ROOT)]);
+    let loaded = load(request(
+        "assets/worlds/root_inline.toml",
+        &reader,
+        &NoScriptResolver,
+        LoadPolicy::Activate,
+    ))
+    .expect("the load returns source-located composition findings");
+
+    let unresolved: Vec<_> = loaded
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding.category == "unresolvable-template" && finding.source.reference == MISSING
+        })
+        .collect();
+    assert_eq!(unresolved.len(), 1, "findings: {:?}", loaded.findings);
+    assert_eq!(
+        unresolved[0].source.file,
+        "assets/worlds/root_inline.toml#script.setup"
+    );
+    assert_eq!(unresolved[0].source.line, Some(2));
 }
 
 #[test]

@@ -918,6 +918,8 @@ entities:
       status: proposed
       confidence: confirmed
       title: World Authoring Validator
+      rationale:
+        - "Issue #1046 gives additive supporting worlds a narrow pre-activation gate over the templates they may spawn: include composition, template resolution/override validity, and doctrine anchors against the active root/layer anchor union plus the candidate's own anchors. The gate consumes `CompiledScripts.spawned_templates` when available, so resolved sibling `.rhai` references retain their own source path and line and replace, rather than append to, the inline-config scan."
       summary: Resolves every authored world reference before activation and reports source-located errors for missing templates, names, flags, objectives, trigger targets, comms senders, and child-world paths. Also validates the base scenario manifest, reporting source-located findings for missing, unparseable, duplicate, or malformed scenario entries.
     architecture:
       kind: configuration-validator
@@ -925,11 +927,11 @@ entities:
       owns: [world-authoring-validation-state]
       reads: [world-configuration-state, world-composition-state]
       produces: [world-authoring-validation-state]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, headless-runtime]
     implementation:
       status: declared
       paths: [src/world/validate.rs, src/world/manifest.rs, src/headless/app.rs]
-      symbols: [validate_composition, validate_entity_identity, validate_manifest, WorldFinding, has_error]
+      symbols: [validate_composition, validate_supporting_world, validate_entity_identity, validate_manifest, WorldSource, WorldFinding, has_error]
       tests: [cargo test]
 
   - state: world-authoring-validation-state
@@ -1018,6 +1020,8 @@ entities:
       status: proposed
       confidence: confirmed
       title: World Load Lifecycle Contract
+      rationale:
+        - "A `LoadPolicy::Merge` result is composition-gated in `evaluate_layer_load` before named-entity UUID minting and before any AST, handler, deadline, entity or `WorldLoaded` can reach the applier. The validation context is rebuilt for each change from the root and currently active layers, so an earlier successful load in the same deterministic drain may provide an anchor while a later or failed sentinel may not."
       summary: Defines load, deferred activation, unload, cleanup, and reload semantics for base and child worlds, and activates a root world only after its full composition validates. Unload removes each layer's owned runtime content (entities, triggers, comms, objectives) and cancels or resolves its pending delayed actions by authored policy.
     architecture:
       kind: lifecycle-policy
@@ -1028,8 +1032,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/headless/app.rs, src/world/server.rs, src/world/validate.rs]
-      symbols: [validate_composition, activation_findings, has_error, spawn_immediate_entities_internal, apply_world_layer_changes]
+      paths: [src/headless/app.rs, src/world/server.rs, src/world/layers.rs, src/world/validate.rs]
+      symbols: [validate_composition, validate_supporting_world, LayerValidationContext, evaluate_layer_load, activation_findings, has_error, spawn_immediate_entities_internal, apply_world_layer_changes]
       tests: [cargo test]
 
   - state: world-content-lifecycle-state
@@ -1103,6 +1107,8 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Layer Runtime
+      rationale:
+        - "Issue #1046 validates every candidate layer's declarative and resolved-script spawn template surface before UUID assignment. Production injects the same overlay-aware template and fragment sources spawning uses; on wasm their non-final absence answer preserves the pending-cache rule rather than mistaking in-flight content for a missing template."
       summary: "Loads the base world and additive extra worlds, queues runtime layer changes, maintains loaded layer ownership, and applies atomic load/unload transitions. Browser loads retain a fetched layer TOML while an overlay-aware sibling Rhai request is pending; an explicit fetch failure refuses the layer whole, while an empty script is valid. Layer activation merges scripts and origin-scoped deadlines before publishing WorldLoaded."
     architecture:
       kind: lifecycle-controller
@@ -1114,7 +1120,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/config.rs, src/world/layers.rs, src/world/load/mod.rs, src/entities/config_cache.rs, src/server/bridge.rs, server.html]
+      paths: [src/world/server.rs, src/world/config.rs, src/world/layers.rs, src/world/load/mod.rs, src/world/validate.rs, src/entities/config_cache.rs, src/server/bridge.rs, server.html]
+      symbols: [LayerValidationContext, evaluate_layer_load, validate_supporting_world, apply_world_layer_changes, WorldLayerMap, WorldRuntime]
       tests: [cargo test, "npx playwright test layer-sibling-script.spec.js"]
 
   - state: world-layer-runtime-state

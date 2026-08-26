@@ -278,9 +278,11 @@ pub enum LoadPolicy {
     /// `boot::ingest_world` (and today's `build_headless_app`) uses.
     Activate,
     /// Additive layer/scenario merge: parse the single world, record its TOML,
-    /// and carry its compiled scripts as data — no composition gate and no child
-    /// recursion, because a layer merges into an already-active composition. The
-    /// policy `scenario.rs` folds into (issue #1045 plumbing).
+    /// and carry its compiled scripts as data — no whole-composition gate and no
+    /// child recursion, because a layer merges into an already-active
+    /// composition. The layer caller runs the narrow candidate gate before
+    /// applying this result. The policy `scenario.rs` folds into (issue #1045
+    /// plumbing).
     Merge,
     /// The pure kernel: [`parse_world`](crate::world::config::parse_world) only,
     /// no ledger and no scripts. The policy the manifest / mod-pack linters use
@@ -514,10 +516,12 @@ impl std::error::Error for LoadError {}
 /// * [`Inspect`](LoadPolicy::Inspect) — read + `parse_world`. No scripts, no
 ///   ledger, no children.
 /// * [`Merge`](LoadPolicy::Merge) — read + `parse_world`, record the TOML, and
-///   compile scripts (carried, not activated). No composition gate, no children.
+///   compile scripts (carried, not activated). No whole-composition gate or
+///   children; the additive-layer caller runs its narrow candidate gate.
 /// * [`Activate`](LoadPolicy::Activate) — the full sequence: read + `parse_world`,
 ///   record, recurse and record `extra_worlds` children, validate the
-///   composition, and compile scripts.
+///   composition against the already-compiled root script set, and return those
+///   same scripts.
 pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
     let LoadRequest {
         path,
@@ -593,9 +597,19 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
                 });
             }
 
+            // Compile ONCE before validation so the root source can expose the
+            // exact inline/sibling script-spawn set to the composition gate.
+            // This stays after child ingestion, preserving the prior error and
+            // ledger order; the same owned value is returned below and supplies
+            // the unchanged digest/runtime handoff.
+            let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
+
             // Atomic composition validation over root + children. Findings (not
             // errors) — the caller gates activation on them.
-            let root_src = WorldSource::new(path.clone(), &text, &config);
+            let mut root_src = WorldSource::new(path.clone(), &text, &config);
+            if let Some(compiled) = scripts.as_ref() {
+                root_src = root_src.with_resolved_script_spawns(&compiled.spawned_templates);
+            }
             let child_srcs: Vec<WorldSource> = children
                 .iter()
                 .zip(child_sources.iter())
@@ -607,7 +621,6 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
             drop(child_srcs);
             drop(root_src);
 
-            let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
             let digests = script_digests(&scripts);
 
             Ok(LoadedWorld {

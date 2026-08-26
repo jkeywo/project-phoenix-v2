@@ -1,0 +1,4 @@
+script = "root_sibling_composition_rejected.rhai"
+
+[global]
+seed = 1046

@@ -2316,8 +2316,8 @@ pub fn wasm_push_scenario_manifest(toml_str: String) {
 ///
 /// **Absent from a demo build** (PRD #855, `build_flags::accepts_mod_pack_
 /// uploads`). The public build ships a deliberately restricted catalogue —
-/// combat_test and the Alliance Destroyer, curated by
-/// `assets/scenarios.demo.toml` (issue #931) — and this is the one call that
+/// combat_test with the Alliance Destroyer and Alliance Cruiser, curated by
+/// `assets/scenarios.demo.toml` — and this is the one call that
 /// widens it at runtime, adding whatever scenarios and hulls an uploaded ZIP
 /// carries. Gating it with `#[cfg]` rather than a runtime refusal is the same
 /// doctrine `command_admission::debug_route` follows and for the same reason:

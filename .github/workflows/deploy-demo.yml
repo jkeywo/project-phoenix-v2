@@ -256,7 +256,7 @@ jobs:
           fi
           echo "ok: no occurrences of the dev worker URL in dist/"
 
-          if ! grep -qF 'ships = ["assets/entities/alliance_destroyer.toml"]' dist/assets/scenarios.toml; then
+          if ! grep -qF 'ships = ["assets/entities/alliance_destroyer.toml", "assets/entities/alliance_cruiser.toml"]' dist/assets/scenarios.toml; then
             echo "dist/assets/scenarios.toml does not look like the demo manifest (issue #917 curated entry not found)" >&2
             exit 1
           fi

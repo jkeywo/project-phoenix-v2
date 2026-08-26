@@ -5,7 +5,7 @@
 | Document | GDD-OVERVIEW |
 | Status | Working draft |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-08-26 |
 | Scope | Vision and high-level game experience |
 | Authority | Orientation only. Code and assets are runtime truth; PASM is design and architecture truth. |
 
@@ -215,7 +215,7 @@ Core playtest questions:
 
 ## Current implementation versus intended product
 
-The full development catalogue already contains the bridge simulation, the major station families, human/AI authority hand-off, scenario scripting, Combat Test, and Falling Skyway. The public demo is intentionally narrower: Combat Test with the Alliance Destroyer. The roadmap broadens content and delivery in release bands rather than treating every planned capability as part of the current player promise.
+The full development catalogue already contains the bridge simulation, the major station families, human/AI authority hand-off, scenario scripting, Combat Test, and Falling Skyway. The public demo is intentionally narrower: Combat Test with the Alliance Destroyer and Alliance Cruiser. The roadmap broadens content and delivery in release bands rather than treating every planned capability as part of the current player promise.
 
 Detailed documents should keep these labels distinct:
 

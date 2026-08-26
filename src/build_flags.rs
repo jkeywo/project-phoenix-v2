@@ -51,9 +51,9 @@ pub const fn is_demo_cfg() -> bool {
 
 /// Does this build offer the host mod-pack upload? (PRD #855.)
 ///
-/// The public build ships a curated catalogue — combat_test and the Alliance
-/// Destroyer, per `assets/scenarios.demo.toml` (issue #931). A mod-pack upload
-/// ADDS scenarios and hulls to that catalogue at runtime, so it is the one
+/// The public build ships a curated catalogue — combat_test with the Alliance
+/// Destroyer and Alliance Cruiser, per `assets/scenarios.demo.toml`. A mod-pack
+/// upload ADDS scenarios and hulls to that catalogue at runtime, so it is the one
 /// control that undoes the restriction, and a demo binary contains no
 /// `wasm_add_mod_pack` to reach: that export carries
 /// `#[cfg(not(phoenix_demo_build))]`, and `gui/build-flags.js`'s

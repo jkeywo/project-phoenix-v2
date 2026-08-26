@@ -4,11 +4,12 @@
 // `?manifest=<path>` (server.html's resolveManifestPath()) selects an
 // alternate scenario manifest instead of the base `assets/scenarios.toml`.
 // `assets/scenarios.demo.toml` curates the catalogue down to one scenario with
-// a single playable hull via the manifest's `ships` allowlist — the referenced
+// two playable hulls via the manifest's `ships` allowlist — the referenced
 // world TOML itself is never edited and still authors its full hull list.
 //
-// Which scenario, and which hull, is authored data and is read out of the two
-// manifests below rather than pinned here (issue #941).
+// Scenario ids remain authored data and are read out of the manifests below
+// (issue #941). The demo hull roster is pinned as an exact release regression:
+// Destroyer first/default, Cruiser second.
 //
 // This exercises the QR-first pre-load catalog flow (buildScenarioCatalog /
 // renderScenarioLockState / the scenario-arbiter), NOT the `?scenario=<path>`
@@ -43,15 +44,17 @@ const COMBAT_TEST_TOML = asset('assets/worlds/combat_test.toml');
 const BASE_SCENARIO_IDS = tableArrayValues(asset('assets/scenarios.toml'), 'scenario', 'id');
 const DEMO_SCENARIO_IDS = tableArrayValues(asset('assets/scenarios.demo.toml'), 'scenario', 'id');
 
-// The demo manifest's `ships` allowlist, and the full hull list the referenced
-// world authors — both read from the committed TOML so this spec asserts
-// "curation narrowed X to Y" rather than "curation produced the destroyer".
+// The demo manifest's `ships` allowlist and the full hull list the referenced
+// world authors are both read from committed TOML. Exact constants below name
+// the public two-hull contract and the choice this test makes.
 const CURATED_SHIPS = (() => {
   const m = asset('assets/scenarios.demo.toml').match(/^\s*ships\s*=\s*\[([^\]]*)\]/m);
   return m ? Array.from(m[1].matchAll(/"([^"]+)"/g)).map((x) => x[1]) : [];
 })();
 const WORLD_SHIPS = tableArrayValues(COMBAT_TEST_TOML, 'available_ships', 'template_path');
 const CURATED_AWAY = WORLD_SHIPS.filter((s) => !CURATED_SHIPS.includes(s));
+const DESTROYER_TEMPLATE = 'assets/entities/alliance_destroyer.toml';
+const CRUISER_TEMPLATE = 'assets/entities/alliance_cruiser.toml';
 
 // Only the entity template TOMLs matter for the "which hull got requested"
 // assertions below.
@@ -66,19 +69,15 @@ function hullTemplateRequests(context) {
   return requested;
 }
 
-test('demo manifest (?manifest=assets/scenarios.demo.toml): host offers only the curated scenario and resolves straight to its single curated hull', async ({ context }) => {
-  // The curation this spec exercises only exists when the manifest narrows the
-  // world's hull list to exactly one — that is what makes the pre-load arbiter
-  // skip the ship stage. Fail loudly rather than silently testing nothing if
-  // the shipped demo manifest is ever re-curated.
+test('demo manifest (?manifest=assets/scenarios.demo.toml): host offers its two curated hulls and loads the chosen Destroyer', async ({ context }) => {
+  // Fail loudly rather than silently testing a different public roster if the
+  // shipped demo manifest is ever re-curated. Order is part of this contract:
+  // the Destroyer remains the first/default card, followed by the Cruiser.
   expect(
     DEMO_SCENARIO_IDS.length,
     'assets/scenarios.demo.toml no longer curates to a single scenario — this spec needs rewriting',
   ).toBe(1);
-  expect(
-    CURATED_SHIPS.length,
-    'assets/scenarios.demo.toml no longer curates to a single hull — this spec needs rewriting',
-  ).toBe(1);
+  expect(CURATED_SHIPS).toEqual([DESTROYER_TEMPLATE, CRUISER_TEMPLATE]);
   expect(
     CURATED_AWAY.length,
     'the curated world authors no hull the demo manifest excludes, so there is nothing to narrow',
@@ -107,23 +106,28 @@ test('demo manifest (?manifest=assets/scenarios.demo.toml): host offers only the
 
   await scenarioButtons.first().click();
 
-  // Ship stage never appears: the demo manifest curates the scenario to one
-  // hull, so the pre-load arbiter auto-resolves it (server.html
-  // renderScenarioLockState) instead of showing <ph-ship-picker>.
-  await expect(serverPage.locator('#scenario-panel ph-ship-picker')).toHaveCount(0);
+  // Both curated hulls appear in authored order. Choose the Destroyer
+  // explicitly: a two-hull catalogue no longer takes the one-hull auto-select
+  // path through renderScenarioLockState.
+  const picker = serverPage.locator('#scenario-panel ph-ship-picker');
+  await picker.waitFor({ state: 'visible', timeout: 30_000 });
+  const cards = picker.locator('.ship-card');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0)).toHaveAttribute('data-template', DESTROYER_TEMPLATE);
+  await expect(cards.nth(1)).toHaveAttribute('data-template', CRUISER_TEMPLATE);
+  await cards.nth(0).click();
   await expect(serverPage.locator('#scenario-panel')).toBeHidden({ timeout: 30_000 });
 
   await waitForWasmReady(serverPage);
   const hostId = await readHostPeerId(serverPage);
   expect(hostId).toBeTruthy();
 
-  // Only the allowlisted hull's template TOML was ever fetched — every other
-  // hull the world authors is never requested, confirming the curation
-  // actually narrowed the playable hull and didn't just narrow what the UI
-  // happens to display.
-  await expect
-    .poll(() => hullRequests.some((u) => u.endsWith(`/${CURATED_SHIPS[0]}`)))
-    .toBe(true);
+  // Every allowlisted hull is preloaded and every excluded hull remains
+  // unfetched, confirming curation narrowed the runtime surface rather than
+  // merely hiding cards in the UI.
+  for (const curated of CURATED_SHIPS) {
+    await expect.poll(() => hullRequests.some((u) => u.endsWith(`/${curated}`))).toBe(true);
+  }
   for (const other of CURATED_AWAY) {
     expect(
       hullRequests.some((u) => u.endsWith(`/${other}`)),

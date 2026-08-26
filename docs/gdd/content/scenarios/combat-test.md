@@ -5,7 +5,7 @@
 | Document | GDD-CONTENT-COMBAT-TEST |
 | Status | Implemented content overview; balance remains iterative |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-08-26 |
 | Scope | Premise, structure, scaling, entities, outcomes, and authoring contract for Combat Test |
 | Authority | `assets/worlds/combat_test.toml` and referenced templates are content truth. |
 
@@ -27,7 +27,7 @@ Detailed mechanics: [Movement and Helm](../../mechanics/movement.md), [Targeting
 | Opposition | Eight timed Harrow wave groups with power-rating scaling |
 | Victory | All hostiles destroyed after all eight waves have spawned |
 | Defeat | Starbase Alpha is destroyed or the player ship reaches its terminal destruction condition |
-| Public demo | Included, with the demo catalogue restricted to the Alliance Destroyer |
+| Public demo | Included, with the demo catalogue restricted to the Alliance Destroyer and Alliance Cruiser |
 
 ## Experience goals
 

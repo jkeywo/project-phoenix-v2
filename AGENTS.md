@@ -171,7 +171,7 @@ node scripts/build-client.mjs
 # decode either client message at all, so the hidden control and the closed
 # route cannot come apart.
 # The fourth is the catalogue restriction's other half: a demo build curates the
-# catalogue down to combat_test + the Alliance Destroyer
+# catalogue down to combat_test + the Alliance Destroyer and Alliance Cruiser
 # (assets/scenarios.demo.toml, #931), and a mod-pack upload adds whatever
 # scenarios and hulls a ZIP carries. `build_flags::accepts_mod_pack_uploads()`
 # states the rule, gui/build-flags.js's `offersModPackUpload` removes the

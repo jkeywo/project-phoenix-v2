@@ -1731,6 +1731,35 @@ fn a_scripted_destroy_chains_its_triggers_off_the_removal() {
         "the DEFERRED `in_seconds(2).destroy_entity` fires after the collapse it was \
          scheduled behind ({band_a_at:.2} s vs {gone_at:.2} s)"
     );
+
+    // Issue #1130: the headless report's canonical scenario projection carries
+    // every objective row and its terminal status. This is the production seam
+    // the balance sweep folds — no duplicate objective rollup on RunReport.
+    let report = build_report(&mut app, &args, 0.0);
+    let scenario = report
+        .scenario
+        .as_ref()
+        .expect("a loaded scripted world must project scenario state");
+    let objective_rows: Vec<_> = scenario
+        .objectives
+        .iter()
+        .map(|objective| {
+            (
+                objective.id.as_str(),
+                objective.mandatory,
+                objective.status.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        objective_rows,
+        vec![
+            ("obj-hold-skyhook", true, ObjectiveStatus::Failed),
+            ("obj-clear-band", false, ObjectiveStatus::Completed),
+        ],
+        "the report must preserve the full mandatory-first objective rollup with \
+         the statuses produced by the real scripted run"
+    );
 }
 
 /// Issue #839 wiring guard: the production player game-start spawn path

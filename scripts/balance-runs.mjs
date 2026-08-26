@@ -23,6 +23,7 @@
 //   report.sides.{player,enemy}.damage_dealt
 //   report.damage_by_ship[uuid].death      [tick, sim_t] | null
 //   report.station_activity.buckets[].stations[]  {station, human, ai, offline}
+//   report.scenario.objectives[]           {id, mandatory, status, ...}
 //   report.seed, report.final_phase, report.sim_seconds
 //
 // Merge conventions (documented so the numbers are unambiguous):
@@ -41,8 +42,15 @@
 //   - Damage margin per run = player.damage_dealt - enemy.damage_dealt; the
 //     merge reports the mean over every run that produced a report. Positive =
 //     the player side out-damaged the enemy.
+//   - Mandatory-set completion is a whole-run measure: a measurable run has at
+//     least one mandatory scenario objective, and succeeds only when ALL of
+//     them finish `Completed`. `Active` and `Failed` both fail the set. Reports
+//     with no usable objective projection are excluded from the denominator
+//     and counted by telemetry-gap reason; process failures remain failures and
+//     are excluded too.
 //
 // The pure exports (mergeReports / formatMarkdown / formatMatrix / expandMatchups
+// / buildRunTasks / buildRunArgs
 // / resolveSeeds / evaluateThresholds / formatThresholds / failedThresholds / formatPhases /
 // formatStationActivity / runFileName) are unit-tested in
 // tests/client/balance-runs.test.js with
@@ -109,6 +117,20 @@ export function matchupLabel(sideA, sideB) {
 }
 
 /**
+ * Resolve a scenario-sweep player-hull authoring value to `--ship`'s literal
+ * template path. Scenario hulls are Alliance player ships, so a short class
+ * name follows the same documented convention as the duel resolver
+ * (`destroyer` -> `assets/entities/alliance_destroyer.toml`). A value already
+ * written as a path/TOML filename is authoritative and passes through. PURE —
+ * no hard-coded catalogue of whichever hulls happen to ship today.
+ */
+export function scenarioShipPath(hull) {
+  const value = String(hull);
+  if (value.includes('/') || value.includes('\\') || value.endsWith('.toml')) return value;
+  return `assets/entities/alliance_${value}.toml`;
+}
+
+/**
  * Resolve the `seeds` knob to an explicit list. A number N → seeds 1..N; an
  * array is taken verbatim. PURE.
  */
@@ -167,7 +189,13 @@ export function expandMatchups(config) {
       throw new Error('`scenario_hulls` needs a scenario `world` (the world defines the enemies)');
     }
     for (const hull of config.scenario_hulls) {
-      matchups.push({ label: matchupLabel([hull], []), sideA: [hull], sideB: [], world: config.world });
+      matchups.push({
+        label: matchupLabel([hull], []),
+        sideA: [hull],
+        sideB: [],
+        world: config.world,
+        playerShip: scenarioShipPath(hull),
+      });
     }
   }
 
@@ -192,6 +220,7 @@ export function buildRunTasks(config, matchups) {
         matchup: m.label,
         sideA: m.sideA,
         sideB: m.sideB,
+        playerShip: m.playerShip,
         world: m.world,
         seed,
         simSeconds,
@@ -238,6 +267,44 @@ function runTtk(report) {
 }
 
 /**
+ * Classify one report's mandatory-objective set without allowing absent
+ * telemetry to masquerade as either a loss or vacuous success.
+ */
+function mandatorySetObservation(report) {
+  const scenario = report?.scenario;
+  if (scenario === null || typeof scenario !== 'object' || Array.isArray(scenario)) {
+    return { sampled: false, reason: 'missingScenario' };
+  }
+  const objectives = scenario.objectives;
+  if (!Array.isArray(objectives)) {
+    return { sampled: false, reason: 'malformedObjectives' };
+  }
+  const ids = new Set();
+  for (const objective of objectives) {
+    if (
+      objective === null
+      || typeof objective !== 'object'
+      || typeof objective.id !== 'string'
+      || objective.id.trim().length === 0
+      || typeof objective.mandatory !== 'boolean'
+      || !['Active', 'Completed', 'Failed'].includes(objective.status)
+      || ids.has(objective.id)
+    ) {
+      return { sampled: false, reason: 'malformedObjectives' };
+    }
+    ids.add(objective.id);
+  }
+  const mandatory = objectives.filter((objective) => objective.mandatory);
+  if (mandatory.length === 0) {
+    return { sampled: false, reason: 'noMandatoryObjectives' };
+  }
+  return {
+    sampled: true,
+    completed: mandatory.every((objective) => objective.status === 'Completed'),
+  };
+}
+
+/**
  * Fold an array of run results into per-matchup summary metrics. PURE — a fold
  * over report objects, no I/O.
  *
@@ -265,6 +332,13 @@ export function mergeReports(runs) {
         failuresDetail: [],
         phaseSeconds: {},
         stationActivity: {},
+        mandatorySetSampled: 0,
+        mandatorySetCompleted: 0,
+        mandatorySetUnmeasurable: {
+          missingScenario: 0,
+          malformedObjectives: 0,
+          noMandatoryObjectives: 0,
+        },
       };
       byMatchup.set(run.matchup, m);
     }
@@ -327,11 +401,23 @@ export function mergeReports(runs) {
         acc.offline += st.offline ?? 0;
       }
     }
+
+    const mandatorySet = mandatorySetObservation(run.report);
+    if (mandatorySet.sampled) {
+      m.mandatorySetSampled += 1;
+      if (mandatorySet.completed) m.mandatorySetCompleted += 1;
+    } else {
+      m.mandatorySetUnmeasurable[mandatorySet.reason] += 1;
+    }
   }
 
   const matchups = {};
   for (const m of byMatchup.values()) {
     const completed = m.wins + m.losses + m.draws + m.timeouts;
+    const mandatorySetUnmeasurable = {
+      total: Object.values(m.mandatorySetUnmeasurable).reduce((a, n) => a + n, 0),
+      ...m.mandatorySetUnmeasurable,
+    };
     matchups[m.label] = {
       label: m.label,
       sideA: m.sideA,
@@ -351,6 +437,14 @@ export function mergeReports(runs) {
         count: m.ttkSamples.length,
       },
       damageMargin: { mean: mean(m.marginSamples), count: m.marginSamples.length },
+      mandatorySetCompletion: {
+        completed: m.mandatorySetCompleted,
+        sampled: m.mandatorySetSampled,
+        rate: m.mandatorySetSampled > 0
+          ? m.mandatorySetCompleted / m.mandatorySetSampled
+          : null,
+        unmeasurable: mandatorySetUnmeasurable,
+      },
       // Phase → summed sim-seconds, keys sorted and values rounded to ms so
       // merged.json is stable and diffably free of float-sum noise.
       phases: Object.fromEntries(
@@ -389,6 +483,23 @@ export function mergeReports(runs) {
 const pct = (r) => (r === null ? '—' : `${(r * 100).toFixed(0)}%`);
 const num = (n, d = 1) => (n === null || n === undefined ? '—' : n.toFixed(d));
 
+function formatMandatorySet(metric) {
+  const unmeasurable = metric.unmeasurable;
+  const reasons = [
+    [unmeasurable.missingScenario, 'missing scenario'],
+    [unmeasurable.malformedObjectives, 'malformed objectives'],
+    [unmeasurable.noMandatoryObjectives, 'no mandatory objectives'],
+  ]
+    .filter(([count]) => count > 0)
+    .map(([count, reason]) => `${count} ${reason}`)
+    .join(', ');
+  if (metric.sampled === 0) {
+    return `0/0 (no data${reasons ? `; ${reasons}` : ''})`;
+  }
+  const gap = reasons ? `; ${reasons}` : '';
+  return `${metric.completed}/${metric.sampled} (${pct(metric.rate)}${gap})`;
+}
+
 /**
  * Render a per-matchup summary table. PURE — string in, string out. Works for
  * every config shape (one row per matchup).
@@ -396,15 +507,15 @@ const num = (n, d = 1) => (n === null || n === undefined ? '—' : n.toFixed(d))
 export function formatMarkdown(summary) {
   const rows = Object.values(summary.matchups);
   const lines = [];
-  lines.push('| Matchup | Runs | Win% | W/L/D/T | Fail | TTK min/med/max (s) | Dmg margin |');
-  lines.push('|---|---:|---:|:---:|---:|:---:|---:|');
+  lines.push('| Matchup | Runs | Win% | W/L/D/T | Fail | Mandatory set complete | TTK min/med/max (s) | Dmg margin |');
+  lines.push('|---|---:|---:|:---:|---:|:---:|:---:|---:|');
   for (const s of rows) {
     const wldt = `${s.wins}/${s.losses}/${s.draws}/${s.timeouts}`;
     const ttk = s.ttk.count
       ? `${num(s.ttk.min)} / ${num(s.ttk.median)} / ${num(s.ttk.max)}`
       : '—';
     lines.push(
-      `| ${s.label} | ${s.total} | ${pct(s.winRate)} | ${wldt} | ${s.failures} | ${ttk} | ${num(s.damageMargin.mean)} |`,
+      `| ${s.label} | ${s.total} | ${pct(s.winRate)} | ${wldt} | ${s.failures} | ${formatMandatorySet(s.mandatorySetCompletion)} | ${ttk} | ${num(s.damageMargin.mean)} |`,
     );
   }
   const t = summary.totals;
@@ -561,17 +672,28 @@ function binaryPath() {
   return path.join(root, 'target', 'release', name);
 }
 
-/** Spawn one headless run and resolve to a run result (never rejects). */
-function runOne(bin, task) {
-  const args = [
-    '--world', task.world,
-    '--side-a', task.sideA.join(','),
-  ];
-  if (task.sideB && task.sideB.length) args.push('--side-b', task.sideB.join(','));
+/** Exact phoenix-headless CLI arguments for one task. PURE and unit-tested. */
+export function buildRunArgs(task) {
+  const args = ['--world', task.world];
+  if (task.playerShip) {
+    // Scenario sweeps preserve the scenario's authored opposition and replace
+    // only the player hull. Side flags are the duel transform and are invalid
+    // on worlds without its `// duel:slots` marker.
+    args.push('--ship', task.playerShip);
+  } else {
+    args.push('--side-a', task.sideA.join(','));
+    if (task.sideB && task.sideB.length) args.push('--side-b', task.sideB.join(','));
+  }
   args.push('--seed', String(task.seed));
   args.push('--sim-seconds', String(task.simSeconds));
   if (task.hz != null) args.push('--hz', String(task.hz));
   args.push('--report-format', 'json');
+  return args;
+}
+
+/** Spawn one headless run and resolve to a run result (never rejects). */
+function runOne(bin, task) {
+  const args = buildRunArgs(task);
 
   const timeoutSecs = task.timeoutSecs ?? DEFAULT_RUN_TIMEOUT_SECS;
 

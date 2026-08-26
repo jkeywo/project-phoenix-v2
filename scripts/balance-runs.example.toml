@@ -33,8 +33,12 @@ class_matrix = ["courier", "destroyer", "cruiser", "battleship"]
 
 # ── Scenario sweep (same world, N seeds, one player hull each) ────────────────
 # Point `world` at a scenario that defines its own enemies and list the player
-# hulls to sweep. No side_b — the world supplies the opposition. This is a
-# standalone config shape; drop the class_matrix above when using it.
+# hulls to sweep. Short names use the Alliance player-hull convention
+# (`destroyer` -> `assets/entities/alliance_destroyer.toml`); an explicit TOML
+# path is also accepted. Each run passes that hull as `--ship`, never through
+# the duel-only `--side-a` transform. No side_b — the world supplies the
+# opposition. This is a standalone config shape; drop the class_matrix above
+# when using it.
 #
 # world          = "assets/worlds/combat_test.toml"
 # scenario_hulls = ["courier", "destroyer", "cruiser", "battleship"]

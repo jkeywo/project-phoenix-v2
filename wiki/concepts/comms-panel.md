@@ -129,11 +129,21 @@ the thread:
 | `any_unread` | any message in thread has `!is_read` |
 | `latest_out_of_range` | latest message `!sender_in_range` |
 | `latest_orphaned` | latest message `is_orphaned` |
+| `latest_priority` | authoritative priority of the latest live message; legacy `is_urgent` is only a fallback when `priority` is absent |
 
 Row styling mirrors the old per-message style:
 - out-of-range → alert-red `(35,25,25)` bg / `rgb(1.0,0.2,0.267)` fg
 - all-read → dim `(30,30,40)` / `0.4,0.4,0.5`
 - any-unread → bright `(40,40,55)` / `0.9,0.9,1.0`
+
+Critical is continuing thread state rather than an unread edge. The latest
+message in a thread owns it; reading or visiting Comms does not clear it, while
+an admitted response, a later message in the same thread, or dialogue removal
+does. Live Critical threads sort first and render localized `CRITICAL` text, a
+diamond shape, and the danger colour in both the hail list and current-message
+panel. The treatment is deliberately non-modal. The authoritative inbox folds
+the same state into logical Station `comms` on `StationImportance`, so the Hero
+Bar continues to signal it even after the operator opens the console.
 
 ### Chat panel — chat-room view
 
@@ -182,6 +192,8 @@ pub struct CommsMessage {
     pub is_orphaned: bool,
     pub sender_in_range: bool,   // #[serde(default = "default_true")]
     pub thread_id: String,       // #[serde(default)]  "" = own thread
+    pub priority: CommsPriority, // Routine | Urgent | Critical
+    pub is_urgent: bool,         // compatibility projection/fallback only
 }
 ```
 
@@ -237,9 +249,13 @@ Comms conversation handlers were relocated from `src/world/server.rs` into `src/
 - `src/client_comms.rs`
 - `src/console/comms/inbox.rs`
 - `src/core/messages.rs`
+- `src/server_app/broadcast.rs` (`ingest_station_importance` — live Critical Comms → logical `comms` Hero Bar channel)
 - `src/comms/server.rs` (CommsRuntime, broadcast/range/roster systems — consolidated in #816)
 - `src/comms/content.rs` (CommsDialogueNode/CommsResponse, ActiveDialogue, ScriptedDialogue, OpenCommsRequest)
 - `src/comms/scripted.rs` (`open_scripted_comms_threads` — the one thread-opening path since #985)
 - `src/world/script/comms.rs` (`enter_node`, `project_node` — script meets wire shape)
 - `src/world/server.rs` (dispatch appliers called by `handle_respond_to_message`)
+- `gui/comms-state.js` (priority normalization and latest-live-thread grouping)
+- `gui/components/ph-comms-hail-list.js`
+- `gui/components/ph-comms-current-message.js`
 - `assets/worlds/default.toml` (the reference scripted dialogue tree)

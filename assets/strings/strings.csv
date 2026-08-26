@@ -353,6 +353,7 @@ component.comms_contacts.empty,Comms contact list when nothing is in hailing ran
 component.comms_contacts.hail,Button that hails a comms contact,HAIL
 component.comms_hails.empty,Comms message list when no transmissions have arrived,NO MESSAGES
 component.comms_hails.label,Accessible name (aria-label) for the comms hail list — the keyboard/pointer message selector (issue #1178),Received hails
+component.comms.priority.critical,Visible text paired with a diamond and danger colour on a live critical Comms hail,CRITICAL
 component.comms_message.no_active_hail,Comms message panel when no hail is open,[NO ACTIVE HAIL]
 component.comms_message.confirm_important,"Comms response button prompt asking the operator to confirm an important, irreversible response before it is sent",CONFIRM?
 component.comms_message.unavailable,Comms response button tooltip shown when the sender is out of comms range and the response cannot be sent,[OUT OF RANGE]
@@ -1243,7 +1244,10 @@ world.falling_skyway.entity.shuttle_wick.name,assets/worlds/falling_skyway.toml 
 world.falling_skyway.capacity.fuel_lift.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.capacity]] label,[Fuel lift per window]
 world.falling_skyway.threshold.pumping.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.threshold]] label,[Pumping]
 world.falling_skyway.deadline.tether_slip.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Tether slip]
+world.falling_skyway.deadline.lark_first_hail_due.label,Hidden authored safety beat for Hauler Lark's first check-in,[Lark safety check]
 world.falling_skyway.deadline.skyway_survey_due.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Survey due to Control]
+world.falling_skyway.deadline.lark_final_hail_due.label,Hidden authored safety beat for Hauler Lark's Critical second check-in,[Lark final safety check]
+world.falling_skyway.deadline.lark_collision_due.label,Hidden authored terminal beat for Hauler Lark's corridor collision,[Lark corridor entry]
 world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Scan Skyhook Verrow and both ladder depots. File the completed survey with Skyway Control.]"
 world.falling_skyway.objective.corridor.text,Objective text — the Act 1 corridor watch in Falling Skyway,"[Keep the corridor moving. See the lead hauler through the gate.]"
 world.falling_skyway.objective.triage.text,Objective text — the Act 1 triage call in Falling Skyway,[Name the structure that takes the first repair team.]
@@ -1252,6 +1256,12 @@ world.falling_skyway.comms.survey_ready,Dialogue body — Control is ready to re
 world.falling_skyway.comms.file_survey,Response text — filing the completed Falling Skyway survey with Control,"[Control, receiving. Filing the skyhook and both depot condition reads now.]"
 world.falling_skyway.comms.survey_received,Dialogue body — Control acknowledges the completed Falling Skyway survey,[Survey received and entered against the corridor record. Control out.]
 world.falling_skyway.comms.survey_unfiled,Dialogue body — Control acts on the existing record after Falling Skyway's survey deadline,"[Destroyer, survey deadline. No complete report reached Control. We are proceeding on Havelock's filed corridor figures.]"
+world.falling_skyway.comms.lark_safety_check,Dialogue body — Hauler Lark narrates its intended corridor transit thirty seconds before the survey deadline,"[Destroyer, Hauler Lark. We are thirty seconds from the Meridian throat on the filed corridor clearance. Confirm it is safe for transit.]"
+world.falling_skyway.comms.lark_final_check,Dialogue body — Hauler Lark's Critical second check at the survey deadline,"[Destroyer, Lark. We are at the survey deadline with no stop order. Send scan proof now or we enter the throat in twenty seconds.]"
+world.falling_skyway.comms.lark_unsafe_response,Response text — the crew use a valid survey scan to stop Hauler Lark,"[Lark, hold outside the throat. Our survey scan proves the filed clearance is unsafe. Do not enter.]"
+world.falling_skyway.comms.lark_holding,Dialogue body — Hauler Lark acknowledges the scan-backed stop order,"[Destroyer, Lark. Scan evidence received. Holding clear of the corridor. Transit cancelled.]"
+world.falling_skyway.comms.lark_collision_report,Dialogue body — Hauler Lark announces entry immediately before the committed corridor collision,"[Destroyer, Lark. No scan-backed stop received. We are entering the corridor now—stand by—]"
+world.falling_skyway.game_over.lark_collision,Defeat reason — uncontrolled Hauler Lark physically destroys the Falling Skyway,"[Hauler Lark struck Skyway Meridian in the uncontrolled corridor. The structure is lost.]"
 world.probe_evidence.entity.skyway_hook.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Skyway Hook]"
 world.probe_evidence.entity.line_foreman.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Line Foreman]"
 world.probe_evidence.capacity.berths.label,"Crew-facing label for the berths capacity in the #1031 probe world","[Berths]"

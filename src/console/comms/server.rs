@@ -174,9 +174,9 @@ fn publish_comms_blackboard(
         .map(|rt| rt.contacts.clone())
         .unwrap_or_default();
     for contact in contacts.iter_mut() {
-        contact.is_urgent = messages
-            .iter()
-            .any(|m| m.sender_uuid == contact.uuid && m.is_urgent && !m.is_read);
+        contact.is_urgent = messages.iter().any(|m| {
+            m.sender_uuid == contact.uuid && m.effective_priority().is_urgent() && !m.is_read
+        });
     }
 
     let local_bb = CommsBlackboard {
@@ -681,11 +681,16 @@ pub(crate) fn handle_respond_to_message(
             let thread_id = dialogue.thread_id.clone();
             let sender_uuid = inbox.0.sender_uuid_for(message_id).unwrap_or_default();
             let sender_name = inbox.0.sender_name_for(message_id).unwrap_or_default();
-            // R6: a follow-up INHERITS the urgency the thread was opened
-            // with, so an urgent thread stays urgent as it advances. (The
+            // R6: a follow-up inherits legacy urgency, while a response
+            // acknowledges generic Critical state. A later authored OPEN may
+            // raise the thread again. (The
             // declarative arm deleted in issue #985 hardcoded `urgent: false`
             // here, because follow-up urgency was not a TOML-level concept.)
-            let urgent = inbox.0.is_urgent_for(message_id).unwrap_or(false);
+            let priority = inbox
+                .0
+                .priority_for(message_id)
+                .unwrap_or_default()
+                .after_response();
             let (wire_node, on_pick) = crate::world::script::comms::project_node(&node);
             let new_msg_id = crate::world_id::mint_id_with(
                 aux.id_mint.as_deref(),
@@ -703,7 +708,7 @@ pub(crate) fn handle_respond_to_message(
                 new_responses,
                 thread_id.clone(),
                 available,
-                urgent,
+                priority,
             );
             channel2_writer.write(CommsChannel2Event::scripted_dialogue(new_msg));
             comms.active_dialogues.insert(
@@ -779,6 +784,13 @@ pub(crate) fn handle_clear_comms(
             cmd.payload,
             crate::core::messages::SystemControlPayload::ClearComms
         ) {
+            // Clearing invalidates every live dialogue. Preserve its historical
+            // row when it is still unread, but acknowledge any continuing
+            // Critical interruption before the dialogue authority disappears.
+            let dialogue_ids: Vec<String> = comms.active_dialogues.keys().cloned().collect();
+            for message_id in dialogue_ids {
+                inbox.0.acknowledge_priority(&message_id);
+            }
             inbox.0.clear();
             comms.open_hails.clear();
             comms.active_dialogues.clear();
@@ -1851,7 +1863,7 @@ pub fn operate_comms_response_ai(
                 response_count: responses.len(),
                 available_response_count: if sender_in_range { responses.len() } else { 0 },
                 important_response_count: responses.iter().filter(|r| r.important).count(),
-                is_urgent: message.is_urgent,
+                is_urgent: message.effective_priority().is_urgent(),
                 is_read: message.is_read,
                 is_orphaned: message.is_orphaned,
                 sender_in_range,

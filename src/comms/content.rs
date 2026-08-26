@@ -24,7 +24,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::messages::CommsResponseView;
+use crate::core::messages::{CommsPriority, CommsResponseView};
 
 // -- The shown node ---------------------------------------------------------
 
@@ -176,7 +176,12 @@ pub struct OpenCommsRequest {
     pub display_name: Option<String>,
     /// Joins an existing thread when set; a fresh id is minted when absent.
     pub thread_id: Option<String>,
-    /// Whether the injected message is flagged urgent.
+    /// Generic authoritative priority. `Routine` plus legacy `urgent = true`
+    /// decodes as Urgent through [`effective_priority`](Self::effective_priority).
+    #[serde(default)]
+    pub priority: CommsPriority,
+    /// Compatibility fallback retained for snapshots authored before priority.
+    /// New script opens project this boolean from `priority`.
     pub urgent: bool,
     /// Content-relative path of the unit defining `root_fn`. Stamped at the
     /// host's drain boundary, not by the script — the effect sink cannot know
@@ -187,4 +192,14 @@ pub struct OpenCommsRequest {
     /// alongside `script_path`, never authored by Rhai.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_layer: Option<String>,
+}
+
+impl OpenCommsRequest {
+    pub fn effective_priority(&self) -> CommsPriority {
+        if self.priority == CommsPriority::Routine && self.urgent {
+            CommsPriority::Urgent
+        } else {
+            self.priority
+        }
+    }
 }

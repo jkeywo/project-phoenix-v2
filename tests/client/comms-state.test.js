@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  ClientCommsState, commsState, effectiveThreadId,
+  ClientCommsState, commsState, effectiveThreadId, COMMS_PRIORITY,
+  normalizeCommsPriority, commsPriority, latestLiveThreadPriority,
+  isLatestLiveCriticalMessage,
   hailMessage, selectCommsMessage, respondToMessage, clearCommsMessage,
   commsPreview, COMMS_PREVIEW_CHARS,
 } from '../../gui/comms-state.js';
@@ -108,6 +110,42 @@ describe('effectiveThreadId', () => {
     s.selectThread('m1');
     expect(s.selectedThreadId).toBe('m1');
     expect(s.threadMessages('m1')).toHaveLength(1);
+  });
+});
+
+describe('CommsPriority compatibility and live-thread lifecycle', () => {
+  it('normalizes authoritative enum casing and only falls back to legacy is_urgent', () => {
+    expect(normalizeCommsPriority('Critical')).toBe(COMMS_PRIORITY.CRITICAL);
+    expect(normalizeCommsPriority('URGENT')).toBe(COMMS_PRIORITY.URGENT);
+    expect(commsPriority({ priority: 'Routine', is_urgent: true })).toBe(COMMS_PRIORITY.ROUTINE);
+    expect(commsPriority({ priority: 'Critical', is_urgent: false })).toBe(COMMS_PRIORITY.CRITICAL);
+    expect(commsPriority({ is_urgent: true })).toBe(COMMS_PRIORITY.URGENT);
+    expect(commsPriority({})).toBe(COMMS_PRIORITY.ROUTINE);
+  });
+
+  it('keeps the latest live Critical priority after read/visit', () => {
+    const critical = msgInThread('m1', 'lark', {
+      priority: 'Critical',
+      is_read: true,
+    });
+    expect(latestLiveThreadPriority([critical])).toBe(COMMS_PRIORITY.CRITICAL);
+    expect(isLatestLiveCriticalMessage(critical, [critical])).toBe(true);
+  });
+
+  it('clears Critical on response or dialogue invalidation', () => {
+    expect(latestLiveThreadPriority([
+      msgInThread('m1', 'lark', { priority: 'Critical', selected_response: 0 }),
+    ])).toBe(COMMS_PRIORITY.ROUTINE);
+    expect(latestLiveThreadPriority([
+      msgInThread('m1', 'lark', { priority: 'Critical', is_orphaned: true }),
+    ])).toBe(COMMS_PRIORITY.ROUTINE);
+  });
+
+  it('lets the latest message supersede a historical Critical priority', () => {
+    const critical = msgInThread('m1', 'lark', { priority: 'Critical' });
+    const routine = msgInThread('m2', 'lark', { priority: 'Routine' });
+    expect(latestLiveThreadPriority([critical, routine])).toBe(COMMS_PRIORITY.ROUTINE);
+    expect(isLatestLiveCriticalMessage(critical, [critical, routine])).toBe(false);
   });
 });
 
@@ -264,6 +302,7 @@ describe('sortedThreads', () => {
       subject: 'Latest',
       any_unread: false,
       any_urgent: false,
+      latest_priority: 'routine',
       latest_out_of_range: true,
       latest_orphaned: true,
     });
@@ -291,6 +330,31 @@ describe('sortedThreads', () => {
     const threads = s.sortedThreads();
     expect(threads[0].thread_id).toBe('t2'); // unread beats read-urgent
     expect(threads.find(t => t.thread_id === 't1').any_urgent).toBe(false);
+  });
+
+  it('orders a read-but-live Critical thread first until it is answered', () => {
+    const s = new ClientCommsState();
+    s.apply(commsStateMsg([
+      msgInThread('m1', 'unread', { is_read: false }),
+      msgInThread('m2', 'critical', { is_read: true, priority: 'Critical' }),
+    ]));
+    let threads = s.sortedThreads();
+    expect(threads.map(t => t.thread_id)).toEqual(['critical', 'unread']);
+    expect(threads[0].latest_priority).toBe(COMMS_PRIORITY.CRITICAL);
+    expect(threads[0].any_urgent).toBe(true);
+
+    s.apply(commsStateMsg([
+      msgInThread('m1', 'unread', { is_read: false }),
+      msgInThread('m2', 'critical', {
+        is_read: true,
+        priority: 'Critical',
+        selected_response: 0,
+      }),
+    ]));
+    threads = s.sortedThreads();
+    expect(threads[0].thread_id).toBe('unread');
+    expect(threads.find(t => t.thread_id === 'critical').latest_priority)
+      .toBe(COMMS_PRIORITY.ROUTINE);
   });
 });
 

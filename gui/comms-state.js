@@ -16,6 +16,67 @@ export function effectiveThreadId(msg) {
   return msg.thread_id ? msg.thread_id : msg.id;
 }
 
+/** Canonical client-side spellings of the authoritative wire priority. */
+export const COMMS_PRIORITY = Object.freeze({
+  ROUTINE: 'routine',
+  URGENT: 'urgent',
+  CRITICAL: 'critical',
+});
+
+/**
+ * Normalise the Rust enum's wire spelling without coupling the pure client to
+ * one serde casing. Unknown/missing values return null so the legacy boolean
+ * can remain a decode fallback during a rolling upgrade.
+ */
+export function normalizeCommsPriority(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  return Object.values(COMMS_PRIORITY).includes(normalized) ? normalized : null;
+}
+
+/**
+ * Authoritative priority for one message. `is_urgent` is deliberately only a
+ * compatibility fallback for payloads sent before CommsPriority existed.
+ */
+export function commsPriority(msg) {
+  const priority = normalizeCommsPriority(msg && msg.priority);
+  if (priority !== null) return priority;
+  return msg && msg.is_urgent ? COMMS_PRIORITY.URGENT : COMMS_PRIORITY.ROUTINE;
+}
+
+/** A responded or invalidated dialogue no longer carries live importance. */
+export function isLiveCommsMessage(msg) {
+  return !!msg
+    && (msg.selected_response === null || msg.selected_response === undefined)
+    && !msg.is_orphaned;
+}
+
+/**
+ * Priority of the latest live message in a thread. Looking only at the latest
+ * message makes a newer hail an authoritative supersession; read/visit state
+ * is intentionally absent, so Critical survives opening the thread.
+ */
+export function latestLiveThreadPriority(messages, threadId = null) {
+  const raw = Array.isArray(messages) ? messages : [];
+  const thread = threadId === null
+    ? raw
+    : raw.filter(m => effectiveThreadId(m) === threadId);
+  const latest = thread[thread.length - 1];
+  return isLiveCommsMessage(latest) ? commsPriority(latest) : COMMS_PRIORITY.ROUTINE;
+}
+
+/** True only for the latest, still-live Critical message in its thread. */
+export function isLatestLiveCriticalMessage(msg, messages) {
+  if (!msg) return false;
+  const tid = effectiveThreadId(msg);
+  const thread = (Array.isArray(messages) ? messages : [])
+    .filter(candidate => effectiveThreadId(candidate) === tid);
+  const latest = thread[thread.length - 1];
+  return !!latest
+    && latest.id === msg.id
+    && latestLiveThreadPriority(thread) === COMMS_PRIORITY.CRITICAL;
+}
+
 /** Longest inbox/hail preview, in characters, before an ellipsis. */
 export const COMMS_PREVIEW_CHARS = 64;
 
@@ -152,10 +213,10 @@ export class ClientCommsState {
   }
 
   /**
-   * Thread summaries sorted for display: urgent+unread first, then plain
-   * unread, then read. Relative order within each group preserved (stable
-   * sort, inbox order). Each thread appears once; metadata reflects the
-   * LATEST message in the thread. Mirrors `sorted_threads`.
+   * Thread summaries sorted for display: live Critical first, urgent+unread,
+   * plain unread, then read. Relative order within each group is preserved
+   * (stable sort, inbox order). Each thread appears once; metadata reflects
+   * the LATEST message in the thread. Mirrors `sorted_threads`.
    */
   sortedThreads() {
     // Unique thread ids in first-seen order (preserves inbox order).
@@ -170,19 +231,29 @@ export class ClientCommsState {
       const latest = threadMsgs[threadMsgs.length - 1];
       const contact = this.contacts.find(c => c.uuid === latest.sender_uuid);
       const anyUnread = threadMsgs.some(m => !m.is_read);
-      const anyUrgent = threadMsgs.some(m => m.is_urgent && !m.is_read);
+      const latestPriority = latestLiveThreadPriority(threadMsgs);
+      // Preserve legacy Urgent's unread lifecycle. A historical Critical is
+      // not allowed to leak through this compatibility field after a newer
+      // message supersedes it.
+      const anyUrgent = latestPriority === COMMS_PRIORITY.CRITICAL
+        || threadMsgs.some(m => commsPriority(m) === COMMS_PRIORITY.URGENT && !m.is_read);
       return {
         thread_id: tid,
         sender_name: contact ? contact.name : latest.sender_name,
         subject: commsPreview(latest),
         any_unread: anyUnread,
         any_urgent: anyUrgent,
+        latest_priority: latestPriority,
         latest_out_of_range: latest.sender_in_range === false,
         latest_orphaned: !!latest.is_orphaned,
       };
     });
 
-    const priority = s => (s.any_urgent ? 0 : s.any_unread ? 1 : 2);
+    const priority = s => (
+      s.latest_priority === COMMS_PRIORITY.CRITICAL ? 0
+        : s.any_urgent ? 1
+          : s.any_unread ? 2 : 3
+    );
     // Array.prototype.sort is stable, matching Rust's sort_by.
     summaries.sort((a, b) => priority(a) - priority(b));
     return summaries;

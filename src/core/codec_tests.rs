@@ -648,6 +648,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
                     is_orphaned: false,
                     sender_in_range: true,
                     thread_id: "thread-001".into(),
+                    priority: CommsPriority::Routine,
                     is_urgent: false,
                 }],
                 objectives: vec![],
@@ -3828,6 +3829,44 @@ fn comms_state_payload_with_no_range_flags_defaults_both_to_true() {
         }
         other => panic!("expected CommsState, got {other:?}"),
     }
+}
+
+#[test]
+fn comms_priority_decodes_legacy_urgency_but_new_field_is_authoritative() {
+    let legacy = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false,"is_urgent":true}"#;
+    let legacy: CommsMessage = serde_json::from_str(legacy).expect("legacy message decodes");
+    assert_eq!(legacy.priority, CommsPriority::Urgent);
+    assert!(legacy.is_urgent);
+
+    let explicit = r#"{"id":"m","sender_uuid":"s","sender_name":"S","subject":"x","body":"y","responses":[],"selected_response":null,"is_read":false,"priority":"Routine","is_urgent":true}"#;
+    let explicit: CommsMessage = serde_json::from_str(explicit).expect("priority message decodes");
+    assert_eq!(explicit.priority, CommsPriority::Routine);
+    assert!(
+        !explicit.is_urgent,
+        "the compatibility boolean is normalised from authoritative priority"
+    );
+}
+
+#[test]
+fn critical_serializes_with_legacy_urgent_projection() {
+    let mut message = CommsMessage::injected(
+        "m".into(),
+        "s".into(),
+        "Sender".into(),
+        "body".into(),
+        Default::default(),
+        vec![],
+        "thread".into(),
+        true,
+        CommsPriority::Critical,
+    );
+    // Even a stale hand-built compatibility value is projected from priority.
+    message.is_urgent = false;
+    let json = serde_json::to_value(&message).expect("message encodes");
+    assert_eq!(json["priority"], "Critical");
+    assert_eq!(json["is_urgent"], true);
+    let round_trip: CommsMessage = serde_json::from_value(json).expect("message decodes");
+    assert_eq!(round_trip.priority, CommsPriority::Critical);
 }
 
 #[test]

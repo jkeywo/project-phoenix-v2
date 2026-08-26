@@ -500,7 +500,8 @@ fn on_decline(ctx) { }
 | `node_fn` | The fn returning this thread's root node. |
 | `display_name` | Player-facing sender label. Falls back to `from`. |
 | `thread_id` | Joins an existing thread. A fresh id is minted when absent. |
-| `urgent` | Flags the message urgent; a follow-up inherits the thread's urgency. |
+| `priority` | Generic authoritative priority: `"routine"` (default), `"urgent"`, or `"critical"`. Critical is a continuing non-modal Comms/Hero Bar interruption until the latest thread is answered, superseded, or invalidated. |
+| `urgent` | Legacy compatibility spelling. When `priority` is absent, `true` means Urgent. New content should author `priority`; an answered Critical node returns to Routine while legacy Urgent follow-ups remain Urgent. |
 
 A response's `important` flag makes the client confirm before submitting it.
 

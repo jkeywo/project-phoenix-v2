@@ -42,6 +42,7 @@ fn request(root_fn: &str, from: &str) -> OpenCommsRequest {
         root_fn: root_fn.to_string(),
         display_name: None,
         thread_id: None,
+        priority: crate::core::messages::CommsPriority::Routine,
         urgent: false,
         script_path: PATH.to_string(),
         origin_layer: None,

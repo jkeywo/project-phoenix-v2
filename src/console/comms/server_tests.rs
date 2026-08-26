@@ -21,6 +21,7 @@ fn msg(id: &str) -> CommsMessage {
         is_orphaned: false,
         sender_in_range: true,
         thread_id: id.into(),
+        priority: crate::core::messages::CommsPriority::Routine,
         is_urgent: false,
     }
 }
@@ -2863,6 +2864,7 @@ fn clear_comms_removes_orphaned_messages_and_broadcasts_update() {
         is_orphaned: true,
         sender_in_range: true,
         thread_id: "orphaned-001".into(),
+        priority: crate::core::messages::CommsPriority::Routine,
         is_urgent: false,
     };
     // Orphan it before injection so clear() will remove it.

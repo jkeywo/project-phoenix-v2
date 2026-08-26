@@ -52,7 +52,9 @@
 #
 # ── The clock ────────────────────────────────────────────────────────────────
 #
-# Two named deadlines, both visible on the captain's countdown:
+# Five named opening deadlines. The two mission-work clocks are visible; Lark's
+# three safety beats are authored but remain Comms pressure rather than extra
+# captain-panel countdowns:
 #
 #   t=160 s `tether_slip`        the head loses six condition points. 48 → 42
 #                                takes it under its authored 45 % lift line, the
@@ -62,6 +64,10 @@
 #                                after all three structure scans completes the
 #                                survey; silence fails it and Control proceeds on
 #                                the falsified record already in its hands.
+#   t=330 s `lark_first_hail_due` Lark asks whether the throat is safe.
+#   t=360 s `lark_final_hail_due` Lark asks again, at Critical priority.
+#   t=380 s `lark_collision_due`  without a scan-backed stop order, Lark commits
+#                                to the compromised throat and strikes the head.
 #
 # Act 1 owns the opening six minutes. The act boundary is authored DATA — two
 # `due_secs` numbers — and nothing in Rust or in the headless test restates its
@@ -1297,7 +1303,7 @@ template_path = "assets/entities/ship_civilian_hauler.toml"
 id = "hauler_lark"
 name = "world.falling_skyway.entity.hauler_lark.name"
 transform = { position = [0.0, 0.0, -520.0] }
-overrides = { civilian = { route = "skyway_lane", order_options = [
+overrides = { comms = { hailable = true }, civilian = { route = "skyway_lane", order_options = [
   { id = "storm_shelter", label = "world.falling_skyway.civilian_order.storm_shelter", order = { verb = "divert", route = "storm_shelter_run" } },
 ] } }
 
@@ -1402,10 +1408,28 @@ due_secs = 160
 visible = true
 
 [[deadline]]
+id = "lark_first_hail_due"
+label = "world.falling_skyway.deadline.lark_first_hail_due.label"
+due_secs = 330
+visible = false
+
+[[deadline]]
 id = "skyway_survey_due"
 label = "world.falling_skyway.deadline.skyway_survey_due.label"
 due_secs = 360
 visible = true
+
+[[deadline]]
+id = "lark_final_hail_due"
+label = "world.falling_skyway.deadline.lark_final_hail_due.label"
+due_secs = 360
+visible = false
+
+[[deadline]]
+id = "lark_collision_due"
+label = "world.falling_skyway.deadline.lark_collision_due.label"
+due_secs = 380
+visible = false
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ACT 2 — THE RADIATION STORM AND THE RESCUE (issue #1037)
@@ -1843,7 +1867,10 @@ setup = """
 on_world_loaded("on_arrival");
 
 on_deadline("tether_slip", "on_tether_slip");
+on_deadline("lark_first_hail_due", "on_lark_first_hail");
 on_deadline("skyway_survey_due", "on_survey_due");
+on_deadline("lark_final_hail_due", "on_lark_final_hail");
+on_deadline("lark_collision_due", "on_lark_collision");
 on_flag_set("scan.skyhook.taken", "on_survey_scan");
 on_flag_set("scan.depot_ladder_a.taken", "on_survey_scan");
 on_flag_set("scan.depot_ladder_b.taken", "on_survey_scan");
@@ -1966,14 +1993,128 @@ fn survey_ready(ctx) {
     ctx.flags["scan.depot_ladder_b.taken"] > 0
 }
 
+fn any_survey_scan(ctx) {
+    ctx.flags["scan.skyhook.taken"] > 0 ||
+    ctx.flags["scan.depot_ladder_a.taken"] > 0 ||
+    ctx.flags["scan.depot_ladder_b.taken"] > 0
+}
+
 // The trigger predicate grammar deliberately keeps names simple and therefore
 // cannot name dotted scan flags directly. Mirror the exact conjunction into one
 // scenario flag whenever any constituent arrives; `survey_ready` remains the
 // authoritative predicate and the report pickup defensively re-reads it.
 fn on_survey_scan(ctx) {
+    // The first valid structure scan is the only proof the crew may cite to
+    // stop Lark. If it arrives after either check-in, refresh that already-open
+    // thread at its current wording and priority so the newly valid response is
+    // visible immediately rather than waiting for another hail.
+    if ctx.flags.lark_unsafe_response_unlocked == 0 && any_survey_scan(ctx) {
+        ctx.flags.lark_unsafe_response_unlocked = 1;
+        if ctx.flags.lark_corridor_cancelled == 0 {
+            if ctx.flags.lark_final_hail_sent > 0 {
+                ctx.effects.open_comms(#{
+                    from: "world.falling_skyway.entity.hauler_lark.name",
+                    node_fn: "lark_final_check",
+                    thread_id: "falling-skyway-lark-safety",
+                    priority: "critical",
+                });
+            } else if ctx.flags.lark_first_hail_sent > 0 {
+                ctx.effects.open_comms(#{
+                    from: "world.falling_skyway.entity.hauler_lark.name",
+                    node_fn: "lark_safety_check",
+                    thread_id: "falling-skyway-lark-safety",
+                    priority: "routine",
+                });
+            }
+        }
+    }
     if survey_ready(ctx) {
         ctx.flags.skyway_survey_scans_complete = 1;
     }
+}
+
+fn lark_safety_check(ctx) {
+    let responses = [];
+    if any_survey_scan(ctx) {
+        responses.push(#{
+            text: "world.falling_skyway.comms.lark_unsafe_response",
+            on_pick: "on_lark_unsafe_response",
+            important: true,
+        });
+    }
+    #{ message: "world.falling_skyway.comms.lark_safety_check", responses: responses }
+}
+
+fn lark_final_check(ctx) {
+    let node = lark_safety_check(ctx);
+    node.message = "world.falling_skyway.comms.lark_final_check";
+    node
+}
+
+fn lark_holding(ctx) {
+    #{ message: "world.falling_skyway.comms.lark_holding", responses: [] }
+}
+
+fn lark_collision_report(ctx) {
+    #{ message: "world.falling_skyway.comms.lark_collision_report", responses: [] }
+}
+
+fn on_lark_first_hail(ctx) {
+    if ctx.flags.lark_corridor_cancelled > 0 { return; }
+    ctx.flags.lark_first_hail_sent = 1;
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.hauler_lark.name",
+        node_fn: "lark_safety_check",
+        thread_id: "falling-skyway-lark-safety",
+        priority: "routine",
+    });
+}
+
+fn on_lark_final_hail(ctx) {
+    if ctx.flags.lark_corridor_cancelled > 0 { return; }
+    ctx.flags.lark_final_hail_sent = 1;
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.hauler_lark.name",
+        node_fn: "lark_final_check",
+        thread_id: "falling-skyway-lark-safety",
+        priority: "critical",
+    });
+}
+
+fn on_lark_unsafe_response(ctx) {
+    // The response was rendered from scan state, but re-read it at the
+    // authoritative admitted pickup too. A stale or fabricated submission can
+    // never stop the collision.
+    if !any_survey_scan(ctx) { return lark_safety_check(ctx); }
+    if ctx.flags.lark_corridor_collision_committed > 0 {
+        return lark_collision_report(ctx);
+    }
+    if ctx.flags.lark_corridor_cancelled == 0 {
+        ctx.flags.lark_corridor_cancelled = 1;
+        if ctx.deadlines.state("lark_collision_due") == "pending" {
+            ctx.deadlines.cancel("lark_collision_due");
+        }
+    }
+    lark_holding(ctx)
+}
+
+fn on_lark_collision(ctx) {
+    if ctx.flags.lark_corridor_cancelled > 0 || ctx.flags.lark_corridor_collision_committed > 0 {
+        return;
+    }
+    // Commitment, physical consequence and defeat share the t=380 handler.
+    // A late response sees the commitment flag and cannot reverse any of them.
+    ctx.flags.lark_corridor_collision_committed = 1;
+    ctx.flags.lark_corridor_collision = 1;
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.hauler_lark.name",
+        node_fn: "lark_collision_report",
+        thread_id: "falling-skyway-lark-safety",
+        priority: "critical",
+    });
+    ctx.effects.destroy_entity("world.falling_skyway.entity.hauler_lark.name");
+    ctx.effects.destroy_entity("world.falling_skyway.entity.skyhook.name");
+    ctx.effects.game_over("world.falling_skyway.game_over.lark_collision", "defeat");
 }
 
 // Control is an ordinary hailable target. A partial survey can ask, but cannot

@@ -42,6 +42,7 @@
 
 import { t } from '../strings.js';
 import { setAutoState } from '../console-ui.js';
+import { isLatestLiveCriticalMessage } from '../comms-state.js';
 
 /**
  * Build a Comms `renderStation(s, doc)` for one hull from its `variant`.
@@ -79,10 +80,15 @@ export function makeCommsRender(variant) {
 
     // ── Current-message thread ──────────────────────────────────────────
     const msgs = view.messages || [];
-    const threadMsg = msgs.find((m) => !m.is_read) || msgs[msgs.length - 1] || null;
+    // Critical remains ordinary, non-modal panel content, but it wins the
+    // panel's existing automatic selection while it is live.
+    const threadMsg = [...msgs].reverse().find(m => isLatestLiveCriticalMessage(m, msgs))
+      || msgs.find((m) => !m.is_read)
+      || msgs[msgs.length - 1]
+      || null;
     if (ids.currentMessage) {
       const el = doc.getElementById(ids.currentMessage);
-      if (el) el.state = { thread: threadMsg, rejection: view.rejection };
+      if (el) el.state = { thread: threadMsg, messages: msgs, rejection: view.rejection };
     }
 
     // ── Station-damage bar ───────────────────────────────────────────────

@@ -135,6 +135,9 @@ pub struct StationImportanceRes(pub crate::station_importance::StationImportance
 ///   hull sums into.
 /// - A raised Red Alert on the local ship is a continuing `critical` condition,
 ///   attributed to that ship-wide core bucket.
+/// - A latest-live Critical Comms thread is a continuing `critical` condition
+///   on the logical `comms` station. Read/visit edges do not clear it; the inbox
+///   lifecycle does so on response, supersession, or invalidation.
 ///
 /// Authored-TOML importance is a deliberate future seam and is NOT built here.
 pub(crate) fn ingest_station_importance(world: &mut World) {
@@ -178,11 +181,16 @@ pub(crate) fn ingest_station_importance(world: &mut World) {
         })
         .collect();
 
-    let critical_stations: Vec<StationId> = if red_alert {
-        vec![core.clone()]
-    } else {
-        Vec::new()
-    };
+    let mut critical_stations: Vec<StationId> = Vec::new();
+    if red_alert {
+        critical_stations.push(core.clone());
+    }
+    if world
+        .get_resource::<crate::comms::server::CommsInboxRes>()
+        .is_some_and(|inbox| inbox.0.has_live_critical_thread())
+    {
+        critical_stations.push(StationId("comms".to_string()));
+    }
 
     if let Some(mut res) = world.get_resource_mut::<StationImportanceRes>() {
         res.0.ingest(attributed, critical_stations);

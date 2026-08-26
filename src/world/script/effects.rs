@@ -712,7 +712,7 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         category = "effect",
         params = ["spec"],
         summary = "Open a scripted comms thread: `#{from, node_fn, display_name?, \
-                  thread_id?, urgent?}`. No delayed form — defer it with \
+                  thread_id?, priority?, urgent?}`. No delayed form — defer it with \
                   `schedule.after`.",
         |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
             // Comms vocabulary, so it buffers onto the sink's SECOND buffer
@@ -1151,7 +1151,8 @@ pub(super) fn destroy_entity_action(entity: &str) -> Result<TriggerAction, Strin
 ///     node_fn: "hail_axiom",         // required: the root dialogue node fn
 ///     display_name: "Axiom Control", // optional
 ///     thread_id: "aphelion",         // optional: joins an existing thread
-///     urgent: true,                  // optional, default false
+///     priority: "critical",          // optional: routine|urgent|critical
+///     urgent: true,                  // legacy optional fallback
 /// });
 /// ```
 ///
@@ -1170,12 +1171,28 @@ fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
     let root_fn = map_str(spec, "node_fn").ok_or_else(|| {
         "open_comms requires a string `node_fn` (the root dialogue node fn)".to_string()
     })?;
+    let legacy_urgent = map_bool(spec, "urgent").unwrap_or(false);
+    let priority = match map_str(spec, "priority") {
+        Some(value) => match value.to_ascii_lowercase().as_str() {
+            "routine" => crate::core::messages::CommsPriority::Routine,
+            "urgent" => crate::core::messages::CommsPriority::Urgent,
+            "critical" => crate::core::messages::CommsPriority::Critical,
+            _ => {
+                return Err(format!(
+                    "open_comms `priority` must be routine, urgent, or critical (got `{value}`)"
+                ));
+            }
+        },
+        None if legacy_urgent => crate::core::messages::CommsPriority::Urgent,
+        None => crate::core::messages::CommsPriority::Routine,
+    };
     Ok(OpenCommsRequest {
         from,
         root_fn,
         display_name: map_str(spec, "display_name"),
         thread_id: map_str(spec, "thread_id"),
-        urgent: map_bool(spec, "urgent").unwrap_or(false),
+        priority,
+        urgent: priority.is_urgent(),
         // Stamped by `EffectSink::take_opens` at the host boundary.
         script_path: String::new(),
         origin_layer: None,
@@ -2043,6 +2060,7 @@ mod tests {
                 root_fn: "hail_axiom".to_string(),
                 display_name: Some("Axiom Control".to_string()),
                 thread_id: Some("aphelion".to_string()),
+                priority: crate::core::messages::CommsPriority::Urgent,
                 urgent: true,
                 script_path: "t.rhai".to_string(),
                 origin_layer: None,
@@ -2065,10 +2083,35 @@ mod tests {
                 root_fn: "hail".to_string(),
                 display_name: None,
                 thread_id: None,
+                priority: crate::core::messages::CommsPriority::Routine,
                 urgent: false,
                 script_path: "t.rhai".to_string(),
                 origin_layer: None,
             }]
+        );
+    }
+
+    #[test]
+    fn open_comms_accepts_authoritative_critical_priority() {
+        let (_effects, opens) = run_with_opens(
+            r#"fn f(ctx) {
+                ctx.effects.open_comms(#{
+                    from: "axiom",
+                    node_fn: "hail",
+                    priority: "critical",
+                    urgent: false,
+                });
+            }"#,
+            "f",
+        );
+        assert_eq!(opens.len(), 1);
+        assert_eq!(
+            opens[0].priority,
+            crate::core::messages::CommsPriority::Critical
+        );
+        assert!(
+            opens[0].urgent,
+            "legacy urgency is only the compatibility projection"
         );
     }
 

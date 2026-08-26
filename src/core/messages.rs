@@ -780,8 +780,48 @@ pub struct CommsResponseView {
 /// the name is the only thing that can tell it which table belongs to which id.
 pub const TEXT_PARAMS_SUFFIX: &str = "_params";
 
+/// Authoritative importance of one Comms message.
+///
+/// `is_urgent` predates this vocabulary and remains on the wire as a compatibility
+/// projection. New producers and consumers use this enum; a legacy payload with
+/// no `priority` is promoted to [`Urgent`](Self::Urgent) when `is_urgent` is true.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum CommsPriority {
+    #[default]
+    Routine,
+    Urgent,
+    Critical,
+}
+
+impl CommsPriority {
+    /// Compatibility projection for peers that only understand `is_urgent`.
+    pub fn is_urgent(self) -> bool {
+        self != Self::Routine
+    }
+
+    /// A response acknowledges a critical interruption. Legacy urgent threads
+    /// keep their existing urgency as they advance; critical follow-ups return
+    /// to routine unless a later authored OPEN raises them again.
+    pub fn after_response(self) -> Self {
+        match self {
+            Self::Critical => Self::Routine,
+            other => other,
+        }
+    }
+}
+
+impl From<bool> for CommsPriority {
+    fn from(is_urgent: bool) -> Self {
+        if is_urgent {
+            Self::Urgent
+        } else {
+            Self::Routine
+        }
+    }
+}
+
 /// A single message in the Comms inbox.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CommsMessage {
     /// Stable identifier for this message (server-assigned UUID).
     pub id: String,
@@ -798,7 +838,6 @@ pub struct CommsMessage {
     ///
     /// Not applied to [`subject`](Self::subject), which is a character prefix of
     /// the *id* rather than of the rendered text; see [`Self::injected`].
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub body_params: BTreeMap<String, String>,
     /// Available response options. Empty while awaiting a reply (loading).
     ///
@@ -812,25 +851,112 @@ pub struct CommsMessage {
     pub is_read: bool,
     /// True when the owning scenario has unloaded; responses are disabled and
     /// a "transmission ended" marker should be shown.
-    #[serde(default)]
     pub is_orphaned: bool,
     /// True when the sender is currently within comms range of the player
     /// ship. When false, responses should be disabled and an out-of-range
     /// marker shown. Defaults to true for backward compatibility.
-    #[serde(default = "default_true")]
     pub sender_in_range: bool,
     /// Conversation thread identifier. All messages belonging to the same
     /// hail/dialogue tree (initial message + all follow-ups) share this UUID.
     /// Defaults to empty string for backward compatibility with old wire
     /// payloads; the client treats an empty value as "own thread" (= message id).
-    #[serde(default)]
     pub thread_id: String,
+    /// Generic authoritative message priority. Critical state is level-triggered
+    /// from the latest live message in each thread; reading a message does not
+    /// acknowledge it.
+    pub priority: CommsPriority,
     /// True when this message was flagged as urgent by the world template.
     /// Urgent messages are shown with a `!` marker and an amber tint in the
     /// inbox; the sender's Hail button also receives the `!` marker while any
     /// unread urgent message from that sender exists.
-    #[serde(default)]
     pub is_urgent: bool,
+}
+
+/// Decode helper that can distinguish an absent new field from an explicitly
+/// authored `Routine`, which is what makes the old boolean a fallback rather
+/// than a second source of authority.
+#[derive(Deserialize)]
+struct CommsMessageWire {
+    id: String,
+    sender_uuid: String,
+    sender_name: String,
+    subject: String,
+    body: String,
+    #[serde(default)]
+    body_params: BTreeMap<String, String>,
+    responses: Vec<CommsResponseView>,
+    selected_response: Option<usize>,
+    is_read: bool,
+    #[serde(default)]
+    is_orphaned: bool,
+    #[serde(default = "default_true")]
+    sender_in_range: bool,
+    #[serde(default)]
+    thread_id: String,
+    #[serde(default)]
+    priority: Option<CommsPriority>,
+    #[serde(default)]
+    is_urgent: bool,
+}
+
+impl<'de> Deserialize<'de> for CommsMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = CommsMessageWire::deserialize(deserializer)?;
+        let priority = wire.priority.unwrap_or(if wire.is_urgent {
+            CommsPriority::Urgent
+        } else {
+            CommsPriority::Routine
+        });
+        Ok(Self {
+            id: wire.id,
+            sender_uuid: wire.sender_uuid,
+            sender_name: wire.sender_name,
+            subject: wire.subject,
+            body: wire.body,
+            body_params: wire.body_params,
+            responses: wire.responses,
+            selected_response: wire.selected_response,
+            is_read: wire.is_read,
+            is_orphaned: wire.is_orphaned,
+            sender_in_range: wire.sender_in_range,
+            thread_id: wire.thread_id,
+            priority,
+            is_urgent: priority.is_urgent(),
+        })
+    }
+}
+
+impl Serialize for CommsMessage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let priority = self.effective_priority();
+        let field_count = if self.body_params.is_empty() { 13 } else { 14 };
+        let mut wire = serializer.serialize_struct("CommsMessage", field_count)?;
+        wire.serialize_field("id", &self.id)?;
+        wire.serialize_field("sender_uuid", &self.sender_uuid)?;
+        wire.serialize_field("sender_name", &self.sender_name)?;
+        wire.serialize_field("subject", &self.subject)?;
+        wire.serialize_field("body", &self.body)?;
+        if !self.body_params.is_empty() {
+            wire.serialize_field("body_params", &self.body_params)?;
+        }
+        wire.serialize_field("responses", &self.responses)?;
+        wire.serialize_field("selected_response", &self.selected_response)?;
+        wire.serialize_field("is_read", &self.is_read)?;
+        wire.serialize_field("is_orphaned", &self.is_orphaned)?;
+        wire.serialize_field("sender_in_range", &self.sender_in_range)?;
+        wire.serialize_field("thread_id", &self.thread_id)?;
+        wire.serialize_field("priority", &priority)?;
+        wire.serialize_field("is_urgent", &priority.is_urgent())?;
+        wire.end()
+    }
 }
 
 impl CommsMessage {
@@ -867,8 +993,9 @@ impl CommsMessage {
         responses: Vec<CommsResponseView>,
         thread_id: String,
         sender_in_range: bool,
-        is_urgent: bool,
+        priority: impl Into<CommsPriority>,
     ) -> Self {
+        let priority = priority.into();
         Self {
             id,
             sender_uuid,
@@ -882,7 +1009,18 @@ impl CommsMessage {
             is_orphaned: false,
             sender_in_range,
             thread_id,
-            is_urgent,
+            priority,
+            is_urgent: priority.is_urgent(),
+        }
+    }
+
+    /// Priority used by runtime consumers. The boolean arm exists only for
+    /// hand-built legacy values; decoded values are normalised in `Deserialize`.
+    pub fn effective_priority(&self) -> CommsPriority {
+        if self.priority == CommsPriority::Routine && self.is_urgent {
+            CommsPriority::Urgent
+        } else {
+            self.priority
         }
     }
 }

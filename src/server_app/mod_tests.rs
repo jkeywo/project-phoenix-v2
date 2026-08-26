@@ -109,6 +109,61 @@ fn importance_marks_red_alert_critical_that_survives_visit_and_clears_on_resolve
 }
 
 #[test]
+fn live_critical_comms_drives_the_logical_comms_hero_channel_until_response() {
+    let mut world = World::new();
+    world.init_resource::<StationImportanceRes>();
+    world.insert_resource(crate::comms::server::CommsInboxRes(
+        crate::console::comms::CommsInbox::new(),
+    ));
+    world
+        .resource_mut::<crate::comms::server::CommsInboxRes>()
+        .0
+        .inject(CommsMessage::injected(
+            "critical".into(),
+            "sender".into(),
+            "Sender".into(),
+            "message".into(),
+            Default::default(),
+            vec![],
+            "safety".into(),
+            true,
+            CommsPriority::Critical,
+        ));
+
+    ingest_station_importance(&mut world);
+    assert_eq!(
+        importance_of(&build_station_importance_snapshots(&mut world), "comms"),
+        Some(&StationImportanceSnapshot {
+            station: StationId("comms".into()),
+            unread: false,
+            critical: true,
+        })
+    );
+
+    world
+        .resource_mut::<StationImportanceRes>()
+        .0
+        .visit(&StationId("comms".into()));
+    ingest_station_importance(&mut world);
+    assert_eq!(
+        importance_of(&build_station_importance_snapshots(&mut world), "comms")
+            .map(|snapshot| snapshot.critical),
+        Some(true),
+        "opening Comms does not acknowledge a continuing critical hail"
+    );
+
+    world
+        .resource_mut::<crate::comms::server::CommsInboxRes>()
+        .0
+        .record_response("critical", 0);
+    ingest_station_importance(&mut world);
+    assert!(
+        importance_of(&build_station_importance_snapshots(&mut world), "comms").is_none(),
+        "the admitted response lifecycle clears the Hero Bar condition"
+    );
+}
+
+#[test]
 fn importance_carries_simultaneous_unread_and_critical_independently() {
     // A completed off-screen objective (one-off unread) AND a raised Red
     // Alert (continuing critical) land on the same core bucket at once. The

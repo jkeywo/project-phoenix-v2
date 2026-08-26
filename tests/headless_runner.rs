@@ -21,7 +21,7 @@ use bevy::prelude::*;
 use common::SimFixture;
 use project_phoenix::ai::server::AiHighFidelity;
 use project_phoenix::core::balance::RunOutcome;
-use project_phoenix::core::messages::GamePhase;
+use project_phoenix::core::messages::{CommsPriority, GamePhase};
 use project_phoenix::headless::args::ticks_for_sim_seconds;
 use project_phoenix::headless::{build_headless_app, build_report, run, HeadlessArgs};
 use project_phoenix::server_app::LocalShip;
@@ -8834,6 +8834,9 @@ const SKYWAY_SURVEY_HEAD: &str = "world.falling_skyway.entity.skyhook.name";
 const SKYWAY_SURVEY_DEPOT_A: &str = "world.falling_skyway.entity.depot_ladder_a.name";
 /// The authority that accepts the completed survey report.
 const SKYWAY_SURVEY_CONTROL: &str = "world.falling_skyway.entity.skyway_control.name";
+/// The uncontrolled opening transit whose scan-backed stop order gates the
+/// rest of the mission.
+const SKYWAY_LARK: &str = "world.falling_skyway.entity.hauler_lark.name";
 /// The finding the evidence branch reads. Filed by the operator's own file, and
 /// what `ctx.dossier.holds` is asked about.
 const SKYWAY_FILE: &str = "world.falling_skyway.evidence.ladder_b_maintenance_file";
@@ -8896,6 +8899,12 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
         .entity_mut(ship)
         .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
 
+    // Every later-act fixture represents an engaged crew, so establish the
+    // scenario's real opening precondition through a real Sensors admission.
+    // One valid survey scan is enough to prove Lark's filed clearance unsafe;
+    // it does not file Control's three-structure survey for them.
+    skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_HEAD);
+
     // The file-backed survey deadline sized this limit before app construction;
     // the margin is only for the boundary's effects to cross the schedule.
     let limit = ticks_for_sim_seconds(run_budget, SKYWAY_DT);
@@ -8909,6 +8918,16 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
         skyway_flag(&app, "act"),
         2,
         "the survey deadline must open act 2"
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_LARK,
+        "world.falling_skyway.comms.lark_unsafe_response",
+    );
+    assert_eq!(
+        skyway_flag(&app, "lark_corridor_cancelled"),
+        1,
+        "later-act fixtures must enter through the admitted scan-backed safety response"
     );
     let _ = std::any::type_name::<WorldContentRuntime>();
 
@@ -9317,6 +9336,155 @@ fn falling_skyway_posted_survey_completes_on_the_admitted_control_pickup() {
         Some("world.falling_skyway.comms.survey_received"),
         "the follow-up is the distinct survey receipt"
     );
+}
+
+/// **Issue #1138 — the unattended opening is terminal through world state.**
+/// No scan or response is fabricated. The authored t=380 deadline commits the
+/// collision, removes both physical participants, and declares defeat without
+/// reading an objective status.
+#[test]
+fn idle_crew_fails_every_era_headless_checks() {
+    let collision_due = skyway_authored_deadline_secs("lark_collision_due") as f64;
+    let args = HeadlessArgs {
+        world_path: SKYWAY_WORLD.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt: SKYWAY_DT,
+        max_ticks: ticks_for_sim_seconds(collision_due + 8.0, SKYWAY_DT),
+        deterministic: true,
+        seed: Some(1138),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, args.max_ticks);
+
+    assert_eq!(skyway_flag(&app, "lark_corridor_cancelled"), 0);
+    assert_eq!(skyway_flag(&app, "lark_corridor_collision_committed"), 1);
+    assert_eq!(skyway_flag(&app, "lark_corridor_collision"), 1);
+    assert_eq!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::GameOver,
+        "the collision is authored terminality, not an objective checkpoint"
+    );
+    assert!(!named_entity_present(&mut app, SKYWAY_LARK));
+    assert!(!named_entity_present(
+        &mut app,
+        "world.falling_skyway.entity.skyhook.name"
+    ));
+    let report = build_report(&mut app, &args, collision_due);
+    assert_eq!(report.outcome_report.outcome, RunOutcome::Defeat);
+}
+
+/// A first scan taken after the routine check-in refreshes that live thread;
+/// the proof response does not have to wait for the Critical second hail.
+#[test]
+fn falling_skyway_mid_window_scan_unlocks_the_routine_stop_response() {
+    const UNSAFE: &str = "world.falling_skyway.comms.lark_unsafe_response";
+
+    let first_hail = skyway_authored_deadline_secs("lark_first_hail_due") as f64;
+    let collision_due = skyway_authored_deadline_secs("lark_collision_due") as f64;
+    let (mut app, ship) = skyway_survey_app(31138);
+
+    window_run_to(&mut app, first_hail + 1.0);
+    let first = skyway_messages(&app, SKYWAY_LARK)
+        .into_iter()
+        .rfind(|message| message.body == "world.falling_skyway.comms.lark_safety_check")
+        .expect("Lark's routine safety check arrives before the crew scan");
+    assert_eq!(first.priority, CommsPriority::Routine);
+    assert!(
+        !skyway_options(&first).contains(&UNSAFE.to_string()),
+        "without a scan the crew cannot merely assert that the corridor is unsafe"
+    );
+
+    skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_HEAD);
+    let lark_position = skyway_position(&mut app, SKYWAY_LARK);
+    skyway_move(
+        &mut app,
+        ship,
+        lark_position + bevy::prelude::Vec3::new(40.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    let refreshed = skyway_messages(&app, SKYWAY_LARK)
+        .into_iter()
+        .rfind(|message| message.body == "world.falling_skyway.comms.lark_safety_check")
+        .expect("the first valid scan refreshes Lark's live routine check");
+    assert_eq!(refreshed.priority, CommsPriority::Routine);
+    assert!(skyway_options(&refreshed).contains(&UNSAFE.to_string()));
+    skyway_pick(&mut app, SKYWAY_LARK, UNSAFE);
+
+    window_run_to(&mut app, collision_due + 3.0);
+    assert_eq!(skyway_flag(&app, "lark_corridor_cancelled"), 1);
+    assert_eq!(skyway_flag(&app, "lark_corridor_collision_committed"), 0);
+    assert!(named_entity_present(&mut app, SKYWAY_LARK));
+    assert!(named_entity_present(
+        &mut app,
+        "world.falling_skyway.entity.skyhook.name"
+    ));
+}
+
+/// **Issue #1138 — scan-backed engagement keeps the whole crew path open.**
+/// The scan and response both use ordinary admitted console commands. The
+/// routine hail exposes the proof but does not stop Lark by itself. The
+/// crew waits for the second, Critical hail and answers inside its final window;
+/// advancing past t=380 cannot resurrect the cancelled collision.
+#[test]
+fn falling_skyway_scan_backed_unsafe_response_cancels_the_collision() {
+    const UNSAFE: &str = "world.falling_skyway.comms.lark_unsafe_response";
+
+    let first_hail = skyway_authored_deadline_secs("lark_first_hail_due") as f64;
+    let final_hail = skyway_authored_deadline_secs("lark_final_hail_due") as f64;
+    let collision_due = skyway_authored_deadline_secs("lark_collision_due") as f64;
+    let (mut app, ship) = skyway_survey_app(21138);
+
+    skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_HEAD);
+    window_run_to(&mut app, first_hail + 2.0);
+    let lark_position = skyway_position(&mut app, SKYWAY_LARK);
+    skyway_move(
+        &mut app,
+        ship,
+        lark_position + bevy::prelude::Vec3::new(40.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+
+    let first = skyway_messages(&app, SKYWAY_LARK)
+        .into_iter()
+        .find(|message| message.body == "world.falling_skyway.comms.lark_safety_check")
+        .expect("Lark checks in thirty seconds before the survey deadline");
+    assert_eq!(first.priority, CommsPriority::Routine);
+    assert!(skyway_options(&first).contains(&UNSAFE.to_string()));
+
+    window_run_to(&mut app, final_hail + 2.0);
+    let lark_position = skyway_position(&mut app, SKYWAY_LARK);
+    skyway_move(
+        &mut app,
+        ship,
+        lark_position + bevy::prelude::Vec3::new(40.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    let final_check = skyway_messages(&app, SKYWAY_LARK)
+        .into_iter()
+        .find(|message| message.body == "world.falling_skyway.comms.lark_final_check")
+        .expect("Lark's second check arrives at the survey deadline");
+    assert_eq!(final_check.priority, CommsPriority::Critical);
+    assert!(
+        skyway_options(&final_check).contains(&UNSAFE.to_string()),
+        "the scan-backed response remains available in the final window"
+    );
+    skyway_pick(&mut app, SKYWAY_LARK, UNSAFE);
+
+    assert_eq!(skyway_flag(&app, "lark_corridor_cancelled"), 1);
+    assert_eq!(skyway_flag(&app, "lark_corridor_collision_committed"), 0);
+    window_run_to(&mut app, collision_due + 3.0);
+    assert_eq!(skyway_flag(&app, "lark_corridor_collision_committed"), 0);
+    assert_eq!(skyway_flag(&app, "lark_corridor_collision"), 0);
+    assert_ne!(
+        app.world().resource::<State<GamePhase>>().get(),
+        &GamePhase::GameOver
+    );
+    assert!(named_entity_present(&mut app, SKYWAY_LARK));
+    assert!(named_entity_present(
+        &mut app,
+        "world.falling_skyway.entity.skyhook.name"
+    ));
 }
 
 /// One structure's live condition, read off the entity rather than off the file.
@@ -9971,6 +10139,33 @@ fn skyway_args(dt: f64, seconds: f64) -> HeadlessArgs {
     }
 }
 
+/// Build a later-act Falling Skyway fixture through the opening's real safety
+/// contract. These tests are about storm, structural and transfer behavior,
+/// not about silently allowing Lark to collide with the head first. A valid
+/// Sensors command supplies the evidence; the ordinary Backfill Comms policy
+/// remains installed and chooses the resulting response when Lark checks in.
+fn build_engaged_skyway_app(args: &HeadlessArgs) -> bevy::prelude::App {
+    let mut app = build_headless_app(args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    let ship = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the crew's hull");
+    let original_position = {
+        let physics = app
+            .world()
+            .get::<ShipPhysics>(ship)
+            .expect("the crew's hull has physics");
+        bevy::prelude::Vec3::new(physics.x, physics.y, physics.z)
+    };
+    skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_HEAD);
+    skyway_move(&mut app, ship, original_position);
+    run(&mut app, 2);
+    app
+}
+
 /// The authored `due_secs` of one of this world's deadlines, read from the
 /// config rather than restated in the test — the tuning pass (#1044) moves
 /// these numbers and nothing here should have to be edited with them.
@@ -10031,10 +10226,10 @@ fn skyway_order_corridor_to_shelter(app: &mut bevy::prelude::App) {
     }
 }
 
-/// **Issue #1134.** Silence does not clear the lane for the crew. The storm's
-/// own deadlines still fire while the strike is unresolved; physical bands
-/// destroy exposed civilians, and every loss is named immediately on the
-/// ledger and Control channel.
+/// **Issue #1134.** Beyond the opening scan-backed Lark stop, silence does not
+/// clear the lane for the crew. The storm's own deadlines still fire while the
+/// strike is unresolved; physical bands destroy exposed civilians, and every
+/// loss is named immediately on the ledger and Control channel.
 #[test]
 fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike() {
     use project_phoenix::core::messages::ObjectiveStatus;
@@ -10047,8 +10242,10 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
     run(&mut app, 10);
 
-    // Keep the strike genuinely unresolved: a human is sitting at Comms and
-    // choosing nothing. The weather must not wait for that conversation.
+    // Seat a human at Comms before either authored conversation opens. They
+    // answer only Lark's scan-backed safety check; the strike remains genuinely
+    // unresolved and Navigation issues no shelter orders. The weather must not
+    // wait for either silence.
     let ship = app
         .world_mut()
         .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
@@ -10059,8 +10256,29 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
         .entity_mut(ship)
         .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
 
+    skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_HEAD);
+    let first_hail = skyway_authored_deadline_secs("lark_first_hail_due") as f64;
+    window_run_to(&mut app, first_hail + 1.0);
+    let lark_position = skyway_position(&mut app, SKYWAY_LARK);
+    skyway_move(
+        &mut app,
+        ship,
+        lark_position + bevy::prelude::Vec3::new(40.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_pick(
+        &mut app,
+        SKYWAY_LARK,
+        "world.falling_skyway.comms.lark_unsafe_response",
+    );
+    assert_eq!(
+        skyway_flag(&app, "lark_corridor_cancelled"),
+        1,
+        "the combined fixture must survive #1138's opening through its admitted response"
+    );
+
     let mut first_band_while_unresolved = false;
-    for _ in 10..args.max_ticks {
+    while window_now(&app) < closes_at + 6.0 {
         run(&mut app, 1);
         if named_entity_present(&mut app, "storm_band_one")
             && skyway_flag(&app, "skyway_strike_settled") == 0
@@ -10182,12 +10400,13 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
     }
 }
 
-/// **Issue #1037/#1134.** Act 2 driven end to end with Navigation doing its
-/// work: one order per endangered craft clears all three bands, while the
-/// rescue that nobody ran still fails loudly on its independent clock.
+/// **Issue #1037/#1134.** After the opening scan-backed safety stop, Act 2 is
+/// driven end to end with Navigation doing its work: one order per endangered
+/// craft clears all three bands, while the rescue that nobody ran still fails
+/// loudly on its independent clock and writes campaign state.
 ///
-/// The failure branch is the one an unattended run produces, and that is the
-/// honest default: opening an operation is a crew verb, so a backfilled bridge
+/// Once Act 2 opens, this failure branch is what an unattended bridge produces:
+/// opening an operation is a crew verb, so a backfilled bridge
 /// never tows anybody. The companion test below drives the same act with a crew
 /// that does.
 #[test]
@@ -10205,7 +10424,7 @@ fn falling_skyway_ordered_traffic_clears_all_three_bands_while_the_idle_rescue_f
     drop(probe);
 
     let args = skyway_args(dt, closes_at + 6.0);
-    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    let mut app = build_engaged_skyway_app(&args);
 
     let mut first: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
     let mut seen: std::collections::BTreeSet<String> = Default::default();
@@ -10426,7 +10645,7 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     // Six seconds past the rescue's own deadline: long enough to see the Lyra
     // survive the beat that would otherwise have taken her.
     let args = skyway_args(dt, clear_by + 6.0);
-    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    let mut app = build_engaged_skyway_app(&args);
     run(&mut app, 10);
     skyway_order_corridor_to_shelter(&mut app);
     run(&mut app, 4);
@@ -12188,13 +12407,14 @@ fn skyway_projected_floor(app: &bevy::prelude::App) -> f64 {
     skyway_deadline_secs(app, "skyhook_failure_due") as f64 - 16.0
 }
 
-/// **Issue #1040, AC1/AC2/AC4/AC5/AC6/AC7.** Act 3 driven end to end with nobody
-/// at the consoles: the head warns three times on three surfaces, crosses its
+/// **Issue #1040, AC1/AC2/AC4/AC5/AC6/AC7.** After the opening scan-backed
+/// safety stop, Act 3 runs end to end with nobody at the consoles: the head
+/// warns three times on three surfaces, crosses its
 /// authored structural floor, is REMOVED FROM THE WORLD, and the mission carries
 /// on into a survivor-rescue epilogue that reaches its own resolution.
 ///
-/// The neglect branch is the one an unattended run produces, and that is the
-/// honest default: opening an operation is a crew verb, so a backfilled bridge
+/// Once Act 3 opens, this neglect branch is what an unattended bridge produces:
+/// opening an operation is a crew verb, so a backfilled bridge
 /// never stabilises anything. The companion tests below drive the same act with
 /// a crew that reacts, and the epilogue with a crew that tows.
 #[test]
@@ -12211,7 +12431,7 @@ fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_ep
     // epilogue's authored window, plus a margin. Lengthening Act 3 in the TOML
     // must not silently turn this into a test of an act that never finished.
     let args = skyway_args(dt, projected + 100.0);
-    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    let mut app = build_engaged_skyway_app(&args);
 
     let mut first: std::collections::BTreeMap<String, f64> = Default::default();
     // What each surface said on the tick each warning fired. Sampled AT THE
@@ -12386,7 +12606,8 @@ fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_ep
          capacity's own mirrored counter says so to any predicate that asks. A \
          structure that has stopped ticking cannot correct its own last reading."
     );
-    // The count is READ off authored state, never rolled. In an unattended run
+    // The count is READ off authored state, never rolled. After the opening
+    // safety stop, in an otherwise unattended run
     // #1036's comms backfill answers the committee (settling the strike, so a
     // FULL shift is back on the head) and answers the head's own channel (so the
     // gang were told, and braced): six, less one, is five.
@@ -12476,7 +12697,7 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
     drop(probe);
 
     let args = skyway_args(dt, projected + 20.0);
-    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    let mut app = build_engaged_skyway_app(&args);
     run(&mut app, 10);
     let (ship, _ship_uuid) = skyway_crew_hull(&mut app);
     // Where Act 3's own approach objective sends a helm, and 247 units off the
@@ -12603,7 +12824,7 @@ fn falling_skyway_act_3_epilogue_is_completable_by_a_crew_that_tows_both_craft()
     drop(probe);
 
     let args = skyway_args(dt, projected + 100.0);
-    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    let mut app = build_engaged_skyway_app(&args);
     run(&mut app, 10);
     let (ship, _ship_uuid) = skyway_crew_hull(&mut app);
 
@@ -12727,7 +12948,7 @@ fn falling_skyway_losing_the_ship_is_a_hard_fail_and_writes_none_of_the_head_s_f
     drop(probe);
 
     let args = skyway_args(dt, band_at + 60.0);
-    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    let mut app = build_engaged_skyway_app(&args);
     run(&mut app, 10);
     let (ship, _) = skyway_crew_hull(&mut app);
 
@@ -13705,8 +13926,8 @@ fn a_crew_who_saved_the_head_and_nothing_else_reach_the_window_shorter() {
     );
 }
 
-/// **Issue #1042, AC2/AC4 — the third outcome, and the one an unattended bridge
-/// produces.**
+/// **Issue #1042, AC2/AC4 — the third outcome, and the one a bridge unattended
+/// after the opening safety stop produces.**
 ///
 /// Nobody mended anything and nobody caught the tether, so #1040's strain walks
 /// the head to its structural floor and `destroy_entity` takes it out of the
@@ -13728,13 +13949,12 @@ fn a_crew_who_mended_nothing_reach_a_window_with_no_lift_in_it_at_all() {
     let opens_at = skyway_deadline_secs(&probe, "skyway_transfer_window") as f64;
     drop(probe);
 
-    let mut app =
-        build_headless_app(&skyway_args(SKYWAY_DT, opens_at + 12.0)).expect("the world must load");
+    let mut app = build_engaged_skyway_app(&skyway_args(SKYWAY_DT, opens_at + 12.0));
     run(&mut app, 10);
     let (ship, _) = window_ship(&mut app);
     window_run_to(&mut app, opens_at - 20.0);
-    // On station, so the hail reaches them. Nothing else about this run is
-    // steered: it is the mission running with nobody at the consoles.
+    // On station, so the hail reaches them. After the opening safety
+    // precondition, nothing else about this run is steered.
     skyway_move(&mut app, ship, WINDOW_STATION);
     let _ = window_open_time(&mut app, opens_at + 10.0);
 

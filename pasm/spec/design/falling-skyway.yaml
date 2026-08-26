@@ -6,8 +6,8 @@
 #     chains carry the order (checked against authored dues by
 #     design-content.deadline-order) and one envelope bound holds the whole
 #     mission to 20-30 minutes;
-#   - terminal failure is WORLD-DRIVEN only: no checkpoint logic. The opening
-#     terminal is RATIFIED TARGET DESIGN for #1138, not current runtime: unless
+#   - terminal failure is WORLD-DRIVEN only: no checkpoint logic. In the opening,
+#     unless
 #     the crew sends the scan-backed unsafe response, an uncontrolled Hauler
 #     Lark collides in the corridor and causes terminal defeat. Lark narrates
 #     its intent; the first hail arrives 30 seconds before `skyway_survey_due`,
@@ -94,6 +94,12 @@ entities:
       architecture_links: [scenario-script-host-seam]
       owner_role: fs-science
       produces_facts: [scan-skyhook-taken, scan-depot-a-taken, scan-depot-b-taken, survey-reported]
+  - verb: fs-stop-lark
+    core: {status: proposed, confidence: provisional, origin: ai, title: Stop Lark's Transit, summary: "[ai] Take any valid structure survey scan, then send Lark the scan-backed unsafe response before its twenty-second final window closes. A scan alone is evidence, not a stop order."}
+    game_design:
+      architecture_links: [comms-dialogue-controller]
+      owner_role: fs-tactical
+      produces_facts: [lark-corridor-cancelled]
   - verb: fs-settle-the-strike
     core: {status: proposed, confidence: provisional, origin: ai, title: Settle the Strike, summary: "[ai] Negotiate the committee's two-of-three ground; both promises land on the commitments ledger and stay open. Timers harden the tree but never close this path."}
     game_design:
@@ -185,6 +191,30 @@ entities:
       deadline_id: skyway_survey_due
       requires: [fs-tether-slip]
       on_failure: [fs-survey-unfiled]
+  - gate: fs-lark-first-check
+    core: {status: proposed, confidence: provisional, origin: ai, title: Lark Checks the Filed Clearance, summary: "[ai] Thirty seconds before the survey deadline, Lark narrates the intended corridor transit on a routine Comms hail. Any first valid survey scan makes the scan-backed unsafe response available; merely taking the scan changes nothing."}
+    game_design:
+      deadline_id: lark_first_hail_due
+      requires: [fs-tether-slip]
+      requires_player_action: [fs-stop-lark]
+      on_success: [fs-lark-holds]
+      on_failure: [fs-lark-escalates]
+  - gate: fs-lark-final-check
+    core: {status: proposed, confidence: provisional, origin: ai, title: Lark's Critical Final Check, summary: "[ai] At the survey deadline Lark checks a second time at generic authoritative Critical priority, leaving twenty seconds for the admitted scan-backed response. Reading or visiting Comms does not acknowledge it."}
+    game_design:
+      deadline_id: lark_final_hail_due
+      requires: [fs-lark-first-check]
+      requires_player_action: [fs-stop-lark]
+      on_success: [fs-lark-holds]
+      on_failure: [fs-lark-final-window]
+  - gate: fs-lark-collision
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Uncontrolled Corridor Collision, summary: "[ai] At t=380, without the admitted scan-backed response, Lark commits to the compromised throat, strikes the Skyway and causes authored world-driven defeat. Objective status is never consulted."}
+    game_design:
+      deadline_id: lark_collision_due
+      requires: [fs-lark-final-check, fs-survey-thread]
+      requires_player_action: [fs-stop-lark]
+      on_success: [fs-lark-holds]
+      on_failure: [fs-lark-collision-defeat]
 
   # ── Strike thread: stews mid-survey, on its own trigger ────────────────────
   - gate: fs-strike-thread
@@ -359,6 +389,22 @@ entities:
     core: {status: proposed, confidence: provisional, origin: ai, title: The Head Loses Certification, summary: "[ai] Under the 45% lift line; the lift-capable flag falls and every later supply computation starts from here."}
     game_design:
       handler: on_tether_slip
+  - consequence: fs-lark-holds
+    core: {status: proposed, confidence: provisional, origin: ai, title: Lark Holds Clear, summary: "[ai] The admitted scan-backed unsafe response cancels the collision deadline permanently and idempotently; the wider survey remains independent."}
+    game_design:
+      handler: on_lark_unsafe_response
+  - consequence: fs-lark-escalates
+    core: {status: proposed, confidence: provisional, origin: ai, title: Lark Checks Again, summary: "[ai] No scan-backed stop followed the routine hail, so Lark continues toward the throat and raises the second hail at Critical priority."}
+    game_design:
+      handler: on_lark_final_hail
+  - consequence: fs-lark-final-window
+    core: {status: proposed, confidence: provisional, origin: ai, title: Lark's Final Window Opens, summary: "[ai] The Critical second hail leaves the authored final twenty-second response window; the crew route remains open until collision commitment."}
+    game_design:
+      handler: on_lark_final_hail
+  - consequence: fs-lark-collision-defeat
+    core: {status: proposed, confidence: provisional, origin: ai, title: Lark Strikes the Skyway, summary: "[ai] Lark and the Skyway leave the world and the scenario declares defeat from the authored collision handler at t=380."}
+    game_design:
+      handler: on_lark_collision
   - consequence: fs-survey-unfiled
     core:
       status: proposed
@@ -576,13 +622,13 @@ entities:
           to: "380s"
           intensity_intent: setup-with-the-strike-stewing
           engaged_roles: [fs-science, fs-captain, fs-tactical]
-          covers_deadlines: [tether_slip, skyway_survey_due]
+          covers_deadlines: [tether_slip, lark_first_hail_due, skyway_survey_due, lark_final_hail_due]
         - phase_id: storm-over-a-live-negotiation
           from: "380s"
           to: "1100s"
           intensity_intent: rising-to-peak
           engaged_roles: [fs-navigation, fs-operations, fs-tactical, fs-captain]
-          covers_deadlines: [storm_front_due, storm_band_one_due, storm_band_two_due, lyra_clear_due, storm_band_three_due, storm_passed_due]
+          covers_deadlines: [lark_collision_due, storm_front_due, storm_band_one_due, storm_band_two_due, lyra_clear_due, storm_band_three_due, storm_passed_due]
         - phase_id: crowded-back-half
           from: "1100s"
           to: "1900s"
@@ -647,8 +693,7 @@ entities:
       origin: ai
       title: Silence Fails Loudly in Every Era
       summary: >
-        [ai] RATIFIED TARGET DESIGN for #1138, not current runtime: an idle
-        opening ends in world-driven terminal defeat when uncontrolled Hauler
+        [ai] An idle opening ends in world-driven terminal defeat when uncontrolled Hauler
         Lark collides in the corridor, unless the crew sends the scan-backed
         unsafe response. Lark narrates its intent; its first hail arrives 30
         seconds before the survey deadline, a second generic authoritative
@@ -658,7 +703,7 @@ entities:
     game_design:
       strength: hard
       context: fully idle crew, every intensity era
-      construction: [fs-survey-thread, fs-storm-exposure, fs-skyhook-holds-or-falls]
+      construction: [fs-survey-thread, fs-lark-collision, fs-storm-exposure, fs-skyhook-holds-or-falls]
       expected_dynamic: each era posts a visible failure an idle crew cannot avoid; nothing completes by accident
       experience_hypothesis: doing nothing is never mistaken for doing fine
       measured_by: [idle_crew_fails_every_era_headless_checks]

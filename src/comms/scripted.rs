@@ -414,7 +414,7 @@ pub(crate) fn open_scripted_comms_threads(
             responses,
             thread_id.clone(),
             available,
-            req.urgent,
+            req.effective_priority(),
         );
         channel2_writer.write(CommsChannel2Event::scripted_dialogue(msg));
         comms.active_dialogues.insert(

@@ -73,6 +73,49 @@ describe('PhCommsCurrentMessage', () => {
     expect(msgs[0].textContent.trim()).toContain('Welcome to the sector.');
   });
 
+  it('shows a read live Critical hail as non-modal text, shape, and colour', () => {
+    const sendAction = vi.fn();
+    const { el } = setup({ sendAction });
+    const thread = {
+      id: 'm-critical', thread_id: 'lark', sender_name: 'Lark',
+      body: 'Is the corridor safe?', priority: 'Critical', is_read: true,
+      selected_response: null, is_orphaned: false, responses: ['Unsafe'],
+    };
+    el.state = { thread, messages: [thread] };
+    const cue = el.shadowRoot.querySelector('.priority-cue');
+    expect(cue.hidden).toBe(false);
+    expect(cue.textContent).toContain('◆');
+    expect(cue.textContent).toContain(t('component.comms.priority.critical'));
+    expect(el.shadowRoot.querySelector('style').textContent).toContain('var(--fire-bright)');
+    expect(el.shadowRoot.querySelector('[role="dialog"]')).toBeNull();
+
+    el.shadowRoot.querySelector('.resp-btn').click();
+    expect(sendAction).toHaveBeenCalledWith('respond_to_message', {
+      message_id: 'm-critical', response_index: 0,
+    });
+  });
+
+  it('clears the Critical cue after response, invalidation, or supersession', () => {
+    const { el } = setup();
+    const critical = {
+      id: 'm-critical', thread_id: 'lark', sender_name: 'Lark', body: 'Safety check.',
+      priority: 'Critical', selected_response: null, is_orphaned: false, responses: ['Unsafe'],
+    };
+    el.state = { thread: critical, messages: [critical] };
+    expect(el.shadowRoot.querySelector('.priority-cue').hidden).toBe(false);
+
+    el.state = { thread: { ...critical, selected_response: 0 }, messages: [{ ...critical, selected_response: 0 }] };
+    expect(el.shadowRoot.querySelector('.priority-cue').hidden).toBe(true);
+
+    el.state = { thread: { ...critical, is_orphaned: true }, messages: [{ ...critical, is_orphaned: true }] };
+    expect(el.shadowRoot.querySelector('.priority-cue').hidden).toBe(true);
+
+    el.state = { thread: critical, messages: [critical, {
+      id: 'm-routine', thread_id: 'lark', priority: 'Routine', selected_response: null,
+    }] };
+    expect(el.shadowRoot.querySelector('.priority-cue').hidden).toBe(true);
+  });
+
   it('renders empty body placeholder when body is empty', () => {
     const { el } = setup();
     el.state = {

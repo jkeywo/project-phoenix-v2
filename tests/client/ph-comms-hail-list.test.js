@@ -85,6 +85,52 @@ describe('PhCommsHailList', () => {
     expect(sender.classList.contains('unread')).toBe(false);
   });
 
+  it('marks a live Critical hail with localized text, a diamond, and danger colour even after read', () => {
+    const { el } = setup();
+    el.state = {
+      messages: [{
+        id: 'msg-critical',
+        thread_id: 'lark',
+        sender_name: 'Lark',
+        body: 'Confirm corridor safety.',
+        priority: 'Critical',
+        is_read: true,
+        selected_response: null,
+        is_orphaned: false,
+      }],
+    };
+    const row = el.shadowRoot.querySelector('.row');
+    const cue = row.querySelector('.priority-cue');
+    expect(row.classList.contains('critical')).toBe(true);
+    expect(row.dataset.priority).toBe('critical');
+    expect(cue.classList.contains('critical')).toBe(true);
+    expect(cue.querySelector('.priority-shape').textContent).toBe('◆');
+    expect(cue.querySelector('.priority-text').textContent)
+      .toBe(t('component.comms.priority.critical'));
+    expect(el.shadowRoot.querySelector('style').textContent).toContain('var(--fire-bright)');
+  });
+
+  it('removes the Critical cue after response, invalidation, or supersession', () => {
+    const { el } = setup();
+    const critical = {
+      id: 'msg-critical', thread_id: 'lark', sender_name: 'Lark',
+      priority: 'Critical', is_read: true, selected_response: null, is_orphaned: false,
+    };
+    el.state = { messages: [critical] };
+    expect(el.shadowRoot.querySelector('.row').classList.contains('critical')).toBe(true);
+
+    el.state = { messages: [{ ...critical, selected_response: 0 }] };
+    expect(el.shadowRoot.querySelector('.row').classList.contains('critical')).toBe(false);
+
+    el.state = { messages: [{ ...critical, is_orphaned: true }] };
+    expect(el.shadowRoot.querySelector('.row').classList.contains('critical')).toBe(false);
+
+    el.state = { messages: [critical, {
+      id: 'msg-routine', thread_id: 'lark', sender_name: 'Lark', priority: 'Routine',
+    }] };
+    expect(el.shadowRoot.querySelectorAll('.row.critical')).toHaveLength(0);
+  });
+
   it('shows a readable preview derived from the resolved body, not a chopped id', () => {
     const { el } = setup();
     el.state = {

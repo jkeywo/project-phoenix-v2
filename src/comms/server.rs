@@ -693,9 +693,9 @@ pub(crate) fn broadcast_comms_state(
     // Auto-derive is_urgent: a contact is urgent when it has at least one
     // unread urgent message in the current inbox.
     for contact in contacts.iter_mut() {
-        contact.is_urgent = messages
-            .iter()
-            .any(|m| m.sender_uuid == contact.uuid && m.is_urgent && !m.is_read);
+        contact.is_urgent = messages.iter().any(|m| {
+            m.sender_uuid == contact.uuid && m.effective_priority().is_urgent() && !m.is_read
+        });
     }
 
     outbox.0.push((

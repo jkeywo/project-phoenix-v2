@@ -11,7 +11,7 @@
 //   - `CommsInbox::messages` — ordered snapshot of current inbox
 //   - `CommsInbox::is_dirty` / `CommsInbox::mark_clean` — change tracking
 
-use crate::core::messages::CommsMessage;
+use crate::core::messages::{CommsMessage, CommsPriority};
 
 /// Server-side record for a single inbox message.
 #[derive(Clone, Debug)]
@@ -109,17 +109,49 @@ impl CommsInbox {
             .map(|r| r.message.sender_uuid.clone())
     }
 
-    /// Return the `is_urgent` flag of the message with `message_id`, or `None`.
-    ///
-    /// A scripted thread's follow-up inherits the urgency of the message it
-    /// answers (issue #984), so the response handler reads it back from the
-    /// delivered message — the one authoritative record of what the thread was
-    /// opened as.
-    pub fn is_urgent_for(&self, message_id: &str) -> Option<bool> {
+    /// Return the authoritative priority of `message_id`, including the legacy
+    /// boolean fallback for hand-built old values.
+    pub fn priority_for(&self, message_id: &str) -> Option<CommsPriority> {
         self.records
             .iter()
             .find(|r| r.message.id == message_id)
-            .map(|r| r.message.is_urgent)
+            .map(|r| r.message.effective_priority())
+    }
+
+    /// Remove Critical importance without removing the historical message.
+    /// Used when an explicit inbox clear invalidates its dialogue surface.
+    pub fn acknowledge_priority(&mut self, message_id: &str) {
+        if let Some(rec) = self.records.iter_mut().find(|r| r.message.id == message_id) {
+            if rec.message.effective_priority() == CommsPriority::Critical {
+                rec.message.priority = CommsPriority::Routine;
+                rec.message.is_urgent = false;
+                self.dirty = true;
+            }
+        }
+    }
+
+    /// True while the latest live message in any thread is Critical.
+    ///
+    /// "Live" is presentation-independent: reading or visiting Comms does not
+    /// acknowledge a safety interruption. A response, orphaning/removal, or a
+    /// later message in the same thread does. Empty legacy thread ids fall back
+    /// to the message id, matching the client grouping rule.
+    pub fn has_live_critical_thread(&self) -> bool {
+        let mut latest = std::collections::BTreeMap::<&str, &CommsMessage>::new();
+        for record in &self.records {
+            let message = &record.message;
+            let thread = if message.thread_id.is_empty() {
+                message.id.as_str()
+            } else {
+                message.thread_id.as_str()
+            };
+            latest.insert(thread, message);
+        }
+        latest.values().any(|message| {
+            !message.is_orphaned
+                && message.selected_response.is_none()
+                && message.effective_priority() == CommsPriority::Critical
+        })
     }
 
     /// Return the `sender_name` of the message with `message_id`, or `None`.
@@ -169,6 +201,7 @@ mod tests {
             is_orphaned: false,
             sender_in_range: true,
             thread_id: id.into(),
+            priority: CommsPriority::Routine,
             is_urgent: false,
         }
     }
@@ -263,5 +296,50 @@ mod tests {
         assert_eq!(thread_b[0].id, "m2");
 
         assert!(inbox.messages_for_thread("missing").is_empty());
+    }
+
+    #[test]
+    fn critical_is_latest_live_thread_state_not_an_unread_edge() {
+        let mut inbox = CommsInbox::new();
+        let mut critical = msg("critical");
+        critical.thread_id = "safety".into();
+        critical.priority = CommsPriority::Critical;
+        critical.is_urgent = true;
+        critical.is_read = true;
+        inbox.inject(critical);
+
+        assert!(inbox.has_live_critical_thread());
+        assert!(
+            inbox.has_live_critical_thread(),
+            "reading or visiting Comms is not an acknowledgement"
+        );
+
+        let mut superseding = msg("later");
+        superseding.thread_id = "safety".into();
+        inbox.inject(superseding);
+        assert!(
+            !inbox.has_live_critical_thread(),
+            "the latest message owns the thread's current priority"
+        );
+    }
+
+    #[test]
+    fn response_or_invalidation_clears_critical_idempotently() {
+        let mut inbox = CommsInbox::new();
+        let mut critical = msg("critical");
+        critical.priority = CommsPriority::Critical;
+        critical.is_urgent = true;
+        inbox.inject(critical);
+        inbox.record_response("critical", 0);
+        assert!(!inbox.has_live_critical_thread());
+
+        let mut invalidated = msg("invalidated");
+        invalidated.priority = CommsPriority::Critical;
+        invalidated.is_urgent = true;
+        inbox.inject(invalidated);
+        assert!(inbox.has_live_critical_thread());
+        inbox.acknowledge_priority("invalidated");
+        inbox.acknowledge_priority("invalidated");
+        assert!(!inbox.has_live_critical_thread());
     }
 }

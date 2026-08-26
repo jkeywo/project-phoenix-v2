@@ -62,7 +62,7 @@ describe('battleship comms renderStation', () => {
     battleshipRender(base, document);
     expect(el('comms-contact-list').state).toEqual({ contacts: [{ id: 'c1' }] });
     expect(el('comms-hail-list').state).toEqual(base);
-    expect(el('comms-current-message').state).toEqual({ thread: { id: 'm2', is_read: false, sender_name: 'Ops' }, rejection: null });
+    expect(el('comms-current-message').state).toEqual({ thread: { id: 'm2', is_read: false, sender_name: 'Ops' }, messages: base.messages, rejection: null });
     expect(el('station-damage').state).toEqual({ pct: 0.9 });
   });
 
@@ -71,6 +71,17 @@ describe('battleship comms renderStation', () => {
     expect(el('footer-target').textContent).toBe('Ops');
     battleshipRender({ ...base, messages: [{ id: 'm1', is_read: false }] }, document);
     expect(el('footer-target').textContent).toBe(t('console.common.active_hail'));
+  });
+
+  it('selects a live Critical hail without making it modal', () => {
+    const messages = [
+      { id: 'm1', thread_id: 'routine', is_read: false, priority: 'Routine' },
+      { id: 'm2', thread_id: 'lark', is_read: true, priority: 'Critical', selected_response: null },
+    ];
+    battleshipRender({ ...base, messages }, document);
+    expect(el('comms-current-message').state).toEqual({
+      thread: messages[1], messages, rejection: null,
+    });
   });
 
   it('shows the no-active-hail fallback with no messages', () => {
@@ -112,7 +123,7 @@ describe('cruiser comms renderStation', () => {
     cruiserRender(payload, document);
     expect(el('comms-contact-list').state).toEqual({ contacts: [{ id: 'c1' }] });
     expect(el('comms-hail-list').state).toEqual(comms);
-    expect(el('comms-current-message').state).toEqual({ thread: { id: 'm1', is_read: false }, rejection: 'console.common.no_target' });
+    expect(el('comms-current-message').state).toEqual({ thread: { id: 'm1', is_read: false }, messages: comms.messages, rejection: 'console.common.no_target' });
     expect(el('station-damage').state).toEqual({ pct: 0.5 });
   });
 

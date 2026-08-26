@@ -183,9 +183,10 @@
 # the head's fate, so it is also where a crew end up who kept the structure
 # standing and let it fall out of lift certification.
 #
-# Six campaign flag families come out the far side under `campaign.skyway.` —
-# passage, strike, evidence, casualties, skyhook, commitments — and they live in
-# the ordinary flag store, which is censused and snapshotted already. The slice
+# Seven campaign flag families come out the far side under `campaign.skyway.` —
+# passage, strike, evidence, casualties, traffic, skyhook, commitments — and
+# they live in the ordinary flag store, which is censused and snapshotted
+# already. The slice
 # registers no new authoritative state and adds no Rust;
 # `pasm/spec/architecture/world-files.yaml`'s `campaign-flag-handoff-state`
 # describes the handoff and names the types that carry it.
@@ -460,7 +461,7 @@
 # the same number as deleting the ENTIRE script band, so everything else #1043
 # authors folds nothing at all: three comms trees, seven objectives' worth of
 # posting and resolution, the booking and berth seams, the commitments settled at
-# the close, the casualty arithmetic, the debrief and all six campaign flag
+# the close, the casualty arithmetic, the debrief and all seven campaign flag
 # families. That is the same authoritative-but-unfolded bucket #1039, #1040,
 # #1041 and #1042 each put a script band in, and this slice is the largest test
 # of the claim so far.
@@ -1280,7 +1281,9 @@ template_path = "assets/entities/ship_civilian_hauler.toml"
 id = "convoy_meridian"
 name = "world.falling_skyway.entity.convoy_meridian.name"
 transform = { position = [-90.0, 0.0, 760.0] }
-overrides = { comms = { hailable = true }, civilian = { route = "skyway_lane" } }
+overrides = { comms = { hailable = true }, civilian = { route = "skyway_lane", order_options = [
+  { id = "storm_shelter", label = "world.falling_skyway.civilian_order.storm_shelter", order = { verb = "divert", route = "storm_shelter_run" } },
+] } }
 
 # ── The traffic ──────────────────────────────────────────────────────────────
 #
@@ -1294,14 +1297,18 @@ template_path = "assets/entities/ship_civilian_hauler.toml"
 id = "hauler_lark"
 name = "world.falling_skyway.entity.hauler_lark.name"
 transform = { position = [0.0, 0.0, -520.0] }
-overrides = { civilian = { route = "skyway_lane" } }
+overrides = { civilian = { route = "skyway_lane", order_options = [
+  { id = "storm_shelter", label = "world.falling_skyway.civilian_order.storm_shelter", order = { verb = "divert", route = "storm_shelter_run" } },
+] } }
 
 [[entity]]
 template_path = "assets/entities/ship_civilian_hauler.toml"
 id = "hauler_pell"
 name = "world.falling_skyway.entity.hauler_pell.name"
 transform = { position = [70.0, 0.0, -880.0] }
-overrides = { civilian = { route = "skyway_lane" } }
+overrides = { civilian = { route = "skyway_lane", order_options = [
+  { id = "storm_shelter", label = "world.falling_skyway.civilian_order.storm_shelter", order = { verb = "divert", route = "storm_shelter_run" } },
+] } }
 
 # The ladder shuttle, on the other lane entirely.
 [[entity]]
@@ -1425,8 +1432,8 @@ visible = true
 #
 # ── The sweep's clock, and why the traffic goes first ────────────────────────
 #
-#   t=400  storm_front_due     Control's forecast. The corridor is cleared and
-#                              the Lyra's situation becomes the crew's problem.
+#   t=400  storm_front_due     Control's forecast. Navigation's clearance work
+#                              and the Lyra's crisis become the crew's problem.
 #   t=580  storm_band_one_due  the first band, over the north corridor. Retires
 #                              at t=620, forty seconds later.
 #   t=740  storm_band_two_due  the second, over the upper gate. Retires t=780.
@@ -1484,9 +1491,9 @@ visible = true
 # make for the holding arc would fly diagonally down the corridor and straight
 # through the sweep. West first, then south, then hold.
 #
-# It loops so a craft parked on it stays parked — the crew put the corridor back
-# to work at `storm_passed_due` by ordering it back onto `skyway_lane`, which is
-# a decision somebody makes rather than a timer running out on a craft.
+# It loops so a craft parked on it stays parked. At `storm_passed_due` the
+# scenario marshals survivors back onto `skyway_lane`; that return order is not
+# the safety decision, which belongs to Navigation before band one.
 [[route]]
 id = "storm_shelter_run"
 on_complete = "loop"
@@ -2536,17 +2543,17 @@ on_flag_set("skyway_lyra_under_control", "on_lyra_recovered");
 // this act's own deadline today, something else tomorrow — lands here.
 on_destroyed("world.falling_skyway.entity.lyra_ascending.name", "on_lyra_lost");
 
-// Every craft on a lane. If one of these ever fires, the sweep schedule and the
-// shelter run did not do their job, and the act says so at its close rather
-// than completing quietly over four wrecks.
-on_destroyed("world.falling_skyway.entity.convoy_meridian.name", "on_traffic_lost");
-on_destroyed("world.falling_skyway.entity.hauler_lark.name", "on_traffic_lost");
-on_destroyed("world.falling_skyway.entity.hauler_pell.name", "on_traffic_lost");
-on_destroyed("world.falling_skyway.entity.shuttle_wick.name", "on_traffic_lost");
+// Every craft on a lane. Identity is retained through a thin wrapper so a loss
+// is a named ledger fact and an immediate call, not an aggregate discovered at
+// the end of the act. Wick remains the canary outside the storm corridor.
+on_destroyed("world.falling_skyway.entity.convoy_meridian.name", "on_meridian_traffic_lost");
+on_destroyed("world.falling_skyway.entity.hauler_lark.name", "on_lark_traffic_lost");
+on_destroyed("world.falling_skyway.entity.hauler_pell.name", "on_pell_traffic_lost");
+on_destroyed("world.falling_skyway.entity.shuttle_wick.name", "on_wick_traffic_lost");
 
-// The forecast. Everything the crew get to plan with arrives in one beat, 45
-// seconds before the first band: what is coming, who is in the way, and where
-// the traffic is being sent.
+// The forecast. Everything the crew get to plan with arrives in one beat, 180
+// seconds before the first band: what is coming, who is in the way, and the
+// shelter route Navigation can order each endangered craft onto.
 fn on_storm_front(ctx) {
     ctx.effects.add_objective(#{
         id: "obj-a2-shelter",
@@ -2587,24 +2594,6 @@ fn on_storm_front(ctx) {
         text: "world.falling_skyway.objective.storm.text",
         mandatory: true,
     });
-
-    // THE TRAFFIC RESPONDS TO THE SCHEDULE. Three ordinary #1028 divert orders
-    // onto the shelter run, issued off the same deadline that announces the
-    // sweep — no new navigation AI, and no craft that knows what a storm is.
-    // Each one is a REQUEST: the compliance machine still takes its authored
-    // acknowledge-and-decide seconds, and a hull whose disposition refused
-    // diverts would refuse this one. That is why the forecast is 45 seconds
-    // ahead of the first band rather than five.
-    //
-    // THREE, not four. `shuttle_wick` works the depot ladder, which runs east
-    // of the corridor and never comes within 300 units of a band centre — the
-    // storm sweeps the skyway, not the whole sky, and ordering a craft off a
-    // lane it was never in danger on would be theatre. Its `on_destroyed` hook
-    // stays registered below as the canary: if the ladder shuttle ever dies of
-    // weather, this claim was wrong.
-    ctx.effects.order_divert_route("world.falling_skyway.entity.convoy_meridian.name", "storm_shelter_run");
-    ctx.effects.order_divert_route("world.falling_skyway.entity.hauler_lark.name", "storm_shelter_run");
-    ctx.effects.order_divert_route("world.falling_skyway.entity.hauler_pell.name", "storm_shelter_run");
 
     ctx.flags.increment("a2_front_warned", 1);
 }
@@ -2706,12 +2695,59 @@ fn on_lyra_lost(ctx) {
     }
 }
 
-fn on_traffic_lost(ctx) {
+fn record_traffic_loss(ctx, ledger_flag, subject, evidence, node_fn) {
+    if ctx.flags[ledger_flag] > 0 { return; }
+    ctx.flags[ledger_flag] = 1;
     ctx.flags.increment("a2_traffic_lost", 1);
+    ctx.effects.fail_objective("obj-a2-shelter");
+    ctx.dossier.append(#{
+        subject: subject,
+        text: evidence,
+        provenance: "scan",
+    });
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyway_control.name",
+        node_fn: node_fn,
+        urgent: true,
+    });
+    if ctx.flags.a2_traffic_lost == 1 {
+        ctx.effects.add_objective(#{
+            id: "obj-a2-traffic-loss-report",
+            text: "world.falling_skyway.objective.traffic_loss_report.text",
+            mandatory: true,
+            targets: ["world.falling_skyway.entity.skyway_control.name"],
+        });
+    }
 }
 
-// The corridor clears. The lane going back to work is an ORDER somebody gives,
-// not a timer expiring on a craft: the same three diverts, pointed home.
+fn on_meridian_traffic_lost(ctx) {
+    record_traffic_loss(ctx, "skyway_traffic_lost_meridian",
+        "world.falling_skyway.entity.convoy_meridian.name",
+        "world.falling_skyway.evidence.traffic_lost_meridian", "traffic_lost_meridian")
+}
+fn on_lark_traffic_lost(ctx) {
+    record_traffic_loss(ctx, "skyway_traffic_lost_lark",
+        "world.falling_skyway.entity.hauler_lark.name",
+        "world.falling_skyway.evidence.traffic_lost_lark", "traffic_lost_lark")
+}
+fn on_pell_traffic_lost(ctx) {
+    record_traffic_loss(ctx, "skyway_traffic_lost_pell",
+        "world.falling_skyway.entity.hauler_pell.name",
+        "world.falling_skyway.evidence.traffic_lost_pell", "traffic_lost_pell")
+}
+fn on_wick_traffic_lost(ctx) {
+    record_traffic_loss(ctx, "skyway_traffic_lost_wick",
+        "world.falling_skyway.entity.shuttle_wick.name",
+        "world.falling_skyway.evidence.traffic_lost_wick", "traffic_lost_wick")
+}
+
+fn traffic_lost_meridian(ctx) { #{ message: "world.falling_skyway.comms.traffic_lost_meridian", responses: [] } }
+fn traffic_lost_lark(ctx)     { #{ message: "world.falling_skyway.comms.traffic_lost_lark", responses: [] } }
+fn traffic_lost_pell(ctx)     { #{ message: "world.falling_skyway.comms.traffic_lost_pell", responses: [] } }
+fn traffic_lost_wick(ctx)     { #{ message: "world.falling_skyway.comms.traffic_lost_wick", responses: [] } }
+
+// The corridor clears. Marshal surviving traffic back onto its working route;
+// this post-sweep reset does not replace Navigation's pre-band shelter orders.
 fn on_storm_passed(ctx) {
     ctx.effects.order_divert_route("world.falling_skyway.entity.convoy_meridian.name", "skyway_lane");
     ctx.effects.order_divert_route("world.falling_skyway.entity.hauler_lark.name", "skyway_lane");
@@ -4166,7 +4202,7 @@ fn window_closes(ctx) { #{ message: "world.falling_skyway.comms.window_closes", 
 // own epilogue has already said what became of the structure. Every combination
 // produces a distinct set of statements; no combination needs its own string.
 //
-// ── THE SIX FAMILIES THIS MISSION HANDS FORWARD ─────────────────────────────
+// ── THE SEVEN FAMILIES THIS MISSION HANDS FORWARD ───────────────────────────
 //
 // Written in ONE place, `write_the_campaign_record`, under a `campaign.skyway.`
 // prefix so a later mission can find them without knowing this file:
@@ -4179,6 +4215,7 @@ fn window_closes(ctx) { #{ message: "world.falling_skyway.comms.window_closes", 
 //   casualties   the picket, the head and the storm, and their sum
 //   skyhook      held / lost, mirroring the pair #1040 guarantees
 //   commitments  how many promises were kept and how many broken
+//   traffic      the storm's civilian losses, aggregate and per craft
 //
 // They live in the ordinary `FlagStore`, which is censused and snapshotted
 // already, so this slice registers no new authoritative state and adds no Rust.
@@ -5105,7 +5142,7 @@ fn havelock_rides_it_out_hurt(ctx)      { #{ message: "world.falling_skyway.comm
 fn convoy_rides_it_out(ctx)             { #{ message: "world.falling_skyway.comms.convoy_rides_it_out", responses: [] } }
 fn convoy_rides_it_out_hurt(ctx)        { #{ message: "world.falling_skyway.comms.convoy_rides_it_out_hurt", responses: [] } }
 
-// ── The six families ────────────────────────────────────────────────────────
+// ── The seven families ──────────────────────────────────────────────────────
 
 fn write_the_campaign_record(ctx) {
     // 1. SAFE PASSAGE. One of the pair per claimant, always, so a later mission
@@ -5195,6 +5232,16 @@ fn write_the_campaign_record(ctx) {
     } else if broken == 0 {
         ctx.flags["campaign.skyway.commitments.clean"] = 1;
     }
+
+    // 7. THE TRAFFIC. This is deliberately separate from human casualty tolls:
+    // a destroyed hauler is a corridor-capacity fact even when its complement
+    // is not modelled as a headcount. The exact complement is always written.
+    ctx.flags["campaign.skyway.traffic.lost"] = ctx.flags.a2_traffic_lost;
+    if ctx.flags.a2_traffic_lost == 0 { ctx.flags["campaign.skyway.traffic.none"] = 1; }
+    if ctx.flags.skyway_traffic_lost_meridian > 0 { ctx.flags["campaign.skyway.traffic.meridian"] = 1; }
+    if ctx.flags.skyway_traffic_lost_lark > 0     { ctx.flags["campaign.skyway.traffic.lark"] = 1; }
+    if ctx.flags.skyway_traffic_lost_pell > 0     { ctx.flags["campaign.skyway.traffic.pell"] = 1; }
+    if ctx.flags.skyway_traffic_lost_wick > 0     { ctx.flags["campaign.skyway.traffic.wick"] = 1; }
 }
 
 // ── The debrief ─────────────────────────────────────────────────────────────

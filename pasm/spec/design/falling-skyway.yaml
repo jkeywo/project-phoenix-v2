@@ -84,7 +84,7 @@ entities:
       confidence: provisional
       origin: ai
       title: Navigation (Falling Skyway)
-      summary: "[ai] Orders the civilian traffic off the lane ahead of the bands; nobody should die in the storm without a human (or an AI emitter) at this seat."
+      summary: "[ai] Gives one shelter order to each endangered civilian before band one; the authored shelter route then clears all three bands. Nobody should die in the storm without a human (or an AI emitter) at this seat."
     game_design:
       player_verbs: [fs-order-the-traffic]
 
@@ -132,9 +132,9 @@ entities:
       owner_role: fs-operations
       produces_facts: [skyhook-stabilised]
   - verb: fs-order-the-traffic
-    core: {status: proposed, confidence: provisional, origin: ai, title: Order the Traffic, summary: "[ai] Divert the civilian craft off the lane ahead of each band; the forecast-to-band gap is sized so a compliant order always lands in time."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: Order the Traffic, summary: "[ai] Issue one authored shelter diversion to each endangered craft before band one. A compliant order lands inside the forecast window and the shelter route clears that craft from all three bands."}
     game_design:
-      architecture_links: [scenario-script-host-seam]
+      architecture_links: [civilian-traffic-adapter, scenario-script-host-seam]
       owner_role: fs-navigation
       produces_facts: [traffic-ordered-clear]
   - verb: fs-file-the-evidence
@@ -205,17 +205,16 @@ entities:
 
   # ── Storm thread: arrives whatever the crew decided ────────────────────────
   - gate: fs-storm-front
-    core: {status: proposed, confidence: provisional, origin: ai, title: Control's Forecast Lands, summary: "[ai] The corridor is cleared ahead of the weather mid-negotiation; the Lyra's situation becomes the crew's problem. Own trigger — no act flag."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: Control's Forecast Lands, summary: "[ai] The forecast opens the crew's traffic-clearance and Lyra work mid-negotiation. It orders nobody and waits for no strike or act flag; the weather keeps its own clock."}
     game_design:
       self_resolving: true
       deadline_id: storm_front_due
-      on_failure: [fs-corridor-cleared]
+      on_failure: [fs-traffic-clearance-opens]
   - gate: fs-storm-band-one
     core: {status: proposed, confidence: provisional, origin: ai, title: First Band, summary: "[ai] The forecast-to-first-band gap is arithmetic, not generosity: sized from hauler speed, lane length and the authored acknowledge-and-decide delay, and it scales with the clock."}
     game_design:
       self_resolving: true
       deadline_id: storm_band_one_due
-      requires: [fs-storm-front]
       on_failure: [fs-storm-exposure]
   - gate: fs-storm-band-two
     core: {status: proposed, confidence: provisional, origin: ai, title: Second Band, summary: "[ai] Over the upper gate — the band the Lyra must be clear of."}
@@ -335,7 +334,7 @@ entities:
       title: The Window Closes
       summary: >
         [ai] The window shuts for good; the ledger decides which two of
-        three claims lifted, and the six campaign flag families carry the
+        three claims lifted, and the seven campaign flag families carry the
         rest forward. The envelope anchor below holds the whole mission to
         20-30 minutes, and the authored 1800s close lands exactly on that
         boundary.
@@ -383,8 +382,8 @@ entities:
     game_design:
       handler: on_stall
       magnitude_source: how far the escalation timers ran before the crew engaged
-  - consequence: fs-corridor-cleared
-    core: {status: proposed, confidence: provisional, origin: ai, title: The Corridor Clears, summary: "[ai] Civilian traffic is ordered off the lane ahead of the weather; the Lyra cannot comply."}
+  - consequence: fs-traffic-clearance-opens
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Corridor Must Be Cleared, summary: "[ai] The forecast posts and signposts the clearance work; each endangered craft's authored shelter control is already in Navigation's traffic picture. Navigation must issue the orders; the Lyra cannot comply."}
     game_design:
       handler: on_storm_front
   - consequence: fs-storm-exposure
@@ -454,7 +453,7 @@ entities:
       magnitude_source: the five clean-ledger criteria over the transfer ledger and campaign flags
       depends_on_state: [fs-ladder-supply-picture]
   - consequence: fs-claims-lapse
-    core: {status: proposed, confidence: provisional, origin: ai, title: Unlifted Claims Lapse, summary: "[ai] The window shuts for good; what was not lifted was chosen against, and the six campaign flag families carry it forward."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: Unlifted Claims Lapse, summary: "[ai] The window shuts for good; what was not lifted was chosen against, and the seven campaign flag families carry it forward."}
     game_design:
       handler: on_the_window_shuts_for_good
 
@@ -621,7 +620,7 @@ entities:
       construction: [fs-storm-front, fs-storm-band-one, fs-traffic-thread]
       expected_dynamic: compliant traffic escapes each band with margin; the Lyra, who cannot comply, becomes the crew's problem instead
       experience_hypothesis: the storm reads as lethal weather with fair warning, not as scripted punishment
-      measured_by: [traffic_clears_before_each_band_headless_check]
+      measured_by: [falling_skyway_ordered_traffic_clears_all_three_bands_while_the_idle_rescue_fails]
   - design_principle: fs-backfill-completes-the-set
     core:
       status: proposed

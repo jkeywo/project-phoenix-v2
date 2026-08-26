@@ -118,7 +118,7 @@ A scenario must remain playable without prior facts unless it is explicitly mark
 
 ## Falling Skyway handoff
 
-Falling Skyway currently writes six fact families at mission close:
+Falling Skyway currently writes seven fact families at mission close:
 
 | Family | What it preserves |
 |---|---|
@@ -126,10 +126,11 @@ Falling Skyway currently writes six fact families at mission close:
 | Strike | Whether the workforce dispute was negotiated, coerced, or left unresolved |
 | Evidence | How much of the underlying conduct the crew established and what they did with the finding |
 | Casualties | Casualties by consequential beat and in total |
+| Traffic | How many civilian craft the storm took, the named craft lost, or the exact no-loss complement |
 | Structure | Whether the skyhook held or was lost |
 | Commitments | How many promises were kept and broken |
 
-These facts are implemented and projected, but no specific follow-on episode is yet the ratified consumer. A future continuation should use several families in independent ways rather than reduce them to one good/bad score: passage can determine who is present, strike resolution can alter workforce disposition, evidence can change leverage, casualties can change tone and trust, structure state can change the physical opening, and commitments can affect who believes the crew.
+These facts are implemented and projected, but no specific follow-on episode is yet the ratified consumer. A future continuation should use several families in independent ways rather than reduce them to one good/bad score: passage can determine who is present, strike resolution can alter workforce disposition, evidence can change leverage, casualties can change tone and trust, traffic losses can change corridor capacity and named survivors, structure state can change the physical opening, and commitments can affect who believes the crew.
 
 ## Debrief and “previously” presentation
 
@@ -212,6 +213,6 @@ Modded scenarios may read and write campaign facts only through declared namespa
 
 - `src/campaign/projection.rs` and `pasm/spec/architecture/world-files.yaml` for the implemented campaign fact vocabulary and projection boundary.
 - `src/snapshot.rs`, the host save/import/export surfaces, and snapshot PASM for exact-run persistence and compatibility.
-- `assets/worlds/falling_skyway.toml` and its end-to-end tests for the current six-family handoff.
+- `assets/worlds/falling_skyway.toml` and its end-to-end tests for the current seven-family handoff.
 - [Game and Session Lifecycle](./game-lifecycle.md) for live-session, round, lobby, and exit boundaries.
 - [Future Modes](../future/future-modes.md) for customisation, crew assignments, Patrol Mode, multi-ship, and GM scope.

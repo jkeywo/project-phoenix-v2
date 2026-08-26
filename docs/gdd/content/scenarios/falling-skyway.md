@@ -69,9 +69,9 @@ Depot Ladder B’s structural reading and filed record can disagree. Scanning, o
 
 ### Act II — Storm and physical crisis
 
-The storm front is due at 400 seconds, with bands at 580, 740, and 900 seconds and passage recorded at 1072 seconds. Lyra Ascending’s clear deadline falls at 768 seconds. The storm changes the physical and operational problem while civilian traffic remains in motion.
+The storm front is due at 400 seconds, with bands at 580, 740, and 900 seconds and passage recorded at 1072 seconds. Lyra Ascending’s clear deadline falls at 768 seconds. Every weather beat has its own deadline trigger and waits for neither strike settlement nor an act checkpoint: the storm changes the physical and operational problem while civilian traffic remains in motion.
 
-The crew may need to order traffic, open or hold the lane, shelter vessels, rescue or tow Lyra, recover lost objects, and stabilise the skyhook. Operations take time, range, power, and capability; beginning one is a commitment of ship position and crew attention. Traffic destruction and missed recovery opportunities are recorded rather than erased when the act advances.
+Navigation must issue one authored shelter diversion to Meridian, Lark, and Pell before the first band. Each civilian’s traffic row publishes an accessible **ORDER TO STORM SHELTER** control; the ordinary compliance machine then puts that craft on a route clear of all three bands. The front does not issue those orders for the crew. An unordered craft remains physically exposed, and its destruction immediately posts a named Control report, per-craft ledger fact, failed clearance objective, and aggregate loss objective. The ship’s own destruction remains the region damage system’s terminal defeat, not a scripted checkpoint.
 
 The skyhook has several load-bearing facts. If condition and stabilisation do not preserve them, warning flags clear in sequence and a projected failure deadline can end in structural loss. The scenario recognises both successful stabilisation and collapse.
 
@@ -79,7 +79,7 @@ The skyhook has several load-bearing facts. If condition and stabilisation do no
 
 After the storm, the skyhook’s projected failure falls at 1528 seconds, then the transfer window opens at 1600 seconds and closes at 1800 seconds. Three claimant groups make requests against two berths and insufficient total capacity. The crew can make, keep, or break earlier commitments, confront actors with evidence, and decide who receives lift/transfer access.
 
-The decision is not a detached dialogue menu. Infrastructure capacity, claimant presence, prior promises, strike settlement, evidence, casualties, and the surviving corridor constrain what can be offered and how actors respond. The scenario resolves the berth choices and promises, then writes campaign-facing facts describing passage, labour outcome, evidence, casualties, structure, and commitments.
+The decision is not a detached dialogue menu. Infrastructure capacity, claimant presence, prior promises, strike settlement, evidence, casualties, and the surviving corridor constrain what can be offered and how actors respond. The scenario resolves the berth choices and promises, then writes campaign-facing facts describing passage, labour outcome, evidence, casualties, structure, commitments, and aggregate/per-craft storm traffic losses.
 
 ## Authored clocks
 
@@ -107,7 +107,7 @@ The skyhook and depots carry condition and named capacities. The Destroyer carri
 
 ### Traffic and navigation
 
-Three authored routes—`skyway_lane`, `ladder_run`, and `storm_shelter_run`—give civilian entities a persistent spatial life. Hold, divert, dock, and corridor decisions affect real movement. Waypoint arrival and destruction can trigger acknowledgement and consequences.
+Three authored routes—`skyway_lane`, `ladder_run`, and `storm_shelter_run`—give civilian entities a persistent spatial life. The three endangered craft author finite `order_options` that Navigation receives through the authoritative traffic snapshot; their buttons emit the existing `order_civilian` action rather than a scenario-only verb. Hold, divert, dock, and corridor decisions affect real movement. Waypoint arrival and destruction can trigger acknowledgement and consequences.
 
 ### Labour and disposition
 

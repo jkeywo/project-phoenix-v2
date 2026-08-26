@@ -4806,6 +4806,21 @@ pub struct CivilianTrafficSnapshot {
     /// `strings.csv` id explaining a refusal or a failure; empty otherwise.
     #[serde(default)]
     pub reason: String,
+    /// Scenario-authored controls the Navigation console may issue to this
+    /// craft. Empty preserves the read-only traffic rows older content used.
+    #[serde(default)]
+    pub order_options: Vec<CivilianOrderOptionSnapshot>,
+}
+
+/// One authoritative Navigation-console control for a civilian craft.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CivilianOrderOptionSnapshot {
+    /// Stable authored id (not player-visible).
+    pub id: String,
+    /// Player-facing `strings.csv` id.
+    pub label: String,
+    /// Existing wire order submitted by the client action map.
+    pub order: crate::civilian::CivilianOrder,
 }
 
 impl Default for NavigationBlackboard {

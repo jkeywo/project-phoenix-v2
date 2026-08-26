@@ -8916,6 +8916,11 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
     // Two ticks for the comms range pass to see the new position, so a pick is
     // never refused by a stale range flag.
     run(&mut app, 2);
+    // These are engaged-crew fixtures for the strike and back half, not the
+    // idle-storm branch. Clear the endangered traffic through Navigation so a
+    // later assertion is not really about a convoy the weather already took.
+    skyway_order_corridor_to_shelter(&mut app);
+    run(&mut app, 4);
     (app, ship)
 }
 
@@ -9996,17 +10001,197 @@ fn civilian_state_of(
         .unwrap_or_else(|| panic!("{name} is not civilian traffic in this world"))
 }
 
-/// **Issue #1037, AC1/AC2/AC4/AC6.** Act 2 driven end to end with nobody at the
-/// consoles: the storm sweeps the corridor in three bands and clears, the
-/// traffic gets out of its way and survives, and the rescue that nobody ran
-/// FAILS — loudly, with an on-screen consequence and campaign state written.
+/// Queue the three crew-authored Navigation orders that clear the corridor.
+/// One order per endangered craft, all before band one; the compliance machine
+/// and the authored shelter route do the rest. This is the same
+/// `OrderCivilian` payload the browser button emits, not a script shortcut.
+fn skyway_order_corridor_to_shelter(app: &mut bevy::prelude::App) {
+    use project_phoenix::civilian::CivilianOrder;
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
+    use project_phoenix::lobby::InboundMessage;
+
+    let targets: Vec<String> = SKYWAY_CORRIDOR_TRAFFIC
+        .iter()
+        .map(|name| skyway_uuid(app, name))
+        .collect();
+    let mut inbound = app
+        .world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>();
+    for target in targets {
+        inbound.write(InboundMessage {
+            token: "ai:skyway-navigation".into(),
+            msg: ClientMessage::ControlSystem {
+                target: project_phoenix::ship::system_registry::navigation_system_id(),
+                payload: SystemControlPayload::OrderCivilian {
+                    target,
+                    order: CivilianOrder::divert_to_route("storm_shelter_run"),
+                },
+            },
+        });
+    }
+}
+
+/// **Issue #1134.** Silence does not clear the lane for the crew. The storm's
+/// own deadlines still fire while the strike is unresolved; physical bands
+/// destroy exposed civilians, and every loss is named immediately on the
+/// ledger and Control channel.
+#[test]
+fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let dt = 1.0 / 30.0;
+    let probe = build_headless_app(&skyway_args(dt, 1.0)).expect("the world must load");
+    let closes_at = skyway_deadline_secs(&probe, "skyway_window_closes") as f64 + 32.0;
+    drop(probe);
+    let args = skyway_args(dt, closes_at + 6.0);
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+
+    // Keep the strike genuinely unresolved: a human is sitting at Comms and
+    // choosing nothing. The weather must not wait for that conversation.
+    let ship = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the crew's hull");
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
+
+    let mut first_band_while_unresolved = false;
+    for _ in 10..args.max_ticks {
+        run(&mut app, 1);
+        if named_entity_present(&mut app, "storm_band_one")
+            && skyway_flag(&app, "skyway_strike_settled") == 0
+        {
+            first_band_while_unresolved = true;
+        }
+    }
+    assert!(
+        first_band_while_unresolved,
+        "band one must arrive on its own deadline while the strike conversation is still open"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 0);
+
+    let named_losses = [
+        "skyway_traffic_lost_meridian",
+        "skyway_traffic_lost_lark",
+        "skyway_traffic_lost_pell",
+        "skyway_traffic_lost_wick",
+    ];
+    let total: i64 = named_losses
+        .iter()
+        .map(|flag| skyway_flag(&app, flag))
+        .sum();
+    assert_eq!(
+        total,
+        SKYWAY_CORRIDOR_TRAFFIC.len() as i64,
+        "every endangered craft left unordered on the corridor must be physically lost"
+    );
+    assert_eq!(
+        skyway_flag(&app, "a2_traffic_lost"),
+        total,
+        "the aggregate ledger must equal its per-craft facts"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_traffic_lost_wick"),
+        0,
+        "Wick is the safe-lane canary, not corridor traffic"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-shelter"),
+        ObjectiveStatus::Failed,
+        "the first loss turns the mandatory clearance objective red immediately"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-traffic-loss-report"),
+        ObjectiveStatus::Active,
+        "the aggregate consequence stays on the crew's objective ledger"
+    );
+
+    let bodies: std::collections::BTreeSet<String> =
+        skyway_messages(&app, "world.falling_skyway.entity.skyway_control.name")
+            .into_iter()
+            .map(|message| message.body)
+            .collect();
+    for (flag, message) in [
+        (
+            "skyway_traffic_lost_meridian",
+            "world.falling_skyway.comms.traffic_lost_meridian",
+        ),
+        (
+            "skyway_traffic_lost_lark",
+            "world.falling_skyway.comms.traffic_lost_lark",
+        ),
+        (
+            "skyway_traffic_lost_pell",
+            "world.falling_skyway.comms.traffic_lost_pell",
+        ),
+        (
+            "skyway_traffic_lost_wick",
+            "world.falling_skyway.comms.traffic_lost_wick",
+        ),
+    ] {
+        assert_eq!(
+            bodies.contains(message),
+            skyway_flag(&app, flag) > 0,
+            "{flag} and its named Control report must be the same fact"
+        );
+    }
+
+    assert_eq!(skyway_flag(&app, "a3_endings_written"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.traffic.lost"), total);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.traffic.none"), 0);
+    for (run_flag, campaign_flag) in [
+        (
+            "skyway_traffic_lost_meridian",
+            "campaign.skyway.traffic.meridian",
+        ),
+        ("skyway_traffic_lost_lark", "campaign.skyway.traffic.lark"),
+        ("skyway_traffic_lost_pell", "campaign.skyway.traffic.pell"),
+        ("skyway_traffic_lost_wick", "campaign.skyway.traffic.wick"),
+    ] {
+        assert_eq!(
+            skyway_flag(&app, campaign_flag),
+            skyway_flag(&app, run_flag),
+            "the campaign ledger must preserve {run_flag} exactly"
+        );
+    }
+
+    // Take the same generic campaign projection the next mission consumes. The
+    // named storm facts must survive the save boundary, not merely exist in the
+    // live Rhai flag store.
+    let payload = project_phoenix::snapshot::capture(app.world());
+    let run = project_phoenix::snapshot::run_for(
+        payload,
+        project_phoenix::sim_digest::world_digest(app.world()),
+        42,
+        SKYWAY_WORLD,
+        project_phoenix::snapshot::versions(&project_phoenix::content_ledger::frozen_or_live()),
+    );
+    let facts = project_phoenix::campaign::project(&run);
+    assert_eq!(facts.tally("campaign.skyway.traffic.lost"), total);
+    for campaign_flag in [
+        "campaign.skyway.traffic.meridian",
+        "campaign.skyway.traffic.lark",
+        "campaign.skyway.traffic.pell",
+        "campaign.skyway.traffic.wick",
+    ] {
+        assert_eq!(facts.tally(campaign_flag), skyway_flag(&app, campaign_flag));
+    }
+}
+
+/// **Issue #1037/#1134.** Act 2 driven end to end with Navigation doing its
+/// work: one order per endangered craft clears all three bands, while the
+/// rescue that nobody ran still fails loudly on its independent clock.
 ///
 /// The failure branch is the one an unattended run produces, and that is the
 /// honest default: opening an operation is a crew verb, so a backfilled bridge
 /// never tows anybody. The companion test below drives the same act with a crew
 /// that does.
 #[test]
-fn falling_skyway_act_2_sweeps_the_corridor_and_fails_the_rescue_nobody_ran() {
+fn falling_skyway_ordered_traffic_clears_all_three_bands_while_the_idle_rescue_fails() {
     use project_phoenix::civilian::ComplianceState;
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -10029,6 +10214,7 @@ fn falling_skyway_act_2_sweeps_the_corridor_and_fails_the_rescue_nobody_ran() {
     // fact about where they were when the weather turned up.
     let mut clearance: std::collections::BTreeMap<String, f32> = Default::default();
     let mut compliance_reached: std::collections::BTreeMap<String, bool> = Default::default();
+    let mut orders_issued = false;
 
     for tick in 0..args.max_ticks {
         run(&mut app, 1);
@@ -10067,6 +10253,7 @@ fn falling_skyway_act_2_sweeps_the_corridor_and_fails_the_rescue_nobody_ran() {
         }
 
         let flags = &app.world().resource::<WorldContentRuntime>().flags;
+        let should_order = flags.counter("a2_front_warned") > 0 && !orders_issued;
         for flag in [
             "a2_front_warned",
             "a2_rescue_resolved",
@@ -10076,6 +10263,10 @@ fn falling_skyway_act_2_sweeps_the_corridor_and_fails_the_rescue_nobody_ran() {
             if flags.counter(flag) > 0 {
                 first.entry(flag.to_string()).or_insert(sim_t);
             }
+        }
+        if should_order {
+            orders_issued = true;
+            skyway_order_corridor_to_shelter(&mut app);
         }
     }
 
@@ -10123,14 +10314,13 @@ fn falling_skyway_act_2_sweeps_the_corridor_and_fails_the_rescue_nobody_ran() {
     for name in SKYWAY_CORRIDOR_TRAFFIC {
         assert!(
             compliance_reached.get(name).copied().unwrap_or(false),
-            "{name} must take the divert order the forecast issues — the sweep is \
-             announced through #1028's ordinary compliance machine, and a craft that \
+            "{name} must take the divert order Navigation issues — the command walks \
+             #1028's ordinary compliance machine, and a craft that \
              never answered would be flying the lane into a band"
         );
         assert!(
             at(&format!("{name}_complying")) < at("storm_band_one_up"),
-            "…and be under way BEFORE the first band, which is what the 45 seconds of \
-             forecast are for"
+            "…and be under way BEFORE the first band, inside the authored forecast window"
         );
         assert!(
             named_entity_present(&mut app, name),
@@ -10238,6 +10428,8 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     let args = skyway_args(dt, clear_by + 6.0);
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
     run(&mut app, 10);
+    skyway_order_corridor_to_shelter(&mut app);
+    run(&mut app, 4);
 
     // The crew's hull. The player row carries no authored name, because its config
     // comes from the lobby-selected template wholesale — found by the LocalShip
@@ -13889,7 +14081,7 @@ fn skyway_sheet_texts(app: &mut bevy::prelude::App, subject: &str) -> Vec<String
 
 /// **The invariant every run has to satisfy, whatever the crew did.**
 ///
-/// Four of the six families are EXCLUSIVE — a claimant is carried or is left,
+/// Four of the seven families are EXCLUSIVE — a claimant is carried or is left,
 /// the strike ended one of three ways, the evidence is at one of three depths,
 /// the structure held or fell — and the promise this slice makes to whatever
 /// mission reads them next is that each says exactly one thing rather than
@@ -13968,6 +14160,21 @@ fn assert_the_campaign_record_is_complete(app: &bevy::prelude::App) {
         skyway_flag(app, "campaign.skyway.casualties.none"),
         i64::from(total == 0),
         "…and the 'nobody was hurt' bit is that sum, not a separate claim about it"
+    );
+
+    let traffic_lost = skyway_flag(app, "campaign.skyway.traffic.lost");
+    assert_eq!(
+        traffic_lost,
+        skyway_flag(app, "campaign.skyway.traffic.meridian")
+            + skyway_flag(app, "campaign.skyway.traffic.lark")
+            + skyway_flag(app, "campaign.skyway.traffic.pell")
+            + skyway_flag(app, "campaign.skyway.traffic.wick"),
+        "the traffic handoff's aggregate must equal its per-craft facts"
+    );
+    assert_eq!(
+        skyway_flag(app, "campaign.skyway.traffic.none"),
+        i64::from(traffic_lost == 0),
+        "the exact no-loss complement is always written"
     );
 
     let taken = skyway_flag(app, "campaign.skyway.passage.taken");
@@ -14228,7 +14435,7 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
         "all three were answered — two carried and one told to its face"
     );
 
-    // ── AC6: the six families ───────────────────────────────────────────────
+    // ── AC6: the seven families ─────────────────────────────────────────────
     assert_the_campaign_record_is_complete(&app);
     assert_eq!(skyway_flag(&app, "campaign.skyway.passage.committee"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.passage.convoy"), 1);
@@ -14822,7 +15029,7 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
         "and nothing else came with them"
     );
 
-    // All six families are represented, by prefix — the shape #1043 guarantees,
+    // All seven families are represented, by prefix — the shape #1043/#1134 guarantees,
     // checked here so a projection that silently dropped one is caught even
     // though this test does not presume which member each family answered with.
     for family in [
@@ -14832,6 +15039,7 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
         "campaign.skyway.casualties.",
         "campaign.skyway.skyhook.",
         "campaign.skyway.commitments.",
+        "campaign.skyway.traffic.",
     ] {
         assert!(
             facts
@@ -14841,6 +15049,12 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
             "the `{family}` family reached the next mission"
         );
     }
+    assert_eq!(
+        facts.tally("campaign.skyway.traffic.none"),
+        1,
+        "the crew-issued clearance survives projection as an exact no-loss fact"
+    );
+    assert_eq!(facts.tally("campaign.skyway.traffic.lost"), 0);
 
     // The road-specific facts this variant exists for, and the ones a follow-on
     // mission would actually branch on.

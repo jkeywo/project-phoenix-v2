@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { t } from '../../gui/strings.js';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { complianceLabel, formatLeg } from '../../gui/components/ph-civilian-traffic.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { complianceLabel, formatLeg, orderActionArgs } from '../../gui/components/ph-civilian-traffic.js';
 import '../../gui/components/ph-civilian-traffic.js';
 
 function setup() {
@@ -28,6 +28,11 @@ const HAULER = {
   order_destination: '',
   compliance: 'unordered',
   reason: '',
+  order_options: [{
+    id: 'storm_shelter',
+    label: 'world.falling_skyway.civilian_order.storm_shelter',
+    order: { verb: 'divert', route: 'storm_shelter_run' },
+  }],
 };
 
 describe('PhCivilianTraffic', () => {
@@ -59,6 +64,26 @@ describe('PhCivilianTraffic', () => {
         state: t('component.civilians.compliance.unordered'),
       },
     ]);
+  });
+
+  it('renders an accessible authored order and emits the existing Navigation action', () => {
+    const el = setup();
+    el.sendAction = vi.fn();
+    el.state = { civilians: [HAULER] };
+
+    const button = el.shadowRoot.querySelector('button[data-order-id="storm_shelter"]');
+    expect(button).not.toBeNull();
+    expect(button.getAttribute('aria-label')).toContain(t(HAULER.name));
+    button.focus();
+    el.state = { civilians: [{ ...HAULER, compliance: 'received' }] };
+    expect(el.shadowRoot.activeElement).toBe(button);
+    button.click();
+
+    expect(el.sendAction).toHaveBeenCalledWith('order_civilian', {
+      target: HAULER.uuid,
+      verb: 'divert',
+      route: 'storm_shelter_run',
+    });
   });
 
   // The distinction the whole panel exists for: a craft that said no and
@@ -134,6 +159,18 @@ describe('PhCivilianTraffic', () => {
       }
       // An empty state is the resting one, not a miss.
       expect(complianceLabel('')).toBe('component.civilians.compliance.unordered');
+    });
+  });
+
+  describe('orderActionArgs', () => {
+    it('flattens only complete authored orders', () => {
+      expect(orderActionArgs('civ-1', { verb: 'hold' }))
+        .toEqual({ target: 'civ-1', verb: 'hold' });
+      expect(orderActionArgs('civ-1', { verb: 'divert', route: 'lee' })).toEqual({
+        target: 'civ-1', verb: 'divert', route: 'lee',
+      });
+      expect(orderActionArgs('civ-1', { verb: 'divert' })).toBeNull();
+      expect(orderActionArgs('', { verb: 'hold' })).toBeNull();
     });
   });
 });

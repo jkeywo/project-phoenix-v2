@@ -18,6 +18,15 @@ authored state as it stands, and flags every unratified number it leans on.
 > Findings 1–4 as measurements and design exploration of that earlier build,
 > not current runtime behaviour.
 
+> **Current traffic note (#1134).** The storm front no longer diverts civilians
+> automatically. Navigation now sees a world-authored **ORDER TO STORM SHELTER**
+> button on Meridian, Lark and Pell; one ordinary `OrderCivilian` diversion per
+> craft before band one puts that craft on the shelter route for all three
+> bands. An idle bridge loses exposed traffic immediately and by name. A fully
+> backfilled bridge still needs #1141's Navigation producer to press the same
+> verb autonomously; #1134 supplies the human surface and authoritative data,
+> not a special scenario-side AI shortcut.
+
 ## Method
 
 - Read the three AI fragments the Alliance Destroyer composes:
@@ -135,8 +144,9 @@ What a pure-AI run therefore **could** achieve in the historical baseline
 - `obj-a2-approach` (auto-complete on arrival at the Lyra).
 - `obj-a2-lee` (Reach `storm_lee`, priority 75, posted at `lyra_clear_due`
   `:2511-2519`).
-- `obj-a2-storm` and `obj-a2-shelter` (auto-complete at `storm_passed`, `:2553-2558`,
-  if no traffic died — traffic auto-diverts).
+- `obj-a2-storm` auto-completes at `storm_passed`; `obj-a2-shelter` completes
+  only if Navigation issued the three authored shelter orders and no traffic
+  died. The front itself issues no diversion.
 - `obj-a1-loss-report` (loss report, `:2534-2538`) — **pending authoring of
   Control's comms node; no completion path is authored yet** (the report to
   Control is #1039's business per `:1969-1970`).
@@ -332,7 +342,7 @@ Content split (through-line = 1/2/4/5/7, side-pressure = 3/8, back-half = 6):
 |---|---|---|---|
 | 1 | survey | through-line | crew scans + report |
 | 2 | diplomacy / strike | through-line | opens mid-survey |
-| 3 | traffic control | side-pressure | order-divert civilians (human-nav decision, `OrderCivilian`/`order_divert_route`, `:2439-2441`) |
+| 3 | traffic control | side-pressure | one authored `OrderCivilian` shelter diversion per endangered craft before band one; the route clears all three bands |
 | 4 | rescue | through-line | opens on storm front / early tow |
 | 5 | storm survival | through-line | storm front |
 | 6 | stabilise / collapse | back-half | head comes down after rescue-clear or deadline |

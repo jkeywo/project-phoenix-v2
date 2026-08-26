@@ -22,7 +22,7 @@ pub use server::{
     CIVILIAN_ROUTE_OBJECTIVE_ID,
 };
 pub use traffic::{
-    CivilianConfig, CivilianOrder, CivilianState, CivilianTravel, ComplianceDisposition,
-    ComplianceState, ComplianceTransition, OrderKind, OrderResponse, RouteCompletion, RouteConfig,
-    RouteLeg, REASON_UNABLE,
+    CivilianConfig, CivilianOrder, CivilianOrderOption, CivilianState, CivilianTravel,
+    ComplianceDisposition, ComplianceState, ComplianceTransition, OrderKind, OrderResponse,
+    RouteCompletion, RouteConfig, RouteLeg, REASON_UNABLE,
 };

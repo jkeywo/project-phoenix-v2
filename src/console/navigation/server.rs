@@ -436,6 +436,7 @@ fn publish_navigation_blackboard(
     civilians_q: Query<(
         &crate::entities::spawner::EntityUuid,
         Option<&crate::entities::spawner::EntityName>,
+        &crate::civilian::CivilianSection,
         &crate::civilian::CivilianTraffic,
     )>,
     mut ship_q: Query<
@@ -490,6 +491,7 @@ fn civilian_traffic_rows(
     civilians: &Query<(
         &crate::entities::spawner::EntityUuid,
         Option<&crate::entities::spawner::EntityName>,
+        &crate::civilian::CivilianSection,
         &crate::civilian::CivilianTraffic,
     )>,
     world_config: Option<&crate::world::config::WorldConfig>,
@@ -497,7 +499,7 @@ fn civilian_traffic_rows(
     use crate::civilian::CivilianOrder;
     let mut rows: Vec<crate::core::messages::CivilianTrafficSnapshot> = civilians
         .iter()
-        .map(|(uuid, name, traffic)| {
+        .map(|(uuid, name, section, traffic)| {
             let state = &traffic.0;
             let route = state.route().unwrap_or_default().to_string();
             let legs = world_config
@@ -527,6 +529,18 @@ fn civilian_traffic_rows(
                 order_destination: destination,
                 compliance: state.compliance().as_str().to_string(),
                 reason: state.reason().unwrap_or_default().to_string(),
+                order_options: section
+                    .0
+                    .order_options
+                    .iter()
+                    .map(
+                        |option| crate::core::messages::CivilianOrderOptionSnapshot {
+                            id: option.id.clone(),
+                            label: option.label.clone(),
+                            order: option.order.clone(),
+                        },
+                    )
+                    .collect(),
             }
         })
         .collect();

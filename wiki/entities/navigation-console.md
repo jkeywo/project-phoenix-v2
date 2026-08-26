@@ -2,8 +2,8 @@
 title: Navigation Console
 type: entity
 tags: [console, navigation, waypoint, map, radar, ship]
-sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/destroyer/tactical.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/civilian/server.rs, src/core/messages.rs, src/entities/config.rs, assets/entities/alliance_battleship.toml]
-updated: 2026-08-14
+sources: [gui/battleship/navigation.html, gui/cruiser/comms.html, gui/destroyer/tactical.html, gui/components/ph-navigation-map.js, gui/components/ph-civilian-traffic.js, gui/console-state.js, gui/sim-state.js, gui/action-map.js, src/console/navigation/mod.rs, src/console/navigation/server.rs, src/civilian/traffic.rs, src/civilian/server.rs, src/core/messages.rs, src/entities/config.rs, assets/entities/alliance_battleship.toml]
+updated: 2026-08-26
 ---
 
 # Navigation Console
@@ -47,6 +47,8 @@ Compliance is published, never inferred client-side, because "has not started tu
 
 Orders are issued as `SystemControlPayload::OrderCivilian`, admitted for the same Navigation system the waypoint payloads are, and answered on the craft's own authored clock rather than immediately — an order is a negotiation with an actor, not a remote-control input. An order the host cannot deliver at all (unknown craft, malformed divert) bounces as `ServerMessage::CivilianOrderRejected`; a craft that simply says no does not bounce, it changes compliance state. The mechanism lives in `src/civilian/`.
 
+The human control surface is finite and authored. A civilian's optional `[civilian].order_options` list gives each control a stable id, a `strings.csv` label and one existing `hold`, `divert` or `dock` order. The host validates those options with the entity config, copies them into `CivilianTrafficSnapshot`, and `<ph-civilian-traffic>` renders them as native buttons. A button submits `order_civilian` with the published target and order; the browser does not choose destinations or carry scenario policy. Civilians without options keep the read-only row they had before issue #1134.
+
 ## Wire surface
 
 - `SystemControlPayload::SetNavigationWaypoint { x, z, source_uuid }` sets a free or anchored waypoint.
@@ -54,6 +56,6 @@ Orders are issued as `SystemControlPayload::OrderCivilian`, admitted for the sam
 - `SystemControlPayload::OrderCivilian { target, order }` orders a civilian to hold, divert or dock (issue #1028).
 - `ServerMessage::CivilianOrderRejected { target, reason }` is the rejection-only reply for an order that could not be delivered.
 - `NavigationBlackboard.navigation_waypoint: Option<WaypointSnapshot>` publishes the current shared value.
-- `NavigationBlackboard.civilians: Vec<CivilianTrafficSnapshot>` publishes the traffic picture, on the local ship only.
+- `NavigationBlackboard.civilians: Vec<CivilianTrafficSnapshot>` publishes the traffic picture and each craft's finite `order_options`, on the local ship only.
 
 `gui/action-map.js` maps the browser actions onto these authoritative commands. `buildWaypointBlip` also projects the shared waypoint onto Helm and other radar views, edge-clamping it where the consuming view requests that behaviour.

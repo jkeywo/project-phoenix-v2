@@ -265,6 +265,45 @@ pub enum CivilianOrder {
     },
 }
 
+/// One authored control offered for a civilian on the Navigation console.
+///
+/// The option is data rather than client policy: a scenario chooses which
+/// orders make sense for one craft, while the console only renders the label
+/// and sends the already-supported [`CivilianOrder`] payload. `id` is stable
+/// authoring identity for tests, automation and future save migrations; it is
+/// never player-visible.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CivilianOrderOption {
+    /// Stable identifier, unique within this civilian's option list.
+    pub id: String,
+    /// Player-facing `strings.csv` id rendered on the order button.
+    pub label: String,
+    /// The authoritative order the button submits.
+    pub order: CivilianOrder,
+}
+
+impl CivilianOrderOption {
+    /// Reject an option that cannot identify, label or carry out its order.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.id.trim().is_empty() {
+            return Err("[civilian.order_options] id must not be empty".to_string());
+        }
+        if self.label.trim().is_empty() {
+            return Err(format!(
+                "[civilian.order_options] '{}' label must be a strings.csv id",
+                self.id
+            ));
+        }
+        self.order.validate().map_err(|err| {
+            format!(
+                "[civilian.order_options] '{}' contains an invalid order: {err}",
+                self.id
+            )
+        })
+    }
+}
+
 impl CivilianOrder {
     /// Divert onto a named route.
     pub fn divert_to_route(route: impl Into<String>) -> Self {
@@ -295,6 +334,18 @@ impl CivilianOrder {
             Self::Hold => OrderKind::Hold,
             Self::Divert { .. } => OrderKind::Divert,
             Self::Dock { .. } => OrderKind::Dock,
+        }
+    }
+
+    /// Authored route destination, when this is a route divert. World
+    /// validation uses this to reject a button that can only submit a dangling
+    /// lane reference before the scenario activates.
+    pub fn route_destination(&self) -> Option<&str> {
+        match self {
+            Self::Divert {
+                route: Some(route), ..
+            } => Some(route),
+            _ => None,
         }
     }
 
@@ -458,6 +509,10 @@ pub struct CivilianConfig {
     /// cooperative default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compliance: Option<ComplianceDisposition>,
+    /// Scenario-authored controls exposed for this craft on Navigation.
+    /// Empty keeps older entities and worlds read-only on that panel.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub order_options: Vec<CivilianOrderOption>,
 }
 
 /// Default utility priority of a civilian's route objective.
@@ -483,6 +538,16 @@ impl CivilianConfig {
         }
         if let Some(compliance) = self.compliance.as_ref() {
             compliance.validate()?;
+        }
+        let mut option_ids = std::collections::HashSet::new();
+        for option in &self.order_options {
+            option.validate()?;
+            if !option_ids.insert(option.id.as_str()) {
+                return Err(format!(
+                    "[civilian.order_options] duplicate id '{}'",
+                    option.id
+                ));
+            }
         }
         Ok(())
     }
@@ -1394,6 +1459,36 @@ refusal_reason = "world.convoy.will_not_dock"
         }
         .validate()
         .is_err());
+        assert!(CivilianConfig {
+            order_options: vec![
+                CivilianOrderOption {
+                    id: "clear_lane".into(),
+                    label: "world.test.clear_lane".into(),
+                    order: CivilianOrder::Hold,
+                },
+                CivilianOrderOption {
+                    id: "clear_lane".into(),
+                    label: "world.test.clear_lane_again".into(),
+                    order: CivilianOrder::divert_to_route("lee"),
+                },
+            ],
+            ..CivilianConfig::default()
+        }
+        .validate()
+        .is_err());
+        assert!(CivilianConfig {
+            order_options: vec![CivilianOrderOption {
+                id: "bad".into(),
+                label: "world.test.bad".into(),
+                order: CivilianOrder::Divert {
+                    route: None,
+                    anchor: None,
+                },
+            }],
+            ..CivilianConfig::default()
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]
@@ -1402,6 +1497,9 @@ refusal_reason = "world.convoy.will_not_dock"
             r#"
 route = "depot_run"
 route_priority = 80.0
+order_options = [
+  { id = "storm_shelter", label = "world.test.storm_shelter", order = { verb = "divert", route = "storm_shelter_run" } },
+]
 
 [compliance]
 divert = "refuse"
@@ -1410,6 +1508,12 @@ divert = "refuse"
         .expect("the vocabulary parses");
         assert_eq!(parsed.route.as_deref(), Some("depot_run"));
         assert_eq!(parsed.route_priority, 80.0);
+        assert_eq!(parsed.order_options.len(), 1);
+        assert_eq!(parsed.order_options[0].id, "storm_shelter");
+        assert_eq!(
+            parsed.order_options[0].order,
+            CivilianOrder::divert_to_route("storm_shelter_run")
+        );
         assert_eq!(
             parsed.compliance.expect("authored").divert,
             OrderResponse::Refuse

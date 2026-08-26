@@ -129,12 +129,13 @@ entities:
       status: implemented
       confidence: confirmed
       title: Civilian Traffic Adapter
-      summary: Advances each civilian craft's compliance clock once per logical tick against the live world, takes the orders both surfaces queue for it, mirrors the craft's PatrolCursor index onto its state, and keeps ONE doctrine objective on the hull pointed at whatever the craft is currently trying to do.
+      summary: Advances each civilian craft's compliance clock once per logical tick against the live world, validates and publishes its finite authored order options, takes the orders both surfaces queue for it, mirrors the craft's PatrolCursor index onto its state, and keeps ONE doctrine objective on the hull pointed at whatever the craft is currently trying to do.
       rationale:
         - "[ai] NO SECOND STEERING IMPLEMENTATION, and that is the whole design. A civilian is an ordinary NPC hull: its doctrine is scored by aggregate_doctrine_blackboards, its winning directive is flown by plan_helm_travel, and the result reaches it as ordinary admitted SetThrust/SetSteering commands. The adapter's entire job is to keep the single `civilian-route` doctrine entry current - Patrol over the route's anchor chain, Reach for a diverted anchor, Dock for a berth, and NOTHING at all for a hold, which is how every objective-less NPC already comes to a stop."
         - "[ai] The existing PatrolCursor IS the leg pointer; the adapter mirrors its index rather than keeping a second one. Per-leg speed is that leg's authored value written onto the directive's target_speed, and an authored hold_secs dwell is the same lever set to zero - which is why a dwelling craft KEEPS its directive, and therefore its place on the lane, instead of being taken off it and put back."
         - "[ai] AiDirective::Dock is the one addition to the shared directive vocabulary, and it is a DESTINATION rather than a mover: it resolves through the same resolve_destroy_target a Destroy target does, becomes the craft's own anchored waypoint through the same operate_navigation_ai every hull already runs, and is flown by the existing Channel-3 hand-off. plan_helm_travel resolves it to None on purpose - resolving it a second time would fly a stale position and would be the second implementation this slice exists to avoid."
         - "[ai] Both order surfaces converge on one queue and neither is privileged (AGENTS.md rule 6). A console order is an admitted OrderCivilian payload on the navigation system; a script order is buffered as an ActionCmd and resolved by the applier. Both then pass through the same acknowledgement delay and the same authored disposition, so a scenario cannot remote-control traffic that a crew has to negotiate with."
+        - "[ai] The human surface is finite and authored: each [civilian] may publish order_options with a stable id, strings.csv label and existing CivilianOrder. The Navigation blackboard copies those options to <ph-civilian-traffic>, whose accessible buttons submit the ordinary order_civilian action. The browser neither invents destinations nor owns scenario policy."
         - "[ai] Runs in SimSet::Input, so a console order admitted this tick is acted on this tick and the doctrine entry it produces is in place before PublishAggregate scores the pool. A scripted order is one tick later by construction - its applier runs in Physics - which is the same one-tick bridge every other world-event consumer rides."
         - "[ai] Craft are walked in UUID order, never query order: Bevy archetype order is not part of the simulation's contract, and two craft racing for the same order would otherwise resolve differently on two hosts."
     architecture:
@@ -148,17 +149,23 @@ entities:
       paths:
         - src/civilian/traffic.rs
         - src/civilian/server.rs
+        - src/core/messages.rs
         - src/world/config.rs
         - src/world/validate.rs
         - src/world/dispatch.rs
         - src/world/script/effects.rs
         - src/console/navigation/mod.rs
+        - src/console/navigation/server.rs
+        - gui/components/ph-civilian-traffic.js
+        - gui/action-map.js
       symbols:
         - RouteConfig
         - RouteLeg
         - RouteCompletion
         - CivilianConfig
         - CivilianOrder
+        - CivilianOrderOption
+        - CivilianOrderOptionSnapshot
         - OrderKind
         - OrderResponse
         - ComplianceDisposition
@@ -168,7 +175,7 @@ entities:
         - PendingCivilianOrder
         - tick_civilian_traffic
         - CIVILIAN_ROUTE_OBJECTIVE_ID
-      tests: [cargo test, "cargo test --features headless --test headless_runner civilian_orders_walk"]
+      tests: [cargo test, npm run test:editor, "cargo test --features headless --test headless_runner civilian_orders_walk", "cargo test --features headless --test headless_runner falling_skyway_ordered_traffic"]
     evidence:
       - kind: test
         reference: "tests/headless_runner.rs::civilian_orders_walk_the_compliance_machine_while_the_lane_keeps_being_flown"
@@ -211,19 +218,21 @@ entities:
       status: implemented
       confidence: confirmed
       title: Published Civilian Traffic State
-      summary: The Navigation console's traffic picture - per craft, its uuid, its crew-facing name id, its lane and which leg of how many, its standing order and destination, its compliance state, and the reason id behind a refusal or a failure. Carried on the local ship's NavigationBlackboard in UUID order, and empty for every world that authors no traffic.
+      summary: The Navigation console's traffic picture - per craft, its uuid, its crew-facing name id, its lane and which leg of how many, its standing order and destination, its compliance state, the reason id behind a refusal or a failure, and its finite authored order options. Carried on the local ship's NavigationBlackboard in UUID order, and empty for every world that authors no traffic.
       rationale:
         - "[ai] Carried ONLY on the local ship's blackboard: this is the crew's traffic picture, and an NPC's own Navigation blackboard has no console to render it on."
         - "[ai] There is deliberately no position on the row. A civilian is already a contact on the nav chart, and a second copy of its coordinates on a different cadence is how two readouts of the same ship end up disagreeing."
         - "[ai] Compliance is published rather than inferred client-side, because 'has not started turning yet' and 'has decided not to' look identical on a chart."
+        - "[ai] Order options are authoritative projection, not client configuration: the snapshot carries each stable id, strings.csv label and CivilianOrder whole, and the browser can only submit a control the world offered."
     architecture:
       classification: client-projection
       owner: civilian-traffic-adapter
       writers: [civilian-traffic-adapter]
     implementation:
       status: declared
-      paths: [src/core/messages.rs, src/console/navigation/mod.rs, gui/components/ph-civilian-traffic.js]
+      paths: [src/core/messages.rs, src/console/navigation/server.rs, gui/components/ph-civilian-traffic.js, gui/action-map.js]
       symbols:
         - CivilianTrafficSnapshot
+        - CivilianOrderOptionSnapshot
         - publish_navigation_blackboard
       tests: [cargo test, "npx vitest run tests/client/ph-civilian-traffic.test.js"]

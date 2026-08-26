@@ -1012,22 +1012,39 @@ fn validate_doctrine_anchors_in(
     findings
 }
 
-/// The `[[route]]` id one spawned instance's `[civilian]` table names.
+/// Every `[[route]]` id one spawned instance's `[civilian]` table names: its
+/// standing assignment and any finite console order that diverts to a route.
 ///
 /// Same shape, and the same silences, as [`doctrine_anchor_refs`]: a template
 /// that cannot be loaded or whose override merge fails yields nothing, because
 /// both are *different* defects with their own findings.
-fn civilian_route_ref(inst: &SpawnedInstance, loader: &dyn TemplateLoader) -> Option<String> {
-    let template = loader.load_template(&inst.template_path)?;
+fn civilian_route_refs(inst: &SpawnedInstance, loader: &dyn TemplateLoader) -> Vec<String> {
+    let Some(template) = loader.load_template(&inst.template_path) else {
+        return Vec::new();
+    };
     let config = match inst.overrides {
         None => template,
-        Some(overrides) => crate::entities::loader::apply_overrides(&template, overrides).ok()?,
+        Some(overrides) => match crate::entities::loader::apply_overrides(&template, overrides) {
+            Ok(config) => config,
+            Err(_) => return Vec::new(),
+        },
     };
-    config
-        .civilian
-        .as_ref()
-        .and_then(|c| c.route.clone())
+    let Some(civilian) = config.civilian.as_ref() else {
+        return Vec::new();
+    };
+    civilian
+        .route
+        .iter()
+        .map(String::as_str)
+        .chain(
+            civilian
+                .order_options
+                .iter()
+                .filter_map(|option| option.order.route_destination()),
+        )
         .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Reject a `[[route]]` leg naming an anchor no world in the composition
@@ -1092,51 +1109,50 @@ fn validate_civilian_routes_in(
     // Severity in the key, for the reason `validate_doctrine_anchors_in` gives.
     let mut reported: HashSet<(String, String, bool)> = HashSet::new();
     for inst in collect_spawned_instances(src) {
-        let Some(route) = civilian_route_ref(&inst, loader) else {
-            continue;
-        };
-        if declared_routes.contains(route.as_str()) {
-            continue;
-        }
-        // A `[civilian]` block is as overridable as a `[behaviour]` one, so the
-        // same reading applies: only an override this pass could not read to the
-        // end leaves the template's route in doubt.
-        let unreadable = inst.doctrine_may_differ;
-        if !reported.insert((inst.label.clone(), route.clone(), unreadable)) {
-            continue;
-        }
-        let (severity, message) = if unreadable {
-            (
-                Severity::Warning,
-                format!(
-                    "script spawn of template '{}' is assigned civilian route '{route}', \
+        for route in civilian_route_refs(&inst, loader) {
+            if declared_routes.contains(route.as_str()) {
+                continue;
+            }
+            // A `[civilian]` block is as overridable as a `[behaviour]` one, so the
+            // same reading applies: only an override this pass could not read to the
+            // end leaves the template's route in doubt.
+            let unreadable = inst.doctrine_may_differ;
+            if !reported.insert((inst.label.clone(), route.clone(), unreadable)) {
+                continue;
+            }
+            let (severity, message) = if unreadable {
+                (
+                    Severity::Warning,
+                    format!(
+                        "script spawn of template '{}' is assigned civilian route '{route}', \
                      which no world in the composition declares, in '{}'. The spawn passes \
                      an `overrides` value this validator cannot read to the end, so the \
                      route may already be replaced there — if it is not, the hauler \
                      installs no directive and holds station for the whole mission",
-                    inst.template_path, src.path
-                ),
-            )
-        } else {
-            (
-                Severity::Error,
-                format!(
-                    "entity '{}' (template '{}') is assigned civilian route '{route}', \
+                        inst.template_path, src.path
+                    ),
+                )
+            } else {
+                (
+                    Severity::Error,
+                    format!(
+                        "entity '{}' (template '{}') is assigned civilian route '{route}', \
                      which no world in the composition declares, in '{}'",
-                    inst.label, inst.template_path, src.path
-                ),
-            )
-        };
-        findings.push(WorldFinding {
-            severity,
-            category: "unresolved-route",
-            message,
-            source: SourceLocation {
-                file: inst.site_file(src),
-                line: inst.site_line(src),
-                reference: route,
-            },
-        });
+                        inst.label, inst.template_path, src.path
+                    ),
+                )
+            };
+            findings.push(WorldFinding {
+                severity,
+                category: "unresolved-route",
+                message,
+                source: SourceLocation {
+                    file: inst.site_file(src),
+                    line: inst.site_line(src),
+                    reference: route,
+                },
+            });
+        }
     }
     findings
 }

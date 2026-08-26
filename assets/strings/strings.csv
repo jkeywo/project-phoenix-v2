@@ -1329,7 +1329,17 @@ world.falling_skyway.deadline.storm_band_two.label,assets/worlds/falling_skyway.
 world.falling_skyway.deadline.lyra_clear.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Lyra clear of the lane]
 world.falling_skyway.deadline.storm_band_three.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Third band]
 world.falling_skyway.deadline.storm_passed.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Storm passes]
-world.falling_skyway.objective.shelter.text,Objective text — the Act 2 corridor clearance in Falling Skyway,[Get the corridor traffic off the lane before the front arrives.]
+world.falling_skyway.objective.shelter.text,Objective text — the Act 2 corridor clearance in Falling Skyway,[Get the corridor traffic into storm shelter before the first band arrives.]
+world.falling_skyway.civilian_order.storm_shelter,Navigation order button for endangered Falling Skyway traffic,[ORDER TO STORM SHELTER]
+world.falling_skyway.objective.traffic_loss_report.text,Objective text — mandatory report after civilian traffic is lost in Falling Skyway,[Report the civilian traffic losses to Skyway Control.]
+world.falling_skyway.evidence.traffic_lost_meridian,Dossier ledger entry when Convoy Meridian is destroyed in Falling Skyway,[Convoy Meridian lost during the radiation sweep.]
+world.falling_skyway.evidence.traffic_lost_lark,Dossier ledger entry when Hauler Lark is destroyed in Falling Skyway,[Hauler Lark lost during the radiation sweep.]
+world.falling_skyway.evidence.traffic_lost_pell,Dossier ledger entry when Hauler Pell is destroyed in Falling Skyway,[Hauler Pell lost during the radiation sweep.]
+world.falling_skyway.evidence.traffic_lost_wick,Dossier ledger entry when Shuttle Wick is destroyed in Falling Skyway,[Shuttle Wick lost during the radiation sweep.]
+world.falling_skyway.comms.traffic_lost_meridian,Urgent Skyway Control report when Convoy Meridian is destroyed,[Control to destroyer. Convoy Meridian is gone. We have logged the loss.]
+world.falling_skyway.comms.traffic_lost_lark,Urgent Skyway Control report when Hauler Lark is destroyed,[Control to destroyer. Hauler Lark is gone. We have logged the loss.]
+world.falling_skyway.comms.traffic_lost_pell,Urgent Skyway Control report when Hauler Pell is destroyed,[Control to destroyer. Hauler Pell is gone. We have logged the loss.]
+world.falling_skyway.comms.traffic_lost_wick,Urgent Skyway Control report when Shuttle Wick is destroyed,[Control to destroyer. Shuttle Wick is gone. We have logged the loss.]
 world.falling_skyway.objective.approach.text,Objective text — the Act 2 approach to the stricken craft in Falling Skyway,"[Lyra Ascending is adrift in the lane with no drive. Close on her before the front does.]"
 world.falling_skyway.objective.rescue.text,Objective text — the Act 2 tow rescue in Falling Skyway,"[Get a line on Lyra Ascending and pull her clear before the second band.]"
 world.falling_skyway.objective.storm.text,Objective text — the Act 2 storm watch in Falling Skyway,[See the sweep through. The corridor is yours again when the last band passes.]

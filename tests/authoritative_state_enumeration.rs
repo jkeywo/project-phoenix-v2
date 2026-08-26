@@ -501,11 +501,12 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // #1035's `FlagMirror` two paragraphs up for the precedent.
     //
     // Issue #1043's CAMPAIGN FLAG HANDOFF registers nothing either, and it is the
-    // largest test of that reading so far. Six families of fact that Falling
+    // largest test of that reading so far. Seven families of fact that Falling
     // Skyway hands to whatever mission comes after it — who was carried in the
     // transfer window and who was left, how the strike ended, how deep the
-    // evidence went, what the casualties came to, whether the skyhook held, and
-    // how many promises were kept and broken — are ordinary named counters in
+    // evidence went, what the casualties came to, which civilian traffic the
+    // storm took, whether the skyhook held, and how many promises were kept and
+    // broken — are ordinary named counters in
     // that same base-world `FlagStore`, written by world script under a
     // `campaign.<mission>.<family>.<fact>` prefix. There is no `CampaignRecord`
     // resource and no per-mission component, for the reason the paragraph above

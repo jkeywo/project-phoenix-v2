@@ -488,6 +488,47 @@ name = "kestrel"
     );
 }
 
+#[test]
+fn a_civilian_order_option_diverting_to_an_undeclared_route_is_rejected() {
+    let templates = fake_templates(&[(
+        "assets/entities/hauler.toml",
+        &format!(
+            "{PATROLLER}
+[civilian]
+route = \"depot_run\"
+order_options = [
+  {{ id = \"storm_shelter\", label = \"world.test.storm_shelter\", order = {{ verb = \"divert\", route = \"missing_shelter\" }} }},
+]
+{CAPTAIN_AI}
+{BASELINE_AI}"
+        ),
+    )]);
+    let root = cfg(r#"
+[anchors]
+depot_north = [10.0, 0.0, 20.0]
+
+[[route]]
+id = "depot_run"
+
+[[route.leg]]
+anchor = "depot_north"
+
+[[entity]]
+template_path = "assets/entities/hauler.toml"
+name = "kestrel"
+"#);
+    let src = WorldSource::new("assets/worlds/scenario.toml", "name = \"kestrel\"", &root);
+    let findings = validate_composition_with(&src, &[], &templates);
+    let err = findings
+        .iter()
+        .find(|finding| {
+            finding.category == "unresolved-route" && finding.source.reference == "missing_shelter"
+        })
+        .expect("an authored button may not submit a dangling route");
+    assert!(err.is_error());
+    assert!(err.message.contains("kestrel"), "{}", err.message);
+}
+
 // ── relative_to positioning references (issue #969) ──────────────────────
 
 /// The failure case the issue asks for: an entity positioned against a

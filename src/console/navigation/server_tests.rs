@@ -187,7 +187,8 @@ fn latest_navigation_blackboard(
 #[test]
 fn the_navigation_blackboard_carries_the_civilian_traffic_picture() {
     use crate::civilian::{
-        CivilianConfig, CivilianOrder, CivilianState, CivilianTraffic, ComplianceDisposition,
+        CivilianConfig, CivilianOrder, CivilianOrderOption, CivilianSection, CivilianState,
+        CivilianTraffic, ComplianceDisposition,
     };
 
     // Read off the local ship's own blackboard rather than off the wire:
@@ -220,6 +221,11 @@ fn the_navigation_blackboard_carries_the_civilian_traffic_picture() {
     // One hauler, ordered to dock and already complying.
     let config = CivilianConfig {
         route: Some("depot_run".into()),
+        order_options: vec![CivilianOrderOption {
+            id: "clear_lane".into(),
+            label: "world.test.civilian.clear_lane".into(),
+            order: CivilianOrder::divert_to_route("storm_shelter_run"),
+        }],
         ..CivilianConfig::default()
     };
     let mut state = CivilianState::from_config(&config);
@@ -239,6 +245,7 @@ fn the_navigation_blackboard_carries_the_civilian_traffic_picture() {
     app.world_mut().spawn((
         crate::entities::spawner::EntityUuid("civ-1".into()),
         crate::entities::spawner::EntityName("world.entity.hauler_kestrel.name".into()),
+        CivilianSection(config),
         CivilianTraffic(state),
     ));
 
@@ -256,6 +263,13 @@ fn the_navigation_blackboard_carries_the_civilian_traffic_picture() {
         "the row key is what an order names it by"
     );
     assert_eq!(row.name, "world.entity.hauler_kestrel.name");
+    assert_eq!(row.order_options.len(), 1);
+    assert_eq!(row.order_options[0].id, "clear_lane");
+    assert_eq!(row.order_options[0].label, "world.test.civilian.clear_lane");
+    assert_eq!(
+        row.order_options[0].order,
+        CivilianOrder::divert_to_route("storm_shelter_run")
+    );
     assert_eq!(row.route, "depot_run");
     assert_eq!(row.order, "dock");
     assert_eq!(row.order_destination, "world.entity.skyhook_depot.name");

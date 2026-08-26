@@ -884,11 +884,14 @@ fn publish_captain_blackboard(
                     .iter()
                     .filter(|record| record.visible)
                     .map(|record| crate::core::messages::DeadlineSnapshot {
-                        id: record.id.clone(),
+                        id: record.presentation_id(),
                         label: record.label.clone(),
-                        remaining_secs: content
-                            .deadlines
-                            .remaining_secs(&record.id, now_tick, tick_hz),
+                        remaining_secs: content.deadlines.remaining_secs_scoped(
+                            record.origin_layer.as_deref(),
+                            &record.id,
+                            now_tick,
+                            tick_hz,
+                        ),
                         state: record.state.as_str().to_string(),
                     })
                     .collect();

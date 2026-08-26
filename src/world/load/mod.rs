@@ -86,11 +86,11 @@ impl WorldReader for FsReader {
     }
 }
 
-/// Browser reader: the world TOML off the config-cache's JS-delivered pending
-/// queue, firing a fetch request when it is not yet present.
+/// Browser reader: resolve world TOML from the live overlay or durable
+/// JS-delivered base cache, firing a fetch request when neither is present.
 ///
 /// Mirrors `world::server::load_scenario_toml_text`'s wasm arm. Both
-/// [`pop_pending_world_toml`](crate::entities::config_cache::pop_pending_world_toml) and
+/// [`resolved_world_source`](crate::entities::config_cache::resolved_world_source) and
 /// [`request_world_fetch`](crate::entities::config_cache::request_world_fetch) have native
 /// no-op stubs, so this adapter compiles on every target (and simply reads
 /// `None` off-browser) without a `cfg` gate of its own.
@@ -98,7 +98,7 @@ pub struct WasmReader;
 
 impl WorldReader for WasmReader {
     fn read(&self, path: &str) -> Option<String> {
-        crate::entities::config_cache::pop_pending_world_toml(path).or_else(|| {
+        crate::entities::config_cache::resolved_world_source(path).or_else(|| {
             crate::entities::config_cache::request_world_fetch(path.to_string());
             None
         })
@@ -272,15 +272,17 @@ impl TemplateLoader for MemoryTemplateLoader {
 /// How much of the load sequence to run for a [`LoadRequest`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoadPolicy {
-    /// Full boot ingestion: parse, recurse `extra_worlds` children, validate the
-    /// composition, compile scripts, and gather every file read into the
-    /// [`LedgerPlan`] for the caller to apply and freeze. The policy the future
-    /// `boot::ingest_world` (and today's `build_headless_app`) uses.
+    /// Full boot ingestion: parse the root and its static `extra_worlds`
+    /// children, compile each world's own scripts, validate the composition,
+    /// and gather every world record and script digest into the [`LedgerPlan`]
+    /// for the caller to apply and freeze. The policy `boot::ingest_world` uses.
     Activate,
     /// Additive layer/scenario merge: parse the single world, record its TOML,
-    /// and carry its compiled scripts as data — no composition gate and no child
-    /// recursion, because a layer merges into an already-active composition. The
-    /// policy `scenario.rs` folds into (issue #1045 plumbing).
+    /// and carry its compiled scripts as data — no whole-composition gate and no
+    /// child recursion, because a layer merges into an already-active
+    /// composition. The layer caller runs the narrow candidate gate before
+    /// applying this result. The policy `scenario.rs` folds into (issue #1045
+    /// plumbing).
     Merge,
     /// The pure kernel: [`parse_world`](crate::world::config::parse_world) only,
     /// no ledger and no scripts. The policy the manifest / mod-pack linters use
@@ -416,11 +418,12 @@ impl LedgerPlan {
 ///
 /// `findings` carries the **composition**-level findings (from
 /// [`validate_composition`](crate::world::validate::validate_composition)); the
-/// **script**-level findings ride in `scripts`'s own
+/// **script**-level findings ride in each world's own
 /// [`CompiledScripts::findings`](crate::world::script::load::CompiledScripts). A
-/// caller gating activation checks both, exactly as the boot paths do today:
-/// `has_error(&loaded.findings)` and, when `scripts` is `Some`,
-/// `has_error(&scripts.findings)`.
+/// caller gating activation checks `loaded.findings`, the root `scripts`, and
+/// every static child's `scripts`. Boot retains only the root set as the runtime
+/// `PreCompiledScripts` resource; child sets exist here to validate and bind the
+/// pre-freeze declared content before runtime layer activation recompiles them.
 pub struct LoadedWorld {
     /// The parsed world configuration (from the untouched TOML text).
     pub config: WorldConfig,
@@ -514,10 +517,12 @@ impl std::error::Error for LoadError {}
 /// * [`Inspect`](LoadPolicy::Inspect) — read + `parse_world`. No scripts, no
 ///   ledger, no children.
 /// * [`Merge`](LoadPolicy::Merge) — read + `parse_world`, record the TOML, and
-///   compile scripts (carried, not activated). No composition gate, no children.
+///   compile scripts (carried, not activated). No whole-composition gate or
+///   children; the additive-layer caller runs its narrow candidate gate.
 /// * [`Activate`](LoadPolicy::Activate) — the full sequence: read + `parse_world`,
-///   record, recurse and record `extra_worlds` children, validate the
-///   composition, and compile scripts.
+///   record, load every `extra_worlds` child, compile the root and each child's
+///   own scripts, validate composition against those exact source sets, and
+///   return them all. The optional raw transform applies to the root only.
 pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
     let LoadRequest {
         path,
@@ -561,10 +566,17 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
                 text: text.clone(),
             }];
 
-            // Read, parse and record each `extra_worlds` child. The `(path, text)`
-            // pairs are owned here so the borrowed `WorldSource`s below outlive the
-            // composition call, exactly as `build_headless_app` owns its
-            // `child_owned` triples.
+            // Read, parse, compile and record each `extra_worlds` child. Static
+            // children need their own compiled set HERE, before the content-ledger
+            // freeze: their literal sibling-script spawns are part of the declared
+            // template set even though runtime layer activation later compiles the
+            // child again into its independently owned registrations. The root's
+            // raw transform is deliberately not inherited — duel-side rewriting is
+            // a root harness seam, not a transform over every supporting world.
+            //
+            // The `(path, text)` pairs are owned here so the borrowed
+            // `WorldSource`s below outlive the composition call, exactly as
+            // `build_headless_app` owned its `child_owned` triples.
             let mut children: Vec<LoadedWorld> = Vec::new();
             let mut child_sources: Vec<(String, String)> = Vec::new();
             for child_path in &config.extra_worlds {
@@ -579,6 +591,8 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
                         path: child_path.clone(),
                         message: e,
                     })?;
+                let child_scripts =
+                    compile_scripts(child_path, &child_text, script_resolver, None)?;
                 records.push(LedgerRecord {
                     path: child_path.clone(),
                     text: child_text.clone(),
@@ -586,29 +600,46 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
                 child_sources.push((child_path.clone(), child_text));
                 children.push(LoadedWorld {
                     config: child_config,
-                    scripts: None,
+                    scripts: child_scripts,
                     children: Vec::new(),
                     findings: Vec::new(),
                     ledger: LedgerPlan::default(),
                 });
             }
 
+            // Compile ONCE before validation so the root source can expose the
+            // exact inline/sibling script-spawn set to the composition gate.
+            // This stays after child ingestion, preserving the prior error and
+            // ledger order; the same owned value is returned below and supplies
+            // the unchanged digest/runtime handoff.
+            let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
+
             // Atomic composition validation over root + children. Findings (not
             // errors) — the caller gates activation on them.
-            let root_src = WorldSource::new(path.clone(), &text, &config);
+            let mut root_src = WorldSource::new(path.clone(), &text, &config);
+            if let Some(compiled) = scripts.as_ref() {
+                root_src = root_src.with_resolved_script_spawns(&compiled.spawned_templates);
+            }
             let child_srcs: Vec<WorldSource> = children
                 .iter()
                 .zip(child_sources.iter())
                 .map(|(child, (child_path, child_text))| {
-                    WorldSource::new(child_path.clone(), child_text.as_str(), &child.config)
+                    let mut source =
+                        WorldSource::new(child_path.clone(), child_text.as_str(), &child.config);
+                    if let Some(compiled) = child.scripts.as_ref() {
+                        source = source.with_resolved_script_spawns(&compiled.spawned_templates);
+                    }
+                    source
                 })
                 .collect();
             let findings = validate_composition(&root_src, &child_srcs);
             drop(child_srcs);
             drop(root_src);
 
-            let scripts = compile_scripts(&path, &text, script_resolver, raw_transform)?;
-            let digests = script_digests(&scripts);
+            let mut digests = script_digests(&scripts);
+            for child in &children {
+                digests.extend(script_digests(&child.scripts));
+            }
 
             Ok(LoadedWorld {
                 config,
@@ -626,9 +657,8 @@ pub fn load(request: LoadRequest) -> Result<LoadedWorld, LoadError> {
 /// The ledger writes a compiled script set implies (issue #1241).
 ///
 /// One entry, or none for a world that lifted no source. Kept as a `Vec` rather
-/// than an `Option` because it is the shape a caller applies — and because the
-/// set of digest-shaped things a load gathers is expected to grow (a world's
-/// script-SPAWNABLE entity templates are the next candidate, issue #1047).
+/// than an `Option` because an Activate load concatenates the root and every
+/// scripted child's record into one caller-applied plan.
 fn script_digests(scripts: &Option<CompiledScripts>) -> Vec<LedgerDigest> {
     scripts
         .as_ref()

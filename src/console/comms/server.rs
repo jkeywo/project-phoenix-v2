@@ -416,15 +416,15 @@ pub(crate) fn handle_respond_to_message(
         // `world::dispatch` table (issue #708/#710), the same table
         // `tick_trigger_pipeline` and `tick_delayed_actions` use — so a scripted
         // `spawn_entity` mints its uuid from the real `WorldIdMint` in the same
-        // order its trigger-authored twin would. A comms thread carries no
-        // originating sub-world layer, so `origin_layer` is always `None` here
-        // and every layer-scoped action resolves against the base world. This is
+        // order its trigger-authored twin would. A scripted comms thread carries
+        // its originating sub-world layer, so effects and flag writes remain in
+        // the scope of the handler which opened it. This is
         // a single-shot dispatch, not a chaining pass: `new_events` are routed
         // onto `runtime.pending_world_events` so `tick_trigger_pipeline` (later
         // in the same tick via `SimSet::Physics`, since this handler runs in
         // `SimSet::Input`) picks them up and fires any chained
         // `on_flag_set` / `on_flag_cleared` / `on_destroyed` triggers.
-        let origin_layer: Option<String> = None;
+        let origin_layer = dialogue.script.origin_layer.clone();
         let name_to_uuid_snapshot = runtime.name_to_uuid.clone();
         // Build reverse map (UUID → entity name) so `AddObjective`'s
         // empty-`targets` fallback can resolve to the comms sender's name.
@@ -473,6 +473,15 @@ pub(crate) fn handle_respond_to_message(
         // the bindings above were always built once and shared by both, and are
         // now simply this arm's.
         let sd = &dialogue.script;
+        let dialogue_flag_chain: Vec<crate::world::flags::FlagStore> =
+            crate::world::server::layered_flag_chain(
+                origin_layer.as_deref(),
+                &runtime.flags,
+                world_layers.layer_map.as_deref(),
+            )
+            .into_iter()
+            .cloned()
+            .collect();
         // Read the clock BEFORE borrowing the runtime, so the two reads of
         // `aux` stay sequential.
         let now_tick = aux.script.sim_tick.as_ref().map(|t| t.0).unwrap_or(0);
@@ -542,17 +551,18 @@ pub(crate) fn handle_respond_to_message(
                 host, asts, budget, ..
             } = &mut *sr;
             match asts.get(&sd.script_path) {
-                Some(ast) => Some(crate::world::script::comms::enter_node(
+                Some(ast) => Some(crate::world::script::comms::enter_node_scoped(
                     host,
                     budget,
                     &script_clock,
                     ast,
                     &sd.script_path,
                     &on_pick_fn,
-                    &runtime.flags,
+                    &dialogue_flag_chain,
                     &runtime.deadlines,
                     &runtime.commitments,
                     &runtime.evidence,
+                    origin_layer.as_deref(),
                 )),
                 None => {
                     bevy::log::warn!(
@@ -695,7 +705,7 @@ pub(crate) fn handle_respond_to_message(
                 available,
                 urgent,
             );
-            channel2_writer.write(CommsChannel2Event { message: new_msg });
+            channel2_writer.write(CommsChannel2Event::scripted_dialogue(new_msg));
             comms.active_dialogues.insert(
                 new_msg_id,
                 ActiveDialogue {
@@ -703,6 +713,7 @@ pub(crate) fn handle_respond_to_message(
                     thread_id,
                     script: crate::comms::content::ScriptedDialogue {
                         script_path: sd.script_path.clone(),
+                        origin_layer: sd.origin_layer.clone(),
                         node_fn: on_pick_fn,
                         on_pick,
                     },
@@ -859,8 +870,19 @@ pub(crate) fn handle_show_on_screen(
 pub(crate) fn handle_comms_channel2(
     mut reader: MessageReader<CommsChannel2Event>,
     mut inbox: ResMut<CommsInboxRes>,
+    comms: Res<CommsRuntime>,
 ) {
     for ev in reader.read() {
+        if ev.delivery == crate::comms::server::CommsChannel2Delivery::ScriptedDialogue
+            && !comms.active_dialogues.contains_key(&ev.message.id)
+        {
+            // The authoritative dialogue was retired after its presentation
+            // event was queued (layer unload, ClearComms, or response race).
+            // Skip this one event in place; never drain/rewrite the shared
+            // Messages buffer, which would mint new IDs and replay survivors to
+            // readers that already consumed them.
+            continue;
+        }
         inbox.0.inject(ev.message.clone());
     }
 }

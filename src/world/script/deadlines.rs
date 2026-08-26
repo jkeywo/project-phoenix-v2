@@ -75,16 +75,28 @@ pub struct Deadlines {
     changes: Arc<Mutex<Vec<DeadlineChange>>>,
     now_tick: u64,
     tick_hz: f32,
+    origin_layer: Option<String>,
 }
 
 impl Deadlines {
     /// A fresh per-call view over a snapshot of `base`, measured at `now_tick`.
     pub fn new(base: &DeadlineTable, now_tick: u64, tick_hz: f32) -> Self {
+        Self::with_origin(base, now_tick, tick_hz, None)
+    }
+
+    /// A per-call view scoped to the world that owns the running handler.
+    pub fn with_origin(
+        base: &DeadlineTable,
+        now_tick: u64,
+        tick_hz: f32,
+        origin_layer: Option<&str>,
+    ) -> Self {
         Self {
             snapshot: Arc::new(Mutex::new(base.clone())),
             changes: Arc::new(Mutex::new(Vec::new())),
             now_tick,
             tick_hz,
+            origin_layer: origin_layer.map(str::to_string),
         }
     }
 
@@ -95,7 +107,12 @@ impl Deadlines {
         self.snapshot
             .lock()
             .expect("deadline snapshot lock")
-            .remaining_secs(id, self.now_tick, self.tick_hz)
+            .remaining_secs_scoped(
+                self.origin_layer.as_deref(),
+                id,
+                self.now_tick,
+                self.tick_hz,
+            )
     }
 
     /// `"pending"` / `"fired"` / `"cancelled"`, or `"unknown"` for an id this
@@ -104,7 +121,7 @@ impl Deadlines {
         self.snapshot
             .lock()
             .expect("deadline snapshot lock")
-            .state_of(id)
+            .state_of_scoped(self.origin_layer.as_deref(), id)
             .to_string()
     }
 
@@ -113,6 +130,7 @@ impl Deadlines {
     fn push(&self, id: &str, mutation: DeadlineMutation) {
         let change = DeadlineChange {
             id: id.to_string(),
+            origin_layer: self.origin_layer.clone(),
             mutation,
         };
         self.snapshot.lock().expect("deadline snapshot lock").apply(
@@ -287,10 +305,12 @@ mod tests {
             vec![
                 DeadlineChange {
                     id: "window".into(),
+                    origin_layer: None,
                     mutation: DeadlineMutation::Slip { by_secs: 60 },
                 },
                 DeadlineChange {
                     id: "collapse".into(),
+                    origin_layer: None,
                     mutation: DeadlineMutation::Cancel,
                 },
             ]

@@ -302,6 +302,37 @@ pub fn enter_node(
     base_commitments: &crate::world::commitments::CommitmentLedger,
     base_evidence: &crate::dossier::evidence::EvidenceLog,
 ) -> Result<(CallEffects, Option<ScriptDialogueNode>), EnterError> {
+    enter_node_scoped(
+        host,
+        budget,
+        clock,
+        ast,
+        path,
+        fn_name,
+        std::slice::from_ref(base_flags),
+        base_deadlines,
+        base_commitments,
+        base_evidence,
+        None,
+    )
+}
+
+/// Layer-aware dialogue entry. The supplied flag chain and origin are the
+/// scope of the handler which opened (or is advancing) the thread.
+#[allow(clippy::too_many_arguments)]
+pub fn enter_node_scoped(
+    host: &RuntimeHost,
+    budget: &mut TickBudget,
+    clock: &SchedClock,
+    ast: &rhai::AST,
+    path: &str,
+    fn_name: &str,
+    flag_chain: &[FlagStore],
+    base_deadlines: &crate::world::deadlines::DeadlineTable,
+    base_commitments: &crate::world::commitments::CommitmentLedger,
+    base_evidence: &crate::dossier::evidence::EvidenceLog,
+    origin_layer: Option<&str>,
+) -> Result<(CallEffects, Option<ScriptDialogueNode>), EnterError> {
     // Resolve the name against the unit BEFORE calling. `call_fn` reports a
     // missing function as an ordinary `CallError`, which the host's failure
     // policy turns into a dev panic mid-mission and a release no-op — neither of
@@ -311,18 +342,17 @@ pub fn enter_node(
     if !ast.iter_functions().any(|f| f.name == fn_name) {
         return Err(EnterError::Unresolved);
     }
-    let Some((effects, value)) = host.call_dialogue(
+    let Some((effects, value)) = host.call_dialogue_scoped(
         budget,
         clock,
         ast,
         path,
         fn_name,
-        // A comms thread carries no originating layer (see the applier call in
-        // `comms::scripted`), so its handler reads at base scope.
-        std::slice::from_ref(base_flags),
+        flag_chain,
         base_deadlines,
         base_commitments,
         base_evidence,
+        origin_layer,
         Map::new(),
     ) else {
         return Err(EnterError::Refused);

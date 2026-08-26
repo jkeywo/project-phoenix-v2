@@ -141,6 +141,9 @@ pub struct DeadlineHandler {
 pub struct DeadlineRecord {
     /// The authored id.
     pub id: String,
+    /// Supporting world that authored this local id. `None` is the root world.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_layer: Option<String>,
     /// The authored `strings.csv` label id.
     #[serde(default)]
     pub label: String,
@@ -163,6 +166,17 @@ pub struct DeadlineRecord {
     /// of the two, which is the correct count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub armed: Option<ScheduledCall>,
+}
+
+impl DeadlineRecord {
+    /// Stable row key for presentation. Root ids stay byte-for-byte compatible;
+    /// a supporting layer qualifies its local authored id by ownership.
+    pub fn presentation_id(&self) -> String {
+        match &self.origin_layer {
+            Some(layer) => format!("{layer}#deadline.{}", self.id),
+            None => self.id.clone(),
+        }
+    }
 }
 
 /// The edit a mutation asks of the *existing* callback queue.
@@ -203,6 +217,8 @@ pub enum DeadlineMutation {
 pub struct DeadlineChange {
     /// The `[[deadline]] id` addressed.
     pub id: String,
+    /// Scope in which the script addressed `id`. `None` is the root world.
+    pub origin_layer: Option<String>,
     /// What to do to it.
     pub mutation: DeadlineMutation,
 }
@@ -250,7 +266,21 @@ impl DeadlineTable {
         now_tick: u64,
         tick_hz: f32,
     ) -> Vec<ScheduledCall> {
-        self.armed = true;
+        self.arm_scoped(authored, handlers, now_tick, tick_hz, None)
+    }
+
+    /// Arm one world's authored deadlines in its own local-id namespace.
+    pub fn arm_scoped(
+        &mut self,
+        authored: &[Deadline],
+        handlers: &[DeadlineHandler],
+        now_tick: u64,
+        tick_hz: f32,
+        origin_layer: Option<&str>,
+    ) -> Vec<ScheduledCall> {
+        if origin_layer.is_none() {
+            self.armed = true;
+        }
         let mut queued = Vec::new();
         for deadline in authored {
             let Some(handler) = handlers.iter().find(|h| h.deadline_id == deadline.id) else {
@@ -261,10 +291,12 @@ impl DeadlineTable {
                 fire_tick: due_tick,
                 script_path: handler.source_path.clone(),
                 fn_name: handler.handler.clone(),
+                origin_layer: origin_layer.map(str::to_string),
             };
             queued.push(call.clone());
             self.records.push(DeadlineRecord {
                 id: deadline.id.clone(),
+                origin_layer: origin_layer.map(str::to_string),
                 label: deadline.label.clone(),
                 visible: deadline.visible,
                 due_tick,
@@ -277,7 +309,32 @@ impl DeadlineTable {
 
     /// The record for `id`, or `None`.
     pub fn get(&self, id: &str) -> Option<&DeadlineRecord> {
-        self.records.iter().find(|r| r.id == id)
+        self.get_scoped(None, id)
+    }
+
+    /// The record for local `id` in `origin_layer`'s namespace.
+    pub fn get_scoped(&self, origin_layer: Option<&str>, id: &str) -> Option<&DeadlineRecord> {
+        self.records
+            .iter()
+            .find(|r| r.id == id && r.origin_layer.as_deref() == origin_layer)
+    }
+
+    /// Remove every record owned by `origin_layer`, returning its still-armed
+    /// calls so the adapter can retract exact queue entries before callbacks
+    /// drain in that tick.
+    pub fn remove_origin(&mut self, origin_layer: &str) -> Vec<ScheduledCall> {
+        let mut armed = Vec::new();
+        self.records.retain(|record| {
+            if record.origin_layer.as_deref() == Some(origin_layer) {
+                if let Some(call) = &record.armed {
+                    armed.push(call.clone());
+                }
+                false
+            } else {
+                true
+            }
+        });
+        armed
     }
 
     /// Whether anything is authored here.
@@ -297,7 +354,18 @@ impl DeadlineTable {
     ///   `Option` to return; the two cases are told apart by
     ///   [`state_of`](Self::state_of), which names the unknown id explicitly.
     pub fn remaining_secs(&self, id: &str, now_tick: u64, tick_hz: f32) -> i64 {
-        match self.get(id) {
+        self.remaining_secs_scoped(None, id, now_tick, tick_hz)
+    }
+
+    /// Scoped form of [`remaining_secs`](Self::remaining_secs).
+    pub fn remaining_secs_scoped(
+        &self,
+        origin_layer: Option<&str>,
+        id: &str,
+        now_tick: u64,
+        tick_hz: f32,
+    ) -> i64 {
+        match self.get_scoped(origin_layer, id) {
             Some(record) => match record.state {
                 DeadlineState::Pending => {
                     ticks_to_secs_ceil(record.due_tick.saturating_sub(now_tick), tick_hz)
@@ -313,7 +381,12 @@ impl DeadlineTable {
     /// authored — the one answer [`remaining_secs`](Self::remaining_secs) cannot
     /// give, because a cancelled deadline and a typo both have no time left.
     pub fn state_of(&self, id: &str) -> &'static str {
-        match self.get(id) {
+        self.state_of_scoped(None, id)
+    }
+
+    /// Scoped form of [`state_of`](Self::state_of).
+    pub fn state_of_scoped(&self, origin_layer: Option<&str>, id: &str) -> &'static str {
+        match self.get_scoped(origin_layer, id) {
             Some(record) => record.state.as_str(),
             None => "unknown",
         }
@@ -333,7 +406,10 @@ impl DeadlineTable {
         now_tick: u64,
         tick_hz: f32,
     ) -> Option<QueueEdit> {
-        let record = self.records.iter_mut().find(|r| r.id == change.id)?;
+        let record = self
+            .records
+            .iter_mut()
+            .find(|r| r.id == change.id && r.origin_layer == change.origin_layer)?;
         if record.state != DeadlineState::Pending {
             return None;
         }
@@ -498,6 +574,7 @@ mod tests {
                 fire_tick: 600,
                 script_path: "w.toml#script.setup".into(),
                 fn_name: "on_window".into(),
+                origin_layer: None,
             },
             "the queued work is an ordinary ScheduledCall — no new record type"
         );
@@ -515,6 +592,90 @@ mod tests {
         assert!(
             table.get("collapse").is_none(),
             "an unhandled deadline is not armed at all"
+        );
+    }
+
+    #[test]
+    fn root_and_layers_may_reuse_a_local_id_without_cross_talk() {
+        let deadline = Deadline {
+            id: "window".into(),
+            label: "deadline.window".into(),
+            due_secs: 10,
+            visible: true,
+        };
+        let handler = DeadlineHandler {
+            deadline_id: "window".into(),
+            handler: "on_window".into(),
+            source_path: "shared.rhai".into(),
+        };
+        let mut table = DeadlineTable::default();
+        let root = table.arm(
+            std::slice::from_ref(&deadline),
+            std::slice::from_ref(&handler),
+            0,
+            HZ,
+        );
+        let layer_a = table.arm_scoped(
+            std::slice::from_ref(&deadline),
+            std::slice::from_ref(&handler),
+            30,
+            HZ,
+            Some("worlds/a.toml"),
+        );
+        let layer_b = table.arm_scoped(
+            std::slice::from_ref(&deadline),
+            std::slice::from_ref(&handler),
+            60,
+            HZ,
+            Some("worlds/b.toml"),
+        );
+
+        assert_eq!(root[0].origin_layer, None);
+        assert_eq!(layer_a[0].origin_layer.as_deref(), Some("worlds/a.toml"));
+        assert_eq!(layer_b[0].origin_layer.as_deref(), Some("worlds/b.toml"));
+        assert_eq!(table.records.len(), 3);
+        assert_eq!(table.records[0].presentation_id(), "window");
+        assert_eq!(
+            table.records[1].presentation_id(),
+            "worlds/a.toml#deadline.window"
+        );
+        assert_eq!(
+            table.records[2].presentation_id(),
+            "worlds/b.toml#deadline.window"
+        );
+        assert_eq!(table.get("window").unwrap().due_tick, 600);
+        assert_eq!(
+            table
+                .get_scoped(Some("worlds/a.toml"), "window")
+                .unwrap()
+                .due_tick,
+            630,
+            "layer due_secs is relative to the tick its activation landed"
+        );
+
+        table.apply(
+            &DeadlineChange {
+                id: "window".into(),
+                origin_layer: Some("worlds/a.toml".into()),
+                mutation: DeadlineMutation::Cancel,
+            },
+            30,
+            HZ,
+        );
+        assert_eq!(table.get("window").unwrap().state, DeadlineState::Pending);
+        assert_eq!(
+            table
+                .get_scoped(Some("worlds/a.toml"), "window")
+                .unwrap()
+                .state,
+            DeadlineState::Cancelled
+        );
+        assert_eq!(
+            table
+                .get_scoped(Some("worlds/b.toml"), "window")
+                .unwrap()
+                .state,
+            DeadlineState::Pending
         );
     }
 
@@ -552,6 +713,7 @@ mod tests {
         table.apply(
             &DeadlineChange {
                 id: "collapse".into(),
+                origin_layer: None,
                 mutation: DeadlineMutation::Cancel,
             },
             0,
@@ -581,6 +743,7 @@ mod tests {
             .apply(
                 &DeadlineChange {
                     id: "window".into(),
+                    origin_layer: None,
                     mutation: DeadlineMutation::Slip { by_secs: 5 },
                 },
                 120,
@@ -599,6 +762,7 @@ mod tests {
                 fire_tick: 900,
                 script_path: "w.toml#script.setup".into(),
                 fn_name: "on_window".into(),
+                origin_layer: None,
             }),
             "and the replacement is the same unit and fn at the new tick"
         );
@@ -617,6 +781,7 @@ mod tests {
             table.apply(
                 &DeadlineChange {
                     id: "window".into(),
+                    origin_layer: None,
                     mutation: DeadlineMutation::Slip { by_secs: 5 },
                 },
                 0,
@@ -632,6 +797,7 @@ mod tests {
         table.apply(
             &DeadlineChange {
                 id: "window".into(),
+                origin_layer: None,
                 mutation: DeadlineMutation::Slip { by_secs: -20 },
             },
             0,
@@ -648,6 +814,7 @@ mod tests {
         table.apply(
             &DeadlineChange {
                 id: "window".into(),
+                origin_layer: None,
                 mutation: DeadlineMutation::Slip { by_secs: -600 },
             },
             250,
@@ -663,6 +830,7 @@ mod tests {
             .apply(
                 &DeadlineChange {
                     id: "collapse".into(),
+                    origin_layer: None,
                     mutation: DeadlineMutation::Cancel,
                 },
                 0,
@@ -690,6 +858,7 @@ mod tests {
         table.apply(
             &DeadlineChange {
                 id: "window".into(),
+                origin_layer: None,
                 mutation: DeadlineMutation::Cancel,
             },
             0,
@@ -699,6 +868,7 @@ mod tests {
             table.apply(
                 &DeadlineChange {
                     id: "window".into(),
+                    origin_layer: None,
                     mutation: DeadlineMutation::Slip { by_secs: 60 },
                 },
                 0,
@@ -711,6 +881,7 @@ mod tests {
             table.apply(
                 &DeadlineChange {
                     id: "nope".into(),
+                    origin_layer: None,
                     mutation: DeadlineMutation::Cancel,
                 },
                 0,
@@ -731,6 +902,7 @@ mod tests {
         table.apply(
             &DeadlineChange {
                 id: "window".into(),
+                origin_layer: None,
                 mutation: DeadlineMutation::Slip { by_secs: 5 },
             },
             0,
@@ -809,6 +981,7 @@ mod tests {
         table.apply(
             &DeadlineChange {
                 id: "window".into(),
+                origin_layer: None,
                 mutation: DeadlineMutation::Slip { by_secs: 30 },
             },
             60,

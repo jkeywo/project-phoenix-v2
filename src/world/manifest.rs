@@ -1037,13 +1037,25 @@ world = "assets/worlds/mod_skirmish.toml"
     /// The demo curation manifest (issue #917): must parse, curate the
     /// catalogue down to exactly `combat_test`, and — without editing
     /// `combat_test.toml`, which still authors four `[[available_ships]]` —
-    /// resolve the ship list down to exactly the Alliance Destroyer.
+    /// resolve the ship list to the Destroyer followed by the Cruiser.
     #[test]
-    fn demo_manifest_curates_to_combat_test_and_the_destroyer() {
+    fn demo_manifest_curates_to_combat_test_destroyer_then_cruiser() {
         let manifest_toml = include_str!("../../assets/scenarios.demo.toml");
         let m = parse_manifest(manifest_toml).expect("scenarios.demo.toml must parse");
         let ids: Vec<&str> = m.scenarios.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, ["combat_test"]);
+        assert_eq!(
+            m.scenarios[0]
+                .ships
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            [
+                "assets/entities/alliance_destroyer.toml",
+                "assets/entities/alliance_cruiser.toml"
+            ],
+            "the demo allowlist keeps the Destroyer first/default"
+        );
 
         let mut map = HashMap::new();
         map.insert(
@@ -1060,10 +1072,16 @@ world = "assets/worlds/mod_skirmish.toml"
         let catalog = build_catalog(&m, resolver(map));
         assert_eq!(catalog.scenarios.len(), 1);
         assert_eq!(catalog.scenarios[0].id, "combat_test");
-        assert_eq!(catalog.scenarios[0].ships.len(), 1);
         assert_eq!(
-            catalog.scenarios[0].ships[0].template_path,
-            "assets/entities/alliance_destroyer.toml"
+            catalog.scenarios[0]
+                .ships
+                .iter()
+                .map(|ship| ship.template_path.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "assets/entities/alliance_destroyer.toml",
+                "assets/entities/alliance_cruiser.toml"
+            ]
         );
 
         // combat_test.toml itself is untouched: it still authors all four

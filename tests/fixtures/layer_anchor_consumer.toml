@@ -1,0 +1,11 @@
+[global]
+seed = 1
+
+[script]
+setup = """
+fn patrol_wave(ctx) {
+    ctx.effects.spawn_entity(#{
+        template_path: "assets/entities/ship_harrow_patrol.toml"
+    });
+}
+"""

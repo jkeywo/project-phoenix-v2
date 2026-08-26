@@ -424,7 +424,20 @@ use crate::world_id::{WorldIdMint, WorldIdMintState};
 /// 4-tuple format-12 save ever existed outside that merge window; a stray dev
 /// save from the window fails RON parse rather than the format check, which is
 /// acceptable for a payload no release wrote.
-pub const SNAPSHOT_FORMAT: u32 = 12;
+///
+/// `13` — issue #1045 made supporting-world ownership authoritative on pending
+/// script callbacks, named deadline rows, queued scripted comms opens and live
+/// scripted dialogues. It also widened [`LayerFlags`] into the ordered active
+/// layer topology: the loader that owns each layer and the activation order that
+/// determines scripted-trigger indices. Each new ownership field has a serde
+/// default so a format-12 save still parses; accepting it would silently restore
+/// layer-owned operations at base scope and replay the fresh bootstrap's layer
+/// composition instead of the captured run's. A callback could mutate the wrong
+/// flag store, two layers' same-local-id deadlines could cross-talk, or an index
+/// could restore fired-state onto another layer's handler. Nothing in an older
+/// payload distinguishes those cases from a genuinely base-owned, startup-loaded
+/// layer, so the format dimension refuses it rather than guessing ownership.
+pub const SNAPSHOT_FORMAT: u32 = 13;
 
 /// The simulation, as a string because "0.1-pre" says more in a bug report than
 /// "1" and because nothing compares these for order.
@@ -1370,10 +1383,32 @@ pub struct CollisionRecord {
     pub hull_damage: f32,
 }
 
-/// One world layer's flag store, keyed by the layer's TOML path.
+/// One active world layer in the capture's authoritative activation order.
+///
+/// The vector of these rows is the topology: `path` identifies the layer,
+/// `loader_path` preserves its parent flag scope, and vector position preserves
+/// the order in which scripted triggers were appended to the shared trigger
+/// table. The absolute runtime activation ordinal is deliberately not stored;
+/// only the relative order of layers that are still active can affect handler
+/// alignment after a resume.
+///
+/// Failed-load sentinels in `WorldLayerMap` are not layers and do not appear
+/// here. A genuinely active but otherwise empty layer does, which is why capture
+/// tests `WorldRuntime::is_active` rather than inferring success from its fields.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LayerFlags {
     pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loader_path: Option<String>,
+    /// Captured UUIDs aligned with `WorldRuntime::spawned_entities`.
+    ///
+    /// `Some` is a live entity declared by this layer's `[[entity]]` block.
+    /// `None` is either a dead slot or a script-spawned entity; script spawns
+    /// already carry their own serialisable `EntitySpawnOrigin` recipe. Keeping
+    /// the slots preserves declaration order so a fresh activation can exchange
+    /// its newly-minted UUIDs for the captured identities before entity restore.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_entity_uuids: Vec<Option<String>>,
     pub flags: FlagStore,
 }
 
@@ -1830,7 +1865,9 @@ pub struct PhoenixSnapshot {
     /// The base world's flag store.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flags: Option<FlagStore>,
-    /// Per-layer flag stores, sorted by path so the payload is byte-stable.
+    /// Active layer topology in activation order, including each layer's flag
+    /// store and loader ownership. Runtime activation ordinals make the order
+    /// deterministic; the vector position is the stored order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub layer_flags: Vec<LayerFlags>,
     /// The AI's shared world view as of the capture tick (issue #1242) —
@@ -1955,16 +1992,39 @@ fn capture_layer_flags(world: &World) -> Vec<LayerFlags> {
     let Some(layers) = world.get_resource::<crate::world::server::WorldLayerMap>() else {
         return Vec::new();
     };
-    let mut rows: Vec<LayerFlags> = layers
+    let mut active: Vec<_> = layers
         .0
         .iter()
+        .filter(|(_, runtime)| runtime.is_active)
+        .collect();
+    active.sort_by(|(path_a, runtime_a), (path_b, runtime_b)| {
+        runtime_a
+            .activation_order
+            .cmp(&runtime_b.activation_order)
+            .then_with(|| path_a.cmp(path_b))
+    });
+    active
+        .into_iter()
         .map(|(path, runtime)| LayerFlags {
             path: path.clone(),
+            loader_path: runtime.loader_path.clone(),
+            declared_entity_uuids: runtime
+                .spawned_entities
+                .iter()
+                .map(|entity| {
+                    if world
+                        .get::<crate::entities::spawner::EntitySpawnOrigin>(*entity)
+                        .is_some()
+                    {
+                        None
+                    } else {
+                        world.get::<EntityUuid>(*entity).map(|uuid| uuid.0.clone())
+                    }
+                })
+                .collect(),
             flags: runtime.flags.clone(),
         })
-        .collect();
-    rows.sort_by(|a, b| a.path.cmp(&b.path));
-    rows
+        .collect()
 }
 
 /// The fixed-step clock the mission anchor is a reading of.
@@ -3502,6 +3562,20 @@ pub enum RestoreGap {
     MissingEntity(String),
     /// A captured `AsteroidUuid` no asteroid in the target world carries.
     MissingAsteroid(String),
+    /// A supporting world present at capture has not finished loading in the
+    /// fresh bootstrap. Its ASTs/handlers are derived and cannot be restored by
+    /// payload, so ownership state must never be written onto a missing layer.
+    MissingWorldLayer(String),
+    /// The fresh world's ordered active layer composition differs from the
+    /// capture, or a layer change is still in flight. Script trigger state is
+    /// restored by index, so even equal path sets in another activation order
+    /// are unsafe to write into.
+    WorldLayerTopologyMoved {
+        saved: Vec<String>,
+        found: Vec<String>,
+        pending: usize,
+        inactive: Vec<String>,
+    },
     /// The captured `SimRngState` has a different number of streams than this
     /// build declares — a save from before a stream was added. Refused rather
     /// than mapped by position, which would hand one call site another's
@@ -3551,6 +3625,20 @@ impl std::fmt::Display for RestoreGap {
             RestoreGap::MissingAsteroid(uuid) => {
                 write!(f, "the world has no asteroid `{uuid}` to restore into")
             }
+            RestoreGap::MissingWorldLayer(path) => {
+                write!(f, "the world layer `{path}` has not loaded for restore")
+            }
+            RestoreGap::WorldLayerTopologyMoved {
+                saved,
+                found,
+                pending,
+                inactive,
+            } => write!(
+                f,
+                "this save's ordered world-layer topology is {saved:?}, but the fresh \
+                 world has {found:?} with {pending} change(s) still pending and \
+                 inactive load sentinel(s) {inactive:?}"
+            ),
             RestoreGap::RngStreamsMoved => f.write_str(
                 "this save's generator streams do not match this build's; \
                  mapping them by position would misroute a call site's sequence",
@@ -3616,6 +3704,16 @@ impl RestoreReport {
 /// what tell a host which world that is.
 pub fn restore(world: &mut World, snapshot: &PhoenixSnapshot) -> RestoreReport {
     let mut report = RestoreReport::default();
+
+    // Layer ASTs and handlers are derived state, and trigger progress is stored
+    // by index. Refuse the whole overwrite while the fresh bootstrap still has
+    // an extra/missing/reordered layer (or a change that can create one next
+    // tick), rather than restoring callbacks into one composition and letting
+    // the next layer activation append a duplicate set underneath them.
+    if let Some(gap) = layer_topology_gap(world, snapshot) {
+        report.gaps.push(gap);
+        return report;
+    }
 
     restore_entities(world, snapshot, &mut report);
     restore_asteroids(world, snapshot, &mut report);
@@ -3771,13 +3869,20 @@ fn restore_run_scope(world: &mut World, snapshot: &PhoenixSnapshot, report: &mut
     }
 
     if !snapshot.layer_flags.is_empty() {
+        let mut missing = Vec::new();
         if let Some(mut layers) = world.get_resource_mut::<crate::world::server::WorldLayerMap>() {
             for layer in &snapshot.layer_flags {
-                if let Some(runtime) = layers.0.get_mut(&layer.path) {
-                    runtime.flags = layer.flags.clone();
+                match layers.0.get_mut(&layer.path) {
+                    Some(runtime) => runtime.flags = layer.flags.clone(),
+                    None => missing.push(layer.path.clone()),
                 }
             }
+        } else {
+            missing.extend(snapshot.layer_flags.iter().map(|layer| layer.path.clone()));
         }
+        report
+            .gaps
+            .extend(missing.into_iter().map(RestoreGap::MissingWorldLayer));
     }
 
     restore_scenario(world, snapshot, report);
@@ -4975,7 +5080,7 @@ pub fn ready_to_restore(world: &World, snapshot: &PhoenixSnapshot) -> bool {
             *uuid == row.uuid && (*has_controls || row.control.is_none())
         })
     });
-    roster_ready && belt_ready(world, snapshot)
+    roster_ready && belt_ready(world, snapshot) && layers_ready(world, snapshot)
 }
 
 /// Whether a world that has stopped becoming [`ready_to_restore`] can be
@@ -5019,7 +5124,370 @@ pub fn ready_to_rebuild(world: &World, snapshot: &PhoenixSnapshot) -> bool {
             None => row.spawn.is_some(),
         }
     });
-    roster_rebuildable && belt_ready(world, snapshot)
+    roster_rebuildable && belt_ready(world, snapshot) && layers_ready(world, snapshot)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LayerTopologyEntry {
+    path: String,
+    loader_path: Option<String>,
+}
+
+fn saved_layer_topology(snapshot: &PhoenixSnapshot) -> Vec<LayerTopologyEntry> {
+    snapshot
+        .layer_flags
+        .iter()
+        .map(|layer| LayerTopologyEntry {
+            path: layer.path.clone(),
+            loader_path: layer.loader_path.clone(),
+        })
+        .collect()
+}
+
+fn live_layer_topology(world: &World) -> Vec<LayerTopologyEntry> {
+    let Some(layers) = world.get_resource::<crate::world::server::WorldLayerMap>() else {
+        return Vec::new();
+    };
+    let mut active: Vec<_> = layers
+        .0
+        .iter()
+        .filter(|(_, runtime)| runtime.is_active)
+        .collect();
+    active.sort_by(|(path_a, runtime_a), (path_b, runtime_b)| {
+        runtime_a
+            .activation_order
+            .cmp(&runtime_b.activation_order)
+            .then_with(|| path_a.cmp(path_b))
+    });
+    active
+        .into_iter()
+        .map(|(path, runtime)| LayerTopologyEntry {
+            path: path.clone(),
+            loader_path: runtime.loader_path.clone(),
+        })
+        .collect()
+}
+
+fn layer_topology_labels(rows: &[LayerTopologyEntry]) -> Vec<String> {
+    rows.iter()
+        .map(|row| match &row.loader_path {
+            Some(loader) => format!("{} <- {}", row.path, loader),
+            None => row.path.clone(),
+        })
+        .collect()
+}
+
+fn pending_layer_changes(world: &World) -> usize {
+    world
+        .get_resource::<crate::world::server::PendingWorldLayerChanges>()
+        .map_or(0, |pending| pending.0.len())
+}
+
+fn inactive_layer_paths(world: &World) -> Vec<String> {
+    let mut paths: Vec<String> = world
+        .get_resource::<crate::world::server::WorldLayerMap>()
+        .into_iter()
+        .flat_map(|layers| layers.0.iter())
+        .filter(|(_, runtime)| !runtime.is_active)
+        .map(|(path, _)| path.clone())
+        .collect();
+    paths.sort();
+    paths
+}
+
+fn layer_topology_gap(world: &World, snapshot: &PhoenixSnapshot) -> Option<RestoreGap> {
+    let saved = saved_layer_topology(snapshot);
+    let found = live_layer_topology(world);
+    let pending = pending_layer_changes(world);
+    let inactive = inactive_layer_paths(world);
+    (saved != found || pending != 0 || !inactive.is_empty()).then(|| {
+        RestoreGap::WorldLayerTopologyMoved {
+            saved: layer_topology_labels(&saved),
+            found: layer_topology_labels(&found),
+            pending,
+            inactive,
+        }
+    })
+}
+
+/// Terminal state of [`reconcile_world_layers`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LayerReconcileStatus {
+    /// Ordered active topology and declared layer-entity identities are exact.
+    Ready,
+    /// A deterministic load/unload is queued or already in flight. Run another
+    /// simulation update and call the reconciler again.
+    Waiting,
+    /// `path` is a desired layer whose fresh load reached a failed sentinel (or
+    /// whose captured ownership/identity cannot be reconstructed safely).
+    Failed(String),
+}
+
+/// Reconcile the fresh bootstrap's derived layer runtime to the capture.
+///
+/// Call this between simulation updates, before [`ready_to_restore`] or
+/// [`ready_to_rebuild`]. It queues deterministic layer changes through the same
+/// `PendingWorldLayerChanges` boundary gameplay uses: the first divergent live
+/// suffix unloads newest-first, then missing layers load one at a time in the
+/// capture's activation order with their captured loader ownership.
+///
+/// Successful activations mint declared layer entities again. Once topology is
+/// exact this function also exchanges those fresh UUIDs for the captured UUIDs,
+/// before the roster readiness predicate runs. Script-spawned entities are not
+/// remapped here: they already carry `EntitySpawnOrigin` recipes and use the
+/// ordinary rebuild path.
+pub fn reconcile_world_layers(
+    world: &mut World,
+    snapshot: &PhoenixSnapshot,
+) -> LayerReconcileStatus {
+    let saved = saved_layer_topology(snapshot);
+    let live = live_layer_topology(world);
+
+    if pending_layer_changes(world) != 0 {
+        return LayerReconcileStatus::Waiting;
+    }
+
+    // Sentinels are loader bookkeeping, not captured composition. Remove every
+    // non-target sentinel so it cannot survive a resume as an `AlreadyLoaded`
+    // dedup blocker. A sentinel at a DESIRED path is handled below as terminal:
+    // retrying identical content would only reproduce the same failure forever.
+    let desired_paths: std::collections::HashSet<&str> =
+        saved.iter().map(|layer| layer.path.as_str()).collect();
+    let non_target_sentinels: Vec<String> = inactive_layer_paths(world)
+        .into_iter()
+        .filter(|path| !desired_paths.contains(path.as_str()))
+        .collect();
+    if !non_target_sentinels.is_empty() {
+        queue_layer_changes(
+            world,
+            non_target_sentinels
+                .into_iter()
+                .map(crate::world::server::WorldLayerChange::Unload),
+        );
+        return LayerReconcileStatus::Waiting;
+    }
+
+    if saved == live {
+        return if reconcile_layer_entity_uuids(world, snapshot) {
+            LayerReconcileStatus::Ready
+        } else {
+            LayerReconcileStatus::Failed("declared layer entity identity".to_string())
+        };
+    }
+
+    let common_prefix = saved
+        .iter()
+        .zip(&live)
+        .take_while(|(saved, live)| saved == live)
+        .count();
+
+    if common_prefix < live.len() {
+        let unloads: Vec<String> = live[common_prefix..]
+            .iter()
+            .rev()
+            .map(|layer| layer.path.clone())
+            .collect();
+        queue_layer_changes(
+            world,
+            unloads
+                .into_iter()
+                .map(crate::world::server::WorldLayerChange::Unload),
+        );
+        return LayerReconcileStatus::Waiting;
+    }
+
+    let Some(next) = saved.get(common_prefix) else {
+        return LayerReconcileStatus::Waiting;
+    };
+
+    // A refused desired load is terminal. The sentinel proves this bootstrap
+    // already attempted the exact path; deleting it and retrying cannot repair
+    // parse/compile/fetch failure and would turn a named refusal into a loop.
+    let has_failed_sentinel = world
+        .get_resource::<crate::world::server::WorldLayerMap>()
+        .and_then(|layers| layers.0.get(&next.path))
+        .is_some_and(|runtime| !runtime.is_active);
+    if has_failed_sentinel {
+        return LayerReconcileStatus::Failed(next.path.clone());
+    }
+
+    // A captured child can only have activated after its loader. Refusing an
+    // impossible/corrupt ordering is safer than silently loading it at base
+    // scope and realigning trigger indices against another flag chain.
+    if let Some(loader) = &next.loader_path {
+        if !live[..common_prefix]
+            .iter()
+            .any(|layer| &layer.path == loader)
+        {
+            return LayerReconcileStatus::Failed(next.path.clone());
+        }
+    }
+
+    queue_layer_changes(
+        world,
+        std::iter::once(crate::world::server::WorldLayerChange::Load {
+            path: next.path.clone(),
+            loader_path: next.loader_path.clone(),
+        }),
+    );
+    LayerReconcileStatus::Waiting
+}
+
+fn queue_layer_changes(
+    world: &mut World,
+    changes: impl IntoIterator<Item = crate::world::server::WorldLayerChange>,
+) {
+    if world
+        .get_resource::<crate::world::server::PendingWorldLayerChanges>()
+        .is_none()
+    {
+        world.insert_resource(crate::world::server::PendingWorldLayerChanges::default());
+    }
+    world
+        .resource_mut::<crate::world::server::PendingWorldLayerChanges>()
+        .0
+        .extend(changes);
+}
+
+fn reconcile_layer_entity_uuids(world: &mut World, snapshot: &PhoenixSnapshot) -> bool {
+    let current_entities: Vec<(Entity, String)> = {
+        let mut query = world.query::<(Entity, &EntityUuid)>();
+        query
+            .iter(world)
+            .map(|(entity, uuid)| (entity, uuid.0.clone()))
+            .collect()
+    };
+    let current_by_uuid: std::collections::HashMap<String, Entity> = current_entities
+        .iter()
+        .map(|(entity, uuid)| (uuid.clone(), *entity))
+        .collect();
+
+    let mut remaps: Vec<(Entity, String)> = Vec::new();
+    let mut add_remap = |entity: Entity, desired: &str| -> bool {
+        if let Some((_, existing)) = remaps.iter().find(|(found, _)| *found == entity) {
+            return existing == desired;
+        }
+        if remaps
+            .iter()
+            .any(|(found, uuid)| *found != entity && uuid == desired)
+        {
+            return false;
+        }
+        remaps.push((entity, desired.to_string()));
+        true
+    };
+
+    {
+        let Some(layers) = world.get_resource::<crate::world::server::WorldLayerMap>() else {
+            return snapshot.layer_flags.is_empty();
+        };
+        for saved in &snapshot.layer_flags {
+            let Some(live) = layers.0.get(&saved.path) else {
+                return false;
+            };
+            for (slot, desired) in saved.declared_entity_uuids.iter().enumerate() {
+                let Some(desired) = desired else {
+                    continue;
+                };
+                let Some(entity) = live.spawned_entities.get(slot).copied() else {
+                    return false;
+                };
+                if !add_remap(entity, desired) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    // Named entities give the same identity exchange a second, independent key
+    // and cover any minted base entity whose UUID collides with a layer's saved
+    // one after the fresh load happened at another point in the run.
+    if let Some(saved_scenario) = &snapshot.scenario {
+        let live_names = world
+            .get_resource::<WorldContentRuntime>()
+            .map(|runtime| runtime.name_to_uuid.clone())
+            .unwrap_or_default();
+        for (name, desired) in &saved_scenario.name_to_uuid {
+            let Some(current) = live_names.get(name) else {
+                continue;
+            };
+            let Some(entity) = current_by_uuid.get(current).copied() else {
+                continue;
+            };
+            if !add_remap(entity, desired) {
+                return false;
+            }
+        }
+    }
+
+    remaps.sort_by_key(|(entity, _)| entity.index());
+    let remapped_entities: std::collections::HashSet<Entity> =
+        remaps.iter().map(|(entity, _)| *entity).collect();
+    let mut displaced: Vec<Entity> = remaps
+        .iter()
+        .filter_map(|(entity, desired)| {
+            current_by_uuid
+                .get(desired)
+                .copied()
+                .filter(|holder| holder != entity && !remapped_entities.contains(holder))
+        })
+        .collect();
+    displaced.sort_by_key(|entity| entity.index());
+    displaced.dedup();
+
+    let current_uuid_by_entity: std::collections::HashMap<Entity, String> = current_entities
+        .iter()
+        .map(|(entity, uuid)| (*entity, uuid.clone()))
+        .collect();
+    remaps.retain(|(entity, desired)| current_uuid_by_entity.get(entity) != Some(desired));
+    if remaps.is_empty() && displaced.is_empty() {
+        return true;
+    }
+
+    // Move every participant off the UUID namespace first. This makes swaps and
+    // cycles safe and prevents the transient duplicate that a one-by-one rename
+    // would create when mint order shifted several named entities at once.
+    let mut used: std::collections::HashSet<String> = current_entities
+        .iter()
+        .map(|(_, uuid)| uuid.clone())
+        .collect();
+    used.extend(remaps.iter().map(|(_, desired)| desired.clone()));
+    let mut temporary_index = 0u64;
+    for entity in remaps
+        .iter()
+        .map(|(entity, _)| *entity)
+        .chain(displaced.iter().copied())
+    {
+        let temporary = loop {
+            let candidate = format!("__snapshot_layer_reconcile_{temporary_index}");
+            temporary_index += 1;
+            if used.insert(candidate.clone()) {
+                break candidate;
+            }
+        };
+        world.entity_mut(entity).insert(EntityUuid(temporary));
+    }
+    for (entity, desired) in &remaps {
+        world
+            .entity_mut(*entity)
+            .insert(EntityUuid(desired.clone()));
+    }
+
+    if let (Some(saved_scenario), Some(mut runtime)) = (
+        snapshot.scenario.as_ref(),
+        world.get_resource_mut::<WorldContentRuntime>(),
+    ) {
+        runtime.name_to_uuid = saved_scenario.name_to_uuid.iter().cloned().collect();
+    }
+    true
+}
+
+/// A layer's executable state (ASTs and handler alignment) is rebuilt by the
+/// fresh bootstrap, not serialized. The ordered active composition, loader
+/// ownership and an empty pending-change queue must all match before scoped
+/// callbacks/deadlines or index-keyed trigger state can be restored.
+fn layers_ready(world: &World, snapshot: &PhoenixSnapshot) -> bool {
+    layer_topology_gap(world, snapshot).is_none()
 }
 
 /// Whether the target world's asteroid streamer has settled onto the same

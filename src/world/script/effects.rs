@@ -210,10 +210,22 @@ impl EffectSink {
     /// callback's path, and for the same reason (a short or anonymous fn name is
     /// not unique across units). Success path only, like [`take`](Self::take).
     pub fn take_opens(&self, script_path: &str) -> Vec<OpenCommsRequest> {
+        self.take_opens_scoped(script_path, None)
+    }
+
+    /// Scoped form of [`take_opens`](Self::take_opens). `origin_layer` is
+    /// authoritative ownership; `script_path` alone cannot distinguish two
+    /// loaded layers sharing one sibling unit.
+    pub fn take_opens_scoped(
+        &self,
+        script_path: &str,
+        origin_layer: Option<&str>,
+    ) -> Vec<OpenCommsRequest> {
         std::mem::take(&mut *self.opens.lock().expect("effect sink lock"))
             .into_iter()
             .map(|open| OpenCommsRequest {
                 script_path: script_path.to_string(),
+                origin_layer: origin_layer.map(str::to_string),
                 ..open
             })
             .collect()
@@ -325,9 +337,10 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         params = ["path"],
         summary = "Load the world layer at `path`.",
         |sink: &mut EffectSink, path: ImmutableString| {
-            // `loader_path` is `None` here: a script-issued load is authored at base
-            // scope in M1 (no sub-world layer origin to thread yet). Mirrors
-            // `dispatch_action`'s `LoadWorld` when `origin_layer` is `None`.
+            // The effect object is intentionally call-owner agnostic. The live
+            // applier stamps the running script call's `origin_layer`, matching
+            // the delayed builder path; a base-world call therefore remains
+            // `None` and a layer call becomes that layer's child.
             sink.push(ActionCmd::LoadWorld {
                 path: path.to_string(),
                 loader_path: None,
@@ -1165,6 +1178,7 @@ fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
         urgent: map_bool(spec, "urgent").unwrap_or(false),
         // Stamped by `EffectSink::take_opens` at the host boundary.
         script_path: String::new(),
+        origin_layer: None,
     })
 }
 
@@ -2031,6 +2045,7 @@ mod tests {
                 thread_id: Some("aphelion".to_string()),
                 urgent: true,
                 script_path: "t.rhai".to_string(),
+                origin_layer: None,
             }]
         );
     }
@@ -2052,6 +2067,7 @@ mod tests {
                 thread_id: None,
                 urgent: false,
                 script_path: "t.rhai".to_string(),
+                origin_layer: None,
             }]
         );
     }

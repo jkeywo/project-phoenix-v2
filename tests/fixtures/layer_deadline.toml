@@ -1,0 +1,37 @@
+[global]
+seed = 1045
+title = "Layer deadline fixture"
+description = "Issue 1045 lifecycle fixture."
+# Deliberately unlike the root test cadence: layer deadlines must ignore it.
+sim_tick_hz = 60.0
+
+[[deadline]]
+id = "instant"
+label = "world.test.layer_deadline.instant.label"
+due_secs = 0
+visible = true
+
+[[deadline]]
+id = "shared"
+label = "world.test.layer_deadline.shared.label"
+due_secs = 2
+visible = true
+
+[script]
+setup = """
+on_deadline("instant", "on_instant");
+on_deadline("shared", "on_shared");
+
+fn on_instant(ctx) {
+    ctx.flags.increment("instant_fired", 1);
+}
+
+fn on_shared(ctx) {
+    ctx.flags.increment("deadline_fired", 1);
+    ctx.flags.increment("parent:deadline_fired_outward", 1);
+    ctx.schedule.after(1, |ctx| {
+        ctx.flags.increment("nested_fired", 1);
+        ctx.flags.increment("parent:nested_fired_outward", 1);
+    });
+}
+"""

@@ -3,7 +3,7 @@ title: Build & Deployment
 type: concept
 tags: [trunk, wasm, github-pages, cloudflare, native-host, ci]
 sources: [Trunk.toml, scripts/build-client.mjs, scripts/check-deploy-headers.mjs, .github/workflows/, README.md, worker/wrangler.toml, worker/wrangler.demo.toml, deploy/cloudflare/_headers, src/delivery/, docs/delivery-checklist.md, pasm/spec/architecture/native-delivery.yaml]
-updated: 2026-08-15
+updated: 2026-08-26
 ---
 
 # Build & Deployment
@@ -77,7 +77,7 @@ Pages, alongside (not instead of) the GitHub Pages dev host above.
 |---|---|---|
 | Trigger | `ci.yml` `deploy` job, automatic on push to `main` | `.github/workflows/deploy-demo.yml`, `workflow_dispatch` only — **never** on push |
 | Host | GitHub Pages behind `https://pp-dev.kiwigamedesign.co.uk` | Cloudflare Pages behind `https://pp-demo.kiwigamedesign.co.uk` |
-| Scenario manifest | `dist/assets/scenarios.toml` as authored (full catalogue) | overwritten with `assets/scenarios.demo.toml` (issue #917 curation — bare URL serves `combat_test` + the Alliance Destroyer only) |
+| Scenario manifest | `dist/assets/scenarios.toml` as authored (full catalogue) | overwritten with `assets/scenarios.demo.toml` (issue #917 curation — bare URL serves `combat_test` with the Alliance Destroyer first and the Alliance Cruiser second) |
 | Mod-pack upload | enabled | **absent** — `wasm_add_mod_pack` carries `#[cfg(not(phoenix_demo_build))]` and `gui/build-flags.js`'s `offersModPackUpload` removes the control, so nothing can widen the curated catalogue at runtime (PRD #855) |
 | Caching rules | none — GitHub Pages ignores `_headers` | `deploy/cloudflare/_headers`, copied to `dist/_headers` by the workflow |
 | TURN worker | `worker/wrangler.toml` → `phoenix-turn-credentials`, `ALLOWED_ORIGIN = pp-dev.kiwigamedesign.co.uk` | `worker/wrangler.demo.toml` → `phoenix-turn-credentials-demo`, `ALLOWED_ORIGIN = pp-demo.kiwigamedesign.co.uk` — a **separate worker**, deployed by the same run; `wrangler.toml` and the dev worker are never touched by the demo workflow |

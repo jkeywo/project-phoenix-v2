@@ -111,12 +111,122 @@ pub struct CommsInboxRes(pub CommsInbox);
 #[derive(Resource, Default)]
 pub struct OnScreenMessage(pub Option<CommsMessage>);
 
+/// Delivery contract for one [`CommsChannel2Event`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommsChannel2Delivery {
+    /// Generic injection has no dialogue-runtime prerequisite.
+    Generic,
+    /// A scripted dialogue message is deliverable only while its authoritative
+    /// `CommsRuntime::active_dialogues` entry still exists. This closes the
+    /// Physics-to-Broadcast race where a layer unload or `ClearComms` retires
+    /// the dialogue after the writer queued its presentation event.
+    ScriptedDialogue,
+}
+
 /// Channel-2 (immediate sim-level) delivery of scenario content into the Comms system.
 /// Fired by the world engine instead of mutating `CommsInboxRes` directly; consumed by
 /// `handle_comms_channel2` in the Broadcast set.
 #[derive(Message, Clone, Debug)]
 pub struct CommsChannel2Event {
     pub message: CommsMessage,
+    pub delivery: CommsChannel2Delivery,
+}
+
+impl CommsChannel2Event {
+    /// Generic, unconditional channel-2 injection.
+    pub fn generic(message: CommsMessage) -> Self {
+        Self {
+            message,
+            delivery: CommsChannel2Delivery::Generic,
+        }
+    }
+
+    /// Presentation half of an authoritative scripted dialogue.
+    pub fn scripted_dialogue(message: CommsMessage) -> Self {
+        Self {
+            message,
+            delivery: CommsChannel2Delivery::ScriptedDialogue,
+        }
+    }
+}
+
+/// Retire every active dialogue owned by `origin_layer`, plus the visible inbox
+/// and viewscreen rows belonging to those dialogue threads.
+///
+/// Idempotent by construction: after the first call there are no matching
+/// `active_dialogues`, so a later call from the actual unload is a no-op. The
+/// early Input call closes the response race; the unload call is the lifecycle
+/// backstop for fixtures and for changes queued later in the tick.
+pub(crate) fn retire_layer_owned_dialogues(
+    origin_layer: &str,
+    comms: &mut CommsRuntime,
+    inbox: Option<&mut CommsInboxRes>,
+    on_screen: Option<&mut OnScreenMessage>,
+) -> usize {
+    let mut retired_message_ids = HashSet::new();
+    comms.active_dialogues.retain(|message_id, dialogue| {
+        let retire = dialogue.script.origin_layer.as_deref() == Some(origin_layer);
+        if retire {
+            retired_message_ids.insert(message_id.clone());
+        }
+        !retire
+    });
+    if retired_message_ids.is_empty() {
+        return 0;
+    }
+
+    comms.needs_broadcast = true;
+    if let Some(inbox) = inbox {
+        let stale_ids: Vec<String> = inbox
+            .0
+            .messages()
+            .into_iter()
+            // Thread ids are authored/local and can be shared by another
+            // owner. Only the active message id is authoritative ownership.
+            .filter(|message| retired_message_ids.contains(&message.id))
+            .map(|message| message.id)
+            .collect();
+        for message_id in stale_ids {
+            inbox.0.remove(&message_id);
+        }
+    }
+    if let Some(on_screen) = on_screen {
+        let is_stale = on_screen
+            .0
+            .as_ref()
+            .is_some_and(|message| retired_message_ids.contains(&message.id));
+        if is_stale {
+            on_screen.0 = None;
+        }
+    }
+    retired_message_ids.len()
+}
+
+/// Close layer-owned response surfaces before either Backfill or a human can
+/// answer them in `SimSet::Input`.
+pub(crate) fn retire_dialogues_for_pending_layer_unloads(
+    pending: Option<Res<crate::world::server::PendingWorldLayerChanges>>,
+    mut comms: Option<ResMut<CommsRuntime>>,
+    mut inbox: Option<ResMut<CommsInboxRes>>,
+    mut on_screen: Option<ResMut<OnScreenMessage>>,
+) {
+    let (Some(pending), Some(comms)) = (pending.as_deref(), comms.as_deref_mut()) else {
+        return;
+    };
+    let mut seen = HashSet::new();
+    for change in &pending.0 {
+        let crate::world::server::WorldLayerChange::Unload(path) = change else {
+            continue;
+        };
+        if seen.insert(path.as_str()) {
+            retire_layer_owned_dialogues(
+                path,
+                comms,
+                inbox.as_deref_mut(),
+                on_screen.as_deref_mut(),
+            );
+        }
+    }
 }
 
 // -- Plugin ------------------------------------------------------------------
@@ -124,7 +234,8 @@ pub struct CommsChannel2Event {
 /// Registers the comms resources, messages, and systems in the SAME sets and
 /// relative order the pre-#816 `WorldPlugin` used:
 ///
-/// * Input: the four console command handlers (from `console::comms`).
+/// * Input: pending-layer dialogue retirement, then the four console command
+///   handlers (from `console::comms`).
 /// * Broadcast chain: `handle_comms_channel2` → `auto_clear_on_screen_message`
 ///   → `update_comms_range_flags` → `broadcast_comms_state` (the world's
 ///   `broadcast_objective_summary` orders itself `.after(broadcast_comms_state)`).
@@ -161,6 +272,12 @@ impl Plugin for CommsWorldPlugin {
             .add_systems(
                 FixedUpdate,
                 (
+                    // Unload wins a response tie. This precedes `handle_hail`;
+                    // the console plugin orders response AI after hail and
+                    // before the router, placing both AI and human response
+                    // paths after cleanup.
+                    retire_dialogues_for_pending_layer_unloads
+                        .in_set(crate::sim_sets::SimSet::Input),
                     handle_hail.in_set(crate::sim_sets::SimSet::Input),
                     handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
                     // CLEAR WINS on a tie (issue #786). `handle_hail` and

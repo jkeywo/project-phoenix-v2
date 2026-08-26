@@ -1,0 +1,6 @@
+[global]
+seed = 1
+
+[anchors]
+ironveil_patrol_a = [10.0, 0.0, 0.0]
+ironveil_patrol_b = [20.0, 0.0, 0.0]

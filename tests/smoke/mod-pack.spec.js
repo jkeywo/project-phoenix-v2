@@ -237,9 +237,8 @@ test('two-pack precedence: the later pack wins the shared world path, and reorde
 test('upload after world load is ignored: the panel is hidden and no pack is applied', async ({
   context,
 }) => {
-  // The curated demo manifest resolves to a single scenario + single hull, so
-  // clicking the scenario drives straight into world load (demo-manifest.spec.js
-  // pattern). Strip combat_test's heavy entities so the load stays cheap.
+  // The curated demo manifest resolves to a single scenario, then offers its
+  // two hulls. Strip combat_test's heavy entities so the load stays cheap.
   await context.route('**/assets/worlds/combat_test.toml', (route) =>
     route.fulfill({ contentType: 'text/plain', body: stripHeavyEntities(COMBAT_TEST_TOML) }),
   );
@@ -250,6 +249,12 @@ test('upload after world load is ignored: the panel is hidden and no pack is app
   const buttons = scenarioButtons(page);
   await buttons.first().waitFor({ state: 'visible', timeout: 30_000 });
   await buttons.first().click();
+
+  const destroyer = page.locator(
+    '#scenario-panel ph-ship-picker .ship-card[data-template="assets/entities/alliance_destroyer.toml"]',
+  );
+  await destroyer.waitFor({ state: 'visible', timeout: 30_000 });
+  await destroyer.click();
 
   // World load latched (_worldLoadStarted): the scenario panel — which HOSTS the
   // mod-pack upload controls — is hidden.

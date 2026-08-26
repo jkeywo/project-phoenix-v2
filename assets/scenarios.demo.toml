@@ -14,9 +14,10 @@
 # the pre-load catalog (`world::manifest::build_catalog`) filters the world's
 # ship list down to just these, in the world's own authored order, and
 # `wasm_get_scenario_catalog` is what both the host UI and connected phones
-# read. A single curated ship also makes the lobby ship picker resolve
-# straight to it (server.html's ship selection logic, issue #623 / the
-# pre-load arbiter auto-select), without a hull-specific code branch anywhere.
+# read. The two entries below keep the world's authored order: the Destroyer is
+# the first/default card and the Cruiser follows it. Because more than one ship
+# survives curation, the pre-load arbiter shows the regular ship picker rather
+# than auto-selecting a hull (server.html's ship selection logic, issue #623).
 #
 # `[content]` (issue #986) mirrors the base manifest's content identity: the
 # demo curates the same shipped assets, so a mod pack compatible with the base
@@ -29,4 +30,4 @@ epoch = 1
 [[scenario]]
 id = "combat_test"
 world = "assets/worlds/combat_test.toml"
-ships = ["assets/entities/alliance_destroyer.toml"]
+ships = ["assets/entities/alliance_destroyer.toml", "assets/entities/alliance_cruiser.toml"]

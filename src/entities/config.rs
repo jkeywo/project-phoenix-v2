@@ -817,7 +817,9 @@ pub struct LodGeneration {
 /// *fully* declares how the atlas comes back — the model viewer's capture tool
 /// (`src/viewer/capture.rs`, reached from the LOD panel) is the one reader, and
 /// re-baking needs a GPU + the browser viewer, so like the Blender voxel pre-pass
-/// this is a local step CI only re-hashes (`scripts/lod-manifest.toml`).
+/// this is a local step. CI only re-hashes it against the separate capture
+/// provenance contract in `scripts/lod-capture-manifest.toml` (#1245); generated
+/// GLB provenance remains independently owned by `scripts/lod-manifest.toml`.
 ///
 /// ```toml
 /// [[lod]]

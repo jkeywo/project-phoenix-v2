@@ -859,48 +859,62 @@ pub fn poll_asset_preload(
 
         let pending_sub_worlds = preload.pending_sub_worlds.clone();
         for world_path in &pending_sub_worlds {
-            if let Some(toml_str) =
-                crate::entities::config_cache::pop_pending_world_toml(world_path)
-            {
-                let mut manifest = AssetManifest::default();
-                let cache = crate::entities::config_cache::get_config_cache();
-                let cache_ref: &std::collections::HashMap<
-                    String,
-                    crate::entities::config::EntityConfig,
-                > = &*cache;
-                let player_start = preload.player_start;
-                // A single reborrow so the two field-level `&mut`s below split
-                // off ONE `&mut AssetPreloadResource` rather than each going
-                // through `preload`'s own `DerefMut` separately — the borrow
-                // checker only proves disjoint field access for the former.
-                let preload = &mut *preload;
-                match process_sub_world_toml(
-                    &toml_str,
-                    cache_ref,
-                    &mut preload.seen_entities,
-                    &mut manifest,
-                    world_path,
-                    player_start,
-                    &mut preload.sidecar_distance,
-                ) {
-                    Ok(more_worlds) => {
-                        new_glbs.extend(manifest.glb_models);
-                        // Dust textures ride the icon path — both are Images.
-                        new_icons.extend(manifest.radar_icons);
-                        new_icons.extend(manifest.pfx_textures);
-                        new_planet_textures.extend(manifest.planet_textures);
-                        new_sidecars.extend(manifest.sidecars);
-                        new_sub_worlds.extend(more_worlds);
-                        preload.seen_worlds.insert(world_path.clone());
-                    }
-                    Err(e) => {
-                        bevy::log::warn!(
-                            "asset_preload: failed to parse sub-world {world_path}: {e}"
-                        );
+            match crate::entities::config_cache::world_fetch_state(world_path) {
+                crate::entities::config_cache::WorldFetchState::Ready(toml_str) => {
+                    let mut manifest = AssetManifest::default();
+                    let cache = crate::entities::config_cache::get_config_cache();
+                    let cache_ref: &std::collections::HashMap<
+                        String,
+                        crate::entities::config::EntityConfig,
+                    > = &*cache;
+                    let player_start = preload.player_start;
+                    // A single reborrow so the two field-level `&mut`s below split
+                    // off ONE `&mut AssetPreloadResource` rather than each going
+                    // through `preload`'s own `DerefMut` separately — the borrow
+                    // checker only proves disjoint field access for the former.
+                    let preload = &mut *preload;
+                    match process_sub_world_toml(
+                        &toml_str,
+                        cache_ref,
+                        &mut preload.seen_entities,
+                        &mut manifest,
+                        world_path,
+                        player_start,
+                        &mut preload.sidecar_distance,
+                    ) {
+                        Ok(more_worlds) => {
+                            new_glbs.extend(manifest.glb_models);
+                            // Dust textures ride the icon path — both are Images.
+                            new_icons.extend(manifest.radar_icons);
+                            new_icons.extend(manifest.pfx_textures);
+                            new_planet_textures.extend(manifest.planet_textures);
+                            new_sidecars.extend(manifest.sidecars);
+                            new_sub_worlds.extend(more_worlds);
+                            preload.seen_worlds.insert(world_path.clone());
+                        }
+                        Err(e) => {
+                            bevy::log::warn!(
+                                "asset_preload: failed to parse sub-world {world_path}: {e}"
+                            );
+                        }
                     }
                 }
-            } else {
-                still_pending_worlds.push(world_path.clone());
+                crate::entities::config_cache::WorldFetchState::Failed(message) => {
+                    // A terminal fetch failure must not hold the whole preload
+                    // gate open forever. The eventual layer activation reports
+                    // its own atomic refusal through the same authoritative
+                    // state; here we surface the asset-walk omission once.
+                    bevy::log::warn!(
+                        "asset_preload: failed to fetch sub-world {world_path}: {message}"
+                    );
+                }
+                crate::entities::config_cache::WorldFetchState::NotRequested => {
+                    crate::entities::config_cache::request_world_fetch(world_path.clone());
+                    still_pending_worlds.push(world_path.clone());
+                }
+                crate::entities::config_cache::WorldFetchState::Pending => {
+                    still_pending_worlds.push(world_path.clone());
+                }
             }
         }
         preload.pending_sub_worlds = still_pending_worlds;
@@ -1776,16 +1790,16 @@ shape = "sphere"
         assert_eq!(sidecar_distance.get(&sc).copied(), Some(10.0));
     }
 
-    /// `extra_worlds` entries are de-duplicated before they reach the fetch
-    /// queue.
+    /// `extra_worlds` entries are de-duplicated before they reach the preload
+    /// work list.
     ///
     /// The duplicate used to come from two `[[trigger]]` blocks naming the same
     /// `load_world` path; issue #985 deleted that walk with the front-end that
     /// fed it, and a scripted `load_world` is not discoverable before its handler
     /// runs (the layer applier fetches on demand instead). `extra_worlds` is the
-    /// surviving static source, and a duplicate there is the same hang: the first
-    /// `pop_pending_world_toml` consumes the TOML and the second copy waits
-    /// forever, because `request_world_fetch` will not re-fire.
+    /// surviving static source. Durable fetched bodies make duplicate reads
+    /// safe, but de-duplicating the authored work still prevents parsing and
+    /// registering every discovered asset twice.
     #[test]
     fn discover_base_assets_deduplicates_extra_world_paths() {
         use crate::world::config::parse_world;

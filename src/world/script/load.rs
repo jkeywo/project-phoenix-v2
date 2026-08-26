@@ -77,6 +77,14 @@ pub struct CompiledScripts {
     /// unit's top level (issue #1024). Paired with the world's `[[deadline]]`
     /// blocks by `arm_mission_deadlines`.
     pub deadline_handlers: Vec<crate::world::deadlines::DeadlineHandler>,
+    /// Literal entity-template references scanned from the exact resolved
+    /// source set this compilation consumed (issue #1046).
+    ///
+    /// Sorted by resolved script path; references within one unit retain lexical
+    /// order (and therefore line order). Composition validation consumes this
+    /// list instead of re-scanning `WorldConfig`'s inline-only source bodies, so
+    /// sibling `.rhai` files are covered without double-counting inline blocks.
+    pub spawned_templates: Vec<crate::world::config::ResolvedScriptSpawnRef>,
     /// Content hash binding a save to the exact scripts it was recorded against.
     pub content_hash: u64,
     /// The content-ledger write this set implies, returned as DATA for the
@@ -122,6 +130,21 @@ fn sibling_path(world_path: &str, rel: &str) -> String {
         Some(i) => format!("{}/{}", world_path[..i].replace('\\', "/"), rel),
         None => rel,
     }
+}
+
+/// Return the resolved sibling script path declared by a raw world document.
+/// Inline `[script]` tables and script-free worlds return `None`.
+///
+/// The browser layer loader uses this small preflight before compilation so it
+/// can retain the already-fetched TOML while the sibling request is pending,
+/// without treating "not delivered yet" as a missing-file authoring error.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn declared_sibling_script_path(world_path: &str, world_toml: &str) -> Option<String> {
+    let value: toml::Value = toml::from_str(world_toml).ok()?;
+    value
+        .get("script")
+        .and_then(toml::Value::as_str)
+        .map(|rel| sibling_path(world_path, rel))
 }
 
 /// Lift a world's `script` declaration into sorted [`ScriptSource`]s.
@@ -198,6 +221,13 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
     let mut sorted: Vec<ScriptSource> = sources.to_vec();
     sorted.sort_by(|a, b| a.path.cmp(&b.path));
 
+    let spawned_templates = sorted
+        .iter()
+        .flat_map(|source| {
+            crate::world::config::resolved_script_spawn_refs(&source.path, &source.source)
+        })
+        .collect();
+
     let mut asts: BTreeMap<String, AST> = BTreeMap::new();
     let mut defined_fns: BTreeSet<String> = BTreeSet::new();
     let mut findings: Vec<WorldFinding> = Vec::new();
@@ -263,6 +293,7 @@ pub fn compile_scripts(sources: &[ScriptSource]) -> CompiledScripts {
         registrations,
         script_triggers,
         deadline_handlers,
+        spawned_templates,
         content_hash,
         // `compile_scripts` is handed sources with no world path to key a ledger
         // entry by; `load_world_scripts` is what knows the world and fills this.
@@ -430,6 +461,23 @@ mod tests {
     }
 
     #[test]
+    fn discovers_only_a_top_level_sibling_declaration_for_async_prefetch() {
+        assert_eq!(
+            declared_sibling_script_path(
+                "assets/worlds/layer.toml",
+                "script = \"logic.rhai\"\n[global]\nseed = 1",
+            )
+            .as_deref(),
+            Some("assets/worlds/logic.rhai")
+        );
+        assert!(declared_sibling_script_path(
+            "assets/worlds/layer.toml",
+            "[script]\nsetup = \"fn f(ctx) {}\"",
+        )
+        .is_none());
+    }
+
+    #[test]
     fn a_missing_sibling_file_is_an_error_finding() {
         let world = toml_of(r#"script = "missing.rhai""#);
         let (sources, findings) =
@@ -473,6 +521,41 @@ mod tests {
         assert_eq!(
             compiled.content_hash,
             compile_scripts(&reordered).content_hash
+        );
+    }
+
+    #[test]
+    fn resolved_spawn_refs_are_sorted_by_unit_and_keep_exact_lines() {
+        let sources = vec![
+            ScriptSource {
+                path: "worlds/zeta.rhai".to_string(),
+                source: "fn z(ctx) {\n    ctx.effects.spawn_entity(#{ template_path: \"z.toml\" });\n}"
+                    .to_string(),
+            },
+            ScriptSource {
+                path: "worlds/alpha.rhai".to_string(),
+                source: "fn a(ctx) {\n    let ignored = #{ template_path: \"data.toml\" };\n    ctx.effects.spawn_entity(#{ template_path: \"a.toml\" });\n}"
+                    .to_string(),
+            },
+        ];
+
+        let compiled = compile_scripts(&sources);
+        assert!(compiled.findings.is_empty(), "{:?}", compiled.findings);
+        assert_eq!(
+            compiled
+                .spawned_templates
+                .iter()
+                .map(|spawn| (
+                    spawn.source_path.as_str(),
+                    spawn.line,
+                    spawn.template_path.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("worlds/alpha.rhai", 3, "a.toml"),
+                ("worlds/zeta.rhai", 2, "z.toml"),
+            ],
+            "the resolved unit path is the primary order and data maps are not spawns"
         );
     }
 

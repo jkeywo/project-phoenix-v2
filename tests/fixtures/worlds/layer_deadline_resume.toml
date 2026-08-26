@@ -1,0 +1,14 @@
+extra_worlds = ["tests/fixtures/layer_deadline.toml"]
+
+[global]
+seed = 1045
+ai_helm_tick_hz = 30.0
+
+[player_spawn]
+position = [0.0, 0.0, 0.0]
+
+[[entity]]
+template_path = "assets/entities/alliance_cruiser.toml"
+id = "player-ship"
+transform = { position = [0.0, 0.0, 0.0] }
+spawn_on = "game_start"

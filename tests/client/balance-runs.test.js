@@ -8,6 +8,7 @@ import {
   resolveSeeds,
   expandMatchups,
   buildRunTasks,
+  buildRunArgs,
   runFileName,
   evaluateThresholds,
   formatThresholds,
@@ -18,7 +19,15 @@ import {
 // A fabricated report shaped like the real phoenix-headless JSON, minimal to
 // what mergeReports consumes: outcome, sides.*.damage_dealt, damage_by_ship
 // ledgers with a `death` of [tick, sim_t] | null. No simulation needed.
-function report({ outcome, playerDealt, enemyDealt, deaths = [], phases = [], stationBuckets = null }) {
+function report({
+  outcome,
+  playerDealt,
+  enemyDealt,
+  deaths = [],
+  phases = [],
+  stationBuckets = null,
+  scenario = undefined,
+}) {
   const damage_by_ship = {};
   let i = 0;
   for (const d of deaths) {
@@ -48,8 +57,11 @@ function report({ outcome, playerDealt, enemyDealt, deaths = [], phases = [], st
       buckets: stationBuckets.map((stations, b) => ({ start_tick: b * 900, stations })),
     };
   }
+  if (scenario !== undefined) out.scenario = scenario;
   return out;
 }
+
+const objective = (status, mandatory = true, id = `objective-${status}`) => ({ id, status, mandatory });
 
 describe('matchupLabel', () => {
   it('joins side compositions, dropping side_b for a scenario sweep', () => {
@@ -101,6 +113,10 @@ describe('expandMatchups', () => {
     expect(m.map((x) => x.label)).toEqual(['courier', 'cruiser']);
     expect(m.every((x) => x.sideB.length === 0)).toBe(true);
     expect(m.every((x) => x.world === 'assets/worlds/combat_test.toml')).toBe(true);
+    expect(m.map((x) => x.playerShip)).toEqual([
+      'assets/entities/alliance_courier.toml',
+      'assets/entities/alliance_cruiser.toml',
+    ]);
   });
 
   it('rejects a scenario sweep with no world, and an empty config', () => {
@@ -122,6 +138,53 @@ describe('buildRunTasks', () => {
     const matchups = expandMatchups({ class_matrix: ['courier'] });
     expect(buildRunTasks({ seeds: 1 }, matchups)[0].timeoutSecs).toBe(300);
     expect(buildRunTasks({ seeds: 1, run_timeout_secs: 45 }, matchups)[0].timeoutSecs).toBe(45);
+  });
+});
+
+describe('buildRunArgs', () => {
+  it('runs scenario_hulls with --ship and no duel-side transform', () => {
+    const matchups = expandMatchups({
+      world: 'assets/worlds/falling_skyway.toml',
+      scenario_hulls: ['destroyer'],
+    });
+    const [task] = buildRunTasks({ seeds: [7], sim_seconds: 520, hz: 30 }, matchups);
+    expect(buildRunArgs(task)).toEqual([
+      '--world', 'assets/worlds/falling_skyway.toml',
+      '--ship', 'assets/entities/alliance_destroyer.toml',
+      '--seed', '7',
+      '--sim-seconds', '520',
+      '--hz', '30',
+      '--report-format', 'json',
+    ]);
+    expect(buildRunArgs(task)).not.toContain('--side-a');
+    expect(buildRunArgs(task)).not.toContain('--side-b');
+  });
+
+  it('takes an explicitly authored scenario hull path literally', () => {
+    const [matchup] = expandMatchups({
+      world: 'assets/worlds/falling_skyway.toml',
+      scenario_hulls: ['mods/thin-margin/player_hull.toml'],
+    });
+    const [task] = buildRunTasks({ seeds: 1, sim_seconds: 60 }, [matchup]);
+    expect(buildRunArgs(task).slice(0, 4)).toEqual([
+      '--world', 'assets/worlds/falling_skyway.toml',
+      '--ship', 'mods/thin-margin/player_hull.toml',
+    ]);
+  });
+
+  it('keeps duel matchups on --side-a/--side-b', () => {
+    const [matchup] = expandMatchups({
+      matchup: [{ side_a: ['cruiser'], side_b: ['ship_harrow_patrol'] }],
+    });
+    const [task] = buildRunTasks({ seeds: 1, sim_seconds: 45 }, [matchup]);
+    expect(buildRunArgs(task)).toEqual([
+      '--world', 'assets/worlds/duel.toml',
+      '--side-a', 'cruiser',
+      '--side-b', 'ship_harrow_patrol',
+      '--seed', '1',
+      '--sim-seconds', '45',
+      '--report-format', 'json',
+    ]);
   });
 });
 
@@ -208,6 +271,157 @@ describe('mergeReports — failed runs', () => {
     expect(s.failures).toBe(1);
     expect(s.timeouts).toBe(0); // report.outcome 'timeout' ≠ a killed hang; the latter has no report
     expect(s.failuresDetail).toEqual([{ seed: 2, error: 'timeout after 300s', exitCode: null }]);
+  });
+});
+
+describe('mergeReports — mandatory objective sets', () => {
+  it('completes a run only when every mandatory objective is Completed', () => {
+    const runs = [
+      {
+        matchup: 'm', seed: 1,
+        report: report({
+          outcome: 'victory', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: [
+            objective('Completed', true, 'rescue'),
+            objective('Completed', true, 'escape'),
+            objective('Active', false, 'optional-scan'),
+          ] },
+        }),
+      },
+      {
+        matchup: 'm', seed: 2,
+        report: report({
+          outcome: 'defeat', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: [objective('Completed'), objective('Failed')] },
+        }),
+      },
+      {
+        matchup: 'm', seed: 3,
+        report: report({
+          outcome: 'timeout', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: [objective('Active')] },
+        }),
+      },
+    ];
+
+    expect(mergeReports(runs).matchups.m.mandatorySetCompletion).toEqual({
+      completed: 1,
+      sampled: 3,
+      rate: 1 / 3,
+      unmeasurable: {
+        total: 0,
+        missingScenario: 0,
+        malformedObjectives: 0,
+        noMandatoryObjectives: 0,
+      },
+    });
+  });
+
+  it('excludes telemetry gaps, optional-only reports, and process failures from the denominator', () => {
+    const base = { outcome: 'timeout', playerDealt: 0, enemyDealt: 0 };
+    const runs = [
+      { matchup: 'm', seed: 1, report: report(base) },
+      { matchup: 'm', seed: 2, report: report({ ...base, scenario: null }) },
+      { matchup: 'm', seed: 3, report: report({ ...base, scenario: { objectives: {} } }) },
+      {
+        matchup: 'm', seed: 4,
+        report: report({ ...base, scenario: { objectives: [objective('Completed', false)] } }),
+      },
+      { matchup: 'm', seed: 5, error: 'exit 101', exitCode: 101 },
+    ];
+
+    const s = mergeReports(runs).matchups.m;
+    expect(s.mandatorySetCompletion).toEqual({
+      completed: 0,
+      sampled: 0,
+      rate: null,
+      unmeasurable: {
+        total: 4,
+        missingScenario: 2,
+        malformedObjectives: 1,
+        noMandatoryObjectives: 1,
+      },
+    });
+    expect(s.failures).toBe(1);
+  });
+
+  it('rejects missing, empty, non-string, and duplicate objective identities', () => {
+    const base = { outcome: 'victory', playerDealt: 0, enemyDealt: 0 };
+    const runs = [
+      {
+        matchup: 'm', seed: 1,
+        report: report({
+          ...base,
+          scenario: { objectives: [{ status: 'Completed', mandatory: true }] },
+        }),
+      },
+      {
+        matchup: 'm', seed: 2,
+        report: report({
+          ...base,
+          scenario: { objectives: [objective('Completed', true, '')] },
+        }),
+      },
+      {
+        matchup: 'm', seed: 3,
+        report: report({
+          ...base,
+          scenario: { objectives: [objective('Completed', true, 7)] },
+        }),
+      },
+      {
+        matchup: 'm', seed: 4,
+        report: report({
+          ...base,
+          scenario: { objectives: [
+            objective('Completed', true, 'same-id'),
+            objective('Completed', true, 'same-id'),
+          ] },
+        }),
+      },
+    ];
+
+    expect(mergeReports(runs).matchups.m.mandatorySetCompletion).toEqual({
+      completed: 0,
+      sampled: 0,
+      rate: null,
+      unmeasurable: {
+        total: 4,
+        missingScenario: 0,
+        malformedObjectives: 4,
+        noMandatoryObjectives: 0,
+      },
+    });
+  });
+
+  it('keeps independent deterministic aggregates for multiple matchups', () => {
+    const make = (matchup, seed, statuses) => ({
+      matchup,
+      seed,
+      report: report({
+        outcome: 'timeout',
+        playerDealt: 0,
+        enemyDealt: 0,
+        scenario: { objectives: statuses.map((status, i) => objective(status, true, `${matchup}-${i}`)) },
+      }),
+    });
+    const summary = mergeReports([
+      make('complete', 1, ['Completed', 'Completed']),
+      make('zero', 1, ['Failed']),
+      make('zero', 2, ['Active']),
+      {
+        matchup: 'no_data', seed: 1,
+        report: report({
+          outcome: 'timeout', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: [objective('Completed', false)] },
+        }),
+      },
+    ]);
+
+    expect(Object.keys(summary.matchups)).toEqual(['complete', 'zero', 'no_data']);
+    expect(summary.matchups.complete.mandatorySetCompletion).toMatchObject({ completed: 1, sampled: 1, rate: 1 });
+    expect(summary.matchups.zero.mandatorySetCompletion).toMatchObject({ completed: 0, sampled: 2, rate: 0 });
+    expect(summary.matchups.no_data.mandatorySetCompletion).toMatchObject({ completed: 0, sampled: 0, rate: null });
   });
 });
 
@@ -435,6 +649,32 @@ describe('formatMarkdown', () => {
     expect(md).toContain('| a_vs_b |');
     expect(md).toContain('Totals:');
     expect(md).toContain('1 failed');
+  });
+
+  it('renders explicit 0/N mandatory-set completion and diagnosed no-data rows', () => {
+    const failedSet = (seed, status) => ({
+      matchup: 'zero',
+      seed,
+      report: report({
+        outcome: 'timeout', playerDealt: 0, enemyDealt: 0,
+        scenario: { objectives: [objective(status)] },
+      }),
+    });
+    const summary = mergeReports([
+      failedSet(1, 'Failed'),
+      failedSet(2, 'Active'),
+      {
+        matchup: 'no_data', seed: 1,
+        report: report({
+          outcome: 'timeout', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: [objective('Completed', false)] },
+        }),
+      },
+    ]);
+    const md = formatMarkdown(summary);
+    expect(md).toContain('| Mandatory set complete |');
+    expect(md).toContain('| zero | 2 | 0% | 0/0/0/2 | 0 | 0/2 (0%) |');
+    expect(md).toContain('| no_data | 1 | 0% | 0/0/0/1 | 0 | 0/0 (no data; 1 no mandatory objectives) |');
   });
 });
 

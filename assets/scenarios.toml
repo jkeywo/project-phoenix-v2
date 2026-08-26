@@ -34,8 +34,8 @@ world = "assets/worlds/combat_test.toml"
 # `[[available_ships]]`, so nothing about the mission is restated here.
 #
 # Deliberately NOT added to `assets/scenarios.demo.toml`: the public demo build
-# is combat_test and the Alliance Destroyer only (issue #931), and what the demo
-# curates is a separate decision from what the dev catalogue offers.
+# is combat_test with the Alliance Destroyer and Alliance Cruiser, and what the
+# demo curates is a separate decision from what the dev catalogue offers.
 [[scenario]]
 id = "falling_skyway"
 world = "assets/worlds/falling_skyway.toml"

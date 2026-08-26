@@ -33,7 +33,7 @@ use crate::comms::server::{current_sender_in_range, CommsChannel2Event, CommsRun
 use crate::core::messages::{CommsMessage, GamePhase};
 use crate::entities::spawner::EntityUuid;
 use crate::world::content::WorldEvent;
-use crate::world::script::comms::{enter_node, project_node, EnterError};
+use crate::world::script::comms::{enter_node_scoped, project_node, EnterError};
 use crate::world::script::schedule::{SchedClock, TickBudget};
 use crate::world::server::{
     apply_script_commands, EffectQueues, ObjectiveManagerRes, ScriptRuntimeParams,
@@ -250,22 +250,32 @@ pub(crate) fn open_scripted_comms_threads(
         // `WorldScriptRuntime` into disjoint field borrows so the one `&self` call
         // takes `&mut budget` and `&ast` at once while `&runtime.flags` (a
         // DISJOINT resource) is the overlay base.
+        let dialogue_flag_chain: Vec<crate::world::flags::FlagStore> =
+            crate::world::server::layered_flag_chain(
+                req.origin_layer.as_deref(),
+                &runtime.flags,
+                world_layers.layer_map.as_deref(),
+            )
+            .into_iter()
+            .cloned()
+            .collect();
         let entered = {
             let WorldScriptRuntime {
                 host, asts, budget, ..
             } = &mut *sr;
             match asts.get(&req.script_path) {
-                Some(ast) => Some(enter_node(
+                Some(ast) => Some(enter_node_scoped(
                     host,
                     budget,
                     &script_clock,
                     ast,
                     &req.script_path,
                     &req.root_fn,
-                    &runtime.flags,
+                    &dialogue_flag_chain,
                     &runtime.deadlines,
                     &runtime.commitments,
                     &runtime.evidence,
+                    req.origin_layer.as_deref(),
                 )),
                 None => {
                     bevy::log::warn!(
@@ -335,12 +345,7 @@ pub(crate) fn open_scripted_comms_threads(
                 .as_ref()
                 .map(|wc| &wc.anchors)
                 .unwrap_or(&empty_anchors),
-            // A comms thread carries no originating sub-world layer (the
-            // declarative `CommsTemplate` has no `origin_layer` field either), so
-            // every layer-scoped action resolves against the base world. The
-            // entity name is the thread's sender, matching the declarative
-            // response path's pre-resolved `sender_entity_name`.
-            None,
+            req.origin_layer.clone(),
             Some(req.from.clone()),
             &mut effect_queues.out(),
         );
@@ -411,7 +416,7 @@ pub(crate) fn open_scripted_comms_threads(
             available,
             req.urgent,
         );
-        channel2_writer.write(CommsChannel2Event { message: msg });
+        channel2_writer.write(CommsChannel2Event::scripted_dialogue(msg));
         comms.active_dialogues.insert(
             msg_id,
             ActiveDialogue {
@@ -419,6 +424,7 @@ pub(crate) fn open_scripted_comms_threads(
                 thread_id,
                 script: ScriptedDialogue {
                     script_path: req.script_path.clone(),
+                    origin_layer: req.origin_layer.clone(),
                     node_fn: req.root_fn.clone(),
                     on_pick,
                 },

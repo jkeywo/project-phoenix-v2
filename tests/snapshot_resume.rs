@@ -34,8 +34,9 @@ use project_phoenix::headless::{build_headless_app, HeadlessArgs};
 use project_phoenix::server_app::{GameOverReason, SimOutbox};
 use project_phoenix::sim_digest::world_digest;
 use project_phoenix::snapshot::{
-    capture, load_from, ready_to_rebuild, ready_to_restore, restore, run_for, save_to, versions,
-    LoadRefusal, PhoenixSnapshot, SavedGame, SIMULATION_RULES, SNAPSHOT_FORMAT,
+    capture, load_from, ready_to_rebuild, ready_to_restore, reconcile_world_layers, restore,
+    run_for, save_to, versions, LayerReconcileStatus, LoadRefusal, PhoenixSnapshot, SavedGame,
+    SIMULATION_RULES, SNAPSHOT_FORMAT,
 };
 use project_phoenix::world::script::load::script_ledger_key;
 use vellum_save::{FileStore, Moved, Verdict, Versions};
@@ -251,10 +252,17 @@ fn shield_charge_by_uuid(
 fn boot_to_restore_point(args: &HeadlessArgs, snapshot: &PhoenixSnapshot) -> bevy::prelude::App {
     let mut app = boot(args);
     for _ in 0..1_000 {
-        if ready_to_restore(app.world(), snapshot) {
-            return app;
-        }
+        // Run Startup before asking reconciliation to queue anything. Calling it
+        // against the pre-Startup empty map would race `load_extra_worlds` and
+        // put the same startup layer in the queue twice.
         app.update();
+        match reconcile_world_layers(app.world_mut(), snapshot) {
+            LayerReconcileStatus::Ready if ready_to_restore(app.world(), snapshot) => return app,
+            LayerReconcileStatus::Failed(path) => {
+                panic!("world-layer reconciliation failed at {path}")
+            }
+            LayerReconcileStatus::Ready | LayerReconcileStatus::Waiting => {}
+        }
     }
     panic!("the fresh app never reached the restore point");
 }
@@ -1104,15 +1112,16 @@ fn a_save_whose_authored_data_changed_is_refused_on_content() {
 /// from under the rest of the suite. The hull edited below is the PLAYER's own,
 /// which reaches the ledger through `FsTemplateLoader` resolving `--ship`.
 ///
-/// The duel's NPC hulls are deliberately not the ones edited: they are not in
-/// the FROZEN ledger and never were. `content_ledger::
-/// eager_record_world_entities` walks `world_config.entities`, so a hull that
-/// arrives any other way — a `[[trigger]]` spawn action, as duel.toml's slots
-/// did before issue #984, or a script spawn, as they do after it — is recorded
-/// only when it actually spawns, which is after `freeze`. That is a #935-class
-/// gap about trigger/script-spawned templates generally, tracked as its own
-/// issue; the M6 conversion changed which side of it these slots sit on, not
-/// whether the gap exists.
+/// The duel's NPC hull is deliberately not the one edited: its path is a
+/// computed script argument supplied by the duel transform, so no load-time
+/// literal scan can put it in the frozen ledger. Issue #1047 now eagerly walks
+/// both `world_config.entities` and `CompiledScripts::spawned_templates`; a
+/// literal script-spawned hull is covered before freeze, while a computed path
+/// is reported once when dispatched and deliberately not folded late (doing so
+/// would make the save digest depend on how far the run had progressed). The
+/// PLAYER's selected hull still enters through headless's explicit `--ship`
+/// resolution and re-freeze, so editing it keeps this older #935 test isolated
+/// from the computed-path residual.
 #[test]
 fn a_save_whose_entity_template_changed_is_refused_on_content() {
     let mut live = duel();
@@ -1164,6 +1173,131 @@ fn a_save_whose_entity_template_changed_is_refused_on_content() {
         "got {refusal}"
     );
     content_ledger::reset();
+}
+
+/// Issue #1047 end to end, including the static-child edge: a root with no
+/// `[[entity]]` loads an `extra_world`, that child names a sibling `.rhai`, and
+/// only that sibling literally names the hull. Editing the hull must make
+/// `load_from` return vellum's content-moved refusal.
+///
+/// The reset immediately AFTER each real `world::load` is load-bearing. The
+/// composition validator resolves literal spawn templates through
+/// `FsTemplateLoader`, which records as a side effect; leaving that record live
+/// would let this test pass even if the returned child's compiled set never
+/// reached the eager pre-freeze walk. Erasing it, then applying only the returned
+/// `LedgerPlan` and explicitly eager-walking root and child, isolates the shipped
+/// compatibility path under test.
+#[test]
+fn a_save_whose_script_only_hull_template_changed_is_refused_on_content() {
+    struct Cleanup(std::path::PathBuf);
+
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            content_ledger::reset();
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    let dir = scratch("script_only_hull_content");
+    std::fs::create_dir_all(&dir).expect("fixture directory is created");
+    let _cleanup = Cleanup(dir.clone());
+    content_ledger::reset();
+
+    let hull_path = dir.join("late_hull.toml");
+    let root_path = dir.join("root.toml");
+    let child_path = dir.join("child.toml");
+    let script_path = dir.join("child.rhai");
+    let hull_ref = hull_path.to_string_lossy().replace('\\', "/");
+    let root_ref = root_path.to_string_lossy().into_owned();
+    let child_ref = child_path.to_string_lossy().replace('\\', "/");
+    std::fs::write(&hull_path, "[hull]\nhull_integrity = 400.0\n")
+        .expect("baseline hull is written");
+    let root_source = r#"
+extra_worlds = ["__CHILD__"]
+
+[global]
+seed = 1047
+"#
+    .replace("__CHILD__", &child_ref);
+    std::fs::write(&root_path, root_source).expect("root world is written");
+    std::fs::write(
+        &child_path,
+        "script = \"child.rhai\"\n\n[global]\nseed = 1048\n",
+    )
+    .expect("child world is written");
+    let script_source = r#"
+fn spawn_later(ctx) {
+    ctx.effects.spawn_entity(#{ template_path: "__HULL__", name: "late-hull" });
+}
+"#
+    .replace("__HULL__", &hull_ref);
+    std::fs::write(&script_path, script_source).expect("child sibling script is written");
+
+    let freeze_declared_set = || {
+        use project_phoenix::world::load::{load, FsReader, LoadPolicy, LoadRequest};
+
+        let resolver = project_phoenix::entities::config_cache::production_script_resolver();
+        let loaded = load(LoadRequest::new(
+            root_ref.clone(),
+            &FsReader,
+            &resolver,
+            LoadPolicy::Activate,
+        ))
+        .expect("the root and scripted child load");
+        assert!(loaded.config.entities.is_empty());
+        assert_eq!(loaded.children.len(), 1);
+        assert!(loaded.children[0].config.entities.is_empty());
+        assert!(
+            loaded.children[0].scripts.is_some(),
+            "the child's sibling set must survive the load"
+        );
+
+        // Intentionally first after `load`: erase every record template
+        // resolution during validation could have made.
+        content_ledger::reset();
+        loaded.ledger.apply();
+        content_ledger::eager_record_world_entities_with_scripts(
+            &loaded.config,
+            loaded.scripts.as_ref(),
+        );
+        for child in &loaded.children {
+            content_ledger::eager_record_world_entities_with_scripts(
+                &child.config,
+                child.scripts.as_ref(),
+            );
+        }
+        content_ledger::freeze();
+        assert!(
+            content_ledger::frozen_covers(&hull_ref),
+            "the explicit child eager walk must cover the sibling-only hull"
+        );
+        versions(&content_ledger::frozen_or_live())
+    };
+
+    let baseline = freeze_declared_set();
+    let run = run_for(
+        PhoenixSnapshot::default(),
+        0,
+        SEED,
+        &root_ref,
+        baseline.clone(),
+    );
+    let store = FileStore::new(dir.join("save"));
+    save_to(&store, "autosave", &run).expect("the fixture save is written");
+
+    std::fs::write(&hull_path, "[hull]\nhull_integrity = 401.0\n")
+        .expect("the hull edit is written");
+    let edited = freeze_declared_set();
+    assert_ne!(
+        edited.content, baseline.content,
+        "editing the literal script-only hull must move the frozen content digest"
+    );
+
+    let refusal = load_from(&store, "autosave", &edited).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Content { .. })),
+        "got {refusal}"
+    );
 }
 
 /// The digest must not depend on the ORDER the loader happened to record
@@ -2108,6 +2242,12 @@ fn a_save_written_before_comms_state_is_refused_on_format() {
 // ── Named mission deadlines across a resume (issue #1024) ────────────────────
 
 const DEADLINES: &str = "tests/fixtures/worlds/deadline_resume.toml";
+const LAYER_DEADLINES: &str = "tests/fixtures/worlds/layer_deadline_resume.toml";
+const DYNAMIC_LAYERS: &str = "tests/fixtures/worlds/layer_dynamic_resume.toml";
+const LAYER_DEADLINE_PATH: &str = "tests/fixtures/layer_deadline.toml";
+const LAYER_NESTED_PARENT_PATH: &str = "tests/fixtures/layer_nested_parent.toml";
+const LAYER_NESTED_CHILD_PATH: &str = "tests/fixtures/layer_nested_child.toml";
+const LAYER_ENTITY_PATH: &str = "tests/fixtures/layer_entities.toml";
 
 /// Frames the deadline world runs before its capture: past the ~tick-60 timer
 /// that slips one deadline and cancels the other, and short of every fire tick.
@@ -2126,6 +2266,184 @@ fn deadline_args() -> HeadlessArgs {
         deterministic: true,
         ..Default::default()
     }
+}
+
+fn layer_deadline_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: LAYER_DEADLINES.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+fn dynamic_layer_args() -> HeadlessArgs {
+    HeadlessArgs {
+        world_path: DYNAMIC_LAYERS.into(),
+        ship_path: "assets/entities/alliance_cruiser.toml".into(),
+        max_ticks: 4_000,
+        seed: Some(SEED),
+        deterministic: true,
+        ..Default::default()
+    }
+}
+
+fn queue_layer_load(app: &mut bevy::prelude::App, path: &str, loader_path: Option<&str>) {
+    use project_phoenix::world::server::{PendingWorldLayerChanges, WorldLayerChange};
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Load {
+            path: path.to_string(),
+            loader_path: loader_path.map(str::to_string),
+        });
+}
+
+fn queue_layer_unload(app: &mut bevy::prelude::App, path: &str) {
+    use project_phoenix::world::server::{PendingWorldLayerChanges, WorldLayerChange};
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Unload(path.to_string()));
+}
+
+fn layer_is_active(app: &bevy::prelude::App, path: &str) -> bool {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldLayerMap>()
+        .0
+        .get(path)
+        .is_some_and(|layer| layer.is_active)
+}
+
+fn step_until_layers_are_active(app: &mut bevy::prelude::App, paths: &[&str]) {
+    for _ in 0..300 {
+        if paths.iter().all(|path| layer_is_active(app, path)) {
+            return;
+        }
+        app.update();
+    }
+    panic!("layers never became active: {paths:?}");
+}
+
+fn step_until_layer_is_absent(app: &mut bevy::prelude::App, path: &str) {
+    for _ in 0..300 {
+        let absent = !app
+            .world()
+            .resource::<project_phoenix::world::server::WorldLayerMap>()
+            .0
+            .contains_key(path);
+        let settled = app
+            .world()
+            .resource::<project_phoenix::world::server::PendingWorldLayerChanges>()
+            .0
+            .is_empty();
+        if absent && settled {
+            return;
+        }
+        app.update();
+    }
+    panic!("layer never unloaded: {path}");
+}
+
+fn layer_counter(app: &bevy::prelude::App, path: &str, name: &str) -> i64 {
+    app.world()
+        .resource::<project_phoenix::world::server::WorldLayerMap>()
+        .0
+        .get(path)
+        .map_or(0, |layer| layer.flags.counter(name))
+}
+
+#[test]
+fn active_empty_layers_are_captured_in_order_but_failed_sentinels_are_terminal() {
+    use project_phoenix::world::server::{PendingWorldLayerChanges, WorldLayerMap, WorldRuntime};
+
+    let parent = "tests/fixtures/active-empty-parent.toml";
+    let child = "tests/fixtures/active-empty-child.toml";
+    let sentinel = "tests/fixtures/refused-layer.toml";
+
+    let mut source = bevy::prelude::App::new();
+    source.insert_resource(WorldLayerMap(std::collections::HashMap::from([
+        (
+            child.to_string(),
+            WorldRuntime {
+                is_active: true,
+                activation_order: 8,
+                loader_path: Some(parent.to_string()),
+                ..Default::default()
+            },
+        ),
+        (
+            parent.to_string(),
+            WorldRuntime {
+                is_active: true,
+                activation_order: 7,
+                ..Default::default()
+            },
+        ),
+        (sentinel.to_string(), WorldRuntime::default()),
+    ])));
+    let payload = capture(source.world());
+    assert_eq!(
+        payload
+            .layer_flags
+            .iter()
+            .map(|layer| layer.path.as_str())
+            .collect::<Vec<_>>(),
+        vec![parent, child],
+        "a successful content-empty layer is active, a failed sentinel is not, \
+         and HashMap order never reaches the payload"
+    );
+    assert_eq!(payload.layer_flags[1].loader_path.as_deref(), Some(parent));
+
+    let mut failed_target = bevy::prelude::App::new();
+    failed_target.insert_resource(PendingWorldLayerChanges::default());
+    failed_target.insert_resource(WorldLayerMap(std::collections::HashMap::from([
+        (
+            parent.to_string(),
+            WorldRuntime {
+                is_active: true,
+                activation_order: 1,
+                ..Default::default()
+            },
+        ),
+        (child.to_string(), WorldRuntime::default()),
+    ])));
+    assert_eq!(
+        reconcile_world_layers(failed_target.world_mut(), &payload),
+        LayerReconcileStatus::Failed(child.to_string()),
+        "a desired failed sentinel is a named terminal refusal, never a retry loop"
+    );
+    assert!(
+        failed_target
+            .world()
+            .resource::<PendingWorldLayerChanges>()
+            .0
+            .is_empty(),
+        "terminal failure queues neither an unload nor an identical retry"
+    );
+
+    let mut stale_target = bevy::prelude::App::new();
+    stale_target.insert_resource(PendingWorldLayerChanges::default());
+    stale_target.insert_resource(WorldLayerMap(std::collections::HashMap::from([(
+        sentinel.to_string(),
+        WorldRuntime::default(),
+    )])));
+    let empty = PhoenixSnapshot::default();
+    assert_eq!(
+        reconcile_world_layers(stale_target.world_mut(), &empty),
+        LayerReconcileStatus::Waiting
+    );
+    assert_eq!(
+        stale_target
+            .world()
+            .resource::<PendingWorldLayerChanges>()
+            .0
+            .len(),
+        1,
+        "a non-target sentinel is queued for removal so it cannot remain a dedup blocker"
+    );
 }
 
 // ── Issue #1025: infrastructure condition survives a resume ─────────────────
@@ -2296,6 +2614,353 @@ fn a_slipped_and_a_cancelled_deadline_both_survive_a_resume() {
         world_digest(resumed.world()),
         world_digest(live.world()),
         "and the two worlds are still standing in the same place afterwards"
+    );
+}
+
+/// A supporting world's ownership survives the whole save boundary. The fresh
+/// bootstrap is required to finish loading the layer before restore; restore
+/// then replaces its freshly armed row/call rather than merging a duplicate.
+#[test]
+fn a_layer_deadline_resumes_in_its_owner_without_duplicate_arming() {
+    let mut live = boot(&layer_deadline_args());
+    step(&mut live, 30);
+    let payload = capture(live.world());
+    let scenario = scenario_of(&payload);
+
+    assert!(payload
+        .layer_flags
+        .iter()
+        .any(|layer| layer.path == LAYER_DEADLINE_PATH));
+    assert_eq!(
+        scenario
+            .deadlines
+            .records
+            .iter()
+            .filter(|record| record.origin_layer.as_deref() == Some(LAYER_DEADLINE_PATH))
+            .count(),
+        2
+    );
+    let captured_calls: Vec<_> = scenario
+        .script_callbacks
+        .iter()
+        .filter(|call| call.origin_layer.as_deref() == Some(LAYER_DEADLINE_PATH))
+        .cloned()
+        .collect();
+    assert_eq!(
+        captured_calls.len(),
+        1,
+        "only the future shared deadline remains queued"
+    );
+
+    let mut resumed = boot_to_restore_point(&layer_deadline_args(), &payload);
+    assert!(resumed
+        .world()
+        .resource::<project_phoenix::world::server::WorldLayerMap>()
+        .0
+        .contains_key(LAYER_DEADLINE_PATH));
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    let restored = resumed
+        .world()
+        .resource::<project_phoenix::world::server::WorldScriptRuntime>();
+    let restored_calls: Vec<_> = restored
+        .pending_callbacks
+        .0
+        .iter()
+        .filter(|call| call.origin_layer.as_deref() == Some(LAYER_DEADLINE_PATH))
+        .cloned()
+        .collect();
+    assert_eq!(
+        restored_calls, captured_calls,
+        "restore replaces bootstrap arming exactly; it never appends a duplicate"
+    );
+
+    for _ in 0..200 {
+        live.update();
+        resumed.update();
+    }
+    assert_eq!(
+        layer_counter(&resumed, LAYER_DEADLINE_PATH, "deadline_fired"),
+        1
+    );
+    assert_eq!(
+        layer_counter(&resumed, LAYER_DEADLINE_PATH, "nested_fired"),
+        1
+    );
+    assert_eq!(
+        world_counter(&resumed, "deadline_fired_outward"),
+        world_counter(&live, "deadline_fired_outward")
+    );
+    assert_eq!(world_counter(&resumed, "deadline_fired_outward"), 1);
+    assert_eq!(world_counter(&resumed, "nested_fired_outward"), 1);
+}
+
+#[test]
+fn dynamically_loaded_order_ownership_entities_and_deadlines_resume_exactly() {
+    use project_phoenix::entities::spawner::EntityUuid;
+    use project_phoenix::world::server::{
+        PendingWorldLayerChanges, WorldContentRuntime, WorldLayerMap, WorldScriptRuntime,
+    };
+
+    let mut live = boot(&dynamic_layer_args());
+    step(&mut live, 20);
+
+    // Parent and child both contribute scripted triggers. Their paths sort in
+    // the opposite order to their activation, making this a real handler-index
+    // order check rather than a set-equality check that happens to pass.
+    queue_layer_load(&mut live, LAYER_NESTED_PARENT_PATH, None);
+    step_until_layers_are_active(
+        &mut live,
+        &[LAYER_NESTED_PARENT_PATH, LAYER_NESTED_CHILD_PATH],
+    );
+    queue_layer_load(
+        &mut live,
+        LAYER_DEADLINE_PATH,
+        Some(LAYER_NESTED_PARENT_PATH),
+    );
+    step_until_layers_are_active(&mut live, &[LAYER_DEADLINE_PATH]);
+    queue_layer_load(&mut live, LAYER_ENTITY_PATH, Some(LAYER_NESTED_PARENT_PATH));
+    step_until_layers_are_active(&mut live, &[LAYER_ENTITY_PATH]);
+    step(&mut live, 30);
+
+    let payload = capture(live.world());
+    assert_eq!(
+        payload
+            .layer_flags
+            .iter()
+            .map(|layer| layer.path.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            LAYER_NESTED_PARENT_PATH,
+            LAYER_NESTED_CHILD_PATH,
+            LAYER_DEADLINE_PATH,
+            LAYER_ENTITY_PATH,
+        ],
+        "the capture carries activation order, not lexical path order"
+    );
+    for child in [
+        LAYER_NESTED_CHILD_PATH,
+        LAYER_DEADLINE_PATH,
+        LAYER_ENTITY_PATH,
+    ] {
+        assert_eq!(
+            payload
+                .layer_flags
+                .iter()
+                .find(|layer| layer.path == child)
+                .and_then(|layer| layer.loader_path.as_deref()),
+            Some(LAYER_NESTED_PARENT_PATH),
+            "{child} keeps the layer that owns its parent: flag scope"
+        );
+    }
+
+    let entity_layer = payload
+        .layer_flags
+        .iter()
+        .find(|layer| layer.path == LAYER_ENTITY_PATH)
+        .expect("the entity layer is captured");
+    let captured_entity_uuid = entity_layer
+        .declared_entity_uuids
+        .first()
+        .and_then(Option::as_deref)
+        .expect("the live declared layer entity has a captured identity")
+        .to_string();
+    assert!(
+        payload
+            .entities
+            .iter()
+            .any(|row| row.uuid == captured_entity_uuid && row.spawn.is_none()),
+        "the layer-declared entity has no script SpawnOrigin recipe; topology must recover it"
+    );
+
+    let captured_calls: Vec<_> = scenario_of(&payload)
+        .script_callbacks
+        .iter()
+        .filter(|call| call.origin_layer.as_deref() == Some(LAYER_DEADLINE_PATH))
+        .cloned()
+        .collect();
+    assert_eq!(captured_calls.len(), 1, "one future deadline is armed");
+
+    // Drive the public reconciliation seam explicitly so the assertion can see
+    // the fresh UUID immediately before it is exchanged for the captured one.
+    let mut resumed = boot(&dynamic_layer_args());
+    let mut fresh_entity_uuid = None;
+    for _ in 0..1_000 {
+        resumed.update();
+        let all_active = [
+            LAYER_NESTED_PARENT_PATH,
+            LAYER_NESTED_CHILD_PATH,
+            LAYER_DEADLINE_PATH,
+            LAYER_ENTITY_PATH,
+        ]
+        .iter()
+        .all(|path| layer_is_active(&resumed, path));
+        let settled = resumed
+            .world()
+            .resource::<PendingWorldLayerChanges>()
+            .0
+            .is_empty();
+        if all_active && settled && fresh_entity_uuid.is_none() {
+            let entity = resumed
+                .world()
+                .resource::<WorldLayerMap>()
+                .0
+                .get(LAYER_ENTITY_PATH)
+                .and_then(|layer| layer.spawned_entities.first())
+                .copied()
+                .expect("the fresh activation spawned its declared entity");
+            fresh_entity_uuid = resumed
+                .world()
+                .get::<EntityUuid>(entity)
+                .map(|uuid| uuid.0.clone());
+        }
+        match reconcile_world_layers(resumed.world_mut(), &payload) {
+            LayerReconcileStatus::Ready if ready_to_restore(resumed.world(), &payload) => break,
+            LayerReconcileStatus::Failed(path) => {
+                panic!("dynamic topology failed to reconcile at {path}")
+            }
+            LayerReconcileStatus::Ready | LayerReconcileStatus::Waiting => continue,
+        }
+    }
+    let fresh_entity_uuid = fresh_entity_uuid.expect("the fresh layer entity was observed");
+    assert_ne!(
+        fresh_entity_uuid, captured_entity_uuid,
+        "loading the dynamic layer at another tick must genuinely exercise UUID reconciliation"
+    );
+    let restored_layer_entity = resumed
+        .world()
+        .resource::<WorldLayerMap>()
+        .0
+        .get(LAYER_ENTITY_PATH)
+        .and_then(|layer| layer.spawned_entities.first())
+        .copied()
+        .expect("the reconciled layer still owns its entity");
+    assert_eq!(
+        resumed
+            .world()
+            .get::<EntityUuid>(restored_layer_entity)
+            .map(|uuid| uuid.0.as_str()),
+        Some(captured_entity_uuid.as_str()),
+        "identity is repaired before entity-state restore looks up the captured UUID"
+    );
+
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+    let runtime = resumed.world().resource::<WorldContentRuntime>();
+    let scripts = resumed.world().resource::<WorldScriptRuntime>();
+    assert_eq!(runtime.trigger_states.len(), scripts.handlers.len());
+    for path in [LAYER_NESTED_PARENT_PATH, LAYER_NESTED_CHILD_PATH] {
+        assert_eq!(
+            runtime
+                .trigger_states
+                .iter()
+                .zip(&scripts.handlers)
+                .filter(|(state, handler)| {
+                    state.origin_layer.as_deref() == Some(path) && handler.is_some()
+                })
+                .count(),
+            1,
+            "{path} has exactly one aligned trigger handler after resume"
+        );
+    }
+    let restored_calls: Vec<_> = scripts
+        .pending_callbacks
+        .0
+        .iter()
+        .filter(|call| call.origin_layer.as_deref() == Some(LAYER_DEADLINE_PATH))
+        .cloned()
+        .collect();
+    assert_eq!(
+        restored_calls, captured_calls,
+        "deadline arming is replaced"
+    );
+
+    step(&mut live, 200);
+    step(&mut resumed, 200);
+    assert_eq!(
+        layer_counter(&resumed, LAYER_DEADLINE_PATH, "deadline_fired"),
+        1
+    );
+    assert_eq!(
+        layer_counter(&resumed, LAYER_DEADLINE_PATH, "nested_fired"),
+        1
+    );
+    assert_eq!(
+        layer_counter(&resumed, LAYER_NESTED_PARENT_PATH, "deadline_fired_outward"),
+        1
+    );
+    assert_eq!(
+        layer_counter(&resumed, LAYER_NESTED_PARENT_PATH, "nested_fired_outward"),
+        1
+    );
+    assert_eq!(
+        layer_counter(&resumed, LAYER_NESTED_CHILD_PATH, "child_arrived"),
+        layer_counter(&live, LAYER_NESTED_CHILD_PATH, "child_arrived"),
+        "the child opening handler does not re-arm after trigger-state restore"
+    );
+}
+
+#[test]
+fn a_dynamically_unloaded_startup_layer_stays_absent_after_resume() {
+    use project_phoenix::world::server::{WorldContentRuntime, WorldLayerMap, WorldScriptRuntime};
+
+    let mut live = boot(&layer_deadline_args());
+    step_until_layers_are_active(&mut live, &[LAYER_DEADLINE_PATH]);
+    step(&mut live, 30);
+    queue_layer_unload(&mut live, LAYER_DEADLINE_PATH);
+    step_until_layer_is_absent(&mut live, LAYER_DEADLINE_PATH);
+
+    let payload = capture(live.world());
+    assert!(
+        payload.layer_flags.is_empty(),
+        "the captured active composition records the runtime unload, not WorldConfig.extra_worlds"
+    );
+    assert!(scenario_of(&payload)
+        .deadlines
+        .records
+        .iter()
+        .all(|record| record.origin_layer.as_deref() != Some(LAYER_DEADLINE_PATH)));
+    assert!(scenario_of(&payload)
+        .script_callbacks
+        .iter()
+        .all(|call| call.origin_layer.as_deref() != Some(LAYER_DEADLINE_PATH)));
+
+    // The fresh world loads the startup layer again. Reconciliation must remove
+    // that extra before callbacks/deadlines are restored, even though the saved
+    // topology is the empty vector.
+    let mut resumed = boot_to_restore_point(&layer_deadline_args(), &payload);
+    assert!(!resumed
+        .world()
+        .resource::<WorldLayerMap>()
+        .0
+        .contains_key(LAYER_DEADLINE_PATH));
+    let report = restore(resumed.world_mut(), &payload);
+    assert!(report.is_complete(), "gaps: {:?}", report.gaps);
+
+    let runtime = resumed.world().resource::<WorldContentRuntime>();
+    let scripts = resumed.world().resource::<WorldScriptRuntime>();
+    assert!(runtime
+        .trigger_states
+        .iter()
+        .all(|state| state.origin_layer.as_deref() != Some(LAYER_DEADLINE_PATH)));
+    assert_eq!(runtime.trigger_states.len(), scripts.handlers.len());
+    assert!(scripts
+        .pending_callbacks
+        .0
+        .iter()
+        .all(|call| call.origin_layer.as_deref() != Some(LAYER_DEADLINE_PATH)));
+    assert!(scripts.ast_owners.values().all(|owners| !owners
+        .iter()
+        .any(|owner| owner.as_deref() == Some(LAYER_DEADLINE_PATH))));
+
+    step(&mut live, 200);
+    step(&mut resumed, 200);
+    assert_eq!(world_counter(&resumed, "deadline_fired_outward"), 0);
+    assert_eq!(world_counter(&resumed, "nested_fired_outward"), 0);
+    assert_eq!(
+        world_counter(&resumed, "deadline_fired_outward"),
+        world_counter(&live, "deadline_fired_outward")
     );
 }
 
@@ -3785,10 +4450,14 @@ fn live_name_to_uuid(app: &bevy::prelude::App) -> std::collections::BTreeMap<Str
 fn boot_to_rebuild_point(args: &HeadlessArgs, snapshot: &PhoenixSnapshot) -> bevy::prelude::App {
     let mut app = boot(args);
     for _ in 0..1_000 {
-        if ready_to_rebuild(app.world(), snapshot) {
-            return app;
-        }
         app.update();
+        match reconcile_world_layers(app.world_mut(), snapshot) {
+            LayerReconcileStatus::Ready if ready_to_rebuild(app.world(), snapshot) => return app,
+            LayerReconcileStatus::Failed(path) => {
+                panic!("world-layer reconciliation failed at {path}")
+            }
+            LayerReconcileStatus::Ready | LayerReconcileStatus::Waiting => {}
+        }
     }
     panic!("the fresh app never reached the rebuild point");
 }

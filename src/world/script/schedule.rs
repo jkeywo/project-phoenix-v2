@@ -153,6 +153,10 @@ pub struct ScheduledCall {
     pub script_path: String,
     /// The (possibly generated `anon$…`) name to call at `fire_tick`.
     pub fn_name: String,
+    /// Supporting world that owns the call. `None` is the root world.
+    /// Defaulted so pre-#1045 snapshots remain readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_layer: Option<String>,
 }
 
 /// The serialisable pending-callback queue.
@@ -370,6 +374,16 @@ impl ScheduleSink {
         clock: &SchedClock,
         script_path: &str,
     ) -> (Vec<DelayedAction>, Vec<ScheduledCall>) {
+        self.drain_scoped(clock, script_path, None)
+    }
+
+    /// Drain while retaining the supporting-world scope of the running call.
+    pub fn drain_scoped(
+        &self,
+        clock: &SchedClock,
+        script_path: &str,
+        origin_layer: Option<&str>,
+    ) -> (Vec<DelayedAction>, Vec<ScheduledCall>) {
         let items = std::mem::take(&mut *self.0.lock().expect("schedule sink lock"));
         let mut delayed = Vec::new();
         let mut callbacks = Vec::new();
@@ -378,10 +392,9 @@ impl ScheduleSink {
                 Deferred::Effect { delay_secs, action } => {
                     delayed.push(DelayedAction {
                         action: *action,
-                        // Script-scheduled work is authored at base scope in M3
-                        // (no sub-world layer origin to thread yet), mirroring the
-                        // effect sink's `loader_path: None` note.
-                        origin_layer: None,
+                        // Delayed work inherits the running call's owner, just as
+                        // the immediate applier stamps a `load_world` command.
+                        origin_layer: origin_layer.map(str::to_string),
                         entity_name: None,
                         fire_at_elapsed: clock.elapsed_secs + delay_secs.max(0) as f32,
                     });
@@ -394,6 +407,7 @@ impl ScheduleSink {
                         fire_tick: clock.tick + seconds_to_ticks(delay_secs, clock.tick_hz),
                         script_path: script_path.to_string(),
                         fn_name,
+                        origin_layer: origin_layer.map(str::to_string),
                     });
                 }
             }
@@ -625,16 +639,41 @@ mod tests {
             fire_tick: 300,
             script_path: "world.toml#script.setup".to_string(),
             fn_name: "anon$41a691411dc30a5e".to_string(),
+            origin_layer: None,
         });
         queue.push(ScheduledCall {
             fire_tick: 42,
             script_path: "combat.rhai".to_string(),
             fn_name: "on_reinforce".to_string(),
+            origin_layer: Some("worlds/reinforcements.toml".to_string()),
         });
 
         let json = serde_json::to_string(&queue).expect("serialises");
         let restored: PendingCallbacks = serde_json::from_str(&json).expect("deserialises");
         assert_eq!(restored, queue, "the pending queue must round-trip exactly");
+
+        let legacy = r#"[{"fire_tick":7,"script_path":"old.rhai","fn_name":"f"}]"#;
+        let restored: PendingCallbacks =
+            serde_json::from_str(legacy).expect("pre-#1045 calls remain readable");
+        assert_eq!(restored.0[0].origin_layer, None);
+    }
+
+    #[test]
+    fn scoped_drain_stamps_callbacks_and_delayed_effects_with_the_same_owner() {
+        let sink = ScheduleSink::new();
+        sink.push(Deferred::Effect {
+            delay_secs: 1,
+            action: Box::new(TriggerAction::CompleteObjective { id: "x".into() }),
+        });
+        sink.push(Deferred::Callback {
+            delay_secs: 1,
+            fn_name: "later".into(),
+        });
+
+        let (delayed, callbacks) =
+            sink.drain_scoped(&clock(10, 2.0, 60.0), "shared.rhai", Some("worlds/a.toml"));
+        assert_eq!(delayed[0].origin_layer.as_deref(), Some("worlds/a.toml"));
+        assert_eq!(callbacks[0].origin_layer.as_deref(), Some("worlds/a.toml"));
     }
 
     #[test]
@@ -668,6 +707,7 @@ mod tests {
                 fire_tick: 300 + 5 * 60,
                 script_path: "combat.rhai".to_string(),
                 fn_name: "anon$abc".to_string(),
+                origin_layer: None,
             }]
         );
     }
@@ -778,6 +818,7 @@ mod tests {
                 fire_tick: fire,
                 script_path: "s.rhai".to_string(),
                 fn_name: name.to_string(),
+                origin_layer: None,
             });
         }
         let due = queue.drain_due(20);
@@ -797,6 +838,7 @@ mod tests {
             fire_tick: fire,
             script_path: "s.rhai".to_string(),
             fn_name: name.to_string(),
+            origin_layer: None,
         };
         let mut queue = PendingCallbacks::new();
         queue.push(call(300, "shared"));

@@ -74,6 +74,38 @@ use crate::world::config::{assign_named_entity_uuids, WorldConfig};
 use crate::world::load::{load, LedgerPlan, LoadError, LoadPolicy, LoadRequest, MemoryReader};
 use crate::world::script::load::{CompiledScripts, ScriptResolver};
 
+/// The already-active composition facts needed to validate one additive layer
+/// before it can mutate the runtime (issue #1046).
+///
+/// The two sources are injected to preserve the browser's pending-cache
+/// authority rule (`absence_is_final = false` while content may still arrive).
+/// Anchor names are owned, sorted, and deduplicated because the Bevy caller
+/// rebuilds this context for every load from the root plus all currently-active
+/// layers; a layer applied earlier in the same drain can therefore satisfy a
+/// later layer deterministically.
+pub struct LayerValidationContext<'a> {
+    pub template_loader: &'a dyn crate::entities::loader::TemplateLoader,
+    pub fragment_source: &'a dyn crate::entities::include_resolve::FragmentSource,
+    pub declared_anchors: Vec<String>,
+}
+
+impl<'a> LayerValidationContext<'a> {
+    pub fn new(
+        template_loader: &'a dyn crate::entities::loader::TemplateLoader,
+        fragment_source: &'a dyn crate::entities::include_resolve::FragmentSource,
+        declared_anchors: impl IntoIterator<Item = String>,
+    ) -> Self {
+        let mut declared_anchors: Vec<String> = declared_anchors.into_iter().collect();
+        declared_anchors.sort();
+        declared_anchors.dedup();
+        Self {
+            template_loader,
+            fragment_source,
+            declared_anchors,
+        }
+    }
+}
+
 /// Decision produced by [`evaluate_layer_load`].
 #[derive(Debug)]
 pub struct LayerLoadResult {
@@ -173,6 +205,7 @@ pub fn evaluate_layer_load<F>(
     already_loaded: bool,
     toml_str: Option<&str>,
     script_resolver: &dyn ScriptResolver,
+    validation: &LayerValidationContext,
     uuid_source: F,
 ) -> LayerLoadResult
 where
@@ -289,6 +322,49 @@ where
             ledger,
         };
     }
+
+    // Composition-gate the layer before UUID minting or any value can reach the
+    // applier. The resolved compiled spawn set is authoritative when present:
+    // it includes sibling `.rhai` units and replaces the config's inline-only
+    // scan, avoiding duplicate inline findings.
+    let composition_findings = {
+        let mut source = crate::world::validate::WorldSource::new(path, toml_str, &scenario_config);
+        if let Some(compiled) = scripts.as_ref() {
+            source = source.with_resolved_script_spawns(&compiled.spawned_templates);
+        }
+        crate::world::validate::validate_supporting_world(
+            &source,
+            validation.template_loader,
+            validation.fragment_source,
+            &validation.declared_anchors,
+        )
+    };
+    if crate::world::validate::has_error(&composition_findings) {
+        let detail = composition_findings
+            .iter()
+            .filter(|finding| finding.is_error())
+            .map(|finding| {
+                let line = finding
+                    .source
+                    .line
+                    .map(|line| format!(":{line}"))
+                    .unwrap_or_default();
+                format!(
+                    "[{}] {}{}: {}",
+                    finding.category, finding.source.file, line, finding.message
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        return LayerLoadResult {
+            outcome: LayerLoadOutcome::ParseFailed,
+            warnings: vec![format!(
+                "failed to load {path}: composition error: {detail}"
+            )],
+            ledger,
+        };
+    }
+
     // Assign UUIDs to named entities in this layer's config; the registrations go
     // both into the returned config (for spawning) and to the applier (for the
     // live runtime map).
@@ -354,11 +430,15 @@ name = "raider_alpha"
 
     /// The default evaluation these tests make: no sibling scripts, counter UUIDs.
     fn evaluate(path: &str, already_loaded: bool, toml_str: Option<&str>) -> LayerLoadResult {
+        let templates = crate::entities::loader::WasmTemplateLoader;
+        let fragments = crate::entities::include_resolve::HostFragmentSource;
+        let validation = LayerValidationContext::new(&templates, &fragments, Vec::new());
         evaluate_layer_load(
             path,
             already_loaded,
             toml_str,
             &crate::world::script::load::NoSiblingScripts,
+            &validation,
             counter_uuids(),
         )
     }
@@ -441,11 +521,15 @@ seed = 1
             "worlds/wave.rhai".to_string(),
             "on_world_loaded(\"wave_in\"); fn wave_in(ctx) { }".to_string(),
         )]);
+        let templates = crate::entities::loader::WasmTemplateLoader;
+        let fragments = crate::entities::include_resolve::HostFragmentSource;
+        let validation = LayerValidationContext::new(&templates, &fragments, Vec::new());
         let result = evaluate_layer_load(
             "worlds/l1.toml",
             false,
             Some(WITH_SIBLING),
             &resolver,
+            &validation,
             counter_uuids(),
         );
         let LayerLoadOutcome::Loaded(layer) = result.outcome else {
@@ -463,6 +547,166 @@ seed = 1
             scripts.script_triggers.len(),
             1,
             "and its top-level registration built the layer's one trigger"
+        );
+    }
+
+    #[test]
+    fn inline_and_sibling_script_spawns_are_composition_gated_with_unit_provenance() {
+        const INLINE: &str = r#"
+[global]
+seed = 1
+
+[script]
+setup = """
+fn wave(ctx) {
+    ctx.effects.spawn_entity(#{ template_path: "assets/entities/missing_inline.toml" });
+}
+"""
+"#;
+        const SIBLING: &str = r#"
+script = "wave.rhai"
+
+[global]
+seed = 1
+"#;
+        let sibling_resolver = FakeSiblings(vec![(
+            "worlds/wave.rhai".to_string(),
+            "fn wave(ctx) {\n    ctx.effects.spawn_entity(#{ template_path: \"assets/entities/missing_sibling.toml\" });\n}"
+                .to_string(),
+        )]);
+        let templates = crate::world::load::MemoryTemplateLoader::authoritative_empty();
+        let fragments = std::collections::HashMap::<String, String>::new();
+        let validation = LayerValidationContext::new(&templates, &fragments, Vec::new());
+
+        let inline = evaluate_layer_load(
+            "worlds/inline.toml",
+            false,
+            Some(INLINE),
+            &crate::world::script::load::NoSiblingScripts,
+            &validation,
+            counter_uuids(),
+        );
+        assert!(matches!(inline.outcome, LayerLoadOutcome::ParseFailed));
+        assert!(
+            inline.warnings[0].contains("worlds/inline.toml#script.setup:2"),
+            "the inline virtual unit and exact call line own the finding: {}",
+            inline.warnings[0]
+        );
+        assert!(inline.warnings[0].contains("unresolvable-template"));
+
+        let sibling = evaluate_layer_load(
+            "worlds/layer.toml",
+            false,
+            Some(SIBLING),
+            &sibling_resolver,
+            &validation,
+            counter_uuids(),
+        );
+        assert!(matches!(sibling.outcome, LayerLoadOutcome::ParseFailed));
+        assert!(
+            sibling.warnings[0].contains("worlds/wave.rhai:2"),
+            "the resolved sibling file and exact call line own the finding: {}",
+            sibling.warnings[0]
+        );
+        assert!(sibling.warnings[0].contains("missing_sibling.toml"));
+    }
+
+    #[test]
+    fn sibling_spawn_doctrine_may_use_an_active_root_anchor_but_not_an_undeclared_one() {
+        const LAYER: &str = r#"
+script = "wave.rhai"
+
+[global]
+seed = 1
+"#;
+        let resolver = FakeSiblings(vec![(
+            "worlds/wave.rhai".to_string(),
+            "fn wave(ctx) {\n    ctx.effects.spawn_entity(#{ template_path: \"assets/entities/ship_harrow_patrol.toml\" });\n}"
+                .to_string(),
+        )]);
+        let templates = crate::entities::loader::WasmTemplateLoader;
+        let fragments = crate::entities::include_resolve::HostFragmentSource;
+
+        let undeclared = LayerValidationContext::new(&templates, &fragments, Vec::new());
+        let rejected = evaluate_layer_load(
+            "worlds/layer.toml",
+            false,
+            Some(LAYER),
+            &resolver,
+            &undeclared,
+            counter_uuids(),
+        );
+        assert!(matches!(rejected.outcome, LayerLoadOutcome::ParseFailed));
+        assert!(
+            rejected.warnings[0].contains("unresolved-anchor"),
+            "the template's undeclared patrol anchors must block the layer: {}",
+            rejected.warnings[0]
+        );
+
+        let root_declared = LayerValidationContext::new(
+            &templates,
+            &fragments,
+            [
+                "ironveil_patrol_a".to_string(),
+                "ironveil_patrol_b".to_string(),
+            ],
+        );
+        let accepted = evaluate_layer_load(
+            "worlds/layer.toml",
+            false,
+            Some(LAYER),
+            &resolver,
+            &root_declared,
+            counter_uuids(),
+        );
+        assert!(
+            matches!(accepted.outcome, LayerLoadOutcome::Loaded(_)),
+            "the active root's anchors are visible to its child layer: {:?}",
+            accepted.outcome
+        );
+    }
+
+    #[test]
+    fn composition_refusal_happens_before_named_entity_uuid_minting() {
+        use std::cell::Cell;
+
+        const BROKEN: &str = r#"
+[global]
+seed = 1
+
+[[entity]]
+template_path = "assets/entities/ship_harrow_destroyer.toml"
+name = "must_not_receive_a_uuid"
+
+[script]
+setup = """
+fn wave(ctx) {
+    ctx.effects.spawn_entity(#{ template_path: "assets/entities/missing.toml" });
+}
+"""
+"#;
+        let templates = crate::world::load::MemoryTemplateLoader::authoritative_empty();
+        let fragments = std::collections::HashMap::<String, String>::new();
+        let validation = LayerValidationContext::new(&templates, &fragments, Vec::new());
+        let minted = Cell::new(0usize);
+
+        let result = evaluate_layer_load(
+            "worlds/broken.toml",
+            false,
+            Some(BROKEN),
+            &crate::world::script::load::NoSiblingScripts,
+            &validation,
+            || {
+                minted.set(minted.get() + 1);
+                format!("uuid-{}", minted.get())
+            },
+        );
+
+        assert!(matches!(result.outcome, LayerLoadOutcome::ParseFailed));
+        assert_eq!(
+            minted.get(),
+            0,
+            "composition rejection must precede every named-entity UUID mint"
         );
     }
 

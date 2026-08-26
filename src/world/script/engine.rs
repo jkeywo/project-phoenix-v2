@@ -284,6 +284,122 @@ impl RuntimeHost {
         &self.engine
     }
 
+    /// Root-world compatibility wrapper for [`Self::call_scoped`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn call(
+        &self,
+        budget: &mut TickBudget,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        extra: Map,
+    ) -> CallEffects {
+        self.call_scoped(
+            budget,
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            None,
+            extra,
+        )
+    }
+
+    /// Root-world compatibility wrapper for [`Self::try_call_scoped`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_call(
+        &self,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        extra: Map,
+    ) -> Result<(CallEffects, u64), vellum_script::CallError> {
+        self.try_call_scoped(
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            None,
+            extra,
+        )
+    }
+
+    /// Root-world compatibility wrapper for [`Self::call_dialogue_scoped`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn call_dialogue(
+        &self,
+        budget: &mut TickBudget,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        extra: Map,
+    ) -> Option<(CallEffects, rhai::Dynamic)> {
+        self.call_dialogue_scoped(
+            budget,
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            None,
+            extra,
+        )
+    }
+
+    /// Root-world compatibility wrapper for [`Self::try_call_returning_scoped`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_call_returning(
+        &self,
+        clock: &SchedClock,
+        ast: &AST,
+        path: &str,
+        fn_name: &str,
+        flag_chain: &[FlagStore],
+        base_deadlines: &DeadlineTable,
+        base_commitments: &CommitmentLedger,
+        base_evidence: &EvidenceLog,
+        extra: Map,
+    ) -> Result<(CallEffects, rhai::Dynamic, u64), vellum_script::CallError> {
+        self.try_call_returning_scoped(
+            clock,
+            ast,
+            path,
+            fn_name,
+            flag_chain,
+            base_deadlines,
+            base_commitments,
+            base_evidence,
+            None,
+            extra,
+        )
+    }
+
     /// Run a retained function under a per-tick `budget`, returning its immediate
     /// effects and the deferred work it scheduled, stamped against `clock`.
     ///
@@ -307,7 +423,7 @@ impl RuntimeHost {
     /// continues. Callers that need to inspect the error use [`try_call`].
     ///
     /// [`try_call`]: RuntimeHost::try_call
-    pub fn call(
+    pub fn call_scoped(
         &self,
         budget: &mut TickBudget,
         clock: &SchedClock,
@@ -318,13 +434,14 @@ impl RuntimeHost {
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
         base_evidence: &EvidenceLog,
+        origin_layer: Option<&str>,
         extra: Map,
     ) -> CallEffects {
         if !budget.admit_call() {
             // Dropped: the call cap is reached or the tick has already tripped.
             return CallEffects::default();
         }
-        match self.try_call(
+        match self.try_call_scoped(
             clock,
             ast,
             path,
@@ -333,6 +450,7 @@ impl RuntimeHost {
             base_deadlines,
             base_commitments,
             base_evidence,
+            origin_layer,
             extra,
         ) {
             Ok((effects, ops)) => {
@@ -370,7 +488,7 @@ impl RuntimeHost {
     /// [`try_call_returning`](RuntimeHost::try_call_returning), of which this is
     /// exactly the value-dropping form — one body, so the two entry points cannot
     /// drift in what they drain.
-    pub fn try_call(
+    pub fn try_call_scoped(
         &self,
         clock: &SchedClock,
         ast: &AST,
@@ -380,9 +498,10 @@ impl RuntimeHost {
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
         base_evidence: &EvidenceLog,
+        origin_layer: Option<&str>,
         extra: Map,
     ) -> Result<(CallEffects, u64), vellum_script::CallError> {
-        self.try_call_returning(
+        self.try_call_returning_scoped(
             clock,
             ast,
             path,
@@ -391,6 +510,7 @@ impl RuntimeHost {
             base_deadlines,
             base_commitments,
             base_evidence,
+            origin_layer,
             extra,
         )
         .map(|(effects, _value, ops)| (effects, ops))
@@ -432,7 +552,7 @@ impl RuntimeHost {
     /// cannot disagree. (`tripped()` is NOT that predicate: the call that reaches
     /// the call cap is refused and trips the budget in one step, so a `tripped()`
     /// pre-flight passes on a call that is about to be dropped.)
-    pub fn call_dialogue(
+    pub fn call_dialogue_scoped(
         &self,
         budget: &mut TickBudget,
         clock: &SchedClock,
@@ -443,13 +563,14 @@ impl RuntimeHost {
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
         base_evidence: &EvidenceLog,
+        origin_layer: Option<&str>,
         extra: Map,
     ) -> Option<(CallEffects, rhai::Dynamic)> {
         if !budget.admit_call() {
             // Dropped: the call cap is reached or the tick has already tripped.
             return None;
         }
-        match self.try_call_returning(
+        match self.try_call_returning_scoped(
             clock,
             ast,
             path,
@@ -458,6 +579,7 @@ impl RuntimeHost {
             base_deadlines,
             base_commitments,
             base_evidence,
+            origin_layer,
             extra,
         ) {
             Ok((effects, value, ops)) => {
@@ -493,7 +615,7 @@ impl RuntimeHost {
     /// the schedule sink is drained against `clock` like every other call, so a
     /// dialogue fn's deferred work is kept; and on error both buffers are dropped
     /// whole, never returned.
-    pub fn try_call_returning(
+    pub fn try_call_returning_scoped(
         &self,
         clock: &SchedClock,
         ast: &AST,
@@ -503,6 +625,7 @@ impl RuntimeHost {
         base_deadlines: &DeadlineTable,
         base_commitments: &CommitmentLedger,
         base_evidence: &EvidenceLog,
+        origin_layer: Option<&str>,
         extra: Map,
     ) -> Result<(CallEffects, rhai::Dynamic, u64), vellum_script::CallError> {
         let sink = EffectSink::new();
@@ -513,7 +636,8 @@ impl RuntimeHost {
         // Measured against the SAME clock a deferred effect is stamped with, so
         // `ctx.deadlines.remaining(…)` and `ctx.schedule.after(n, …)` agree about
         // what "now" is (issue #1024).
-        let deadlines = Deadlines::new(base_deadlines, clock.tick, clock.tick_hz);
+        let deadlines =
+            Deadlines::with_origin(base_deadlines, clock.tick, clock.tick_hz, origin_layer);
         // Shares the SAME sink as `flags` (issue #1029): a resolution's campaign
         // flag is an ordinary `MutateFlag`, emitted where the author put it
         // rather than appended after the call's other work.
@@ -548,8 +672,8 @@ impl RuntimeHost {
         // second buffer carries the call's comms opens, stamped with `path` here
         // at the host boundary just as the schedule drain stamps a callback's.
         let commands = sink.take();
-        let comms_opens = sink.take_opens(path);
-        let (delayed, callbacks) = schedule.drain(clock, path);
+        let comms_opens = sink.take_opens_scoped(path, origin_layer);
+        let (delayed, callbacks) = schedule.drain_scoped(clock, path, origin_layer);
         Ok((
             CallEffects {
                 commands,

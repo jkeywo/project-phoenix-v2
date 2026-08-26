@@ -1731,6 +1731,35 @@ fn a_scripted_destroy_chains_its_triggers_off_the_removal() {
         "the DEFERRED `in_seconds(2).destroy_entity` fires after the collapse it was \
          scheduled behind ({band_a_at:.2} s vs {gone_at:.2} s)"
     );
+
+    // Issue #1130: the headless report's canonical scenario projection carries
+    // every objective row and its terminal status. This is the production seam
+    // the balance sweep folds — no duplicate objective rollup on RunReport.
+    let report = build_report(&mut app, &args, 0.0);
+    let scenario = report
+        .scenario
+        .as_ref()
+        .expect("a loaded scripted world must project scenario state");
+    let objective_rows: Vec<_> = scenario
+        .objectives
+        .iter()
+        .map(|objective| {
+            (
+                objective.id.as_str(),
+                objective.mandatory,
+                objective.status.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        objective_rows,
+        vec![
+            ("obj-hold-skyhook", true, ObjectiveStatus::Failed),
+            ("obj-clear-band", false, ObjectiveStatus::Completed),
+        ],
+        "the report must preserve the full mandatory-first objective rollup with \
+         the statuses produced by the real scripted run"
+    );
 }
 
 /// Issue #839 wiring guard: the production player game-start spawn path
@@ -5150,11 +5179,20 @@ fn the_composed_player_cruiser_rings_its_target_and_breaks_off_to_bear_its_tubes
 /// a request on, and `requested == 0` was the deadlock's signature rather than
 /// the doctrine's.
 ///
-/// With the tubes firing again the hull orbits, carries loaded tubes while it
-/// does, and Channel 3 asks: 478 of 1180 ring ticks. So the control is back in
-/// its original shape — a request stood, the ring declined it — and it is
-/// asserted alongside the liveness reading (damage exchanged and a torpedo
-/// actually launched) that was added when the request count went away.
+/// With the tubes firing again the hull orbits and carries loaded tubes while
+/// it does. Channel 3 therefore asks in at least one of the two real samples,
+/// and the ring declines it. The control is asserted alongside the duel's
+/// liveness reading (damage exchanged and a torpedo actually launched) that was
+/// added when the request count went away.
+///
+/// The control is deliberately across the PAIR, not pinned to `probe_duel`.
+/// Issue #1045 corrected when that world's zero-delay scripted opponent is
+/// spawned; the resulting encounter no longer passes through the brief
+/// loaded-and-out-of-arc state, while `probe_aggressor` still does. Both samples
+/// use this same composed cruiser and both retain their own `overwritten == 0`
+/// assertion below. Requiring the pair to contain a real request keeps the test
+/// non-vacuous without making an incidental script-spawn phase part of #918's
+/// Helm contract.
 ///
 /// What has NOT changed, and is why the phaser family never appears in that
 /// count: at least one phaser bank is always `Ready` on the ring's beam line, so
@@ -5263,8 +5301,8 @@ fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
         duel.ticks
     );
 
-    // A STANDING REQUEST IS BACK, and it is what makes `overwritten == 0` below
-    // mean anything (issue #929).
+    // A STANDING REQUEST EXISTS IN THE PAIRED REAL RUNS, and it is what makes
+    // `overwritten == 0` below mean anything (issue #929).
     //
     // This assertion read `== 0` between the #896 freeze fix and #929, on the
     // reasoning that the hull's own torpedo-bearing leg claimed a loaded tube
@@ -5277,14 +5315,16 @@ fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
     // going untested here.
     //
     // With the tubes firing again the hull flies its ring, carries loaded tubes
-    // on it, and Channel 3 asks. So the request is now the CONTROL, in the shape
-    // the pre-#896 revision of this test used: a request stood, the ring
-    // declined it, and `overwritten == 0` is a real refusal rather than a
-    // description of an empty inbox. A `0` here again means either the tubes
-    // stopped being loaded on the ring or the hull went back to parking in the
-    // bow hold.
+    // on it, and Channel 3 asks in at least one sample. So the request is now
+    // the CONTROL, in the shape the pre-#896 revision of this test used: a
+    // request stood, the ring declined it, and `overwritten == 0` is a real
+    // refusal rather than a description of two empty inboxes. A `0` across BOTH
+    // samples means either the tubes stopped being loaded on the ring or the
+    // hull went back to parking in the bow hold.
     //
-    // RE-MEASURED TWICE across issue #929, and the trend is the point:
+    // RE-MEASURED TWICE across issue #929, and the historical trend is the
+    // point (these are `probe_duel` readings before #1045 corrected its
+    // zero-delay scripted spawn phase):
     //
     //   first pass  (gate off,  4 dmg/s, auto arcs 180)   478 of 1180 ring ticks
     //   second pass (gate on,  24 dmg/s, auto arcs 180)    81 of  675
@@ -5300,22 +5340,25 @@ fn the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request() {
     //
     // SO THE ASSERTION IS THE PROPERTY, NOT THE COUNT. What this control has to
     // establish is that `overwritten == 0` below is a REFUSAL rather than a
-    // description of an empty inbox, and ONE standing request makes it one. A
-    // numeric floor here has already been re-blessed downward twice inside a
-    // single issue — 100, then 40, and 36 would have taken it to 15 — which is the
-    // signature of a threshold measuring something this hull's TUNING moves rather
-    // than something the doctrine guarantees. The count stays in the failure
-    // message so a reader gets the magnitude; the bar is `> 0`, the smallest claim
-    // that keeps the refusal below non-vacuous and the largest one that does not
-    // have to move every time the guns do. If it ever does reach zero, the honest
-    // response is to re-point this control at a hull that still carries the
-    // loaded-and-unable-to-point state — not to lower a bar that is already on the
-    // floor.
+    // description of two empty inboxes, and ONE standing request across the
+    // paired samples makes it one. A numeric floor here has already been
+    // re-blessed downward twice inside a single issue — 100, then 40, and 36
+    // would have taken it to 15 — which is the signature of a threshold
+    // measuring something this hull's TUNING moves rather than something the
+    // doctrine guarantees. Both counts stay in the failure message so a reader
+    // gets the magnitude; the bar is `> 0`, the smallest claim that keeps the
+    // refusal below non-vacuous and the largest one that does not have to move
+    // every time the guns or scripted spawn phase do. If the pair ever reaches
+    // zero, the honest response is to re-point a sample at a hull that still
+    // carries the loaded-and-unable-to-point state — not to lower a bar already
+    // on the floor.
     assert!(
-        duel.requested > 0,
-        "the cruiser's Weapons never raised a standing arc-bearing request across          {} ring ticks, so `overwritten == 0` below is vacuous — there was nothing          to decline. Either the tubes are no longer loaded while the ring is flown,          or the hull is back to holding the bow-hold leg instead of orbiting          (issue #929). Last measured at 36 of 654; requested = {}",
+        duel.requested > 0 || aggressor.requested > 0,
+        "the cruiser's Weapons never raised a standing arc-bearing request across          either real ring sample, so `overwritten == 0` below is vacuous — there was          nothing to decline. Either the tubes are no longer loaded while the ring is          flown, or the hull is back to holding the bow-hold leg instead of orbiting          (issue #929). Duel: {} requests / {} ring ticks; aggressor: {} / {}",
+        duel.requested,
         duel.ticks,
-        duel.requested
+        aggressor.requested,
+        aggressor.ticks
     );
 
     // The `duel` floor was re-blessed from 300 to 250 at issue #907 (observed:

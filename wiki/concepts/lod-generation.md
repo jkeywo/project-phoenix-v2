@@ -2,8 +2,8 @@
 title: LOD Generation
 type: concept
 tags: [tooling, assets, models, rendering, ci]
-sources: [scripts/generate-lods.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/viewer-lods.test.js]
-updated: 2026-08-25
+sources: [scripts/generate-lods.mjs, scripts/capture-billboards.mjs, scripts/viewer-lods.mjs, scripts/dev-viewer.mjs, scripts/blender-voxel-remesh.py, scripts/lod-manifest.toml, scripts/lod-capture-manifest.toml, src/entities/config.rs, src/entities/model_rig.rs, src/perf/assets.rs, src/perf/mesh.rs, tests/client/generate-lods.test.js, tests/client/capture-billboards.test.js, tests/client/viewer-lods.test.js]
+updated: 2026-08-26
 ---
 
 # LOD Generation
@@ -80,6 +80,21 @@ for reasons that are not drift. The recorded `output_bytes` is asserted against
 has one measurement and two readers. Triangle and texture budgets belong to
 issue #905. Both performance inventories exclude checked-in `.remesh.glb`
 intermediates: they are generator inputs, not files the runtime can select.
+
+Billboard PNGs have a parallel but separate contract. Every `[[lod]]` level
+with `[lod.capture]` is recorded in `scripts/lod-capture-manifest.toml` with its
+source/output hashes and byte size, authored yaw-view/resolution/pitch recipe,
+capture-recipe version, every declaring sidecar, and the canonical `[base]`
+transform the native renderer applies. That base is taken from the capture
+source's `.model.toml`, or is explicit identity when no such sidecar exists;
+variant billboard scales are not part of the shared atlas recipe.
+
+`npm run lod-captures:check` re-hashes and checks PNG dimensions without a GPU
+or capture binary. `node scripts/capture-billboards.mjs --adopt <model>` records
+an already-reviewed committed PNG, while the default command performs a real
+recapture and forwards all three authored parameters to the renderer. A
+successful capture from the model viewer refreshes the same manifest record,
+so browser and batch authoring cannot leave different provenance behind.
 
 The mesh-interior pass follows the runtime graph from top-level entity
 templates into the selected model+variant sidecar. It loads every GLB named by

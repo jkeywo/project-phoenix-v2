@@ -17,6 +17,22 @@ fn collect(mut reader: MessageReader<OutboundMessage>, mut box_: ResMut<Outbox>)
 
 pub(crate) fn comms_test_app() -> App {
     let mut app = App::new();
+    // Mirror production's total fixed-tick order. In particular, the layer
+    // applier lives in Physics while response retirement + routing live in
+    // Input; tests must not manufacture a direct edge that production lacks.
+    app.configure_sets(
+        FixedUpdate,
+        (
+            crate::sim_sets::SimSet::Input,
+            crate::sim_sets::SimSet::Physics,
+            crate::sim_sets::SimSet::Damage,
+            crate::sim_sets::SimSet::Modifiers,
+            crate::sim_sets::SimSet::Publish,
+            crate::sim_sets::SimSet::PublishAggregate,
+            crate::sim_sets::SimSet::Broadcast,
+        )
+            .chain(),
+    );
     // The Comms AI hosts read `AiHostEnv` (issue #1207); a fixture that runs
     // one must register its bare-`Res` context or panic at schedule build.
     crate::ai::host::register_ai_host_env(&mut app);
@@ -33,13 +49,14 @@ pub(crate) fn comms_test_app() -> App {
         .add_systems(
             FixedUpdate,
             (
-                handle_hail,
-                handle_respond_to_message,
-                handle_clear_comms,
-                handle_comms_channel2,
-                update_comms_range_flags,
-                broadcast_comms_state,
-                broadcast_objective_summary,
+                retire_dialogues_for_pending_layer_unloads.in_set(crate::sim_sets::SimSet::Input),
+                handle_hail.in_set(crate::sim_sets::SimSet::Input),
+                handle_respond_to_message.in_set(crate::sim_sets::SimSet::Input),
+                handle_clear_comms.in_set(crate::sim_sets::SimSet::Input),
+                handle_comms_channel2.in_set(crate::sim_sets::SimSet::Broadcast),
+                update_comms_range_flags.in_set(crate::sim_sets::SimSet::Broadcast),
+                broadcast_comms_state.in_set(crate::sim_sets::SimSet::Broadcast),
+                broadcast_objective_summary.in_set(crate::sim_sets::SimSet::Broadcast),
             )
                 .chain()
                 .after(crate::server_app::AdmissionSet),
@@ -1094,8 +1111,8 @@ fn ship_despawn_mid_game_keeps_gates_closed() {
 fn scenario_hail_arrives_in_inbox_via_channel2() {
     let mut app = ai_trigger_test_app();
 
-    app.world_mut().write_message(CommsChannel2Event {
-        message: CommsMessage::injected(
+    app.world_mut()
+        .write_message(CommsChannel2Event::generic(CommsMessage::injected(
             "msg-ch2".into(),
             "outpost-uuid-ch2".into(),
             "Outpost Alpha".into(),
@@ -1105,8 +1122,7 @@ fn scenario_hail_arrives_in_inbox_via_channel2() {
             "thread-ch2".into(),
             true,
             false,
-        ),
-    });
+        )));
 
     app.update();
 
@@ -1150,8 +1166,8 @@ fn channel2_injection_never_auto_responds_for_ai_comms() {
         ));
     }
 
-    app.world_mut().write_message(CommsChannel2Event {
-        message: CommsMessage::injected(
+    app.world_mut()
+        .write_message(CommsChannel2Event::generic(CommsMessage::injected(
             "msg-ai-ch2".into(),
             "sector-hq-uuid".into(),
             "sector_hq".into(),
@@ -1165,8 +1181,7 @@ fn channel2_injection_never_auto_responds_for_ai_comms() {
             "thread-ai-ch2".into(),
             true,
             false,
-        ),
-    });
+        )));
 
     app.update();
 

@@ -1,0 +1,35 @@
+# Falling Skyway Backfill baseline (issue #1130, parent #1129).
+#
+# Exact run:
+#   npm run balance:falling-skyway
+#     = cargo build --release --features headless --bin phoenix-headless
+#       && node scripts/balance-runs.mjs scripts/balance-runs.falling-skyway.toml --out .balance-out
+#
+# This is a recorded diagnostic sweep, not a CI gate. It measures whether the
+# fully Backfilled player ship completes the scenario's WHOLE mandatory
+# objective set, independently of victory/defeat classification. Keep the fixed
+# seeds so later scenario and AI changes compare run-for-run.
+
+seeds       = [1, 2, 3, 4, 5]
+sim_seconds = 520
+hz          = 30
+world       = "assets/worlds/falling_skyway.toml"
+
+# A short player-hull alias resolves through the scenario-sweep convention to
+# assets/entities/alliance_destroyer.toml and is passed as --ship. The scenario
+# itself supplies every NPC; no --side-a/--side-b duel transform is applied.
+scenario_hulls = ["destroyer"]
+
+[thresholds]
+max_failures = 0
+
+# BASELINE RECORDED ON #1130:
+#   seeds 1..5, 520 simulated seconds, 30 Hz
+#   0/5 full mandatory-set completions (0%)
+#   every seed reported all 18 mandatory objectives, with 9 Completed and the
+#   other 9 not Completed at the cutoff.
+#
+# This 0% result is the regression floor #1129 starts from, not an acceptable
+# final balance target. #1131 retunes the scenario clock next; later slices
+# improve the authored scenario and Backfill behaviour against this fixed
+# evidence. Do not move the seeds or shorten the run to manufacture movement.

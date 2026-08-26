@@ -1,0 +1,13 @@
+[global]
+sim_tick_hz = 60
+
+[script]
+setup = '''
+on_world_loaded("nested_child_arrived");
+
+fn nested_child_arrived(ctx) {
+    ctx.flags.increment("child_arrived", 1);
+    ctx.flags.increment("parent:child_seen", 1);
+    ctx.flags.increment("parent:parent:nested_seen_at_root", 1);
+}
+'''

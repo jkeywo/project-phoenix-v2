@@ -19,6 +19,7 @@ raw
 .understand-anything
 .sandcastle
 .scratch
+.worktrees/
 
 node_modules
 

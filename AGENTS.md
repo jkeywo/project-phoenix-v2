@@ -57,6 +57,7 @@ cargo test                                     # CI: test job, step 3
 npx vitest run                                 # CI: editor-test job (tests/client/*.test.js)
 node scripts/check-strings.mjs --strict        # CI: editor-test job
 npm run lods:check                             # CI: editor-test job (LOD drift)
+npm run lod-captures:check                     # CI: editor-test job (billboard capture drift)
 uv run pasm validate                           # CI: pasm job, gates on the spec model
 uv run pasm scan                               # CI: pasm job, gating (scan: gate)
 uv run pasm traceability                       # CI: pasm job, report (still exits nonzero on error)
@@ -137,6 +138,15 @@ node scripts/generate-lods.mjs --plan
 #   A level with no remesh_voxel_size that regenerates LARGER than its
 #   recorded baseline (a stubborn mesh) fails the run instead of just
 #   warning; fix it with the Blender voxel pre-pass above, not --force.
+
+# Billboard LOD capture provenance (issue #1245). Recapture is a local GPU
+# operation; the check/adopt paths only hash committed inputs and PNGs and do
+# not need the native binary. Capture parameters come from `[lod.capture]`.
+node scripts/capture-billboards.mjs alliance_cruiser
+npm run lod-captures:check
+node scripts/capture-billboards.mjs --adopt alliance_cruiser
+#   `--adopt` deliberately records a reviewed existing PNG; it is not the fix
+#   for unexplained drift. Commit the PNG, sidecar and capture manifest together.
 
 # Model / shader viewer — one model, real render path, switchable lighting.
 # Use this to iterate on how things LOOK instead of booting a whole scenario.
@@ -238,7 +248,7 @@ git diff perf/baselines
 #   test         cargo fmt --check ; cargo clippy --all-targets --all-features
 #                -D warnings ; cargo test
 #   editor-test  npx vitest run ; node scripts/check-strings.mjs --strict ;
-#                npm run lods:check
+#                npm run lods:check ; npm run lod-captures:check
 #   build        TRUNK_BUILD_RELEASE=true trunk build --release ;
 #                node scripts/build-client.mjs
 #   smoke        npx playwright test (against the built dist/)

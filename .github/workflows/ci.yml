@@ -371,6 +371,13 @@ jobs:
       - name: Check generated LODs are current
         run: npm run lods:check
 
+      # The generated-GLB manifest above intentionally knows nothing about
+      # `[lod.capture]` PNGs. This separate gate re-hashes each authored source
+      # and atlas, compares capture parameters plus the source model's canonical
+      # `[base]`, and checks atlas dimensions. It never runs the GPU renderer.
+      - name: Check billboard LOD captures are current
+        run: npm run lod-captures:check
+
       # Guards the committed mod-pack fixture archives against silent drift
       # (issue #986): re-derives each store-only .zip from its source dir in
       # memory and byte-compares to the committed archive, the same way

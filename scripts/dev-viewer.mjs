@@ -32,6 +32,7 @@ import { stat, readdir, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
+import { refreshCaptureManifest } from './capture-billboards.mjs';
 
 import {
   modelStem,
@@ -478,6 +479,11 @@ async function handleApi(req, res, url) {
       source: `assets/models/${stem}.glb`,
     });
     if (!result.ok) return json(res, 400, result);
+    // Refresh only this successful capture. The helper preserves unrelated
+    // declared atlases and prunes records against the complete sidecar set.
+    // Errors reach the API catch below, so the panel cannot claim success for
+    // a capture whose provenance CI would reject.
+    await refreshCaptureManifest(ROOT, [atlas]);
     return json(res, 200, { ...result, atlas, state: await ladderState(stem, variantOf(url, body)) });
   }
 

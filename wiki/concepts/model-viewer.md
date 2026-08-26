@@ -2,8 +2,8 @@
 title: Model Viewer
 type: concept
 tags: [tooling, rendering, shaders, wasm, trunk]
-sources: [viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
-updated: 2026-08-11
+sources: [viewer.html, viewer-trunk.toml, start-viewer.bat, scripts/dev-viewer.mjs, scripts/capture-billboards.mjs, scripts/generate-entity-index.mjs, scripts/stitch-planet-textures.mjs, scripts/viewer-lods.mjs, scripts/lod-capture-manifest.toml, assets/planets/, assets/shaders/planet_surface.wgsl, assets/shaders/planet_clouds.wgsl, src/viewer/, src/render_setup.rs, src/entities/glb_visual.rs, src/entities/celestial_visual.rs, src/entities/mesh_stats.rs]
+updated: 2026-08-26
 ---
 
 # Model Viewer
@@ -88,6 +88,12 @@ the tree untouched.
 same ratios and texture sizes, switch distances scaled by the extents ratio. It
 lands in the editor as a proposal to check, not a saved file — the precedent
 lives in the sidecars rather than in a table inside the tool.
+
+Capturing a far-level billboard writes the PNG and `[lod.capture]` declaration,
+then refreshes that output's record in `scripts/lod-capture-manifest.toml`.
+Manifest failures are returned to the panel as capture errors; a green result
+therefore means the browser-authored atlas is also ready for the CI currency
+check, not merely that the PNG reached disk.
 
 ## Render parity is structural, not copied
 

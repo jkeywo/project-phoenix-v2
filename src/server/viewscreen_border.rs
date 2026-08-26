@@ -29,7 +29,7 @@ use rand::Rng;
 use crate::console_bridge::{HudStateChanged, LobbyStateChanged};
 use crate::core::codec;
 use crate::core::messages::{
-    GamePhase, LobbyStatePayload, ServerMessage, StationPayload, ViewscreenHudState,
+    GamePhase, LobbyStatePayload, Player, ServerMessage, StationPayload, ViewscreenHudState,
 };
 use crate::lobby::stations_config::ShipStations;
 use crate::lobby::{CountdownTimer, OutboundMessage, Sessions, WorldResource};
@@ -303,24 +303,8 @@ pub(crate) fn push_lobby_state(
     };
 
     let players = sessions.0.players();
-    let roster_size = stations.stations.len() as u32;
-
-    let mut station_payloads: Vec<StationPayload> = Vec::new();
+    let roster = claimable_lobby_roster(&stations, players);
     let mut spectators: Vec<String> = Vec::new();
-
-    for def in &stations.stations {
-        let holder = players
-            .iter()
-            .find(|p| p.connected && p.station.as_ref() == Some(&def.id));
-        station_payloads.push(StationPayload {
-            name: def.name.clone(),
-            short_code: def.short_code.clone(),
-            rank: def.rank.clone(),
-            holder_name: holder.map(|p| p.name.clone()),
-            is_mine: false,
-            preset_names: vec![],
-        });
-    }
 
     // Spectators (issue #1105) are the participants who hold the explicit
     // Spectator role — a real session role now, not the connected-and-stationless
@@ -329,9 +313,6 @@ pub(crate) fn push_lobby_state(
     for p in players.iter().filter(|p| p.connected && p.spectator) {
         spectators.push(p.name.clone());
     }
-
-    let all_filled =
-        !stations.stations.is_empty() && station_payloads.iter().all(|s| s.holder_name.is_some());
 
     let scenario_title = world_resource
         .as_ref()
@@ -359,14 +340,11 @@ pub(crate) fn push_lobby_state(
         phase: format!("{:?}", phase.get()),
         scenario_title,
         scenario_body,
-        crew_count: station_payloads
-            .iter()
-            .filter(|s| s.holder_name.is_some())
-            .count() as u32,
-        max_players: roster_size,
-        all_stations_filled: all_filled,
+        crew_count: roster.crew_count,
+        max_players: roster.max_players,
+        all_stations_filled: roster.all_filled,
         all_ready,
-        stations: station_payloads,
+        stations: roster.stations,
         spectators,
         loading_progress,
         countdown_secs,
@@ -374,6 +352,47 @@ pub(crate) fn push_lobby_state(
 
     if let Ok(json) = codec::encode_lobby_state(&payload) {
         writer.write(LobbyStateChanged { json });
+    }
+}
+
+/// Build the host viewscreen lobby roster from claimable bridge seats only.
+/// Auxiliary Stations remain mounted for visiting placement, but they are not
+/// seats and therefore must not affect cards or any counts derived from them.
+struct ClaimableLobbyRoster {
+    stations: Vec<StationPayload>,
+    crew_count: u32,
+    max_players: u32,
+    all_filled: bool,
+}
+
+fn claimable_lobby_roster(stations: &ShipStations, players: &[Player]) -> ClaimableLobbyRoster {
+    let station_payloads: Vec<_> = stations
+        .stations
+        .iter()
+        .filter(|def| !def.auxiliary)
+        .map(|def| {
+            let holder = players
+                .iter()
+                .find(|p| p.connected && p.station.as_ref() == Some(&def.id));
+            StationPayload {
+                name: def.name.clone(),
+                short_code: def.short_code.clone(),
+                rank: def.rank.clone(),
+                holder_name: holder.map(|p| p.name.clone()),
+                is_mine: false,
+                preset_names: vec![],
+            }
+        })
+        .collect();
+    let crew_count = station_payloads
+        .iter()
+        .filter(|station| station.holder_name.is_some())
+        .count() as u32;
+    ClaimableLobbyRoster {
+        max_players: station_payloads.len() as u32,
+        all_filled: !station_payloads.is_empty() && crew_count == station_payloads.len() as u32,
+        stations: station_payloads,
+        crew_count,
     }
 }
 
@@ -758,6 +777,80 @@ fn push_hud_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_lobby_roster_excludes_auxiliary_stations() {
+        use crate::core::messages::StationId;
+        use crate::lobby::stations_config::StationDef;
+
+        let station = |id: &str, name: &str, auxiliary: bool| StationDef {
+            id: StationId(id.into()),
+            name: name.into(),
+            description: String::new(),
+            rank: String::new(),
+            short_code: name.chars().take(3).collect(),
+            console: None,
+            ratings: vec!["Std".into()],
+            human_seeking: auxiliary,
+            host_order: vec![],
+            visiting_rating: auxiliary.then(|| "Std".into()),
+            auxiliary,
+        };
+        let stations = ShipStations {
+            stations: vec![
+                station("captain", "Captain", false),
+                station("command", "Command", true),
+            ],
+        };
+        let players = vec![
+            Player {
+                token: "captain-token".into(),
+                name: "Ada".into(),
+                connected: true,
+                ready: true,
+                station: Some(StationId("captain".into())),
+                last_rating: None,
+                spectator: false,
+                afk: false,
+            },
+            Player {
+                token: "auxiliary-token".into(),
+                name: "Grace".into(),
+                connected: true,
+                ready: false,
+                station: Some(StationId("command".into())),
+                last_rating: None,
+                spectator: false,
+                afk: false,
+            },
+        ];
+
+        let roster = claimable_lobby_roster(&stations, &players);
+
+        assert_eq!(
+            roster.stations.len(),
+            1,
+            "only the claimable seat becomes a card"
+        );
+        assert_eq!(roster.stations[0].name, "Captain");
+        assert_eq!(roster.stations[0].holder_name.as_deref(), Some("Ada"));
+        assert!(roster
+            .stations
+            .iter()
+            .all(|payload| payload.name != "Command"));
+        assert_eq!(
+            roster.max_players, 1,
+            "auxiliary Stations are not lobby slots"
+        );
+        assert_eq!(
+            roster.crew_count, 1,
+            "crew counts only claimable held seats"
+        );
+        assert!(
+            roster.all_filled,
+            "an empty auxiliary Station cannot block filled state"
+        );
+    }
 
     // ── reduced motion: shake_magnitude (issue #1173) ────────────────
 

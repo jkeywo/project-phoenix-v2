@@ -2,8 +2,8 @@
 title: Server HTML Lobby UI
 type: concept
 tags: [lobby, server, html, ui, bridge, responsive]
-sources: [server.html, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs]
-updated: 2026-06-08
+sources: [server.html, gui/host-lobby-view.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs]
+updated: 2026-08-26
 ---
 
 # Server HTML Lobby UI
@@ -14,10 +14,10 @@ The host page is the only consumer of this push channel: each viewer of `server.
 
 ## Push path (Rust → DOM)
 
-1. **Bevy producer.** `push_lobby_state` in `src/server/viewscreen_border.rs:330` builds a `LobbyStatePayload`, encodes it via `core::codec::encode_lobby_state`, and writes a `LobbyStateChanged` event whenever the lobby state has actually changed (it dedupes by hashing the payload).
+1. **Bevy producer.** `push_lobby_state` in `src/server/viewscreen_border.rs` builds a `LobbyStatePayload`, encodes it via `core::codec::encode_lobby_state`, and writes a `LobbyStateChanged` event. Its station roster contains claimable (`auxiliary = false`) seats only; auxiliary mounted Stations never become cards or affect counts.
 2. **WASM bridge drain.** `flush_host_channels` in `src/server/bridge.rs` drains those events on every tick and invokes the single registered host-channel callback with `("lobby", json)` (#818).
 3. **JS callback registration.** `set_host_channel_callback(window.__hostChannel)` is invoked once in `server.html` when WASM is ready; the dispatcher's handlers table routes `"lobby"` payloads to `window.__updateLobby`.
-4. **DOM mutation.** `window.__updateLobby` (`server.html:756` onward) parses the JSON and rewrites `#lobby-title`, `#lobby-subtitle`, `#lobby-crew-count`, `#lobby-crew-dots`, `#lobby-spectator-tag`, `#lobby-ready-badge`, `#station-grid`, `#reserved-aggregate`, `#lobby-spectator-list`, and `#lobby-status-hint`.
+4. **View model and DOM mutation.** `gui/host-lobby-view.js` derives the render model; `window.__updateLobby` in `server.html` applies it to the lobby DOM.
 
 This is a **one-way state-push channel** that runs in parallel to the regular [Message Flow](./message-flow.md) (which targets specific peers via PeerJS). Lobby state is broadcast-equivalent: only the host's own DOM consumes it.
 
@@ -30,15 +30,15 @@ This is a **one-way state-push channel** that runs in parallel to the regular [M
 | `phase` | `GamePhase` | Only `Lobby` makes the panel visible. |
 | `scenario_title` | `String` | Header big text. |
 | `scenario_body` | `String` | Header subtitle. |
-| `crew_count` | `usize` | Currently filled stations. |
-| `max_players` | `usize` | Maximum supported by the active ship/station preset. |
-| `stations` | `Vec<StationPayload>` | One entry per active station (1–6). |
-| `spectators` | `Vec<String>` | Names waiting in queue. |
+| `crew_count` | `u32` | Currently filled claimable Stations. |
+| `max_players` | `u32` | Number of claimable seats on the active ship. |
+| `stations` | `Vec<StationPayload>` | One entry per claimable, non-auxiliary station. |
+| `spectators` | `Vec<String>` | Names holding the explicit Spectator role. |
 | `all_stations_filled` | `bool` | Flips ready badge to `READY TO LAUNCH`. |
 
-`StationPayload`: `name`, `short_code`, `rank`, `holder_name?`, `consoles: Vec<String>`, `preset_names: Vec<String>`.
+`StationPayload`: `name`, `short_code`, `rank`, `holder_name?`, `is_mine`, `preset_names`.
 
-The JS hard-codes `MAX_SLOTS = 6`. When `stations.length < MAX_SLOTS`, the JS still emits one `.station-card.empty.per-slot` per missing slot (so that wide layouts retain a 6-cell visual) and additionally activates the aggregate chip (so compact layouts can collapse to a single line).
+The grid is sized directly from the claimable roster. It creates no padding or reserved placeholder cards.
 
 ## DOM contract
 
@@ -56,9 +56,7 @@ The JS hard-codes `MAX_SLOTS = 6`. When `stations.length < MAX_SLOTS`, the JS st
     └── .lobby-body                             /* row in landscape, col compact */
         ├── .lobby-grid-column
         │   ├── #station-grid.lobby-grid        /* auto-fit minmax(220, 360)     */
-        │   │   ├── .station-card[.claimed]     /* 0–6 active station cards      */
-        │   │   └── .station-card.empty.per-slot /* 0–N reserved placeholders    */
-        │   └── #reserved-aggregate.reserved-aggregate[.active]
+        │   │   └── .station-card[.claimed]     /* one per claimable Station     */
         └── .lobby-rail                          /* aside; rail right or below   */
             ├── .lobby-rail-label
             ├── #lobby-spectator-list.lobby-rail-section
@@ -79,13 +77,11 @@ toggles **compact mode**, in which:
 
 - `.lobby-body` switches from `flex-direction: row` to `flex-direction: column` so `.lobby-rail` flows below `#station-grid`.
 - `.lobby-rail`'s left border becomes a top border; padding and direction flip; `#lobby-spectator-list` becomes a flex-wrap of pills.
-- `.lobby-grid .station-card.empty` is hidden (`display: none`).
-- `.reserved-aggregate.active` is shown (`display: block`).
-- The aggregate chip text is `↻ N station slot(s) reserved (max 6)`.
+- Claimable Station cards reflow without adding placeholders.
 
-In wide mode the aggregate chip is `display: none` and the per-slot empties are visible — preserving the 3×2 (or up to 6×1 ultrawide) look.
+Wide mode uses the same claimable cards in an adaptive multi-column grid.
 
-A scroll fallback (`overflow-y: auto` on `#station-grid`) handles extreme cases where 6 cards × min-height won't fit even after reflow.
+A scroll fallback (`overflow-y: auto` on `#station-grid`) handles rosters that do not fit after reflow.
 
 ## Rust — what stays in `viewscreen_border.rs`
 
@@ -104,15 +100,15 @@ The Bevy lobby UI tree (`LobbyScreenRoot`, `LobbyGridRoot`, `LobbyStationCard`, 
 
 Smoke coverage in `tests/smoke/lobby-responsive.spec.js`:
 
-- Portrait viewport (480×900): aggregate chip visible, per-slot empties hidden, rail below grid, no horizontal body scroll, spectator pills rendered.
-- Landscape viewport (1280×720): per-slot empties visible, aggregate hidden, rail right of grid, multi-column grid.
+- Portrait viewport (480×900): rail below the claimable-station grid, no horizontal body scroll, and spectator pills rendered.
+- Landscape viewport (1280×720): rail right of the claimable-station grid with multiple card columns.
 
 Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.js` (`SelectStation`, `StartGame`, captain authority, etc.). Those tests do not touch the DOM.
 
 ## Sources
 
 - `server.html`
-- `src/server/viewscreen_border.rs:330` — `push_lobby_state`
+- `src/server/viewscreen_border.rs` — `push_lobby_state`
 - `src/server/bridge.rs` — `set_host_channel_callback`, `flush_host_channels` (named Host Channel table, #818)
 - `src/console_bridge.rs` — `LobbyStateChanged` event
 - `src/core/messages.rs` — `LobbyStatePayload` / `StationPayload`

@@ -20,8 +20,8 @@ it('pins the direct Station first and keeps visitors in hull order', () => {
     stationRatings: { helm: 'Detailed' }, activeStation: 'comms',
   });
   expect(model.tabs.map(tab => tab.id)).toEqual(['helm', 'navigation', 'comms']);
-  expect(model.tabs[0]).toMatchObject({ mode: 'direct', rating: 'Detailed' });
-  expect(model.tabs[1]).toMatchObject({ mode: 'visiting', rating: 'Floor' });
+  expect(model.tabs[0]).toMatchObject({ rating: 'Detailed' });
+  expect(model.tabs[1]).toMatchObject({ rating: 'Floor' });
   expect(model.selected).toBe('comms');
 });
 
@@ -55,8 +55,8 @@ it('hosts a generic Power Station on Repair without a family blackboard', () => 
     activeStation: 'power',
   });
   expect(model.tabs).toEqual([
-    expect.objectContaining({ id: 'repair', mode: 'direct' }),
-    expect.objectContaining({ id: 'power', mode: 'visiting', rating: 'Std' }),
+    expect.objectContaining({ id: 'repair' }),
+    expect.objectContaining({ id: 'power', rating: 'Std' }),
   ]);
   expect(model.ownership.power).toBe('visiting');
 });
@@ -126,21 +126,21 @@ it('sources per-tab importance from the host map, held apart from health', () =>
 
 function heroDom() {
   const dom = new JSDOM(
-    '<div id="tabs"></div><div id="title"></div><div id="meta"></div><div id="ai"></div><div id="health"></div>',
+    '<div id="tabs"></div><div id="title"></div><div id="rating"></div><div id="ai"></div>',
     { url: 'https://phoenix.test/' },
   );
   const byId = id => dom.window.document.getElementById(id);
   return {
     dom,
     elements: {
-      tabsEl: byId('tabs'), titleEl: byId('title'), metaEl: byId('meta'),
-      aiEl: byId('ai'), healthEl: byId('health'),
+      tabsEl: byId('tabs'), titleEl: byId('title'), ratingEl: byId('rating'),
+      aiEl: byId('ai'),
     },
   };
 }
 
 function translate(id, values = {}) {
-  if (id === 'client.hero.meta') return `${values.owner} / ${values.rating}`;
+  if (id === 'client.hero.rating') return `Rating: ${values.rating}`;
   if (id === 'client.hero.ai_status') return `AI: ${values.stations}`;
   if (id === 'client.hero.health.readout') return `Hull ${values.pct}%`;
   if (id === 'client.hero.health.none') return 'No damage model';
@@ -185,7 +185,7 @@ it('preserves the focused tab node across routine state renders', () => {
   expect(dom.window.document.activeElement).toBe(focused);
 });
 
-it('shows a persistent per-tab health cue that survives an importance alert', () => {
+it('renders accessible per-tab progress bars that survive an importance alert', () => {
   const { elements } = heroDom();
   const build = () => heroBarModel({
     directStation: 'helm', stations,
@@ -198,19 +198,24 @@ it('shows a persistent per-tab health cue that survives an importance alert', ()
   });
   renderHeroBarDom({ ...elements, model: build(), translate, onActivate: vi.fn() });
 
-  // Every tab carries a non-colour health cue and a legible state token.
-  const cueOf = id => elements.tabsEl
+  const barOf = id => elements.tabsEl
     .querySelector(`[data-station="${id}"] .station-tab-health`);
-  expect(cueOf('helm').textContent).toBe('damaged');
-  expect(cueOf('navigation').textContent).toBe('healthy');
-  expect(cueOf('comms').textContent).toBe('none');
+  const fillOf = id => barOf(id).querySelector('.station-tab-health-fill');
+  const labelOf = id => barOf(id).querySelector('.station-tab-health-label');
+  expect(fillOf('helm').style.width).toBe('40%');
+  expect(fillOf('helm').style.getPropertyValue('--station-health-pct')).toBe('40%');
+  expect(fillOf('helm').style.getPropertyValue('--station-health-loss-pct')).toBe('60%');
+  expect(fillOf('navigation').style.width).toBe('100%');
+  expect(fillOf('comms').hidden).toBe(true);
+  expect(labelOf('helm').textContent).toBe('Hull 40%');
+  expect(labelOf('navigation').textContent).toBe('Hull 100%');
+  expect(labelOf('comms').textContent).toBe('No damage model');
   for (const id of ['helm', 'navigation', 'comms']) {
     expect(elements.tabsEl.querySelector(`[data-station="${id}"]`).dataset.health)
       .toBeTruthy();
   }
-  // Selected-Station readout comes from the host figure (40%).
-  expect(elements.healthEl.textContent).toBe('Hull 40%');
-  expect(elements.healthEl.dataset.health).toBe('damaged');
+  expect(elements.tabsEl.querySelector('.station-tab-owner')).toBeNull();
+  expect(elements.ratingEl.textContent).toBe('');
 
   // An importance alert painted elsewhere on the tab must not hide the cue.
   const helmTab = elements.tabsEl.querySelector('[data-station="helm"]');
@@ -223,7 +228,28 @@ it('shows a persistent per-tab health cue that survives an importance alert', ()
 
   expect(helmTab.dataset.alert).toBe('true');
   expect(helmTab.querySelector('.tab-alert')).not.toBeNull();
-  expect(cueOf('helm').textContent).toBe('damaged');
+  expect(fillOf('helm').style.width).toBe('40%');
+});
+
+it('keeps a red endpoint at zero health and shows rating without ownership text', () => {
+  const { elements } = heroDom();
+  const model = heroBarModel({
+    directStation: 'helm', stations,
+    stationHealth: { helm: 0 },
+    stationRatings: { helm: 'Detailed' }, activeStation: 'helm',
+  });
+
+  renderHeroBarDom({ ...elements, model, translate, onActivate: vi.fn() });
+
+  const tab = elements.tabsEl.querySelector('[data-station="helm"]');
+  const fill = tab.querySelector('.station-tab-health-fill');
+  expect(fill.style.width).toBe('2px');
+  expect(fill.style.getPropertyValue('--station-health-pct')).toBe('0%');
+  expect(fill.style.getPropertyValue('--station-health-loss-pct')).toBe('100%');
+  expect(tab.dataset.healthValue).toBe('0');
+  expect(tab.querySelector('.station-tab-health-label').textContent).toBe('Hull 0%');
+  expect(elements.ratingEl.textContent).toBe('Rating: Detailed');
+  expect(tab.querySelector('.station-tab-owner')).toBeNull();
 });
 
 it('renders a persistent per-tab importance cue on every tab, coexisting with health', () => {
@@ -309,7 +335,7 @@ it('reports the visited Station id to onActivate (the StationVisited contract)',
   expect(onActivate).toHaveBeenCalledWith('navigation');
 });
 
-it('renders the neutral no-damage-model readout for a Station with no damage', () => {
+it('renders a neutral empty track for a Station with no damage model', () => {
   const { elements } = heroDom();
   const model = heroBarModel({
     directStation: 'comms', stations,
@@ -318,8 +344,11 @@ it('renders the neutral no-damage-model readout for a Station with no damage', (
     stationRatings: {}, activeStation: 'comms',
   });
   renderHeroBarDom({ ...elements, model, translate, onActivate: vi.fn() });
-  expect(elements.healthEl.textContent).toBe('No damage model');
-  expect(elements.healthEl.dataset.health).toBe('none');
+  const tab = elements.tabsEl.querySelector('[data-station="comms"]');
+  expect(tab.dataset.health).toBe('none');
+  expect(tab.dataset.healthValue).toBe('none');
+  expect(tab.querySelector('.station-tab-health-fill').hidden).toBe(true);
+  expect(tab.querySelector('.station-tab-health-label').textContent).toBe('No damage model');
 });
 
 it('renders AI ownership as visible live status without making an AI tab', () => {

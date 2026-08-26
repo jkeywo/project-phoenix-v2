@@ -59,9 +59,13 @@ Each console UI is one HTML file per ship class (`gui/battleship/helm.html`, `gu
 
 `client.html` owns one shared Hero Bar above those iframes. It switches whole
 mounted Station surfaces, so visiting Navigation or Comms uses the same normal
-Navigation/Comms iframe as a direct holder. The bar states Direct/Visiting
-ownership in text as well as styling and exposes ARIA tabs with Arrow/Home/End
-focus movement; a departed visitor returns selection to the direct Station.
+Navigation/Comms iframe as a direct holder. The shell does not expose placement
+as Direct/Visiting text: it shows the selected Station and rating, AI-only
+outcomes, a thin authoritative health bar on every tab, and separate importance
+cues. In landscape it becomes a vertical strip on the left, with upright tab
+buttons and sideways selected-Station metadata. It exposes ARIA tabs with
+Arrow/Home/End focus movement; a departed visitor returns selection to the
+direct Station.
 The destroyer's bespoke Nav/Comms overlay toggles (`gui/visiting-systems.js`)
 are retired — issues #1097 and #1098 moved both onto this shared path, and
 only Tactical's unrelated Intel toggle still uses the generic overlay pattern

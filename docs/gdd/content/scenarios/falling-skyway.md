@@ -5,7 +5,7 @@
 | Document | GDD-CONTENT-FALLING-SKYWAY |
 | Status | Implemented authored scenario; balance and recommended crew remain TBD |
 | Owner | Unassigned |
-| Last updated | 2026-08-18 |
+| Last updated | 2026-08-26 |
 | Scope | Premise, acts, actors, systems, choices, outcomes, and authoring contract for Falling Skyway |
 | Authority | `assets/worlds/falling_skyway.toml` and referenced templates are content truth. |
 
@@ -20,7 +20,7 @@ Detailed mechanics: [Sensors and Epistemics](../../mechanics/sensors-epistemics.
 | Attribute | Design |
 |---|---|
 | Form | Multi-act operational crisis / intended campaign episode |
-| Expected length | 30–60 minutes in the overview target; authored critical window currently reaches 470 seconds and needs tuning against play |
+| Expected length | Ratified 20–30 minute design envelope; the allocation window closes at 1800 seconds and ending facts land 26 seconds later |
 | Recommended crew | TBD by playtest |
 | Possible crew | 0–4 on the currently offered Alliance Destroyer |
 | Offered ship | Alliance Destroyer only |
@@ -61,7 +61,7 @@ The actors are simulation entities with position, route, comms, damage, faction,
 
 ### Act I — Arrival, strike, and survey
 
-The crew arrives to an already unstable system. Visible deadlines at 40 seconds and 90 seconds put the tether slip and survey requirement immediately on the bridge. The crew can hail actors, inspect the depots, begin scans, position for operations, and choose whether to engage the labour dispute through negotiation or force.
+The crew arrives to an already unstable system. Visible deadlines at 160 seconds and 360 seconds put the tether slip and survey requirement on the bridge throughout the opening era. The crew can hail actors, inspect the depots, begin scans, position for operations, and choose whether to engage the labour dispute through negotiation or force.
 
 The design purpose is to distribute first tasks quickly: Captain and Comms establish claims; Science/Sensors gather the condition and record picture; Helm and Navigation orient to the corridor and infrastructure; Engineering prepares power and external operations; Tactical decides whether an armed picket is a target, a deterrent, or an actor to hold at risk.
 
@@ -69,7 +69,7 @@ Depot Ladder B’s structural reading and filed record can disagree. Scanning, o
 
 ### Act II — Storm and physical crisis
 
-The storm front is due at 100 seconds, with bands at 145, 185, and 225 seconds and passage recorded at 268 seconds. Lyra Ascending’s clear deadline falls at 192 seconds. The storm changes the physical and operational problem while civilian traffic remains in motion.
+The storm front is due at 400 seconds, with bands at 580, 740, and 900 seconds and passage recorded at 1072 seconds. Lyra Ascending’s clear deadline falls at 768 seconds. The storm changes the physical and operational problem while civilian traffic remains in motion.
 
 The crew may need to order traffic, open or hold the lane, shelter vessels, rescue or tow Lyra, recover lost objects, and stabilise the skyhook. Operations take time, range, power, and capability; beginning one is a commitment of ship position and crew attention. Traffic destruction and missed recovery opportunities are recorded rather than erased when the act advances.
 
@@ -77,7 +77,7 @@ The skyhook has several load-bearing facts. If condition and stabilisation do no
 
 ### Act III — Allocation and consequences
 
-After the storm, the transfer window opens at 400 seconds and closes at 470 seconds. Three claimant groups make requests against two berths and insufficient total capacity. The crew can make, keep, or break earlier commitments, confront actors with evidence, and decide who receives lift/transfer access.
+After the storm, the skyhook’s projected failure falls at 1528 seconds, then the transfer window opens at 1600 seconds and closes at 1800 seconds. Three claimant groups make requests against two berths and insufficient total capacity. The crew can make, keep, or break earlier commitments, confront actors with evidence, and decide who receives lift/transfer access.
 
 The decision is not a detached dialogue menu. Infrastructure capacity, claimant presence, prior promises, strike settlement, evidence, casualties, and the surviving corridor constrain what can be offered and how actors respond. The scenario resolves the berth choices and promises, then writes campaign-facing facts describing passage, labour outcome, evidence, casualties, structure, and commitments.
 
@@ -85,19 +85,19 @@ The decision is not a detached dialogue menu. Infrastructure capacity, claimant 
 
 | Deadline | Due | Design function |
 |---|---:|---|
-| `tether_slip` | 40s | Immediate physical warning |
-| `skyway_survey_due` | 90s | Forces early investigation |
-| `storm_front_due` | 100s | Opens the environmental crisis |
-| `storm_band_one_due` | 145s | Storm escalation |
-| `storm_band_two_due` | 185s | Storm escalation |
-| `lyra_clear_due` | 192s | Rescue urgency |
-| `storm_band_three_due` | 225s | Final storm escalation |
-| `storm_passed_due` | 268s | Opens post-storm resolution work |
-| `skyhook_failure_due` | 382s | Structural recovery/failure horizon |
-| `skyway_transfer_window` | 400s | Opens final allocation |
-| `skyway_window_closes` | 470s | Ends the available decision window |
+| `tether_slip` | 160s | Immediate physical warning |
+| `skyway_survey_due` | 360s | Forces early investigation |
+| `storm_front_due` | 400s | Opens the environmental crisis |
+| `storm_band_one_due` | 580s | Storm escalation |
+| `storm_band_two_due` | 740s | Storm escalation |
+| `lyra_clear_due` | 768s | Rescue urgency |
+| `storm_band_three_due` | 900s | Final storm escalation |
+| `storm_passed_due` | 1072s | Opens post-storm resolution work |
+| `skyhook_failure_due` | 1528s | Structural recovery/failure horizon |
+| `skyway_transfer_window` | 1600s | Opens final allocation |
+| `skyway_window_closes` | 1800s | Ends the available decision window |
 
-These values are implemented content, not yet ratified pacing. The first two are intentionally short in the authored file, but the whole sequence must be tested with real console navigation, dialogue reading, reconnects, and small-crew Backfill before the recommended player count or expected duration is final.
+These values are implemented current design and place every deadline once inside the three PASM intensity eras. Human playtests must still test console navigation, dialogue reading, reconnects, and small-crew Backfill before the recommended player count is final.
 
 ## Core system interactions
 
@@ -146,7 +146,7 @@ disposition = 25
 [[deadline]]
 id = "storm_front_due"
 label = "world.falling_skyway.deadline.storm_front.label"
-due_secs = 100
+due_secs = 400
 visible = true
 
 [script]
@@ -176,13 +176,13 @@ A “victory” may therefore be operationally successful while carrying politic
 ## Playtest questions
 
 - What recommended crew size lets players read the crisis without either idling or drowning in simultaneous information?
-- Can a first-time crew identify an actionable opening before the 40-second tether deadline?
+- Can a first-time crew identify an actionable opening before the 160-second tether deadline?
 - Are scans, records, and corroboration understood as different evidence rather than repeated flavour text?
 - Do traffic and infrastructure feel physically present through movement, capacity, and operations?
 - Do players understand that total demand exceeds supply before making final promises?
 - Are negotiation, restraint, disablement, and force all legible options without implying equal consequences?
 - Does each act acknowledge prior choices, and can players explain the final outcome dimensions?
-- Are the current 470 seconds an enjoyable crisis window once real reading and coordination time is included?
+- Are the 200 seconds between the 1600-second opening and 1800-second close enough for the allocation scene’s reading and coordination?
 
 ## Success measures
 
@@ -195,7 +195,7 @@ A “victory” may therefore be operationally successful while carrying politic
 
 ## Open content decisions
 
-- Recommended player count, final duration, deadline spacing, and dialogue reading allowance are TBD.
+- Recommended player count and dialogue reading allowance remain TBD; the authored deadline spacing now needs human validation rather than another provisional clock.
 - Final prose, voice, faction terminology, and setting consistency need a Thin Margin editorial pass.
 - Other Alliance hulls are not currently offered and would require operational-capability and pacing validation.
 - The exact win/defeat framing and debrief presentation need consolidation with the lifecycle document.

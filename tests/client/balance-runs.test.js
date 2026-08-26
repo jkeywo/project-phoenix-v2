@@ -147,12 +147,12 @@ describe('buildRunArgs', () => {
       world: 'assets/worlds/falling_skyway.toml',
       scenario_hulls: ['destroyer'],
     });
-    const [task] = buildRunTasks({ seeds: [7], sim_seconds: 520, hz: 30 }, matchups);
+    const [task] = buildRunTasks({ seeds: [7], sim_seconds: 1850, hz: 30 }, matchups);
     expect(buildRunArgs(task)).toEqual([
       '--world', 'assets/worlds/falling_skyway.toml',
       '--ship', 'assets/entities/alliance_destroyer.toml',
       '--seed', '7',
-      '--sim-seconds', '520',
+      '--sim-seconds', '1850',
       '--hz', '30',
       '--report-format', 'json',
     ]);

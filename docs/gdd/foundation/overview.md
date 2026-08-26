@@ -24,7 +24,7 @@ Related documents: [Game and Session Lifecycle](./game-lifecycle.md), [Campaign 
 | Session model | One host-authoritative simulation with local or remote players connected as crew |
 | Possible players | 0 through the selected ship's authored maximum; unclaimed stations operate through Backfill AI |
 | Recommended players | Authored per scenario and, where needed, per ship. Combat Test: 2–4. Falling Skyway: to be determined. |
-| Typical length | Scenario-dependent. The design boundary is a 30–90 minute mission; the current Combat Test is shorter and Falling Skyway targets 30–60 minutes. |
+| Typical length | Scenario-dependent. The broader design boundary is 30–90 minutes; Combat Test is shorter, while Falling Skyway uses a ratified 20–30 minute crisis envelope with its allocation close at 30 minutes. |
 | Current content | Combat Test, an escalating defence scenario; Falling Skyway, an operational crisis with traffic, infrastructure, negotiation, evidence, deadlines, and consequences |
 | Long-term structure | A growing catalogue of authored missions, followed by campaign continuity and a generated Patrol Mode |
 | Commercial model and release targets | Deliberately deferred |

@@ -7744,6 +7744,22 @@ fn the_dossier_channel_carries_what_the_crew_know_and_not_what_they_do_not() {
 
 // ── Falling Skyway: the skeleton world and Act 1 (issue #1034, parent #852) ──
 
+const SKYWAY_WORLD: &str = "assets/worlds/falling_skyway.toml";
+
+/// Read one authored Falling Skyway deadline before an app exists, so tests
+/// can size their run budget from content without restating a tunable value.
+fn skyway_authored_deadline_secs(id: &str) -> i64 {
+    let toml = std::fs::read_to_string(SKYWAY_WORLD)
+        .expect("the shipped Falling Skyway world must be readable");
+    project_phoenix::world::config::parse_world(&toml)
+        .expect("the shipped Falling Skyway world must parse")
+        .deadlines
+        .iter()
+        .find(|deadline| deadline.id == id)
+        .unwrap_or_else(|| panic!("the world authors the '{id}' deadline"))
+        .due_secs
+}
+
 /// The four civilian craft `falling_skyway.toml` puts on lanes at mission start.
 const SKYWAY_TRAFFIC: [&str; 4] = [
     "world.falling_skyway.entity.convoy_meridian.name",
@@ -7807,9 +7823,10 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
     const SKYHOOK: &str = "world.falling_skyway.entity.skyhook.name";
 
     let dt = 1.0 / 30.0;
-    let sim_seconds = 100.0;
+    let authored_due = skyway_authored_deadline_secs("skyway_survey_due");
+    let sim_seconds = authored_due as f64 + 10.0;
     let args = HeadlessArgs {
-        world_path: "assets/worlds/falling_skyway.toml".into(),
+        world_path: SKYWAY_WORLD.into(),
         // The mission's authored hull, and the one its six stations are the
         // small-crew set of.
         ship_path: "assets/entities/alliance_destroyer.toml".into(),
@@ -7821,16 +7838,8 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
     };
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
 
-    // AC1 precondition: the act's own clock fits inside this run. Read from the
-    // authored config rather than restated here.
-    let authored_due: i64 = app
-        .world()
-        .resource::<WorldConfig>()
-        .deadlines
-        .iter()
-        .find(|d| d.id == "skyway_survey_due")
-        .expect("the world authors the act-boundary deadline")
-        .due_secs;
+    // AC1 precondition: the file-backed act clock sized the run before the app
+    // was constructed, with ten seconds left for the boundary's effects.
     assert!(
         (authored_due as f64) < sim_seconds - 5.0,
         "Act 1 closes at t={authored_due} s, which this {sim_seconds} s run does not \
@@ -8806,11 +8815,13 @@ const SKYWAY_DT: f64 = 1.0 / 30.0;
 fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
     use project_phoenix::world::server::WorldContentRuntime;
 
+    let survey_due = skyway_authored_deadline_secs("skyway_survey_due") as f64;
+    let run_budget = survey_due + 10.0;
     let args = HeadlessArgs {
-        world_path: "assets/worlds/falling_skyway.toml".into(),
+        world_path: SKYWAY_WORLD.into(),
         ship_path: "assets/entities/alliance_destroyer.toml".into(),
         dt: SKYWAY_DT,
-        max_ticks: ticks_for_sim_seconds(300.0, SKYWAY_DT),
+        max_ticks: ticks_for_sim_seconds(run_budget, SKYWAY_DT),
         deterministic: true,
         seed: Some(42),
         ..test_args()
@@ -8831,7 +8842,7 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
     // `havelock_offer`: the player hull's config comes from the lobby selection
     // wholesale, so an override on the `player-ship` row is discarded.
     // Stepped far enough for the game to start and the hull to spawn first; the
-    // threads this matters for do not open until the act boundary, 90 s away.
+    // threads this matters for do not open until the authored act boundary.
     run(&mut app, 10);
     let ship = app
         .world_mut()
@@ -8843,9 +8854,9 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
         .entity_mut(ship)
         .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
 
-    // The survey falls due at an authored 90 s; the limit is generous so the
-    // tuning pass (#1044) can lengthen the act without touching this test.
-    let limit = ticks_for_sim_seconds(150.0, SKYWAY_DT);
+    // The file-backed survey deadline sized this limit before app construction;
+    // the margin is only for the boundary's effects to cross the schedule.
+    let limit = ticks_for_sim_seconds(run_budget, SKYWAY_DT);
     for _ in 0..limit {
         run(&mut app, 1);
         if skyway_flag(&app, "act") == 2 {
@@ -8859,7 +8870,7 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
     );
     let _ = std::any::type_name::<WorldContentRuntime>();
 
-    skyway_move(&mut app, ship, bevy::prelude::Vec3::new(900.0, 0.0, 40.0));
+    skyway_move(&mut app, ship, CHOICE_LADDER);
     // Two ticks for the comms range pass to see the new position, so a pick is
     // never refused by a stale range flag.
     run(&mut app, 2);
@@ -9588,7 +9599,6 @@ fn a_storm_band_is_survivable_to_cross_and_fatal_to_live_in() {
 
 // ── Falling Skyway, Act 2: the storm and the rescue (issue #1037) ────────────
 
-const SKYWAY_WORLD: &str = "assets/worlds/falling_skyway.toml";
 const SKYWAY_LYRA: &str = "world.falling_skyway.entity.lyra_ascending.name";
 /// The three craft the sweep schedule actually moves. `shuttle_wick` works the
 /// depot ladder east of the corridor and is deliberately left alone.
@@ -11639,10 +11649,10 @@ fn skyway_dispatch_repair(app: &mut bevy::prelude::App, ship: bevy::prelude::Ent
 
 /// The floor crossing the world's authored strain rate reaches, derived from the
 /// projection deadline rather than restated: `falling_skyway.toml`'s Act-3 band
-/// authors `skyhook_failure_due` four seconds past it and says so. The tuning
-/// pass (#1044) moves the deadline and this follows it.
+/// authors `skyhook_failure_due` sixteen seconds past it and says so. A later
+/// authored retune therefore moves this test's expected crossing with it.
 fn skyway_projected_floor(app: &bevy::prelude::App) -> f64 {
-    skyway_deadline_secs(app, "skyhook_failure_due") as f64 - 4.0
+    skyway_deadline_secs(app, "skyhook_failure_due") as f64 - 16.0
 }
 
 /// **Issue #1040, AC1/AC2/AC4/AC5/AC6/AC7.** Act 3 driven end to end with nobody
@@ -11917,7 +11927,7 @@ fn falling_skyway_act_3_warns_three_times_then_the_head_falls_into_a_playable_ep
 /// fires, not at a time this test knows.
 ///
 /// The save is now the crew coupling the head and holding it: the tractor's
-/// arrest-decline (#1158) recovers the head's condition NET of the 0.2 pt/s
+/// arrest-decline (#1158) recovers the head's condition NET of the 0.05 pt/s
 /// strain, and the recovered condition crossing the top rung's 42 % restore line
 /// IS the save landing — the same reading the old lump-payout stabilise left
 /// behind. What the margin measures is unchanged: how much room the last warning
@@ -11982,10 +11992,10 @@ fn falling_skyway_act_3_a_crew_who_react_to_the_last_warning_save_the_head() {
     // ── AC3: the margin, measured rather than asserted ──
     let slack = floor - done;
     assert!(
-        slack >= 10.0,
+        slack >= 80.0,
         "the final warning window must leave real room: the order went in at {ordered:.1} s, \
          the work landed at {done:.1} s, and the head would have crossed its floor at \
-         {floor:.1} s — {slack:.1} s of margin, against the 12 the world file records"
+         {floor:.1} s — {slack:.1} s of margin, against the roughly 90 the world file records"
     );
     assert!(
         named_entity_present(&mut app, SKYWAY_HEAD),
@@ -12615,19 +12625,18 @@ fn window_field_repair(
 /// Hold the head up until the tether's projection has fallen due, then leave the
 /// ship on station (issue #1165 S11b).
 ///
-/// The strain #1040 authors walks the head down 2 points every 10 seconds for as
+/// The strain #1040 authors walks the head down 0.5 points every 10 seconds for as
 /// long as the watch is open, and it opens the moment the storm clears. The crew
 /// keep it certified with a repair-team DISPATCH to the spine (#1161, the
 /// field-repair beat) rather than the tractor: a skyhook head is a fixed
 /// structure, and a dispatched team raises its OWN condition track IN PLACE,
 /// where the tractor's arrest-decline would haul the head onto the destroyer's
-/// rig — a crew do not park a station head alongside their own hull for two
-/// minutes. The team's authored rate outpaces the 0.2 pt/s strain, so one
+/// rig — a crew do not park a station head alongside their own hull for nearly
+/// eight minutes. The team's authored rate outpaces the 0.05 pt/s strain, so one
 /// dispatch held to the projection carries the head back over its lift line and
 /// keeps it there — the crew who never stopped watching. (The Act-3 collapse
-/// SAVE, by contrast, is the fast tractor stabilise: it has to cross the top rung
-/// inside the last warning's twelve-second window, which the slower dispatch
-/// could not.)
+/// SAVE, by contrast, exercises the fast tractor stabilise from the last
+/// warning itself rather than this long-horizon certification path.)
 fn window_hold_the_tether(
     app: &mut bevy::prelude::App,
     ship: bevy::prelude::Entity,
@@ -13465,10 +13474,12 @@ fn probe_window_prices_four_chains_and_stands_down_what_it_cannot_finish() {
 /// The civilian convoy's lead hauler — the third claimant, and the only one that
 /// has to be flown to the conversation.
 const SKYWAY_CONVOY: &str = "world.falling_skyway.entity.convoy_meridian.name";
-/// The ladder transit leg. Where all three claimants are inside the smaller of
-/// their comms range and the destroyer's, which is why the choice objective
-/// carries a Reach directive to it.
-const CHOICE_LADDER: bevy::prelude::Vec3 = bevy::prelude::Vec3::new(900.0, 0.0, 40.0);
+/// A standoff beside the ladder transit leg. It is 19.2 units from the authored
+/// Reach anchor, inside the destroyer's 20-unit arrival radius and every
+/// claimant's comms range, but clear of both live `ladder_run` segments. Tests
+/// pin the destroyer here instead of teleporting it onto a civilian waypoint
+/// for the whole transfer window.
+const CHOICE_LADDER: bevy::prelude::Vec3 = bevy::prelude::Vec3::new(888.0, 0.0, 55.0);
 
 /// Step the mission to `secs`, holding the hull on `station` the whole way.
 ///

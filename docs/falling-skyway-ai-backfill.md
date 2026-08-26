@@ -8,6 +8,14 @@ objectives are out of its reach?*
 [ai] This document is AI-origin (produced by the survey agent). It cites the
 authored state as it stands, and flags every unratified number it leans on.
 
+> **Historical timing note (pre-#1131).** The audit findings and measured
+> timelines below were recorded against the original 40–470 second scenario
+> clock and are preserved as that baseline. Issue #1131 subsequently authored
+> the 160/360/400/580/740/768/900/1072/1528/1600 schedule, ratified the window
+> close at 1800 seconds, and slowed tether strain to 0.5 points per ten-second
+> beat (an unattended structural floor around t=1512). Treat older times below
+> as measurements of the pre-retune build, not current design.
+
 ## Method
 
 - Read the three AI fragments the Alliance Destroyer composes:
@@ -296,15 +304,17 @@ Idle crew fails these loudly across all acts.
   **auto-resolves when it posts** — the full 25-minute schedule stays on stage;
   early work relieves pressure rather than shortening the mission.
 
-### Clock — ×4 the times, 25 minutes of content
+### Clock — pre-#1131 proposal and ratified close
 
-Multiply **all** scenario clocks by 4: `tether_slip` 40→**160**, `survey_due`
+The pre-#1131 proposal was to multiply **all** scenario clocks by 4:
+`tether_slip` 40→**160**, `survey_due`
 90→**360**, `storm_front` 100→**400**, bands 145/185/225→**580/740/900**,
 `lyra_clear` 192→**768**, `storm_passed` 268→**1072**, `transfer_window`
 400→**1600**, `window_closes` 470→**1880**, `skyhook_failure` 382→**1528**.
-Fixed `schedule.after` beats (2-30 s) stay unscaled — they are real work beats,
-not clocks. The act boundary stretches to ~t=180 for the tour (spawn→B→A→head ≈
-2244 u ≈ 125 s at 18 u/s fits inside it).
+Issue #1131 ratified that schedule with the close brought inside the PASM envelope at
+**1800**, not 1880. Fixed `schedule.after` beats (2-30 s) stayed unscaled — they
+are real work beats, not clocks. The live Act-I boundary is t=360, giving the
+tour (spawn→B→A→head ≈ 2244 u ≈ 125 s at 18 u/s fits inside it).
 
 ### Threads — interleaved, each on its own trigger
 
@@ -336,7 +346,7 @@ pickup on the **Control comms channel that resolves the objective itself**
 (the seam `put_the_file` already reuses, `:4345-4396`). All three scans gate the
 report pickup (`can_file`-style). Any scan band works (`alliance_destroyer.toml:527-552`
 — detailed or coarse); a scan raising `scan.<id>.taken` fires `on_flag_set`.
-Stretch the act boundary to ~t=180 for the tour.
+The live Act-I boundary is t=360 for the tour.
 
 ### The AI surface (the verb batch, scoped separately)
 

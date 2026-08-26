@@ -7,11 +7,12 @@
 #
 # This is a recorded diagnostic sweep, not a CI gate. It measures whether the
 # fully Backfilled player ship completes the scenario's WHOLE mandatory
-# objective set, independently of victory/defeat classification. Keep the fixed
-# seeds so later scenario and AI changes compare run-for-run.
+# objective set, independently of victory/defeat classification. The current
+# 1850-second sweep crosses the ratified t=1800 window close and its 26-second
+# ending delay. Keep the fixed seeds so later changes compare run-for-run.
 
 seeds       = [1, 2, 3, 4, 5]
-sim_seconds = 520
+sim_seconds = 1850
 hz          = 30
 world       = "assets/worlds/falling_skyway.toml"
 
@@ -29,7 +30,8 @@ max_failures = 0
 #   every seed reported all 18 mandatory objectives, with 9 Completed and the
 #   other 9 not Completed at the cutoff.
 #
-# This 0% result is the regression floor #1129 starts from, not an acceptable
-# final balance target. #1131 retunes the scenario clock next; later slices
-# improve the authored scenario and Backfill behaviour against this fixed
-# evidence. Do not move the seeds or shorten the run to manufacture movement.
+# This pre-#1131 0% result is the regression floor #1129 starts from, not an
+# acceptable final balance target. #1131 retuned the scenario clock and moved
+# the standing sweep to the whole-mission 1850-second budget; later slices
+# improve scenario and Backfill behaviour against the preserved evidence. Do
+# not move the seeds or shorten the run to manufacture movement.

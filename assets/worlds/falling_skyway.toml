@@ -8,8 +8,8 @@
 # (#1037), the scan-versus-dossier evidence (#1038), the worker who corroborates
 # it (#1039), the restraint lever (#1041), the collapse and its epilogue (#1040),
 # the transfer window itself (#1042) and the choice all of them were built for
-# (#1043) have landed. The mission is authored whole; what is left is the tuning
-# pass (#1044).
+# (#1043) have landed. The mission is authored whole, and #1131's pacing pass
+# now carries it across the ratified 20-30 minute envelope.
 #
 # ── The place ────────────────────────────────────────────────────────────────
 #
@@ -54,18 +54,17 @@
 #
 # Two named deadlines, both visible on the captain's countdown:
 #
-#   t=40 s  `tether_slip`        the head loses six condition points. 48 → 42
+#   t=160 s `tether_slip`        the head loses six condition points. 48 → 42
 #                                takes it under its authored 45 % lift line, the
 #                                `skyhook_lift_capable` flag falls, and the
 #                                triage priority names itself.
-#   t=90 s  `skyway_survey_due`  Control wants the assessment. Whatever the crew
+#   t=360 s `skyway_survey_due`  Control wants the assessment. Whatever the crew
 #                                have by then is what they send, the act closes,
 #                                and Act 2 opens.
 #
-# Act 1 is short on purpose. The act boundary is authored DATA — two `due_secs`
-# numbers — so the tuning pass (#1044) lengthens the act by editing them and
-# nothing in Rust or in the headless test knows the difference: the test derives
-# its run length from the authored deadline rather than from a hardcoded span.
+# Act 1 owns the opening six minutes. The act boundary is authored DATA — two
+# `due_secs` numbers — and nothing in Rust or in the headless test restates its
+# span: the test derives its run length from the authored deadline.
 #
 # ── Act 1's three objectives, and how each one resolves ──────────────────────
 #
@@ -990,9 +989,9 @@ workforce = "skyway_workers"
 # line) by the one system that owns the flag edges, so `on_head_stands_down`
 # fires exactly as it did off the old lump payout and the scenario's DETECTION is
 # unchanged. The head's decline is a SCRIPTED beat (`tether_strain`, not
-# `decay_per_sec`), so the recovery runs NET of the 0.2 pt/s strain: two points a
-# second is 1.8 net, carrying it from the third warning's 24 over the 42 line in
-# about ten seconds — inside the twelve-plus-second window the last warning
+# `decay_per_sec`), so the recovery runs NET of the 0.05 pt/s strain: two points
+# a second is 1.95 net, carrying it from the third warning's 24.5 over the 42
+# line in about ten seconds — inside the 100-second window the last warning
 # leaves. The moment it crosses, `on_head_stands_down` stands the watch down and
 # the strain stops, so one hold saves it outright.
 # [ai] Unratified — the tuning surface of the save margin.
@@ -1390,13 +1389,13 @@ overrides = { comms = { hailable = true }, infrastructure = { publish = false, c
 [[deadline]]
 id = "tether_slip"
 label = "world.falling_skyway.deadline.tether_slip.label"
-due_secs = 40
+due_secs = 160
 visible = true
 
 [[deadline]]
 id = "skyway_survey_due"
 label = "world.falling_skyway.deadline.skyway_survey_due.label"
-due_secs = 90
+due_secs = 360
 visible = true
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1424,23 +1423,22 @@ visible = true
 #
 # ── The sweep's clock, and why the traffic goes first ────────────────────────
 #
-#   t=100  storm_front_due     Control's forecast. The corridor is cleared and
+#   t=400  storm_front_due     Control's forecast. The corridor is cleared and
 #                              the Lyra's situation becomes the crew's problem.
-#   t=145  storm_band_one_due  the first band, over the north corridor. Retires
-#                              at t=185, forty seconds later.
-#   t=185  storm_band_two_due  the second, over the upper gate. Retires t=225.
-#   t=192  lyra_clear_due      THE RESCUE'S CLOCK. She is under control by now
+#   t=580  storm_band_one_due  the first band, over the north corridor. Retires
+#                              at t=620, forty seconds later.
+#   t=740  storm_band_two_due  the second, over the upper gate. Retires t=780.
+#   t=768  lyra_clear_due      THE RESCUE'S CLOCK. She is under control by now
 #                              or the band has her.
-#   t=225  storm_band_three_due  the third, over the head. Retires t=265.
-#   t=268  storm_passed_due    the corridor is clear. Traffic goes back on the
+#   t=900  storm_band_three_due  the third, over the head. Retires t=940.
+#   t=1072 storm_passed_due    the corridor is clear. Traffic goes back on the
 #                              lane and the act closes.
 #
-# FORTY-FIVE SECONDS of warning before the first band, which is not generosity —
-# it is arithmetic. A bulk hauler makes twelve units a second and needs about
-# thirty-five of them to get clear of the lane once its own authored
-# acknowledge-and-decide delay has run. A shorter forecast would put craft in
-# bands however well the crew handled it, and "the traffic died because the
-# schedule was wrong" is not a decision anybody made.
+# THREE MINUTES of warning before the first band includes the human work the
+# headless arithmetic cannot price: reading the forecast, agreeing an order and
+# finding the control. A bulk hauler makes twelve units a second and needs about
+# thirty-five of them to get clear once its unchanged authored
+# acknowledge-and-decide delay has run. The rest is crew decision time.
 #
 # ── The rescue, and the two numbers that make it a real decision ─────────────
 #
@@ -1571,37 +1569,37 @@ recover_per_sec = 2.0
 [[deadline]]
 id = "storm_front_due"
 label = "world.falling_skyway.deadline.storm_front.label"
-due_secs = 100
+due_secs = 400
 visible = true
 
 [[deadline]]
 id = "storm_band_one_due"
 label = "world.falling_skyway.deadline.storm_band_one.label"
-due_secs = 145
+due_secs = 580
 visible = true
 
 [[deadline]]
 id = "storm_band_two_due"
 label = "world.falling_skyway.deadline.storm_band_two.label"
-due_secs = 185
+due_secs = 740
 visible = true
 
 [[deadline]]
 id = "lyra_clear_due"
 label = "world.falling_skyway.deadline.lyra_clear.label"
-due_secs = 192
+due_secs = 768
 visible = true
 
 [[deadline]]
 id = "storm_band_three_due"
 label = "world.falling_skyway.deadline.storm_band_three.label"
-due_secs = 225
+due_secs = 900
 visible = true
 
 [[deadline]]
 id = "storm_passed_due"
 label = "world.falling_skyway.deadline.storm_passed.label"
-due_secs = 268
+due_secs = 1072
 visible = true
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1619,37 +1617,37 @@ visible = true
 #
 # THE STRAIN. The storm has passed and the corridor is working again, which means
 # the head is carrying traffic on a ribbon that has been slipping since before
-# the crew arrived. That load costs it [2] condition points every [10] seconds,
+# the crew arrived. That load costs it [0.5] condition points every [10] seconds,
 # for as long as the tether watch is open — a scripted beat that re-arms itself,
 # NOT the template's `decay_per_sec`, which the skyhook deliberately does not
 # author (its own header says why: decay ticks from world load and would charge
 # the mission for the lobby).
 #
-# So the rate is a point every five seconds — 0.2 points a second — and every
-# number below is derived from it rather than guessed.
+# This averages 0.05 points a second. The run is deterministic because each
+# applied half-point slice is exactly representable and re-arms on fixed ticks;
+# every number below is derived from that schedule rather than guessed.
 #
 # ── The warning ladder, and the window it buys ───────────────────────────────
 #
 # `skyhook.toml` authors five rungs; Act 3 crosses four of them. The head opens
 # the act on 42 points (48 on arrival, six spent by Act 1's `tether_slip`), so
-# the strain walks it down two points at a time through even numbers:
+# the strain walks it down half a point at a time:
 #
-#   t=268   the storm passes, the watch opens, and its first beat lands with it:
-#           the head is on 42 and goes straight to 40
-#   t=288   36 — under 37 %: `skyhook_load_bearing` falls       WARNING ONE
-#   t=318   30 — under 31 %: `skyhook_tether_tensioned` falls   WARNING TWO
-#   t=348   24 — under 25 %: `skyhook_station_holding` falls    WARNING THREE
-#   t=378   18 — under 20 %: `skyhook_tether_stable` falls      THE FLOOR
+#   t=1072  the storm passes, the watch opens, and its first beat lands with it:
+#           the head is on 42 and goes straight to 41.5
+#   t=1172  36.5 — under 37 %: `skyhook_load_bearing` falls     WARNING ONE
+#   t=1292  30.5 — under 31 %: `skyhook_tether_tensioned` falls WARNING TWO
+#   t=1412  24.5 — under 25 %: `skyhook_station_holding` falls  WARNING THREE
+#   t=1512  19.5 — under 20 %: `skyhook_tether_stable` falls    THE FLOOR
 #
 # Those are MEASURED times, off the headless trace, not predicted ones — the
 # threshold fires a frame behind the beat that crosses it, and the act's opening
 # beat lands on the same tick the watch opens.
 #
-# THIRTY SECONDS BETWEEN EVERY RUNG, including the last one and the floor, and
-# that is not a coincidence — it is six condition points and five, over 0.2
-# points a second, discretised by a ten-second beat. Three warnings, evenly
-# spaced, each louder than the last, and half a minute after the third one the
-# head comes apart.
+# The first two warning gaps are two minutes apiece: six condition points at
+# 0.05 points a second, discretised by a ten-second beat. The final rung is five
+# points above the floor and therefore leaves 100 seconds. Three warnings, each
+# louder than the last, and a real last chance before the head comes apart.
 #
 # ── THE SAVE MARGIN, derived rather than asserted ────────────────────────────
 #
@@ -1659,16 +1657,16 @@ visible = true
 # #1158, authored on the head's `[entity.overrides.held_response]` above), in
 # place of the retired `stabilise` operation (issue #1164). The arithmetic:
 #
-#   final warning window            30 s   (24 points → 18 points at 0.2 pt/s)
-#   tractor arrest-decline recovery ~10 s  (24 -> the 42 line, net of the strain)
+#   final warning window           100 s   (24.5 points → 19.5 at 0.05 pt/s)
+#   tractor arrest-decline recovery ~10 s  (24.5 -> the 42 line, net of strain)
 #   ────────────────────────────────────
-#   SLACK FOR GIVING THE ORDER      ~20 s
+#   SLACK FOR GIVING THE ORDER      ~90 s
 #
 # The recovery arrests the head's decline the moment the beam takes hold and
-# recovers it NET of the 0.2 pt/s strain, carrying it from the third warning's 24
-# back over the FIRST rung's 42 % restore line — and the moment it crosses, the
+# recovers it NET of the 0.05 pt/s strain, carrying it from the third warning's
+# 24.5 back over the FIRST rung's 42 % restore line — and the moment it crosses, the
 # watch stands down and the strain stops, so one hold stands the whole ladder
-# down rather than buying another thirty seconds. A crew who react late are
+# down rather than buying another hundred seconds. A crew who react late are
 # unambiguously a crew who saved it, with real room to spare.
 #
 # The travel term is zero on purpose. The tractor is authored at 500 units and
@@ -1711,11 +1709,11 @@ visible = true
 #
 # ── The countdown is a PROJECTION, not a fuse ────────────────────────────────
 #
-# `skyhook_failure_due` is authored at [382] seconds: four seconds after the
+# `skyhook_failure_due` is authored at [1528] seconds: sixteen seconds after the
 # measured floor crossing above. Nothing about the head's fate is decided by it —
 # what takes the head is its CONDITION reaching the floor, and the deadline is
 # what that arithmetic says if nobody does anything. A crew who
-# neglect it watch the projection come true four seconds early. A crew who
+# neglect it watch the projection come true sixteen seconds early. A crew who
 # stabilise beat it, and the deadline firing on a head that is still standing IS
 # the act's other ending: the load comes off, the corridor's own structural
 # people take over, and she held.
@@ -1769,13 +1767,13 @@ visible = true
 # ── Act 3's clock ────────────────────────────────────────────────────────────
 #
 # One deadline, visible, and it is a PROJECTION rather than a fuse — the band
-# header above says at length why. [382] is four seconds past the floor crossing
+# header above says at length why. [1528] is sixteen seconds past the floor crossing
 # the authored strain rate reaches, measured off the headless trace rather than
 # guessed at.
 [[deadline]]
 id = "skyhook_failure_due"
 label = "world.falling_skyway.deadline.skyhook_failure.label"
-due_secs = 382
+due_secs = 1528
 visible = true
 
 # ── Act 3's clock (issue #1042) ──────────────────────────────────────────────
@@ -1785,7 +1783,7 @@ visible = true
 # captain's countdown from the mission's first tick, not posted when the act
 # that uses them opens. That is the point: the transfer window is the thing the
 # crew are working towards from the moment they arrive, and a deadline that
-# appeared at t=268 would be news rather than a schedule.
+# appeared at t=1072 would be news rather than a schedule.
 #
 # The pair reads as ONE window on the panel. Before `skyway_transfer_window`
 # fires, its remaining time is how long the crew have to make the chain better.
@@ -1795,9 +1793,9 @@ visible = true
 # countdown per deadline and a duration nobody could see coming would be a
 # stopwatch the crew are not holding.
 #
-# THE WINDOW OPENS AFTER THE TETHER'S FATE IS SETTLED, and eighteen seconds is
-# the whole of the gap. `skyhook_failure_due` above falls at 382 — the projection
-# the collapse slice (#1040) either beats or does not — so by 400 the head has
+# THE WINDOW OPENS AFTER THE TETHER'S FATE IS SETTLED, and seventy-two seconds
+# is the whole of the gap. `skyhook_failure_due` above falls at 1528 — the projection
+# the collapse slice (#1040) either beats or does not — so by 1600 the head has
 # either held or come out of the world, and the supply this window is priced at
 # is a fact rather than a forecast. Pricing it while the tether was still walking
 # down would have published a figure that stopped being true a minute later, and
@@ -1812,23 +1810,21 @@ visible = true
 # outcomes, one number, and the window's arithmetic names nothing the collapse
 # authors.
 #
-# [ai] BOTH NUMBERS UNRATIFIED, and they are the act's whole pacing surface.
-# 400 is 18 seconds past the projection: long enough that the fate has landed and
-# its consequence has been mirrored, short enough that the crew are still in the
-# middle of it. 470 gives the window 70 seconds, which is two climber runs at the
-# 24 seconds a lift takes and change — so a captain who dithers loses a claimant
-# to the clock rather than to the arithmetic, and "capacity for two" is what the
-# clock says as well as what the numbers say.
+# #1131 RATIFIES BOTH NUMBERS as the act's pacing surface. 1600 is 72 seconds
+# past the projection: long enough that the fate has landed and its consequence
+# has been mirrored. 1800 gives the allocation scene 200 seconds — enough to
+# read and coordinate, while the authored capacity, not a hidden stopwatch,
+# remains what limits the crew to two claims.
 [[deadline]]
 id = "skyway_transfer_window"
 label = "world.falling_skyway.deadline.transfer_window.label"
-due_secs = 400
+due_secs = 1600
 visible = true
 
 [[deadline]]
 id = "skyway_window_closes"
 label = "world.falling_skyway.deadline.window_closes.label"
-due_secs = 470
+due_secs = 1800
 visible = true
 
 # ── Act 1 ────────────────────────────────────────────────────────────────────
@@ -3107,7 +3103,7 @@ fn on_head_watch_opens(ctx) {
     tether_strain(ctx);
 }
 
-// One beat of the load the head is carrying: [2] condition points every [10]
+// One beat of the load the head is carrying: [0.5] condition points every [10]
 // seconds, re-arming itself for as long as the watch is open.
 //
 // A callback chain rather than the template's `decay_per_sec`, because that
@@ -3120,7 +3116,7 @@ fn on_head_watch_opens(ctx) {
 // head is saved, or the head is gone.
 fn tether_strain(ctx) {
     if ctx.flags.skyway_tether_watch == 0 { return; }
-    ctx.effects.damage_infrastructure("world.falling_skyway.entity.skyhook.name", 2);
+    ctx.effects.damage_infrastructure("world.falling_skyway.entity.skyhook.name", flt("0.5"));
     ctx.flags.increment("a3_strain_beats", 1);
     ctx.schedule.after(10, |ctx| { tether_strain(ctx); });
 }
@@ -3265,7 +3261,7 @@ fn head_casualties(ctx) {
 fn on_head_lost(ctx) {
     // The strain has nothing left to strain and the projection nothing left to
     // project. Cancelling is also what keeps `skyhook_failure_due` from firing
-    // four seconds later onto a head that is already gone.
+    // sixteen seconds later onto a head that is already gone.
     ctx.flags.skyway_tether_watch = 0;
     if ctx.deadlines.state("skyhook_failure_due") == "pending" {
         ctx.deadlines.cancel("skyhook_failure_due");
@@ -4084,7 +4080,7 @@ fn window_closes(ctx) { #{ message: "world.falling_skyway.comms.window_closes", 
 // ── [ai] THE BAND'S REMAINING TUNABLES, ALL UNRATIFIED ──────────────────────
 //
 //   [22] s   how long a claimant waits before calling back once, on a window
-//            that is 70 seconds long. Long enough that holding is a real
+//            that is 200 seconds long. Long enough that holding is a real
 //            decision with a cost, short enough that a captain who put them off
 //            to deal with something else gets one more chance.
 //   [3] s    the pause before a granted lift reprices the other two screens. It
@@ -4096,7 +4092,7 @@ fn window_closes(ctx) { #{ message: "world.falling_skyway.comms.window_closes", 
 //            own.
 //   [68]/[66]  the parley's and the choice's objective priorities, one and two
 //            rungs above #1042's window objective (65). The tether ladder's
-//            60/70/80 are resolved eighteen seconds before the window opens, so
+//            60/70/80 are resolved seventy-two seconds before the window opens, so
 //            nothing live outranks them; a tuning pass that lengthens Act 3 has
 //            to check that again.
 //   [75]/[5] what the workers make of a captain who carries them and of one who
@@ -4246,7 +4242,7 @@ fn the_parley_at_the_ladder(ctx) {
     //
     // Priority 68, above #1042's window objective (65) and below nothing that is
     // still live: the tether ladder's rungs resolved with the head's fate
-    // eighteen seconds before the window opened, which is the whole point of the
+    // seventy-two seconds before the window opened, which is the whole point of the
     // order those two deadlines are authored in.
     ctx.effects.add_objective(#{
         id: "obj-a3-parley",

@@ -6,19 +6,22 @@
 #     chains carry the order (checked against authored dues by
 #     design-content.deadline-order) and one envelope bound holds the whole
 #     mission to 20-30 minutes;
-#   - terminal failure is WORLD-DRIVEN only: no checkpoint logic — the storm
-#     kills a ship that lives in a band, the collapse branch owns the back
-#     half, and the opening era still needs its mechanism authored (open
-#     question below);
+#   - terminal failure is WORLD-DRIVEN only: no checkpoint logic. The opening
+#     terminal is RATIFIED TARGET DESIGN for #1138, not current runtime: unless
+#     the crew sends the scan-backed unsafe response, an uncontrolled Hauler
+#     Lark collides in the corridor and causes terminal defeat. Lark narrates
+#     its intent; the first hail arrives 30 seconds before `skyway_survey_due`,
+#     a second generic authoritative `critical` hail lands at the deadline, and
+#     the crew then have a final 20-second response window. The storm and
+#     collapse own the later terminal pressure;
 #   - the good ending is the clean-ledger benchmark, modelled as a
 #     consequence plus an invariant proving even a benchmark run lifts only
 #     two of three claims;
 #   - pacing is GLOBAL INTENSITY ERAS (threads live in the gate graph).
 #
-# The world file stays authoritative and currently authors the OLD 5-minute
-# arc: the envelope bounds warning on skyway_window_closes is the intended
-# gap marker until the #1129 scenario edit lands. Entities are origin: ai,
-# awaiting ratification via `pasm review`.
+# The world file stays authoritative and now authors the ratified 20-30 minute
+# arc, closing its allocation window at the envelope's 1800-second ceiling.
+# Entities are origin: ai, awaiting ratification via `pasm review`.
 entities:
   - scenario_model: falling-skyway
     core:
@@ -32,9 +35,6 @@ entities:
         storm, rescue, stabilise, window, traffic, evidence) on their own
         triggers, passively startable from t=0, escalating but never closing
         a crew-initiated path.
-      open_questions:
-        - "World-driven terminal for the opening era: the storm and the collapse can end a silent run in their eras, but nothing in the world ends a fully silent opening era yet. Ratified direction is world-driven only (no checkpoint logic); the mechanism is unauthored."
-        - "PRD's x4 window close (1880s) exceeds the ratified 20-30 minute envelope (max 1800s); the scenario edit must land the close inside the envelope."
     game_design:
       world_file: assets/worlds/falling_skyway.toml
 
@@ -337,8 +337,8 @@ entities:
         [ai] The window shuts for good; the ledger decides which two of
         three claims lifted, and the six campaign flag families carry the
         rest forward. The envelope anchor below holds the whole mission to
-        20-30 minutes — the current authored 470s trips it on purpose until
-        the #1129 re-author lands.
+        20-30 minutes, and the authored 1800s close lands exactly on that
+        boundary.
     game_design:
       self_resolving: true
       deadline_id: skyway_window_closes
@@ -533,8 +533,6 @@ entities:
         commitments kept, skyhook held, evidence filed — still cannot lift
         all three claims: the benchmark criteria and the scarcity arithmetic
         are independent, so the moral choice survives the best possible run.
-      open_questions:
-        - "The dedicated benchmark headless test (a benchmark-meeting run that still books exactly two claims) does not exist yet; add its name to asserted_by when the #1129 measurement batch lands."
     game_design:
       relation: >
         clean-ledger benchmark met implies exactly two of the three claims
@@ -564,9 +562,8 @@ entities:
       summary: >
         [ai] Three global intensity eras over the target 20-30 minute clock
         (threads live in the gate graph, not here). Era boundaries partition
-        the whole envelope, so today's un-retuned clocks still land exactly
-        once each — the gap shows on the envelope anchor, not as coverage
-        noise.
+        the whole envelope, and every authored deadline lands exactly once in
+        its half-open era.
     game_design:
       clock_source: mission first tick; lobby time costs the mission none of its clock
       human_calibration: >
@@ -580,21 +577,19 @@ entities:
           to: "380s"
           intensity_intent: setup-with-the-strike-stewing
           engaged_roles: [fs-science, fs-captain, fs-tactical]
-          # covers_deadlines for every era is declared when the x4 retune
-          # lands; until then the old clocks squat in this window and any
-          # declaration would only restate the envelope gap.
+          covers_deadlines: [tether_slip, skyway_survey_due]
         - phase_id: storm-over-a-live-negotiation
           from: "380s"
           to: "1100s"
           intensity_intent: rising-to-peak
           engaged_roles: [fs-navigation, fs-operations, fs-tactical, fs-captain]
-          # covers_deadlines declared when the x4 retune lands these clocks
-          # in this era; declaring them now would just restate the envelope gap.
+          covers_deadlines: [storm_front_due, storm_band_one_due, storm_band_two_due, lyra_clear_due, storm_band_three_due, storm_passed_due]
         - phase_id: crowded-back-half
           from: "1100s"
           to: "1900s"
           intensity_intent: everything-lands-at-once
           engaged_roles: [fs-operations, fs-captain, fs-science]
+          covers_deadlines: [skyhook_failure_due, skyway_transfer_window, skyway_window_closes]
 
   # ── Principles ──────────────────────────────────────────────────────────────
   - design_principle: fs-scarcity-reads-as-choice
@@ -653,11 +648,14 @@ entities:
       origin: ai
       title: Silence Fails Loudly in Every Era
       summary: >
-        [ai] An idle crew fails mandatory objectives visibly in every era,
-        and the world itself — not checkpoint logic — carries the
-        terminality: the storm takes what is left in it, the head falls
-        without a stabilise. The opening era's world-driven mechanism is
-        the open design question on the scenario model.
+        [ai] RATIFIED TARGET DESIGN for #1138, not current runtime: an idle
+        opening ends in world-driven terminal defeat when uncontrolled Hauler
+        Lark collides in the corridor, unless the crew sends the scan-backed
+        unsafe response. Lark narrates its intent; its first hail arrives 30
+        seconds before the survey deadline, a second generic authoritative
+        `critical` hail lands at the deadline, and a final 20-second response
+        window remains. Later, the storm takes what is left in it and the head
+        falls without a stabilise.
     game_design:
       strength: hard
       context: fully idle crew, every intensity era

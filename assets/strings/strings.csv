@@ -1244,9 +1244,14 @@ world.falling_skyway.capacity.fuel_lift.label,assets/worlds/falling_skyway.toml 
 world.falling_skyway.threshold.pumping.label,assets/worlds/falling_skyway.toml -> [[entity.overrides.infrastructure.threshold]] label,[Pumping]
 world.falling_skyway.deadline.tether_slip.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Tether slip]
 world.falling_skyway.deadline.skyway_survey_due.label,assets/worlds/falling_skyway.toml -> [[deadline]] label,[Survey due to Control]
-world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Take station off the skyhook. Get a condition read on the head and on both depots.]"
+world.falling_skyway.objective.survey.text,Objective text — the Act 1 condition read in Falling Skyway,"[Scan Skyhook Verrow and both ladder depots. File the completed survey with Skyway Control.]"
 world.falling_skyway.objective.corridor.text,Objective text — the Act 1 corridor watch in Falling Skyway,"[Keep the corridor moving. See the lead hauler through the gate.]"
 world.falling_skyway.objective.triage.text,Objective text — the Act 1 triage call in Falling Skyway,[Name the structure that takes the first repair team.]
+world.falling_skyway.comms.survey_incomplete,Dialogue body — Control refuses a partial Falling Skyway survey,"[Control. We cannot accept a corridor survey without readings from the head and both depots. Complete the three scans and call again.]"
+world.falling_skyway.comms.survey_ready,Dialogue body — Control is ready to receive the completed Falling Skyway survey,"[Skyway Control. We have your carrier. Send the head and depot survey when ready.]"
+world.falling_skyway.comms.file_survey,Response text — filing the completed Falling Skyway survey with Control,"[Control, receiving. Filing the skyhook and both depot condition reads now.]"
+world.falling_skyway.comms.survey_received,Dialogue body — Control acknowledges the completed Falling Skyway survey,[Survey received and entered against the corridor record. Control out.]
+world.falling_skyway.comms.survey_unfiled,Dialogue body — Control acts on the existing record after Falling Skyway's survey deadline,"[Destroyer, survey deadline. No complete report reached Control. We are proceeding on Havelock's filed corridor figures.]"
 world.probe_evidence.entity.skyway_hook.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Skyway Hook]"
 world.probe_evidence.entity.line_foreman.name,"assets/worlds/probe_evidence.toml -> [[entity]] name","[Line Foreman]"
 world.probe_evidence.capacity.berths.label,"Crew-facing label for the berths capacity in the #1031 probe world","[Berths]"

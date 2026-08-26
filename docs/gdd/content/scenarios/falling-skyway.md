@@ -61,7 +61,7 @@ The actors are simulation entities with position, route, comms, damage, faction,
 
 ### Act I — Arrival, strike, and survey
 
-The crew arrives to an already unstable system. Visible deadlines at 160 seconds and 360 seconds put the tether slip and survey requirement on the bridge throughout the opening era. The crew can hail actors, inspect the depots, begin scans, position for operations, and choose whether to engage the labour dispute through negotiation or force.
+The crew arrives to an already unstable system. Visible deadlines at 160 seconds and 360 seconds put the tether slip and survey requirement on the bridge throughout the opening era. The survey is actionable immediately and posts as an objective when the tether slips: scan Skyhook Verrow and both ladder depots, then hail Control and file the report through its gated response. Filing early is remembered and completes the objective when it posts. A partial survey cannot be filed; an unfiled survey fails at 360 seconds with an urgent Control transmission and Control proceeds on the existing falsified record. The crew can also hail actors, position for operations, and choose whether to engage the labour dispute through negotiation or force.
 
 The design purpose is to distribute first tasks quickly: Captain and Comms establish claims; Science/Sensors gather the condition and record picture; Helm and Navigation orient to the corridor and infrastructure; Engineering prepares power and external operations; Tactical decides whether an armed picket is a target, a deterrent, or an actor to hold at risk.
 

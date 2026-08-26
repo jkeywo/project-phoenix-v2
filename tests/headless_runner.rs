@@ -7797,10 +7797,10 @@ fn ship_positions(app: &mut bevy::prelude::App) -> std::collections::BTreeMap<St
         .collect()
 }
 
-/// **Issue #1034.** The Falling Skyway skeleton, driven past the end of Act 1:
-/// the world loads, its traffic is already flying, its clock is on the captain's
-/// panel, its three objectives resolve, and the run reaches an Act-1-complete
-/// state.
+/// **Issue #1034, amended by #1132.** Falling Skyway driven past the end of
+/// Act 1 with nobody issuing a command: traffic still flies, the clock still
+/// lands, corridor and triage resolve from world events, but the unfiled survey
+/// fails loudly rather than being granted by the timer.
 ///
 /// Every reading is taken tick by tick and asserted on ORDER and STATE, never on
 /// frame arithmetic. The mission clock anchors on the first `InProgress` tick
@@ -7811,7 +7811,7 @@ fn ship_positions(app: &mut bevy::prelude::App) -> std::collections::BTreeMap<St
 /// lengthening Act 1 in the TOML (the #1044 tuning pass) does not silently turn
 /// this into a test of an act that never finished.
 #[test]
-fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complete() {
+fn falling_skyway_silent_act_one_fails_the_unfiled_survey_loudly() {
     use project_phoenix::civilian::CivilianTraffic;
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::entities::spawner::EntityName;
@@ -7898,8 +7898,8 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
         if objective_status_opt(&app, "obj-a1-triage") == Some(ObjectiveStatus::Completed) {
             first.entry("triage_objective").or_insert(sim_t);
         }
-        if objective_status_opt(&app, "obj-a1-survey") == Some(ObjectiveStatus::Completed) {
-            first.entry("survey_objective").or_insert(sim_t);
+        if objective_status_opt(&app, "obj-a1-survey") == Some(ObjectiveStatus::Failed) {
+            first.entry("survey_failure").or_insert(sim_t);
             if skyhook_condition_at_close.is_none() {
                 skyhook_condition_at_close = app
                     .world_mut()
@@ -8041,12 +8041,12 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
          #1028's route machinery, not a timer"
     );
 
-    // ── AC1/AC5: the act closes, deterministically, on its own deadline ──
+    // ── #1132 AC1/AC5: the act closes, deterministically, on its own deadline ──
     let closed = at("act1_complete");
     assert_eq!(
-        at("survey_objective"),
+        at("survey_failure"),
         closed,
-        "the survey report and the act boundary are the same beat"
+        "silence fails the unfiled survey on the act boundary's own beat"
     );
     for earlier in ["corridor_objective", "triage_objective"] {
         assert!(
@@ -8072,14 +8072,51 @@ fn falling_skyway_runs_traffic_a_countdown_and_three_objectives_to_act_1_complet
         Some(DeadlineState::Fired),
         "the act boundary is the authored deadline firing, not a script counting frames"
     );
-    for id in ["obj-a1-survey", "obj-a1-corridor", "obj-a1-triage"] {
+    assert_eq!(
+        objective_status(&app, "obj-a1-survey"),
+        ObjectiveStatus::Failed,
+        "an idle crew cannot receive a green survey from the deadline"
+    );
+    for id in ["obj-a1-corridor", "obj-a1-triage"] {
         assert_eq!(
             objective_status(&app, id),
             ObjectiveStatus::Completed,
-            "every Act 1 objective resolves in a clean run; a partial one would read \
-             Failed here rather than staying Pending"
+            "the two world-event objectives retain their existing clean-run outcome"
         );
     }
+    for flag in [
+        "scan.skyhook.taken",
+        "scan.depot_ladder_a.taken",
+        "scan.depot_ladder_b.taken",
+        "skyway_survey_reported",
+    ] {
+        assert_eq!(
+            runtime.flags.counter(flag),
+            0,
+            "the silent run must not fabricate crew work in '{flag}'"
+        );
+    }
+    for flag in [
+        "skyway_survey_unfiled",
+        "skyway_survey_missing_report",
+        "skyway_survey_missing_skyhook",
+        "skyway_survey_missing_depot_a",
+        "skyway_survey_missing_depot_b",
+    ] {
+        assert_eq!(
+            runtime.flags.counter(flag),
+            1,
+            "the deadline records the silent run's missing work in '{flag}'"
+        );
+    }
+    let control_message = skyway_messages(&app, "world.falling_skyway.entity.skyway_control.name")
+        .into_iter()
+        .find(|message| message.body == "world.falling_skyway.comms.survey_unfiled")
+        .expect("Control must say that it is proceeding on the uncorrected record");
+    assert!(
+        control_message.is_urgent,
+        "the missed survey deadline must be an urgent, visible failure"
+    );
 
     // ── AC2: the structures the act is about, as authored data ──
     // The skyhook is six points down on where it started and still standing:
@@ -8792,6 +8829,11 @@ const SKYWAY_COMMITTEE: &str = "world.falling_skyway.entity.strike_committee.nam
 const SKYWAY_CUTTER: &str = "world.falling_skyway.entity.havelock_cutter.name";
 /// The rung the dispute is about.
 const SKYWAY_DEPOT_B: &str = "world.falling_skyway.entity.depot_ladder_b.name";
+/// The other two structures whose scan flags make up Control's Act-1 survey.
+const SKYWAY_SURVEY_HEAD: &str = "world.falling_skyway.entity.skyhook.name";
+const SKYWAY_SURVEY_DEPOT_A: &str = "world.falling_skyway.entity.depot_ladder_a.name";
+/// The authority that accepts the completed survey report.
+const SKYWAY_SURVEY_CONTROL: &str = "world.falling_skyway.entity.skyway_control.name";
 /// The finding the evidence branch reads. Filed by the operator's own file, and
 /// what `ctx.dossier.holds` is asked about.
 const SKYWAY_FILE: &str = "world.falling_skyway.evidence.ladder_b_maintenance_file";
@@ -8887,6 +8929,92 @@ fn skyway_move(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity, to: be
     physics.z = to.z;
 }
 
+/// Hail one named contact through the ordinary admitted Comms command.
+fn skyway_hail(app: &mut bevy::prelude::App, sender: &str) {
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
+    use project_phoenix::lobby::InboundMessage;
+
+    let target_uuid = app
+        .world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .get(sender)
+        .cloned()
+        .unwrap_or_else(|| panic!("{sender} is not in this world"));
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: SKYWAY_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: project_phoenix::ship::system_registry::comms_system_id(),
+                payload: SystemControlPayload::Hail { target_uuid },
+            },
+        });
+    run(app, 4);
+}
+
+/// Close the current hail through the same admitted command the console sends,
+/// allowing the crew to hail Control again after adding another scan.
+fn skyway_clear_comms(app: &mut bevy::prelude::App) {
+    use project_phoenix::core::messages::{ClientMessage, SystemControlPayload};
+    use project_phoenix::lobby::InboundMessage;
+
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<InboundMessage>>()
+        .write(InboundMessage {
+            token: SKYWAY_TOKEN.into(),
+            msg: ClientMessage::ControlSystem {
+                target: project_phoenix::ship::system_registry::comms_system_id(),
+                payload: SystemControlPayload::ClearComms,
+            },
+        });
+    run(app, 3);
+}
+
+/// Put the destroyer alongside a named structure and request its reading through
+/// the real admitted Sensors command. Teleporting here substitutes only for helm
+/// travel; scan range and the authoritative scan latch remain live.
+fn skyway_scan_for_survey(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity, target: &str) {
+    let position = skyway_position(app, target);
+    skyway_move(
+        app,
+        ship,
+        position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(app, 2);
+    let uuid = scan_uuid_named(app, target);
+    ask_for_scan(app, &uuid);
+    run(app, 4);
+}
+
+/// Start a deterministic Falling Skyway survey run with a seated Comms officer.
+/// Removing only the response policy leaves admission authoritative while
+/// preventing Backfill from choosing the report response ahead of the test.
+fn skyway_survey_app(seed: u64) -> (bevy::prelude::App, bevy::prelude::Entity) {
+    let survey_due = skyway_authored_deadline_secs("skyway_survey_due") as f64;
+    let args = HeadlessArgs {
+        world_path: SKYWAY_WORLD.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt: SKYWAY_DT,
+        max_ticks: ticks_for_sim_seconds(survey_due + 10.0, SKYWAY_DT),
+        deterministic: true,
+        seed: Some(seed),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+    let ship = app
+        .world_mut()
+        .query_filtered::<bevy::prelude::Entity, With<LocalShip>>()
+        .iter(app.world())
+        .next()
+        .expect("the crew's hull");
+    app.world_mut()
+        .entity_mut(ship)
+        .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
+    (app, ship)
+}
+
 fn skyway_flag(app: &bevy::prelude::App, name: &str) -> i64 {
     app.world()
         .resource::<project_phoenix::world::server::WorldContentRuntime>()
@@ -8970,6 +9098,219 @@ fn skyway_pick(app: &mut bevy::prelude::App, sender: &str, text: &str) {
             .iter()
             .any(|m| m.id == msg.id && m.selected_response == Some(index)),
         "the pick '{text}' was refused rather than recorded"
+    );
+}
+
+/// **Issue #1132 — engaged path.** The crew take all three readings, prove that
+/// Control will not offer a filing response for only two, then file the complete
+/// report before the survey objective posts. The tether-slip handler remembers
+/// that authoritative work and posts the objective already complete; the later
+/// deadline cannot turn it red.
+#[test]
+fn falling_skyway_three_scans_and_control_pick_complete_the_remembered_survey() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    const FILE_SURVEY: &str = "world.falling_skyway.comms.file_survey";
+
+    let survey_due = skyway_authored_deadline_secs("skyway_survey_due") as f64;
+    let tether_due = skyway_authored_deadline_secs("tether_slip") as f64;
+    let (mut app, ship) = skyway_survey_app(1132);
+
+    assert_eq!(
+        objective_status_opt(&app, "obj-a1-survey"),
+        None,
+        "the survey is actionable before its tether-slip post"
+    );
+
+    // Two readings are evidence, but not a complete survey. Control must expose
+    // no response that can be picked to manufacture the third.
+    skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_HEAD);
+    skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_DEPOT_A);
+    let control_position = skyway_position(&mut app, SKYWAY_SURVEY_CONTROL);
+    skyway_move(
+        &mut app,
+        ship,
+        control_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_hail(&mut app, SKYWAY_SURVEY_CONTROL);
+    let partial = skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
+        .into_iter()
+        .last()
+        .expect("Control answers a partial survey hail");
+    assert_eq!(partial.body, "world.falling_skyway.comms.survey_incomplete");
+    assert!(
+        partial.responses.is_empty(),
+        "two readings must not unlock the report pickup"
+    );
+    assert_eq!(skyway_flag(&app, "skyway_survey_reported"), 0);
+
+    // Re-open the thread after the last real scan. The authoritative pickup
+    // writes only the survey's own received memory; the later maintenance-file
+    // promise is a different piece of work even though it also travels via Control.
+    skyway_clear_comms(&mut app);
+    skyway_scan_for_survey(&mut app, ship, SKYWAY_DEPOT_B);
+    skyway_move(
+        &mut app,
+        ship,
+        control_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_hail(&mut app, SKYWAY_SURVEY_CONTROL);
+    let ready = skyway_open_node(&app, SKYWAY_SURVEY_CONTROL);
+    let file_response = ready
+        .responses
+        .iter()
+        .find(|response| response.text == FILE_SURVEY)
+        .expect("all three readings unlock Control's report pickup");
+    assert!(
+        file_response.important,
+        "filing the survey is an explicit consequential response"
+    );
+    skyway_pick(&mut app, SKYWAY_SURVEY_CONTROL, FILE_SURVEY);
+    for flag in [
+        "scan.skyhook.taken",
+        "scan.depot_ladder_a.taken",
+        "scan.depot_ladder_b.taken",
+        "skyway_survey_reported",
+    ] {
+        assert_eq!(
+            skyway_flag(&app, flag),
+            1,
+            "the admitted scan/report path must latch '{flag}' exactly once"
+        );
+    }
+    assert_eq!(
+        skyway_flag(&app, "skyway_records_put"),
+        0,
+        "filing the survey must not keep the separate maintenance-record promise"
+    );
+    assert_eq!(
+        skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
+            .last()
+            .map(|message| message.body.as_str()),
+        Some("world.falling_skyway.comms.survey_received"),
+        "Control acknowledges the survey with its own receipt, not evidence-filed state"
+    );
+    assert_eq!(
+        objective_status_opt(&app, "obj-a1-survey"),
+        None,
+        "early filing is remembered in flags rather than posting the objective early"
+    );
+
+    // The late post consumes that memory in the same deterministic handler.
+    for _ in 0..ticks_for_sim_seconds(tether_due + 5.0, SKYWAY_DT) {
+        run(&mut app, 1);
+        if skyway_flag(&app, "tether_slipped") > 0 {
+            break;
+        }
+    }
+    assert_eq!(skyway_flag(&app, "tether_slipped"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a1-survey"),
+        ObjectiveStatus::Completed,
+        "posting a pre-empted survey must resolve it immediately"
+    );
+
+    // Closing Act 1 preserves the green result and emits no false failure.
+    for _ in 0..ticks_for_sim_seconds(survey_due + 5.0, SKYWAY_DT) {
+        run(&mut app, 1);
+        if skyway_flag(&app, "act1_complete") > 0 {
+            break;
+        }
+    }
+    assert_eq!(skyway_flag(&app, "act1_complete"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_survey_unfiled"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a1-survey"),
+        ObjectiveStatus::Completed
+    );
+    assert!(
+        skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
+            .iter()
+            .all(|message| message.body != "world.falling_skyway.comms.survey_unfiled"),
+        "a filed report must not receive the deadline's failure transmission"
+    );
+}
+
+/// **Issue #1132 — normal order.** Unlike the pre-emption path above, this run
+/// first observes the survey as a posted, Active objective. Three admitted
+/// scans alone leave it Active; the admitted Control pickup is the event that
+/// changes it to Completed. Removing `complete_objective` from the pickup would
+/// therefore fail this test even if the flag-backed pre-emption helper survived.
+#[test]
+fn falling_skyway_posted_survey_completes_on_the_admitted_control_pickup() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    const FILE_SURVEY: &str = "world.falling_skyway.comms.file_survey";
+    const MAINTENANCE_EVIDENCE: &str = "world.falling_skyway.evidence.record_on_the_open_channel";
+
+    let tether_due = skyway_authored_deadline_secs("tether_slip") as f64;
+    let (mut app, ship) = skyway_survey_app(21132);
+
+    for _ in 0..ticks_for_sim_seconds(tether_due + 5.0, SKYWAY_DT) {
+        run(&mut app, 1);
+        if objective_status_opt(&app, "obj-a1-survey").is_some() {
+            break;
+        }
+    }
+    assert_eq!(skyway_flag(&app, "tether_slipped"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a1-survey"),
+        ObjectiveStatus::Active,
+        "normal-order work starts from an observable posted objective"
+    );
+
+    for target in [SKYWAY_SURVEY_HEAD, SKYWAY_SURVEY_DEPOT_A, SKYWAY_DEPOT_B] {
+        skyway_scan_for_survey(&mut app, ship, target);
+    }
+    assert_eq!(skyway_flag(&app, "skyway_survey_scans_complete"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_survey_reported"), 0);
+    assert_eq!(
+        objective_status(&app, "obj-a1-survey"),
+        ObjectiveStatus::Active,
+        "all three scans are necessary but cannot replace Control's pickup"
+    );
+
+    let control_position = skyway_position(&mut app, SKYWAY_SURVEY_CONTROL);
+    skyway_move(
+        &mut app,
+        ship,
+        control_position + bevy::prelude::Vec3::new(60.0, 0.0, 0.0),
+    );
+    run(&mut app, 2);
+    skyway_hail(&mut app, SKYWAY_SURVEY_CONTROL);
+    assert!(
+        skyway_options(&skyway_open_node(&app, SKYWAY_SURVEY_CONTROL))
+            .iter()
+            .any(|text| text == FILE_SURVEY),
+        "the complete scan set exposes the report pickup on Control"
+    );
+    skyway_pick(&mut app, SKYWAY_SURVEY_CONTROL, FILE_SURVEY);
+
+    assert_eq!(skyway_flag(&app, "skyway_survey_reported"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a1-survey"),
+        ObjectiveStatus::Completed,
+        "the admitted pickup completes an already-posted survey immediately"
+    );
+    assert_eq!(
+        skyway_flag(&app, "skyway_records_put"),
+        0,
+        "survey receipt is not the maintenance-evidence promise"
+    );
+    assert!(
+        !skyway_sheet_texts(&mut app, SKYWAY_SURVEY_CONTROL)
+            .iter()
+            .any(|text| text == MAINTENANCE_EVIDENCE),
+        "survey receipt must not file maintenance evidence on Control's sheet"
+    );
+    assert_eq!(
+        skyway_messages(&app, SKYWAY_SURVEY_CONTROL)
+            .last()
+            .map(|message| message.body.as_str()),
+        Some("world.falling_skyway.comms.survey_received"),
+        "the follow-up is the distinct survey receipt"
     );
 }
 

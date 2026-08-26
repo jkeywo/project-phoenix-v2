@@ -58,9 +58,10 @@
 #                                takes it under its authored 45 % lift line, the
 #                                `skyhook_lift_capable` flag falls, and the
 #                                triage priority names itself.
-#   t=360 s `skyway_survey_due`  Control wants the assessment. Whatever the crew
-#                                have by then is what they send, the act closes,
-#                                and Act 2 opens.
+#   t=360 s `skyway_survey_due`  Control wants the assessment. A report filed
+#                                after all three structure scans completes the
+#                                survey; silence fails it and Control proceeds on
+#                                the falsified record already in its hands.
 #
 # Act 1 owns the opening six minutes. The act boundary is authored DATA — two
 # `due_secs` numbers — and nothing in Rust or in the headless test restates its
@@ -68,9 +69,10 @@
 #
 # ── Act 1's three objectives, and how each one resolves ──────────────────────
 #
-#   obj-a1-survey    resolves when `skyway_survey_due` fires. It carries the
-#                    Reach directive that takes the ship to its station-keeping
-#                    point, so an AI-backfilled crew flies the mission's shape.
+#   obj-a1-survey    posts when the tether slips and resolves only after the
+#                    skyhook and both depots have been scanned and the crew file
+#                    the result with Control. Work done before the post is
+#                    remembered in the flag store and resolves it immediately.
 #   obj-a1-corridor  resolves when the lead hauler clears `corridor_gate` — the
 #                    lane proving itself, through #1028's route machinery.
 #   obj-a1-triage    resolves when the head drops out of lift tolerance, through
@@ -1835,6 +1837,20 @@ on_world_loaded("on_arrival");
 
 on_deadline("tether_slip", "on_tether_slip");
 on_deadline("skyway_survey_due", "on_survey_due");
+on_flag_set("scan.skyhook.taken", "on_survey_scan");
+on_flag_set("scan.depot_ladder_a.taken", "on_survey_scan");
+on_flag_set("scan.depot_ladder_b.taken", "on_survey_scan");
+
+// A hail trigger is one-shot. Keep a distinct trigger armed for the partial and
+// ready states: a false trigger-level `when` does NOT consume it, so a crew who
+// checks in early can clear the channel, finish the tour and hail again. The
+// third registration provides one post-filing acknowledgement on a fresh hail.
+on_hailed("world.falling_skyway.entity.skyway_control.name", "on_control_survey_hailed")
+    .when("counter(skyway_survey_scans_complete) < 1");
+on_hailed("world.falling_skyway.entity.skyway_control.name", "on_control_survey_hailed")
+    .when("counter(skyway_survey_scans_complete) > 0 and counter(skyway_survey_reported) < 1");
+on_hailed("world.falling_skyway.entity.skyway_control.name", "on_control_survey_hailed")
+    .when("counter(skyway_survey_reported) > 0");
 
 // The two events the crew's own objectives resolve on. Neither is a timer: one
 // is a structure crossing an authored line, the other is a hull arriving at an
@@ -1850,23 +1866,12 @@ on_waypoint_reached("world.falling_skyway.entity.hauler_lark.name", "corridor_ga
 // the strike holds for the whole of the skeleton run.
 on_flag_set("skyway_strike_settled", "on_strike_settled");
 
-// Posted at world load rather than on a timer, so the objectives list is
-// populated before the crew are out of the lobby.
+// The corridor and triage reads are visible on arrival. The survey itself posts
+// when the tether slips: its deadline is visible from the opening tick, and the
+// structures plus Control are already actionable, so a crew can pre-empt the
+// post without shortening the mission's authored schedule.
 fn on_arrival(ctx) {
     ctx.flags.act = 1;
-
-    // The survey carries the ship's own directive: Reach the station-keeping
-    // point off the head. It is what an AI-backfilled crew flies, and what a
-    // human helm is being asked for.
-    ctx.effects.add_objective(#{
-        id: "obj-a1-survey",
-        text: "world.falling_skyway.objective.survey.text",
-        mandatory: true,
-        source: "mission",
-        base_priority: 45,
-        directive_kind: "Reach",
-        directive_anchor: "station_keeping",
-    });
     ctx.effects.add_objective(#{
         id: "obj-a1-corridor",
         text: "world.falling_skyway.objective.corridor.text",
@@ -1880,12 +1885,37 @@ fn on_arrival(ctx) {
     });
 }
 
+// Generic pre-emption memory for this scenario's late-posting threads. The work
+// itself raises `completion_flag` at the place it happens; posting then reads the
+// authoritative flag store and resolves immediately when the crew got there
+// early. #1135 reuses this for the crowded back-half threads.
+fn post_remembered_objective(ctx, spec, completion_flag) {
+    let id = spec.id;
+    ctx.effects.add_objective(spec);
+    if ctx.flags[completion_flag] > 0 {
+        ctx.effects.complete_objective(id);
+    }
+}
+
+fn post_survey_objective(ctx) {
+    post_remembered_objective(ctx, #{
+        id: "obj-a1-survey",
+        text: "world.falling_skyway.objective.survey.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 45,
+        directive_kind: "Reach",
+        directive_anchor: "station_keeping",
+    }, "skyway_survey_reported");
+}
+
 // The slip. Six points off a head sitting at 48 takes it to 42 — under the 45 %
 // lift line the template authors — so this one call reaches the objectives list
 // through the condition track and its threshold rather than by touching it.
 fn on_tether_slip(ctx) {
     ctx.effects.damage_infrastructure("world.falling_skyway.entity.skyhook.name", 6);
     ctx.flags.increment("tether_slipped", 1);
+    post_survey_objective(ctx);
 }
 
 // Chained off the crossing, one tick later. [ai] Placeholder: in the skeleton
@@ -1920,11 +1950,89 @@ fn on_lane_open(ctx) {
     ctx.effects.complete_objective("obj-a1-corridor");
 }
 
-// The act boundary. The report goes to Control with whatever the crew have, and
-// anything still open is failed rather than left pending — an act that ends on
-// the clock has to say what it ended with.
-fn on_survey_due(ctx) {
+// The three successful scan mirrors are the survey's evidence. Any authored
+// fidelity band raises the same latched flag in `science::server`; the report
+// cares that the crew read each structure, not how close the ship happened to be.
+fn survey_ready(ctx) {
+    ctx.flags["scan.skyhook.taken"] > 0 &&
+    ctx.flags["scan.depot_ladder_a.taken"] > 0 &&
+    ctx.flags["scan.depot_ladder_b.taken"] > 0
+}
+
+// The trigger predicate grammar deliberately keeps names simple and therefore
+// cannot name dotted scan flags directly. Mirror the exact conjunction into one
+// scenario flag whenever any constituent arrives; `survey_ready` remains the
+// authoritative predicate and the report pickup defensively re-reads it.
+fn on_survey_scan(ctx) {
+    if survey_ready(ctx) {
+        ctx.flags.skyway_survey_scans_complete = 1;
+    }
+}
+
+// Control is an ordinary hailable target. A partial survey can ask, but cannot
+// manufacture the report response: the response is built from the live flag
+// store each time the crew hail.
+fn on_control_survey_hailed(ctx) {
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.skyway_control.name",
+        node_fn: "control_survey",
+    });
+}
+
+fn control_survey(ctx) {
+    if ctx.flags.skyway_survey_reported > 0 {
+        return #{ message: "world.falling_skyway.comms.survey_received", responses: [] };
+    }
+    if survey_ready(ctx) {
+        return #{
+            message: "world.falling_skyway.comms.survey_ready",
+            responses: [#{
+                text: "world.falling_skyway.comms.file_survey",
+                on_pick: "on_file_survey",
+                important: true,
+            }],
+        };
+    }
+    #{ message: "world.falling_skyway.comms.survey_incomplete", responses: [] }
+}
+
+fn on_file_survey(ctx) {
+    // Defensive re-read at the authoritative pickup. Scan flags latch, so the
+    // normal route cannot regress between rendering and admission, but no stale
+    // or hand-built response may file a partial survey either.
+    if !survey_ready(ctx) { return control_survey(ctx); }
+    ctx.flags.skyway_survey_reported = 1;
     ctx.effects.complete_objective("obj-a1-survey");
+    control_survey(ctx)
+}
+
+fn survey_unfiled(ctx) {
+    #{ message: "world.falling_skyway.comms.survey_unfiled", responses: [] }
+}
+
+// The act boundary. A filed survey stays green. Anything else fails loudly and
+// records exactly which pieces were missing when the clock landed, so the later
+// evidence thread can distinguish silence from a partial attempt.
+fn on_survey_due(ctx) {
+    if ctx.flags.skyway_survey_reported == 0 {
+        ctx.flags.skyway_survey_unfiled = 1;
+        ctx.flags.skyway_survey_missing_report = 1;
+        if ctx.flags["scan.skyhook.taken"] == 0 {
+            ctx.flags.skyway_survey_missing_skyhook = 1;
+        }
+        if ctx.flags["scan.depot_ladder_a.taken"] == 0 {
+            ctx.flags.skyway_survey_missing_depot_a = 1;
+        }
+        if ctx.flags["scan.depot_ladder_b.taken"] == 0 {
+            ctx.flags.skyway_survey_missing_depot_b = 1;
+        }
+        ctx.effects.fail_objective("obj-a1-survey");
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.skyway_control.name",
+            node_fn: "survey_unfiled",
+            urgent: true,
+        });
+    }
     if ctx.flags.a1_lane_open == 0 {
         ctx.effects.fail_objective("obj-a1-corridor");
     }

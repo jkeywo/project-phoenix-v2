@@ -174,12 +174,12 @@ entities:
       origin: ai
       title: The Survey Falls Due
       summary: >
-        [ai] TARGET (PRD #1129): the survey is a task — scan all three
-        structures and report to Control — so this gate cannot pass while
-        the crew does nothing. Whatever is unreported when the clock lands
-        is failed loudly; early scans are remembered and auto-resolve.
-        (Today's TOML completes this on a timer; the scenario edit closes
-        that gap.)
+        [ai] The survey is crew work: scan the skyhook and both ladder depots,
+        then file the report through Control's comms target. All three latched
+        scan flags gate the report pickup, so a partial survey cannot pass.
+        Whatever is unreported when the clock lands fails loudly and Control
+        proceeds on the falsified record; early work is remembered in the flag
+        store and auto-resolves the objective when it posts.
     game_design:
       requires_player_action: [fs-compile-the-survey]
       deadline_id: skyway_survey_due

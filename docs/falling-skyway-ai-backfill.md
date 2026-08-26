@@ -8,13 +8,15 @@ objectives are out of its reach?*
 [ai] This document is AI-origin (produced by the survey agent). It cites the
 authored state as it stands, and flags every unratified number it leans on.
 
-> **Historical timing note (pre-#1131).** The audit findings and measured
+> **Historical baseline note (pre-#1131 and pre-#1132).** The audit findings and measured
 > timelines below were recorded against the original 40–470 second scenario
 > clock and are preserved as that baseline. Issue #1131 subsequently authored
 > the 160/360/400/580/740/768/900/1072/1528/1600 schedule, ratified the window
 > close at 1800 seconds, and slowed tether strain to 0.5 points per ten-second
-> beat (an unattended structural floor around t=1512). Treat older times below
-> as measurements of the pre-retune build, not current design.
+> beat (an unattended structural floor around t=1512). Issue #1132 then replaced
+> the timer-granted Act-1 survey with three scans plus a Control report. Treat
+> Findings 1–4 as measurements and design exploration of that earlier build,
+> not current runtime behaviour.
 
 ## Method
 
@@ -60,7 +62,7 @@ capability verbs (`alliance_destroyer.toml:1520-1640`) but nothing in any fragme
 can order them. `tow`, `stabilise`, `field_repair` and `transfer` are therefore
 strictly crew-only today.
 
-## Finding 1 — Act 1 completes without the crew doing anything
+## Finding 1 — Act 1 completed without the crew doing anything (historical)
 
 All three Act-1 objectives resolve on world/timer events, not crew action
 (`falling_skyway.toml`) :
@@ -79,6 +81,12 @@ three objectives green. The Reach directives (station_keeping, then
 `ladder_transit`) exist so an AI-backfilled helm "flies the mission's shape"
 (`:72-74, 1885-1891`) — they are decorative for completion. **Act 1 proves
 nothing about whether backfill works**; it passes with zero commands issued.
+
+**Closed by #1132.** The survey now posts on the t=160 tether slip and completes
+only after the skyhook and both ladder depots have been scanned and the report
+has been filed with Control. A silent run reaches t=360 with that objective
+failed and an urgent Control transmission; corridor and triage retain their
+existing world-event outcomes.
 
 ## Finding 2 — the strike DOES settle under baseline AI (by negotiation)
 
@@ -119,10 +127,10 @@ Because no policy can emit `StartOperation`:
 - **The transfer window (#1042)** — `transfer` cannot be ordered; even with the
   strike settled, no backfill stands a transfer up.
 
-What a pure-AI run therefore **can** achieve (objectives that resolve on
-timers, auto-completions, or first-pick comms):
+What a pure-AI run therefore **could** achieve in the historical baseline
+(objectives that resolved on timers, auto-completions, or first-pick comms):
 
-- Act 1: all three (Finding 1).
+- Act 1: all three (Finding 1; the survey free pass was removed by #1132).
 - `obj-a2-line` (strike settled by negotiation, Finding 2).
 - `obj-a2-approach` (auto-complete on arrival at the Lyra).
 - `obj-a2-lee` (Reach `storm_lee`, priority 75, posted at `lyra_clear_due`
@@ -179,10 +187,10 @@ that is timing-sensitive for backfill, and the agents' numbers are unratified.
 |---|---|---|
 | AI cannot run operations (tow/stabilise/field_repair/transfer) | no ops policy, no `StartOperation` emission path | an operations AI policy surface + wiring `emit_ai_command` → `StartOperation` at the captain system (new feature; scope as its own issue) |
 | AI always takes the first comms response | `fleet_baseline.toml:405` | a comms response-*selection* heuristic (e.g. prefer `important`, avoid `stall`), or per-scenario authored response order |
-| Act 1 is a free pass for any behaviour | `falling_skyway.toml:1861-1877` | intended skeleton behaviour (`:77-82`: the triage beat becomes a captain *decision* under #1035); a test asserting "Act 1 green with an idle crew" would document it deliberately |
+| Act 1 survey was a free pass for any behaviour | historical `on_survey_due` implementation | **Closed by #1132:** three scans plus Control pickup; the idle headless path now asserts a loud failure |
 | `obj-a2-loss-report` has no human path either | `:2534-2538`; no Control node authored | #1039 (the report to Control) fills it in |
 
-## Finding 4 — the survey is a timer, not a task, and the good settle needs no evidence
+## Finding 4 — the survey was a timer, not a task, and the good settle needs no evidence (historical)
 
 Follow-up exploration of "Act 1 and Act 2 are passed accidentally" — what the
 survey *should* be, what evidence the scenario already authored, and where the
@@ -234,7 +242,7 @@ gates actually sit ([ai] exploration; every ref verified against the file).
 - Campaign side: `campaign.skyway.evidence.*` is exclusive
   corroborated > records > none (`:4969-4981`).
 
-### Where the gates actually sit today (and what is not gated)
+### Where the gates sat at audit time (and what was not gated)
 
 - **`show_file` (the negotiation's evidence branch) is gated, and worth 1 ground
   — equal to a promise.** It only appears while the dossier holds
@@ -243,8 +251,9 @@ gates actually sit ([ai] exploration; every ref verified against the file).
 - **`call_the_vote` is gated on `ground >= 2`, NOT on evidence** (`:2062-2068`).
   Two promises reach the vote, so the strike settles by negotiation with no
   file shown — the pure-AI first-pick walk lands here (Finding 2).
-- **`obj-a1-survey` completes on the timer at t=90, unconditionally**
-  (`on_survey_due`, `:1869-1870`). No scan, no position, no report required.
+- **At audit time, `obj-a1-survey` completed on the timer at t=90,
+  unconditionally.** #1132 replaced that route with the three-scan plus Control
+  pickup contract described below.
 - **Keeping the records promise is evidence-gated.** `skyway_surface_records`
   is kept iff `skyway_records_put > 0` (`:4778-4783`), and `put_the_file` is
   offered only while the dossier holds the maintenance file (`:4350-4351,
@@ -254,15 +263,11 @@ gates actually sit ([ai] exploration; every ref verified against the file).
 
 ### What this means for "we should need to do the survey, and need evidence"
 
-- **The survey task is authorable now.** Requiring `obj-a1-survey` to complete
-  on scans (e.g. `scan.skyhook.taken` + `scan.depot_ladder_a.taken` +
-  `scan.depot_ladder_b.taken`) or on a survey report to Control is pure
-  scenario content — every primitive (scan flag, world event, dossier entry)
-  exists. This is the deliberate design fork: a survey that matters flips
-  Act-1-green-from-idle into the reverse, and an AI that cannot scan (the
-  fragments emit no scan verb) becomes unable to pass it — the opposite failure
-  mode of today's free pass. A scan-capable AI would be a new policy surface,
-  scoped separately.
+- **The survey task was authorable as scenario content and #1132 implemented
+  it.** `scan.skyhook.taken`, `scan.depot_ladder_a.taken`, and
+  `scan.depot_ladder_b.taken` gate a report response on Control. Filing raises
+  `skyway_survey_reported`; an AI that cannot scan cannot pass it. A scan-capable
+  AI remains a separately scoped policy surface.
 - **The good settle could require evidence** by raising `call_the_vote` to need
   `showed_the_file` (or corrupt `ground`'s basis), forcing a no-evidence crew to
   the force path — the trade already authored as "costs people, a relationship,
@@ -295,10 +300,13 @@ Idle crew fails these loudly across all acts.
   trigger.
 - Every task is **passively startable from t=0** — crew-initiated hail or scan
   opens it early (survey scans, committee/civilians, hailable Lyra at `:1491-1508`).
-- Timers **escalate, never close**: the deadline hardens the tree (frustrated
-  committee, costlier options, Havelock counter-offer) but the crew-initiated
-  path stays open. Idempotency via "did the crew already engage" flags, like the
-  `skyway_strike_settled` guard (`:1794-1797`).
+- Timers normally **escalate rather than remove interactions**: the deadline
+  hardens the tree (frustrated committee, costlier options, Havelock
+  counter-offer) but the crew-initiated path stays open. The survey deadline is
+  the explicit scoring exception: it fails the unfiled objective loudly while
+  leaving the report interaction available for later records and consequences.
+  Idempotency comes from "did the crew already engage" flags, like the
+  `skyway_strike_settled` guard.
 - **Pre-emption is remembered**: early work (scan early, tow the Lyra at t=300,
   settle the strike before the deadline) is recorded and the objective
   **auto-resolves when it posts** — the full 25-minute schedule stays on stage;
@@ -340,13 +348,20 @@ claimants lift (ceiling 52 vs 66 — a clean run still has a real moral choice).
 
 ### The survey beat (act 1 becomes a real objective)
 
+**Implemented by #1132.**
+
 `obj-a1-survey` completes on: **scan all three structures** (`scan.skyhook.taken`
 + `scan.depot_ladder_a.taken` + `scan.depot_ladder_b.taken`) **and** a report
 pickup on the **Control comms channel that resolves the objective itself**
-(the seam `put_the_file` already reuses, `:4345-4396`). All three scans gate the
+(Control is transport and authority only; this does not file the separate
+maintenance evidence or keep its promise). All three scans gate the
 report pickup (`can_file`-style). Any scan band works (`alliance_destroyer.toml:527-552`
 — detailed or coarse); a scan raising `scan.<id>.taken` fires `on_flag_set`.
-The live Act-I boundary is t=360 for the tour.
+The survey posts on the t=160 tether slip. `post_remembered_objective` consumes
+the flag-backed `skyway_survey_reported` memory, so scans and filing completed
+before that post resolve it immediately without moving the schedule. The live
+Act-I boundary is t=360; an unfiled survey fails there with an urgent Control
+message and exact missing-work flags.
 
 ### The AI surface (the verb batch, scoped separately)
 

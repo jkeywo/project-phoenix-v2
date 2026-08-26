@@ -585,8 +585,8 @@ fn run_in_entry() {
        base_priority: 35, target_speed: flt("0.9") }
 }
 
-fn raid_overrides() {
-    #{ weapons_console: acquisition_band(),
+fn raid_overrides(display_name) {
+    #{ display_name: display_name, weapons_console: acquisition_band(),
        behaviour: #{ doctrine: [ assault_entry(), run_in_entry() ] } }
 }
 
@@ -599,8 +599,8 @@ fn raid_overrides() {
 // keeps the merge legal (see the anchors section above). `base_priority = 0`
 // and the empty `modifiers` keep it out of the scored pool as well, so it
 // cannot lead a pool every consumer reads the FIRST entry of.
-fn wave_8_overrides() {
-    #{ weapons_console: acquisition_band(),
+fn wave_8_overrides(display_name) {
+    #{ display_name: display_name, weapons_console: acquisition_band(),
        behaviour: #{ doctrine: [
            #{ id: "patrol-ironveil", directive_kind: "None", directive_anchors: [],
               directive_loop: false, base_priority: 0, modifiers: [] },
@@ -663,19 +663,19 @@ fn release_wave_1(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_cruiser.toml",
         name: "wave_1", anchor: "enemy_n_outer",
-        groups: ["hostiles", "wave_1"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_1"], overrides: raid_overrides("world.combat_test.harrow.blood_eagle")
     });
     if ctx.flags.ship_power >= 90 {
         ctx.effects.spawn_entity(#{
             template_path: "assets/entities/ship_harrow_destroyer.toml",
             name: "wave_1_bonus", position: [900, 0, -560],
-            groups: ["hostiles", "wave_1"], overrides: raid_overrides()
+            groups: ["hostiles", "wave_1"], overrides: raid_overrides("world.combat_test.harrow.iron_spear")
         });
     }
     ctx.effects.add_objective(#{
         id: "obj-destroy-wave-1",
         text: "world.combat_test.trigger.action.obj_destroy_wave_1.text",
-        mandatory: true, targets: ["wave_1"], target: "wave_1",
+        mandatory: true, targets: [], target: "wave_1",
         directive_kind: "Destroy", base_priority: 80
     });
     ctx.flags.increment("waves_spawned", 1);
@@ -685,19 +685,19 @@ fn release_wave_2(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_destroyer.toml",
         name: "wave_2", anchor: "enemy_se",
-        groups: ["hostiles", "wave_2"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_2"], overrides: raid_overrides("world.combat_test.harrow.black_anvil")
     });
     if ctx.flags.ship_power >= 100 {
         ctx.effects.spawn_entity(#{
             template_path: "assets/entities/ship_harrow_cruiser.toml",
             name: "wave_2_bonus", position: [1000, 0, 640],
-            groups: ["hostiles", "wave_2"], overrides: raid_overrides()
+            groups: ["hostiles", "wave_2"], overrides: raid_overrides("world.combat_test.harrow.red_hammer")
         });
     }
     ctx.effects.add_objective(#{
         id: "obj-destroy-wave-2",
         text: "world.combat_test.trigger.action.obj_destroy_wave_2.text",
-        mandatory: true, targets: ["wave_2"], target: "wave_2",
+        mandatory: true, targets: [], target: "wave_2",
         directive_kind: "Destroy", base_priority: 80
     });
     ctx.flags.increment("waves_spawned", 1);
@@ -707,19 +707,19 @@ fn release_wave_3(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_cruiser.toml",
         name: "wave_3", anchor: "enemy_e",
-        groups: ["hostiles", "wave_3"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_3"], overrides: raid_overrides("world.combat_test.harrow.ash_pike")
     });
     if ctx.flags.ship_power >= 90 {
         ctx.effects.spawn_entity(#{
             template_path: "assets/entities/ship_harrow_destroyer.toml",
             name: "wave_3_bonus", position: [1200, 0, 140],
-            groups: ["hostiles", "wave_3"], overrides: raid_overrides()
+            groups: ["hostiles", "wave_3"], overrides: raid_overrides("world.combat_test.harrow.steel_mace")
         });
     }
     ctx.effects.add_objective(#{
         id: "obj-destroy-wave-3",
         text: "world.combat_test.trigger.action.obj_destroy_wave_3.text",
-        mandatory: true, targets: ["wave_3"], target: "wave_3",
+        mandatory: true, targets: [], target: "wave_3",
         directive_kind: "Destroy", base_priority: 80
     });
     ctx.flags.increment("waves_spawned", 1);
@@ -729,19 +729,19 @@ fn release_wave_4(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_destroyer.toml",
         name: "wave_4", anchor: "enemy_ne",
-        groups: ["hostiles", "wave_4"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_4"], overrides: raid_overrides("world.combat_test.harrow.night_cleaver")
     });
     if ctx.flags.ship_power >= 100 {
         ctx.effects.spawn_entity(#{
             template_path: "assets/entities/ship_harrow_cruiser.toml",
             name: "wave_4_bonus", position: [1000, 0, -360],
-            groups: ["hostiles", "wave_4"], overrides: raid_overrides()
+            groups: ["hostiles", "wave_4"], overrides: raid_overrides("world.combat_test.harrow.war_axe")
         });
     }
     ctx.effects.add_objective(#{
         id: "obj-destroy-wave-4",
         text: "world.combat_test.trigger.action.obj_destroy_wave_4.text",
-        mandatory: true, targets: ["wave_4"], target: "wave_4",
+        mandatory: true, targets: [], target: "wave_4",
         directive_kind: "Destroy", base_priority: 80
     });
     ctx.flags.increment("waves_spawned", 1);
@@ -752,24 +752,24 @@ fn release_wave_5(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_cruiser.toml",
         name: "wave_5", anchor: "enemy_ese",
-        groups: ["hostiles", "wave_5"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_5"], overrides: raid_overrides("world.combat_test.harrow.grave_halberd")
     });
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_cruiser.toml",
         name: "wave_5_second", anchor: "enemy_ene",
-        groups: ["hostiles", "wave_5"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_5"], overrides: raid_overrides("world.combat_test.harrow.storm_lance")
     });
     if ctx.flags.ship_power >= 90 {
         ctx.effects.spawn_entity(#{
             template_path: "assets/entities/ship_harrow_destroyer.toml",
             name: "wave_5_bonus", position: [1100, 0, 390],
-            groups: ["hostiles", "wave_5"], overrides: raid_overrides()
+            groups: ["hostiles", "wave_5"], overrides: raid_overrides("world.combat_test.harrow.iron_kite")
         });
     }
     ctx.effects.add_objective(#{
         id: "obj-destroy-wave-5",
         text: "world.combat_test.trigger.action.obj_destroy_wave_5.text",
-        mandatory: true, targets: ["wave_5", "wave_5_second"], target: "wave_5",
+        mandatory: true, targets: [], target: "wave_5",
         directive_kind: "Destroy", base_priority: 80
     });
     ctx.flags.increment("waves_spawned", 1);
@@ -779,24 +779,24 @@ fn release_wave_6(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_destroyer.toml",
         name: "wave_6", anchor: "enemy_s_outer",
-        groups: ["hostiles", "wave_6"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_6"], overrides: raid_overrides("world.combat_test.harrow.red_scythe")
     });
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_destroyer.toml",
         name: "wave_6_second", anchor: "enemy_n_outer",
-        groups: ["hostiles", "wave_6"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_6"], overrides: raid_overrides("world.combat_test.harrow.black_sabre")
     });
     if ctx.flags.ship_power >= 100 {
         ctx.effects.spawn_entity(#{
             template_path: "assets/entities/ship_harrow_cruiser.toml",
             name: "wave_6_bonus", position: [900, 0, 840],
-            groups: ["hostiles", "wave_6"], overrides: raid_overrides()
+            groups: ["hostiles", "wave_6"], overrides: raid_overrides("world.combat_test.harrow.ash_maul")
         });
     }
     ctx.effects.add_objective(#{
         id: "obj-destroy-wave-6",
         text: "world.combat_test.trigger.action.obj_destroy_wave_6.text",
-        mandatory: true, targets: ["wave_6", "wave_6_second"], target: "wave_6",
+        mandatory: true, targets: [], target: "wave_6",
         directive_kind: "Destroy", base_priority: 80
     });
     ctx.flags.increment("waves_spawned", 1);
@@ -808,24 +808,24 @@ fn release_wave_7(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_cruiser.toml",
         name: "wave_7", anchor: "enemy_e_far",
-        groups: ["hostiles", "wave_7"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_7"], overrides: raid_overrides("world.combat_test.harrow.steel_raptor")
     });
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_destroyer.toml",
         name: "wave_7_second", anchor: "enemy_e",
-        groups: ["hostiles", "wave_7"], overrides: raid_overrides()
+        groups: ["hostiles", "wave_7"], overrides: raid_overrides("world.combat_test.harrow.war_brand")
     });
     if ctx.flags.ship_power >= 90 {
         ctx.effects.spawn_entity(#{
             template_path: "assets/entities/ship_harrow_destroyer.toml",
             name: "wave_7_bonus", position: [1400, 0, 140],
-            groups: ["hostiles", "wave_7"], overrides: raid_overrides()
+            groups: ["hostiles", "wave_7"], overrides: raid_overrides("world.combat_test.harrow.blood_fang")
         });
     }
     ctx.effects.add_objective(#{
         id: "obj-destroy-wave-7",
         text: "world.combat_test.trigger.action.obj_destroy_wave_7.text",
-        mandatory: true, targets: ["wave_7", "wave_7_second"], target: "wave_7",
+        mandatory: true, targets: [], target: "wave_7",
         directive_kind: "Destroy", base_priority: 80
     });
     ctx.flags.increment("waves_spawned", 1);
@@ -837,19 +837,19 @@ fn release_wave_8(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/ship_harrow_patrol.toml",
         name: "wave_8", anchor: "enemy_e_far",
-        groups: ["hostiles", "wave_8"], overrides: wave_8_overrides()
+        groups: ["hostiles", "wave_8"], overrides: wave_8_overrides("world.combat_test.harrow.dread_spear")
     });
     if ctx.flags.ship_power >= 100 {
         ctx.effects.spawn_entity(#{
             template_path: "assets/entities/ship_harrow_cruiser.toml",
             name: "wave_8_bonus", position: [1400, 0, -40],
-            groups: ["hostiles", "wave_8"], overrides: raid_overrides()
+            groups: ["hostiles", "wave_8"], overrides: raid_overrides("world.combat_test.harrow.night_hammer")
         });
     }
     ctx.effects.add_objective(#{
         id: "obj-destroy-wave-8",
         text: "world.combat_test.trigger.action.obj_destroy_wave_8.text",
-        mandatory: true, targets: ["wave_8"], target: "wave_8",
+        mandatory: true, targets: [], target: "wave_8",
         directive_kind: "Destroy", base_priority: 80
     });
     ctx.flags.increment("waves_spawned", 1);
@@ -959,55 +959,55 @@ fn add_standing_mission(ctx) {
 // All twelve are announcements, so every node's `responses` is empty.
 
 fn send_brief(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "brief", urgent: true });
 }
 fn brief(ctx) { #{ message: "world.combat_test.comms.0.message", responses: [] } }
 
 fn report_wave_1(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "wave_1_report" });
 }
 fn wave_1_report(ctx) { #{ message: "world.combat_test.comms.1.message", responses: [] } }
 
 fn report_wave_2(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "wave_2_report" });
 }
 fn wave_2_report(ctx) { #{ message: "world.combat_test.comms.2.message", responses: [] } }
 
 fn report_wave_3(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "wave_3_report" });
 }
 fn wave_3_report(ctx) { #{ message: "world.combat_test.comms.3.message", responses: [] } }
 
 fn report_wave_4(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "wave_4_report" });
 }
 fn wave_4_report(ctx) { #{ message: "world.combat_test.comms.4.message", responses: [] } }
 
 fn report_wave_5(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "wave_5_report", urgent: true });
 }
 fn wave_5_report(ctx) { #{ message: "world.combat_test.comms.5.message", responses: [] } }
 
 fn report_wave_6(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "wave_6_report", urgent: true });
 }
 fn wave_6_report(ctx) { #{ message: "world.combat_test.comms.6.message", responses: [] } }
 
 fn report_wave_7(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "wave_7_report", urgent: true });
 }
 fn wave_7_report(ctx) { #{ message: "world.combat_test.comms.7.message", responses: [] } }
 
 fn report_wave_8(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "wave_8_report", urgent: true });
 }
 fn wave_8_report(ctx) { #{ message: "world.combat_test.comms.8.message", responses: [] } }
@@ -1016,19 +1016,19 @@ fn wave_8_report(ctx) { #{ message: "world.combat_test.comms.8.message", respons
 // crossing, so a single large hit that crosses several bands at once fires
 // each of them, in the order registered here.
 fn report_hull_75(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "hull_75", urgent: true });
 }
 fn hull_75(ctx) { #{ message: "world.combat_test.comms.9.message", responses: [] } }
 
 fn report_hull_50(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "hull_50", urgent: true });
 }
 fn hull_50(ctx) { #{ message: "world.combat_test.comms.10.message", responses: [] } }
 
 fn report_hull_10(ctx) {
-    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name",
+    ctx.effects.open_comms(#{ from: "world.entity.starbase_alpha.name", thread_id: "combat_test_starbase",
                               node_fn: "hull_10", urgent: true });
 }
 fn hull_10(ctx) { #{ message: "world.combat_test.comms.11.message", responses: [] } }

@@ -51,6 +51,20 @@ function intentTitle(kind) {
   }
 }
 
+function stationLabel(id) {
+  switch (id) {
+    case 'captain': return t('station.captain.name');
+    case 'helm': return t('station.helm.name');
+    case 'tactical': return t('station.tactical.name');
+    case 'repair': return t('station.repair.name');
+    case 'navigation': return t('station.navigation.name');
+    case 'comms': return t('station.comms.name');
+    case 'engineering': return t('station.engineering.name');
+    case 'science': return t('station.science.name');
+    default: return id || '';
+  }
+}
+
 /**
  * Normalise a CoordinationPopup payload to display strings.
  *
@@ -60,11 +74,13 @@ function intentTitle(kind) {
  *
  * @param {{ type?: string, target?: string, data?: object }} payload
  * @param {string|null|undefined} senderLabel  the localised origin label
- * @returns {{ sender: string, title: string, body: string }}
+ * @param {string|null|undefined} targetLabel  the localised destination station
+ * @returns {{ sender: string, from: string, to: string, title: string, body: string }}
  */
-export function normalizeCoordinationPayload(payload, senderLabel) {
+export function normalizeCoordinationPayload(payload, senderLabel, targetLabel) {
   const label = senderLabel || t('chatter.sender.ai');
-  const sender = payload.target ? (label + ' ? ' + payload.target) : label;
+  const destination = stationLabel(targetLabel);
+  const sender = destination ? (label + ' → ' + destination) : label;
   const data = payload.data || {};
 
   let title;
@@ -137,7 +153,7 @@ export function normalizeCoordinationPayload(payload, senderLabel) {
     title = payload.type || t('coordination.advisory.fallback_title');
   }
 
-  return { sender, title, body };
+  return { sender, from: label, to: destination, title, body };
 }
 
 // Expose for the non-module inline scripts in client.html and server.html.

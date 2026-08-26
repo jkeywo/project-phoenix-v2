@@ -1,4 +1,23 @@
 id,context,en
+world.combat_test.harrow.blood_eagle,assets/worlds/combat_test.toml → scripted Harrow display identity,Blood-Eagle
+world.combat_test.harrow.iron_spear,assets/worlds/combat_test.toml → scripted Harrow display identity,Iron-Spear
+world.combat_test.harrow.black_anvil,assets/worlds/combat_test.toml → scripted Harrow display identity,Black-Anvil
+world.combat_test.harrow.red_hammer,assets/worlds/combat_test.toml → scripted Harrow display identity,Red-Hammer
+world.combat_test.harrow.ash_pike,assets/worlds/combat_test.toml → scripted Harrow display identity,Ash-Pike
+world.combat_test.harrow.steel_mace,assets/worlds/combat_test.toml → scripted Harrow display identity,Steel-Mace
+world.combat_test.harrow.night_cleaver,assets/worlds/combat_test.toml → scripted Harrow display identity,Night-Cleaver
+world.combat_test.harrow.war_axe,assets/worlds/combat_test.toml → scripted Harrow display identity,War-Axe
+world.combat_test.harrow.grave_halberd,assets/worlds/combat_test.toml → scripted Harrow display identity,Grave-Halberd
+world.combat_test.harrow.storm_lance,assets/worlds/combat_test.toml → scripted Harrow display identity,Storm-Lance
+world.combat_test.harrow.iron_kite,assets/worlds/combat_test.toml → scripted Harrow display identity,Iron-Kite
+world.combat_test.harrow.red_scythe,assets/worlds/combat_test.toml → scripted Harrow display identity,Red-Scythe
+world.combat_test.harrow.black_sabre,assets/worlds/combat_test.toml → scripted Harrow display identity,Black-Sabre
+world.combat_test.harrow.ash_maul,assets/worlds/combat_test.toml → scripted Harrow display identity,Ash-Maul
+world.combat_test.harrow.steel_raptor,assets/worlds/combat_test.toml → scripted Harrow display identity,Steel-Raptor
+world.combat_test.harrow.war_brand,assets/worlds/combat_test.toml → scripted Harrow display identity,War-Brand
+world.combat_test.harrow.blood_fang,assets/worlds/combat_test.toml → scripted Harrow display identity,Blood-Fang
+world.combat_test.harrow.dread_spear,assets/worlds/combat_test.toml → scripted Harrow display identity,Dread-Spear
+world.combat_test.harrow.night_hammer,assets/worlds/combat_test.toml → scripted Harrow display identity,Night-Hammer
 entity.alliance_battleship.name,assets/entities/alliance_battleship.toml → name (top level),Alliance Battleship
 entity.alliance_battleship.hull.system_hull.helm_engine_port.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Engine (Port)
 entity.alliance_battleship.hull.system_hull.helm_engine_starboard.display_name,assets/entities/alliance_battleship.toml → [hull.system_hull] display_name,Engine (Starboard)

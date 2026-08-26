@@ -261,8 +261,8 @@ export function routeMessage(msg, ctx) {
       return done(false);
     }
     case 'CoordinationPopup': {
-      const { payload, sender_label } = msg.data;
-      sideEffects.push({ effect: 'coordination-popup', payload, senderLabel: sender_label });
+      const { payload, sender_label, target } = msg.data;
+      sideEffects.push({ effect: 'coordination-popup', payload, senderLabel: sender_label, targetLabel: target });
       return done(false);
     }
     case 'CommsState': {

@@ -1166,7 +1166,7 @@
   <!-- Top-centre coordination popup overlay (issue #494). Shown for AI-to-human
        coordination messages. Click-to-dismiss, auto-dismiss after 8s. -->
   <div id="coordination-popup" onclick="dismissCoordinationPopup()">
-    <div class="popup-sender" id="popup-sender"></div>
+    <div class="popup-sender"><span id="popup-from"></span><span id="popup-arrow"></span><span id="popup-to"></span><span id="popup-colon"></span></div>
     <div class="popup-title" id="popup-title"></div>
     <div class="popup-body" id="popup-body"></div>
   </div>
@@ -2638,19 +2638,25 @@
 
     // -- Coordination popup (issue #494) ---------------------------------------
     let coordinationPopupTimer = null;
-    function showCoordinationPopup(payload, sender_label) {
+      function showCoordinationPopup(payload, sender_label, target_label) {
       const el = document.getElementById('coordination-popup');
       if (!el) return;
-      const senderEl = document.getElementById('popup-sender');
+      const fromEl = document.getElementById('popup-from');
+      const arrowEl = document.getElementById('popup-arrow');
+      const toEl = document.getElementById('popup-to');
+      const colonEl = document.getElementById('popup-colon');
       const titleEl = document.getElementById('popup-title');
       const bodyEl = document.getElementById('popup-body');
-      if (!senderEl || !titleEl || !bodyEl) return;
+      if (!fromEl || !arrowEl || !toEl || !colonEl || !titleEl || !bodyEl) return;
       // Payload → { sender, title, body } normalisation is pure and lives in
       // gui/coordination-popup.js (issue #827); only the DOM writes and the
       // auto-dismiss timer stay here.
       if (typeof window.normalizeCoordinationPayload !== 'function') return;
-      const norm = window.normalizeCoordinationPayload(payload, sender_label);
-      senderEl.textContent = norm.sender;
+        const norm = window.normalizeCoordinationPayload(payload, sender_label, target_label);
+      fromEl.textContent = `[${norm.from}]`;
+      arrowEl.textContent = norm.to ? ' → ' : '';
+      toEl.textContent = norm.to ? `[${norm.to}]` : '';
+      colonEl.textContent = ':';
       titleEl.textContent = norm.title;
       bodyEl.textContent = norm.body;
       el.style.display = 'block';
@@ -2885,7 +2891,7 @@
           if (navigator.vibrate) navigator.vibrate(fx.duration);
           break;
         case 'coordination-popup':
-          showCoordinationPopup(fx.payload, fx.senderLabel);
+            showCoordinationPopup(fx.payload, fx.senderLabel, fx.targetLabel);
           break;
       }
     }

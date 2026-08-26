@@ -1078,7 +1078,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-b292f15b206ec0d7.js" crossorigin="anonymous" integrity="sha384-npQqZWLMd0fbuNJeU4POkuvUPr/qQ5YUsA+rS+XgwNfc4CXG2hj6oL5X/OV1TBmA"><link rel="preload" href="./project-phoenix-b292f15b206ec0d7_bg.wasm" crossorigin="anonymous" integrity="sha384-GnGTv5uiHaowloRjbmE6mDtQXYtq1gasTXnz0PBuZMPnPqBViJF+9CgdeyL3BjYt" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-e8cd98ae8dab5578.js" crossorigin="anonymous" integrity="sha384-jLcKNR+3v0jZe7GWufIt3XHulmqKTyBEbcAk31goXwDdsu3SujiYU6SmcgsrhTop"><link rel="preload" href="./project-phoenix-e8cd98ae8dab5578_bg.wasm" crossorigin="anonymous" integrity="sha384-z+xdMm6SLBy934YbtBSuJPCQd9Balf9WtaS3z9gzb6lpt+CSKFrcBFQ2QSZyjq98" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1479,8 +1479,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-b292f15b206ec0d7.js';
-const wasm = await init({ module_or_path: './project-phoenix-b292f15b206ec0d7_bg.wasm' });
+import init, * as bindings from './project-phoenix-e8cd98ae8dab5578.js';
+const wasm = await init({ module_or_path: './project-phoenix-e8cd98ae8dab5578_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -2126,7 +2126,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // `from_label` and any id-bearing payload field are already resolved by
     // localiseHostPayload; the normaliser only fills the sentence template.
     if (typeof window.normalizeCoordinationPayload !== 'function') return;
-    const norm = window.normalizeCoordinationPayload(payload, from_label);
+    const norm = window.normalizeCoordinationPayload(payload, from_label, to_label);
 
     const container = document.getElementById('chatter-container');
     if (!container) return;
@@ -2142,9 +2142,9 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
     // Create bubble element
     const bubble = document.createElement('div');
     bubble.className = 'chatter-bubble';
-    bubble.innerHTML = '<span class="chatter-from">' + escapeHtml(from_label)
-      + '</span><span class="chatter-arrow">→</span><span class="chatter-to">' + escapeHtml(to_label)
-      + '</span><span class="chatter-text">' + escapeHtml(text) + '</span>';
+    bubble.innerHTML = '<span class="chatter-from">[' + escapeHtml(norm.from)
+      + ']</span><span class="chatter-arrow"> → </span><span class="chatter-to">[' + escapeHtml(norm.to)
+      + ']</span><span class="chatter-text">: ' + escapeHtml(text) + '</span>';
 
     container.appendChild(bubble);
 

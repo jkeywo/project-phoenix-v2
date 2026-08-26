@@ -126,7 +126,9 @@
 # that and answered on the attack side instead: a torpedo no longer bypasses a
 # raised arc, so the gate is worth ten times the round it delays, and the
 # cruiser's phaser banks went `beam_damage_per_sec` 4 -> 24 to make the gate
-# reachable. Everything below is the current tree.
+# reachable. The measurements immediately below are that #929 tuning record;
+# they stopped being the current trajectory when #1045 changed the scheduling
+# phase of this world's zero-delay scripted opponent.
 #
 # `phoenix-headless --world assets/worlds/probe_duel.toml --seed 3 --hz 30
 # --sim-seconds 90 --deterministic --report-format json`, seed 3, over the 45 s
@@ -134,12 +136,10 @@
 #
 #   ring ticks 654   requested 36   overwritten 0   worst error 0.0
 #
-# The standing request is BACK, which is what makes `overwritten == 0` a real
-# refusal again rather than a description of an empty inbox — the same shape the
-# pre-#896 367-vs-4 count had, and the reason that history is still recorded
-# above. `the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request`
-# asserts a floor below half the measured 36, alongside the liveness control
-# (damage dealt and a torpedo launched) that was added while the count was zero.
+# The standing request was back in this pre-#1045 trajectory, making
+# `overwritten == 0` a real refusal again rather than a description of an empty
+# inbox — the same shape the pre-#896 367-vs-4 count had, and the reason that
+# history is still recorded above.
 #
 # The count has fallen twice across #929 and the trend is worth reading:
 #
@@ -154,10 +154,23 @@
 # request. The ring shrinks a little for the same reason, the bow-hold leg being
 # genuinely flown now rather than skipped.
 #
-# Over the whole 90 s window on the same seed, and across the 28-seed sweep
-# `alliance_cruiser.toml` records in full:
+# RE-MEASURED after #1045 on both Linux CI and the local headless gate:
 #
-#                       first pass    second pass   current
+#   ring ticks 678   requested 0   overwritten 0   worst error 0.0
+#
+# The corrected script lifecycle changes the exact phase at which the opponent
+# enters this chaotically sensitive engagement. This sample no longer passes
+# through the brief loaded-and-out-of-arc state that raises Channel 3's request;
+# `probe_aggressor`, the paired real-ring sample in
+# `the_composed_cruisers_ring_is_not_overwritten_by_an_arc_bearing_request`,
+# still does. That test therefore requires a real request across the PAIR while
+# retaining independent ring-duration and `overwritten == 0` assertions for
+# each run. No request in either sample still fails as vacuous.
+#
+# The following whole-90 s table is the same pre-#1045 #929 sweep, retained as
+# the combat-retuning record rather than presented as the current trajectory:
+#
+#                       first pass    second pass   third pass
 #                       (gate off,    (gate on,     (gate on, 270 arcs,
 #                        4 dmg/s)      180, 24)      32)
 #   cruiser launches     4 every seed  2-5, 28/28    2-4, 28/28

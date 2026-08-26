@@ -162,19 +162,14 @@ test('a connector arriving after every station is filled becomes a spectator', a
 
   // Every seat is now held, so the next player to connect has nowhere to sit.
   const overflow = await createTestClient(context, hostId, { name: 'Spectator' });
-
-  const spectatorMsg = await overflow.page.evaluate(
-    (token) => {
-      const msgs = window.__messages || [];
-      return msgs.find((m) => m.type === 'StationAssigned' && m.data.token === token);
-    },
-    overflow.token,
+  const overflowWelcome = await overflow.page.evaluate(
+    () => window.__messages.find((message) => message.type === 'Welcome'),
   );
-
-  expect(spectatorMsg).not.toBeNull();
-  expect(spectatorMsg.data.station).toBeNull();
-  // Spectator: serde omits `station_id` when None, so the field is undefined.
-  expect(spectatorMsg.data.station_id).toBeUndefined();
+  const overflowPlayer = overflowWelcome.data.state.players.find(
+    (player) => player.token === overflow.token,
+  );
+  expect(overflowPlayer).toBeDefined();
+  expect(overflowPlayer.station).toBeUndefined();
 
   for (const c of clients) { await c.close(); }
   await overflow.close();

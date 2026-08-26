@@ -1078,7 +1078,7 @@
       }
     }
   </style>
-<link rel="modulepreload" href="./project-phoenix-e8cd98ae8dab5578.js" crossorigin="anonymous" integrity="sha384-jLcKNR+3v0jZe7GWufIt3XHulmqKTyBEbcAk31goXwDdsu3SujiYU6SmcgsrhTop"><link rel="preload" href="./project-phoenix-e8cd98ae8dab5578_bg.wasm" crossorigin="anonymous" integrity="sha384-z+xdMm6SLBy934YbtBSuJPCQd9Balf9WtaS3z9gzb6lpt+CSKFrcBFQ2QSZyjq98" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="./project-phoenix-5ed6c3c177138c95.js" crossorigin="anonymous" integrity="sha384-y8nqVWtQqSODBLrAjMqzTRUZZKcbziF9gWz4znGEYtH7Rest7qAG1Jl3Ajtgfn80"><link rel="preload" href="./project-phoenix-5ed6c3c177138c95_bg.wasm" crossorigin="anonymous" integrity="sha384-sD9+MBioGyWj9GZujAdlcCzEP80xTN6gNcyUPwdjjMWy8azvkTLt0HzNfhqEaQZP" as="fetch" type="application/wasm"></head>
 <body>
   <!-- ── HTML bridge transport shim (ADR-0001 §3) ─────────────────────────── -->
   <script>
@@ -1479,8 +1479,8 @@
        using the `binaryen` npm package directly. -->
   
 <script type="module">
-import init, * as bindings from './project-phoenix-e8cd98ae8dab5578.js';
-const wasm = await init({ module_or_path: './project-phoenix-e8cd98ae8dab5578_bg.wasm' });
+import init, * as bindings from './project-phoenix-5ed6c3c177138c95.js';
+const wasm = await init({ module_or_path: './project-phoenix-5ed6c3c177138c95_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -3366,6 +3366,12 @@ function finishInit() {
   // the pool it projects is authoritative state.
   window.wasm_toggle_ai_doctrine = wasmBindings.wasm_toggle_ai_doctrine;
   window.wasm_get_ai_doctrine = wasmBindings.wasm_get_ai_doctrine;
+  // Scenario trigger/deadline state (issue #1045): publish the existing WASM
+  // debug pair on the same window seam the settings cog resolves by name.
+  // Keeping this observable is also what lets the browser smoke prove a failed
+  // sibling script activates neither half of its layer atomically.
+  window.wasm_toggle_scenario_state = wasmBindings.wasm_toggle_scenario_state;
+  window.wasm_get_scenario_state = wasmBindings.wasm_get_scenario_state;
   // Console input-to-feedback latency (issue #1169). The getter returns a
   // ConsoleLatencyPayload as JSON, which the cog's console-latency output draws
   // as a per-action table (gui/console-latency-panel.js).
@@ -3656,12 +3662,14 @@ function startServer() {
 
   set_message_callback(routeOutbound);
 
-  // Register the runtime fetch callback. The same callback serves two flows:
-  //  - World TOMLs (e.g. patrol.toml) loaded additively by load_world triggers.
+  // Register the runtime fetch callback. The same callback serves three flows:
+  //  - World TOMLs (e.g. patrol.toml) loaded additively by load_world effects.
+  //  - Sibling Rhai scripts declared by those additive world TOMLs.
   //  - Per-model rig sidecars under assets/models/*.toml, requested by the
   //    renderer when spawning a GLB-backed entity.
   // Sidecar paths (assets/models/<stem>.<variant>.toml) are routed to
-  // wasm_push_sidecar_toml; everything else is treated as a world TOML. An
+  // wasm_push_sidecar_toml; everything else uses the durable world/script
+  // content cache. An
   // empty string on 404 tells Rust to stop re-requesting (renderer then falls
   // back to an identity base rig).
   if (typeof wasmBindings.set_world_fetch_callback === 'function') {
@@ -3691,8 +3699,13 @@ function startServer() {
         .then(toml => { pushToml(path, toml); })
         .catch(err => {
           console.error('[Phoenix] Failed to fetch TOML at ' + path + ':', err);
-          // Push empty string so Rust stops re-requesting.
-          pushToml(path, '');
+          if (!isSidecarPath(path) && typeof wasmBindings.wasm_fail_world_fetch === 'function') {
+            wasmBindings.wasm_fail_world_fetch(path, String(err));
+          } else {
+            // Optional rig sidecars retain their established empty-string
+            // absence signal; runtime worlds/scripts have an explicit failure.
+            pushToml(path, '');
+          }
         });
     });
   }

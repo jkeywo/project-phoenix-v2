@@ -136,9 +136,9 @@ pub fn operate_civilian_order_ai(
             let (target, route) = crate::objectives::order_directive(&objective.directive)?;
             if target.is_empty()
                 || route.is_empty()
-                || !world_config
+                || world_config
                     .as_deref()
-                    .is_some_and(|world| world.route(route).is_some())
+                    .is_none_or(|world| world.route(route).is_none())
             {
                 return None;
             }

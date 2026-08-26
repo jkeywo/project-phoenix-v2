@@ -2,8 +2,8 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/world/config.rs, src/world/server.rs, src/server/renderer.rs, src/entities/config.rs, src/entities/include_resolve.rs, assets/worlds/default.toml]
-updated: 2026-07-27
+sources: [src/world/config.rs, src/world/server.rs, src/world/deadlines.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/include_resolve.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
+updated: 2026-08-26
 ---
 
 # World Data
@@ -50,6 +50,33 @@ crew-detail contract. It is resolved only after the lobby-selected hull exists.
 `write_scenario_detail_floor` matches each selector against that hull's Station
 ids and System kinds, writes the concrete System ids to the LocalShip's
 `ScenarioDetailFloor`, and clears stale values when the active world changes.
+
+### Supporting-layer script and deadline lifecycle
+
+A supporting world loaded through `extra_worlds` or `load_world` uses the same
+`[script]`, `[[deadline]]` and `on_deadline` contract as the root. An inline
+script compiles immediately. A top-level sibling `script = "child.rhai"` is
+resolved beside the layer; in a browser the host retains the fetched TOML and
+requests that sibling through the existing overlay-aware fetch bridge before
+attempting activation. Pending, failed and legitimately empty script sources
+are distinct states. A missing sibling refuses the whole layer once—entities,
+handlers and deadlines never activate partially.
+
+Layer script state is owned by the layer path. The same sibling AST may be
+shared by several layers, but triggers, callbacks, delayed effects, Comms opens
+and deadline mutations carry `origin_layer` and read that layer's flag chain.
+Local deadline ids are scoped by `(origin_layer, id)`, so root and child worlds
+may all author `window`; Captain presentation qualifies child ids while keeping
+the authored label. Child `due_secs` starts at the tick activation actually
+lands and uses the root simulation cadence. Unload runs before callback drain,
+removes owned rows and queued work, and releases a shared AST only after its
+last owner; reload starts a fresh activation-relative window. Snapshot format
+13 persists the ordered active composition, loader ownership, flags and
+declared-layer entity identities. Resume removes bootstrap-only layers, loads
+missing dynamic layers in captured activation order, treats a desired failed
+sentinel as terminal rather than retrying, and only then restores callbacks,
+deadlines and Comms state. That preserves index-aligned handlers and prevents
+bootstrap duplicate arming.
 
 ## Proposed Authoring Contract
 
@@ -211,7 +238,8 @@ mechanism fixtures, deliberately outside `assets/entities/` where every
 3. **Renderer backdrop:** `RendererPlugin` attaches the shared `assets/skybox/phoenix_space_cubemap.png` cubemap to `GameCamera`; it is independent of world TOML content.
 4. **`spawn_world_ambient_light` (`PostStartup`)** reads `WorldConfig.ambient_light` and inserts the `AmbientLight` resource.
 5. **`WorldSetup` broadcast** carries the per-instance entity snapshots to clients on `GameStart` and re-broadcasts via `Welcome` to late joiners.
-6. **For the rest of the session:** anchors and ambient light are immutable. Entities can be destroyed (asteroids, hull-zero stations); triggers and objectives mutate via the wire.
+6. **Supporting layer changes:** `apply_world_layer_changes` atomically activates retained TOML/script/entities/triggers/deadlines and publishes `WorldLoaded` only afterwards. It runs before scripted callback draining, so an unload on a callback's due tick retracts the callback deterministically.
+7. **For the rest of the session:** anchors and ambient light are immutable. Entities can be destroyed (asteroids, hull-zero stations); triggers, callbacks, deadlines, Comms and objectives mutate through authoritative runtime state.
 
 ## Migration notes (2026-05 entity-schema refactor)
 

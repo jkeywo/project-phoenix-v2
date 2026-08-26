@@ -86,11 +86,11 @@ impl WorldReader for FsReader {
     }
 }
 
-/// Browser reader: the world TOML off the config-cache's JS-delivered pending
-/// queue, firing a fetch request when it is not yet present.
+/// Browser reader: resolve world TOML from the live overlay or durable
+/// JS-delivered base cache, firing a fetch request when neither is present.
 ///
 /// Mirrors `world::server::load_scenario_toml_text`'s wasm arm. Both
-/// [`pop_pending_world_toml`](crate::entities::config_cache::pop_pending_world_toml) and
+/// [`resolved_world_source`](crate::entities::config_cache::resolved_world_source) and
 /// [`request_world_fetch`](crate::entities::config_cache::request_world_fetch) have native
 /// no-op stubs, so this adapter compiles on every target (and simply reads
 /// `None` off-browser) without a `cfg` gate of its own.
@@ -98,7 +98,7 @@ pub struct WasmReader;
 
 impl WorldReader for WasmReader {
     fn read(&self, path: &str) -> Option<String> {
-        crate::entities::config_cache::pop_pending_world_toml(path).or_else(|| {
+        crate::entities::config_cache::resolved_world_source(path).or_else(|| {
             crate::entities::config_cache::request_world_fetch(path.to_string());
             None
         })

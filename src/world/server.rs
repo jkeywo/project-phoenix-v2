@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rhai::{Map, AST};
@@ -212,6 +212,16 @@ pub struct PendingScenarioLoad(pub Vec<String>);
 /// [`remove_layer_script_triggers`] matches on at unload.
 #[derive(Clone, Debug, Default)]
 pub struct WorldRuntime {
+    /// `true` only after a layer completed atomic activation. Failed-load
+    /// sentinels deliberately remain `false`: they occupy the path to suppress
+    /// retry loops, but are not part of the active composition a snapshot must
+    /// recreate. A successfully loaded content-empty layer is still `true`.
+    pub is_active: bool,
+    /// Relative atomic-activation order among the active layers. Snapshot
+    /// topology sorts on this before restoring index-aligned trigger state.
+    /// Failed sentinels keep the default zero; a reloaded layer receives an
+    /// ordinal after every survivor.
+    pub activation_order: u64,
     /// ECS entity handles spawned when this layer was loaded.
     pub spawned_entities: Vec<Entity>,
     /// Anchor table from the layer's `WorldConfig`. Used by `spawn_entity`
@@ -239,13 +249,10 @@ pub struct WorldRuntime {
     /// Script units (AST keys) this layer's `[script]` block ADDED to the live
     /// [`WorldScriptRuntime::asts`] (issue #1045).
     ///
-    /// Only the keys this load actually inserted, never one that was already
-    /// there: two worlds can name the same sibling `.rhai`, and an unload must
-    /// not pull a unit the base world (or another layer) still resolves handlers
-    /// against. Read by the `UnloadWorld` branch to retract exactly this layer's
-    /// ASTs, its `on_deadline` declarations, and any `after(..)` callback still
-    /// queued against one of them. Empty for every script-free layer — which is
-    /// the whole shipped set.
+    /// Every compiled unit this layer owns, including a sibling `.rhai` shared
+    /// with another layer. The live AST is retained once, while `ast_owners`
+    /// records each owning layer; unload removes this layer's ownership and only
+    /// drops the AST after the final owner leaves. Empty for a script-free layer.
     pub script_units: Vec<String>,
 }
 
@@ -406,18 +413,24 @@ pub enum WorldLayerChange {
         path: String,
         loader_path: Option<String>,
     },
+    /// The layer TOML has arrived and is retained here while its declared
+    /// sibling `.rhai` fetch is pending. Neither source is re-requested and the
+    /// layer is not parsed/compiled/minted until the sibling reaches a terminal
+    /// state.
+    AwaitingScript {
+        path: String,
+        loader_path: Option<String>,
+        toml: String,
+        script_path: String,
+    },
     /// A `Load` that was already EVALUATED on an earlier tick and is waiting for
     /// the `WorldScriptRuntime` that tick inserted to become visible (issue
     /// #1045). The applier merges and spawns straight from `layer`.
     ///
     /// It carries the evaluated decision rather than re-running the evaluation
-    /// because a layer's TOML can only be read ONCE. On wasm `load_scenario_toml`
-    /// pops the text out of the JS-delivered pending-fetch map and
-    /// `request_world_fetch` refuses to ask for a path it has already asked for,
-    /// so a second evaluation would find nothing, answer `TomlUnavailable`, and
-    /// re-queue itself forever — a silent hang in the browser, which is the
-    /// shipped client. Carrying the outcome makes native and wasm identical and
-    /// reads the world source exactly once either way.
+    /// because re-evaluation would reparse the layer and mint different entity
+    /// UUIDs. Carrying the outcome makes native and wasm identical and ensures
+    /// the eventual activation is exactly the decision evaluated on this tick.
     DeferredApply {
         path: String,
         loader_path: Option<String>,
@@ -530,12 +543,10 @@ pub struct ScriptHandlerRef {
 /// Runtime state for a world that authors Rhai scripts (issue #984, Rhai M6
 /// phase 2a).
 ///
-/// Inserted at `Startup` by [`compile_world_scripts`] ONLY when the loaded world
-/// compiled at least one script AST with no error; **absent** for every
-/// script-free world (the entire shipped set), so the scripted-handler branch of
-/// [`tick_trigger_pipeline`] is skipped and behaviour there is byte-identical to
-/// before scripting existed. Its lifecycle mirrors [`WorldContentRuntime`]:
-/// created at world load, persisting for the session.
+/// Inserted at `Startup` by [`compile_world_scripts`] when the root world has a
+/// runnable AST, or just before applying the first scripted child layer. Its
+/// lifecycle mirrors [`WorldContentRuntime`]; child units are reference-counted
+/// by explicit owners and may enter or leave while the root runtime persists.
 ///
 /// [`pending_callbacks`](Self::pending_callbacks) is the serialisable
 /// future-work queue that deferred `after(n, |ctx| …)` callbacks land on
@@ -548,6 +559,9 @@ pub struct WorldScriptRuntime {
     pub host: RuntimeHost,
     /// Retained ASTs keyed by content-relative (or virtual) path.
     pub asts: BTreeMap<String, AST>,
+    /// Owners retaining each AST unit. `None` denotes the root world; layer
+    /// paths are explicit so shared sibling scripts survive either unload.
+    pub ast_owners: BTreeMap<String, BTreeSet<Option<String>>>,
     /// The compiled script triggers, consumed once by [`init_world_runtime`]'s
     /// merge ([`merge_script_triggers`]) to append trigger states and build
     /// [`handlers`](Self::handlers).
@@ -595,16 +609,18 @@ pub struct WorldScriptRuntime {
     ///
     /// It lives here, not on a comms resource, for the same reason the callback
     /// queue does — this is the resource the script systems already borrow, so
-    /// routing costs one line per call site and a script-free world (every shipped
-    /// one) has no `WorldScriptRuntime` at all, hence no queue and no behaviour.
+    /// routing costs one line per call site and a wholly script-free composition
+    /// has no `WorldScriptRuntime` at all, hence no queue and no behaviour.
     /// The request itself is comms vocabulary from `comms::content`, keeping the
     /// #816 split intact: world runtime holds the strings, the comms module owns
     /// what they mean.
     pub pending_comms_opens: Vec<crate::comms::content::OpenCommsRequest>,
     /// `on_deadline("id", "handler")` declarations collected at load (issue
     /// #1024), pairing each authored `[[deadline]]` with the fn it runs and the
-    /// unit that said so. Read once, by [`arm_mission_deadlines`]; the unit path
-    /// is half of the `ScheduledCall` key each deadline arms with.
+    /// unit that said so. Root declarations are read by
+    /// [`arm_mission_deadlines`]; child declarations are consumed atomically by
+    /// `apply_loaded_layer` at that layer's activation tick. The unit path is
+    /// part of the `ScheduledCall` key each deadline arms with.
     pub deadline_handlers: Vec<crate::world::deadlines::DeadlineHandler>,
 }
 
@@ -623,9 +639,16 @@ impl WorldScriptRuntime {
         if compiled.asts.is_empty() {
             return None;
         }
+        let ast_owners = compiled
+            .asts
+            .keys()
+            .cloned()
+            .map(|path| (path, BTreeSet::from([None])))
+            .collect();
         Some(WorldScriptRuntime {
             host: RuntimeHost::new(),
             asts: compiled.asts,
+            ast_owners,
             triggers: compiled.script_triggers,
             handlers: Vec::new(),
             budget: TickBudget::new(),
@@ -654,6 +677,7 @@ impl WorldScriptRuntime {
         WorldScriptRuntime {
             host: RuntimeHost::new(),
             asts: BTreeMap::new(),
+            ast_owners: BTreeMap::new(),
             triggers: Vec::new(),
             handlers: Vec::new(),
             budget: TickBudget::new(),
@@ -871,7 +895,10 @@ impl Plugin for WorldPlugin {
             )
             .add_systems(
                 FixedUpdate,
-                apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics),
+                apply_world_layer_changes
+                    .in_set(crate::sim_sets::SimSet::Physics)
+                    .before(collect_world_events)
+                    .before(tick_script_callbacks),
             )
             .add_observer(handle_region_entered_event)
             .add_observer(handle_region_exited_event);
@@ -1723,57 +1750,44 @@ pub(crate) fn remove_layer_script_triggers(
 /// earlier layer) already loaded arrives carrying that unit's registrations a
 /// second time. Appending them unconditionally would give the shared script two
 /// `on_world_loaded` states — and the applier's own `WorldLoaded` push would fire
-/// the intro twice on the tick the layer landed — while the retraction, which
-/// keys on the units this layer added, would take neither back out. Load and
-/// unload the same layer repeatedly and the table grows without bound.
+/// the intro twice on the tick the layer landed. Instead the AST is retained once
+/// and the registrations are instantiated once per owning layer, with that layer
+/// stamped on every trigger/callback so unload can retract the exact slice.
 ///
-/// What never moves: `registrations` (the generic `on(..)` set) has no runtime
-/// consumer at all — it exists for the load-time cross-reference pass, which
-/// already ran; `deadline_handlers` are dropped because nothing can arm them (see
-/// the applier's warning and [`arm_mission_deadlines`], a once-per-mission latch
-/// that has long fired by the time a layer loads); and `content_hash` stays
-/// whatever the base world set, because the layer's set binds a save through its
-/// own `<layer path>#scripts` ledger record.
+/// `registrations` (the generic `on(..)` set) has no runtime consumer — it exists
+/// for the load-time cross-reference pass, which already ran. Deadline handlers
+/// are consumed by the applier immediately before this merge, when it arms the
+/// layer's deadline rows at the activation tick. `content_hash` stays whatever
+/// the base world set because the layer's set binds a save through its own
+/// `<layer path>#scripts` ledger record.
 pub(crate) fn merge_layer_scripts(
     layer_path: &str,
     compiled: crate::world::script::load::CompiledScripts,
     runtime: &mut WorldContentRuntime,
     script_runtime: &mut WorldScriptRuntime,
 ) -> Vec<String> {
-    let mut added_units: Vec<String> = Vec::new();
+    let mut referenced_units: Vec<String> = Vec::new();
     for (unit_path, ast) in compiled.asts {
-        match script_runtime.asts.entry(unit_path.clone()) {
-            std::collections::btree_map::Entry::Vacant(slot) => {
-                slot.insert(ast);
-                added_units.push(unit_path);
-            }
-            std::collections::btree_map::Entry::Occupied(_) => {
-                // Same authored key from two worlds — only reachable through a
-                // shared sibling `.rhai`, since an inline block's virtual path is
-                // prefixed with its own world path. Keep the resident unit (its
-                // owner may still be calling into it) and say so.
-                bevy::log::warn!(
-                    target: "world",
-                    "merge_layer_scripts: layer {layer_path} names script unit '{unit_path}', \
-                     which is already loaded; its registrations are already live and are \
-                     not registered again"
-                );
-            }
+        referenced_units.push(unit_path.clone());
+        script_runtime
+            .ast_owners
+            .entry(unit_path.clone())
+            .or_default()
+            .insert(Some(layer_path.to_string()));
+        if let std::collections::btree_map::Entry::Vacant(slot) =
+            script_runtime.asts.entry(unit_path)
+        {
+            slot.insert(ast);
         }
     }
 
-    // Registrations from a unit this load did NOT insert are already live — see
-    // the doc above. `added_units` is at most a handful of paths, so a linear
-    // membership test beats building a set.
-    script_runtime.triggers.extend(
-        compiled
-            .script_triggers
-            .into_iter()
-            .filter(|t| added_units.contains(&t.source_path)),
-    );
+    // Registrations belong to the world that declared the unit, not to the AST
+    // path. Two layers sharing one sibling script receive distinct scoped
+    // triggers while retaining one compiled AST.
+    script_runtime.triggers.extend(compiled.script_triggers);
     merge_script_triggers(runtime, script_runtime, Some(layer_path));
 
-    added_units
+    referenced_units
 }
 
 /// Startup system: queue all `extra_worlds` paths from the loaded `WorldConfig`
@@ -2464,7 +2478,7 @@ pub(crate) fn tick_trigger_pipeline(
                             host, asts, budget, ..
                         } = &mut *sr;
                         match asts.get(&h.script_path) {
-                            Some(ast) => Some(host.call(
+                            Some(ast) => Some(host.call_scoped(
                                 budget,
                                 &script_clock,
                                 ast,
@@ -2474,6 +2488,7 @@ pub(crate) fn tick_trigger_pipeline(
                                 &runtime.deadlines,
                                 &runtime.commitments,
                                 &runtime.evidence,
+                                ft.origin_layer.as_deref(),
                                 Map::new(),
                             )),
                             None => {
@@ -2657,14 +2672,10 @@ fn world_modifier_source(tag: String) -> crate::core::messages::ModifierSource {
 /// warning rather than written somewhere arbitrary — the same "past root" answer
 /// `resolve_layer_prefix` gives a trigger condition, which simply does not fire.
 ///
-/// # What still writes at base scope
-///
-/// Only the trigger pipeline threads an origin layer here. Deferred `after(..)`
-/// callbacks and comms `on_pick` handlers pass `None` by existing, documented
-/// decision (see their call sites), so their writes stay base-scoped exactly as
-/// today. A layer whose callback writes a flag its own trigger watches would hit
-/// the asymmetry above; giving those two sites a real origin is a follow-up, not
-/// something to smuggle in here.
+/// Every script call site threads the same owner: trigger handlers, deferred and
+/// deadline callbacks, comms roots and comms response handlers. `None` therefore
+/// means the root world everywhere; a supporting-world call retains its layer
+/// even when its AST path is shared by another owner.
 fn scope_scripted_flag_write(
     cmd: &mut ActionCmd,
     log_ctx: &str,
@@ -2753,8 +2764,9 @@ pub(crate) fn apply_script_commands(
     // binds — so a scripted `spawn_entity` mints its `EntityUuid` inside
     // `dispatch_spawn_entity` from the real `WorldIdMint`, in the same order as
     // the declarative twin (never at the effects.rs boundary, never a fallback
-    // mint). `origin_layer`/`entity_name` come from the fired trigger (the
-    // callback path passes `None`/`None`).
+    // mint). `origin_layer`/`entity_name` come from the call owner: triggers,
+    // deferred callbacks, deadline callbacks and comms nodes all preserve the
+    // layer that authored them.
     uuid_source: &dyn Fn() -> String,
     template_loader: &dyn crate::entities::loader::TemplateLoader,
     base_anchors: &HashMap<String, [f32; 3]>,
@@ -2773,6 +2785,17 @@ pub(crate) fn apply_script_commands(
             // a downstream `on_flag_set` exactly as a declarative `set_flag` does.
             BufferedEffect::Cmd(mut cmd) => {
                 let mut new_events: Vec<WorldEvent> = Vec::new();
+                // Immediate `ctx.effects.load_world` is emitted before the host
+                // knows which retained layer unit is running, so its command
+                // starts with no loader. Stamp the same origin the delayed
+                // `ctx.schedule.in_seconds(..).load_world` path carries on its
+                // `DelayedAction`; explicit loader ownership, if a future
+                // caller supplies it, always wins.
+                if let ActionCmd::LoadWorld { loader_path, .. } = &mut cmd {
+                    if loader_path.is_none() {
+                        *loader_path = origin_layer.clone();
+                    }
+                }
                 if !scope_scripted_flag_write(
                     &mut cmd,
                     log_ctx,
@@ -3814,6 +3837,15 @@ pub(crate) fn tick_script_callbacks(
     let runtime = &mut *runtime;
 
     for call in due {
+        let callback_origin = call.origin_layer.clone();
+        let callback_flag_chain: Vec<crate::world::flags::FlagStore> = layered_flag_chain(
+            callback_origin.as_deref(),
+            &runtime.flags,
+            world_layers.layer_map.as_deref(),
+        )
+        .into_iter()
+        .cloned()
+        .collect();
         // Split `WorldScriptRuntime` into disjoint field borrows so the one
         // `&self` call takes `&mut budget` and `&ast` at once, while
         // `&runtime.flags` (a DISJOINT resource) is the overlay base. `call`
@@ -3824,18 +3856,19 @@ pub(crate) fn tick_script_callbacks(
                 host, asts, budget, ..
             } = &mut *sr;
             match asts.get(&call.script_path) {
-                Some(ast) => Some(host.call(
+                Some(ast) => Some(host.call_scoped(
                     budget,
                     &script_clock,
                     ast,
                     &call.script_path,
                     &call.fn_name,
-                    // Base scope, matching the `origin_layer: None` this path
-                    // passes to `apply_script_commands` below — see that call.
-                    std::slice::from_ref(&runtime.flags),
+                    // The callback's captured layer chain; root callbacks have
+                    // the ordinary one-entry base chain.
+                    &callback_flag_chain,
                     &runtime.deadlines,
                     &runtime.commitments,
                     &runtime.evidence,
+                    callback_origin.as_deref(),
                     Map::new(),
                 )),
                 None => {
@@ -3872,9 +3905,8 @@ pub(crate) fn tick_script_callbacks(
             &mut faction_dispatch,
             &mut ai_query,
             balance_events.as_deref_mut(),
-            // A callback is authored at base scope (no origin layer / trigger
-            // entity to thread), so `None`/`None` — matching the effect sink's and
-            // schedule sink's `origin_layer: None` note.
+            // Preserve the callback's captured owner. It has no trigger entity,
+            // hence the separate `None` for `entity_name`.
             &uuid_source,
             &template_loader,
             world_layers
@@ -3882,7 +3914,7 @@ pub(crate) fn tick_script_callbacks(
                 .as_ref()
                 .map(|wc| &wc.anchors)
                 .unwrap_or(&empty_anchors),
-            None,
+            callback_origin.clone(),
             None,
             &mut effect_queues.out(),
         );
@@ -4258,6 +4290,8 @@ fn apply_loaded_layer(
     runtime: &mut WorldContentRuntime,
     script_runtime: Option<&mut WorldScriptRuntime>,
     id_mint: Option<&crate::world_id::WorldIdMint>,
+    now_tick: u64,
+    root_tick_hz: f32,
 ) {
     let crate::world::layers::LoadedLayer {
         name_to_uuid_inserts,
@@ -4267,10 +4301,18 @@ fn apply_loaded_layer(
     } = layer;
 
     // Merge the layer's compiled `[script]` set into the live script runtime
-    // (issue #1045). `None` for the entire shipped set, so this is skipped there.
+    // (issue #1045). Script-free layers take the `None` branch without changing
+    // the live runtime.
     let script_units = match (scripts, script_runtime) {
         (Some(compiled), Some(sr)) => {
-            warn_about_inert_layer_deadlines(path, &scenario_config, &compiled);
+            let calls = runtime.deadlines.arm_scoped(
+                &scenario_config.deadlines,
+                &compiled.deadline_handlers,
+                now_tick,
+                root_tick_hz,
+                Some(path),
+            );
+            sr.pending_callbacks.extend(calls);
             merge_layer_scripts(path, compiled, runtime, sr)
         }
         (Some(_), None) => {
@@ -4311,20 +4353,23 @@ fn apply_loaded_layer(
             .insert(EntityOriginLayer(path.to_string()));
     }
 
-    // Issue #415: emit a WorldLoaded event so `on_world_loaded` triggers declared
-    // inside this sub-world (and merged into the live runtime above) fire on the
-    // next Update tick via `tick_trigger_pipeline`.
-    if emit_world_loaded {
-        runtime.pending_world_events.push(WorldEvent::WorldLoaded);
-    }
-
     let delayed_unload_resolve = matches!(
         scenario_config.delayed_unload_policy,
         crate::world::config::DelayedUnloadPolicy::Resolve
     );
+    let activation_order = layer_map
+        .0
+        .values()
+        .filter(|layer| layer.is_active)
+        .map(|layer| layer.activation_order)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
     layer_map.0.insert(
         path.to_string(),
         WorldRuntime {
+            is_active: true,
+            activation_order,
             spawned_entities,
             anchors: scenario_config.anchors.clone(),
             flags: crate::world::flags::FlagStore::new(),
@@ -4334,35 +4379,12 @@ fn apply_loaded_layer(
             script_units,
         },
     );
-}
 
-/// Say out loud that a layer's named deadlines cannot fire (issue #1045).
-///
-/// Both halves are inert and only one of them is visible. `arm_mission_deadlines`
-/// is a once-per-mission latch reading the BASE world's `WorldConfig`, and by the
-/// time any layer loads it has already run: so a layer's `[[deadline]]` blocks are
-/// never armed, and the `on_deadline(id, fn)` declarations that pair with them are
-/// dropped by `merge_layer_scripts` rather than merged into a table nothing will
-/// read. A designer would otherwise get a countdown that never appears and a
-/// handler that never runs, with nothing in the log about either.
-fn warn_about_inert_layer_deadlines(
-    path: &str,
-    scenario_config: &crate::world::config::WorldConfig,
-    compiled: &crate::world::script::load::CompiledScripts,
-) {
-    let blocks = scenario_config.deadlines.len();
-    let handlers = compiled.deadline_handlers.len();
-    if blocks == 0 && handlers == 0 {
-        return;
+    // Expose WorldLoaded only after every part of activation is live: ASTs,
+    // handlers, deadlines, entities, flags and the layer map.
+    if emit_world_loaded {
+        runtime.pending_world_events.push(WorldEvent::WorldLoaded);
     }
-    bevy::log::warn!(
-        target: "world",
-        "apply_world_layer_changes: layer {path} authors {blocks} [[deadline]] block(s) \
-         and {handlers} on_deadline declaration(s); NEITHER takes effect — named \
-         deadlines are armed once per mission from the base world's config, long \
-         before a layer loads, so the blocks are never armed and the declarations are \
-         not merged"
-    );
 }
 
 /// How many consecutive drains a layer may answer `TomlUnavailable` before it is
@@ -4405,14 +4427,9 @@ const MAX_TOML_RETRIES: u32 = 300;
 /// the states and their handlers are always written in the SAME system body.
 ///
 /// The re-queued item is a [`WorldLayerChange::DeferredApply`] carrying the
-/// EVALUATED layer, not a fresh `Load`. Re-evaluating would read the world source
-/// a second time, and a layer's source can only be read once: on wasm
-/// `load_scenario_toml` POPS the TOML out of the JS-delivered pending map and
-/// `request_world_fetch` refuses to re-ask for a path already requested, so the
-/// second evaluation would find nothing, answer `TomlUnavailable`, re-queue, and
-/// spin forever with no log — in the browser, which is the shipped client.
-/// Carrying the outcome also means the layer's `[[entity]]` UUIDs are minted
-/// exactly once, so the deferral costs a tick and nothing else.
+/// EVALUATED layer, not a fresh `Load`. Re-evaluating would reparse the layer and
+/// mint different `[[entity]]` UUIDs. Carrying the outcome means those UUIDs are
+/// minted exactly once, so the deferral costs a tick and nothing else.
 fn apply_world_layer_changes(
     mut commands: Commands,
     mut pending: ResMut<PendingWorldLayerChanges>,
@@ -4436,12 +4453,24 @@ fn apply_world_layer_changes(
     // because it is scheduling bookkeeping, not world state: nothing reads it,
     // no digest folds it, and a fresh app starts it empty.
     mut toml_retries: Local<HashMap<String, u32>>,
+    sim_tick: Option<Res<crate::sim_tick::SimTick>>,
+    base_world: Option<Res<crate::world::config::WorldConfig>>,
+    // A layer-owned dialogue is executable scenario state just like its queued
+    // callback. Keep the comms surfaces optional for bare loader fixtures, but
+    // retire all of them atomically when the owner unloads.
+    mut comms_runtime: Option<ResMut<crate::comms::server::CommsRuntime>>,
+    mut comms_inbox: Option<ResMut<crate::comms::server::CommsInboxRes>>,
+    mut on_screen_message: Option<ResMut<crate::comms::server::OnScreenMessage>>,
 ) {
     if pending.0.is_empty() {
         return;
     }
 
     let changes: Vec<WorldLayerChange> = pending.0.drain(..).collect();
+    let now_tick = sim_tick.as_deref().map_or(0, |tick| tick.0);
+    let root_tick_hz = base_world
+        .as_deref()
+        .map_or(SchedClock::ZERO.tick_hz, |world| world.global.sim_tick_hz);
 
     // Resolves a layer's top-level `script = "wave.rhai"` sibling. Built once per
     // drain: `world::layers` keeps the read injected so the decision stays pure,
@@ -4466,14 +4495,63 @@ fn apply_world_layer_changes(
                 // entry, leaking its spawned entities. It also keeps the second
                 // one off the world source, which on wasm can only be read once.
                 let deferred_already = pending.0.iter().any(|queued| {
-                    matches!(queued, WorldLayerChange::DeferredApply { path: p, .. } if p == &path)
+                    matches!(
+                        queued,
+                        WorldLayerChange::DeferredApply { path: p, .. }
+                            | WorldLayerChange::AwaitingScript { path: p, .. }
+                            if p == &path
+                    )
                 });
                 let already_loaded = layer_map.0.contains_key(&path) || deferred_already;
+                #[cfg(target_arch = "wasm32")]
+                if let crate::entities::config_cache::WorldFetchState::Failed(message) =
+                    crate::entities::config_cache::world_fetch_state(&path)
+                {
+                    bevy::log::error!(
+                        target: "world",
+                        "apply_world_layer_changes: refusing {path} atomically after fetch \
+                         failure: {message}"
+                    );
+                    layer_map.0.insert(path, WorldRuntime::default());
+                    continue;
+                }
                 let toml_str = if already_loaded {
                     None
                 } else {
                     load_scenario_toml(&path)
                 };
+                #[cfg(target_arch = "wasm32")]
+                if let Some(toml) = toml_str.as_deref() {
+                    if let Some(script_path) =
+                        crate::world::script::load::declared_sibling_script_path(&path, toml)
+                    {
+                        use crate::entities::config_cache::WorldFetchState;
+                        match crate::entities::config_cache::world_fetch_state(&script_path) {
+                            WorldFetchState::Ready(_) => {}
+                            WorldFetchState::Failed(message) => {
+                                bevy::log::error!(
+                                    target: "world",
+                                    "apply_world_layer_changes: refusing {path} atomically: \
+                                     sibling script {script_path} failed to fetch: {message}"
+                                );
+                                layer_map.0.insert(path, WorldRuntime::default());
+                                continue;
+                            }
+                            WorldFetchState::NotRequested | WorldFetchState::Pending => {
+                                crate::entities::config_cache::request_world_fetch(
+                                    script_path.clone(),
+                                );
+                                pending.0.push(WorldLayerChange::AwaitingScript {
+                                    path,
+                                    loader_path,
+                                    toml: toml.to_string(),
+                                    script_path,
+                                });
+                                continue;
+                            }
+                        }
+                    }
+                }
                 let result = evaluate_layer_load(
                     &path,
                     already_loaded,
@@ -4494,8 +4572,8 @@ fn apply_world_layer_changes(
                 // itself. Applied HERE — right after the evaluation, before the
                 // outcome is acted on and before any deferral — so it lands at the
                 // same moment the eager write did, on every outcome the eager write
-                // covered. Empty for the whole shipped set (no layer authors a
-                // script) and for every outcome that never reached a compile.
+                // covered. Empty for a script-free layer and for every outcome
+                // that never reached a compile.
                 result.ledger.apply();
                 match result.outcome {
                     LayerLoadOutcome::AlreadyLoaded => {
@@ -4540,8 +4618,8 @@ fn apply_world_layer_changes(
                         // one and re-queue the EVALUATED layer rather than merging into
                         // one created on the spot — see the system docs for why the
                         // extra tick is the whole point, and why what is re-queued is
-                        // the outcome rather than the load. Skipped entirely for the
-                        // shipped set: no shipped layer authors a script.
+                        // the outcome rather than the load. Script-free layers skip
+                        // this branch entirely.
                         if layer.scripts.is_some() && script_runtime.is_none() {
                             commands.insert_resource(WorldScriptRuntime::empty());
                             pending.0.push(WorldLayerChange::DeferredApply {
@@ -4560,7 +4638,94 @@ fn apply_world_layer_changes(
                             &mut runtime,
                             script_runtime.as_deref_mut(),
                             id_mint.as_deref(),
+                            now_tick,
+                            root_tick_hz,
                         );
+                    }
+                }
+            }
+            WorldLayerChange::AwaitingScript {
+                path,
+                loader_path,
+                toml,
+                script_path,
+            } => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let _ = (path, loader_path, toml, script_path);
+                    unreachable!("AwaitingScript is produced only by the wasm fetch edge");
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    use crate::entities::config_cache::WorldFetchState;
+                    match crate::entities::config_cache::world_fetch_state(&script_path) {
+                        WorldFetchState::NotRequested | WorldFetchState::Pending => {
+                            crate::entities::config_cache::request_world_fetch(script_path.clone());
+                            pending.0.push(WorldLayerChange::AwaitingScript {
+                                path,
+                                loader_path,
+                                toml,
+                                script_path,
+                            });
+                        }
+                        WorldFetchState::Failed(message) => {
+                            bevy::log::error!(
+                                target: "world",
+                                "apply_world_layer_changes: refusing {path} atomically: sibling \
+                                 script {script_path} failed to fetch: {message}"
+                            );
+                            layer_map.0.insert(path, WorldRuntime::default());
+                        }
+                        WorldFetchState::Ready(_) => {
+                            let result = evaluate_layer_load(
+                                &path,
+                                layer_map.0.contains_key(&path),
+                                Some(&toml),
+                                &script_resolver,
+                                || {
+                                    crate::world_id::mint_id_with(
+                                        id_mint.as_deref(),
+                                        crate::world_id::IdNamespace::Entity,
+                                    )
+                                },
+                            );
+                            for warning in &result.warnings {
+                                bevy::log::error!("apply_world_layer_changes: {warning}");
+                            }
+                            result.ledger.apply();
+                            match result.outcome {
+                                LayerLoadOutcome::AlreadyLoaded => {}
+                                LayerLoadOutcome::TomlUnavailable => {
+                                    unreachable!("retained layer TOML cannot become unavailable")
+                                }
+                                LayerLoadOutcome::ParseFailed => {
+                                    layer_map.0.insert(path, WorldRuntime::default());
+                                }
+                                LayerLoadOutcome::Loaded(layer) => {
+                                    if layer.scripts.is_some() && script_runtime.is_none() {
+                                        commands.insert_resource(WorldScriptRuntime::empty());
+                                        pending.0.push(WorldLayerChange::DeferredApply {
+                                            path,
+                                            loader_path,
+                                            layer,
+                                        });
+                                    } else {
+                                        apply_loaded_layer(
+                                            &path,
+                                            loader_path,
+                                            *layer,
+                                            &mut commands,
+                                            &mut layer_map,
+                                            &mut runtime,
+                                            script_runtime.as_deref_mut(),
+                                            id_mint.as_deref(),
+                                            now_tick,
+                                            root_tick_hz,
+                                        );
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -4594,6 +4759,8 @@ fn apply_world_layer_changes(
                     &mut runtime,
                     script_runtime.as_deref_mut(),
                     id_mint.as_deref(),
+                    now_tick,
+                    root_tick_hz,
                 );
             }
             WorldLayerChange::Unload(path) => {
@@ -4614,13 +4781,28 @@ fn apply_world_layer_changes(
                 // more than it saves.
                 pending.0.retain(|queued| match queued {
                     WorldLayerChange::Load { path: p, .. }
-                    | WorldLayerChange::DeferredApply { path: p, .. } => p != &path,
+                    | WorldLayerChange::DeferredApply { path: p, .. }
+                    | WorldLayerChange::AwaitingScript { path: p, .. } => p != &path,
                     WorldLayerChange::Unload(_) => true,
                 });
 
                 let Some(layer) = layer_map.0.remove(&path) else {
                     continue; // Not loaded - no-op.
                 };
+
+                // Retire every live comms surface owned by this layer before
+                // the response handler can observe it. `script_path` cannot be
+                // used as ownership: two loaded layers may share one sibling
+                // AST, and the survivor must retain its own dialogues while the
+                // departing owner's offered choices become unaddressable.
+                if let Some(comms) = comms_runtime.as_deref_mut() {
+                    crate::comms::server::retire_layer_owned_dialogues(
+                        &path,
+                        comms,
+                        comms_inbox.as_deref_mut(),
+                        on_screen_message.as_deref_mut(),
+                    );
+                }
 
                 // Despawn ECS entities that were spawned when this layer loaded.
                 // Use try_despawn: entities may have already died (e.g. hull = 0) before the layer unloads.
@@ -4636,9 +4818,16 @@ fn apply_world_layer_changes(
                 // `WorldScriptRuntime::handlers`.
                 //
                 // A layer that authored no script has an empty `script_units` and
-                // no origin-tagged states, so every arm below is a no-op for the
-                // entire shipped set.
+                // no origin-tagged state, so every arm below is a no-op.
                 if let Some(sr) = script_runtime.as_deref_mut() {
+                    for call in runtime.deadlines.remove_origin(&path) {
+                        sr.pending_callbacks.retract(&call);
+                    }
+                    sr.pending_callbacks
+                        .0
+                        .retain(|call| call.origin_layer.as_deref() != Some(path.as_str()));
+                    sr.pending_comms_opens
+                        .retain(|open| open.origin_layer.as_deref() != Some(path.as_str()));
                     let removed =
                         remove_layer_script_triggers(&mut runtime, &mut sr.handlers, &path);
                     if removed > 0 {
@@ -4649,15 +4838,19 @@ fn apply_world_layer_changes(
                         );
                     }
                     for unit in &layer.script_units {
-                        sr.asts.remove(unit);
+                        let remove_unit = sr.ast_owners.get_mut(unit).is_some_and(|owners| {
+                            owners.remove(&Some(path.clone()));
+                            owners.is_empty()
+                        });
+                        if remove_unit {
+                            sr.ast_owners.remove(unit);
+                            sr.asts.remove(unit);
+                        }
                     }
-                    // And any `after(..)` callback still waiting on its fire tick:
-                    // left in place it would resolve against an AST that is no longer
-                    // loaded. `deadline_handlers` need no retraction because a layer's
-                    // are never merged — see `merge_layer_scripts`.
-                    sr.pending_callbacks
-                        .0
-                        .retain(|c| !layer.script_units.contains(&c.script_path));
+                    // Every callback still waiting on its fire tick has already
+                    // been retracted by exact `origin_layer`; that includes named
+                    // deadlines, ordinary `after(..)` calls, and callbacks nested
+                    // from either one. Shared ASTs remain until their last owner.
                 }
 
                 // Remove objectives this layer's triggers added (issue #751)
@@ -4719,7 +4912,7 @@ fn load_scenario_toml_text(path: &str) -> Option<String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        crate::entities::config_cache::pop_pending_world_toml(path).or_else(|| {
+        crate::entities::config_cache::resolved_world_source(path).or_else(|| {
             // Fire a JS fetch request if we haven't already.
             crate::entities::config_cache::request_world_fetch(path.to_string());
             None

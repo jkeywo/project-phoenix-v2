@@ -3412,7 +3412,8 @@ pub struct SensorRadarBlackboard {
 /// different numbers off the same mission.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct DeadlineSnapshot {
-    /// The authored `[[deadline]] id` — the panel's stable row key.
+    /// Stable row key. A root deadline keeps its authored id; a supporting
+    /// layer qualifies that local id with its layer path.
     pub id: String,
     /// `strings.csv` id for the crew-facing name. The client looks it up; no
     /// English crosses the wire (AGENTS.md rule 11).

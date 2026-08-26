@@ -123,7 +123,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Trigger Chaining Loop
-      summary: Within one host tick, alternates trigger evaluation and handler execution until a pass produces no new events, so chained triggers (a flag mutation firing a flag-watching trigger) resolve with zero frame latency. Bounded by a fixed pass cap of sixteen that breaks pathological trigger cycles with a warning instead of hanging the frame.
+      summary: "Within one host tick, alternates trigger evaluation and handler execution until a pass produces no new events, so chained triggers resolve with zero frame latency. Trigger and callback calls carry supporting-layer origin through scoped flag/deadline/effect/schedule/comms hosts. Layer changes apply before callback drain, making same-tick unload-before-due deterministic. The loop remains bounded by sixteen passes so a pathological cycle warns instead of hanging the frame."
       goals:
         - chained scenario logic resolves in the same frame that caused it
         - a mis-authored trigger cycle degrades to a logged cutoff, never a hang
@@ -133,6 +133,8 @@ entities:
         - "the dispatch name map is rebuilt at the top of every pass, so an action can resolve an entity name that a spawn registered in an earlier pass of the same tick"
         - "event routing is per-caller: this loop feeds produced events into its own next pass (same tick); the delayed-action scheduler queues them for the next tick; the comms-response site pushes onto pending_world_events from SimSet::Input, which the pipeline drains later the same tick"
         - "[ai] a fire runs the trigger's SCRIPT HANDLER and nothing else. It also dispatched the trigger's own declarative action array, per-action `when` predicate and per-action delay; issue #985 deleted the `[[trigger]]` parser that was their only writer, so `Trigger` lost `actions`/`action_predicates`/`action_delays` and the loop lost the arm that read them. A handler defers with ctx.schedule.in_seconds and gates with ordinary Rhai control flow"
+        - "Issue #1045 threads `origin_layer` through a fired handler, every scheduled callback and nested drain, deadline mutations, buffered actions and scripted Comms. The origin selects the same layer flag chain the trigger used; it is never inferred from `script_path`, because one sibling AST may have several owners."
+        - "The schedule edge `apply_world_layer_changes.before(tick_script_callbacks)` is authoritative behavior: unloading on a callback's due tick retracts it before partition/drain. Activation similarly completes scripts, deadline arming and ownership before `WorldLoaded` can chain."
     architecture:
       kind: evaluation-loop
       authority: authoritative
@@ -141,8 +143,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/content.rs]
-      symbols: [tick_trigger_pipeline, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
+      paths: [src/world/server.rs, src/world/content.rs, src/world/script/engine.rs, src/world/script/schedule.rs]
+      symbols: [tick_trigger_pipeline, tick_script_callbacks, apply_world_layer_changes, ScheduledCall, MAX_CHAIN_PASSES, evaluate_single_trigger, apply_dispatch_result]
       tests: [cargo test]
     evidence:
       - kind: test

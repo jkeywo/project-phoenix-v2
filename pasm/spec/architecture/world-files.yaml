@@ -1103,7 +1103,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Layer Runtime
-      summary: Loads the base world and additive extra worlds, queues runtime layer changes, maintains loaded layer ownership, and applies load and unload transitions.
+      summary: "Loads the base world and additive extra worlds, queues runtime layer changes, maintains loaded layer ownership, and applies atomic load/unload transitions. Browser loads retain a fetched layer TOML while an overlay-aware sibling Rhai request is pending; an explicit fetch failure refuses the layer whole, while an empty script is valid. Layer activation merges scripts and origin-scoped deadlines before publishing WorldLoaded."
     architecture:
       kind: lifecycle-controller
       authority: authoritative
@@ -1114,15 +1114,15 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/config.rs, src/world/layers.rs, src/world/load/mod.rs]
-      tests: [cargo test]
+      paths: [src/world/server.rs, src/world/config.rs, src/world/layers.rs, src/world/load/mod.rs, src/entities/config_cache.rs, src/server/bridge.rs, server.html]
+      tests: [cargo test, "npx playwright test layer-sibling-script.spec.js"]
 
   - state: world-layer-runtime-state
     core:
       status: implemented
       confidence: confirmed
       title: World Layer Runtime State
-      summary: Loaded world layers, pending load/unload changes, and each layer's owned spawned entities and runtime content.
+      summary: "Loaded world layers, retained/pending load and unload changes, and each layer's active/sentinel state, activation order, loader ownership, owned entities, trigger registrations, shared-script references, deadline/callback/comms origins and runtime content. Ownership is keyed by layer path rather than script path so several layers may share one sibling AST safely. Snapshot format 13 reconciles this exact ordered active composition before restoring index-aligned handlers and origin-bearing queues."
     architecture:
       classification: authoritative
       owner: world-layer-runtime
@@ -1130,7 +1130,7 @@ entities:
     implementation:
       status: declared
       paths: [src/world/server.rs, src/world/layers.rs]
-      symbols: [WorldLayerMap, WorldRuntime, PendingWorldLayerChanges, WorldLayerChange, EntityOriginLayer]
+      symbols: [WorldLayerMap, WorldRuntime, PendingWorldLayerChanges, WorldLayerChange, EntityOriginLayer, AwaitingScript, WorldFetchState]
 
   - component: world-trigger-action-dispatcher
     core:
@@ -1176,7 +1176,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: World Unload Cleanup Controller
-      summary: Removes unloaded-layer entities, triggers, comms templates, layer-owned objectives, and generated spawn results, and cancels or resolves the layer's pending delayed actions by authored policy; reloading reconstructs those layer-local contracts.
+      summary: "Removes unloaded-layer entities, triggers, origin-owned comms opens/dialogues, deadline rows, scheduled callbacks, objectives and generated spawn results; releases shared ASTs only after their last owner and cancels or resolves delayed actions by authored policy. The applier runs before callback drain, so same-tick unload retracts due work deterministically; reloading reconstructs fresh layer-local contracts from its new activation tick."
     architecture:
       kind: lifecycle-controller
       authority: authoritative
@@ -1185,6 +1185,6 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/world/server.rs, src/world/layers.rs, src/world/delayed.rs, src/objectives.rs]
-      symbols: [apply_world_layer_changes, evaluate_layer_unload, partition_delayed_actions_on_unload]
-      tests: [cargo test]
+      paths: [src/world/server.rs, src/world/layers.rs, src/world/deadlines.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/world/delayed.rs, src/objectives.rs]
+      symbols: [apply_world_layer_changes, evaluate_layer_unload, remove_origin, remove_layer_script_triggers, partition_delayed_actions_on_unload]
+      tests: [cargo test, "cargo test layer_deadline", "cargo test --features headless --test snapshot_resume a_layer_deadline_resumes"]

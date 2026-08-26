@@ -124,6 +124,21 @@ fn sibling_path(world_path: &str, rel: &str) -> String {
     }
 }
 
+/// Return the resolved sibling script path declared by a raw world document.
+/// Inline `[script]` tables and script-free worlds return `None`.
+///
+/// The browser layer loader uses this small preflight before compilation so it
+/// can retain the already-fetched TOML while the sibling request is pending,
+/// without treating "not delivered yet" as a missing-file authoring error.
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) fn declared_sibling_script_path(world_path: &str, world_toml: &str) -> Option<String> {
+    let value: toml::Value = toml::from_str(world_toml).ok()?;
+    value
+        .get("script")
+        .and_then(toml::Value::as_str)
+        .map(|rel| sibling_path(world_path, rel))
+}
+
 /// Lift a world's `script` declaration into sorted [`ScriptSource`]s.
 ///
 /// Handles a top-level `script = "file.rhai"` (sibling, read via `resolver`) or
@@ -427,6 +442,23 @@ mod tests {
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].path, "assets/worlds/combat.rhai");
         assert_eq!(sources[0].source, "fn on_x(ctx) { }");
+    }
+
+    #[test]
+    fn discovers_only_a_top_level_sibling_declaration_for_async_prefetch() {
+        assert_eq!(
+            declared_sibling_script_path(
+                "assets/worlds/layer.toml",
+                "script = \"logic.rhai\"\n[global]\nseed = 1",
+            )
+            .as_deref(),
+            Some("assets/worlds/logic.rhai")
+        );
+        assert!(declared_sibling_script_path(
+            "assets/worlds/layer.toml",
+            "[script]\nsetup = \"fn f(ctx) {}\"",
+        )
+        .is_none());
     }
 
     #[test]

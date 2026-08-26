@@ -1,0 +1,11 @@
+[global]
+sim_tick_hz = 60
+
+[script]
+setup = '''
+on_world_loaded("load_nested_child");
+
+fn load_nested_child(ctx) {
+    ctx.effects.load_world("tests/fixtures/layer_nested_child.toml");
+}
+'''

@@ -136,6 +136,11 @@ pub struct ScriptedDialogue {
     /// and for the same reason (short and anonymous fn names are not unique
     /// across units).
     pub script_path: String,
+    /// Supporting-world layer whose handler opened this thread. `None` is the
+    /// base world. The path alone is not ownership: sibling script units may be
+    /// shared by several layers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_layer: Option<String>,
     /// The fn that produced the node currently shown.
     pub node_fn: String,
     /// The `on_pick` fn name for each response, PARALLEL to
@@ -178,4 +183,8 @@ pub struct OpenCommsRequest {
     /// which unit is running, exactly as `ScheduleSink::drain` stamps a
     /// callback's path there.
     pub script_path: String,
+    /// Supporting-world layer whose call queued this open. Stamped by the host
+    /// alongside `script_path`, never authored by Rhai.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_layer: Option<String>,
 }

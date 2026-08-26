@@ -44,6 +44,7 @@ fn request(root_fn: &str, from: &str) -> OpenCommsRequest {
         thread_id: None,
         urgent: false,
         script_path: PATH.to_string(),
+        origin_layer: None,
     }
 }
 
@@ -124,6 +125,58 @@ fn a_queued_open_injects_the_root_node_and_records_a_scripted_dialogue() {
             .is_empty(),
         "the queue is drained"
     );
+}
+
+/// A layer-owned callback/open must keep its owner through the comms queue, the
+/// root-node call, and the stored dialogue used by later response picks. The
+/// flag write is the observable proof that the node ran against the layer's
+/// store rather than quietly falling back to the root world.
+#[test]
+fn a_layer_owned_open_runs_and_is_recorded_in_its_origin_scope() {
+    const LAYER: &str = "fixture/layer-comms.toml";
+
+    let mut app = scripted_comms_app();
+    app.init_resource::<crate::world::server::WorldLayerMap>();
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldLayerMap>()
+        .0
+        .insert(
+            LAYER.to_string(),
+            crate::world::server::WorldRuntime::default(),
+        );
+
+    let mut sr = compile_fixture(
+        r#"
+        fn hail_axiom(ctx) {
+            ctx.flags.hailed = 1;
+            #{ message: "Layer channel open.", responses: [] }
+        }
+        "#,
+    );
+    sr.pending_comms_opens.push(OpenCommsRequest {
+        origin_layer: Some(LAYER.to_string()),
+        ..request("hail_axiom", "axiom")
+    });
+    app.world_mut().insert_resource(sr);
+
+    app.update();
+
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert!(
+        !runtime.flags.flag("hailed"),
+        "the root store stays untouched"
+    );
+    let layers = app
+        .world()
+        .resource::<crate::world::server::WorldLayerMap>();
+    assert!(
+        layers.0[LAYER].flags.flag("hailed"),
+        "the node's flag effect lands in its authoring layer"
+    );
+
+    let message = app.world().resource::<CommsInboxRes>().0.messages()[0].clone();
+    let dialogue = &app.world().resource::<CommsRuntime>().active_dialogues[&message.id];
+    assert_eq!(dialogue.script.origin_layer.as_deref(), Some(LAYER));
 }
 
 /// A root fn's effects route through the SAME apply path a trigger handler's

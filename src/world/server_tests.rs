@@ -3963,19 +3963,15 @@ const LAYER_B: &str = "tests/fixtures/layer_scripted_b.toml";
 const READ_AFTER_WRITE: &str = "tests/fixtures/layer_read_after_write.toml";
 const SHARED_X: &str = "tests/fixtures/layer_shared_x.toml";
 const SHARED_Y: &str = "tests/fixtures/layer_shared_y.toml";
+const LAYER_DEADLINE: &str = "tests/fixtures/layer_deadline.toml";
+const NESTED_PARENT: &str = "tests/fixtures/layer_nested_parent.toml";
+const NESTED_CHILD: &str = "tests/fixtures/layer_nested_child.toml";
 
 /// `layer_test_app` plus the trigger pipeline, so a layer's merged scripted
 /// trigger can be seen to FIRE rather than merely to be present.
 ///
-/// The `.before(collect_world_events)` edge is an OBSERVATION convenience this
-/// harness adds and production does not have: it makes a layer that lands on
-/// tick N have its `WorldLoaded` drained on tick N instead of N+1, so a test can
-/// assert without an extra `app.update()`. It does not paper over anything —
-/// what the fix actually relies on is that a layer's trigger states and their
-/// `handlers` are written in the SAME system body, which is true wherever
-/// `apply_world_layer_changes` runs in the tick. Production leaves the applier
-/// unordered inside `SimSet::Physics` deliberately: adding a real edge there
-/// would move system order for every shipped world.
+/// The harness mirrors production's load-before-event-collection edge so a
+/// layer's atomic activation and its `WorldLoaded` exposure happen in one tick.
 fn scripted_layer_test_app() -> App {
     let mut app = ai_trigger_test_app();
     app.init_resource::<WorldLayerMap>()
@@ -3983,6 +3979,12 @@ fn scripted_layer_test_app() -> App {
         .add_systems(
             Update,
             apply_world_layer_changes.before(collect_world_events),
+        )
+        .add_systems(
+            Update,
+            tick_script_callbacks
+                .after(tick_trigger_pipeline)
+                .after(apply_world_layer_changes),
         );
     app
 }
@@ -4098,6 +4100,57 @@ fn a_layer_script_compiles_and_its_trigger_fires_after_load() {
         sr.handlers.len(),
         runtime.trigger_states.len(),
         "handlers stays index-aligned with trigger_states"
+    );
+}
+
+/// Immediate and delayed `load_world` effects must give a child the same owner.
+/// The parent loads the child from its `on_world_loaded` handler; the child's
+/// own handler then writes at all three levels of the real flag chain. This is
+/// observable ownership, not an assertion over the queued command shape.
+#[test]
+fn an_immediate_layer_load_makes_the_new_world_a_child_of_the_calling_layer() {
+    let mut app = scripted_layer_test_app();
+    load_layer(&mut app, NESTED_PARENT);
+
+    for _ in 0..4 {
+        if app
+            .world()
+            .resource::<WorldLayerMap>()
+            .0
+            .contains_key(NESTED_CHILD)
+        {
+            break;
+        }
+        app.update();
+    }
+
+    let layers = app.world().resource::<WorldLayerMap>();
+    let child = layers
+        .0
+        .get(NESTED_CHILD)
+        .expect("the parent's immediate load_world effect activates its child");
+    assert_eq!(child.loader_path.as_deref(), Some(NESTED_PARENT));
+    assert_eq!(child.flags.counter("child_arrived"), 1);
+    assert_eq!(
+        layers.0[NESTED_PARENT].flags.counter("child_seen"),
+        1,
+        "one parent: hop lands in the loading layer"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("nested_seen_at_root"),
+        1,
+        "two parent: hops reach the root world"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("child_seen"),
+        0,
+        "the immediate effect must not flatten the child to root ownership"
     );
 }
 
@@ -4462,29 +4515,162 @@ fn a_same_drain_load_then_unload_of_a_scripted_layer_ends_unloaded() {
     assert_eq!(layer_counter(&app, LAYER_A, "layer_a_loaded"), 0);
 }
 
-/// A shared sibling `.rhai` registers ONCE, and load/unload cycles do not grow
-/// the table (issue #1045).
-///
-/// Running a unit's top level is what builds its registrations, so the second
-/// world to name a shared file arrives carrying a duplicate of them. Appending
-/// those would double-register the shared `on_world_loaded` — firing the intro
-/// twice on the tick the second layer landed — and the retraction, which keys on
-/// the units a layer OWNS, would take neither back out.
+/// A layer deadline is armed from the tick the layer ACTUALLY lands, using the
+/// root simulation cadence. `due = 0` is eligible later in that same ordered
+/// tick, while nested work retains the layer owner and unload retracts it.
 #[test]
-fn a_shared_sibling_unit_registers_once_and_does_not_grow_across_reloads() {
+fn layer_deadlines_use_activation_tick_root_cadence_and_reload_fresh() {
+    let mut app = scripted_layer_test_app();
+    let mut root = crate::world::config::WorldConfig::default();
+    root.global.sim_tick_hz = 10.0;
+    app.world_mut().insert_resource(root);
+    app.world_mut()
+        .insert_resource(crate::sim_tick::SimTick(100));
+
+    load_layer(&mut app, LAYER_DEADLINE);
+
+    {
+        let runtime = app.world().resource::<WorldContentRuntime>();
+        let instant = runtime
+            .deadlines
+            .get_scoped(Some(LAYER_DEADLINE), "instant")
+            .expect("instant deadline armed");
+        let shared = runtime
+            .deadlines
+            .get_scoped(Some(LAYER_DEADLINE), "shared")
+            .expect("shared deadline armed");
+        assert_eq!(instant.due_tick, 100);
+        assert_eq!(instant.state, crate::world::deadlines::DeadlineState::Fired);
+        assert_eq!(
+            shared.due_tick, 120,
+            "2 seconds uses the root 10 Hz cadence, not the layer's authored 1 Hz"
+        );
+    }
+    assert_eq!(layer_counter(&app, LAYER_DEADLINE, "instant_fired"), 1);
+
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 120;
+    app.update();
+    assert_eq!(layer_counter(&app, LAYER_DEADLINE, "deadline_fired"), 1);
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("deadline_fired_outward"),
+        1,
+        "parent: still deliberately escapes from the callback's layer"
+    );
+    {
+        let sr = app.world().resource::<WorldScriptRuntime>();
+        assert_eq!(sr.pending_callbacks.len(), 1);
+        assert_eq!(
+            sr.pending_callbacks.0[0].origin_layer.as_deref(),
+            Some(LAYER_DEADLINE),
+            "nested scheduling keeps the callback's authoritative owner"
+        );
+        assert_eq!(sr.pending_callbacks.0[0].fire_tick, 130);
+    }
+
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 130;
+    unload_layer(&mut app, LAYER_DEADLINE);
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("nested_fired_outward"),
+        0,
+        "unload retracts the exact nested call before it can drain"
+    );
+    assert!(!app
+        .world()
+        .resource::<WorldContentRuntime>()
+        .deadlines
+        .records
+        .iter()
+        .any(|record| record.origin_layer.as_deref() == Some(LAYER_DEADLINE)));
+
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 200;
+    load_layer(&mut app, LAYER_DEADLINE);
+    let runtime = app.world().resource::<WorldContentRuntime>();
+    assert_eq!(
+        runtime
+            .deadlines
+            .get_scoped(Some(LAYER_DEADLINE), "shared")
+            .expect("fresh shared deadline")
+            .due_tick,
+        220,
+        "reload arms once from the new activation tick"
+    );
+    assert_eq!(
+        runtime
+            .deadlines
+            .records
+            .iter()
+            .filter(|record| record.origin_layer.as_deref() == Some(LAYER_DEADLINE))
+            .count(),
+        2,
+        "reload starts fresh rather than duplicating old rows"
+    );
+    assert_eq!(layer_counter(&app, LAYER_DEADLINE, "instant_fired"), 1);
+}
+
+/// Production orders layer unload before the callback drain. If the order were
+/// reversed, the due handler's deliberate `parent:` write would escape into the
+/// base world before its layer disappeared.
+#[test]
+fn same_tick_unload_precedes_a_layer_deadline_callback_drain() {
+    let mut app = scripted_layer_test_app();
+    let mut root = crate::world::config::WorldConfig::default();
+    root.global.sim_tick_hz = 10.0;
+    app.world_mut().insert_resource(root);
+    app.world_mut()
+        .insert_resource(crate::sim_tick::SimTick(100));
+    load_layer(&mut app, LAYER_DEADLINE);
+
+    app.world_mut().resource_mut::<crate::sim_tick::SimTick>().0 = 120;
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Unload(LAYER_DEADLINE.into()));
+    app.update();
+
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .flags
+            .counter("deadline_fired_outward"),
+        0,
+        "the due callback must not run before the same-tick unload"
+    );
+    let sr = app.world().resource::<WorldScriptRuntime>();
+    assert!(sr
+        .pending_callbacks
+        .0
+        .iter()
+        .all(|call| call.origin_layer.as_deref() != Some(LAYER_DEADLINE)));
+    assert!(sr.handlers.is_empty());
+}
+
+/// A shared sibling `.rhai` is compiled once but registers once PER OWNER, and
+/// load/unload cycles do not grow the table (issue #1045).
+///
+/// Running a unit's top level builds its registrations, so each world that names
+/// a shared file receives its own layer-scoped `on_world_loaded`; the AST remains
+/// a single retained unit and retraction removes only the departing owner.
+#[test]
+fn a_shared_sibling_unit_is_scoped_per_layer_and_does_not_grow_across_reloads() {
     let mut app = scripted_layer_test_app();
     load_layer(&mut app, SHARED_X);
     load_layer(&mut app, SHARED_Y);
 
     assert_eq!(
         trigger_state_count(&app),
-        1,
-        "one resident unit, one registration"
+        2,
+        "one scoped registration per owning layer"
     );
     assert_eq!(app.world().resource::<WorldScriptRuntime>().asts.len(), 1);
     assert_eq!(
         app.world().resource::<WorldScriptRuntime>().handlers.len(),
-        1
+        2
     );
     assert_eq!(
         layer_counter(&app, SHARED_X, "shared_arrivals"),
@@ -4493,8 +4679,8 @@ fn a_shared_sibling_unit_registers_once_and_does_not_grow_across_reloads() {
     );
     assert_eq!(
         layer_counter(&app, SHARED_Y, "shared_arrivals"),
-        0,
-        "and the sharing layer registered nothing of its own"
+        1,
+        "the sharing layer receives its own scoped registration"
     );
 
     for cycle in 0..3 {
@@ -4515,14 +4701,258 @@ fn a_shared_sibling_unit_registers_once_and_does_not_grow_across_reloads() {
         load_layer(&mut app, SHARED_Y);
         assert_eq!(
             trigger_state_count(&app),
-            1,
-            "cycle {cycle}: still exactly one registration"
+            2,
+            "cycle {cycle}: still exactly one registration per layer"
         );
         assert_eq!(
             app.world().resource::<WorldScriptRuntime>().handlers.len(),
-            1
+            2
         );
     }
+}
+
+/// A dialogue belongs to the layer call that opened it, not to its AST path.
+/// X and Y retain the same sibling AST; after X unloads, Y keeps the unit but
+/// X's visible response must be gone before the response handler runs. If only
+/// the AST were considered, `shared_accept` would still complete the objective.
+#[test]
+fn unloading_one_shared_ast_owner_retires_its_dialogue_before_a_response_can_run() {
+    use crate::comms::content::{
+        ActiveDialogue, CommsDialogueNode, CommsResponse, ScriptedDialogue,
+    };
+    use crate::comms::server::{CommsChannel2Event, CommsInboxRes, CommsRuntime, OnScreenMessage};
+    use crate::core::messages::{
+        ClientMessage, CommsResponseView, ObjectiveStatus, SystemControlPayload,
+    };
+
+    let mut app = crate::comms::server::tests::comms_test_app();
+    app.init_resource::<WorldLayerMap>()
+        .init_resource::<PendingWorldLayerChanges>()
+        .add_systems(
+            FixedUpdate,
+            // Production placement: Input response retirement/router first,
+            // then the actual world-layer mutation in Physics. No test-only
+            // edge is allowed to make the invariant true.
+            apply_world_layer_changes.in_set(crate::sim_sets::SimSet::Physics),
+        );
+    #[derive(Resource, Default)]
+    struct ObservedChannel2(Vec<String>);
+    fn observe_channel2(
+        mut reader: MessageReader<CommsChannel2Event>,
+        mut observed: ResMut<ObservedChannel2>,
+    ) {
+        observed
+            .0
+            .extend(reader.read().map(|event| event.message.id.clone()));
+    }
+    app.init_resource::<ObservedChannel2>().add_systems(
+        FixedUpdate,
+        observe_channel2
+            .in_set(crate::sim_sets::SimSet::Broadcast)
+            .after(handle_comms_channel2),
+    );
+    load_layer(&mut app, SHARED_X);
+    load_layer(&mut app, SHARED_Y);
+    crate::comms::server::tests::setup_game_with_comms(&mut app, "shared-sender");
+
+    app.world_mut().resource_mut::<ObjectiveManagerRes>().0.add(
+        "stale_shared_dialogue",
+        "must remain active",
+        true,
+        vec![],
+    );
+
+    // Seed an unrelated event and let BOTH channel-2 readers consume it while
+    // Bevy still retains its backing row. The old unload implementation drained
+    // the whole buffer and rewrote this survivor under a new message ID, making
+    // both readers observe it again.
+    let already_consumed = crate::core::messages::CommsMessage::injected(
+        "unrelated-already-consumed".into(),
+        "shared-sender".into(),
+        "Shared Sender".into(),
+        "Already delivered once".into(),
+        Default::default(),
+        vec![],
+        // Deliberately the same authored/local thread id as the departing
+        // owner's dialogue: ownership is message-id exact, never thread-wide.
+        "shared-owner-thread".into(),
+        true,
+        false,
+    );
+    app.world_mut()
+        .write_message(CommsChannel2Event::generic(already_consumed.clone()));
+    let _ = crate::comms::server::tests::tick(&mut app);
+
+    let message = crate::core::messages::CommsMessage::injected(
+        "shared-owner-message".into(),
+        "shared-sender".into(),
+        "Shared Sender".into(),
+        "Owner X still offering a response".into(),
+        Default::default(),
+        vec![CommsResponseView {
+            text: "Accept".into(),
+            important: false,
+            available: true,
+        }],
+        "shared-owner-thread".into(),
+        true,
+        false,
+    );
+    app.world_mut()
+        .resource_mut::<CommsInboxRes>()
+        .0
+        .inject(message.clone());
+    app.world_mut()
+        .write_message(CommsChannel2Event::scripted_dialogue(message.clone()));
+    app.world_mut()
+        .insert_resource(OnScreenMessage(Some(message.clone())));
+    app.world_mut()
+        .resource_mut::<CommsRuntime>()
+        .active_dialogues
+        .insert(
+            message.id.clone(),
+            ActiveDialogue {
+                current_node: CommsDialogueNode {
+                    body: message.body.clone(),
+                    body_params: Default::default(),
+                    responses: vec![CommsResponse {
+                        text: "Accept".into(),
+                        important: false,
+                    }],
+                },
+                thread_id: message.thread_id.clone(),
+                script: ScriptedDialogue {
+                    script_path: "tests/fixtures/layer_shared.rhai".into(),
+                    origin_layer: Some(SHARED_X.into()),
+                    node_fn: "shared_arrived".into(),
+                    on_pick: vec!["shared_accept".into()],
+                },
+            },
+        );
+
+    // A second unrelated event is pending alongside the departing scripted
+    // event. It must be delivered once, while the scripted event is suppressed
+    // because early retirement removed its authoritative dialogue.
+    let pending_unrelated = crate::core::messages::CommsMessage::injected(
+        "unrelated-pending".into(),
+        "shared-sender".into(),
+        "Shared Sender".into(),
+        "Still deliver this".into(),
+        Default::default(),
+        vec![],
+        "shared-owner-thread".into(),
+        true,
+        false,
+    );
+    app.world_mut()
+        .write_message(CommsChannel2Event::generic(pending_unrelated.clone()));
+
+    app.world_mut()
+        .resource_mut::<PendingWorldLayerChanges>()
+        .0
+        .push(WorldLayerChange::Unload(SHARED_X.into()));
+    crate::comms::server::tests::push_msg(
+        &mut app,
+        "comms",
+        ClientMessage::ControlSystem {
+            target: crate::ship::system_registry::comms_system_id(),
+            payload: SystemControlPayload::RespondToMessage {
+                message_id: message.id.clone(),
+                response_index: 0,
+            },
+        },
+    );
+    let out = crate::comms::server::tests::tick(&mut app);
+    let _ = crate::comms::server::tests::tick(&mut app);
+
+    assert!(
+        out.iter().any(|message_out| matches!(
+            &message_out.msg,
+            crate::core::messages::ServerMessage::CommsResponseRejected {
+                message_id,
+                response_index: 0,
+            } if message_id == &message.id
+        )),
+        "the admitted same-tick stale response takes the shared rejection path"
+    );
+
+    let sr = app.world().resource::<WorldScriptRuntime>();
+    assert!(
+        sr.asts.contains_key("tests/fixtures/layer_shared.rhai"),
+        "Y still owns the shared AST"
+    );
+    assert!(app
+        .world()
+        .resource::<WorldLayerMap>()
+        .0
+        .contains_key(SHARED_Y));
+    assert!(!app
+        .world()
+        .resource::<WorldLayerMap>()
+        .0
+        .contains_key(SHARED_X));
+    assert!(
+        !app.world()
+            .resource::<CommsRuntime>()
+            .active_dialogues
+            .contains_key(&message.id),
+        "the unloaded owner's executable dialogue is retired"
+    );
+    assert!(
+        app.world()
+            .resource::<CommsInboxRes>()
+            .0
+            .messages()
+            .iter()
+            .all(|candidate| candidate.id != message.id),
+        "the exact stale offered response is neither visible nor re-injected from channel 2"
+    );
+    assert!(app.world().resource::<OnScreenMessage>().0.is_none());
+    let inbox_ids: Vec<String> = app
+        .world()
+        .resource::<CommsInboxRes>()
+        .0
+        .messages()
+        .into_iter()
+        .map(|candidate| candidate.id)
+        .collect();
+    assert_eq!(
+        inbox_ids
+            .iter()
+            .filter(|id| *id == &already_consumed.id)
+            .count(),
+        1,
+        "an already-consumed unrelated channel-2 event is not replayed"
+    );
+    assert_eq!(
+        inbox_ids
+            .iter()
+            .filter(|id| *id == &pending_unrelated.id)
+            .count(),
+        1,
+        "a pending unrelated channel-2 event is delivered exactly once"
+    );
+    assert!(!inbox_ids.contains(&message.id));
+    let observed = &app.world().resource::<ObservedChannel2>().0;
+    for id in [&already_consumed.id, &pending_unrelated.id, &message.id] {
+        assert_eq!(
+            observed.iter().filter(|seen| *seen == id).count(),
+            1,
+            "the original channel-2 event {id} keeps its identity and is observed once"
+        );
+    }
+    assert_eq!(
+        app.world()
+            .resource::<ObjectiveManagerRes>()
+            .0
+            .sorted_snapshots()
+            .into_iter()
+            .find(|objective| objective.id == "stale_shared_dialogue")
+            .expect("objective exists")
+            .status,
+        ObjectiveStatus::Active,
+        "the stale shared-AST response did not execute"
+    );
 }
 
 /// THE parallel-vec guard (issue #1045 acceptance): unloading a layer whose

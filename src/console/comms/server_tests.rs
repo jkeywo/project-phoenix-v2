@@ -1572,6 +1572,7 @@ fn seat_ai_dialogue(app: &mut App, sender_uuid: &str) -> (String, String) {
                 thread_id: id.clone(),
                 script: crate::comms::content::ScriptedDialogue {
                     script_path: crate::comms::scripted::tests::PATH.to_string(),
+                    origin_layer: None,
                     node_fn: "root".to_string(),
                     on_pick: vec!["on_ack".to_string()],
                 },
@@ -2183,6 +2184,7 @@ fn seat_scripted_dialogue(
                 thread_id: "scripted-thread".to_string(),
                 script: crate::comms::content::ScriptedDialogue {
                     script_path: crate::comms::scripted::tests::PATH.to_string(),
+                    origin_layer: None,
                     node_fn: "root".to_string(),
                     on_pick: on_pick.iter().map(|s| s.to_string()).collect(),
                 },

@@ -1640,6 +1640,34 @@ fn drain_snapshot_restore(world: &mut World) {
         return;
     };
 
+    // A fresh bootstrap only reproduces layers that its opening happens to
+    // load. A captured run may instead have loaded children dynamically or
+    // unloaded startup layers, so restore the exact ordered composition before
+    // probing the entity roster. The reconciler queues one deterministic
+    // load/unload step through the ordinary world-layer pipeline; returning
+    // `Waiting` therefore means this frame must end so that step can apply.
+    // A failed desired layer is terminal: deleting its sentinel and trying the
+    // same content again would turn one loud refusal into a retry loop.
+    match crate::snapshot::reconcile_world_layers(world, &snapshot.state) {
+        crate::snapshot::LayerReconcileStatus::Ready => {}
+        crate::snapshot::LayerReconcileStatus::Waiting => {
+            RESUME_PENDING_MIRROR.with(|m| *m.borrow_mut() = true);
+            return;
+        }
+        crate::snapshot::LayerReconcileStatus::Failed(path) => {
+            clear_pending_restore(world);
+            set_snapshot_status(
+                false,
+                SNAPSHOT_RESUME,
+                format!(
+                    "the save requires world layer '{path}', but that layer could not be reconstructed; \
+                     the resume was abandoned and you are playing a fresh session from tick 0"
+                ),
+            );
+            return;
+        }
+    }
+
     let ready = crate::snapshot::ready_to_restore(world, &snapshot.state);
     // Bump the patience budget only while genuinely waiting — a restore that is
     // ready applies on the frame it becomes ready, counting no frame against it.
@@ -2190,24 +2218,33 @@ pub fn wasm_load_world(
     crate::entities::config_cache::wasm_load_world(path, toml_str, curated_ships)
 }
 
-/// Register the JS callback used by Rust to request a runtime world TOML fetch.
+/// Register the JS callback used by Rust to request runtime world/script content.
 ///
 /// The callback signature is: `callback(path: string)`. When called, JS must
-/// fetch the TOML at `path` and deliver it via `wasm_push_world_toml`.
+/// fetch the TOML or Rhai source at `path` and deliver it via
+/// `wasm_push_world_toml`.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn set_world_fetch_callback(callback: js_sys::Function) {
     crate::entities::config_cache::set_world_fetch_callback(callback);
 }
 
-/// Deliver a runtime-fetched world TOML to the Rust side.
+/// Deliver runtime-fetched world TOML or sibling Rhai source to the Rust side.
 ///
-/// Called by JS after fetching a world path that Rust requested via the
+/// Called by JS after fetching a world/script path that Rust requested via the
 /// `set_world_fetch_callback` callback.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn wasm_push_world_toml(path: String, toml_str: String) {
     crate::entities::config_cache::wasm_push_world_toml(path, toml_str);
+}
+
+/// Report a terminal runtime world/script fetch failure. Separate from
+/// `wasm_push_world_toml` because an empty sibling Rhai file is valid.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn wasm_fail_world_fetch(path: String, message: String) {
+    crate::entities::config_cache::wasm_fail_world_fetch(path, message);
 }
 
 /// Deliver a runtime-fetched model-rig sidecar TOML to the Rust side.
@@ -2311,7 +2348,7 @@ pub fn wasm_push_scenario_manifest(toml_str: String) {
 /// Each finding is a JS object `{ severity, category, message, file, line }`.
 /// Manifest root worlds — and the include fragments the pack's entity templates
 /// pull in — resolve against the pack first, then the active stack, then base
-/// content the host has already fetched (`peek_pending_world_toml` for worlds,
+/// content the host has already fetched (`cached_base_world_source` for worlds,
 /// `raw_template_text` for entity/fragment TOML).
 ///
 /// **Absent from a demo build** (PRD #855, `build_flags::accepts_mod_pack_
@@ -2355,7 +2392,7 @@ pub fn wasm_add_mod_pack(bytes: &[u8]) -> Array {
             // pack hull may include a SHIPPED fragment. The active overlay stack
             // is consulted by `validate_mod_pack` itself (via the `active` slice
             // below), BENEATH the candidate and ABOVE this base resolver.
-            crate::entities::config_cache::peek_pending_world_toml(path)
+            crate::entities::config_cache::cached_base_world_source(path)
                 .or_else(|| crate::entities::config_cache::raw_template_text(path))
         },
         &crate::entities::loader::WasmTemplateLoader,
@@ -2577,10 +2614,7 @@ pub fn wasm_get_scenario_catalog() -> Array {
         .collect();
     let mods: Vec<(&str, &crate::world::manifest::Manifest)> =
         parsed_mods.iter().map(|(id, m)| (id.as_str(), m)).collect();
-    let resolve_world = |path: &str| {
-        crate::entities::config_cache::mod_pack_overlay_get(path)
-            .or_else(|| crate::entities::config_cache::peek_pending_world_toml(path))
-    };
+    let resolve_world = |path: &str| crate::entities::config_cache::resolved_world_source(path);
     for f in validate_manifest(&manifest, &manifest_toml, &resolve_world) {
         bevy::log::warn!(
             target: crate::logging::LogCat::Config.target(),

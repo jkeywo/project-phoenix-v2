@@ -95,10 +95,19 @@ thread_local! {
     static WORLD_CONFIG: RefCell<Option<crate::world::config::WorldConfig>> =
         const { RefCell::new(None) };
 
-    /// Queue of runtime-loaded world TOML strings pushed by JS via
-    /// `wasm_push_world_toml` in response to a `request_world_fetch` call.
-    /// Keyed by path so `pop_pending_world_toml` can retrieve by exact path.
-    static PENDING_WORLD_TOML: RefCell<HashMap<String, String>> =
+    /// Durable base-content cache for runtime-loaded world TOML and sibling
+    /// Rhai source pushed by JS via `wasm_push_world_toml`.
+    ///
+    /// A successful HTTP response remains readable for the browser session:
+    /// additive-layer unload/reload and the asset preloader may both need the
+    /// same bytes. Mod-pack overlay content is resolved above this cache at
+    /// read time and is deliberately never copied into it.
+    static FETCHED_WORLD_SOURCE: RefCell<HashMap<String, String>> =
+        RefCell::new(HashMap::new());
+
+    /// Terminal failures reported by the JS fetch edge. Kept distinct from the
+    /// content map because an empty Rhai source is valid content, not failure.
+    static WORLD_FETCH_FAILURES: RefCell<HashMap<String, String>> =
         RefCell::new(HashMap::new());
 
     /// Optional JS callback for requesting a runtime world TOML fetch.
@@ -514,7 +523,7 @@ impl<R: crate::world::script::load::ScriptResolver> crate::world::script::load::
 // sibling file differently — native/headless from the filesystem, wasm from the
 // config-cache's JS-delivered content. Inline `[script]` blocks are lifted from
 // the world TOML directly (`world::script::load::lift_world_scripts`) and never
-// reach a resolver, so no shipped world exercises the wasm path yet.
+// reach a resolver; sibling scripts use the asynchronous fetch state below.
 
 /// Native/headless fallback: read a world's sibling `.rhai` from the filesystem.
 #[cfg(not(target_arch = "wasm32"))]
@@ -535,18 +544,17 @@ pub fn production_script_resolver() -> OverlayScriptResolver<FsScriptFallback> {
     OverlayScriptResolver::new(FsScriptFallback)
 }
 
-/// WASM fallback: read a sibling `.rhai` from the config cache's JS-delivered
-/// world/script content. Async prefetch of siblings is a later slice; a world
-/// that authors only inline `[script]` blocks (the tested path) never consults
-/// this, and `None` here surfaces as a `script-file-missing` finding that
-/// blocks activation.
+/// WASM fallback: read a sibling `.rhai` from the durable JS-delivered base
+/// content cache. The overlay-aware wrapper below resolves active mod-pack
+/// content first. `None` here means the asynchronous sibling request has not
+/// completed (or failed) and blocks activation at the caller.
 #[cfg(target_arch = "wasm32")]
 pub struct ConfigCacheScriptFallback;
 
 #[cfg(target_arch = "wasm32")]
 impl crate::world::script::load::ScriptResolver for ConfigCacheScriptFallback {
     fn read(&self, path: &str) -> Option<String> {
-        peek_pending_world_toml(path)
+        cached_base_world_source(path)
     }
 }
 
@@ -730,10 +738,11 @@ pub fn get_world_config() -> Option<crate::world::config::WorldConfig> {
     WORLD_CONFIG.with(|slot| slot.borrow().clone())
 }
 
-/// Register the JS callback used to request a runtime world TOML fetch.
+/// Register the JS callback used to request runtime world/script content.
 ///
 /// server.html should call this once at startup with a function that accepts
-/// a path string, fetches the TOML, and delivers it via `wasm_push_world_toml`.
+/// a path string, fetches the TOML or Rhai source, and delivers it via
+/// `wasm_push_world_toml`.
 #[cfg(target_arch = "wasm32")]
 pub fn set_world_fetch_callback(callback: Function) {
     WORLD_FETCH_CB.with(|slot| {
@@ -741,35 +750,83 @@ pub fn set_world_fetch_callback(callback: Function) {
     });
 }
 
-/// Push a runtime-fetched world TOML into the pending queue.
+/// Cache successful runtime-fetched world TOML or sibling Rhai source.
 ///
-/// Called by JS after it has fetched a world at a path that Rust requested
-/// via the world-fetch callback.
+/// Called by JS after it has fetched a path that Rust requested via the shared
+/// world/script callback. The source remains readable for the browser session.
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_push_world_toml(path: String, toml_str: String) {
-    PENDING_WORLD_TOML.with(|m| {
-        m.borrow_mut().insert(path, toml_str);
+    // The first terminal HTTP completion is authoritative. A late duplicate
+    // callback cannot turn a reported failure into success (or overwrite an
+    // earlier successful body with different bytes).
+    if WORLD_FETCH_FAILURES.with(|m| m.borrow().contains_key(&path)) {
+        return;
+    }
+    FETCHED_WORLD_SOURCE.with(|m| {
+        m.borrow_mut().entry(path).or_insert(toml_str);
     });
 }
 
-/// Take the TOML for a previously-requested world path, if available.
-///
-/// Returns `Some(toml)` and removes the entry; returns `None` if the JS fetch
-/// has not yet delivered the TOML.
+/// Record a terminal runtime-content fetch failure without overloading the
+/// legitimate empty-string source value.
 #[cfg(target_arch = "wasm32")]
-pub fn pop_pending_world_toml(path: &str) -> Option<String> {
-    PENDING_WORLD_TOML.with(|m| m.borrow_mut().remove(path))
+pub fn wasm_fail_world_fetch(path: String, message: String) {
+    // A delivered body (including the valid empty string) is already a
+    // terminal success. Ignore any late failure callback for the same path.
+    if FETCHED_WORLD_SOURCE.with(|m| m.borrow().contains_key(&path)) {
+        return;
+    }
+    WORLD_FETCH_FAILURES.with(|m| {
+        m.borrow_mut().entry(path).or_insert(message);
+    });
 }
 
-/// Peek the TOML for a previously-fetched world path without removing it.
-///
-/// The pre-load scenario catalog (issue #754) resolves several world TOMLs to
-/// read each scenario's `[global]` metadata and `[[available_ships]]`; unlike
-/// the additive-load path it must not consume the cache, so worlds stay
-/// available for the eventual `wasm_load_world`.
+/// Authoritative state of one runtime world/script fetch.
 #[cfg(target_arch = "wasm32")]
-pub fn peek_pending_world_toml(path: &str) -> Option<String> {
-    PENDING_WORLD_TOML.with(|m| m.borrow().get(path).cloned())
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorldFetchState {
+    NotRequested,
+    Pending,
+    Ready(String),
+    Failed(String),
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn world_fetch_state(path: &str) -> WorldFetchState {
+    if let Some(source) = mod_pack_overlay_get(path) {
+        return WorldFetchState::Ready(source);
+    }
+    if let Some(source) = cached_base_world_source(path) {
+        return WorldFetchState::Ready(source);
+    }
+    if let Some(message) = WORLD_FETCH_FAILURES.with(|m| m.borrow().get(path).cloned()) {
+        return WorldFetchState::Failed(message);
+    }
+    if WORLD_FETCH_REQUESTED.with(|s| s.borrow().contains(path)) {
+        WorldFetchState::Pending
+    } else {
+        WorldFetchState::NotRequested
+    }
+}
+
+/// Read successful HTTP-fetched world/script content without consuming it.
+///
+/// This is the base-content seam used while validating a candidate mod pack:
+/// it intentionally does not consult the active overlay stack. An empty source
+/// is represented by `Some("")`, distinct from not-yet-delivered content.
+#[cfg(target_arch = "wasm32")]
+pub fn cached_base_world_source(path: &str) -> Option<String> {
+    FETCHED_WORLD_SOURCE.with(|m| m.borrow().get(path).cloned())
+}
+
+/// Resolve the current authoritative world/script content without consuming it.
+///
+/// The live mod-pack overlay wins at read time. Removing or reordering a pack
+/// therefore immediately reveals the newly authoritative overlay or the
+/// durable HTTP-fetched base body; overlay bytes never become stale cache.
+#[cfg(target_arch = "wasm32")]
+pub fn resolved_world_source(path: &str) -> Option<String> {
+    mod_pack_overlay_get(path).or_else(|| cached_base_world_source(path))
 }
 
 /// Store the base scenario manifest TOML (`assets/scenarios.toml`), pushed by
@@ -790,20 +847,18 @@ pub fn get_scenario_manifest_toml() -> Option<String> {
 /// Fire the JS world-fetch callback for `path` if not already requested.
 #[cfg(target_arch = "wasm32")]
 pub fn request_world_fetch(path: String) {
-    let already = WORLD_FETCH_REQUESTED.with(|s| s.borrow().contains(&path));
-    if already {
+    // Resolve overlay content without minting a base HTTP request. If that pack
+    // is later removed, the now-unresolved path may request its base body once.
+    if mod_pack_overlay_get(&path).is_some() {
+        return;
+    }
+
+    // Ready, Failed, and an outstanding Pending request are all terminal for
+    // request issuance. Only the absent state may transition to Pending.
+    if !matches!(world_fetch_state(&path), WorldFetchState::NotRequested) {
         return;
     }
     WORLD_FETCH_REQUESTED.with(|s| s.borrow_mut().insert(path.clone()));
-    // Mod-pack overlay wins for any overridden world path (issue #760, AC2):
-    // satisfy the fetch directly from the uploaded pack instead of firing the
-    // JS HTTP callback, so an additive extra_worlds load reads pack content.
-    if let Some(toml_str) = mod_pack_overlay_get(&path) {
-        PENDING_WORLD_TOML.with(|m| {
-            m.borrow_mut().insert(path, toml_str);
-        });
-        return;
-    }
     WORLD_FETCH_CB.with(|slot| {
         if let Some(cb) = slot.borrow().as_ref() {
             let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&path));
@@ -1056,6 +1111,9 @@ pub fn set_world_fetch_callback(_callback: JsValue) {}
 pub fn wasm_push_world_toml(_path: String, _toml_str: String) {}
 
 #[cfg(not(target_arch = "wasm32"))]
+pub fn wasm_fail_world_fetch(_path: String, _message: String) {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn wasm_load_config(_path: String, _toml_str: String) -> Result<JsValue, JsValue> {
     Ok(JsValue::from_bool(false))
 }
@@ -1143,7 +1201,11 @@ pub fn get_world_config() -> Option<crate::world::config::WorldConfig> {
 
 // Native no-ops for the runtime world-fetch helpers (native uses std::fs directly).
 #[cfg(not(target_arch = "wasm32"))]
-pub fn pop_pending_world_toml(_path: &str) -> Option<String> {
+pub fn cached_base_world_source(_path: &str) -> Option<String> {
+    None
+}
+#[cfg(not(target_arch = "wasm32"))]
+pub fn resolved_world_source(_path: &str) -> Option<String> {
     None
 }
 #[cfg(not(target_arch = "wasm32"))]

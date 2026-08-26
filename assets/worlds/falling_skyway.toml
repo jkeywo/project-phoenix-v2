@@ -2825,6 +2825,54 @@ fn on_storm_front(ctx) {
         source: "mission",
         base_priority: 50,
     });
+    // The mandatory row above records the outcome. These three optional rows
+    // carry the concrete Navigation work, one target and route per order. A
+    // human gets three named instructions; Backfill consumes the same payloads
+    // in scored order and emits the same OrderCivilian command.
+    ctx.effects.add_objective(#{
+        id: "obj-a2-shelter-meridian",
+        text: "world.falling_skyway.objective.shelter_meridian.text",
+        source: "mission",
+        base_priority: 49,
+        directive_kind: "Order",
+        target: "world.falling_skyway.entity.convoy_meridian.name",
+        route: "storm_shelter_run",
+        targets: ["world.falling_skyway.entity.convoy_meridian.name"],
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-a2-shelter-lark",
+        text: "world.falling_skyway.objective.shelter_lark.text",
+        source: "mission",
+        base_priority: 49,
+        directive_kind: "Order",
+        target: "world.falling_skyway.entity.hauler_lark.name",
+        route: "storm_shelter_run",
+        targets: ["world.falling_skyway.entity.hauler_lark.name"],
+    });
+    ctx.effects.add_objective(#{
+        id: "obj-a2-shelter-pell",
+        text: "world.falling_skyway.objective.shelter_pell.text",
+        source: "mission",
+        base_priority: 49,
+        directive_kind: "Order",
+        target: "world.falling_skyway.entity.hauler_pell.name",
+        route: "storm_shelter_run",
+        targets: ["world.falling_skyway.entity.hauler_pell.name"],
+    });
+    // A craft can be lost before the forecast reaches this handler (combat,
+    // collision, or another authored consequence). Its destruction handler has
+    // already written the durable named flag, so project that remembered loss
+    // onto the objective as soon as the late-posting row exists. Otherwise the
+    // row would advertise impossible work against a craft that is already gone.
+    if ctx.flags.skyway_traffic_lost_meridian > 0 {
+        ctx.effects.fail_objective("obj-a2-shelter-meridian");
+    }
+    if ctx.flags.skyway_traffic_lost_lark > 0 {
+        ctx.effects.fail_objective("obj-a2-shelter-lark");
+    }
+    if ctx.flags.skyway_traffic_lost_pell > 0 {
+        ctx.effects.fail_objective("obj-a2-shelter-pell");
+    }
     // TWO OBJECTIVES FOR ONE RESCUE, and the split is forced by what a Reach
     // directive MEANS: `detect_reached_objective_completion` completes any
     // objective whose Reach anchor an AI-flown helm arrives at. An objective
@@ -2958,11 +3006,12 @@ fn on_lyra_lost(ctx) {
     }
 }
 
-fn record_traffic_loss(ctx, ledger_flag, subject, evidence, node_fn) {
+fn record_traffic_loss(ctx, ledger_flag, order_objective, subject, evidence, node_fn) {
     if ctx.flags[ledger_flag] > 0 { return; }
     ctx.flags[ledger_flag] = 1;
     ctx.flags.increment("a2_traffic_lost", 1);
     ctx.effects.fail_objective("obj-a2-shelter");
+    if order_objective != "" { ctx.effects.fail_objective(order_objective); }
     ctx.dossier.append(#{
         subject: subject,
         text: evidence,
@@ -2984,22 +3033,22 @@ fn record_traffic_loss(ctx, ledger_flag, subject, evidence, node_fn) {
 }
 
 fn on_meridian_traffic_lost(ctx) {
-    record_traffic_loss(ctx, "skyway_traffic_lost_meridian",
+    record_traffic_loss(ctx, "skyway_traffic_lost_meridian", "obj-a2-shelter-meridian",
         "world.falling_skyway.entity.convoy_meridian.name",
         "world.falling_skyway.evidence.traffic_lost_meridian", "traffic_lost_meridian")
 }
 fn on_lark_traffic_lost(ctx) {
-    record_traffic_loss(ctx, "skyway_traffic_lost_lark",
+    record_traffic_loss(ctx, "skyway_traffic_lost_lark", "obj-a2-shelter-lark",
         "world.falling_skyway.entity.hauler_lark.name",
         "world.falling_skyway.evidence.traffic_lost_lark", "traffic_lost_lark")
 }
 fn on_pell_traffic_lost(ctx) {
-    record_traffic_loss(ctx, "skyway_traffic_lost_pell",
+    record_traffic_loss(ctx, "skyway_traffic_lost_pell", "obj-a2-shelter-pell",
         "world.falling_skyway.entity.hauler_pell.name",
         "world.falling_skyway.evidence.traffic_lost_pell", "traffic_lost_pell")
 }
 fn on_wick_traffic_lost(ctx) {
-    record_traffic_loss(ctx, "skyway_traffic_lost_wick",
+    record_traffic_loss(ctx, "skyway_traffic_lost_wick", "",
         "world.falling_skyway.entity.shuttle_wick.name",
         "world.falling_skyway.evidence.traffic_lost_wick", "traffic_lost_wick")
 }
@@ -3018,6 +3067,17 @@ fn on_storm_passed(ctx) {
 
     ctx.effects.complete_objective("obj-a2-storm");
     ctx.effects.complete_objective("obj-a2-lee");
+    // Completion is per surviving craft. A named loss is durable and must not
+    // be painted green merely because the weather later clears.
+    if ctx.flags.skyway_traffic_lost_meridian == 0 {
+        ctx.effects.complete_objective("obj-a2-shelter-meridian");
+    }
+    if ctx.flags.skyway_traffic_lost_lark == 0 {
+        ctx.effects.complete_objective("obj-a2-shelter-lark");
+    }
+    if ctx.flags.skyway_traffic_lost_pell == 0 {
+        ctx.effects.complete_objective("obj-a2-shelter-pell");
+    }
     if ctx.flags.a2_traffic_lost == 0 {
         ctx.effects.complete_objective("obj-a2-shelter");
     } else {

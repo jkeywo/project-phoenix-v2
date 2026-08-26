@@ -18,14 +18,14 @@ authored state as it stands, and flags every unratified number it leans on.
 > Findings 1–4 as measurements and design exploration of that earlier build,
 > not current runtime behaviour.
 
-> **Current traffic note (#1134).** The storm front no longer diverts civilians
+> **Current traffic note (#1134/#1141).** The storm front no longer diverts civilians
 > automatically. Navigation now sees a world-authored **ORDER TO STORM SHELTER**
 > button on Meridian, Lark and Pell; one ordinary `OrderCivilian` diversion per
 > craft before band one puts that craft on the shelter route for all three
-> bands. An idle bridge loses exposed traffic immediately and by name. A fully
-> backfilled bridge still needs #1141's Navigation producer to press the same
-> verb autonomously; #1134 supplies the human surface and authoritative data,
-> not a special scenario-side AI shortcut.
+> bands. An idle human-held Navigation console loses exposed traffic immediately
+> and by name. A fully backfilled bridge consumes three payload-bearing `Order`
+> objectives and emits those same admitted commands; #1134's human surface and
+> authoritative traffic state remain the sole downstream path.
 
 ## Method
 
@@ -403,18 +403,18 @@ urgent Control message and exact missing-work flags.
 
 ### The AI surface (the verb batch, scoped separately)
 
-- **(Q17) New `AiDirective` kinds carry the verbs**: `Scan { target }`,
-  `Operate { verb, target_uuid }`, `Order { target, route }` — mirroring the
+- **(Q17) New `AiDirective` kinds carry the verbs**: `Scan { target }`, the
+  delivered operate-family directives, and `Order { target, route }` — mirroring the
   `Hail`/`Dock` precedent. New `SystemAffinity` entries route them into the per-
   system scored-objective pools (`score_doctrine_pool`); the new emitters —
   sensors AI scan (`src/ship/sensors.rs:633-650` has the applier, no policy),
-  an operations emitter at the captain system, a navigation/captain order-
-  civilian emitter — consume them exactly like Comms consumes `Hail`
+  the operation-owning fine-system emitters, and Navigation's order-civilian
+  emitter — consume them exactly like Comms consumes `Hail`
   (`SystemAffinity::Comms`, `core/messages.rs:4295-4298`). This makes the AI
   "AI-addressable by construction": the objective *is* the directive the emitter
   serves.
-- **(Q14) Objectives-driven emitters**: each mandatory objective carries enough
-  authored info (verb + target UUID) for the AI to emit its verb. Not
+- **(Q14) Objectives-driven emitters**: each actionable objective carries enough
+  authored info (verb and target, plus route where required) for the AI to emit its verb. Not
   verb-gating or locks — give the AI the verbs, then let concurrency overwhelm
   it. Keep humans and AI symmetric; nothing branches on actor identity, only on
   timing of engagement.

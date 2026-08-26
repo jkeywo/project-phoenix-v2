@@ -1016,7 +1016,8 @@ fn fire_blaster_control_system_round_trips() {
     );
 }
 
-/// `SystemAffinity` round-trips including the `Comms` variant (issue #753).
+/// `SystemAffinity` round-trips including the `Comms` variant (issue #753)
+/// and Navigation's objective affinity (issue #1141).
 ///
 /// `SystemAffinity` is replicated inside `ScoredObjective` on the viewscreen
 /// blackboard, so the new `Comms` variant must survive the wire codec.
@@ -1027,6 +1028,7 @@ fn system_affinity_comms_variant_round_trips() {
         SystemAffinity::Weapons,
         SystemAffinity::Captain,
         SystemAffinity::Comms,
+        SystemAffinity::Navigation,
         // The issue-#1162 operate affinities.
         SystemAffinity::Engineering,
         SystemAffinity::Repair,
@@ -1041,6 +1043,10 @@ fn system_affinity_comms_variant_round_trips() {
     assert!(
         encoded.contains("Engineering") && encoded.contains("Repair"),
         "the operate affinities must serialize by name"
+    );
+    assert!(
+        encoded.contains("Navigation"),
+        "the Navigation affinity variant must serialize by name"
     );
 }
 
@@ -1075,6 +1081,10 @@ fn ai_directive_operate_variants_round_trip() {
         AiDirective::FieldRepair {
             target: "ally".into(),
         },
+        AiDirective::Order {
+            target: "civilian".into(),
+            route: "storm_shelter_run".into(),
+        },
     ];
     let encoded = serde_json::to_string(&directives).unwrap();
     let decoded: Vec<AiDirective> = serde_json::from_str(&encoded).unwrap();
@@ -1086,6 +1096,7 @@ fn ai_directive_operate_variants_round_trip() {
         "Transfer",
         "FieldRepair",
         "Dock",
+        "Order",
     ] {
         assert!(
             encoded.contains(name),

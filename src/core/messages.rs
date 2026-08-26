@@ -5036,6 +5036,13 @@ pub enum AiDirective {
     Reach { anchor: String },
     /// Hail the named target entity.
     Hail { target: String },
+    /// Order the named civilian onto the named authored route (issue #1141).
+    ///
+    /// Navigation owns the concrete command. The directive carries the same two
+    /// pieces of authored intent the human traffic-control button publishes;
+    /// its AI host turns them into `OrderCivilian { Divert { route } }` through
+    /// command admission rather than mutating civilian state.
+    Order { target: String, route: String },
     /// Retreat to the named anchor position.
     Retreat { anchor: String },
     /// Proceed to and berth at the named structure (issue #1028).
@@ -5096,6 +5103,10 @@ pub enum SystemAffinity {
     /// AI consumes them from its local scored-objective pool and issues the
     /// same `Hail` action a human Comms officer sends.
     Comms,
+    /// Navigation cares about `Order` directives (issue #1141): the Backfill
+    /// Navigation host emits the same `OrderCivilian` payload as the console's
+    /// authored traffic-control button.
+    Navigation,
     /// Engineering cares about the tractor and umbilical operate directives
     /// (issue #1162): `Tow`/`Stabilise`/`Escort` (the tractor) and `Transfer`
     /// (the umbilical over a mated dock). The backfilled Engineering AI hosts

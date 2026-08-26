@@ -754,6 +754,109 @@ fn inject_viewscreen_objective(
     }
 }
 
+/// **Issue #1141, AC2/AC3.** A payload-bearing `Order` objective is translated
+/// into the exact command the Navigation console emits, through admission. The
+/// target stays in its authored-name form for the shared civilian applier to
+/// resolve; neither this host nor the test writes `CivilianState` directly.
+#[test]
+fn civilian_order_ai_emits_the_console_order_through_admission() {
+    use crate::civilian::{CivilianConfig, CivilianOrder, CivilianState, CivilianTraffic};
+    use crate::core::messages::{
+        AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
+        SystemAffinity,
+    };
+
+    let mut app = test_app();
+    start_game_with_navigation(&mut app);
+    set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    let route = "storm_shelter_run";
+    let target = "world.test.hauler.name";
+    let uuid = "civilian-1141";
+    let mut world = crate::world::config::WorldConfig::default();
+    world.routes.push(crate::civilian::RouteConfig {
+        id: route.into(),
+        ..Default::default()
+    });
+    app.world_mut().insert_resource(world);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert(target.into(), uuid.into());
+    app.world_mut().spawn((
+        crate::entities::spawner::EntityUuid(uuid.into()),
+        CivilianTraffic(CivilianState::from_config(&CivilianConfig::default())),
+    ));
+    inject_viewscreen_objective(
+        &mut app,
+        vec![ScoredObjective {
+            id: "order-hauler".into(),
+            score: 49.0,
+            directive: AiDirective::Order {
+                target: target.into(),
+                route: route.into(),
+            },
+            source: ObjectiveSource::Mission,
+            relevance: vec![SystemAffinity::Navigation],
+            snapshot: ObjectiveSnapshot {
+                id: "order-hauler".into(),
+                text: "world.test.objective.order_hauler".into(),
+                text_params: Default::default(),
+                mandatory: false,
+                status: ObjectiveStatus::Active,
+                targets: vec![target.into()],
+                source: ObjectiveSource::Mission,
+            },
+        }],
+    );
+
+    crate::ai::cadence::arm_ai_tick(&mut app);
+    tick(&mut app);
+    let admitted = {
+        let mut q = app.world_mut().query_filtered::<
+            &crate::core::messages::AdmittedCommands,
+            With<crate::server_app::LocalShip>,
+        >();
+        q.single(app.world())
+            .expect("the local ship has an admission queue")
+            .0
+            .clone()
+    };
+    assert!(
+        admitted.iter().any(|command| {
+            command.target == crate::ship::system_registry::navigation_system_id()
+                && command.payload
+                    == SystemControlPayload::OrderCivilian {
+                        target: target.into(),
+                        order: CivilianOrder::divert_to_route(route),
+                    }
+        }),
+        "Backfill must admit the exact target+route command a console button emits"
+    );
+
+    // The same objective under a human-held Navigation system is inert. Re-arm
+    // cadence explicitly so an empty queue proves the source gate, not a skipped
+    // decision tick.
+    set_navigation_control_source(&mut app, crate::ship::control_source::ControlSource::Human);
+    crate::ai::cadence::arm_ai_tick(&mut app);
+    tick(&mut app);
+    let has_ai_order = {
+        let mut q = app.world_mut().query_filtered::<
+            &crate::core::messages::AdmittedCommands,
+            With<crate::server_app::LocalShip>,
+        >();
+        q.single(app.world())
+            .expect("the local ship has an admission queue")
+            .0
+            .iter()
+            .any(|command| matches!(command.payload, SystemControlPayload::OrderCivilian { .. }))
+    };
+    assert!(
+        !has_ai_order,
+        "human-held Navigation must suppress the AI emitter"
+    );
+}
+
 fn spawn_test_entity(app: &mut App, uuid: &str, x: f32, z: f32) {
     app.world_mut().spawn((
         crate::entities::spawner::EntityUuid(uuid.into()),

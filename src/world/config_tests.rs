@@ -1333,6 +1333,108 @@ directive_kind = "Retreat"
     );
 }
 
+#[test]
+fn add_objective_reads_an_order_directive_target_and_route() {
+    let toml = r#"
+[[action]]
+type           = "add_objective"
+id             = "obj-order-meridian"
+text           = "Divert Meridian Freight to shelter."
+directive_kind = "Order"
+target         = "Meridian Freight"
+route          = "storm_shelter_run"
+"#;
+    let parsed = actions(toml).expect("a complete Order directive must parse");
+    match &parsed[0] {
+        TriggerAction::AddObjective { directive, .. } => {
+            assert_eq!(
+                *directive,
+                crate::core::messages::AiDirective::Order {
+                    target: "Meridian Freight".into(),
+                    route: "storm_shelter_run".into(),
+                }
+            );
+        }
+        other => panic!("expected AddObjective, got {other:?}"),
+    }
+}
+
+#[test]
+fn order_directive_requires_a_non_empty_target_and_route() {
+    for (body, missing) in [
+        (
+            r#"
+[[action]]
+type           = "add_objective"
+id             = "obj-order"
+text           = "Divert the civilian."
+directive_kind = "Order"
+target         = ""
+route          = "storm_shelter_run"
+"#,
+            "target",
+        ),
+        (
+            r#"
+[[action]]
+type           = "add_objective"
+id             = "obj-order"
+text           = "Divert the civilian."
+directive_kind = "Order"
+target         = "Meridian Freight"
+"#,
+            "route",
+        ),
+        (
+            r#"
+[[action]]
+type           = "add_objective"
+id             = "obj-order"
+text           = "Divert the civilian."
+directive_kind = "Order"
+route          = "storm_shelter_run"
+"#,
+            "target",
+        ),
+        (
+            r#"
+[[action]]
+type           = "add_objective"
+id             = "obj-order"
+text           = "Divert the civilian."
+directive_kind = "Order"
+target         = "Meridian Freight"
+route          = ""
+"#,
+            "route",
+        ),
+    ] {
+        let err = actions(body).expect_err("an incomplete Order must be rejected");
+        assert!(
+            err.contains("Order") && err.contains(missing) && err.contains("non-empty"),
+            "error must name Order and its missing {missing} field, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn order_route_is_rejected_on_another_directive_kind() {
+    let toml = r#"
+[[action]]
+type             = "add_objective"
+id               = "obj-reach"
+text             = "Reach the shelter."
+directive_kind   = "Reach"
+directive_anchor = "shelter"
+route            = "storm_shelter_run"
+"#;
+    let err = actions(toml).expect_err("Order's route field on Reach must be rejected");
+    assert!(
+        err.contains("`route`") && err.contains("Order") && err.contains("Reach"),
+        "error must name the misplaced field, its owner, and the selected kind, got: {err}"
+    );
+}
+
 // ── add_objective: a field belonging to another directive kind ─────────
 
 /// The Requiem Courier bug, authored on the mission side: `Reach` reads the

@@ -750,6 +750,10 @@ pub fn parse_doctrine_directive(
         Some("FieldRepair") => crate::core::messages::AiDirective::FieldRepair {
             target: d.directive_operate_target.clone().unwrap_or_default(),
         },
+        Some("Order") => crate::core::messages::AiDirective::Order {
+            target: d.directive_order_target.clone().unwrap_or_default(),
+            route: d.directive_order_route.clone().unwrap_or_default(),
+        },
         _ => crate::core::messages::AiDirective::None,
     }
 }

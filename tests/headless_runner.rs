@@ -10578,6 +10578,55 @@ fn skyway_deadline_secs(app: &bevy::prelude::App, id: &str) -> i64 {
         .due_secs
 }
 
+/// Pull one already-armed mission deadline onto the current logical tick.
+///
+/// Falling Skyway's authored clock is deliberately long. A regression about
+/// ordering between two handlers can exercise the same authoritative callback
+/// queue without spending eighteen simulated minutes getting there:
+/// [`DeadlineTable::apply`](project_phoenix::world::deadlines::DeadlineTable::apply)
+/// performs the exact re-key that a script-authored negative slip uses, and this
+/// helper applies its returned queue edit whole.
+fn skyway_pull_deadline_now(app: &mut bevy::prelude::App, id: &str) {
+    use project_phoenix::world::deadlines::{DeadlineChange, DeadlineMutation};
+
+    let now_tick = app
+        .world()
+        .resource::<project_phoenix::sim_tick::SimTick>()
+        .0;
+    let tick_hz = app
+        .world()
+        .resource::<project_phoenix::world::config::WorldConfig>()
+        .global
+        .sim_tick_hz;
+    let edit = app
+        .world_mut()
+        .resource_mut::<project_phoenix::world::server::WorldContentRuntime>()
+        .deadlines
+        .apply(
+            &DeadlineChange {
+                id: id.into(),
+                origin_layer: None,
+                mutation: DeadlineMutation::Slip { by_secs: -100_000 },
+            },
+            now_tick,
+            tick_hz,
+        )
+        .unwrap_or_else(|| panic!("the pending '{id}' deadline can be pulled forward"));
+
+    let mut scripts = app
+        .world_mut()
+        .resource_mut::<project_phoenix::world::server::WorldScriptRuntime>();
+    if let Some(stale) = edit.retract {
+        assert!(
+            scripts.pending_callbacks.retract(&stale),
+            "the deadline's old callback is present"
+        );
+    }
+    if let Some(fresh) = edit.push {
+        scripts.pending_callbacks.push(fresh);
+    }
+}
+
 /// The named civilian's traffic state — the route it is currently flying and
 /// how far through the compliance machine its standing order has got.
 fn civilian_state_of(
@@ -10799,17 +10848,61 @@ fn falling_skyway_idle_traffic_is_lost_loudly_while_the_storm_ignores_the_strike
     }
 }
 
-/// **Issue #1037/#1134.** After the opening scan-backed safety stop, Act 2 is
-/// driven end to end with Navigation doing its work: one order per endangered
-/// craft clears all three bands, while the rescue that nobody ran still fails
-/// loudly on its independent clock and writes campaign state.
+/// **Issue #1141, review regression.** A named civilian loss can precede the
+/// storm-front handler that posts its concrete Navigation objective. The late
+/// row must remember that loss immediately and remain failed after the storm
+/// passes; clearing the weather cannot turn impossible work against a destroyed
+/// craft green.
+#[test]
+fn falling_skyway_pre_front_traffic_loss_stays_failed_after_storm_passage() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let dt = 1.0 / 30.0;
+    let args = skyway_args(dt, 12.0);
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    run(&mut app, 10);
+
+    let meridian_uuid = skyway_uuid(&app, SKYWAY_CORRIDOR_TRAFFIC[0]);
+    app.world_mut()
+        .resource_mut::<bevy::ecs::message::Messages<
+            project_phoenix::ai::server::AiEntityDestroyed,
+        >>()
+        .write(project_phoenix::ai::server::AiEntityDestroyed {
+            entity_uuid: meridian_uuid,
+        });
+    run(&mut app, 3);
+    assert_eq!(skyway_flag(&app, "skyway_traffic_lost_meridian"), 1);
+
+    skyway_pull_deadline_now(&mut app, "storm_front_due");
+    run(&mut app, 3);
+    assert_eq!(
+        objective_status(&app, "obj-a2-shelter-meridian"),
+        ObjectiveStatus::Failed,
+        "the objective posts red when its named craft was already lost"
+    );
+
+    skyway_pull_deadline_now(&mut app, "storm_passed_due");
+    run(&mut app, 3);
+    assert_eq!(
+        objective_status(&app, "obj-a2-shelter-meridian"),
+        ObjectiveStatus::Failed,
+        "storm passage must not repaint an already-impossible order green"
+    );
+}
+
+/// **Issue #1037/#1134/#1141.** After the opening scan-backed safety stop, Act 2
+/// is driven end to end with a fully backfilled bridge. Navigation consumes the
+/// three payload-bearing `Order` objectives and admits one ordinary civilian
+/// order per endangered craft; all three clear the bands while the rescue that
+/// nobody ran still fails loudly on its independent clock and writes campaign
+/// state.
 ///
 /// Once Act 2 opens, this failure branch is what an unattended bridge produces:
 /// opening an operation is a crew verb, so a backfilled bridge
 /// never tows anybody. The companion test below drives the same act with a crew
 /// that does.
 #[test]
-fn falling_skyway_ordered_traffic_clears_all_three_bands_while_the_idle_rescue_fails() {
+fn falling_skyway_backfill_orders_traffic_clear_of_all_three_bands() {
     use project_phoenix::civilian::ComplianceState;
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::server::WorldContentRuntime;
@@ -10832,8 +10925,6 @@ fn falling_skyway_ordered_traffic_clears_all_three_bands_while_the_idle_rescue_f
     // fact about where they were when the weather turned up.
     let mut clearance: std::collections::BTreeMap<String, f32> = Default::default();
     let mut compliance_reached: std::collections::BTreeMap<String, bool> = Default::default();
-    let mut orders_issued = false;
-
     for tick in 0..args.max_ticks {
         run(&mut app, 1);
         let sim_t = (tick + 1) as f64 * dt;
@@ -10871,7 +10962,6 @@ fn falling_skyway_ordered_traffic_clears_all_three_bands_while_the_idle_rescue_f
         }
 
         let flags = &app.world().resource::<WorldContentRuntime>().flags;
-        let should_order = flags.counter("a2_front_warned") > 0 && !orders_issued;
         for flag in [
             "a2_front_warned",
             "a2_rescue_resolved",
@@ -10881,10 +10971,6 @@ fn falling_skyway_ordered_traffic_clears_all_three_bands_while_the_idle_rescue_f
             if flags.counter(flag) > 0 {
                 first.entry(flag.to_string()).or_insert(sim_t);
             }
-        }
-        if should_order {
-            orders_issued = true;
-            skyway_order_corridor_to_shelter(&mut app);
         }
     }
 
@@ -10932,9 +11018,9 @@ fn falling_skyway_ordered_traffic_clears_all_three_bands_while_the_idle_rescue_f
     for name in SKYWAY_CORRIDOR_TRAFFIC {
         assert!(
             compliance_reached.get(name).copied().unwrap_or(false),
-            "{name} must take the divert order Navigation issues — the command walks \
-             #1028's ordinary compliance machine, and a craft that \
-             never answered would be flying the lane into a band"
+            "{name} must take the divert order Backfill Navigation issues from the \
+             authored Order objective — the command walks #1028's ordinary compliance \
+             machine, and a craft that never answered would be flying into a band"
         );
         assert!(
             at(&format!("{name}_complying")) < at("storm_band_one_up"),

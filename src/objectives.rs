@@ -217,6 +217,9 @@ pub fn directive_relevance(directive: &AiDirective) -> Vec<SystemAffinity> {
         // command a human Comms officer sends. No consumer filters Hail on
         // `Captain`, so Comms is the sole relevant affinity.
         AiDirective::Hail { .. } => vec![SystemAffinity::Comms],
+        // A civilian order belongs to Navigation. It is not a Helm travel goal:
+        // the ordered craft's own doctrine and helm fly the resulting route.
+        AiDirective::Order { .. } => vec![SystemAffinity::Navigation],
         // The tractor operate directives (issue #1162): each routes to the
         // owning system's affinity — Engineering, which owns the tractor. The
         // seat decides the concrete `EngageTractor`/`ReleaseTractor`, so these
@@ -288,6 +291,16 @@ pub fn transfer_directive_target(directive: &AiDirective) -> Option<&str> {
 pub fn field_repair_directive_target(directive: &AiDirective) -> Option<&str> {
     match directive {
         AiDirective::FieldRepair { target } => Some(target.as_str()),
+        _ => None,
+    }
+}
+
+/// The civilian and route named by an `Order` directive, or `None` for any
+/// other directive (issue #1141). Kept pure so authoring, selection and the
+/// Navigation host share the same payload projection.
+pub fn order_directive(directive: &AiDirective) -> Option<(&str, &str)> {
+    match directive {
+        AiDirective::Order { target, route } => Some((target.as_str(), route.as_str())),
         _ => None,
     }
 }
@@ -696,6 +709,25 @@ mod tests {
             directive_relevance(&AiDirective::FieldRepair { target: "t".into() }),
             vec![SystemAffinity::Repair],
         );
+    }
+
+    #[test]
+    fn order_routes_to_navigation_and_projects_its_payload() {
+        let directive = AiDirective::Order {
+            target: "Meridian Freight".into(),
+            route: "storm_shelter_run".into(),
+        };
+
+        assert_eq!(
+            directive_relevance(&directive),
+            vec![SystemAffinity::Navigation],
+            "ordering civilian traffic belongs to Navigation, not player-ship Helm"
+        );
+        assert_eq!(
+            order_directive(&directive),
+            Some(("Meridian Freight", "storm_shelter_run"))
+        );
+        assert_eq!(order_directive(&AiDirective::None), None);
     }
 
     fn scored_dir(id: &str, score: f32, directive: AiDirective) -> ScoredObjective {

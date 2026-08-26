@@ -73,7 +73,7 @@ Depot Ladder B’s structural reading and filed record can disagree. Scanning, o
 
 The storm front is due at 400 seconds, with bands at 580, 740, and 900 seconds and passage recorded at 1072 seconds. Lyra Ascending’s clear deadline falls at 768 seconds. Every weather beat has its own deadline trigger and waits for neither strike settlement nor an act checkpoint: the storm changes the physical and operational problem while civilian traffic remains in motion.
 
-Navigation must issue one authored shelter diversion to Meridian, Lark, and Pell before the first band. Each civilian’s traffic row publishes an accessible **ORDER TO STORM SHELTER** control; the ordinary compliance machine then puts that craft on a route clear of all three bands. The front does not issue those orders for the crew. An unordered craft remains physically exposed, and its destruction immediately posts a named Control report, per-craft ledger fact, failed clearance objective, and aggregate loss objective. The ship’s own destruction remains the region damage system’s terminal defeat, not a scripted checkpoint.
+Navigation must issue one authored shelter diversion to Meridian, Lark, and Pell before the first band. Each civilian’s traffic row publishes an accessible **ORDER TO STORM SHELTER** control, and each payload-bearing objective gives Backfill Navigation the same target and route; both emit the ordinary admitted `OrderCivilian` command. The compliance machine then puts that craft on a route clear of all three bands. The front does not issue orders or mutate traffic for the crew. An unordered craft remains physically exposed, and its destruction immediately posts a named Control report, per-craft ledger fact, failed clearance objective, and aggregate loss objective. The ship’s own destruction remains the region damage system’s terminal defeat, not a scripted checkpoint.
 
 The crew may need to order traffic, open or hold the lane, shelter vessels, rescue or tow Lyra, recover lost objects, and stabilise the skyhook. Operations take time, range, power, and capability; beginning one is a commitment of ship position and crew attention. Traffic destruction and missed recovery opportunities are recorded rather than erased when the narrative counter advances.
 
@@ -111,7 +111,7 @@ The skyhook and depots carry condition and named capacities. The Destroyer carri
 
 ### Traffic and navigation
 
-Three authored routes—`skyway_lane`, `ladder_run`, and `storm_shelter_run`—give civilian entities a persistent spatial life. The three endangered craft author finite `order_options` that Navigation receives through the authoritative traffic snapshot; their buttons emit the existing `order_civilian` action rather than a scenario-only verb. Hold, divert, dock, and corridor decisions affect real movement. Waypoint arrival and destruction can trigger acknowledgement and consequences.
+Three authored routes—`skyway_lane`, `ladder_run`, and `storm_shelter_run`—give civilian entities a persistent spatial life. The three endangered craft author finite `order_options` that Navigation receives through the authoritative traffic snapshot; their buttons emit the existing `order_civilian` action rather than a scenario-only verb. Backfill reads the same target and route from `Order` objectives and enters through that command path. Hold, divert, dock, and corridor decisions affect real movement. Waypoint arrival and destruction can trigger acknowledgement and consequences.
 
 ### Labour and disposition
 

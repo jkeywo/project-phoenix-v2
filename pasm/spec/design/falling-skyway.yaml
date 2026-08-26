@@ -84,7 +84,7 @@ entities:
       confidence: provisional
       origin: ai
       title: Navigation (Falling Skyway)
-      summary: "[ai] Gives one shelter order to each endangered civilian before band one; the authored shelter route then clears all three bands. Nobody should die in the storm without a human (or an AI emitter) at this seat."
+      summary: "[ai] Gives one shelter order to each endangered civilian before band one; the authored shelter route then clears all three bands. Human Navigation and Backfill serve the same payload-bearing objectives through the same command path."
     game_design:
       player_verbs: [fs-order-the-traffic]
 
@@ -140,7 +140,7 @@ entities:
   - verb: fs-order-the-traffic
     core: {status: proposed, confidence: provisional, origin: ai, title: Order the Traffic, summary: "[ai] Issue one authored shelter diversion to each endangered craft before band one. A compliant order lands inside the forecast window and the shelter route clears that craft from all three bands."}
     game_design:
-      architecture_links: [civilian-traffic-adapter, scenario-script-host-seam]
+      architecture_links: [civilian-order-ai-operator, civilian-traffic-adapter, scenario-script-host-seam]
       owner_role: fs-navigation
       produces_facts: [traffic-ordered-clear]
   - verb: fs-file-the-evidence

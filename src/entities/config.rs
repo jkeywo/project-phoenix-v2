@@ -74,6 +74,12 @@ pub struct DoctrineObjective {
     /// a `Destroy`/`Dock` target is.
     #[serde(default)]
     pub directive_operate_target: Option<String>,
+    /// Named civilian and authored route for an `Order` directive (#1141).
+    /// Both are required: Navigation emits a route divert for this target.
+    #[serde(default)]
+    pub directive_order_target: Option<String>,
+    #[serde(default)]
+    pub directive_order_route: Option<String>,
     /// Base utility score before modifiers.
     #[serde(default)]
     pub base_priority: f32,
@@ -122,6 +128,8 @@ const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
         "directive_operate_target",
         "Tow / Stabilise / Escort / Transfer / FieldRepair",
     ),
+    ("directive_order_target", "Order"),
+    ("directive_order_route", "Order"),
 ];
 
 /// Reject a doctrine entry that authors a `directive_*` field belonging to a
@@ -173,11 +181,15 @@ pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<()
             // and the seat silently never operates.
             Some("Tow") | Some("Stabilise") | Some("Escort") | Some("Transfer")
             | Some("FieldRepair") => (&["directive_operate_target"], &["directive_operate_target"]),
+            Some("Order") => (
+                &["directive_order_target", "directive_order_route"],
+                &["directive_order_target", "directive_order_route"],
+            ),
             Some(other) => {
                 return Err(format!(
                     "doctrine '{}': unknown directive_kind '{other}'; \
                      valid: Patrol, Destroy, Reach, Retreat, Hail, Dock, \
-                     Tow, Stabilise, Escort, Transfer, FieldRepair",
+                     Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
                     d.id
                 ))
             }
@@ -203,6 +215,14 @@ pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<()
                 .as_deref()
                 .is_some_and(|t| !t.is_empty())
                 .then_some("directive_operate_target"),
+            d.directive_order_target
+                .as_deref()
+                .is_some_and(|t| !t.is_empty())
+                .then_some("directive_order_target"),
+            d.directive_order_route
+                .as_deref()
+                .is_some_and(|r| !r.is_empty())
+                .then_some("directive_order_route"),
         ]
         .into_iter()
         .flatten()

@@ -100,6 +100,28 @@ entities:
       symbols: [operate_navigation_ai, NavigationTargetSelector]
       tests: [cargo test]
 
+  - component: civilian-order-ai-operator
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Civilian Order AI Operator
+      summary: Consumes positive Navigation-affined Order objectives and emits the same admitted OrderCivilian payload as the Navigation console, one target and authored route at a time.
+      rationale:
+        - "[ai] Issue #1141 keeps the actor boundary upstream of admission: the objective names the civilian and route, the operator calls emit_ai_command on the Navigation system, and civilian-traffic-adapter remains the sole applier. Nothing downstream asks whether a human button or Backfill produced the order."
+        - "[ai] Emission is deterministic and idempotent. The scored pool already has a stable order; a craft whose authoritative CivilianState already carries the requested divert is skipped, so its acknowledgement clock is not restarted and the next cadence serves the next objective."
+        - "[ai] The world must declare the route and the target must resolve to live CivilianTraffic before anything is emitted. Refusal and compliance remain authored civilian decisions in civilian-traffic-adapter, not policy invented by this operator."
+    architecture:
+      kind: ai-operator
+      authority: authoritative
+      reads: [system-control-source-state, scored-objective-pool-state, world-configuration-state, civilian-traffic-state]
+      sends: [system-control-command]
+      runs_in: [host-browser-runtime, headless-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/messages.rs, src/objectives.rs, src/console/navigation/server.rs]
+      symbols: [operate_civilian_order_ai, AiDirective, SystemAffinity]
+      tests: [cargo test, "cargo test --features headless --test headless_runner falling_skyway_backfill_orders_traffic_clear_of_all_three_bands"]
+
   - component: helm-shared-waypoint-consumer
     core:
       status: implemented

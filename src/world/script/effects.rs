@@ -1033,6 +1033,7 @@ fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
         mandatory: map_bool(spec, "mandatory"),
         targets: map_string_array(spec, "targets")?,
         target: map_str(spec, "target"),
+        route: map_str(spec, "route"),
         directive_kind: map_str(spec, "directive_kind"),
         directive_anchors: map_string_array(spec, "directive_anchors")?,
         directive_loop: map_bool(spec, "directive_loop"),

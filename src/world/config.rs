@@ -693,6 +693,9 @@ pub(crate) struct RawActionEntry {
     pub(crate) state: Option<String>,
     #[serde(default)]
     pub(crate) target: Option<String>,
+    /// Authored civilian route for an `Order` objective (issue #1141).
+    #[serde(default)]
+    pub(crate) route: Option<String>,
     #[serde(default)]
     pub(crate) tag: Option<String>,
     #[serde(default)]
@@ -1166,8 +1169,9 @@ const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
     ("directive_anchor", "Reach / Retreat"),
     (
         "target",
-        "Destroy / Hail / Dock / Tow / Stabilise / Escort / Transfer / FieldRepair",
+        "Destroy / Hail / Dock / Tow / Stabilise / Escort / Transfer / FieldRepair / Order",
     ),
+    ("route", "Order"),
 ];
 
 /// Build the [`AiDirective`] for an `add_objective` action, rejecting a
@@ -1202,11 +1206,12 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
         // operate verbs.
         Some("Destroy") | Some("Hail") | Some("Dock") | Some("Tow") | Some("Stabilise")
         | Some("Escort") | Some("Transfer") | Some("FieldRepair") => &["target"],
+        Some("Order") => &["target", "route"],
         Some("Reach") | Some("Retreat") => &["directive_anchor"],
         Some(other) => {
             return Err(format!(
                 "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail, \
-                 Dock, Tow, Stabilise, Escort, Transfer, FieldRepair",
+                 Dock, Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
                 other
             ))
         }
@@ -1229,6 +1234,10 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
             .as_deref()
             .is_some_and(|t| !t.is_empty())
             .then_some("target"),
+        raw.route
+            .as_deref()
+            .is_some_and(|r| !r.is_empty())
+            .then_some("route"),
     ]
     .into_iter()
     .flatten()
@@ -1337,11 +1346,27 @@ fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
                 .clone()
                 .ok_or_else(|| "Directive 'FieldRepair' requires a 'target' field".to_string())?,
         }),
+        Some("Order") => Ok(AiDirective::Order {
+            target: raw
+                .target
+                .clone()
+                .filter(|target| !target.is_empty())
+                .ok_or_else(|| {
+                    "Directive 'Order' requires a non-empty 'target' field".to_string()
+                })?,
+            route: raw
+                .route
+                .clone()
+                .filter(|route| !route.is_empty())
+                .ok_or_else(|| {
+                    "Directive 'Order' requires a non-empty 'route' field".to_string()
+                })?,
+        }),
         // Unreachable: the `allowed` match above already returned for an
         // unknown kind.
         Some(other) => Err(format!(
             "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail, \
-             Dock, Tow, Stabilise, Escort, Transfer, FieldRepair",
+             Dock, Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
             other
         )),
     }

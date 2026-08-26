@@ -33,6 +33,16 @@ impl Plugin for NavigationPlugin {
         // commands admitted before Input survive to Physics unchanged.
         app.add_systems(
             FixedUpdate,
+            // Issue #1141: the Backfill Navigation traffic-order host emits in
+            // Input, before the existing origin-blind civilian consumer, so its
+            // `OrderCivilian` lands on exactly the same tick as a console press.
+            operate_civilian_order_ai
+                .in_set(crate::sim_sets::SimSet::Input)
+                .run_if(crate::ai::cadence::ai_tick_ready)
+                .before(crate::civilian::tick_civilian_traffic),
+        )
+        .add_systems(
+            FixedUpdate,
             handle_navigation_waypoint
                 .in_set(crate::sim_sets::SimSet::Physics)
                 .after(operate_navigation_ai),
@@ -68,6 +78,94 @@ impl Plugin for NavigationPlugin {
             FixedUpdate,
             publish_navigation_blackboard.in_set(crate::sim_sets::SimSet::Publish),
         );
+    }
+}
+
+/// Backfill Navigation civilian-order host (issue #1141).
+///
+/// Reads positive `Order { target, route }` objectives in the same deterministic
+/// scored order every other objective host uses. The first target not already
+/// carrying that authoritative order is sent an `OrderCivilian` payload through
+/// [`emit_ai_command`]. `tick_civilian_traffic`, ordered immediately after this
+/// host in `SimSet::Input`, consumes it through the same path as a human console
+/// press; nothing downstream can tell which actor supplied it.
+///
+/// Observing `CivilianState::order()` makes emission idempotent. Once one craft
+/// has received its order the next AI cadence chooses the next objective, so a
+/// scenario can publish one payload-bearing objective per endangered craft
+/// without resetting a civilian's acknowledgement clock every tick.
+#[allow(clippy::type_complexity)]
+pub fn operate_civilian_order_ai(
+    sessions: Res<crate::lobby::Sessions>,
+    runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
+    world_config: Option<Res<crate::world::config::WorldConfig>>,
+    civilians: Query<(
+        &crate::entities::spawner::EntityUuid,
+        &crate::civilian::CivilianTraffic,
+    )>,
+    mut ships: Query<(
+        Option<&crate::entities::spawner::EntityUuid>,
+        &crate::ship_plugin::ShipSystemControlSources,
+        &crate::server_app::ShipSystemBlackboards,
+        Option<&crate::ship_plugin::ShipConfigComponent>,
+        &mut crate::core::messages::AdmittedCommands,
+    )>,
+) {
+    for (entity_uuid, sources, blackboards, ship_config, mut admitted) in ships.iter_mut() {
+        if !crate::ai::host::ai_operates(
+            &sources.0,
+            crate::ship::system_registry::navigation_system_id(),
+        ) {
+            continue;
+        }
+        let Some(crate::core::messages::SystemBlackboard::Viewscreen(view)) = blackboards
+            .0
+            .get(&crate::ship::system_registry::viewscreen_system_id())
+        else {
+            continue;
+        };
+
+        let next = view.scored_objectives.iter().find_map(|objective| {
+            if objective.score <= 0.0
+                || !objective
+                    .relevance
+                    .contains(&crate::core::messages::SystemAffinity::Navigation)
+            {
+                return None;
+            }
+            let (target, route) = crate::objectives::order_directive(&objective.directive)?;
+            if target.is_empty()
+                || route.is_empty()
+                || !world_config
+                    .as_deref()
+                    .is_some_and(|world| world.route(route).is_some())
+            {
+                return None;
+            }
+            let resolved = runtime
+                .as_deref()
+                .and_then(|world| world.name_to_uuid.get(target))
+                .map(String::as_str)
+                .unwrap_or(target);
+            let traffic = civilians
+                .iter()
+                .find(|(uuid, _)| uuid.0 == resolved)
+                .map(|(_, traffic)| traffic)?;
+            let order = crate::civilian::CivilianOrder::divert_to_route(route);
+            (traffic.0.order() != Some(&order)).then(|| (target.to_string(), order))
+        });
+
+        if let Some((target, order)) = next {
+            emit_ai_command(
+                entity_uuid,
+                crate::ship::system_registry::navigation_system_id(),
+                crate::core::messages::SystemControlPayload::OrderCivilian { target, order },
+                sources,
+                &sessions,
+                ship_config,
+                &mut admitted,
+            );
+        }
     }
 }
 

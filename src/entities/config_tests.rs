@@ -3817,6 +3817,112 @@ directive_kind = "Wander"
     assert!(err.contains("Wander"), "{err}");
 }
 
+#[test]
+fn order_doctrine_parses_its_target_and_route() {
+    let config = doctrine_toml(
+        r#"
+id = "order-meridian"
+directive_kind = "Order"
+directive_order_target = "Meridian Freight"
+directive_order_route = "storm_shelter_run"
+"#,
+    )
+    .expect("a complete Order doctrine entry must parse");
+    let doctrine = &config
+        .behaviour
+        .expect("fixture authors behaviour")
+        .doctrine[0];
+
+    assert_eq!(
+        crate::ai::core::parse_doctrine_directive(doctrine),
+        crate::core::messages::AiDirective::Order {
+            target: "Meridian Freight".into(),
+            route: "storm_shelter_run".into(),
+        }
+    );
+}
+
+#[test]
+fn order_doctrine_requires_a_non_empty_target_and_route() {
+    for (body, missing) in [
+        (
+            r#"
+id = "order-civilian"
+directive_kind = "Order"
+directive_order_target = ""
+directive_order_route = "storm_shelter_run"
+"#,
+            "directive_order_target",
+        ),
+        (
+            r#"
+id = "order-civilian"
+directive_kind = "Order"
+directive_order_target = "Meridian Freight"
+"#,
+            "directive_order_route",
+        ),
+        (
+            r#"
+id = "order-civilian"
+directive_kind = "Order"
+directive_order_route = "storm_shelter_run"
+"#,
+            "directive_order_target",
+        ),
+        (
+            r#"
+id = "order-civilian"
+directive_kind = "Order"
+directive_order_target = "Meridian Freight"
+directive_order_route = ""
+"#,
+            "directive_order_route",
+        ),
+    ] {
+        let err = doctrine_toml(body).expect_err("an incomplete Order must be rejected");
+        assert!(
+            err.contains("Order") && err.contains(missing) && err.contains("non-empty"),
+            "error must name Order and its missing {missing} field, got: {err}"
+        );
+    }
+}
+
+#[test]
+fn order_doctrine_fields_are_rejected_on_other_directive_kinds() {
+    let err = doctrine_toml(
+        r#"
+id = "reach-shelter"
+directive_kind = "Reach"
+directive_anchor = "shelter"
+directive_order_route = "storm_shelter_run"
+"#,
+    )
+    .expect_err("Order's route field on Reach must be rejected");
+    assert!(
+        err.contains("directive_order_route") && err.contains("Order") && err.contains("Reach"),
+        "error must name the misplaced field, its owner, and the selected kind: {err}"
+    );
+}
+
+#[test]
+fn foreign_directive_fields_are_rejected_on_order_doctrine() {
+    let err = doctrine_toml(
+        r#"
+id = "order-civilian"
+directive_kind = "Order"
+directive_order_target = "Meridian Freight"
+directive_order_route = "storm_shelter_run"
+directive_target = "wrong-field"
+"#,
+    )
+    .expect_err("Destroy's target field on Order must be rejected");
+    assert!(
+        err.contains("directive_target") && err.contains("Destroy") && err.contains("Order"),
+        "error must name the misplaced field, its owner, and the selected kind: {err}"
+    );
+}
+
 /// The shapes every shipped hull and world override actually authors.
 #[test]
 fn well_formed_directives_of_every_kind_are_accepted() {
@@ -3828,6 +3934,7 @@ fn well_formed_directives_of_every_kind_are_accepted() {
             "id = \"reach\"\ndirective_kind = \"Reach\"\ndirective_anchor = \"home\"",
             "id = \"retreat\"\ndirective_kind = \"Retreat\"\ndirective_anchor = \"haven\"",
             "id = \"hail\"\ndirective_kind = \"Hail\"\ndirective_hail_target = \"Axiom Station\"",
+            "id = \"order\"\ndirective_kind = \"Order\"\ndirective_order_target = \"Meridian Freight\"\ndirective_order_route = \"storm_shelter_run\"",
         ] {
             assert!(
                 doctrine_toml(body).is_ok(),

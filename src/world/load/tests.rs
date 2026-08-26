@@ -259,6 +259,93 @@ fn activate_loads_children_and_records_the_whole_composition() {
 }
 
 #[test]
+fn activate_retains_a_childs_sibling_scripts_digest_and_spawn_provenance() {
+    const CHILD_PATH: &str = "assets/worlds/child_scripted.toml";
+    const SCRIPT_PATH: &str = "assets/worlds/child_scripted.rhai";
+    const MISSING: &str = "assets/entities/missing_child_sibling_1047.toml";
+    const ROOT: &str =
+        "extra_worlds = [\"assets/worlds/child_scripted.toml\"]\n[global]\nseed = 1\n";
+    const CHILD: &str = "script = \"child_scripted.rhai\"\n[global]\nseed = 2\n";
+    const SCRIPT: &str = "fn release(ctx) {\n    ctx.effects.spawn_entity(#{ template_path: \"assets/entities/missing_child_sibling_1047.toml\", name: \"missing\", position: [0, 0, 0] });\n}\n";
+
+    let reader = MemoryReader::new([("assets/worlds/root.toml", ROOT), (CHILD_PATH, CHILD)]);
+    let resolver = CountingScriptResolver {
+        expected_path: SCRIPT_PATH,
+        source: SCRIPT,
+        reads: std::cell::Cell::new(0),
+    };
+    let loaded = load(request(
+        "assets/worlds/root.toml",
+        &reader,
+        &resolver,
+        LoadPolicy::Activate,
+    ))
+    .expect("the scripted child is retained as pre-freeze load data");
+
+    assert!(loaded.scripts.is_none(), "the root itself is script-free");
+    assert_eq!(resolver.reads.get(), 1, "the child sibling compiles once");
+    let child_scripts = loaded.children[0]
+        .scripts
+        .as_ref()
+        .expect("the child's compiled set must not be discarded");
+    assert_eq!(child_scripts.spawned_templates.len(), 1);
+    assert_eq!(child_scripts.spawned_templates[0].source_path, SCRIPT_PATH);
+    assert_eq!(child_scripts.spawned_templates[0].template_path, MISSING);
+
+    let child_digest = child_scripts
+        .ledger_digest
+        .clone()
+        .expect("a scripted child carries a content-ledger digest");
+    assert_eq!(child_digest.key, format!("{CHILD_PATH}#scripts"));
+    assert_eq!(loaded.ledger.digests, vec![child_digest]);
+
+    let unresolved: Vec<_> = loaded
+        .findings
+        .iter()
+        .filter(|finding| {
+            finding.category == "unresolvable-template" && finding.source.reference == MISSING
+        })
+        .collect();
+    assert_eq!(unresolved.len(), 1, "findings: {:?}", loaded.findings);
+    assert_eq!(unresolved[0].source.file, SCRIPT_PATH);
+    assert_eq!(unresolved[0].source.line, Some(2));
+}
+
+#[test]
+fn activate_applies_the_raw_transform_to_the_root_not_static_children() {
+    let root = "extra_worlds = [\"child.toml\"]\n[global]\nseed = 1\n";
+    let child = "[global]\nseed = 2\n[script]\nsetup = \"fn child_handler(ctx) { }\"\n";
+    let reader = MemoryReader::new([("root.toml", root), ("child.toml", child)]);
+    let calls = std::cell::Cell::new(0usize);
+    let root_only = |value: toml::Value| -> Result<toml::Value, String> {
+        calls.set(calls.get() + 1);
+        Ok(value)
+    };
+
+    let loaded = load(
+        request(
+            "root.toml",
+            &reader,
+            &NoScriptResolver,
+            LoadPolicy::Activate,
+        )
+        .with_transform(&root_only),
+    )
+    .expect("the root and child load");
+
+    assert_eq!(
+        calls.get(),
+        1,
+        "the harness transform belongs to the root and must not run over a supporting world"
+    );
+    assert!(loaded.scripts.is_none());
+    assert!(
+        loaded.children[0].scripts.is_some(),
+        "the child still compiles its own untouched inline set"
+    );
+}
+
+#[test]
 fn activate_validates_a_root_sibling_scripts_spawn_with_exact_provenance_once() {
     const ROOT: &str = "script = \"root_wave.rhai\"\n[global]\nseed = 1\n";
     const SCRIPT_PATH: &str = "assets/worlds/root_wave.rhai";

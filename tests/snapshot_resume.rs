@@ -1112,15 +1112,16 @@ fn a_save_whose_authored_data_changed_is_refused_on_content() {
 /// from under the rest of the suite. The hull edited below is the PLAYER's own,
 /// which reaches the ledger through `FsTemplateLoader` resolving `--ship`.
 ///
-/// The duel's NPC hulls are deliberately not the ones edited: they are not in
-/// the FROZEN ledger and never were. `content_ledger::
-/// eager_record_world_entities` walks `world_config.entities`, so a hull that
-/// arrives any other way — a `[[trigger]]` spawn action, as duel.toml's slots
-/// did before issue #984, or a script spawn, as they do after it — is recorded
-/// only when it actually spawns, which is after `freeze`. That is a #935-class
-/// gap about trigger/script-spawned templates generally, tracked as its own
-/// issue; the M6 conversion changed which side of it these slots sit on, not
-/// whether the gap exists.
+/// The duel's NPC hull is deliberately not the one edited: its path is a
+/// computed script argument supplied by the duel transform, so no load-time
+/// literal scan can put it in the frozen ledger. Issue #1047 now eagerly walks
+/// both `world_config.entities` and `CompiledScripts::spawned_templates`; a
+/// literal script-spawned hull is covered before freeze, while a computed path
+/// is reported once when dispatched and deliberately not folded late (doing so
+/// would make the save digest depend on how far the run had progressed). The
+/// PLAYER's selected hull still enters through headless's explicit `--ship`
+/// resolution and re-freeze, so editing it keeps this older #935 test isolated
+/// from the computed-path residual.
 #[test]
 fn a_save_whose_entity_template_changed_is_refused_on_content() {
     let mut live = duel();
@@ -1172,6 +1173,131 @@ fn a_save_whose_entity_template_changed_is_refused_on_content() {
         "got {refusal}"
     );
     content_ledger::reset();
+}
+
+/// Issue #1047 end to end, including the static-child edge: a root with no
+/// `[[entity]]` loads an `extra_world`, that child names a sibling `.rhai`, and
+/// only that sibling literally names the hull. Editing the hull must make
+/// `load_from` return vellum's content-moved refusal.
+///
+/// The reset immediately AFTER each real `world::load` is load-bearing. The
+/// composition validator resolves literal spawn templates through
+/// `FsTemplateLoader`, which records as a side effect; leaving that record live
+/// would let this test pass even if the returned child's compiled set never
+/// reached the eager pre-freeze walk. Erasing it, then applying only the returned
+/// `LedgerPlan` and explicitly eager-walking root and child, isolates the shipped
+/// compatibility path under test.
+#[test]
+fn a_save_whose_script_only_hull_template_changed_is_refused_on_content() {
+    struct Cleanup(std::path::PathBuf);
+
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            content_ledger::reset();
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    let dir = scratch("script_only_hull_content");
+    std::fs::create_dir_all(&dir).expect("fixture directory is created");
+    let _cleanup = Cleanup(dir.clone());
+    content_ledger::reset();
+
+    let hull_path = dir.join("late_hull.toml");
+    let root_path = dir.join("root.toml");
+    let child_path = dir.join("child.toml");
+    let script_path = dir.join("child.rhai");
+    let hull_ref = hull_path.to_string_lossy().replace('\\', "/");
+    let root_ref = root_path.to_string_lossy().into_owned();
+    let child_ref = child_path.to_string_lossy().replace('\\', "/");
+    std::fs::write(&hull_path, "[hull]\nhull_integrity = 400.0\n")
+        .expect("baseline hull is written");
+    let root_source = r#"
+extra_worlds = ["__CHILD__"]
+
+[global]
+seed = 1047
+"#
+    .replace("__CHILD__", &child_ref);
+    std::fs::write(&root_path, root_source).expect("root world is written");
+    std::fs::write(
+        &child_path,
+        "script = \"child.rhai\"\n\n[global]\nseed = 1048\n",
+    )
+    .expect("child world is written");
+    let script_source = r#"
+fn spawn_later(ctx) {
+    ctx.effects.spawn_entity(#{ template_path: "__HULL__", name: "late-hull" });
+}
+"#
+    .replace("__HULL__", &hull_ref);
+    std::fs::write(&script_path, script_source).expect("child sibling script is written");
+
+    let freeze_declared_set = || {
+        use project_phoenix::world::load::{load, FsReader, LoadPolicy, LoadRequest};
+
+        let resolver = project_phoenix::entities::config_cache::production_script_resolver();
+        let loaded = load(LoadRequest::new(
+            root_ref.clone(),
+            &FsReader,
+            &resolver,
+            LoadPolicy::Activate,
+        ))
+        .expect("the root and scripted child load");
+        assert!(loaded.config.entities.is_empty());
+        assert_eq!(loaded.children.len(), 1);
+        assert!(loaded.children[0].config.entities.is_empty());
+        assert!(
+            loaded.children[0].scripts.is_some(),
+            "the child's sibling set must survive the load"
+        );
+
+        // Intentionally first after `load`: erase every record template
+        // resolution during validation could have made.
+        content_ledger::reset();
+        loaded.ledger.apply();
+        content_ledger::eager_record_world_entities_with_scripts(
+            &loaded.config,
+            loaded.scripts.as_ref(),
+        );
+        for child in &loaded.children {
+            content_ledger::eager_record_world_entities_with_scripts(
+                &child.config,
+                child.scripts.as_ref(),
+            );
+        }
+        content_ledger::freeze();
+        assert!(
+            content_ledger::frozen_covers(&hull_ref),
+            "the explicit child eager walk must cover the sibling-only hull"
+        );
+        versions(&content_ledger::frozen_or_live())
+    };
+
+    let baseline = freeze_declared_set();
+    let run = run_for(
+        PhoenixSnapshot::default(),
+        0,
+        SEED,
+        &root_ref,
+        baseline.clone(),
+    );
+    let store = FileStore::new(dir.join("save"));
+    save_to(&store, "autosave", &run).expect("the fixture save is written");
+
+    std::fs::write(&hull_path, "[hull]\nhull_integrity = 401.0\n")
+        .expect("the hull edit is written");
+    let edited = freeze_declared_set();
+    assert_ne!(
+        edited.content, baseline.content,
+        "editing the literal script-only hull must move the frozen content digest"
+    );
+
+    let refusal = load_from(&store, "autosave", &edited).expect_err("this build refuses it");
+    assert!(
+        matches!(refusal, LoadRefusal::Moved(Moved::Content { .. })),
+        "got {refusal}"
+    );
 }
 
 /// The digest must not depend on the ORDER the loader happened to record

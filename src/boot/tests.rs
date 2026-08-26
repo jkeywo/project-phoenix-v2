@@ -20,7 +20,7 @@ use crate::world::load::MemoryReader;
 use crate::world::script::load::ScriptResolver;
 use crate::world::server::PreCompiledScripts;
 
-/// A resolver that serves no sibling scripts — the fixtures author their scripts
+/// A resolver that serves no sibling scripts — fixtures using it author scripts
 /// inline in a `[script]` block, which never reaches a resolver.
 struct NoScriptResolver;
 
@@ -41,6 +41,8 @@ const CLEAN_WORLD: &str = "[global]\nseed = 1\n";
 /// a `LoadError`.
 const BROKEN_SCRIPT_WORLD: &str =
     "[global]\nseed = 1\n[script]\non_alpha = \"fn on_alpha(ctx) { let x = ; }\"\n";
+const CHILD_PATH: &str = "boot_child.toml";
+const ROOT_WITH_CHILD: &str = "extra_worlds = [\"boot_child.toml\"]\n[global]\nseed = 1\n";
 
 /// A fresh [`BootPlan`] for `profile` over `world` — fresh because the boxed reader
 /// is consumed by [`build`], so each build needs its own.
@@ -60,6 +62,22 @@ fn plan_with(profile: BootProfile, world: &str) -> BootPlan {
 /// A fresh plan for `profile` over the clean world.
 fn plan_for(profile: BootProfile) -> BootPlan {
     plan_with(profile, CLEAN_WORLD)
+}
+
+fn plan_with_child(profile: BootProfile, child: &str) -> BootPlan {
+    BootPlan {
+        profile,
+        world_ingest: WorldIngest::FromReader,
+        log_filter: "warn".to_string(),
+        world_path: WORLD_PATH.to_string(),
+        reader: Box::new(MemoryReader::new([
+            (WORLD_PATH, ROOT_WITH_CHILD),
+            (CHILD_PATH, child),
+        ])),
+        script_resolver: Box::new(NoScriptResolver),
+        single_threaded: false,
+        raw_transform: None,
+    }
 }
 
 const PROFILES: [(BootProfile, &str); 3] = [
@@ -161,6 +179,23 @@ fn a_broken_world_aborts_headless_but_only_blocks_activation_for_the_browser() {
         assert!(
             app.world().contains_resource::<PreCompiledScripts>(),
             "{profile:?} must carry the compiled (broken) scripts for the downstream gate"
+        );
+    }
+    crate::content_ledger::reset();
+}
+
+#[test]
+fn a_broken_static_child_script_is_rejected_before_every_profile_can_drop_it() {
+    for (profile, label) in PROFILES {
+        let err = build(plan_with_child(profile, BROKEN_SCRIPT_WORLD))
+            .expect_err("a broken static child has no downstream resource owner");
+        assert!(
+            matches!(err, BootError::WorldInvalid(_)),
+            "{label}: expected WorldInvalid, got {err:?}"
+        );
+        assert!(
+            err.to_string().contains("extra_world[0] scripts"),
+            "{label}: the rejection must identify the child script set: {err}"
         );
     }
     crate::content_ledger::reset();

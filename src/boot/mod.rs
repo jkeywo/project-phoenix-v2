@@ -134,9 +134,11 @@ impl BootProfile {
 pub enum WorldIngest {
     /// Boot owns the whole load: reset the ledger, read the root and its
     /// `extra_worlds` children through the [`BootPlan`] reader, validate the
-    /// composition, compile the scripts once, apply the ledger records
-    /// (+ native eager-record), freeze, and insert the `WorldConfig` and
-    /// `PreCompiledScripts`. Headless and the parity tests.
+    /// composition, compile each world's scripts for the pre-freeze declared
+    /// set, apply the ledger records (+ native eager-record), freeze, and insert
+    /// the root `WorldConfig` and root `PreCompiledScripts`. Static children are
+    /// compiled again when their runtime layers activate. Headless and the
+    /// parity tests.
     FromReader,
     /// The host already ingested the world by another route, so boot must not run
     /// the reader-based load at all. The browser's JS preload parses the
@@ -517,15 +519,18 @@ fn register_render_contract(app: &mut App) {
 ///    `build` in one process never inherits the previous world's files.
 /// 3. [`load`](crate::world::load::load) under [`LoadPolicy::Activate`] — the one
 ///    read/parse/validate/compile of the root and its `extra_worlds` children.
-/// 4. The composition + script gate, applied per the profile's
-///    [abort-vs-block](BootProfile::broken_world_aborts) policy.
+/// 4. The composition + root-script gate, applied per the profile's
+///    [abort-vs-block](BootProfile::broken_world_aborts) policy. A broken static
+///    child's script set always aborts: unlike the root set, it is not inserted
+///    as `PreCompiledScripts` for a browser-side downstream gate to retain.
 /// 5. Apply the ledger records the load gathered, eager-record the declared entity
 ///    templates (native only — the browser's JS preload is its equivalent), and
 ///    [`freeze`](crate::content_ledger::freeze) — so the content digest a save is
 ///    checked against does not drift as the world streams in.
-/// 6. Hand the parsed world and once-compiled scripts to the `App` as resources for
-///    `WorldPlugin`'s `Startup` to consume; a broken-but-not-aborted (browser) world
-///    carries its findings through so the downstream gate blocks activation.
+/// 6. Hand the parsed root world and its once-compiled root scripts to the `App`
+///    as resources for `WorldPlugin`'s `Startup` to consume; a broken-but-not-
+///    aborted browser root carries its findings through so the downstream gate
+///    blocks activation. Static-child compiled sets do not cross this boundary.
 fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     // Step 1 for both modes: the Rhai hashing-seed pin. Genuinely first, before any
     // script engine — `set_hashing_seed` no-ops once a hash is taken. Idempotent
@@ -559,8 +564,11 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     let loaded = load(request).map_err(BootError::WorldLoad)?;
 
     // The activation gate. Both the composition findings and the compiled scripts'
-    // own findings can carry errors; a broken world aborts the build only where the
-    // profile says so.
+    // own findings can carry errors. Root errors follow the profile's abort-vs-
+    // block policy because the root `CompiledScripts` is retained below for the
+    // browser's downstream gate. Static-child compiled sets are pre-freeze inputs,
+    // not runtime resources; no downstream owner receives them, so a broken child
+    // must be rejected here on every profile rather than silently dropped.
     let mut invalid: Vec<String> = Vec::new();
     // Non-blocking findings first, and they have to be LOGGED rather than
     // counted (issue #1046). `LoadedWorld::findings` had exactly one production
@@ -573,6 +581,19 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     log_non_error_findings("composition", &loaded.findings);
     if let Some(scripts) = &loaded.scripts {
         log_non_error_findings("scripts", &scripts.findings);
+    }
+    let mut invalid_child_scripts = Vec::new();
+    for (index, child) in loaded.children.iter().enumerate() {
+        let label = format!("extra_world[{index}] scripts");
+        if let Some(scripts) = &child.scripts {
+            log_non_error_findings(&label, &scripts.findings);
+            if crate::world::validate::has_error(&scripts.findings) {
+                invalid_child_scripts.push(describe_findings(&label, &scripts.findings));
+            }
+        }
+    }
+    if !invalid_child_scripts.is_empty() {
+        return Err(BootError::WorldInvalid(invalid_child_scripts.join("; ")));
     }
     if crate::world::validate::has_error(&loaded.findings) {
         invalid.push(describe_findings("composition", &loaded.findings));
@@ -589,9 +610,15 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     loaded.ledger.apply();
     #[cfg(not(target_arch = "wasm32"))]
     {
-        crate::content_ledger::eager_record_world_entities(&loaded.config);
+        crate::content_ledger::eager_record_world_entities_with_scripts(
+            &loaded.config,
+            loaded.scripts.as_ref(),
+        );
         for child in &loaded.children {
-            crate::content_ledger::eager_record_world_entities(&child.config);
+            crate::content_ledger::eager_record_world_entities_with_scripts(
+                &child.config,
+                child.scripts.as_ref(),
+            );
         }
     }
     crate::content_ledger::freeze();

@@ -2,7 +2,7 @@
 title: WorldPlugin
 type: concept
 tags: [world, plugin, server]
-sources: [src/world/server.rs, src/world/server_tests.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/load/mod.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/world/delayed.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, tests/snapshot_resume.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
+sources: [src/boot/mod.rs, src/content_ledger.rs, src/world/server.rs, src/world/server_tests.rs, src/world/dispatch.rs, src/world/config.rs, src/world/content.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/load/mod.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/world/delayed.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server_app.rs, src/ai/server.rs, src/ai/faction.rs, tests/snapshot_resume.rs, assets/worlds/default.toml, assets/worlds/combat_test.toml, assets/factions/]
 updated: 2026-08-26
 ---
 
@@ -35,6 +35,8 @@ JS (server.html)
 ```
 
 At `Startup`, `insert_world_config_resource` copies the `WORLD_CONFIG` thread-local into a Bevy `Resource` so downstream systems can read it via `Res<WorldConfig>`.
+
+Native boot freezes save compatibility from the same resolved script set it validates. Under `LoadPolicy::Activate`, `world::load` compiles the root and each static `extra_worlds` child against its own path/text and the injected resolver; the root-only raw transform is never applied to a child. It retains each `CompiledScripts`, supplies each exact spawn list to composition validation, and returns all script digests on the root ledger plan. `boot::ingest_world` applies that plan, then eagerly resolves root and children from their declarative `[[entity]]` paths plus their own `CompiledScripts::spawned_templates`; only callers with no compiled set fall back to scanning `WorldConfig`'s inline bodies. These child compiled sets exist for validation and the pre-freeze declared-content census—not as runtime registrations. Additive layer activation compiles and owns a fresh child set, while boot rejects a broken static-child set because only root scripts cross the resource boundary into `PreCompiledScripts`. Changing a hull named only by a literal `ctx.effects.spawn_entity` call therefore refuses an older save as content-moved. A computed template path cannot join a load-time set: dispatch reports an uncovered path once and does not fold it late, because doing so would make the digest depend on mission progress and make a fresh resume reject a valid save. Browser inline roots already enter the equivalent pre-init template preload; root sibling-script pre-init parity remains tracked separately as #1248.
 
 ## Startup chain
 

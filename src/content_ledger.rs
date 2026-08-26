@@ -266,16 +266,17 @@ impl ContentLedger {
 }
 
 /// Eagerly resolve and record every entity template a world can spawn — its
-/// `[[entity]]` roster AND the templates its scripts name — recursively through
-/// nested asteroid-field variants.
+/// `[[entity]]` roster AND the templates its inline scripts name — recursively
+/// through nested asteroid-field variants.
 ///
-/// Native's answer to the browser's JS-driven preload (which fetches the same
-/// declared set before `wasm_init`): without this, native only learns a
-/// template's content lazily, the first time something spawns it, and a
+/// Native's answer to the browser's JS-driven preload: without this, native only
+/// learns a template's content lazily, the first time something spawns it, and a
 /// streamed world's declared set would not be fully known until streaming
-/// finished — which is precisely the load-order sensitivity [`freeze`]
-/// exists to avoid. Call this BEFORE [`freeze`], after the world config is
-/// parsed and before anything spawns.
+/// finished — which is precisely the load-order sensitivity [`freeze`] exists
+/// to avoid. Native's compiled-aware entry point also sees sibling-script
+/// literals; browser inline roots have the preload equivalent, while browser
+/// root-sibling pre-init parity is tracked as #1248. Call this BEFORE [`freeze`],
+/// after the world config is parsed and before anything spawns.
 ///
 /// # Scripted spawns are part of the declared set (issue #1047)
 ///
@@ -308,23 +309,50 @@ impl ContentLedger {
 /// late.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn eager_record_world_entities(world_config: &crate::world::config::WorldConfig) {
+    eager_record_world_entities_with_scripts(world_config, None);
+}
+
+/// [`eager_record_world_entities`] using the exact script source set the loader
+/// compiled when one exists.
+///
+/// Native boot passes its [`CompiledScripts`](crate::world::script::load::CompiledScripts)
+/// here, so sibling `.rhai` files and inline virtual sources contribute the same
+/// literal template references composition validation saw. A parsed config with
+/// no compiled set — a direct unit fixture or another caller below the loader —
+/// retains the inline [`script_spawned_templates`](crate::world::config::script_spawned_templates)
+/// scan as its fallback. `Some` is authoritative even when its list is empty:
+/// appending the fallback would reintroduce a second, less exact source set.
+/// Static `extra_worlds` children are compiled for this pre-freeze enumeration;
+/// their runtime layer activation still compiles and owns a fresh set of
+/// registrations through the additive-layer path.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn eager_record_world_entities_with_scripts(
+    world_config: &crate::world::config::WorldConfig,
+    scripts: Option<&crate::world::script::load::CompiledScripts>,
+) {
     use crate::entities::loader::TemplateLoader;
     use std::collections::HashSet;
 
-    // The `[[entity]]` roster AND every template the world's scripts name
-    // (issue #1047). The second half is `script_spawned_templates`, the same
-    // enumeration `entity_template_paths` feeds the browser preload from — so a
-    // scripted hull is recorded on native for the same reason it is fetched (and
-    // therefore recorded) on wasm.
+    let scripted_paths: Vec<String> = match scripts {
+        Some(compiled) => compiled
+            .spawned_templates
+            .iter()
+            .map(|spawn| spawn.template_path.clone())
+            .collect(),
+        None => crate::world::config::script_spawned_templates(world_config)
+            .into_iter()
+            .map(|spawn| spawn.template_path)
+            .collect(),
+    };
+
+    // The `[[entity]]` roster AND every literal template the exact compiled
+    // script set names (issue #1047). The fallback above preserves direct parsed-
+    // config callers; production native boot supplies `CompiledScripts`.
     let mut queue: Vec<String> = world_config
         .entities
         .iter()
         .map(|e| e.template_path.clone())
-        .chain(
-            crate::world::config::script_spawned_templates(world_config)
-                .into_iter()
-                .map(|spawn| spawn.template_path),
-        )
+        .chain(scripted_paths)
         .collect();
     let mut visited: HashSet<String> = HashSet::new();
 
@@ -460,6 +488,51 @@ setup = \"\"\"
             snapshot().get(HULL).is_some(),
             "a script-only hull must be recorded: {:?}",
             snapshot().entries().map(|(k, _)| k).collect::<Vec<_>>()
+        );
+        reset();
+    }
+
+    /// Production native boot must take its script-template set from the same
+    /// resolved sources it compiled, not re-scan the parsed config's inline-only
+    /// bodies. The two paths deliberately disagree here: the config names one
+    /// hull inline while the compiled sibling names another.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_eager_walk_uses_the_compiled_sibling_source_set_when_available() {
+        const INLINE_HULL: &str = "assets/entities/alliance_destroyer.toml";
+        const SIBLING_HULL: &str = "assets/entities/ship_harrow_destroyer.toml";
+        let world = crate::world::config::parse_world(&format!(
+            "[global]
+seed = 1
+
+[script]
+setup = \"\"\"
+             fn inline_wave(ctx) {{
+             ctx.effects.spawn_entity(#{{ template_path: \"{INLINE_HULL}\", name: \"inline\" }});
+             }}
+\"\"\"
+"
+        ))
+        .expect("fixture world parses");
+        let compiled = crate::world::script::load::compile_scripts(&[vellum_script::ScriptSource {
+            path: "tests/fixtures/script_only_spawn.rhai".into(),
+            source: format!(
+                "fn sibling_wave(ctx) {{\n\
+                 ctx.effects.spawn_entity(#{{ template_path: \"{SIBLING_HULL}\", name: \"sibling\" }});\n\
+                 }}\n"
+            ),
+        }]);
+
+        reset();
+        eager_record_world_entities_with_scripts(&world, Some(&compiled));
+        let recorded = snapshot();
+        assert!(
+            recorded.get(SIBLING_HULL).is_some(),
+            "the resolved sibling's hull must enter the native frozen set"
+        );
+        assert!(
+            recorded.get(INLINE_HULL).is_none(),
+            "CompiledScripts is authoritative when present; the inline fallback must not append a second source set"
         );
         reset();
     }

@@ -147,7 +147,7 @@ test('a connector arriving after every station is filled becomes a spectator', a
   const welcome = await first.page.evaluate(
     () => window.__messages.find((m) => m.type === 'Welcome'),
   );
-  const roster = welcome.data.ship_stations.stations;
+  const roster = welcome.data.ship_stations.stations.filter((station) => !station.auxiliary);
   expect(roster.length, 'the ship must declare at least one station to fill').toBeGreaterThan(0);
 
   // `SelectStation` accepts either the station's display name or its id

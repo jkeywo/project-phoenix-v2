@@ -2178,6 +2178,60 @@ fn joining_player_is_never_auto_assigned_a_station_in_lobby() {
 }
 
 #[test]
+fn joining_after_all_claimable_stations_are_held_becomes_spectator_despite_auxiliary() {
+    let mut stations = ship_stations();
+    stations.stations.push(StationDef {
+        id: StationId("navigation-visit".into()),
+        name: "Navigation Visit".into(),
+        description: "A hosted navigation console.".into(),
+        rank: "Ens.".into(),
+        short_code: "NAV".into(),
+        console: None,
+        ratings: vec!["Std".into()],
+        human_seeking: true,
+        host_order: vec![StationId("comms".into())],
+        visiting_rating: Some("Std".into()),
+        auxiliary: true,
+    });
+    let mut sessions = SessionManager::new();
+    for (index, station) in stations
+        .stations
+        .iter()
+        .filter(|station| !station.auxiliary)
+        .enumerate()
+    {
+        let token = format!("crew-{index}");
+        sessions.register(token.clone(), token).unwrap();
+        sessions.set_station(&format!("crew-{index}"), Some(station.id.clone()));
+    }
+
+    let result = handle_identify(
+        "spectator",
+        "Spectator",
+        &mut sessions,
+        GamePhase::Lobby,
+        None,
+        &stations,
+        &default_ship_config(),
+        &HashMap::new(),
+    );
+
+    assert!(result.outbound.iter().any(|(target, message)| {
+        matches!(
+            (target, message),
+            (
+                Target::Token(token),
+                ServerMessage::StationAssigned {
+                    station: None,
+                    station_id: None,
+                    ..
+                }
+            ) if token == "spectator"
+        )
+    }));
+}
+
+#[test]
 fn existing_assigned_player_follows_next_when_second_player_joins() {
     let stations = ship_stations();
     let mut sessions = SessionManager::new();

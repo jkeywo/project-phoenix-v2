@@ -213,7 +213,15 @@ pub(crate) fn handle_identify(
                 .map(|p| p.station.is_some())
                 .unwrap_or(false);
             if !player_has_station {
-                let capacity = ship_stations.stations.len() as u32;
+                // Auxiliary stations are visiting consoles, not lobby seats.
+                // They stay in the Welcome roster so their host can surface
+                // them, but cannot be claimed and therefore must not delay
+                // the spectator outcome once every ordinary seat is held.
+                let capacity = ship_stations
+                    .stations
+                    .iter()
+                    .filter(|station| !station.auxiliary)
+                    .count() as u32;
                 let at_capacity = connected_with_stations >= capacity;
                 if at_capacity {
                     outbound.push((

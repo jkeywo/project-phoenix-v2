@@ -38,8 +38,7 @@ export function heroBarModel({ directStation, stations, stationSystems,
     selected,
     tabs: tabIds.map(id => {
       const st = byId[id] || { id, name: id };
-      const mode = id === directStation ? 'direct' : 'visiting';
-      const rating = mode === 'visiting'
+      const rating = id !== directStation
         ? (placements[id]?.rating || st.visiting_rating || stationRatings?.[id] || '')
         : (stationRatings?.[id] || '');
       // Authoritative host figure (issue #1100). A number is the summed hull
@@ -54,7 +53,7 @@ export function heroBarModel({ directStation, stations, stationSystems,
       // each with its own lifecycle. Absent (Station resolved / never marked) is
       // the neutral state. Never derived from health or blackboards.
       const importance = (stationImportance && stationImportance[id]) || null;
-      return { id, name: st.name || id, mode, rating, health,
+      return { id, name: st.name || id, rating, health,
         healthState: heroBarHealthState(health), importance,
         importanceState: heroBarImportanceState(importance), selected: id === selected };
     }),
@@ -120,7 +119,7 @@ export function heroBarKeyTarget(ids, current, key) {
  * snapshots render the shell frequently, so preserving button identity is what
  * keeps keyboard focus stable while unrelated blackboard values change.
  */
-export function renderHeroBarDom({ tabsEl, titleEl, metaEl, aiEl, healthEl, model,
+export function renderHeroBarDom({ tabsEl, titleEl, ratingEl, aiEl, model,
   translate, onActivate }) {
   const existing = new Map(
     [...tabsEl.querySelectorAll('button[data-station]')]
@@ -146,32 +145,46 @@ export function renderHeroBarDom({ tabsEl, titleEl, metaEl, aiEl, healthEl, mode
         tabsEl.ownerDocument.createElement('span'),
         tabsEl.ownerDocument.createElement('span'),
         tabsEl.ownerDocument.createElement('span'),
-        tabsEl.ownerDocument.createElement('span'),
       );
-      button.children[1].className = 'station-tab-owner';
-      // A dedicated span for the persistent non-colour health cue (issue #1100).
-      // Being its own element is what lets it coexist with an importance alert
-      // painted elsewhere on the tab, and stay a text/shape token, not colour.
-      button.children[2].className = 'station-tab-health';
+      // The damage indicator remains separate from importance, but becomes a
+      // compact progress strip instead of a visible text row. Its hidden label
+      // preserves the percentage/no-model fact for assistive technology.
+      button.children[1].className = 'station-tab-health';
+      const fill = tabsEl.ownerDocument.createElement('span');
+      fill.className = 'station-tab-health-fill';
+      fill.setAttribute('aria-hidden', 'true');
+      const healthLabel = tabsEl.ownerDocument.createElement('span');
+      healthLabel.className = 'station-tab-health-label visually-hidden';
+      button.children[1].append(fill, healthLabel);
       // A SEPARATE span for the importance cue (issue #1101), with its own
       // `data-importance` attribute — never sharing health's element or
       // attribute, so the two streams coexist on one tab (AC4).
-      button.children[3].className = 'station-tab-importance';
+      button.children[2].className = 'station-tab-importance';
     }
     existing.delete(tab.id);
     button.setAttribute('aria-selected', tab.id === model.selected ? 'true' : 'false');
     button.tabIndex = tab.id === model.selected ? 0 : -1;
     button.children[0].textContent = tab.name;
-    button.children[1].textContent = translate('client.hero.owner.' + tab.mode);
-    // Persistent per-tab health cue on EVERY tab (AC #3/#4): a text/shape token,
-    // never colour, and set unconditionally so an alert cannot suppress it.
-    button.children[2].textContent = translate('client.hero.health.cue.' + tab.healthState);
+    const healthEl = button.children[1];
+    const healthFill = healthEl.querySelector('.station-tab-health-fill');
+    const healthLabel = healthEl.querySelector('.station-tab-health-label');
+    const healthPct = typeof tab.health === 'number'
+      ? Math.round(Math.max(0, Math.min(1, tab.health)) * 100)
+      : null;
+    healthFill.hidden = healthPct == null;
+    healthFill.style.width = healthPct === 0 ? '2px' : `${healthPct || 0}%`;
+    healthFill.style.setProperty('--station-health-pct', `${healthPct || 0}%`);
+    healthFill.style.setProperty('--station-health-loss-pct', `${100 - (healthPct || 0)}%`);
+    healthLabel.textContent = healthPct == null
+      ? translate('client.hero.health.none')
+      : translate('client.hero.health.readout', { pct: healthPct });
     button.dataset.health = tab.healthState;
+    button.dataset.healthValue = healthPct == null ? 'none' : String(healthPct);
     // Persistent per-tab importance cue on EVERY tab (AC4): its own glyph token
     // and its own `data-importance`, set UNCONDITIONALLY (even 'none') so health
     // and importance always coexist and neither can suppress the other. Never a
     // sort key — the tab order above is untouched by importance.
-    button.children[3].textContent = translate('client.hero.importance.cue.' + tab.importanceState);
+    button.children[2].textContent = translate('client.hero.importance.cue.' + tab.importanceState);
     button.dataset.importance = tab.importanceState;
     button.onclick = () => onActivate(tab.id);
     button.onkeydown = event => {
@@ -189,22 +202,13 @@ export function renderHeroBarDom({ tabsEl, titleEl, metaEl, aiEl, healthEl, mode
   }
   const selected = model.tabs.find(tab => tab.id === model.selected) || model.tabs[0];
   titleEl.textContent = selected.name;
-  metaEl.textContent = translate('client.hero.meta', {
-    owner: translate('client.hero.owner.' + selected.mode), rating: selected.rating,
-  });
+  ratingEl.hidden = !selected.rating;
+  ratingEl.textContent = selected.rating
+    ? translate('client.hero.rating', { rating: selected.rating })
+    : '';
   const aiNames = model.aiStations.map(station => station.name).join(', ');
   aiEl.hidden = !aiNames;
   aiEl.textContent = aiNames ? translate('client.hero.ai_status', { stations: aiNames }) : '';
-  // Selected-Station health readout (issue #1100), from the authoritative host
-  // figure. `none`/absent renders the neutral no-damage-model label; otherwise
-  // the summed hull percentage. Carries the same discrete state as a data
-  // attribute so it, too, is legible without relying on colour.
-  if (healthEl) {
-    healthEl.dataset.health = selected.healthState;
-    healthEl.textContent = selected.healthState === 'none'
-      ? translate('client.hero.health.none')
-      : translate('client.hero.health.readout', { pct: Math.round(selected.health * 100) });
-  }
 }
 
 if (typeof window !== 'undefined') {

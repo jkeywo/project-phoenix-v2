@@ -1286,8 +1286,8 @@ world.probe_strike.entity.sister_struck.name,assets/worlds/probe_strike.toml -> 
 world.probe_strike.entity.rig_struck.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Struck Rig]
 world.probe_strike.entity.sister_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Clear-side Sister]
 world.probe_strike.entity.rig_clear.name,assets/worlds/probe_strike.toml -> [[entity]] name,[Unworked Rig]
-world.falling_skyway.objective.line.text,Objective text — the Act 2 dispute in Falling Skyway,[Get the line at Ladder Depot B working again.]
-world.falling_skyway.objective.corroborate.text,Objective text — the optional Act 2 corroboration route in Falling Skyway,[Get a worker on the record about the Ladder B maintenance file.]
+world.falling_skyway.objective.line.text,Objective text — the dispute era in Falling Skyway,[Get the line at Ladder Depot B working again.]
+world.falling_skyway.objective.corroborate.text,Objective text — the optional dispute-era corroboration route in Falling Skyway,[Get a worker on the record about the Ladder B maintenance file.]
 world.falling_skyway.commitment.safe_passage.terms,"Commitment terms — the captain's promise to the strike committee, Falling Skyway","[The corridor stays clear for the workers' craft through the final transfer window.]"
 world.falling_skyway.commitment.safe_passage.resolves,Commitment resolution condition — the safe-passage promise in Falling Skyway,[Settled when the transfer window closes.]
 world.falling_skyway.commitment.surface_records.terms,"Commitment terms — the captain's promise to surface the maintenance file, Falling Skyway","[The Ladder B maintenance file goes to Skyway Control, unedited.]"
@@ -1295,9 +1295,12 @@ world.falling_skyway.commitment.surface_records.resolves,Commitment resolution c
 world.falling_skyway.evidence.ladder_b_maintenance_file,"Evidence text — the operator's own maintenance file on Ladder B, Falling Skyway","[Operator's file on Ladder B: every inspection signed off, none of them by anyone who was on the rung that day.]"
 world.falling_skyway.evidence.picket_cleared_hurt,"Evidence text — what clearing the picket by force cost, Falling Skyway","[The Ladder B picket was cleared by Havelock security on our authorisation. There were casualties.]"
 world.falling_skyway.comms.committee_hails,Dialogue body — the strike committee open the negotiation in Falling Skyway,"[Destroyer, this is the committee at Ladder B. Before you ask: nobody is going back up that rung until somebody fixes what is wrong down here.]"
+world.falling_skyway.comms.committee_hardens_one,Dialogue body — the strike committee's first unanswered escalation in Falling Skyway,"[Destroyer, the tether is slipping and you have left us waiting. The floor will not take promises alone now. Bring us the file as well.]"
+world.falling_skyway.comms.committee_hardens_two,Dialogue body — the strike committee's final unanswered escalation in Falling Skyway,"[Still no answer. Every undertaking and the Ladder B file are the price of a vote now. Havelock will find people braced for them if you send them in.]"
 world.falling_skyway.comms.listen,Response text — hearing the strike committee out in Falling Skyway,[I am listening. Tell me what is wrong down there.]
 world.falling_skyway.comms.dismiss,Response text — talking down to the strike committee in Falling Skyway,[There are forty million people under that tether. Stand your people down.]
 world.falling_skyway.comms.committee_terms,Dialogue body — the strike committee's two demands in Falling Skyway,"[Two things. Nobody works that rung while the tether is slipping, so the corridor is clear when the transfer runs. And the maintenance file on Ladder B goes to Control — not back to the operator who wrote it.]"
+world.falling_skyway.comms.committee_terms_hardened,Dialogue body — the hardened strike committee's three-part settlement threshold in Falling Skyway,"[The floor has heard promises before. This time we need both undertakings and the Ladder B file in our hands before anyone votes.]"
 world.falling_skyway.comms.committee_ready,Dialogue body — the strike committee have enough to take to the floor in Falling Skyway,[That is more than anyone has offered us in six weeks. Say the word and I will put it to the floor.]
 world.falling_skyway.comms.promise_passage,Response text — promising the workers safe passage in the transfer window in Falling Skyway,[You have my word. The corridor is clear when the transfer runs.]
 world.falling_skyway.comms.promise_records,Response text — promising to surface the maintenance file in Falling Skyway,[I will put the file in front of Control myself.]

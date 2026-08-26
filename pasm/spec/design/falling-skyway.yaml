@@ -101,7 +101,7 @@ entities:
       owner_role: fs-tactical
       produces_facts: [lark-corridor-cancelled]
   - verb: fs-settle-the-strike
-    core: {status: proposed, confidence: provisional, origin: ai, title: Settle the Strike, summary: "[ai] Negotiate the committee's two-of-three ground; both promises land on the commitments ledger and stay open. Timers harden the tree but never close this path."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: Settle the Strike, summary: "[ai] Negotiate the committee's ground: any two of three before hardening, all three afterwards. Both promises land on the commitments ledger and stay open; timers never close this path."}
     game_design:
       architecture_links: [comms-dialogue-controller]
       owner_role: fs-tactical
@@ -224,10 +224,12 @@ entities:
       origin: ai
       title: The Strike Stews
       summary: >
-        [ai] Passively startable from t=0, opening while the survey is still
-        in progress. Escalation hardens the committee's tree on its timers
-        (frustrated committee, costlier options) but never closes the
-        talking path.
+        [ai] Passively startable by hailing either party from t=0. Its
+        objectives and incoming channels post on the t=160 tether slip while
+        the survey remains live. Unanswered escalation hardens at t=120 and
+        t=300; the first admitted response stops later timers. Hardening lowers
+        workforce disposition, raises the vote from any two grounds to all
+        three, and increases force casualties, but closes no response path.
     game_design:
       requires_player_action: [fs-settle-the-strike, fs-call-the-vote]
       on_success: [fs-strike-settled]
@@ -420,14 +422,14 @@ entities:
       handler: on_survey_due
       magnitude_source: which of the three scan flags and the report were missing when the clock landed
   - consequence: fs-strike-settled
-    core: {status: proposed, confidence: provisional, origin: ai, title: The Strike Settles, summary: "[ai] Two pieces of ground out of three; both promises go on the commitments ledger with the workers as the party and stay open."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Strike Settles, summary: "[ai] Any two grounds carry the soft floor; after either hardening timer all three are required. Both promises go on the commitments ledger with the workers as party and stay open."}
     game_design:
       handler: on_settle
   - consequence: fs-strike-hardens
-    core: {status: proposed, confidence: provisional, origin: ai, title: The Committee Hardens, summary: "[ai] Escalation on the strike's own timers: a more frustrated committee, costlier options — the tree hardens but the talking path never closes."}
+    core: {status: proposed, confidence: provisional, origin: ai, title: The Committee Hardens, summary: "[ai] At t=120 and t=300, while no response has been admitted, workforce disposition falls and force becomes costlier. A hardened vote needs all three grounds; talk, stall and force paths remain."}
     game_design:
-      handler: on_stall
-      magnitude_source: how far the escalation timers ran before the crew engaged
+      handler: harden_strike
+      magnitude_source: number of t=120/t=300 timers reached before skyway_strike_engaged
   - consequence: fs-traffic-clearance-opens
     core: {status: proposed, confidence: provisional, origin: ai, title: The Corridor Must Be Cleared, summary: "[ai] The forecast posts and signposts the clearance work; each endangered craft's authored shelter control is already in Navigation's traffic picture. Navigation must issue the orders; the Lyra cannot comply."}
     game_design:

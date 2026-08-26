@@ -6,7 +6,7 @@
 | Status | Implemented authored scenario; balance and recommended crew remain TBD |
 | Owner | Unassigned |
 | Last updated | 2026-08-26 |
-| Scope | Premise, acts, actors, systems, choices, outcomes, and authoring contract for Falling Skyway |
+| Scope | Premise, intensity eras, actors, systems, choices, outcomes, and authoring contract for Falling Skyway |
 | Authority | `assets/worlds/falling_skyway.toml` and referenced templates are content truth. |
 
 Falling Skyway is the current operational-crisis scenario. An orbital skyhook, its fuel-depot ladder, and the traffic depending on them are failing as a radiation storm approaches. A labour dispute, corporate interests, civilian movement, incomplete records, limited transfer capacity, and an armed picket make the crisis political as well as technical. The crew cannot preserve every claim in full; it must learn what is true, keep enough infrastructure alive, and decide who receives scarce passage.
@@ -19,7 +19,7 @@ Detailed mechanics: [Sensors and Epistemics](../../mechanics/sensors-epistemics.
 
 | Attribute | Design |
 |---|---|
-| Form | Multi-act operational crisis / intended campaign episode |
+| Form | Multi-era operational crisis / intended campaign episode |
 | Expected length | Ratified 20–30 minute design envelope; the allocation window closes at 1800 seconds and ending facts land 26 seconds later |
 | Recommended crew | TBD by playtest |
 | Possible crew | 0–4 on the currently offered Alliance Destroyer |
@@ -57,25 +57,29 @@ The scenario uses one shared map of the skyway head, station-keeping area, traff
 
 The actors are simulation entities with position, route, comms, damage, faction, or infrastructure facts as applicable. Dialogue should acknowledge those facts rather than pretending they exist only in conversation.
 
-## Three-act structure
+## Three intensity eras
 
-### Act I — Arrival, strike, and survey
+### Opening era — Arrival, strike, and survey
 
-The crew arrives to an already unstable system. Visible deadlines at 160 seconds and 360 seconds put the tether slip and survey requirement on the bridge throughout the opening era. The survey is actionable immediately and posts as an objective when the tether slips: scan Skyhook Verrow and both ladder depots, then hail Control and file the report through its gated response. Filing early is remembered and completes the objective when it posts. A partial survey cannot be filed; an unfiled survey fails at 360 seconds with an urgent Control transmission and Control proceeds on the existing falsified record. The crew can also hail actors, position for operations, and choose whether to engage the labour dispute through negotiation or force.
+The crew arrives to an already unstable system. Visible deadlines at 160 seconds and 360 seconds put the tether slip and survey requirement on the bridge throughout the opening era. The survey is actionable immediately and posts as an objective when the tether slips: scan Skyhook Verrow and both ladder depots, then hail Control and file the report through its gated response. Filing early is remembered and completes the objective when it posts. A partial survey cannot be filed; an unfiled survey fails at 360 seconds with an urgent Control transmission and Control proceeds on the existing falsified record.
+
+The strike is a parallel thread, not the next act. The committee and Havelock are hailable from t=0; Havelock's mooring is 754 units from the player spawn, inside the courier's unchanged 800-unit reciprocal comms range. The line and corroboration objectives post with incoming channels at the t=160 tether slip. If nobody answers, the committee hardens at t=120 and t=300. The first rung therefore exists before the incoming post, so an unattended bridge encounters a hardened committee rather than having Backfill's first response erase every escalation. The first admitted response on either channel stops later hardening. Before hardening, any two of safe-passage promise, records promise, and the maintenance file carry a vote; afterwards all three are required. Each hardening rung lowers workforce disposition and makes a forced clearance costlier, but negotiation, stalling, evidence-gathering, refusal, warning, and immediate force remain available. The legacy `act` flag is only a narrative counter and gates none of these interactions.
 
 The design purpose is to distribute first tasks quickly: Captain and Comms establish claims; Science/Sensors gather the condition and record picture; Helm and Navigation orient to the corridor and infrastructure; Engineering prepares power and external operations; Tactical decides whether an armed picket is a target, a deterrent, or an actor to hold at risk.
 
 Depot Ladder B’s structural reading and filed record can disagree. Scanning, obtaining records, and gaining worker corroboration can build an evidence chain. Evidence matters later in negotiation and consequences; it is not just collectible lore.
 
-### Act II — Storm and physical crisis
+### Storm era — Physical crisis
 
 The storm front is due at 400 seconds, with bands at 580, 740, and 900 seconds and passage recorded at 1072 seconds. Lyra Ascending’s clear deadline falls at 768 seconds. Every weather beat has its own deadline trigger and waits for neither strike settlement nor an act checkpoint: the storm changes the physical and operational problem while civilian traffic remains in motion.
 
 Navigation must issue one authored shelter diversion to Meridian, Lark, and Pell before the first band. Each civilian’s traffic row publishes an accessible **ORDER TO STORM SHELTER** control; the ordinary compliance machine then puts that craft on a route clear of all three bands. The front does not issue those orders for the crew. An unordered craft remains physically exposed, and its destruction immediately posts a named Control report, per-craft ledger fact, failed clearance objective, and aggregate loss objective. The ship’s own destruction remains the region damage system’s terminal defeat, not a scripted checkpoint.
 
+The crew may need to order traffic, open or hold the lane, shelter vessels, rescue or tow Lyra, recover lost objects, and stabilise the skyhook. Operations take time, range, power, and capability; beginning one is a commitment of ship position and crew attention. Traffic destruction and missed recovery opportunities are recorded rather than erased when the narrative counter advances.
+
 The skyhook has several load-bearing facts. If condition and stabilisation do not preserve them, warning flags clear in sequence and a projected failure deadline can end in structural loss. The scenario recognises both successful stabilisation and collapse.
 
-### Act III — Allocation and consequences
+### Crowded back-half era — Allocation and consequences
 
 After the storm, the skyhook’s projected failure falls at 1528 seconds, then the transfer window opens at 1600 seconds and closes at 1800 seconds. Three claimant groups make requests against two berths and insufficient total capacity. The crew can make, keep, or break earlier commitments, confront actors with evidence, and decide who receives lift/transfer access.
 
@@ -181,7 +185,7 @@ A “victory” may therefore be operationally successful while carrying politic
 - Do traffic and infrastructure feel physically present through movement, capacity, and operations?
 - Do players understand that total demand exceeds supply before making final promises?
 - Are negotiation, restraint, disablement, and force all legible options without implying equal consequences?
-- Does each act acknowledge prior choices, and can players explain the final outcome dimensions?
+- Does each intensity era acknowledge prior choices, and can players explain the final outcome dimensions?
 - Are the 200 seconds between the 1600-second opening and 1800-second close enough for the allocation scene’s reading and coordination?
 
 ## Success measures

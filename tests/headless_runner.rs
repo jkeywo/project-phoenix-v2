@@ -8847,19 +8847,9 @@ const SKYWAY_TOKEN: &str = "ai:skyway-comms";
 /// Every test in this group drives the scenario at the #1035 test's timestep.
 const SKYWAY_DT: f64 = 1.0 / 30.0;
 
-/// Build Falling Skyway and step it to the act-2 boundary, with the destroyer
-/// stood off the ladder transit leg where both parties are inside the hull's
-/// authored 1000-unit comms range.
-///
-/// Stepped rather than jumped: the survey deadline is what OPENS both threads,
-/// so a test that shortcut the act boundary would be testing a hand-built
-/// situation instead of the one the mission produces. The hull is then moved by
-/// hand, which is the honest analogue of helm flying the act-2 objective's own
-/// Reach directive — the same substitution the #1035 test makes, and for its
-/// reason: closing the range is helm's job, not this test's subject.
-fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
-    use project_phoenix::world::server::WorldContentRuntime;
-
+/// Build Falling Skyway at the authored opening position with the shipped
+/// Backfill policies intact.
+fn skyway_strike_app_at_authored_start(seed: u64) -> (bevy::prelude::App, bevy::prelude::Entity) {
     let survey_due = skyway_authored_deadline_secs("skyway_survey_due") as f64;
     let run_budget = survey_due + 10.0;
     let args = HeadlessArgs {
@@ -8868,26 +8858,14 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
         dt: SKYWAY_DT,
         max_ticks: ticks_for_sim_seconds(run_budget, SKYWAY_DT),
         deterministic: true,
-        seed: Some(42),
+        seed: Some(seed),
         ..test_args()
     };
     let mut app = build_headless_app(&args).expect("the scenario world must load and build");
 
-    // THE COMMS OFFICER IS A PERSON IN THESE TESTS, and saying so is setup
-    // rather than cheating. The destroyer merges `fragments/ai/fleet_baseline`,
-    // whose Comms policy answers any open thread with its first response — on a
-    // real destroyer Tactical (which is where the comms overlay lives) is one of
-    // the four seats a crew hold, and this hull is fully AI-backfilled only
-    // because a headless run has nobody in it. Dropping the response policy off
-    // the LocalShip is the closest thing this harness has to seating somebody:
-    // the thread then waits for the `RespondToMessage` this test submits, which
-    // is the same admitted command a human's finger produces.
-    //
-    // It cannot be authored in the world file instead — see the note in
-    // `havelock_offer`: the player hull's config comes from the lobby selection
-    // wholesale, so an override on the `player-ship` row is discarded.
-    // Stepped far enough for the game to start and the hull to spawn first; the
-    // threads this matters for do not open until the authored act boundary.
+    // Step far enough for the game to start, the hull to spawn, and the first
+    // authoritative range pass to observe the authored positions. Keep every
+    // shipped policy: one repair test below needs the actual unattended bridge.
     run(&mut app, 10);
     let ship = app
         .world_mut()
@@ -8895,18 +8873,86 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
         .iter(app.world())
         .next()
         .expect("the crew's hull");
+    (app, ship)
+}
+
+/// Seat a human Comms officer in a headless fixture. Removing only the shipped
+/// response policy makes dialogue wait for the same admitted command a human
+/// console sends; production command admission still has no actor-identity
+/// branch.
+fn seat_skyway_comms(app: &mut bevy::prelude::App, ship: bevy::prelude::Entity) {
     app.world_mut()
         .entity_mut(ship)
         .remove::<project_phoenix::console::comms::server::CommsResponseAiPolicy>();
+}
+
+/// Build Falling Skyway with a seated Comms officer and stand the destroyer off
+/// the ladder. This is the flexible base for pre-emption, normal-order and
+/// hardened fixtures which intentionally substitute for Helm travel.
+fn skyway_strike_app(seed: u64) -> (bevy::prelude::App, bevy::prelude::Entity) {
+    let (mut app, ship) = skyway_strike_app_at_authored_start(seed);
+    seat_skyway_comms(&mut app, ship);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+    (app, ship)
+}
+
+/// Step through the authored tether-slip trigger that posts the dispute, leaving
+/// the narrative `act` counter untouched in era 1. The hull is stood off the
+/// ladder transit leg where both parties are inside its authored comms range.
+fn skyway_at_strike_post() -> (bevy::prelude::App, bevy::prelude::Entity) {
+    let tether_due = skyway_authored_deadline_secs("tether_slip") as f64;
+    let run_budget = tether_due + 10.0;
+    let (mut app, ship) = skyway_strike_app(42);
+
+    // The file-backed survey deadline sized this limit before app construction;
+    // the margin is only for the boundary's effects to cross the schedule.
+    let limit = ticks_for_sim_seconds(run_budget, SKYWAY_DT);
+    for _ in 0..limit {
+        run(&mut app, 1);
+        if skyway_flag(&app, "skyway_strike_objectives_posted") > 0 {
+            break;
+        }
+    }
+    assert_eq!(
+        skyway_flag(&app, "skyway_strike_objectives_posted"),
+        1,
+        "the tether slip must post the strike exactly once"
+    );
+    assert_eq!(
+        skyway_flag(&app, "act"),
+        1,
+        "the dispute opens mid-survey; an era counter is not its gate"
+    );
+    (app, ship)
+}
+
+/// Compatibility name for the older scenario slices below. They need the
+/// dispute's posted state, not the retired survey-deadline gate; keeping their
+/// setup behind this one wrapper avoids hand-building either era.
+fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
+    let survey_due = skyway_authored_deadline_secs("skyway_survey_due") as f64;
+    let run_budget = survey_due + 10.0;
+    let (mut app, ship) = skyway_strike_app_at_authored_start(42);
+    seat_skyway_comms(&mut app, ship);
+    let authored_start = {
+        let physics = app
+            .world()
+            .get::<ShipPhysics>(ship)
+            .expect("the crew's hull has physics");
+        bevy::prelude::Vec3::new(physics.x, physics.y, physics.z)
+    };
 
     // Every later-act fixture represents an engaged crew, so establish the
     // scenario's real opening precondition through a real Sensors admission.
     // One valid survey scan is enough to prove Lark's filed clearance unsafe;
     // it does not file Control's three-structure survey for them.
     skyway_scan_for_survey(&mut app, ship, SKYWAY_SURVEY_HEAD);
+    skyway_move(&mut app, ship, authored_start);
+    run(&mut app, 2);
 
-    // The file-backed survey deadline sized this limit before app construction;
-    // the margin is only for the boundary's effects to cross the schedule.
+    // Step through the real survey boundary so Lark's Critical second hail and
+    // the narrative era change are both live before the admitted safety reply.
     let limit = ticks_for_sim_seconds(run_budget, SKYWAY_DT);
     for _ in 0..limit {
         run(&mut app, 1);
@@ -8917,7 +8963,7 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
     assert_eq!(
         skyway_flag(&app, "act"),
         2,
-        "the survey deadline must open act 2"
+        "later-act fixtures must cross the authored survey boundary"
     );
     skyway_pick(
         &mut app,
@@ -8929,15 +8975,10 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
         1,
         "later-act fixtures must enter through the admitted scan-backed safety response"
     );
-    let _ = std::any::type_name::<WorldContentRuntime>();
-
-    skyway_move(&mut app, ship, CHOICE_LADDER);
-    // Two ticks for the comms range pass to see the new position, so a pick is
-    // never refused by a stale range flag.
-    run(&mut app, 2);
     // These are engaged-crew fixtures for the strike and back half, not the
-    // idle-storm branch. Clear the endangered traffic through Navigation so a
-    // later assertion is not really about a convoy the weather already took.
+    // idle-storm branch. Clear the endangered traffic through Navigation in
+    // the forty-second margin before Control's forecast and well before band
+    // one; the ordinary compliance machine still carries every order.
     skyway_order_corridor_to_shelter(&mut app);
     run(&mut app, 4);
     (app, ship)
@@ -9044,6 +9085,26 @@ fn skyway_flag(app: &bevy::prelude::App, name: &str) -> i64 {
         .resource::<project_phoenix::world::server::WorldContentRuntime>()
         .flags
         .counter(name)
+}
+
+/// Advance through the live fixed-tick schedule until a scenario flag reaches
+/// `at_least`, failing with the authored-time budget rather than mutating state.
+fn skyway_run_until_flag(
+    app: &mut bevy::prelude::App,
+    name: &str,
+    at_least: i64,
+    budget_secs: f64,
+) {
+    for _ in 0..ticks_for_sim_seconds(budget_secs, SKYWAY_DT) {
+        if skyway_flag(app, name) >= at_least {
+            return;
+        }
+        run(app, 1);
+    }
+    panic!(
+        "'{name}' never reached {at_least} inside {budget_secs}s (ended at {})",
+        skyway_flag(app, name)
+    );
 }
 
 /// Every inbox message from `sender`, oldest first.
@@ -9486,6 +9547,306 @@ fn falling_skyway_scan_backed_unsafe_response_cancels_the_collision() {
         "world.falling_skyway.entity.skyhook.name"
     ));
 }
+/// **Issue #1133 review — authored-start reachability.** Havelock's cutter is
+/// inside the destroyer's real comms envelope at the authored opening position.
+/// No fixture teleport substitutes for Helm: a crew hail reaches the live
+/// cutter and the immediate-force response is admitted from the opening tick.
+#[test]
+fn falling_skyway_havelock_is_hailable_and_forceable_from_the_authored_start() {
+    let (mut app, ship) = skyway_strike_app_at_authored_start(51133);
+    seat_skyway_comms(&mut app, ship);
+
+    assert_eq!(skyway_flag(&app, "skyway_strike_hardening"), 0);
+    assert_eq!(objective_status_opt(&app, "obj-a2-line"), None);
+    skyway_hail(&mut app, SKYWAY_CUTTER);
+    let offer = skyway_open_node(&app, SKYWAY_CUTTER);
+    assert!(
+        offer.sender_in_range,
+        "the authored endpoints must pass the reciprocal runtime range check"
+    );
+    assert!(
+        skyway_options(&offer).contains(&"world.falling_skyway.comms.force_now".to_string()),
+        "the authored start must put Havelock inside real hail range with force available"
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_now",
+    );
+    assert_eq!(skyway_flag(&app, "skyway_forced_open"), 1);
+    run(&mut app, ticks_for_sim_seconds(7.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 1);
+}
+
+/// **Issue #1133 review — shipped policy.** The unattended bridge keeps its
+/// real `CommsResponseAiPolicy`. Stage 1 lands at t=120, before the t=160
+/// incoming post gives Backfill anything to answer. Its first admitted response
+/// then engages the dispute and stops stage 2 without erasing stage 1.
+#[test]
+fn falling_skyway_shipped_backfill_encounters_and_preserves_stage_one_hardening() {
+    let (mut app, _ship) = skyway_strike_app_at_authored_start(61133);
+
+    skyway_run_until_flag(&mut app, "skyway_strike_hardening", 1, 125.0);
+    assert_eq!(skyway_flag(&app, "skyway_strike_engaged"), 0);
+    assert_eq!(
+        skyway_flag(&app, "skyway_strike_objectives_posted"),
+        0,
+        "the first hardening rung must precede Backfill's incoming objective"
+    );
+
+    skyway_run_until_flag(&mut app, "skyway_strike_engaged", 1, 50.0);
+    assert_eq!(skyway_flag(&app, "skyway_strike_hardening"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_strike_objectives_posted"), 1);
+    assert!(
+        [SKYWAY_COMMITTEE, SKYWAY_CUTTER]
+            .into_iter()
+            .flat_map(|sender| skyway_messages(&app, sender))
+            .any(|message| message.selected_response.is_some()),
+        "the shipped response policy must answer through the observable comms record"
+    );
+
+    run(&mut app, ticks_for_sim_seconds(150.0, SKYWAY_DT));
+    assert_eq!(
+        skyway_flag(&app, "skyway_strike_hardening"),
+        1,
+        "Backfill's admitted response preserves stage 1 and stops the t=300 rung"
+    );
+}
+
+/// **Issue #1133 — pre-emption.** The committee are hailable before any era
+/// boundary. A crew who finish the soft two-of-three settlement in the opening
+/// minutes leave only flag-backed memory; the tether slip later posts the line
+/// objective already green, without moving the schedule or firing either
+/// hardening timer.
+#[test]
+fn falling_skyway_early_strike_settlement_is_remembered_when_its_objective_posts() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let (mut app, _ship) = skyway_strike_app(1133);
+    assert_eq!(objective_status_opt(&app, "obj-a2-line"), None);
+    assert!(
+        skyway_messages(&app, SKYWAY_COMMITTEE).is_empty(),
+        "before the mid-survey post, contact is crew-initiated"
+    );
+
+    skyway_hail(&mut app, SKYWAY_COMMITTEE);
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.listen",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_passage",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_records",
+    );
+    assert!(
+        skyway_options(&skyway_open_node(&app, SKYWAY_COMMITTEE))
+            .contains(&"world.falling_skyway.comms.call_the_vote".to_string()),
+        "the untouched dispute is the soft two-of-three tree"
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.call_the_vote",
+    );
+    run(&mut app, ticks_for_sim_seconds(25.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 1);
+    assert_eq!(objective_status_opt(&app, "obj-a2-line"), None);
+
+    skyway_run_until_flag(
+        &mut app,
+        "skyway_strike_objectives_posted",
+        1,
+        skyway_authored_deadline_secs("tether_slip") as f64 + 5.0,
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-line"),
+        ObjectiveStatus::Completed,
+        "the generic remembered-objective helper resolves early crew work on post"
+    );
+    assert_eq!(skyway_flag(&app, "act"), 1);
+
+    // Cross both authored timer rungs. The first admitted response, not the
+    // eventual settlement timer, is what stopped them.
+    run(&mut app, ticks_for_sim_seconds(150.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&app, "skyway_strike_engaged"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_strike_hardening"),
+        0,
+        "meaningful early engagement makes both hardening timers deterministic no-ops"
+    );
+
+    // The other ending can pre-empt both objectives too. The line posts green
+    // from the common settlement memory while the optional worker route posts
+    // red from its distinct closure memory; neither relies on completing or
+    // failing an objective that did not exist yet.
+    let (mut forced, _ship) = skyway_strike_app(21133);
+    skyway_hail(&mut forced, SKYWAY_CUTTER);
+    skyway_pick(
+        &mut forced,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_now",
+    );
+    run(&mut forced, ticks_for_sim_seconds(7.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&forced, "skyway_strike_settled"), 1);
+    assert_eq!(objective_status_opt(&forced, "obj-a2-line"), None);
+    assert_eq!(objective_status_opt(&forced, "obj-a2-corroborate"), None);
+    skyway_run_until_flag(
+        &mut forced,
+        "skyway_strike_objectives_posted",
+        1,
+        skyway_authored_deadline_secs("tether_slip") as f64 + 5.0,
+    );
+    assert_eq!(
+        objective_status(&forced, "obj-a2-line"),
+        ObjectiveStatus::Completed
+    );
+    assert_eq!(
+        objective_status(&forced, "obj-a2-corroborate"),
+        ObjectiveStatus::Failed
+    );
+}
+
+/// **Issue #1133 — late but still playable.** Silence through t=300 produces
+/// both hardening rungs: the workforce digs in, force costs more, and the floor
+/// requires all three pieces of ground. The crew can still talk, stall, gather
+/// the file, vote, or take the force path; escalation removes no interaction.
+#[test]
+fn falling_skyway_late_hardened_strike_still_settles_by_talk_or_force() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+    use project_phoenix::world::server::WorldContentRuntime;
+
+    let (mut app, ship) = skyway_strike_app(31133);
+    skyway_run_until_flag(&mut app, "skyway_strike_hardening", 2, 305.0);
+    skyway_move(&mut app, ship, CHOICE_LADDER);
+    run(&mut app, 2);
+    assert_eq!(skyway_flag(&app, "act"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-line"),
+        ObjectiveStatus::Active,
+        "the strike posted during the live survey, not at its deadline"
+    );
+    assert_eq!(
+        app.world()
+            .resource::<WorldContentRuntime>()
+            .workforce
+            .disposition("skyway_workers"),
+        Some(5),
+        "two unanswered timers lower the live workforce disposition"
+    );
+    let committee_messages = skyway_messages(&app, SKYWAY_COMMITTEE);
+    for body in [
+        "world.falling_skyway.comms.committee_hardens_one",
+        "world.falling_skyway.comms.committee_hardens_two",
+    ] {
+        assert!(
+            committee_messages
+                .iter()
+                .any(|message| message.body == body),
+            "each hardening rung is narrated on the authoritative channel: {body}"
+        );
+    }
+
+    // Havelock's file is evidence, not a forced ending. Its rebuilt node proves
+    // that refusing, warning and immediate force all remain available late.
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.ask_for_file",
+    );
+    let force_options = skyway_options(&skyway_open_node(&app, SKYWAY_CUTTER));
+    for option in [
+        "world.falling_skyway.comms.refuse_force",
+        "world.falling_skyway.comms.force_warned",
+        "world.falling_skyway.comms.force_now",
+    ] {
+        assert!(
+            force_options.contains(&option.to_string()),
+            "hardening must not remove Havelock's '{option}' path"
+        );
+    }
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.listen",
+    );
+    assert_eq!(
+        skyway_open_node(&app, SKYWAY_COMMITTEE).body,
+        "world.falling_skyway.comms.committee_terms_hardened"
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_passage",
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_records",
+    );
+    let two_ground = skyway_options(&skyway_open_node(&app, SKYWAY_COMMITTEE));
+    assert!(
+        !two_ground.contains(&"world.falling_skyway.comms.call_the_vote".to_string()),
+        "two grounds no longer carry a hardened floor"
+    );
+    assert!(
+        two_ground.contains(&"world.falling_skyway.comms.show_file".to_string())
+            && two_ground.contains(&"world.falling_skyway.comms.stall".to_string()),
+        "the evidence and stall paths stay present while the vote is unavailable"
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.show_file",
+    );
+    assert!(
+        skyway_options(&skyway_open_node(&app, SKYWAY_COMMITTEE))
+            .contains(&"world.falling_skyway.comms.call_the_vote".to_string()),
+        "all three grounds still reach the vote after hardening"
+    );
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.call_the_vote",
+    );
+    run(&mut app, ticks_for_sim_seconds(25.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&app, "strike_resolved"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-line"),
+        ObjectiveStatus::Completed
+    );
+
+    // A second deterministic late run takes the other ending and observes the
+    // concrete cost of the same disposition: four casualties instead of the
+    // soft tree's two, then the same settlement seam six seconds later.
+    let (mut forced, forced_ship) = skyway_strike_app(31133);
+    skyway_run_until_flag(&mut forced, "skyway_strike_hardening", 2, 305.0);
+    skyway_move(&mut forced, forced_ship, CHOICE_LADDER);
+    run(&mut forced, 2);
+    skyway_pick(
+        &mut forced,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.force_now",
+    );
+    assert_eq!(skyway_flag(&forced, "skyway_force_casualties"), 4);
+    run(&mut forced, ticks_for_sim_seconds(7.0, SKYWAY_DT));
+    assert_eq!(skyway_flag(&forced, "strike_resolved"), 1);
+    assert_eq!(
+        objective_status(&forced, "obj-a2-line"),
+        ObjectiveStatus::Completed
+    );
+    assert_eq!(
+        objective_status(&forced, "obj-a2-corroborate"),
+        ObjectiveStatus::Failed
+    );
+}
 
 /// One structure's live condition, read off the entity rather than off the file.
 fn skyway_condition(app: &mut bevy::prelude::App, name: &str) -> f32 {
@@ -9501,26 +9862,35 @@ fn skyway_condition(app: &mut bevy::prelude::App, name: &str) -> f32 {
         .unwrap_or_else(|| panic!("{name} has no condition track"))
 }
 
-/// **AC1/AC2/AC3/AC4/AC7 — Path A, end to end.** The committee are talked round,
-/// both promises land on the books with the workers as the party, and the strike
-/// clears: #1035's two bites let go, through the one settlement lever, at the
-/// pace the tree authored.
+/// **AC1/AC2/AC3/AC4/AC7 plus #1133's normal-order path.** The dispute posts at
+/// the tether slip while the survey and narrative era 1 remain live. The
+/// committee have already reached stage 1 at t=120, so the crew bring the file
+/// as well as both promises. The first admitted mid-survey response preserves
+/// that rung, stops t=300, and the strike clears through the one settlement
+/// lever at the pace the tree authored.
 ///
-/// The evidence branch is asserted here in its NEGATIVE form — a crew who never
-/// went and looked are not offered the line about the file, and must therefore
-/// give both promises to get the vote called. Its positive form is the test
-/// below.
+/// This is the normal posted-order complement to the early pre-emption case:
+/// the objective is visibly active before the admitted work completes it.
 #[test]
 fn the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promises() {
     use project_phoenix::world::commitments::CommitmentState;
     use project_phoenix::world::server::WorldContentRuntime;
 
-    let (mut app, ship) = skyway_at_act_two();
+    let (mut app, ship) = skyway_at_strike_post();
 
-    // Both channels open on the act boundary, and neither is behind the other.
+    assert_eq!(skyway_flag(&app, "act"), 1);
+    assert_eq!(skyway_flag(&app, "skyway_strike_hardening"), 1);
+    assert_eq!(
+        objective_status(&app, "obj-a2-line"),
+        project_phoenix::core::messages::ObjectiveStatus::Active,
+        "the normal-order branch starts from the mid-survey objective post"
+    );
+
+    // Both channels open on the dispute's own trigger, and neither is behind the
+    // other or behind the later survey boundary.
     assert!(
         !skyway_messages(&app, SKYWAY_COMMITTEE).is_empty(),
-        "the committee hail the destroyer when act 2 opens"
+        "the committee hail the destroyer when the dispute posts"
     );
     assert!(
         !skyway_messages(&app, SKYWAY_CUTTER).is_empty(),
@@ -9528,27 +9898,35 @@ fn the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promise
          without saying a word to the workers"
     );
 
+    // The hardened floor needs the operator's file as well as both promises.
+    // Ask for it through Havelock's independently open channel before hearing
+    // the committee's terms.
+    skyway_pick(
+        &mut app,
+        SKYWAY_CUTTER,
+        "world.falling_skyway.comms.ask_for_file",
+    );
     skyway_pick(
         &mut app,
         SKYWAY_COMMITTEE,
         "world.falling_skyway.comms.listen",
     );
 
-    // The terms node, as read by a crew who have gathered nothing.
+    // The terms node reads both the live hardening rung and the obtained file.
     let terms = skyway_open_node(&app, SKYWAY_COMMITTEE);
     assert_eq!(
-        terms.body, "world.falling_skyway.comms.committee_terms",
-        "the committee state their two demands"
+        terms.body, "world.falling_skyway.comms.committee_terms_hardened",
+        "the committee state the hardened three-ground floor"
     );
     assert_eq!(
         skyway_options(&terms),
         vec![
             "world.falling_skyway.comms.promise_passage".to_string(),
             "world.falling_skyway.comms.promise_records".to_string(),
+            "world.falling_skyway.comms.show_file".to_string(),
             "world.falling_skyway.comms.stall".to_string(),
         ],
-        "no maintenance file on the crew's sheet, so no line about it — and no \
-         vote to call yet either"
+        "all three grounds remain available, with no vote before they are given"
     );
 
     skyway_pick(
@@ -9571,11 +9949,21 @@ fn the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promise
         SKYWAY_COMMITTEE,
         "world.falling_skyway.comms.promise_records",
     );
-    let ready = skyway_open_node(&app, SKYWAY_COMMITTEE);
+    let after_two = skyway_open_node(&app, SKYWAY_COMMITTEE);
     assert_eq!(
-        ready.body, "world.falling_skyway.comms.committee_ready",
-        "with two pieces of ground the committee's own line changes"
+        after_two.body, "world.falling_skyway.comms.committee_terms_hardened",
+        "two promises do not carry a stage-1 floor"
     );
+    assert!(!skyway_options(&after_two)
+        .contains(&"world.falling_skyway.comms.call_the_vote".to_string()));
+
+    skyway_pick(
+        &mut app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.show_file",
+    );
+    let ready = skyway_open_node(&app, SKYWAY_COMMITTEE);
+    assert_eq!(ready.body, "world.falling_skyway.comms.committee_ready");
     assert!(
         skyway_options(&ready).contains(&"world.falling_skyway.comms.call_the_vote".to_string())
     );
@@ -9624,6 +10012,11 @@ fn the_negotiation_settles_the_skyway_strike_and_the_ledger_carries_both_promise
 
     run(&mut app, ticks_for_sim_seconds(20.0, SKYWAY_DT));
     assert_eq!(skyway_flag(&app, "strike_resolved"), 1);
+    assert_eq!(
+        skyway_flag(&app, "skyway_strike_hardening"),
+        1,
+        "the admitted mid-survey response preserves t=120 and stops t=300"
+    );
     assert_eq!(
         objective_status(&app, "obj-a2-line"),
         project_phoenix::core::messages::ObjectiveStatus::Completed
@@ -9687,15 +10080,20 @@ fn the_skyway_maintenance_file_opens_a_line_in_the_negotiation_nobody_else_gets(
     use project_phoenix::dossier::evidence::EvidenceProvenance;
     use project_phoenix::world::server::WorldContentRuntime;
 
-    let (mut app, _ship) = skyway_at_act_two();
+    // Take the passively available thread before t=120 so this test continues
+    // to isolate the soft tree's evidence trade. The normal posted-order test
+    // above separately proves that stage 1 requires all three grounds.
+    let (mut app, _ship) = skyway_strike_app(1036);
 
     // The operator hands over their own file, which is this scenario's joke: it
     // is what makes the workers listen to the crew.
+    skyway_hail(&mut app, SKYWAY_CUTTER);
     let offer = skyway_open_node(&app, SKYWAY_CUTTER);
     assert!(
         skyway_options(&offer).contains(&"world.falling_skyway.comms.ask_for_file".to_string()),
         "the file is on the table before any authorisation is"
     );
+    skyway_hail(&mut app, SKYWAY_COMMITTEE);
     skyway_pick(
         &mut app,
         SKYWAY_CUTTER,
@@ -9789,9 +10187,9 @@ fn forcing_the_skyway_picket_open_is_faster_and_the_bill_arrives_on_a_console() 
     assert_eq!(skyway_flag(&app, "skyway_forced_open"), 1);
     assert_eq!(
         skyway_flag(&app, "skyway_force_casualties"),
-        2,
+        3,
         "read off the workers' disposition as it stood when the order was given \
-         — 25, dug in, nobody having talked to them"
+         — 15 after the unanswered t=120 hardening rung"
     );
     // AC5: the campaign remembers, on both sides of the same act.
     assert_eq!(skyway_flag(&app, "relationship.skyway_workers.damaged"), 1);
@@ -9852,8 +10250,9 @@ fn forcing_the_skyway_picket_open_is_faster_and_the_bill_arrives_on_a_console() 
         );
     }
     let after = skyway_condition(&mut app, SKYWAY_DEPOT_B);
+    let casualty_damage = skyway_flag(&app, "skyway_force_casualties") as f32 * 4.0;
     assert!(
-        (before - after - 8.0).abs() < 0.001,
+        (before - after - casualty_damage).abs() < 0.001,
         "four condition points a casualty, on a track the operations panel is \
          already showing: {before} -> {after}"
     );
@@ -9877,7 +10276,7 @@ fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
         SKYWAY_CUTTER,
         "world.falling_skyway.comms.force_now",
     );
-    assert_eq!(skyway_flag(&app, "skyway_force_casualties"), 3);
+    assert_eq!(skyway_flag(&app, "skyway_force_casualties"), 4);
 
     // The same run again from a fresh app on the same seed: the risk is resolved
     // from state, so it does not move.
@@ -9894,7 +10293,7 @@ fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
     );
     assert_eq!(
         skyway_flag(&repeat, "skyway_force_casualties"),
-        3,
+        4,
         "deterministic per seed, because it is read rather than rolled"
     );
 
@@ -9906,7 +10305,7 @@ fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
         SKYWAY_CUTTER,
         "world.falling_skyway.comms.force_warned",
     );
-    assert_eq!(skyway_flag(&warned, "skyway_force_casualties"), 1);
+    assert_eq!(skyway_flag(&warned, "skyway_force_casualties"), 2);
     run(&mut warned, ticks_for_sim_seconds(7.0, SKYWAY_DT));
     assert_eq!(
         skyway_flag(&warned, "strike_resolved"),
@@ -9918,8 +10317,8 @@ fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
     assert!(
         skyway_messages(&warned, SKYWAY_CUTTER)
             .iter()
-            .any(|m| m.body == "world.falling_skyway.comms.force_report_one"),
-        "one casualty is its own report, not the same one with a number in it"
+            .any(|m| m.body == "world.falling_skyway.comms.force_report_hurt"),
+        "the warned stage-1 outcome still reports its two casualties on the live channel"
     );
 }
 
@@ -11337,6 +11736,25 @@ fn ladder_b_sheet(app: &mut bevy::prelude::App) -> Vec<(String, String)> {
 /// is the gate this slice reads — and which of the two roads got there is
 /// #1036's business rather than this one's.
 fn skyway_negotiate_to_a_vote(app: &mut bevy::prelude::App) {
+    // A stage-1/2 floor needs the file as well as both promises. If the caller
+    // has not already produced the records finding, obtain Havelock's copy
+    // through the independently live channel before entering the committee
+    // tree. The soft branch does not need this extra ground.
+    let has_file = app
+        .world()
+        .resource::<project_phoenix::world::server::WorldContentRuntime>()
+        .evidence
+        .entries
+        .iter()
+        .any(|entry| entry.text == SKYWAY_FILE);
+    if skyway_flag(app, "skyway_strike_hardening") > 0 && !has_file {
+        skyway_pick(
+            app,
+            SKYWAY_CUTTER,
+            "world.falling_skyway.comms.ask_for_file",
+        );
+    }
+
     skyway_pick(app, SKYWAY_COMMITTEE, "world.falling_skyway.comms.listen");
     let options = skyway_options(&skyway_open_node(app, SKYWAY_COMMITTEE));
     if options.contains(&"world.falling_skyway.comms.show_file".to_string()) {
@@ -11345,17 +11763,14 @@ fn skyway_negotiate_to_a_vote(app: &mut bevy::prelude::App) {
             SKYWAY_COMMITTEE,
             "world.falling_skyway.comms.show_file",
         );
-        skyway_pick(
-            app,
-            SKYWAY_COMMITTEE,
-            "world.falling_skyway.comms.promise_passage",
-        );
-    } else {
-        skyway_pick(
-            app,
-            SKYWAY_COMMITTEE,
-            "world.falling_skyway.comms.promise_passage",
-        );
+    }
+    skyway_pick(
+        app,
+        SKYWAY_COMMITTEE,
+        "world.falling_skyway.comms.promise_passage",
+    );
+    let options = skyway_options(&skyway_open_node(app, SKYWAY_COMMITTEE));
+    if !options.contains(&"world.falling_skyway.comms.call_the_vote".to_string()) {
         skyway_pick(
             app,
             SKYWAY_COMMITTEE,
@@ -11615,7 +12030,11 @@ fn forcing_the_picket_open_leaves_nobody_willing_to_corroborate_and_says_so() {
 fn a_crew_who_settled_the_strike_but_never_read_the_rung_hear_nothing_yet() {
     use project_phoenix::core::messages::ObjectiveStatus;
 
-    let (mut app, ship) = skyway_at_act_two();
+    // Settle the soft, passively hailable floor before t=120. A hardened floor
+    // necessarily obtains the file as its third ground, so it cannot represent
+    // this test's deliberate "negotiated but no file yet" order.
+    let (mut app, ship) = skyway_strike_app(21039);
+    skyway_hail(&mut app, SKYWAY_COMMITTEE);
 
     skyway_negotiate_to_a_vote(&mut app);
     assert_eq!(skyway_flag(&app, "skyway_settled_by_negotiation"), 1);
@@ -11624,6 +12043,12 @@ fn a_crew_who_settled_the_strike_but_never_read_the_rung_hear_nothing_yet() {
         skyway_flag(&app, "strike_resolved"),
         1,
         "precondition: the rung is moving again, and it was talked into moving"
+    );
+    skyway_run_until_flag(
+        &mut app,
+        "skyway_strike_objectives_posted",
+        1,
+        skyway_authored_deadline_secs("tether_slip") as f64 + 5.0,
     );
 
     assert_eq!(

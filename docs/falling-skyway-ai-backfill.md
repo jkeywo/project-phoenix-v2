@@ -97,7 +97,7 @@ has been filed with Control. A silent run reaches t=360 with that objective
 failed and an urgent Control transmission; corridor and triage retain their
 existing world-event outcomes.
 
-## Finding 2 — the strike DOES settle under baseline AI (by negotiation)
+## Finding 2 — the strike did settle under baseline AI by first-pick accident (historical)
 
 The comms policy answers every open hail with **response index 0**
 (`fleet_baseline.toml:398-405`). Walking the Act-2 dialogue tree with "always
@@ -119,6 +119,16 @@ of first-pick ordering. Two preconditions: the destroyer must be within the
 committee's comms range when the hail opens at t=90 (yes from `station_keeping`,
 per `:1887-1891`), and Comms must not be jammed/destroyed (guards at
 `fleet_baseline.toml:403`).
+
+**Closed by #1133.** The strike is hailable from t=0 and posts independently at
+t=160. Silence hardens the committee at t=120, before the shipped Backfill policy
+receives that post; its first admitted response then preserves stage 1 and stops
+the t=300 rung. The soft tree still accepts any two of three grounds, while a
+hardened vote requires all three, so the old two-promise path no longer settles
+the floor by itself. This observation does not claim a final Backfill outcome:
+the policy can still encounter the file path, and whole-scenario success remains
+the later AI-backfill evaluation's job. Both negotiation and force remain
+available, and the lowered workforce disposition makes late force costlier.
 
 ## Finding 3 — operations are unreachable, so the storm and the collapse are unwinnable-by-AI
 
@@ -198,6 +208,7 @@ that is timing-sensitive for backfill, and the agents' numbers are unratified.
 | AI cannot run operations (tow/stabilise/field_repair/transfer) | no ops policy, no `StartOperation` emission path | an operations AI policy surface + wiring `emit_ai_command` → `StartOperation` at the captain system (new feature; scope as its own issue) |
 | AI always takes the first comms response | `fleet_baseline.toml:405` | a comms response-*selection* heuristic (e.g. prefer `important`, avoid `stall`), or per-scenario authored response order |
 | Act 1 survey was a free pass for any behaviour | historical `on_survey_due` implementation | **Closed by #1132:** three scans plus Control pickup; the idle headless path now asserts a loud failure |
+| Strike settlement was gated by the survey deadline and late first-pick promises produced a good ending | historical `on_survey_due` and two-of-three tree | **Closed by #1133:** t=0 hails, independent t=160 post, t=120/t=300 hardening, and a hardened three-of-three vote |
 | `obj-a2-loss-report` has no human path either | `:2534-2538`; no Control node authored | #1039 (the report to Control) fills it in |
 
 ## Finding 4 — the survey was a timer, not a task, and the good settle needs no evidence (historical)
@@ -294,14 +305,15 @@ rounded them out is AI-origin. The goal restated: make Falling Skyway require
 real interaction, then give the AI the verbs (scan, operations, traffic ordering)
 so a fully-backfilled crew completes the mandatory objectives semi-reliably —
 **80-95 % across seeds** — where today's AI manages almost none of it, and an
-idle crew fails loudly in every act.
+idle crew fails loudly in every intensity era.
 
 ### The spine (mandatory set)
 
-The five-act load-bearing core a crew must complete: **survey, triage, strike
+The load-bearing core a crew must complete across the three intensity eras is:
+**survey, triage, strike
 settled, rescue (Lyra towed), storm survival, stabilise the head**. The transfer
 window (#1042) is **not** mandatory — it is the good-ending differentiator.
-Idle crew fails these loudly across all acts.
+Idle crew fails these loudly across all eras.
 
 ### Suspense mechanics — passive availability + timer escalation, no act gates
 
@@ -320,7 +332,22 @@ Idle crew fails these loudly across all acts.
 - **Pre-emption is remembered**: early work (scan early, tow the Lyra at t=300,
   settle the strike before the deadline) is recorded and the objective
   **auto-resolves when it posts** — the full 25-minute schedule stays on stage;
-  early work relieves pressure rather than shortening the mission.
+early work relieves pressure rather than shortening the mission.
+
+**The strike portion is implemented by #1133.** The committee and Havelock are
+hailable from t=0. `post_strike_objectives` runs at the t=160 tether slip and
+reuses `post_remembered_objective`, completing work performed before the post
+and failing an already-closed corroboration route. The first admitted response
+on either strike channel raises `skyway_strike_engaged`; an unanswered hail does
+not. Deterministic timers at t=120 and t=300 stop on that memory. The first is
+deliberately earlier than the t=160 incoming post: shipped Backfill encounters
+stage 1, responds through the same admitted command path, and prevents stage 2.
+Each timer
+lowers the workers' base disposition by ten points (25→15→5). The soft tree
+requires any two of safe passage, records, and file; a hardened tree requires
+all three. At disposition 5, immediate force costs four casualties instead of
+the soft tree's two. No hardening handler removes negotiation, stall, refusal,
+warning, or immediate-force responses.
 
 ### Clock — pre-#1131 proposal and ratified close
 
@@ -331,8 +358,9 @@ The pre-#1131 proposal was to multiply **all** scenario clocks by 4:
 400→**1600**, `window_closes` 470→**1880**, `skyhook_failure` 382→**1528**.
 Issue #1131 ratified that schedule with the close brought inside the PASM envelope at
 **1800**, not 1880. Fixed `schedule.after` beats (2-30 s) stayed unscaled — they
-are real work beats, not clocks. The live Act-I boundary is t=360, giving the
-tour (spawn→B→A→head ≈ 2244 u ≈ 125 s at 18 u/s fits inside it).
+are real work beats, not clocks. The narrative counter advances at t=360,
+giving the opening tour (spawn→B→A→head ≈ 2244 u ≈ 125 s at 18 u/s) its old
+readable boundary without gating a thread on it.
 
 ### Threads — interleaved, each on its own trigger
 
@@ -356,7 +384,7 @@ commitments kept, skyhook held, evidence filed. The campaign flags (`:4960-5019`
 are the literal scoreboard. The ledger stays the engine of *which* two of three
 claimants lift (ceiling 52 vs 66 — a clean run still has a real moral choice).
 
-### The survey beat (act 1 becomes a real objective)
+### The survey beat (the opening era becomes real crew work)
 
 **Implemented by #1132.**
 
@@ -370,8 +398,8 @@ report pickup (`can_file`-style). Any scan band works (`alliance_destroyer.toml:
 The survey posts on the t=160 tether slip. `post_remembered_objective` consumes
 the flag-backed `skyway_survey_reported` memory, so scans and filing completed
 before that post resolve it immediately without moving the schedule. The live
-Act-I boundary is t=360; an unfiled survey fails there with an urgent Control
-message and exact missing-work flags.
+narrative counter advances at t=360; an unfiled survey fails there with an
+urgent Control message and exact missing-work flags.
 
 ### The AI surface (the verb batch, scoped separately)
 

@@ -40,8 +40,8 @@
 #   Convoy Meridian     the civilian traffic — sympathetic, and with no
 #                       leverage at all.
 #
-# Their negotiation is #1036's, and it is authored now: Act 2 is the two ways the
-# strike ends, either of which the crew can reach without touching the other.
+# Their negotiation is #1036's, and it is authored now: the dispute has two ways
+# to end, either of which the crew can reach without touching the other.
 #
 # ── The traffic ──────────────────────────────────────────────────────────────
 #
@@ -69,9 +69,8 @@
 #   t=380 s `lark_collision_due`  without a scan-backed stop order, Lark commits
 #                                to the compromised throat and strikes the head.
 #
-# Act 1 owns the opening six minutes. The act boundary is authored DATA — two
-# `due_secs` numbers — and nothing in Rust or in the headless test restates its
-# span: the test derives its run length from the authored deadline.
+# The opening era owns the first six minutes. Its narrative boundary is authored
+# DATA — two `due_secs` numbers — and gates no parallel thread.
 #
 # ── Act 1's three objectives, and how each one resolves ──────────────────────
 #
@@ -92,19 +91,22 @@
 # boundary, which is what makes partial success readable: the act ends on the
 # clock whatever the crew got done, and the objectives list says which.
 #
-# ── Act 2's two endings (issue #1036) ────────────────────────────────────────
+# ── The dispute era's two endings (issue #1036) ──────────────────────────────
 #
-# The survey deadline opens the act on two channels — the committee's and the
-# operator's cutter's — and both are answerable from the destroyer's Tactical
-# seat, which is where this hull's comms overlay lives. Neither ending is behind
-# the other's first pick.
+# The dispute is hailable from the opening tick. Its objectives and incoming
+# channels post when the tether slips at t=160, while the survey is still live;
+# the survey deadline only advances the narrative era counter. If nobody has
+# answered either party, the committee hardens at t=120 and again at t=300.
+# Neither ending is behind the other's first pick and no escalation removes it.
 #
-#   NEGOTIATE  the committee settle for two pieces of ground out of three: the
+#   NEGOTIATE  before hardening, the committee settle for two pieces of ground
+#              out of three: the
 #              captain's word that the corridor is clear in the transfer window,
 #              the captain's word that the maintenance file goes to Control, or
 #              the crew showing they have already read the file. Both promises
 #              go onto the commitments ledger with the workers as the party and
-#              stay OPEN — keeping them is #1042's and #1039's business.
+#              stay OPEN — keeping them is #1042's and #1039's business. Once
+#              hardened, all three pieces of ground are required.
 #   FORCE IT   Havelock clear the picket. Faster, and it costs people, a
 #              relationship two campaign flags carry forward, and the worker
 #              corroboration route (#1039) — which fails an objective on the
@@ -115,7 +117,7 @@
 # is given, with ten minutes' warning as the captain's lever over it. It is
 # deterministic per seed by construction and surfaces on a console four ways.
 #
-# ── Act 2's weather (issue #1037) ────────────────────────────────────────────
+# ── The storm era (issue #1037) ──────────────────────────────────────────────
 #
 # The negotiation above opens the act; the RADIATION STORM is its second half,
 # and it arrives whatever the crew decided about the strike. Six more visible
@@ -715,7 +717,7 @@ description = "world.falling_skyway.global.description"
 # strike into the enemies list would have made "the line is down" mean "the
 # depot is hostile" on every console that reads a faction.
 #
-# `disposition` is what each side makes of the crew, 0..=100. Nothing in Act 1
+# `disposition` is what each side makes of the crew, 0..=100. Nothing in the opening era
 # branches on it; it is the state the negotiation (#1036) moves and the acts
 # after it read. [ai] Both numbers unratified — the workers arrive suspicious
 # and the operator arrives correct-but-cold, which is the opening the
@@ -815,7 +817,7 @@ depot_b_berth = [1168.0, 0.0, 240.0]
 # than one, because "they are both at the depot" is the situation and "they are
 # alongside each other" is not.
 worker_mooring = [1110.0, 0.0, 350.0]
-corporate_mooring = [1260.0, 0.0, 360.0]
+corporate_mooring = [1050.0, 0.0, 340.0]
 
 # Where Havelock's hired picket sits (#1041). Its own anchor rather than the
 # mooring beside it, because a picket parked on top of the boat it is guarding
@@ -1267,7 +1269,9 @@ overrides = { comms = { hailable = true } }
 # The operator's security cutter. The Requiem courier hull, with its one
 # `reach-destination` doctrine entry re-pointed at the mooring it is already
 # sitting on — a per-id doctrine edit, which keeps every other entry the
-# template authors. Left pointed at the template's own
+# template authors. The mooring is 754 units from the authored player spawn,
+# inside the courier template's own 800-unit reciprocal comms envelope. Left
+# pointed at the template's own
 # `requiem_courier_destination`, this world would have to declare an anchor
 # named after a probe world to spawn a corporate cutter.
 [[entity]]
@@ -1875,6 +1879,22 @@ on_flag_set("scan.skyhook.taken", "on_survey_scan");
 on_flag_set("scan.depot_ladder_a.taken", "on_survey_scan");
 on_flag_set("scan.depot_ladder_b.taken", "on_survey_scan");
 
+// The dispute exists before any era boundary. Each registration is reserved for
+// one hardening state, so a crew who hail early, clear the channel and return
+// after an escalation still have a crew-initiated way back into both paths.
+on_hailed("world.falling_skyway.entity.strike_committee.name", "on_committee_hailed")
+    .when("counter(skyway_strike_hardening) < 1");
+on_hailed("world.falling_skyway.entity.strike_committee.name", "on_committee_hailed")
+    .when("counter(skyway_strike_hardening) == 1");
+on_hailed("world.falling_skyway.entity.strike_committee.name", "on_committee_hailed")
+    .when("counter(skyway_strike_hardening) > 1");
+on_hailed("world.falling_skyway.entity.havelock_cutter.name", "on_havelock_hailed")
+    .when("counter(skyway_strike_hardening) < 1");
+on_hailed("world.falling_skyway.entity.havelock_cutter.name", "on_havelock_hailed")
+    .when("counter(skyway_strike_hardening) == 1");
+on_hailed("world.falling_skyway.entity.havelock_cutter.name", "on_havelock_hailed")
+    .when("counter(skyway_strike_hardening) > 1");
+
 // A hail trigger is one-shot. Keep a distinct trigger armed for the partial and
 // ready states: a false trigger-level `when` does NOT consume it, so a crew who
 // checks in early can clear the channel, finish the tour and hail again. The
@@ -1896,8 +1916,8 @@ on_waypoint_reached("world.falling_skyway.entity.hauler_lark.name", "corridor_ga
 // chained off an ordinary world flag rather than wired into a dialogue: the
 // negotiation is #1036's and the CONSEQUENCE is this slice's, so whoever sets
 // `skyway_strike_settled` — a comms answer, a deadline, a later act — gets the
-// same settlement applied in one place. Nothing in Act 1 sets it, which is why
-// the strike holds for the whole of the skeleton run.
+// same settlement applied in one place. Early dialogue can now set it before
+// the objective posts, and the remembered-objective helper preserves that work.
 on_flag_set("skyway_strike_settled", "on_strike_settled");
 
 // The corridor and triage reads are visible on arrival. The survey itself posts
@@ -1906,6 +1926,11 @@ on_flag_set("skyway_strike_settled", "on_strike_settled");
 // post without shortening the mission's authored schedule.
 fn on_arrival(ctx) {
     ctx.flags.act = 1;
+    // These are mission-clock timers, scheduled once from world arrival. A
+    // response admitted before either one lands raises the engagement memory and
+    // both handlers become deterministic no-ops.
+    ctx.schedule.after(120, |ctx| { harden_strike(ctx, 1); });
+    ctx.schedule.after(300, |ctx| { harden_strike(ctx, 2); });
     ctx.effects.add_objective(#{
         id: "obj-a1-corridor",
         text: "world.falling_skyway.objective.corridor.text",
@@ -1943,6 +1968,60 @@ fn post_survey_objective(ctx) {
     }, "skyway_survey_reported");
 }
 
+// The dispute posts on its own mid-survey trigger, not on the survey deadline.
+// A crew may already have negotiated or forced the rung open by then, so both
+// objectives consume the same flag-backed memory as the survey. The optional
+// route has a negative memory too: force can close it before it ever appears.
+fn post_strike_objectives(ctx) {
+    if ctx.flags.skyway_strike_objectives_posted > 0 { return; }
+    ctx.flags.skyway_strike_objectives_posted = 1;
+    post_remembered_objective(ctx, #{
+        id: "obj-a2-line",
+        text: "world.falling_skyway.objective.line.text",
+        mandatory: true,
+        source: "mission",
+        base_priority: 50,
+        directive_kind: "Hail",
+        target: "world.falling_skyway.entity.strike_committee.name",
+        targets: ["world.falling_skyway.entity.depot_ladder_b.name"],
+    }, "skyway_strike_settled");
+    post_remembered_objective(ctx, #{
+        id: "obj-a2-corroborate",
+        text: "world.falling_skyway.objective.corroborate.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 25,
+        targets: ["world.falling_skyway.entity.strike_committee.name"],
+    }, "skyway_worker_corroboration_obtained");
+    if ctx.flags.skyway_worker_corroboration_closed > 0 {
+        ctx.effects.fail_objective("obj-a2-corroborate");
+    }
+}
+
+// A passive thread still needs to announce itself. Early crew-initiated hails
+// mark their channel as opened; the tether-slip post then fills in only the
+// channel they did not already open, without duplicating a live conversation.
+fn open_strike_channels(ctx) {
+    if ctx.flags.skyway_settled_by_negotiation > 0 ||
+       ctx.flags.skyway_forced_open > 0 ||
+       ctx.flags.skyway_strike_settled > 0 { return; }
+    if ctx.flags.skyway_committee_channel_opened == 0 {
+        ctx.flags.skyway_committee_channel_opened = 1;
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.strike_committee.name",
+            node_fn: "committee_hails",
+            urgent: true,
+        });
+    }
+    if ctx.flags.skyway_havelock_channel_opened == 0 {
+        ctx.flags.skyway_havelock_channel_opened = 1;
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.havelock_cutter.name",
+            node_fn: "havelock_hails",
+        });
+    }
+}
+
 // The slip. Six points off a head sitting at 48 takes it to 42 — under the 45 %
 // lift line the template authors — so this one call reaches the objectives list
 // through the condition track and its threshold rather than by touching it.
@@ -1950,6 +2029,8 @@ fn on_tether_slip(ctx) {
     ctx.effects.damage_infrastructure("world.falling_skyway.entity.skyhook.name", 6);
     ctx.flags.increment("tether_slipped", 1);
     post_survey_objective(ctx);
+    post_strike_objectives(ctx);
+    open_strike_channels(ctx);
 }
 
 // Chained off the crossing, one tick later. [ai] Placeholder: in the skeleton
@@ -1969,7 +2050,7 @@ fn on_lift_tolerance_lost(ctx) {
 // make of the crew afterwards is #1036's — the two resolution paths part company
 // exactly there, and this handler deliberately takes no view.
 //
-// #1036 hangs the act-2 objective off it and nothing else: BOTH endings reach
+// #1036 hangs the dispute objective off it and nothing else: BOTH endings reach
 // this one handler, so "the line is working again" is completed once, in the
 // place the line actually starts moving, whichever way the crew got there.
 fn on_strike_settled(ctx) {
@@ -2158,9 +2239,9 @@ fn survey_unfiled(ctx) {
     #{ message: "world.falling_skyway.comms.survey_unfiled", responses: [] }
 }
 
-// The act boundary. A filed survey stays green. Anything else fails loudly and
-// records exactly which pieces were missing when the clock landed, so the later
-// evidence thread can distinguish silence from a partial attempt.
+// The survey scoring deadline. A filed survey stays green. Anything else fails
+// loudly and records exactly which pieces were missing when the clock landed,
+// so the later evidence thread can distinguish silence from a partial attempt.
 fn on_survey_due(ctx) {
     if ctx.flags.skyway_survey_reported == 0 {
         ctx.flags.skyway_survey_unfiled = 1;
@@ -2190,57 +2271,11 @@ fn on_survey_due(ctx) {
     ctx.flags.act1_complete = 1;
     ctx.flags.act = 2;
 
-    // ACT 2 OPENS ON THE DISPUTE (issue #1036). Two objectives and two open
-    // channels, and the crew can take either channel without touching the
-    // other — which is what "separately reachable" means here: neither ending
-    // is behind the other's first pick.
-    //
-    // The line objective carries a Reach directive to the ladder transit leg
-    // rather than to a berth, and that is load-bearing rather than scenic. The
-    // hull's `[comms] range` is 1000; from the act-1 station-keeping point the
-    // committee is just inside it and the operator's cutter is NOT, so a crew
-    // who never close on the ladder can hear one party and not answer the
-    // other. Closing is helm's job, the objective names it, and an
-    // AI-backfilled helm flies it.
-    ctx.effects.add_objective(#{
-        id: "obj-a2-line",
-        text: "world.falling_skyway.objective.line.text",
-        mandatory: true,
-        source: "mission",
-        base_priority: 50,
-        directive_kind: "Reach",
-        directive_anchor: "ladder_transit",
-        targets: ["world.falling_skyway.entity.depot_ladder_b.name"],
-    });
-    // Optional, and it is the one the force-open ending FAILS. An objective
-    // that goes red on the list is the loudest way this scenario has of saying
-    // "that route is shut now" without a line of prose about it; the flag
-    // beside it is what a later mission reads.
-    ctx.effects.add_objective(#{
-        id: "obj-a2-corroborate",
-        text: "world.falling_skyway.objective.corroborate.text",
-        mandatory: false,
-        source: "mission",
-        base_priority: 25,
-        targets: ["world.falling_skyway.entity.strike_committee.name"],
-    });
-
-    // Both threads open FROM the parties' own hulls, never from `_self`: the
-    // response router range-gates a pick against the sender's live range flag,
-    // so a real, hailable, in-range sender is what makes an answer land. It is
-    // also the more honest scene — somebody called, and the crew answered.
-    ctx.effects.open_comms(#{
-        from: "world.falling_skyway.entity.strike_committee.name",
-        node_fn: "committee_hails",
-        urgent: true,
-    });
-    ctx.effects.open_comms(#{
-        from: "world.falling_skyway.entity.havelock_cutter.name",
-        node_fn: "havelock_hails",
-    });
+    // Narrative era counter only. The dispute posted at the tether slip and was
+    // hailable before it; nothing is unlocked, closed or re-posted here.
 }
 
-// ═══ ACT 2: THE TWO WAYS THE STRIKE ENDS (issue #1036) ══════════════════════
+// ═══ THE DISPUTE ERA: TWO WAYS THE STRIKE ENDS (#1036/#1133) ════════════════
 //
 // Both endings are authored whole, both are playable, and both end at the SAME
 // lever — `skyway_strike_settled`, which #1035's handler above turns into a
@@ -2270,17 +2305,74 @@ fn on_survey_due(ctx) {
 //
 // ── PATH A: the negotiation ─────────────────────────────────────────────────
 //
-// The committee want two things and will settle for two pieces of ground out of
-// three: promise the corridor is clear in the final transfer window, promise the
-// maintenance file goes to Control rather than back to the operator, or show
-// them you have already read the file. So a crew who never looked must give BOTH
-// promises; a crew who did the evidence work can settle on one. That is the
-// whole reason the evidence branch is worth authoring — it is not flavour, it is
-// a promise the captain does not have to make.
+// The committee want two things and, while the dispute is soft, will settle for
+// two pieces of ground out of three: promise the corridor is clear in the final
+// transfer window, promise the maintenance file goes to Control rather than
+// back to the operator, or show them you have already read the file. Once either
+// hardening timer lands they require all three, but every promise, evidence line,
+// stall and force option remains available.
 //
 // The promises stay OPEN in the ledger. Keeping them is the transfer window's
 // business (#1042) and the report to Control's (#1039); this beat is where they
 // are given.
+
+// One admitted response on either channel is meaningful engagement. Hailing by
+// itself is not: an unanswered call must not freeze the dispute in its soft state.
+fn engage_strike(ctx) {
+    if ctx.flags.skyway_strike_engaged == 0 {
+        ctx.flags.skyway_strike_engaged = 1;
+    }
+}
+
+fn on_committee_hailed(ctx) {
+    ctx.flags.skyway_committee_channel_opened = 1;
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.strike_committee.name",
+        node_fn: "committee_hails",
+    });
+}
+
+fn on_havelock_hailed(ctx) {
+    ctx.flags.skyway_havelock_channel_opened = 1;
+    ctx.effects.open_comms(#{
+        from: "world.falling_skyway.entity.havelock_cutter.name",
+        node_fn: "havelock_hails",
+    });
+}
+
+// Two authored mission-clock rungs. They are idempotent and stop at the first
+// admitted response, not at the first hail. Each rung lowers the workforce's
+// live disposition and narrates the change, but neither mutates a response list.
+fn harden_strike(ctx, stage) {
+    if ctx.flags.skyway_strike_engaged > 0 ||
+       ctx.flags.skyway_settled_by_negotiation > 0 ||
+       ctx.flags.skyway_forced_open > 0 ||
+       ctx.flags.skyway_strike_settled > 0 ||
+       ctx.flags.skyway_strike_hardening >= stage { return; }
+    ctx.flags.skyway_strike_hardening = stage;
+    ctx.effects.set_workforce_disposition("skyway_workers", committee_mood(ctx));
+    if stage == 1 {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.strike_committee.name",
+            node_fn: "committee_hardens_one",
+            urgent: true,
+        });
+    } else {
+        ctx.effects.open_comms(#{
+            from: "world.falling_skyway.entity.strike_committee.name",
+            node_fn: "committee_hardens_two",
+            urgent: true,
+        });
+    }
+}
+
+fn committee_hardens_one(ctx) {
+    #{ message: "world.falling_skyway.comms.committee_hardens_one", responses: [] }
+}
+
+fn committee_hardens_two(ctx) {
+    #{ message: "world.falling_skyway.comms.committee_hardens_two", responses: [] }
+}
 
 fn committee_hails(ctx) {
     // Answered after the picket was cleared over their heads: there is nothing
@@ -2302,12 +2394,13 @@ fn committee_hails(ctx) {
 }
 
 // What the workers make of the crew, derived in ONE place from what the crew
-// have actually done, so two beats cannot disagree about it. Absolute rather
+// have actually done, so two beats cannot disagree about it. Hardening costs ten
+// points per timer before promises and evidence are applied. Absolute rather
 // than incremental for that reason: `set_workforce_disposition` writes a value,
 // and a value computed from the record cannot drift the way a running total of
-// `+10`s can. [ai] Every number here is unratified.
+// `+10`s can.
 fn committee_mood(ctx) {
-    let mood = 25;
+    let mood = 25 - (10 * ctx.flags.skyway_strike_hardening);
     if ctx.commitments.state("skyway_safe_passage") != "unknown" { mood += 10; }
     if ctx.commitments.state("skyway_surface_records") != "unknown" { mood += 10; }
     if ctx.flags.skyway_file_shown > 0 { mood += 15; }
@@ -2316,6 +2409,7 @@ fn committee_mood(ctx) {
 }
 
 fn on_committee_listen(ctx) {
+    engage_strike(ctx);
     ctx.flags.increment("skyway_negotiation_opened", 1);
     committee_terms(ctx)
 }
@@ -2323,6 +2417,7 @@ fn on_committee_listen(ctx) {
 // Talking down to them costs ten points, and those ten points are not
 // decoration: they are what the casualty arithmetic on the other path reads.
 fn on_committee_dismiss(ctx) {
+    engage_strike(ctx);
     ctx.flags.increment("skyway_stonewalled", 1);
     ctx.effects.set_workforce_disposition("skyway_workers", committee_mood(ctx));
     committee_hails(ctx)
@@ -2372,7 +2467,9 @@ fn committee_terms(ctx) {
             on_pick: "on_show_file",
         });
     }
-    if ground >= 2 {
+    let vote_ground = 2;
+    if ctx.flags.skyway_strike_hardening > 0 { vote_ground = 3; }
+    if ground >= vote_ground {
         responses.push(#{
             text: "world.falling_skyway.comms.call_the_vote",
             on_pick: "on_settle",
@@ -2384,28 +2481,40 @@ fn committee_terms(ctx) {
     responses.push(#{ text: "world.falling_skyway.comms.stall", on_pick: "on_stall" });
 
     let body = "world.falling_skyway.comms.committee_terms";
-    if ground >= 2 { body = "world.falling_skyway.comms.committee_ready"; }
+    if ctx.flags.skyway_strike_hardening > 0 {
+        body = "world.falling_skyway.comms.committee_terms_hardened";
+    }
+    if ground >= vote_ground { body = "world.falling_skyway.comms.committee_ready"; }
     #{ message: body, responses: responses }
 }
 
 fn on_promise_passage(ctx) {
-    ctx.commitments.record(#{
-        id: "skyway_safe_passage",
-        made_to: "world.falling_skyway.entity.strike_committee.name",
-        terms: "world.falling_skyway.commitment.safe_passage.terms",
-        resolves_when: "world.falling_skyway.commitment.safe_passage.resolves",
-    });
+    engage_strike(ctx);
+    // A passive incoming channel and a crew/Backfill hail can coexist. Both use
+    // the same admitted response path, so the authoritative state change — not
+    // the actor — makes a repeated pick idempotent.
+    if ctx.commitments.state("skyway_safe_passage") == "unknown" {
+        ctx.commitments.record(#{
+            id: "skyway_safe_passage",
+            made_to: "world.falling_skyway.entity.strike_committee.name",
+            terms: "world.falling_skyway.commitment.safe_passage.terms",
+            resolves_when: "world.falling_skyway.commitment.safe_passage.resolves",
+        });
+    }
     ctx.effects.set_workforce_disposition("skyway_workers", committee_mood(ctx));
     committee_terms(ctx)
 }
 
 fn on_promise_records(ctx) {
-    ctx.commitments.record(#{
-        id: "skyway_surface_records",
-        made_to: "world.falling_skyway.entity.strike_committee.name",
-        terms: "world.falling_skyway.commitment.surface_records.terms",
-        resolves_when: "world.falling_skyway.commitment.surface_records.resolves",
-    });
+    engage_strike(ctx);
+    if ctx.commitments.state("skyway_surface_records") == "unknown" {
+        ctx.commitments.record(#{
+            id: "skyway_surface_records",
+            made_to: "world.falling_skyway.entity.strike_committee.name",
+            terms: "world.falling_skyway.commitment.surface_records.terms",
+            resolves_when: "world.falling_skyway.commitment.surface_records.resolves",
+        });
+    }
     ctx.effects.set_workforce_disposition("skyway_workers", committee_mood(ctx));
     committee_terms(ctx)
 }
@@ -2415,12 +2524,14 @@ fn on_promise_records(ctx) {
 // and it is worth more than either promise, because it is the only thing in this
 // conversation the workers can check.
 fn on_show_file(ctx) {
-    ctx.flags.increment("skyway_file_shown", 1);
+    engage_strike(ctx);
+    ctx.flags.skyway_file_shown = 1;
     ctx.effects.set_workforce_disposition("skyway_workers", committee_mood(ctx));
     committee_terms(ctx)
 }
 
 fn on_stall(ctx) {
+    engage_strike(ctx);
     committee_hails(ctx)
 }
 
@@ -2429,11 +2540,15 @@ fn on_stall(ctx) {
 // the whole difference in PACE between the two endings — the operator clears a
 // picket in six.
 fn on_settle(ctx) {
-    ctx.flags.skyway_settled_by_negotiation = 1;
-    ctx.effects.set_workforce_disposition("skyway_workers", 60);
-    ctx.schedule.after(20, |ctx| {
-        ctx.flags.skyway_strike_settled = 1;
-    });
+    engage_strike(ctx);
+    if ctx.flags.skyway_forced_open == 0 &&
+       ctx.flags.skyway_settled_by_negotiation == 0 {
+        ctx.flags.skyway_settled_by_negotiation = 1;
+        ctx.effects.set_workforce_disposition("skyway_workers", 60);
+        ctx.schedule.after(20, |ctx| {
+            ctx.flags.skyway_strike_settled = 1;
+        });
+    }
     #{ message: "world.falling_skyway.comms.committee_settles", responses: [] }
 }
 
@@ -2513,6 +2628,7 @@ fn havelock_offer(ctx, body) {
 // is the joke this scenario is built on. `records` provenance: it is a document
 // comparison, not a scan and not somebody's word.
 fn on_request_file(ctx) {
+    engage_strike(ctx);
     ctx.dossier.append(#{
         subject:    "world.falling_skyway.entity.depot_ladder_b.name",
         text:       "world.falling_skyway.evidence.ladder_b_maintenance_file",
@@ -2526,6 +2642,7 @@ fn on_request_file(ctx) {
 // depot with a costed problem. They ask once more, thirty seconds later, and
 // only once, so a crew who keep saying no are not nagged for the whole mission.
 fn on_refuse_force(ctx) {
+    engage_strike(ctx);
     ctx.flags.increment("skyway_force_declined", 1);
     if ctx.flags.skyway_force_declined == 1 {
         ctx.schedule.after(30, |ctx| {
@@ -2542,6 +2659,10 @@ fn on_force_now(ctx)    { force_the_picket(ctx, false) }
 fn on_force_warned(ctx) { force_the_picket(ctx, true) }
 
 fn force_the_picket(ctx, warned) {
+    engage_strike(ctx);
+    if ctx.flags.skyway_forced_open > 0 {
+        return #{ message: "world.falling_skyway.comms.havelock_acknowledges", responses: [] };
+    }
     // READ THE GROUND BEFORE MOVING IT. Everything below drives the workers'
     // disposition to the floor, so the risk has to be measured first — it is
     // what the situation was when the order was given, not what the order made
@@ -2555,6 +2676,7 @@ fn force_the_picket(ctx, warned) {
     let hurt = 1;
     if mood <= 40 { hurt = 2; }
     if mood <= 20 { hurt = 3; }
+    if mood <= 10 { hurt = 4; }
     if warned && hurt > 0 { hurt -= 1; }
 
     ctx.flags.skyway_forced_open = 1;

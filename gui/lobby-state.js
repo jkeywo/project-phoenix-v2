@@ -11,6 +11,8 @@
  * as `window.lobbyState` (singleton) for the inline script in client.html.
  */
 
+import { CHANGE_DOMAINS, emptyReducerResult } from './reducer-result.js';
+
 /** All ship stations the lobby UI knows how to render, in display order.
  *
  * Lowercase station ids (issue #618). Consistent with the server-side
@@ -114,10 +116,12 @@ export class LobbyState {
 
   /**
    * Apply a single inbound ServerMessage `{ type, data }`. Variants that
-   * don't affect the lobby are ignored. Mirrors `LobbyState::apply`.
+   * don't affect the lobby are ignored. Mirrors `LobbyState::apply` and
+   * reports accepted lobby-state changes through the shared reducer seam.
    */
   apply(msg) {
-    if (!msg || !msg.type) return;
+    const changes = emptyReducerResult();
+    if (!msg || !msg.type) return changes;
     const d = msg.data || {};
     switch (msg.type) {
       case 'Welcome':
@@ -130,6 +134,7 @@ export class LobbyState {
         // describe the session that just loaded, so the "Mods active" list must
         // survive world load. Welcome carries no pack data of its own, so the
         // last catalog broadcast's list is the right thing to keep.
+        changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         break;
       case 'ScenarioCatalog': {
         // QR-first pre-scenario catalog + current lock state, synthesized by
@@ -156,6 +161,7 @@ export class LobbyState {
         } else {
           this.scenarioCatalog = Array.isArray(d.scenarios) ? d.scenarios : [];
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         break;
       }
       case 'PlayerJoined': {
@@ -163,19 +169,29 @@ export class LobbyState {
         const idx = this.players.findIndex(p => p.token === player.token);
         if (idx >= 0) this.players[idx] = player;
         else this.players.push(player);
+        changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         break;
       }
-      case 'PlayerLeft':
+      case 'PlayerLeft': {
+        const before = this.players.length;
         this.players = this.players.filter(p => p.token !== d.token);
+        if (this.players.length !== before) changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         break;
+      }
       case 'NameChanged': {
         const p = this.players.find(p => p.token === d.token);
-        if (p) p.name = d.name;
+        if (p) {
+          p.name = d.name;
+          changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        }
         break;
       }
       case 'ReadyChanged': {
         const p = this.players.find(p => p.token === d.token);
-        if (p) p.ready = d.ready;
+        if (p) {
+          p.ready = d.ready;
+          changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        }
         break;
       }
       case 'SpectatorChanged': {
@@ -183,7 +199,10 @@ export class LobbyState {
         // unready arrive as their own StationAssigned/ReadyChanged messages, so
         // this only tracks the role flag on the player record.
         const p = this.players.find(p => p.token === d.token);
-        if (p) p.spectator = d.spectator;
+        if (p) {
+          p.spectator = d.spectator;
+          changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        }
         break;
       }
       case 'AfkChanged': {
@@ -191,7 +210,10 @@ export class LobbyState {
         // their own RatingChanged messages and the seat is never vacated, so
         // this only tracks the presence flag on the player record.
         const p = this.players.find(p => p.token === d.token);
-        if (p) p.afk = d.afk;
+        if (p) {
+          p.afk = d.afk;
+          changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
+        }
         break;
       }
       case 'StationAssigned': {
@@ -200,15 +222,18 @@ export class LobbyState {
         // held by at most one player at a time — clear it from anyone else
         // first, then assign to the named token.
         const stationId = (d.station_id && (typeof d.station_id === 'string' ? d.station_id : d.station_id.id)) || null;
+        let accepted = false;
         if (stationId) {
           for (const p of this.players) {
             if (p.token !== d.token && p.station === stationId) {
               p.station = null;
+              accepted = true;
             }
           }
         }
         const target = this.players.find(p => p.token === d.token);
         if (target) {
+          accepted = true;
           target.station = stationId;
           // Mirror the Rust `set_station` invariant (src/lobby/session.rs):
           // seating a player clears the Spectator role — a seat and the
@@ -218,19 +243,23 @@ export class LobbyState {
           // would stay stuck on the read-only spectator surface (issue #1106).
           if (stationId) target.spectator = false;
         }
+        if (accepted) changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         break;
       }
       case 'GameStartCountdown':
         this.countdownSecs = d.remaining_secs || 0;
+        changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         break;
       case 'GameStarted':
         this.phase = 'InProgress';
         this.countdownSecs = 0;
+        changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         break;
       case 'GameOver':
         this.phase = 'GameOver';
         this.gameOverReason = d.reason != null ? d.reason : '';
         this.gameOverOutcome = d.outcome != null ? d.outcome : null;
+        changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         break;
       case 'ReturnedToLobby':
         this.phase = 'Lobby';
@@ -238,11 +267,13 @@ export class LobbyState {
         this.gameOverOutcome = null;
         this.countdownSecs = 0;
         this.waitingForScenario = true;
+        changes.changedDomains.add(CHANGE_DOMAINS.LOBBY);
         break;
       default:
         // Not relevant to the lobby model.
         break;
     }
+    return changes;
   }
 
   // ── LobbyView derivations (token-parameterised) ───────────────────────────

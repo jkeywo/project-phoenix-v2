@@ -2,7 +2,7 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, vitest]
-sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, gui/iframe-bridge.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, gui/iframe-bridge.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
 updated: 2026-08-27
 ---
 
@@ -15,14 +15,14 @@ The client (`client.html`) is **pure HTML/CSS/JS — no WASM or Bevy**. It conne
 ```
 PeerJS message (JSON)
   → client.html handleMessage()
-  → gui/lobby-state.js apply(msg)         # folds lobby-phase state
+  → gui/lobby-state.js apply(msg)         # folds lobby state and reports semantic changes
   → gui/sim-state.js apply(msg)           # folds simulation state and reports semantic changes
-  → gui/comms-state.js apply(msg)         # folds comms inbox/contacts state
+  → gui/comms-state.js apply(msg)         # folds Comms state and reports semantic changes
   → gui/reducer-result.js mergeReducerResults(...results)
-  → gui/dirty-consoles.js dirtyConsolesFor(msg, changes, stationSystems,
-                                            systemConsoleFamilies,
-                                            blackboardConsoleFamilies)
-                                                       # which consoles this message dirtied
+  → gui/dirty-consoles.js dirtyConsolesFor(changes, stationSystems,
+                                               systemConsoleFamilies,
+                                               blackboardConsoleFamilies)
+                                                       # which consoles changed
   → gui/console-state.js buildConsoleState(name, simState)        # rebuild ONLY the dirty consoles → JSON string
   → gui/iframe-bridge.js push()           # __updateConsole(name, json) into the iframe
   → gui/client-router.js route(msg)        # uiState mutation + semantic shell-effect plan
@@ -39,14 +39,15 @@ actual System instance ids. `blackboardConsoleFamilies` separately classifies
 reserved and aggregate channels. Neither duplicates Station ownership, and a
 channel does not become a commandable System.
 
-Reducers return fresh, mergeable sets of changed semantic domains, Systems and
-blackboards through `gui/reducer-result.js`. The Blackboard reducer is the
-complete tracer: only valid entries that were actually folded become changed
-keys, and human-seeking host changes report the broader `station-hosting`
-domain. Dirty routing consumes those results after state reduction; it does not
-inspect the original BlackboardUpdate payload. Non-blackboard message fan-out
-still uses the existing static family table until its owning reducers report
-their domains.
+The simulation, lobby and Comms reducers return fresh, mergeable sets of
+changed semantic domains, Systems and blackboards through
+`gui/reducer-result.js`. Only valid Blackboard entries that were actually
+folded become changed keys, and human-seeking host changes report the broader
+`station-hosting` domain. Every other accepted state-bearing reducer branch
+reports its owned semantic domain. Dirty routing consumes only that merged
+result plus authoritative topology metadata after state reduction; it never
+receives or inspects the original `ServerMessage`. Domain-to-family routing is
+presentation-consumer knowledge, not a replacement per-message census.
 
 Outbound: each console iframe posts `console_action` messages; `gui/action-map.js` is the table-driven dispatcher mapping `action.action` values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
 
@@ -57,9 +58,9 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `mount-plan.js` | **Single home** of the station-id → DOM-id naming scheme (`${id}-ui`/`${id}-iframe`, one tactical → weapons alias) and `planMounts(shipStations)` — the manifest is the server-supplied `ship_stations` |
 | `hero-bar.js` | Shared complete-Station tab model over `SimSnapshot.station_hosts`: direct Station pinned first, visiting Stations in hull order, selected identity/rating/ownership, and roving keyboard focus |
 | `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, typed blackboard discriminants, and both read-only Console Family replicas from `Welcome` |
-| `reducer-result.js` | Fresh, mergeable semantic change results (`changedDomains`, `changedSystems`, `changedBlackboards`) shared by reducers and downstream presentation routing |
-| `lobby-state.js` | Lobby view-model (stations, players, ready states) |
-| `comms-state.js` | Comms inbox/contact view-model |
+| `reducer-result.js` | Fresh, mergeable semantic change results (`changedDomains`, `changedSystems`, `changedBlackboards`) shared by the distinct client reducers and downstream presentation routing |
+| `lobby-state.js` | Lobby view-model (stations, players, ready states) and lobby-domain reducer results |
+| `comms-state.js` | Comms inbox/contact view-model and Comms-domain reducer results |
 | `console-state.js` | Pure view-model builders. One family registry contains all builders, including Command, Tractor and Umbilical; flat and composed consoles carry actual owned `SystemId`s and projected families, while typed blackboard discriminants select semantic data independently of id spelling. |
 | `console-payload.js` | Metadata-driven flat/keyed normalization plus `familyView`: mirrors flat views only under actual projected ids and selects composite views by Console Family, with no inverse id census. |
 | `action-map.js` | Table-driven `console_action` → `ClientMessage` dispatch |
@@ -67,7 +68,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |
 | `client-router.js` | Pure per-message driver: uiState mutations + named side-effect plan for the client.html glue |
-| `dirty-consoles.js` | Semantic reducer changes plus the remaining declarative non-blackboard `ServerMessage` → Console Family mapping, followed by actual topology → owning Station resolution. Blackboard changes use the System or reserved-channel projection without re-reading message payloads; unknown or pre-`Welcome` metadata routes nowhere rather than guessing. |
+| `dirty-consoles.js` | Merged semantic domains, changed Systems and changed blackboards → Console Families → actual owning Stations. It has no `ServerMessage` input or message-variant census; unknown domains/ids and pre-`Welcome` metadata route nowhere rather than guessing. |
 | `lobby-view.js` | Lobby view model (row classes, ready-button state, status-line string-id selection) |
 | `coordination-popup.js` | CoordinationPopup payload → `{ sender, title, body }` normaliser |
 | `phase-toggle.js` | Lobby vs in-game section visibility (`GameOver` counts as in-game) |

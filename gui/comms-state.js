@@ -8,6 +8,8 @@
  * DOM-free; exposed on `window` as `window.commsState` (singleton).
  */
 
+import { CHANGE_DOMAINS, emptyReducerResult } from './reducer-result.js';
+
 /**
  * Effective thread id for a message. Old wire payloads (pre-threading) have
  * `thread_id = ""` — treat those as their own thread (= message id).
@@ -126,10 +128,12 @@ export class ClientCommsState {
 
   /**
    * Apply a single inbound ServerMessage. Only CommsState is handled.
-   * Mirrors `ClientCommsState::apply`.
+   * Mirrors `ClientCommsState::apply` and reports the semantic Comms change
+   * from the reducer that owns the state.
    */
   apply(msg) {
-    if (!msg || msg.type !== 'CommsState') return;
+    const changes = emptyReducerResult();
+    if (!msg || msg.type !== 'CommsState') return changes;
     const d = msg.data || {};
     this.messages = d.messages || [];
     this.objectives = d.objectives || [];
@@ -140,6 +144,8 @@ export class ClientCommsState {
       this.selectedThreadId = null;
     }
     this.version += 1;
+    changes.changedDomains.add(CHANGE_DOMAINS.COMMS);
+    return changes;
   }
 
   /** Open a thread in the chat view. No-op if the thread doesn't exist. */

@@ -6,6 +6,7 @@ import {
   hailMessage, selectCommsMessage, respondToMessage, clearCommsMessage,
   commsPreview, COMMS_PREVIEW_CHARS,
 } from '../../gui/comms-state.js';
+import { CHANGE_DOMAINS } from '../../gui/reducer-result.js';
 
 function msg(id, overrides = {}) {
   return {
@@ -24,6 +25,22 @@ function msg(id, overrides = {}) {
     ...overrides,
   };
 }
+
+describe('semantic reducer results', () => {
+  it('reports Comms state from the Comms reducer', () => {
+    const changes = new ClientCommsState().apply({
+      type: 'CommsState', data: { messages: [], contacts: [], objectives: [] },
+    });
+    expect(changes.changedDomains).toEqual(new Set([CHANGE_DOMAINS.COMMS]));
+  });
+
+  it('returns an empty result for unrelated messages', () => {
+    const changes = new ClientCommsState().apply({ type: 'WeaponsUpdate' });
+    expect([...changes.changedDomains]).toEqual([]);
+    expect([...changes.changedSystems]).toEqual([]);
+    expect([...changes.changedBlackboards]).toEqual([]);
+  });
+});
 
 function msgInThread(id, thread, overrides = {}) {
   return msg(id, { thread_id: thread, ...overrides });

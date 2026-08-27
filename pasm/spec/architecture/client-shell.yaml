@@ -35,11 +35,12 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Console Family Router
-      summary: Selects every flat or composite console payload builder and routes reducer-reported Blackboard changes through the host's complete Console Family projections. Typed blackboard discriminants select semantic data, actual Station-owned System ids key and normalize payloads, and one presentation registry contains every family including Command, Tractor and Umbilical. The router does not decode BlackboardUpdate payloads, and there is no exact/prefix inference, inverse family-to-System census, iframe family hint, or Station-name boot switch.
+      summary: Selects every flat or composite console payload builder and routes merged reducer-reported semantic domains, changed Systems and changed blackboards through the host's complete Console Family projections. Typed blackboard discriminants select semantic data, actual Station-owned System ids key and normalize payloads, and one presentation registry contains every family including Command, Tractor and Umbilical. The router receives no ServerMessage and maintains no message-variant census; there is no exact/prefix inference, inverse family-to-System census, iframe family hint, or Station-name boot switch.
       rationale:
         - "A Console Family describes presentation only. Station topology still decides which surface owns a System, and SystemId still targets command authority."
         - "System instance metadata and reserved-channel metadata remain separate because a blackboard channel can affect a console without being commandable, damageable or ownable."
         - "Before Welcome there is no authoritative topology with which to select a builder, so the router emits an empty payload rather than inventing one from a Station name."
+        - "Message interpretation stays at the reducer branch that owns each state mutation. The downstream domain-to-family relation describes presentation consumers rather than repeating ServerMessage variants."
     architecture:
       kind: presentation-router
       authority: non-authoritative
@@ -55,7 +56,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Simulation State Store
-      summary: Pure-JavaScript receiver that folds authoritative server messages into local presentation state and reports mergeable semantic changes. Blackboard reduction returns only keys that were actually accepted plus broader hosting-domain changes, so presentation routing follows the reducer result instead of decoding the wire payload again. Per-console iframe payload contracts remain documented as JSDoc typedefs beside each builder (issue 827).
+      summary: Pure-JavaScript simulation, lobby and Comms receivers that fold authoritative server messages into their distinct local presentation stores and return fresh mergeable semantic changes from the branch that owns each mutation. Valid Blackboard entries report changed keys and broader hosting-domain changes; the remaining state-bearing branches report semantic domains. Per-console iframe payload contracts remain documented as JSDoc typedefs beside each builder (issue 827).
     architecture:
       kind: client-state-store
       authority: non-authoritative
@@ -65,7 +66,7 @@ entities:
       runs_in: [phone-browser-runtime]
     implementation:
       status: declared
-      paths: [gui/reducer-result.js, gui/sim-state.js, gui/console-state.js, gui/lobby-state.js, client.html]
+      paths: [gui/reducer-result.js, gui/sim-state.js, gui/console-state.js, gui/lobby-state.js, gui/comms-state.js, client.html]
       tests: [npx vitest run]
 
   - state: client-semantic-change-result
@@ -73,15 +74,15 @@ entities:
       status: implemented
       confidence: confirmed
       title: Client Semantic Change Result
-      summary: Ephemeral, mergeable sets of changed semantic domains, System ids, and blackboard keys returned by client reducers after state mutation. Blackboard keys and human-seeking Station-hosting changes are the first complete tracer; unaccepted or malformed entries produce no change, while every accepted entry is reported even when its value repeats the current replica.
+      summary: Ephemeral, mergeable sets of changed semantic domains, System ids, and blackboard keys returned by the simulation, lobby and Comms reducers after state mutation. Dirty-console routing consumes only this result plus authoritative topology metadata, never the original ServerMessage. Unknown messages and unaccepted entries produce no change; accepted state-bearing branches report their owned domain even when the resulting replica value repeats.
     architecture:
       classification: derived
       owner: client-simulation-state-store
       writers: [client-simulation-state-store]
     implementation:
       status: declared
-      paths: [gui/reducer-result.js, gui/sim-state.js, gui/dirty-consoles.js, client.html]
-      symbols: [CHANGE_DOMAINS, emptyReducerResult, mergeReducerResults, ClientSimState]
+      paths: [gui/reducer-result.js, gui/lobby-state.js, gui/sim-state.js, gui/comms-state.js, gui/dirty-consoles.js, client.html]
+      symbols: [CHANGE_DOMAINS, emptyReducerResult, mergeReducerResults, ClientSimState, LobbyState, ClientCommsState]
       tests: [npx vitest run]
 
   - state: client-presentation-state

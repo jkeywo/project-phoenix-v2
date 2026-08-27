@@ -310,6 +310,7 @@ export class ClientSimState {
         if (typeof d.destroyed_fraction === 'number') {
           this.hullDestroyed = d.destroyed_fraction;
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.REPAIR);
         break;
       case 'SimState': {
         const snap = d.snapshot || {};
@@ -355,10 +356,12 @@ export class ClientSimState {
           if (st.shields != null) entity.shields = st.shields;
           if (st.shield_freq != null) entity.shield_freq = st.shield_freq;
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.SIMULATION_SNAPSHOT);
         break;
       }
       case 'WorldSetup':
         this.world = d.world || defaultWorld();
+        changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_ADDED);
         break;
       case 'ReturnedToLobby':
       case 'GameStarted':
@@ -368,6 +371,7 @@ export class ClientSimState {
         this.stationHealth = {};
         this.stationImportance = {};
         this.controlSources = {};
+        changes.changedDomains.add(CHANGE_DOMAINS.ROUND);
         break;
       case 'Welcome': {
         const world = (d.state && d.state.world) || null;
@@ -410,13 +414,21 @@ export class ClientSimState {
           const count = (sc.repair_team_count) || 0;
           if (count > 0) this.repairTeams = new Array(count).fill('Idle');
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.WELCOME);
         break;
       }
       case 'RepairState':
         this.repairTeams = d.teams || [];
+        changes.changedDomains.add(CHANGE_DOMAINS.REPAIR);
+        break;
+      case 'PowerState':
+        // Power presentation is blackboard-backed; this legacy state push is
+        // still the established signal to publish the freshly reduced payload.
+        changes.changedDomains.add(CHANGE_DOMAINS.POWER);
         break;
       case 'PhaserFired':
         this.lastPhaserTarget = d.target_uuid != null ? d.target_uuid : null;
+        changes.changedDomains.add(CHANGE_DOMAINS.PHASER_ACTIVITY);
         break;
       case 'WeaponsUpdate': {
         const previousTargetUuid = this.currentTargetUuid;
@@ -431,6 +443,7 @@ export class ClientSimState {
         if (typeof d.phaser_frequency === 'number') this.phaserFrequency = d.phaser_frequency;
         if (d.blasters != null) this.blasterBanks = d.blasters;
         if (Array.isArray(d.blips)) this.weaponsBlips = d.blips;
+        changes.changedDomains.add(CHANGE_DOMAINS.WEAPONS);
         break;
       }
       case 'TargetLock':
@@ -441,11 +454,13 @@ export class ClientSimState {
           this.currentTargetUuid = null;
           this.currentTargetName = null;
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.WEAPONS);
         break;
       case 'ShieldStatus': {
         this.shieldFacings = d.facings || [];
         const focused = this.shieldFacings.find(f => f.is_focused);
         this.shieldFocusedFacing = focused ? focused.label : null;
+        changes.changedDomains.add(CHANGE_DOMAINS.SHIELDS);
         break;
       }
       case 'TorpedoLaunched':
@@ -455,26 +470,32 @@ export class ClientSimState {
         this.torpedoesInFlight.push({
           uuid: d.uuid, x: d.x, y: d.y != null ? d.y : 0, z: d.z, heading: d.heading, tube: d.tube,
         });
+        changes.changedDomains.add(CHANGE_DOMAINS.TORPEDO_ACTIVITY);
         break;
       case 'TorpedoDestroyed':
         this.torpedoesInFlight = this.torpedoesInFlight.filter(t => t.uuid !== d.uuid);
+        changes.changedDomains.add(CHANGE_DOMAINS.TORPEDO_ACTIVITY);
         break;
       case 'ModifierAdded':
         this.modifiers.set(modifierKey(d.source, d.slot), d.bonus);
+        changes.changedDomains.add(CHANGE_DOMAINS.MODIFIERS);
         break;
       case 'ModifierRemoved':
         this.modifiers.delete(modifierKey(d.source, d.slot));
+        changes.changedDomains.add(CHANGE_DOMAINS.MODIFIERS);
         break;
       case 'EntitySpawned': {
         const snap = d.snapshot;
         if (snap && !this.world.entities.some(e => e.uuid === snap.uuid)) {
           this.world.entities.push(snap);
+          changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_ADDED);
         }
         break;
       }
       case 'EntityDespawned':
         this.removeEntity(d.uuid);
         this._clearTargetsFor(d.uuid);
+        changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_REMOVED);
         break;
       case 'AsteroidSpawned':
         if (!this.world.entities.some(e => e.uuid === d.uuid)) {
@@ -485,11 +506,13 @@ export class ClientSimState {
             radius: d.radius,
             radar_icon: 'asteroid',
           });
+          changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_ADDED);
         }
         break;
       case 'AsteroidDestroyed':
         this.removeEntity(d.uuid);
         this._clearTargetsFor(d.uuid);
+        changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_REMOVED);
         break;
       case 'CoordinationPopup':
         this.coordinationPopup = { target: d.target, payload: d.payload, senderLabel: d.sender_label, ts: Date.now() };
@@ -497,12 +520,15 @@ export class ClientSimState {
         if (d.payload && d.payload.type === 'FrequencyHint' && d.payload.data && typeof d.payload.data.frequency === 'number') {
           this.frequencyHint = d.payload.data.frequency;
         }
+        changes.changedDomains.add(CHANGE_DOMAINS.COORDINATION);
         break;
       case 'ObjectiveSummary':
         this.objectives = d.objectives || [];
+        changes.changedDomains.add(CHANGE_DOMAINS.OBJECTIVES);
         break;
       case 'CommsState':
         this.objectives = d.objectives || [];
+        changes.changedDomains.add(CHANGE_DOMAINS.OBJECTIVES);
         break;
       case 'CommsResponseRejected':
         // Transient feedback (#761 AC3): the submitting comms holder's attempt
@@ -513,10 +539,12 @@ export class ClientSimState {
           response_index: d.response_index,
           ts: Date.now(),
         };
+        changes.changedDomains.add(CHANGE_DOMAINS.COMMS);
         break;
       case 'RatingChanged':
         if (d.station_id != null) {
           this.stationRatings[d.station_id] = d.rating_name || '';
+          changes.changedDomains.add(CHANGE_DOMAINS.STATION_RATINGS);
         }
         break;
       case 'ShipManual':
@@ -524,6 +552,7 @@ export class ClientSimState {
         // The manual panel renders from it; nothing here mutates it or emits
         // any command in response.
         this.shipManual = d.manual || null;
+        changes.changedDomains.add(CHANGE_DOMAINS.SHIP_MANUAL);
         break;
       case 'DebugState':
         // Authoritative read-back of the host's debug/session flags (#940).
@@ -547,6 +576,7 @@ export class ClientSimState {
           paused: !!d.paused,
           godMode: !!d.god_mode,
         };
+        changes.changedDomains.add(CHANGE_DOMAINS.DEBUG_STATE);
         break;
       case 'BlackboardUpdate':
         for (const [systemId, bb] of (d.updates || [])) {

@@ -1,13 +1,13 @@
 /**
- * gui/dirty-consoles.js — declarative message → dirty-console mapping (#823).
+ * gui/dirty-consoles.js — semantic change → dirty-console routing (#823).
  *
  * Replaces the hand-maintained fan-out in client.html handleMessage(): given
- * an inbound ServerMessage, `dirtyConsolesFor` returns the set of console
- * (station) names whose iframes should be re-pushed. The mapping is data:
+ * merged reducer results, `dirtyConsolesFor` returns the set of console
+ * (station) names whose iframes should be re-pushed.
  *
- *  - STATIC_MESSAGE_FAMILIES covers every non-blackboard message type with a
- *    fixed Console Family list. The authoritative topology then resolves each
- *    family to the actual Station ids that own its Systems.
+ *  - Reducers report semantic domains at the point where they interpret and
+ *    mutate state. This module maps those stable domains to their established
+ *    presentation consumers; it never enumerates ServerMessage variants.
  *  - BlackboardUpdate dirtiness is derived from reducer-reported changed keys,
  *    the server-supplied station→systems ownership, authoritative System-id →
  *    Console Family projection, and the separate reserved-blackboard-key
@@ -31,41 +31,28 @@
 
 import { CHANGE_DOMAINS } from './reducer-result.js';
 
-/**
- * Non-blackboard message type → Console Families dirtied. The list preserves
- * the old per-message fan-out, while `dirtyConsolesFor` resolves those families
- * through the current hull's actual ownership.
- */
-export const STATIC_MESSAGE_FAMILIES = Object.freeze({
-  // Push the pre-seeded repair teams so the Repair console renders its rows
-  // immediately on (re)connect, before the first RepairState broadcast.
-  Welcome: Object.freeze(['repair']),
-  // Every radar-bearing console refreshes each 10 Hz tick: radar blips are
-  // built client-side from ship_x/z/yaw + the entity array, so consoles that
-  // only refreshed on their sparse own-event cadence would crawl at ~1 Hz.
-  SimState: Object.freeze(['tactical', 'repair', 'sensors', 'navigation']),
-  WorldSetup: Object.freeze(['tactical', 'helm', 'sensors', 'navigation']),
-  EntitySpawned: Object.freeze(['tactical', 'helm', 'sensors', 'navigation']),
-  AsteroidSpawned: Object.freeze(['tactical', 'helm', 'sensors', 'navigation']),
-  TargetLock: Object.freeze(['tactical']),
-  WeaponsUpdate: Object.freeze(['tactical']),
-  // BeamStarted/BeamEnded entries removed in #825: sim-state no longer
-  // mutates on those messages (the weaponsFiring flag they fed is gone),
-  // so a push would rebuild an unchanged payload.
-  SystemHullUpdate: Object.freeze(['repair']),
-  RepairState: Object.freeze(['repair']),
-  PowerState: Object.freeze(['power']),
-  ShieldStatus: Object.freeze(['shields']),
-  AsteroidDestroyed: Object.freeze(['tactical', 'helm', 'sensors']),
-  EntityDespawned: Object.freeze(['tactical', 'helm', 'sensors']),
-  CommsState: Object.freeze(['comms']),
-  // Rejection feedback (#761 AC3): re-push the comms console so the attempted
-  // response button flashes red.
-  CommsResponseRejected: Object.freeze(['comms']),
-  // stationRatings is already fresh when this fires (sim-state applied the
-  // message first); controlSources lags until the next SimState tick, so the
-  // captain badge is pushed immediately from here.
-  RatingChanged: Object.freeze(['captain']),
+const DOMAIN_FAMILIES = Object.freeze({
+  // Push pre-seeded repair teams immediately on (re)connect, before the first
+  // RepairState broadcast. Other Welcome consumers mount after this fan-out.
+  [CHANGE_DOMAINS.WELCOME]: Object.freeze(['repair']),
+  // Radar blips are derived client-side from the 10 Hz simulation snapshot.
+  [CHANGE_DOMAINS.SIMULATION_SNAPSHOT]: Object.freeze([
+    'tactical', 'repair', 'sensors', 'navigation',
+  ]),
+  [CHANGE_DOMAINS.WORLD_ENTITY_ADDED]: Object.freeze([
+    'tactical', 'helm', 'sensors', 'navigation',
+  ]),
+  [CHANGE_DOMAINS.WORLD_ENTITY_REMOVED]: Object.freeze([
+    'tactical', 'helm', 'sensors',
+  ]),
+  [CHANGE_DOMAINS.WEAPONS]: Object.freeze(['tactical']),
+  [CHANGE_DOMAINS.REPAIR]: Object.freeze(['repair']),
+  [CHANGE_DOMAINS.POWER]: Object.freeze(['power']),
+  [CHANGE_DOMAINS.SHIELDS]: Object.freeze(['shields']),
+  [CHANGE_DOMAINS.COMMS]: Object.freeze(['comms']),
+  // stationRatings is already fresh; controlSources follows on the next
+  // SimState tick, so the Captain-family badge retains its immediate push.
+  [CHANGE_DOMAINS.STATION_RATINGS]: Object.freeze(['captain']),
 });
 
 /**
@@ -142,9 +129,9 @@ export function alwaysPushConsoles(stationSystems, systemConsoleFamilies) {
 }
 
 /**
- * Console names dirtied by an inbound ServerMessage and its merged reducer
- * result. Blackboard routing consumes only semantic changed keys/domains; the
- * original BlackboardUpdate payload is never inspected here.
+ * Console names dirtied by a merged reducer result. Routing consumes only
+ * semantic domains, changed System ids, and changed blackboard keys; the
+ * original ServerMessage is never accepted by this interface.
  *
  * A seeking system's blackboard dirties EVERY station, not just the station
  * that authors it (issue #984). This is the one deliberate cross-read edge the
@@ -156,7 +143,6 @@ export function alwaysPushConsoles(stationSystems, systemConsoleFamilies) {
  * console, so the fan-out is at most one extra push of the console the player
  * is actually looking at — which is the console that has to be right.
  *
- * @param {{ type?: string, data?: object }} msg  decoded ServerMessage
  * @param {{ changedDomains?: Set<string>, changedSystems?: Set<string>,
  *           changedBlackboards?: Set<string> }} changes merged reducer result
  * @param {Object<string, string[]>|null|undefined} stationSystems
@@ -170,13 +156,19 @@ export function alwaysPushConsoles(stationSystems, systemConsoleFamilies) {
  * @returns {Set<string>} console names to push via pushConsoleStateFor
  */
 export function dirtyConsolesFor(
-  msg,
   changes,
   stationSystems,
   systemConsoleFamilies,
   blackboardConsoleFamilies,
 ) {
   const dirty = new Set();
+  for (const id of changes?.changedSystems || []) {
+    const family = systemConsoleFamilies?.[id];
+    if (typeof family !== 'string' || family === '') continue;
+    for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+      dirty.add(name);
+    }
+  }
   for (const id of changes?.changedBlackboards || []) {
     for (const family of familiesForBlackboardId(
       id,
@@ -191,9 +183,11 @@ export function dirtyConsolesFor(
   if (changes?.changedDomains?.has(CHANGE_DOMAINS.STATION_HOSTING)) {
     for (const name of Object.keys(stationSystems || {}).sort()) dirty.add(name);
   }
-  for (const family of STATIC_MESSAGE_FAMILIES[msg?.type] || []) {
-    for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
-      dirty.add(name);
+  for (const domain of changes?.changedDomains || []) {
+    for (const family of DOMAIN_FAMILIES[domain] || []) {
+      for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+        dirty.add(name);
+      }
     }
   }
   return dirty;

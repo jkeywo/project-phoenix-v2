@@ -175,7 +175,6 @@ describe('Dock tracer and visiting Systems', () => {
     };
     const changes = state.apply(update);
     expect(dirtyConsolesFor(
-      update,
       changes,
       state.stationSystems,
       state.systemConsoleFamilies,

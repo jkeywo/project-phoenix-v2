@@ -12,6 +12,7 @@ import {
   shieldStatusView, powerTotal, canIncreasePower, canDecreasePower,
   isSciencePhaserPanelVisible,
 } from '../../gui/sim-state.js';
+import { CHANGE_DOMAINS } from '../../gui/reducer-result.js';
 
 function asteroid(uuid, x, z, radius = 1) {
   return { uuid, position: [x, 0, z], tags: ['asteroid'], radius, radar_icon: 'asteroid' };
@@ -27,6 +28,61 @@ function welcome(world, shipConfig) {
     },
   };
 }
+
+describe('semantic reducer results', () => {
+  const cases = [
+    ['SystemHullUpdate', { type: 'SystemHullUpdate' }, CHANGE_DOMAINS.REPAIR],
+    ['SimState', { type: 'SimState' }, CHANGE_DOMAINS.SIMULATION_SNAPSHOT],
+    ['WorldSetup', { type: 'WorldSetup' }, CHANGE_DOMAINS.WORLD_ENTITY_ADDED],
+    ['ReturnedToLobby', { type: 'ReturnedToLobby' }, CHANGE_DOMAINS.ROUND],
+    ['GameStarted', { type: 'GameStarted' }, CHANGE_DOMAINS.ROUND],
+    ['Welcome', { type: 'Welcome' }, CHANGE_DOMAINS.WELCOME],
+    ['RepairState', { type: 'RepairState' }, CHANGE_DOMAINS.REPAIR],
+    ['PowerState', { type: 'PowerState' }, CHANGE_DOMAINS.POWER],
+    ['PhaserFired', { type: 'PhaserFired' }, CHANGE_DOMAINS.PHASER_ACTIVITY],
+    ['WeaponsUpdate', { type: 'WeaponsUpdate' }, CHANGE_DOMAINS.WEAPONS],
+    ['TargetLock', { type: 'TargetLock' }, CHANGE_DOMAINS.WEAPONS],
+    ['ShieldStatus', { type: 'ShieldStatus' }, CHANGE_DOMAINS.SHIELDS],
+    ['TorpedoLaunched', { type: 'TorpedoLaunched' }, CHANGE_DOMAINS.TORPEDO_ACTIVITY],
+    ['TorpedoDestroyed', { type: 'TorpedoDestroyed' }, CHANGE_DOMAINS.TORPEDO_ACTIVITY],
+    ['ModifierAdded', { type: 'ModifierAdded' }, CHANGE_DOMAINS.MODIFIERS],
+    ['ModifierRemoved', { type: 'ModifierRemoved' }, CHANGE_DOMAINS.MODIFIERS],
+    ['EntitySpawned', {
+      type: 'EntitySpawned', data: { snapshot: { uuid: 'ship-1' } },
+    }, CHANGE_DOMAINS.WORLD_ENTITY_ADDED],
+    ['EntityDespawned', { type: 'EntityDespawned' }, CHANGE_DOMAINS.WORLD_ENTITY_REMOVED],
+    ['AsteroidSpawned', {
+      type: 'AsteroidSpawned', data: { uuid: 'rock-1' },
+    }, CHANGE_DOMAINS.WORLD_ENTITY_ADDED],
+    ['AsteroidDestroyed', { type: 'AsteroidDestroyed' }, CHANGE_DOMAINS.WORLD_ENTITY_REMOVED],
+    ['CoordinationPopup', { type: 'CoordinationPopup' }, CHANGE_DOMAINS.COORDINATION],
+    ['ObjectiveSummary', { type: 'ObjectiveSummary' }, CHANGE_DOMAINS.OBJECTIVES],
+    ['CommsState', { type: 'CommsState' }, CHANGE_DOMAINS.OBJECTIVES],
+    ['CommsResponseRejected', { type: 'CommsResponseRejected' }, CHANGE_DOMAINS.COMMS],
+    ['RatingChanged', {
+      type: 'RatingChanged', data: { station_id: 'helm' },
+    }, CHANGE_DOMAINS.STATION_RATINGS],
+    ['ShipManual', { type: 'ShipManual' }, CHANGE_DOMAINS.SHIP_MANUAL],
+    ['DebugState', { type: 'DebugState' }, CHANGE_DOMAINS.DEBUG_STATE],
+  ];
+
+  for (const [name, msg, expected] of cases) {
+    it(`${name} reports its owned state domain`, () => {
+      const changes = new ClientSimState().apply(msg);
+      expect(changes.changedDomains).toContain(expected);
+    });
+  }
+
+  it('unknown messages return a fresh empty result', () => {
+    const state = new ClientSimState();
+    const first = state.apply({ type: 'NoSuchMessage' });
+    const second = state.apply(null);
+    first.changedDomains.add('mutated-by-test');
+    expect([...second.changedDomains]).toEqual([]);
+    expect([...second.changedSystems]).toEqual([]);
+    expect([...second.changedBlackboards]).toEqual([]);
+  });
+});
 
 describe('defaults', () => {
   it('starts with an empty world and sane defaults', () => {

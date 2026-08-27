@@ -3,6 +3,7 @@ import {
   LobbyState, lobbyState, reconcileActiveConsole, nextActiveConsole,
   ALL_STATIONS, playerStationId,
 } from '../../gui/lobby-state.js';
+import { CHANGE_DOMAINS } from '../../gui/reducer-result.js';
 
 // Post issue #619: a player carries a single lowercase station id (or null).
 function ps(token, name, station) {
@@ -27,6 +28,41 @@ const TWO_STATION_SHIP = {
     { id: 'tactical', name: 'Tactical', description: 'Weapons', rank: '', short_code: 'TAC' },
   ],
 };
+
+describe('semantic reducer results', () => {
+  const cases = [
+    { type: 'Welcome' },
+    { type: 'ScenarioCatalog' },
+    { type: 'PlayerJoined', data: { player: ps('b', 'Bob', null) } },
+    { type: 'PlayerLeft', data: { token: 'a' } },
+    { type: 'NameChanged', data: { token: 'a', name: 'Alicia' } },
+    { type: 'ReadyChanged', data: { token: 'a', ready: true } },
+    { type: 'SpectatorChanged', data: { token: 'a', spectator: true } },
+    { type: 'AfkChanged', data: { token: 'a', afk: true } },
+    { type: 'StationAssigned', data: { token: 'a', station_id: 'helm' } },
+    { type: 'GameStartCountdown', data: { remaining_secs: 3 } },
+    { type: 'GameStarted' },
+    { type: 'GameOver' },
+    { type: 'ReturnedToLobby' },
+  ];
+
+  for (const msg of cases) {
+    it(`${msg.type} reports an accepted lobby change`, () => {
+      const state = new LobbyState();
+      state.players = [ps('a', 'Alice', 'captain')];
+      const changes = state.apply(msg);
+      expect(changes.changedDomains).toContain(CHANGE_DOMAINS.LOBBY);
+    });
+  }
+
+  it('ignored or inapplicable messages return no semantic change', () => {
+    const state = new LobbyState();
+    expect([...state.apply({ type: 'NoSuchMessage' }).changedDomains]).toEqual([]);
+    expect([...state.apply({
+      type: 'NameChanged', data: { token: 'missing', name: 'Nobody' },
+    }).changedDomains]).toEqual([]);
+  });
+});
 
 describe('LobbyState defaults', () => {
   it('starts empty in Lobby phase', () => {

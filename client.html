@@ -71,9 +71,9 @@
        chrome. Relays them to the active console (see gui/key-relay.js). -->
   <script type="module" src="gui/key-relay.js"></script>
   <script type="module" src="gui/console-state.js"></script>
-  <!-- Declarative message → dirty-console table (issue #823): handleMessage()
-       fans iframe pushes out through window.dirtyConsolesFor instead of
-       per-console push wrappers. -->
+  <!-- Semantic dirty-console routing (issues #823 / #1260): handleMessage()
+       merges reducer results, then fans iframe pushes out through
+       window.dirtyConsolesFor instead of per-message console wrappers. -->
   <script type="module" src="gui/dirty-consoles.js"></script>
   <!-- Console input-to-feedback measurement (issue #1169, PRD #1144): this
        phone's own round-trip clock. Publishes window.ConsoleLatencyMeter for
@@ -84,8 +84,8 @@
   <script type="module" src="gui/action-map.js"></script>
   <!-- Pure JS client-state modules (issue #460). Each exposes a singleton
        (window.lobbyState / simState / commsState) with an apply(serverMessage)
-       method; handleMessage() feeds every inbound message through them,
-       replacing the deleted Bevy message drain. -->
+       method returning a fresh semantic result; handleMessage() feeds every
+       inbound message through them, replacing the deleted Bevy message drain. -->
   <script type="module" src="gui/lobby-state.js"></script>
   <script type="module" src="gui/sim-state.js"></script>
   <!-- Contextual tutorials (issue #916): trigger evaluation + client-local
@@ -2571,15 +2571,16 @@
       });
     }
 
-    // -- Message-driven console refresh (issue #823) --------------------------
+    // -- Semantic-change console refresh (issues #823 / #1260) ----------------
     // The per-console build*/push*ConsoleState wrapper pairs that used to live
-    // here were deleted: handleMessage() now computes which consoles a message
-    // dirties via the declarative table in gui/dirty-consoles.js and pushes
-    // each through the generic pushConsoleStateFor above. Pushes are gated on
+    // here were deleted: reducers now report semantic changes and
+    // gui/dirty-consoles.js resolves those through authoritative topology,
+    // then pushes each through the generic pushConsoleStateFor above. Pushes
+    // are gated on
     // the console being active, except Stations projected from the
     // unconditional Console Families in dirty-consoles.js
     // (captain — its push was always unconditional).
-    function pushDirtyConsoles(msg, changes) {
+    function pushDirtyConsoles(changes) {
       // Boot race: the module scripts may not have executed yet — drop the
       // fan-out; pushes are idempotent snapshots and the next message repeats
       // them (same tolerance as _pushIframe / pushConsoleStateFor).
@@ -2591,7 +2592,6 @@
         ? window.alwaysPushConsoles(stationSystems, systemConsoleFamilies)
         : new Set();
       for (const name of window.dirtyConsolesFor(
-        msg,
         changes,
         stationSystems,
         systemConsoleFamilies,
@@ -2853,12 +2853,13 @@
       // shows — so repaint here rather than from the render loop, which would
       // rebuild the volume slider out from under a dragging finger.
       if (msg && msg.type === 'DebugState' && settingsPanel) settingsPanel.rebuildContent();
-      // Declarative iframe fan-out (#823): gui/dirty-consoles.js maps the
-      // message to the console names to re-push. Runs after the state applies
-      // above so every push carries fresh data. On Welcome the consoles are
+      // Semantic iframe fan-out (#1260): gui/dirty-consoles.js maps the merged
+      // reducer result to console names without receiving the wire message.
+      // Runs after state applies so every push carries fresh data. On Welcome
+      // the consoles are
       // (re)mounted AFTER this fan-out — that is fine: each iframe's load
       // listener re-pushes its snapshot once it actually loads.
-      pushDirtyConsoles(msg, changes);
+      pushDirtyConsoles(changes);
       // Per-case routing is pure and lives in gui/client-router.js (issue
       // #827): it applies the uiState mutations and hands back a side-effect
       // plan for the DOM glue below. Boot race: modules run before

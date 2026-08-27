@@ -1894,18 +1894,23 @@ pub(crate) fn broadcast_objective_summary(
 /// same `OnEnter` chain). Without this, round two would measure `after_secs`
 /// from round one's start and arrive with its whole schedule already expired.
 ///
-/// It writes `None` rather than a reading of its own because it does not run
-/// in a fixed step. Bevy applies a `NextState<GamePhase>` write at whichever
-/// `StateTransition` site comes first, and the two production start paths use
-/// different ones: the lobby countdown and headless auto-start write from
-/// `FixedUpdate` (the fixed-schedule site `register_fixed_state_transition`
-/// installs), while `auto_transition_from_loading` writes from `Update` (the
-/// frame-level site). `Time` resolves to `Time<Fixed>` at the first and
-/// `Time<Virtual>` at the second, and those two clocks disagree by up to one
-/// timestep, so a reading taken here would make the schedule a function of
-/// which path started the mission and of frame pacing. Deferring the reading
-/// to [`anchor_mission_clock`], which only ever runs inside a fixed step,
-/// keeps it on one clock.
+/// It writes `None` rather than a reading of its own because it cannot know
+/// which clock it is standing on. Bevy applies a `NextState<GamePhase>` write
+/// at whichever `StateTransition` site comes first; `Time` resolves to
+/// `Time<Fixed>` at the fixed-schedule site `register_fixed_state_transition`
+/// installs and to `Time<Virtual>` at the frame-level one, and those two clocks
+/// disagree by up to one timestep — so a reading taken here would make the
+/// schedule a function of which path started the mission and of frame pacing.
+/// Deferring the reading to [`anchor_mission_clock`], which only ever runs
+/// inside a fixed step, keeps it on one clock.
+///
+/// Since issue #1121's fix round every *production* start path writes from
+/// `FixedUpdate`: the lobby countdown, headless and native-host auto-start, and
+/// `auto_transition_from_loading`, which moved there for the #907 reason this
+/// paragraph describes. That makes the hazard harder to reach, not gone — a
+/// bare-`App` fixture or a test driver writing the phase from a frame schedule
+/// still lands on the frame-level site, and the deferral is what keeps the
+/// mission clock right for those too.
 pub(crate) fn arm_mission_clock(mut runtime: ResMut<WorldContentRuntime>) {
     runtime.mission_clock_anchor_secs = None;
 }

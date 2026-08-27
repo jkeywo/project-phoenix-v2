@@ -1,0 +1,36 @@
+name = "phoenix-rendezvous"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[vars]
+# Comma-separated allowlist of site origins permitted to open a rendezvous
+# socket. pp-dev is the canonical custom domain from .github/workflows/ci.yml;
+# the github.io origin covers direct Pages access; localhost:3000 is the smoke
+# suite's `serve dist` and localhost:3911 the local dist-preview server; 8080
+# is `trunk serve`.
+#
+# THE SAME TRAP AS worker/wrangler.toml, WITH WORSE CONSEQUENCES: the deployed
+# worker only picks this up on `wrangler deploy`. A stale value here CORS- and
+# upgrade-refuses every client, and unlike the TURN worker (where the failure
+# merely stripped relay) nobody can join at all. Verify after every change with
+# the /v1/health recipe in docs/delivery-checklist.md.
+ALLOWED_ORIGIN = "https://pp-dev.kiwigamedesign.co.uk,https://jkeywo.github.io,http://localhost:3000,http://localhost:3911,http://localhost:8080"
+
+# Live join-code records, presence and signalling sockets. A Durable Object
+# rather than KV because the state is a set of open WebSockets, not a value:
+# the registry has to hold both typed namespaces and every active release in
+# one place or wrong-type, version-mismatch and unknown collapse into one
+# answer. Durable Objects are an account-tier decision — see
+# docs/delivery-checklist.md before the first deploy.
+[[durable_objects.bindings]]
+name = "RENDEZVOUS"
+class_name = "RendezvousRegistry"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RendezvousRegistry"]
+
+# This service mints no third-party credentials, so it has NO secrets. If one
+# is ever added (a signing key for join records, say), set it per worker NAME
+# with `wrangler secret put <NAME>` — never in this file — exactly as the TURN
+# worker does.

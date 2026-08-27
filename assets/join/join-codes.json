@@ -1,0 +1,104 @@
+{
+  "note": [
+    "Authored join-code format data (issue #1111). This file is the ONE place",
+    "the join-identifier scheme is written down: gui/join-code.js reads it in",
+    "the browser (fetch), tests/client/join-code.test.js reads it from disk,",
+    "and worker-rendezvous/src/registry.js imports it into the rendezvous",
+    "service bundle. Nothing else may hardcode an alphabet, a GUID or a",
+    "denied word.",
+    "",
+    "JSON rather than TOML because those three consumers must all read it with",
+    "no parser dependency and no build step: the browser client ships as plain",
+    "ES modules and a Cloudflare Worker bundles with esbuild. Neither can parse",
+    "TOML. The per-entry 'reason' fields carry what comments would.",
+    "",
+    "Design source: docs/gdd/systems/native-network-foundation.md 'Join-code",
+    "model' and pasm/spec/design/p2p-design-deltas.yaml decision",
+    "p2p-human-readable-join-namespaces."
+  ],
+
+  "format_version": 1,
+
+  "suffix": {
+    "note": [
+      "Five typed letters. The alphabet deliberately EXCLUDES L, because L",
+      "normalises to I — a letter that can never survive canonicalisation must",
+      "never be minted, or the printed code would not round-trip through the",
+      "very normalisation that makes it typeable. O and I stay in: they are the",
+      "canonical forms of 0 and 1. J stays distinct and is minted normally."
+    ],
+    "length": 5,
+    "alphabet": "ABCDEFGHIJKMNOPQRSTUVWXYZ",
+    "normalise": {
+      "0": "O",
+      "1": "I",
+      "L": "I"
+    },
+    "strip": "-_ \t"
+  },
+
+  "namespaces": {
+    "note": [
+      "Two stable project GUIDs, one per join type, so a suffix typed into the",
+      "crew field can never silently resolve a fleet host. These values are",
+      "permanent — changing one orphans every printed code of that type.",
+      "'client' is what a phone/console types; 'server' admits ship hosts to a",
+      "fleet (issue #1114 owns joining it; #1111 only needs it to EXIST so a",
+      "wrong-type answer is distinguishable from an unknown one)."
+    ],
+    "client": "2f6b0a11-9c4e-4d7a-8f31-5b90c2d47e18",
+    "server": "8d13c7a4-0e52-49bb-9a6c-4f27ed3b90d1"
+  },
+
+  "version": {
+    "note": [
+      "One version GUID marks a compatible release. Bump it when a release can",
+      "no longer join a host built from the previous one, so the rendezvous can",
+      "answer 'version-mismatch' instead of 'unknown' for a suffix that is",
+      "registered under an older build. This is ADVISORY discovery help only:",
+      "the authoritative protocol/content check is the host's own delivery",
+      "stamp handshake (src/delivery/stamp.rs, delivery::check_join_stamp)."
+    ],
+    "guid": "5c0a3e91-7b18-4f26-8d43-9e61af07c25b"
+  },
+
+  "deny": [
+    { "word": "ADMIN", "reason": "misleading: reads as a privileged account rather than a room code" },
+    { "word": "DEBUG", "reason": "misleading: reads as a diagnostic mode" },
+    { "word": "ERROR", "reason": "misleading: a player would read the code itself as a failure" },
+    { "word": "FATAL", "reason": "misleading: reads as a crash report" },
+    { "word": "ABORT", "reason": "misleading: reads as an instruction to stop" },
+    { "word": "RESET", "reason": "misleading: reads as an instruction, not an identifier" },
+    { "word": "LOGIN", "reason": "misleading: implies an account system Phoenix does not have" },
+    { "word": "CRASH", "reason": "misleading: reads as a failure report" },
+    { "word": "EMPTY", "reason": "misleading: reads as 'no code issued'" },
+    { "word": "FALSE", "reason": "misleading: reads as a boolean, not an identifier" },
+    { "word": "STAFF", "reason": "misleading: implies an official/organiser channel" },
+    { "word": "BITCH", "reason": "offensive: profanity" },
+    { "word": "CUNTS", "reason": "offensive: profanity" },
+    { "word": "TWATS", "reason": "offensive: profanity" },
+    { "word": "SHITE", "reason": "offensive: profanity" },
+    { "word": "SHITS", "reason": "offensive: profanity" },
+    { "word": "WANKS", "reason": "offensive: profanity" },
+    { "word": "PISST", "reason": "offensive: profanity" },
+    { "word": "WHORE", "reason": "offensive: slur" },
+    { "word": "SLUTS", "reason": "offensive: slur" },
+    { "word": "PENIS", "reason": "offensive: sexual" },
+    { "word": "PUSSY", "reason": "offensive: sexual" },
+    { "word": "PORNO", "reason": "offensive: sexual" },
+    { "word": "RAPES", "reason": "offensive: sexual violence" },
+    { "word": "RAPED", "reason": "offensive: sexual violence" },
+    { "word": "PEDOS", "reason": "offensive: sexual abuse" },
+    { "word": "NAZIS", "reason": "offensive: hate" },
+    { "word": "KKKKK", "reason": "offensive: hate" },
+    { "word": "COONS", "reason": "offensive: racial slur" },
+    { "word": "CHINK", "reason": "offensive: racial slur" },
+    { "word": "SPICS", "reason": "offensive: racial slur" },
+    { "word": "KIKES", "reason": "offensive: racial slur" },
+    { "word": "NEGRO", "reason": "offensive: racial slur" },
+    { "word": "GYPSY", "reason": "offensive: ethnic slur" },
+    { "word": "DYKES", "reason": "offensive: homophobic slur" },
+    { "word": "FAGOT", "reason": "offensive: homophobic slur" },
+    { "word": "TRANY", "reason": "offensive: transphobic slur" }
+  ]
+}

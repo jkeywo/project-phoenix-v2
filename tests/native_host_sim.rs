@@ -382,7 +382,15 @@ fn a_ship_the_template_cache_does_not_hold_is_refused_rather_than_silently_defau
     // genuinely uncached content must be refused exactly like the canonical
     // spelling — never mistaken, in either direction, for some other key.
     let mut cfg_spelled = solo_config();
-    let spelled_differently = format!("./{}", hull_path.replace('/', "\\"));
+    // `hull_path` is an absolute temp path, and `canonical_template_path`
+    // decides its leading slash BEFORE dropping `.` segments — so a bare
+    // `./`-prefix would strip the root on Unix and canonicalise to a
+    // different key. Keep the root separator so the alternate spelling is
+    // canonically equivalent on both platforms.
+    let spelled_differently = match hull_path.strip_prefix('/') {
+        Some(rest) => format!("/./{}", rest.replace('/', "\\")),
+        None => format!("./{}", hull_path.replace('/', "\\")),
+    };
     cfg_spelled.ship_path = Some(spelled_differently);
     let err_spelled = build_native_host_app(&cfg_spelled, &preload)
         .expect_err("a differently-spelled uncached hull must not silently default either");

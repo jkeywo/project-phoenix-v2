@@ -2712,8 +2712,12 @@ fn combat_test_wave_clock_measures_from_mission_start_not_app_boot() {
          may spawn before the mission starts"
     );
 
-    // Start the mission the way the browser host does: `NextState` written
-    // outside the fixed schedule, applied at the frame-level `StateTransition`.
+    // Start the mission by writing `NextState` from OUTSIDE the fixed
+    // schedule — deliberately exercising the frame-level `StateTransition`
+    // site that bare-`App` fixtures and frame-driven test drivers still
+    // reach. Every production phase writer (bridge force-start, asset
+    // preloader, headless/native auto-start, lobby countdown) has been
+    // fixed-scheduled since #1121's fix round.
     app.world_mut()
         .resource_mut::<NextState<GamePhase>>()
         .set(GamePhase::InProgress);

@@ -149,9 +149,9 @@ pub struct PendingTacticalFrequencyHint(pub Option<f32>);
 ///
 /// Every member is the same shape: the post-lag receiving path lands a consumed
 /// Coordination value in it, and a System one tick later folds that value into
-/// its state. Helm and Tactical are written by their owning receivers from
-/// `DeliveredCoordination`; the legacy Shields slot is still written inside the
-/// lag router pending issue #1258.
+/// its state. Helm, Tactical, and Shields are written by their owning receivers
+/// from `DeliveredCoordination`; the generic lag router does not know their
+/// private pending-state representations.
 /// Each is inserted by hand at
 /// [`PER_SHIP_BUS_SPAWN_SITES`], and a ship that misses one silently cannot
 /// RECEIVE that advisory at all — the consumer writes into a component that is

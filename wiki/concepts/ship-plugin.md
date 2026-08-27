@@ -2,7 +2,7 @@
 title: ShipPlugin
 type: concept
 tags: [ship, helm, physics, coordination, control-source, ai]
-sources: [src/ship_plugin.rs, src/ship/components.rs, src/ship/helm_ai/, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/coordination_systems.rs, src/ship/rating_systems.rs, src/ship/damage_sync.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/core/messages.rs, src/server_app/collision.rs]
+sources: [src/ship_plugin.rs, src/ship/components.rs, src/ship/helm_ai/, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/coordination_systems.rs, src/ship/shields.rs, src/ship/rating_systems.rs, src/ship/damage_sync.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/core/messages.rs, src/server_app/collision.rs]
 updated: 2026-08-27
 ---
 
@@ -31,8 +31,9 @@ the authored Station and live `helm-steering` policy, and owns arc-bearing and
 waypoint-clearance state. Tactical's frequency-hint receiver lives with Weapons;
 Repair's receiver merges AI requests into its severity queue or applies its
 human escalation latch before returning the already-projected popup to the
-shared sequence-ordered outbox flush. Shields
-remains the final private-state consumer in the router pending #1258.
+shared sequence-ordered outbox flush. Shields' receiver verifies its authored
+shield-arc Station and live focus capability before latching a threat bearing.
+The generic router no longer reads any of those domains' private state.
 
 ## Physics ownership
 

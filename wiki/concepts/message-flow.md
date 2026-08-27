@@ -97,6 +97,12 @@ outcome, rechecks the explicit Station and live `helm-steering` policy, then
 preserves exact `NavigateTo` generations and arc geometry. `ArcBearingWithdraw`
 clears the standing request across weapon families in delivered queue order.
 
+Shields owns the AI outcome for `ThreatBearing`.
+`receive_shields_coordination` verifies both the authored shield-arc Station
+and the live authored Shields focus capability before latching the bearing in
+`PendingShieldsThreatBearing` for the following Shields AI decision. The
+generic router no longer reads Shields' private pending state.
+
 Repair owns both outcomes for a `RepairRequest`. An AI delivery retains the
 exact host-internal deficit and merges into `RepairRequestQueue`. A human-popup
 delivery already carries the resolved token, sender label, recipient-projected

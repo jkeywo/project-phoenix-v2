@@ -183,8 +183,8 @@ impl Plugin for ConsoleAiPlugin {
 /// matches-current semantics; no focus held means nothing to emit).
 ///
 /// # Gating
-/// - `ShipSystemControlSources.policy_for(shields_system_id()).operate_ai`
-///   (unchanged from the old `operate_shields_ai` gate).
+/// - the ship authors a `kind = "shields"` focus capability, and that exact
+///   system currently operates AI. Ownerless shield arcs do not create one.
 /// - `AiHighFidelity` (new constraint vs. the old system — query filter).
 ///   Low-LOD NPCs no longer run shield-focus AI; they retain whatever focus
 ///   they last had when demoted.
@@ -259,6 +259,15 @@ pub(crate) fn ai_shield_focus(
         mut admitted,
     ) in ships.iter_mut()
     {
+        let Some(ship_config) = ship_config else {
+            continue;
+        };
+        let Some(shields_focus_system) =
+            crate::ship::shields::ai_operated_shields_focus_system(control_sources, &ship_config.0)
+        else {
+            continue;
+        };
+
         // Emit `Focus(idx)`: admitted `focused: true` at that arc's SystemId.
         // Arcs with an empty authored id have no fine SystemId and cannot be
         // addressed (they never occur in authored content — `ShieldSystem`
@@ -279,17 +288,10 @@ pub(crate) fn ai_shield_focus(
                 sid,
                 crate::core::messages::SystemControlPayload::SetShieldArcFocus { focused: true },
                 control_sources,
-                ship_config,
+                Some(ship_config),
                 admitted,
             );
         };
-
-        let policy = control_sources
-            .0
-            .policy_for(&crate::ship::system_registry::shields_system_id());
-        if !policy.operate_ai {
-            continue;
-        }
 
         // Safety guard: skip a ship the world snapshot already reports as
         // destroyed this tick (the hull-integrity broadcast may lag by one
@@ -433,7 +435,7 @@ pub(crate) fn ai_shield_focus(
         // spine cannot see — `decide` re-confirms both (a no-op here, since we
         // only reach it AI-operated and declared) and owns the resolution.
         let tick = crate::ai::host::HostTick {
-            system: crate::ship::system_registry::shields_system_id(),
+            system: shields_focus_system.clone(),
             channel: crate::entities::config::SHIELD_FOCUS_CHANNEL,
             facts: &facts,
             flags: &flag_chain,
@@ -486,7 +488,7 @@ pub(crate) fn ai_shield_focus(
                             focused: false,
                         },
                         control_sources,
-                        ship_config,
+                        Some(ship_config),
                         &mut admitted,
                     );
                 }

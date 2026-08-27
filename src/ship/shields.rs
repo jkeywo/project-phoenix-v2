@@ -6,15 +6,48 @@ use crate::core::messages::{
     AdmittedCommands, CoordinationPayload, ShieldArcBlackboard, ShieldFacingStatus,
     ShieldsBlackboard, SystemBlackboard, SystemControlPayload, SystemId,
 };
-use crate::ship_plugin::CoordinationEnqueue;
+use crate::ship_plugin::{
+    CoordinationDelivery, CoordinationEnqueue, DeliveredCoordination, ShipConfigComponent,
+    ShipSystemControlSources,
+};
 
 /// Pending Sensors->Shields threat bearing, delivered via the channel-3
-/// coordination bus (issue #683). Set by `process_coordination_lag` when a
-/// `CoordinationPayload::ThreatBearing` is consumed by an AI-controlled
-/// Shields; read by `console_ai::server::ai_shield_focus` to bias facing
-/// toward the threat.
+/// coordination bus (issue #683). Set by [`receive_shields_coordination`] after
+/// the generic lag router delivers a `CoordinationPayload::ThreatBearing` to
+/// AI-controlled Shields; read by `console_ai::server::ai_shield_focus` to bias
+/// facing toward the threat.
 #[derive(Component, Clone, Debug, Default)]
 pub struct PendingShieldsThreatBearing(pub Option<f32>);
+
+/// Resolve the AI-operated System that owns this ship's Shields focus decision.
+///
+/// The capability exists only when the hull authors a `kind = "shields"`
+/// system (the shipped id happens to be `shields-system`) and that exact system
+/// currently operates AI. Ownerless `shield_arc` systems do not imply the
+/// higher-level focus capability. The legacy aggregate blackboard id `shields`
+/// is deliberately not a control-source key.
+pub(crate) fn ai_operated_shields_focus_system<'a>(
+    control_sources: &ShipSystemControlSources,
+    ship_config: &'a crate::ship::config::ShipConfig,
+) -> Option<&'a SystemId> {
+    let system = ship_config
+        .systems
+        .iter()
+        .find(|system| system.kind == crate::ship::system_registry::SHIELDS_KIND)?;
+
+    control_sources
+        .0
+        .policy_for(&system.id)
+        .operate_ai
+        .then_some(&system.id)
+}
+
+pub(crate) fn shields_focus_operates_ai(
+    control_sources: &ShipSystemControlSources,
+    ship_config: &crate::ship::config::ShipConfig,
+) -> bool {
+    ai_operated_shields_focus_system(control_sources, ship_config).is_some()
+}
 
 // `ShieldArcCmd` / `ShieldArcIntents` (issue #692's decide/apply transport)
 // were retired by issue #826: `console_ai::server::ai_shield_focus` now emits
@@ -212,6 +245,7 @@ impl Plugin for ShipShieldsPlugin {
             "shield-arc-",
         ));
         app.add_message::<CoordinationEnqueue>()
+            .add_message::<DeliveredCoordination>()
             .init_resource::<ShieldsAiConfigResource>()
             .add_systems(
                 FixedUpdate,
@@ -240,10 +274,59 @@ impl Plugin for ShipShieldsPlugin {
                     tick_shields
                         .in_set(crate::sim_sets::SimSet::Modifiers)
                         .after(crate::modifiers::coordination::translate_power_modifiers),
+                    receive_shields_coordination
+                        .in_set(crate::sim_sets::SimSet::Modifiers)
+                        .after(crate::ship_plugin::process_coordination_lag),
                     publish_shields_blackboard.in_set(crate::sim_sets::SimSet::Publish),
                 ),
             )
             .add_plugins(shields_state_broadcaster());
+    }
+}
+
+/// Shields-owned receiver for delayed Coordination deliveries (issue #1258).
+///
+/// The generic lag router owns the delay and the live Station routing decision;
+/// it emits [`DeliveredCoordination`] only for a Station that resolves to AI.
+/// This receiver owns the Shields-domain consequence: a typed
+/// [`CoordinationPayload::ThreatBearing`] is latched for the next Shields AI
+/// decision. The resolved AI outcome, explicit address, and live authored
+/// Shields capability policy are checked again so a malformed handoff, or an
+/// ownership change at the receiving seam, cannot write Shields' private
+/// pending state.
+pub(crate) fn receive_shields_coordination(
+    mut delivered: MessageReader<DeliveredCoordination>,
+    mut ships: Query<
+        (
+            &mut PendingShieldsThreatBearing,
+            &ShipSystemControlSources,
+            &ShipConfigComponent,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for message in delivered.read() {
+        if message.delivery != CoordinationDelivery::Ai {
+            continue;
+        }
+        let Ok((mut pending, control_sources, ship_config)) = ships.get_mut(message.source_entity)
+        else {
+            continue;
+        };
+        let Some(shields_address) = crate::ship::coordination::address_for_system_kind(
+            &ship_config.0,
+            crate::ship::system_registry::SHIELD_ARC_KIND,
+        ) else {
+            continue;
+        };
+        if message.address != shields_address
+            || !shields_focus_operates_ai(control_sources, &ship_config.0)
+        {
+            continue;
+        }
+        if let CoordinationPayload::ThreatBearing { bearing_rad, .. } = &message.payload {
+            pending.0 = Some(*bearing_rad);
+        }
     }
 }
 
@@ -753,8 +836,9 @@ fn publish_shields_blackboard(
 // with the ship's own `ai:<uuid>` token, and `handle_shields_messages` above
 // applies them — the single truth-integration point for human and AI alike.
 // `ShieldsDamageHistory`, `ShieldsAiConfigResource`, and
-// `PendingShieldsThreatBearing` remain here since they're shield-domain state
-// read/written by the decide system.
+// `PendingShieldsThreatBearing` remains here since it is shield-domain state:
+// the Shields-owned coordination receiver writes it and the decide system
+// consumes it.
 
 /// Angular distance (degrees) between two angles on a circle, always in [0, 180].
 pub(crate) fn angular_distance_deg(a: f32, b: f32) -> f32 {

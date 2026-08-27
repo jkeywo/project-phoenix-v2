@@ -446,6 +446,34 @@ pub fn get_ship_active_ratings(app: &mut App) -> ActiveStationRatings {
         .clone()
 }
 
+/// Add the shield-arc fine Systems that `EntityConfig::from_toml` synthesises
+/// from a real hull's `[[shield_arc]]` blocks to the lightweight default ship
+/// fixture. `ShipConfigComponent::default()` predates that parse-time step, so
+/// a Coordination test that resolves the Station owning `shield_arc` must add
+/// the same topology explicitly rather than inventing a literal destination.
+pub fn add_default_shield_arc_systems(config: &mut crate::ship::config::ShipConfig) {
+    if config
+        .systems
+        .iter()
+        .any(|system| system.kind == crate::ship::system_registry::SHIELD_ARC_KIND)
+    {
+        return;
+    }
+    let prototype = config
+        .systems
+        .iter()
+        .find(|system| system.kind == crate::ship::system_registry::SHIELDS_KIND)
+        .expect("default ship fixture carries shields-system")
+        .clone();
+    for facing in crate::weapons::shield::ShieldSystem::default().facings {
+        let mut system = prototype.clone();
+        system.id = crate::ship::system_registry::shield_arc_system_id(&facing.id)
+            .expect("default shield facing has a non-empty id");
+        system.kind = crate::ship::system_registry::SHIELD_ARC_KIND.into();
+        config.systems.push(system);
+    }
+}
+
 // ── Helm system control-source tests ───────────────────────────────────
 
 pub fn get_ship_impulse(app: &mut App) -> crate::ship::impulse::ImpulseState {

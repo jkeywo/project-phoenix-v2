@@ -929,6 +929,231 @@ fn tactical_receiver_consumes_a_delivered_frequency_hint_without_router_state_mu
     );
 }
 
+// ── Issue #1258: Shields owns its delivered threat bearing ──────────────
+
+fn shields_address(app: &mut App) -> CoordinationAddress {
+    let ship = find_ship_entity(app);
+    crate::ship::coordination::address_for_system_kind(
+        &app.world()
+            .get::<ShipConfigComponent>(ship)
+            .expect("fixture carries authored topology")
+            .0,
+        crate::ship::system_registry::SHIELD_ARC_KIND,
+    )
+    .expect("default player hull has a Station that owns its shield arcs")
+}
+
+fn give_ship_shields_coordination_topology(app: &mut App) {
+    let ship = find_ship_entity(app);
+    let mut config = app
+        .world_mut()
+        .get_mut::<ShipConfigComponent>(ship)
+        .expect("fixture carries ship config");
+    crate::ship::test_support::add_default_shield_arc_systems(&mut config.0);
+}
+
+fn set_shields_station_control(app: &mut App, source: ControlSource) {
+    let ship = find_ship_entity(app);
+    let CoordinationAddress::Station(station) = shields_address(app) else {
+        unreachable!("Shields address helper always returns a Station")
+    };
+    let systems: Vec<_> = app
+        .world()
+        .get::<ShipConfigComponent>(ship)
+        .unwrap()
+        .0
+        .systems_for_station(&station)
+        .map(|system| system.id.clone())
+        .collect();
+    let mut control = app
+        .world_mut()
+        .get_mut::<ShipSystemControlSources>(ship)
+        .unwrap();
+    for system in systems {
+        if source == ControlSource::Offline {
+            control.0.set_offline(system, true);
+        } else {
+            control.0.set_offline(system.clone(), false);
+            control.0.set(system, source);
+        }
+    }
+}
+
+fn add_shields_coordination_receiver(app: &mut App) {
+    let ship = find_ship_entity(app);
+    app.world_mut()
+        .entity_mut(ship)
+        .insert(crate::ship::shields::PendingShieldsThreatBearing::default());
+    app.init_resource::<DeliveredCoordinationBox>().add_systems(
+        FixedUpdate,
+        (
+            crate::ship::shields::receive_shields_coordination
+                .in_set(crate::sim_sets::SimSet::Modifiers)
+                .after(process_coordination_lag),
+            collect_delivered_coordination
+                .in_set(crate::sim_sets::SimSet::Modifiers)
+                .after(process_coordination_lag),
+        ),
+    );
+}
+
+fn seat_human_on_shields(app: &mut App) {
+    push(
+        app,
+        "shields",
+        ClientMessage::Identify {
+            token: "shields".into(),
+            name: "Shields Tester".into(),
+        },
+    );
+    tick(app);
+    push(
+        app,
+        "shields",
+        ClientMessage::SelectStation {
+            station: "Shields".into(),
+        },
+    );
+    tick(app);
+    assert_eq!(
+        app.world()
+            .resource::<Sessions>()
+            .0
+            .holder_for_station(&StationId("shields".into())),
+        Some("shields"),
+        "fixture must put a connected human at Shields"
+    );
+}
+
+fn delivered_threat_bearings(app: &App) -> usize {
+    app.world()
+        .resource::<DeliveredCoordinationBox>()
+        .0
+        .iter()
+        .filter(|message| matches!(&message.payload, CoordinationPayload::ThreatBearing { .. }))
+        .count()
+}
+
+#[test]
+fn human_sensors_threat_bearing_reaches_backfilled_shields_owned_receiver() {
+    let mut app = routing_test_app();
+    give_ship_shields_coordination_topology(&mut app);
+    start_game_with_sensors_officer(&mut app);
+    set_shields_station_control(&mut app, ControlSource::Ai);
+    add_shields_coordination_receiver(&mut app);
+    let ship = find_ship_entity(&mut app);
+    assert!(
+        crate::ship::shields::shields_focus_operates_ai(
+            &get_ship_control_sources(&mut app),
+            &app.world()
+                .get::<ShipConfigComponent>(ship)
+                .expect("fixture carries authored topology")
+                .0,
+        ),
+        "unmanned Shields must be backfilled before the advisory is sent"
+    );
+    let address = shields_address(&mut app);
+
+    enqueue_coordination(
+        &mut app,
+        ControlSource::Human,
+        address,
+        CoordinationPayload::ThreatBearing {
+            bearing_rad: 1.25,
+            label: "test.threat".into(),
+        },
+    );
+    tick(&mut app);
+
+    assert_eq!(delivered_threat_bearings(&app), 1);
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::shields::PendingShieldsThreatBearing>(ship)
+            .expect("fixture carries Shields' receiving slot")
+            .0,
+        Some(1.25),
+        "the generic router hands off the typed value; Shields owns the state mutation"
+    );
+    assert_eq!(coordination_popups(&app), 0);
+}
+
+#[test]
+fn human_shields_threat_bearing_still_gets_a_popup_not_an_ai_delivery() {
+    let mut app = routing_test_app();
+    give_ship_shields_coordination_topology(&mut app);
+    start_game_with_sensors_officer(&mut app);
+    seat_human_on_shields(&mut app);
+    set_shields_station_control(&mut app, ControlSource::Human);
+    add_shields_coordination_receiver(&mut app);
+    let ship = find_ship_entity(&mut app);
+    let popups_before = coordination_popups(&app);
+    let address = shields_address(&mut app);
+
+    enqueue_coordination(
+        &mut app,
+        ControlSource::Ai,
+        address,
+        CoordinationPayload::ThreatBearing {
+            bearing_rad: 2.5,
+            label: "test.threat".into(),
+        },
+    );
+    tick(&mut app);
+
+    assert_eq!(coordination_popups(&app), popups_before + 1);
+    assert_eq!(delivered_threat_bearings(&app), 0);
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::shields::PendingShieldsThreatBearing>(ship)
+            .unwrap()
+            .0,
+        None,
+        "a human recipient must not mutate Shields' AI inbox"
+    );
+}
+
+#[test]
+fn offline_shields_threat_bearing_still_consumes_without_popup_or_ai_delivery() {
+    let mut app = routing_test_app();
+    give_ship_shields_coordination_topology(&mut app);
+    let ship = find_ship_entity(&mut app);
+    let CoordinationAddress::Station(station) = shields_address(&mut app) else {
+        unreachable!("Shields address helper always returns a Station")
+    };
+    let owned: Vec<_> = app
+        .world()
+        .get::<ShipConfigComponent>(ship)
+        .unwrap()
+        .0
+        .systems_for_station(&station)
+        .map(|system| system.id.clone())
+        .collect();
+    assert!(!owned.is_empty(), "fixture Shields Station owns Systems");
+    set_shields_station_control(&mut app, ControlSource::Offline);
+    add_shields_coordination_receiver(&mut app);
+
+    enqueue_coordination(
+        &mut app,
+        ControlSource::Ai,
+        CoordinationAddress::Station(station),
+        CoordinationPayload::ThreatBearing {
+            bearing_rad: 3.0,
+            label: "test.threat".into(),
+        },
+    );
+    tick(&mut app);
+
+    assert_eq!(coordination_popups(&app), 0);
+    assert_eq!(delivered_threat_bearings(&app), 0);
+    assert_eq!(
+        app.world()
+            .get::<crate::ship::shields::PendingShieldsThreatBearing>(ship)
+            .unwrap()
+            .0,
+        None
+    );
+}
+
 /// AC5, end to end in ONE app. A human sits at Sensors; Tactical is unmanned
 /// and backfilled to AI. The ship's own Sensors emitter derives a frequency
 /// advisory from authoritative state, the bus routes it, and the AI running

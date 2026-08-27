@@ -7,7 +7,9 @@ use crate::ship::shields::{
     PendingShieldsThreatBearing, ShieldsAiConfigResource, ShieldsDamageHistory,
     ShieldsFocusAiPolicy, ShipShields,
 };
-use crate::ship_plugin::{CoordinationEnqueue, ShipSystemControlSources};
+use crate::ship_plugin::{
+    CoordinationEnqueue, DeliveredCoordination, ShipConfigComponent, ShipSystemControlSources,
+};
 
 #[derive(Resource, Default)]
 struct CoordBox(Vec<CoordinationEnqueue>);
@@ -31,6 +33,9 @@ fn shield_test_app() -> App {
         offline_duration: 10.0,
     };
     let mut app = App::new();
+    let mut ship_config = ShipConfigComponent::default();
+    crate::ship::test_support::add_default_shield_arc_systems(&mut ship_config.0);
+    let control_sources = ai_shield_control_sources(&ship_config.0);
     crate::ai::host::register_ai_host_env(&mut app);
     app.add_plugins(bevy::time::TimePlugin)
         .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
@@ -43,11 +48,14 @@ fn shield_test_app() -> App {
             crate::lobby::session::SessionManager::new(),
         ))
         .add_message::<CoordinationEnqueue>()
+        .add_message::<DeliveredCoordination>()
         .add_systems(
             Update,
             (
                 ai_shield_focus.before(crate::ship::shields::handle_shields_messages),
                 crate::ship::shields::handle_shields_messages,
+                crate::ship::shields::receive_shields_coordination
+                    .after(crate::ship::shields::handle_shields_messages),
             ),
         )
         .add_systems(PostUpdate, collect_coord);
@@ -57,7 +65,8 @@ fn shield_test_app() -> App {
         ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
         ShieldsDamageHistory::default(),
         PendingShieldsThreatBearing::default(),
-        ai_shield_control_sources(),
+        control_sources,
+        ship_config,
         AdmittedCommands::default(),
         AiHighFidelity,
         default_focus_policy(),
@@ -78,22 +87,21 @@ fn clear_admitted_each_tick(mut q: Query<&mut AdmittedCommands>) {
     }
 }
 
-/// Coarse shields system (the decide gate) + every synthesised
-/// `shield-arc-<id>` fine system (the admission gate) set to Ai —
-/// matching how the entity spawner rosters an NPC's systems (arcs are
-/// synthesised into `ShipConfig.systems`, so the all-Ai loop covers
-/// them in production).
-fn ai_shield_control_sources() -> ShipSystemControlSources {
+/// The authored Shields capability (the focus-decision gate) + every
+/// synthesised `shield_arc` fine system (the admission gates) set to AI,
+/// matching the entity spawner's Backfill roster without inventing system ids.
+fn ai_shield_control_sources(
+    ship_config: &crate::ship::config::ShipConfig,
+) -> ShipSystemControlSources {
     let mut control_sources = ShipSystemControlSources::default();
-    control_sources.0.set(
-        crate::ship::system_registry::shields_system_id(),
-        ControlSource::Ai,
-    );
-    for arc_id in ["fore", "port", "aft", "starboard"] {
-        control_sources.0.set(
-            crate::ship::system_registry::shield_arc_system_id(arc_id).expect("arc id"),
-            ControlSource::Ai,
-        );
+    for system in ship_config.systems.iter().filter(|system| {
+        matches!(
+            system.kind.as_str(),
+            crate::ship::system_registry::SHIELDS_KIND
+                | crate::ship::system_registry::SHIELD_ARC_KIND
+        )
+    }) {
+        control_sources.0.set(system.id.clone(), ControlSource::Ai);
     }
     control_sources
 }
@@ -267,6 +275,13 @@ fn ai_emitted_focus_applies_to_npc_own_ship_shields_only() {
         regen_per_sec: 0.0,
         offline_duration: 10.0,
     };
+    let ship_config = app
+        .world()
+        .entity(a)
+        .get::<ShipConfigComponent>()
+        .expect("base shield fixture carries authored topology")
+        .clone();
+    let control_sources = ai_shield_control_sources(&ship_config.0);
     let b = app
         .world_mut()
         .spawn((
@@ -274,7 +289,8 @@ fn ai_emitted_focus_applies_to_npc_own_ship_shields_only() {
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             ShieldsDamageHistory::default(),
             PendingShieldsThreatBearing::default(),
-            ai_shield_control_sources(),
+            control_sources,
+            ship_config,
             AdmittedCommands::default(),
             AiHighFidelity,
             default_focus_policy(),
@@ -319,6 +335,13 @@ fn shield_ai_reads_its_own_policy_params_per_entity() {
         regen_per_sec: 0.0,
         offline_duration: 10.0,
     };
+    let ship_config = app
+        .world()
+        .entity(defaulted)
+        .get::<ShipConfigComponent>()
+        .expect("base shield fixture carries authored topology")
+        .clone();
+    let control_sources = ai_shield_control_sources(&ship_config.0);
     // A second ship carrying the permissive tuning as its own policy param.
     let tuned = app
         .world_mut()
@@ -327,7 +350,8 @@ fn shield_ai_reads_its_own_policy_params_per_entity() {
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             ShieldsDamageHistory::default(),
             PendingShieldsThreatBearing::default(),
-            ai_shield_control_sources(),
+            control_sources,
+            ship_config,
             AdmittedCommands::default(),
             AiHighFidelity,
             focus_policy_with_health_ratio(90.0),
@@ -589,15 +613,24 @@ fn ai_shield_focus_ignores_focus_decay_as_incoming_damage() {
 fn ai_shield_focus_skips_ships_where_shields_are_not_ai_operated() {
     let mut app = shield_test_app();
     let e = ship_entity(&mut app);
+    let shields_system_id = app
+        .world()
+        .entity(e)
+        .get::<ShipConfigComponent>()
+        .expect("fixture carries authored topology")
+        .0
+        .systems
+        .iter()
+        .find(|system| system.kind == crate::ship::system_registry::SHIELDS_KIND)
+        .expect("fixture carries the authored Shields capability")
+        .id
+        .clone();
     app.world_mut()
         .entity_mut(e)
         .get_mut::<ShipSystemControlSources>()
         .unwrap()
         .0
-        .set(
-            crate::ship::system_registry::shields_system_id(),
-            ControlSource::Human,
-        );
+        .set(shields_system_id, ControlSource::Human);
 
     app.update();
     {
@@ -618,18 +651,51 @@ fn ai_shield_focus_skips_ships_where_shields_are_not_ai_operated() {
 fn ai_shield_focus_threat_bearing_override_focuses_closest_facing_via_admission() {
     let mut app = shield_test_app();
     let e = ship_entity(&mut app);
+    let address = crate::ship::coordination::address_for_system_kind(
+        &app.world()
+            .entity(e)
+            .get::<ShipConfigComponent>()
+            .expect("fixture carries the authored ship topology")
+            .0,
+        crate::ship::system_registry::SHIELD_ARC_KIND,
+    )
+    .expect("default player hull has a Station that owns its shield arcs");
     app.world_mut()
-        .entity_mut(e)
-        .get_mut::<PendingShieldsThreatBearing>()
-        .unwrap()
-        .0 = Some(90_f32.to_radians());
+        .resource_mut::<Messages<DeliveredCoordination>>()
+        .write(DeliveredCoordination {
+            source_entity: e,
+            address,
+            payload: CoordinationPayload::ThreatBearing {
+                bearing_rad: 90_f32.to_radians(),
+                label: "test.threat.starboard".into(),
+            },
+            presentation: crate::core::messages::CoordinationPresentation::new(
+                "test.coordination.title",
+                "test.coordination.body",
+            ),
+            delivery: crate::ship::components::CoordinationDelivery::Ai,
+        });
 
+    // Production delivers in Modifiers, after the Shields AI's Physics pass.
+    // This fixture preserves that order explicitly: update one lands the typed
+    // handoff in the Shields-owned slot; update two consumes it through the
+    // admitted-command path.
+    app.update();
+    assert_eq!(
+        app.world()
+            .entity(e)
+            .get::<PendingShieldsThreatBearing>()
+            .unwrap()
+            .0,
+        Some(90_f32.to_radians()),
+        "Shields' receiver must preserve the typed bearing for the next decision"
+    );
     app.update();
 
-    let focused = focused_facing(&app, e);
-    assert!(
-        focused.is_some(),
-        "threat-bearing override must focus a facing via the admitted-command path"
+    assert_eq!(
+        focused_facing(&app, e),
+        Some(3),
+        "a 90-degree bearing must focus the authored Starboard facing via the admitted-command path"
     );
 
     // The override takes priority over damage analysis and must consume

@@ -458,7 +458,6 @@ pub(crate) fn process_coordination_lag(
             &ShipConfigComponent,
             &ShipSystemControlSources,
             &mut CoordinationQueue,
-            Option<&mut crate::ship::shields::PendingShieldsThreatBearing>,
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::console::repair::server::ShipRepairTeams>,
             Has<LocalShip>,
@@ -478,17 +477,12 @@ pub(crate) fn process_coordination_lag(
         ship_config,
         control_sources,
         mut queue,
-        mut pending_shields_threat,
         entity_hull,
         entity_teams,
         is_local,
     ) in ship_components.iter_mut()
     {
         let repair_address = coordination::address_for_system(&ship_config.0, &repair_id);
-        let shields_address = coordination::address_for_system_kind(
-            &ship_config.0,
-            crate::ship::system_registry::SHIELD_ARC_KIND,
-        );
         let repair_vis = entity_hull.map(|hull| {
             crate::console::repair::visibility::ship_hull_visibility(
                 &hull.0,
@@ -564,18 +558,9 @@ pub(crate) fn process_coordination_lag(
                         });
                     }
 
-                    // Shields remains a legacy consumer until issue #1258.
-                    // Helm, Tactical, and Repair are absent from this router:
-                    // their owning receivers consume the typed handoff above.
-                    if target_policy.operate_ai && shields_address.as_ref() == Some(&msg.address) {
-                        if let CoordinationPayload::ThreatBearing { bearing_rad, .. } = &msg.payload
-                        {
-                            if let Some(pending) = pending_shields_threat.as_deref_mut() {
-                                pending.0 = Some(*bearing_rad);
-                            }
-                        }
-                    }
-
+                    // Typed behavior belongs to each receiving domain. The
+                    // generic router emits the delivery and never reads or
+                    // writes Helm, Tactical, Repair, or Shields private state.
                     if is_local && msg.sender_origin == ControlSource::Ai {
                         let from_label = if msg.sender_label.is_empty() {
                             coordination::CHATTER_SENDER_AI.to_string()

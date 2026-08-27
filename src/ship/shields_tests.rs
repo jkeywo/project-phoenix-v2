@@ -33,6 +33,104 @@ fn collect_coord(
     }
 }
 
+#[test]
+fn generic_coordination_router_does_not_name_shields_pending_state() {
+    let router = include_str!("coordination_systems.rs");
+    assert!(
+        !router.contains("PendingShieldsThreatBearing")
+            && !router.contains("pending_shields_threat"),
+        "the generic lag router must hand off DeliveredCoordination without knowing Shields' private pending-state representation"
+    );
+}
+
+#[test]
+fn ownerless_npc_shield_arc_does_not_create_focus_capability() {
+    let config = crate::ship::config::ShipConfig::from_toml(
+        r#"
+[[system]]
+id = "shield-arc-fore"
+kind = "shield_arc"
+ai_only = true
+"#,
+        &[crate::ship::system_registry::SHIELD_ARC_KIND],
+    )
+    .expect("ownerless AI-only shield arc is valid NPC topology");
+    let arc = SystemId("shield-arc-fore".into());
+    let mut sources = crate::ship_plugin::ShipSystemControlSources::default();
+    sources.0.set(arc.clone(), ControlSource::Ai);
+
+    assert_eq!(
+        super::ai_operated_shields_focus_system(&sources, &config),
+        None,
+        "an ownerless shield arc must not imply an authored Shields focus capability"
+    );
+}
+
+#[test]
+fn human_popup_threat_bearing_cannot_latch_the_ai_inbox() {
+    let mut ship_config = ShipConfigComponent::default();
+    crate::ship::test_support::add_default_shield_arc_systems(&mut ship_config.0);
+    let shields_address = crate::ship::coordination::address_for_system_kind(
+        &ship_config.0,
+        crate::ship::system_registry::SHIELD_ARC_KIND,
+    )
+    .expect("default fixture authors a Station for its shield arcs");
+    let shields_system = ship_config
+        .0
+        .systems
+        .iter()
+        .find(|system| system.kind == crate::ship::system_registry::SHIELDS_KIND)
+        .expect("default fixture carries the authored Shields capability")
+        .id
+        .clone();
+    let mut control_sources = ShipSystemControlSources::default();
+    control_sources.0.set(shields_system, ControlSource::Ai);
+
+    let mut app = App::new();
+    app.add_message::<DeliveredCoordination>()
+        .add_systems(Update, receive_shields_coordination);
+    let ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            PendingShieldsThreatBearing::default(),
+            control_sources,
+            ship_config,
+        ))
+        .id();
+    app.world_mut()
+        .resource_mut::<Messages<DeliveredCoordination>>()
+        .write(DeliveredCoordination {
+            source_entity: ship,
+            address: shields_address,
+            payload: CoordinationPayload::ThreatBearing {
+                bearing_rad: 1.25,
+                label: "test.threat".into(),
+            },
+            presentation: CoordinationPresentation::new(
+                "test.coordination.title",
+                "test.coordination.body",
+            ),
+            delivery: CoordinationDelivery::HumanPopup {
+                token: "test-token".into(),
+                sender_label: "test-sender".into(),
+                order: 0,
+            },
+        });
+
+    app.update();
+
+    assert_eq!(
+        app.world()
+            .entity(ship)
+            .get::<PendingShieldsThreatBearing>()
+            .expect("fixture carries the Shields-owned inbox")
+            .0,
+        None,
+        "an AI-only receiver must reject a human-popup delivery outcome"
+    );
+}
+
 /// **`tick_shields` regenerates at the ship's own `ModifierSlot::ShieldRegen`**
 /// (issue #952) — the wire from the `shields` power group to the screens.
 ///

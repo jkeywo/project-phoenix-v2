@@ -87,12 +87,19 @@ export async function readHostJoinTarget(serverPage) {
  * This is the single PeerJS-shaped chunk of the client-connect path: `new
  * window.Peer()`, `peer.connect(joinTarget)`, the reliable
  * `DataConnection`'s `on('open'|'data')`, and sending the initial `Identify`.
- * It also defines the page-side contract — `window.__messages` (the inbound
- * message log) and `window.__conn` (the reliable connection) — that the
- * three PeerJS-API-shaped specs (`shim.spec.js`, `snapshot-channel.spec.js`,
- * `reconnect-midgame-sever.spec.js`) still reach into directly from their own
- * `page.evaluate` calls; rewriting those three as behaviour tests against
- * the replacement transport is #1112's job, not this module's.
+ * It also defines the page-side contract that specs reach into directly from
+ * their own `page.evaluate` calls, BYPASSING the exported façade — and that
+ * blast radius is large, not small: `window.__messages` (the inbound message
+ * log) is read/filtered/mutated directly by ~29 spec files, and
+ * `window.__conn`'s API is used raw by two (`snapshot-channel.spec.js`
+ * touches `conn.peerConnection.createDataChannel`, genuine PeerJS/WebRTC
+ * internals; `tactical-fire-flow.spec.js` calls `window.__conn.send`).
+ * Separately, `shim.spec.js` constructs `window.Peer` itself and
+ * `reconnect-midgame-sever.spec.js` drives `window.__peerjsShim.sever/revive`
+ * plus production `window.connectionManager`. #1112 must therefore preserve
+ * the page-global contract's names/shape/timing exactly (or edit those specs)
+ * — keeping the exported `createTestClient`/`readHostPeerId` façade stable is
+ * necessary but not sufficient.
  *
  * @param {import('@playwright/test').Page} page
  * @param {string} joinTarget

@@ -2579,7 +2579,7 @@
     // the console being active, except Stations projected from the
     // unconditional Console Families in dirty-consoles.js
     // (captain — its push was always unconditional).
-    function pushDirtyConsoles(msg) {
+    function pushDirtyConsoles(msg, changes) {
       // Boot race: the module scripts may not have executed yet — drop the
       // fan-out; pushes are idempotent snapshots and the next message repeats
       // them (same tolerance as _pushIframe / pushConsoleStateFor).
@@ -2592,6 +2592,7 @@
         : new Set();
       for (const name of window.dirtyConsolesFor(
         msg,
+        changes,
         stationSystems,
         systemConsoleFamilies,
         blackboardConsoleFamilies,
@@ -2837,9 +2838,13 @@
       // to the pure state modules first. window.simState is the ONLY sim
       // store (issue #819): the console builders read it directly. Guards
       // cover the brief window before the module scripts have executed.
-      if (window.lobbyState)      window.lobbyState.apply(msg);
-      if (window.simState)        window.simState.apply(msg);
-      if (window.commsState)      window.commsState.apply(msg);
+      const reducerResults = [];
+      if (window.lobbyState) reducerResults.push(window.lobbyState.apply(msg));
+      if (window.simState) reducerResults.push(window.simState.apply(msg));
+      if (window.commsState) reducerResults.push(window.commsState.apply(msg));
+      const changes = typeof window.mergeReducerResults === 'function'
+        ? window.mergeReducerResults(...reducerResults)
+        : reducerResults.find(Boolean);
       // The QR-first ScenarioCatalog message (issue #755) is not part of the
       // client-router case table, so force a render to (re)draw the picker.
       if (msg && msg.type === 'ScenarioCatalog') { settleScenarioPick(); scheduleRender(); }
@@ -2853,7 +2858,7 @@
       // above so every push carries fresh data. On Welcome the consoles are
       // (re)mounted AFTER this fan-out — that is fine: each iframe's load
       // listener re-pushes its snapshot once it actually loads.
-      pushDirtyConsoles(msg);
+      pushDirtyConsoles(msg, changes);
       // Per-case routing is pure and lives in gui/client-router.js (issue
       // #827): it applies the uiState mutations and hands back a side-effect
       // plan for the DOM glue below. Boot race: modules run before

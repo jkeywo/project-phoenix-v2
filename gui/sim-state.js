@@ -14,6 +14,11 @@
  * DOM-free; exposed on `window` as `window.simState` (singleton).
  */
 
+import {
+  CHANGE_DOMAINS,
+  emptyReducerResult,
+} from './reducer-result.js';
+
 // ── Radar-range constants (mirror src/radar.rs) ─────────────────────────────
 
 export const HELM_RADAR_RANGE = 250.0;
@@ -278,10 +283,13 @@ export class ClientSimState {
 
   /**
    * Apply a single inbound ServerMessage `{ type, data }`.
-   * Mirrors `ClientSimState::apply`.
+   * Mirrors `ClientSimState::apply` and returns the semantic keys/domains this
+   * reducer changed. Presentation routing consumes that result after the fold;
+   * it does not decode the ServerMessage payload a second time.
    */
   apply(msg) {
-    if (!msg || !msg.type) return;
+    const changes = emptyReducerResult();
+    if (!msg || !msg.type) return changes;
     const d = msg.data || {};
     switch (msg.type) {
       case 'SystemHullUpdate':
@@ -546,6 +554,13 @@ export class ClientSimState {
           if (bb && bb.kind && bb.data) {
             this.blackboards[systemId] = bb.data;
             this.blackboardKinds[systemId] = bb.kind;
+            changes.changedBlackboards.add(systemId);
+            // Human-seeking hosting is a ship-wide semantic change. Report it
+            // here, where the tagged Blackboard payload is understood, rather
+            // than making dirty-console routing inspect that payload again.
+            if (Object.prototype.hasOwnProperty.call(bb.data, 'host_station')) {
+              changes.changedDomains.add(CHANGE_DOMAINS.STATION_HOSTING);
+            }
             // The navigation blackboard is the freshest source for the shared
             // waypoint (SimState only carries it at 10 Hz) — mirror it, as
             // client.html's deleted BlackboardUpdate handler used to (#819).
@@ -558,6 +573,7 @@ export class ClientSimState {
       default:
         break;
     }
+    return changes;
   }
 
   /**

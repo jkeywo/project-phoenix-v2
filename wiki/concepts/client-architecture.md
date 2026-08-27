@@ -2,7 +2,7 @@
 title: Client Architecture
 type: concept
 tags: [client, javascript, iframe, console, console-family, state, accessibility, keyboard, vitest]
-sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, gui/iframe-bridge.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
+sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/reducer-result.js, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, gui/iframe-bridge.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, src/core/messages.rs, src/ship/system_registry.rs, src/dock/server.rs, src/entities/spawner.rs, src/lobby/server.rs, tests/client/]
 updated: 2026-08-27
 ---
 
@@ -15,16 +15,18 @@ The client (`client.html`) is **pure HTML/CSS/JS — no WASM or Bevy**. It conne
 ```
 PeerJS message (JSON)
   → client.html handleMessage()
-  → gui/client-router.js route(msg)       # pure per-message driver: uiState mutation + side-effect plan
-  → gui/sim-state.js apply(msg)           # folds ServerMessage into the single simState store
-      gui/lobby-state.js                  # lobby-phase state
-      gui/comms-state.js                  # comms inbox/contacts state
-  → gui/dirty-consoles.js dirtyConsolesFor(msg, stationSystems,
+  → gui/lobby-state.js apply(msg)         # folds lobby-phase state
+  → gui/sim-state.js apply(msg)           # folds simulation state and reports semantic changes
+  → gui/comms-state.js apply(msg)         # folds comms inbox/contacts state
+  → gui/reducer-result.js mergeReducerResults(...results)
+  → gui/dirty-consoles.js dirtyConsolesFor(msg, changes, stationSystems,
                                             systemConsoleFamilies,
                                             blackboardConsoleFamilies)
                                                        # which consoles this message dirtied
   → gui/console-state.js buildConsoleState(name, simState)        # rebuild ONLY the dirty consoles → JSON string
   → gui/iframe-bridge.js push()           # __updateConsole(name, json) into the iframe
+  → gui/client-router.js route(msg)        # uiState mutation + semantic shell-effect plan
+  → client.html applySideEffect(effect)   # executes the planned DOM effects
 ```
 
 `simState` (`gui/sim-state.js`) is the single client store. `client-router.js`
@@ -37,6 +39,15 @@ actual System instance ids. `blackboardConsoleFamilies` separately classifies
 reserved and aggregate channels. Neither duplicates Station ownership, and a
 channel does not become a commandable System.
 
+Reducers return fresh, mergeable sets of changed semantic domains, Systems and
+blackboards through `gui/reducer-result.js`. The Blackboard reducer is the
+complete tracer: only valid entries that were actually folded become changed
+keys, and human-seeking host changes report the broader `station-hosting`
+domain. Dirty routing consumes those results after state reduction; it does not
+inspect the original BlackboardUpdate payload. Non-blackboard message fan-out
+still uses the existing static family table until its owning reducers report
+their domains.
+
 Outbound: each console iframe posts `console_action` messages; `gui/action-map.js` is the table-driven dispatcher mapping `action.action` values to `ClientMessage`s (mostly `ControlSystem { target, payload }`) via `send(type, data?)`.
 
 ## Module inventory (`gui/`)
@@ -46,6 +57,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `mount-plan.js` | **Single home** of the station-id → DOM-id naming scheme (`${id}-ui`/`${id}-iframe`, one tactical → weapons alias) and `planMounts(shipStations)` — the manifest is the server-supplied `ship_stations` |
 | `hero-bar.js` | Shared complete-Station tab model over `SimSnapshot.station_hosts`: direct Station pinned first, visiting Stations in hull order, selected identity/rating/ownership, and roving keyboard focus |
 | `sim-state.js` | JS port of the old Rust `ClientSimState`: `apply(msg)`, per-console radar configs, message builders, typed blackboard discriminants, and both read-only Console Family replicas from `Welcome` |
+| `reducer-result.js` | Fresh, mergeable semantic change results (`changedDomains`, `changedSystems`, `changedBlackboards`) shared by reducers and downstream presentation routing |
 | `lobby-state.js` | Lobby view-model (stations, players, ready states) |
 | `comms-state.js` | Comms inbox/contact view-model |
 | `console-state.js` | Pure view-model builders. One family registry contains all builders, including Command, Tractor and Umbilical; flat and composed consoles carry actual owned `SystemId`s and projected families, while typed blackboard discriminants select semantic data independently of id spelling. |
@@ -55,7 +67,7 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `content-switcher.js` | Section visibility over the ship's mounted stations; one human directly holds one station |
 | `station-roster.js` | Pure fold: players + station defs → lobby roster rows + aggregates |
 | `client-router.js` | Pure per-message driver: uiState mutations + named side-effect plan for the client.html glue |
-| `dirty-consoles.js` | Declarative `ServerMessage` → Console Family mapping followed by actual topology → owning Station resolution. Blackboard updates use the System or reserved-channel projection; unknown or pre-`Welcome` metadata routes nowhere rather than guessing. |
+| `dirty-consoles.js` | Semantic reducer changes plus the remaining declarative non-blackboard `ServerMessage` → Console Family mapping, followed by actual topology → owning Station resolution. Blackboard changes use the System or reserved-channel projection without re-reading message payloads; unknown or pre-`Welcome` metadata routes nowhere rather than guessing. |
 | `lobby-view.js` | Lobby view model (row classes, ready-button state, status-line string-id selection) |
 | `coordination-popup.js` | CoordinationPopup payload → `{ sender, title, body }` normaliser |
 | `phase-toggle.js` | Lobby vs in-game section visibility (`GameOver` counts as in-game) |

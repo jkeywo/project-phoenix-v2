@@ -8,11 +8,11 @@
  *  - STATIC_MESSAGE_FAMILIES covers every non-blackboard message type with a
  *    fixed Console Family list. The authoritative topology then resolves each
  *    family to the actual Station ids that own its Systems.
- *  - BlackboardUpdate dirtiness is derived from the server-supplied
- *    station→systems ownership, authoritative System-id → Console Family
- *    projection, and the separate reserved-blackboard-key projection. No id
- *    spelling participates in routing, and reserved keys never masquerade as
- *    Systems.
+ *  - BlackboardUpdate dirtiness is derived from reducer-reported changed keys,
+ *    the server-supplied station→systems ownership, authoritative System-id →
+ *    Console Family projection, and the separate reserved-blackboard-key
+ *    projection. The router never re-reads the wire payload. No id spelling
+ *    participates in routing, and reserved keys never masquerade as Systems.
  *
  * On the battleship (identity stations) this reproduces the old hardcoded
  * routing exactly. On composite stations (courier 'pilot', destroyer
@@ -28,6 +28,8 @@
  * Pure module: no DOM, no window reads inside the functions, unit-tested in
  * tests/client/dirty-consoles.test.js.
  */
+
+import { CHANGE_DOMAINS } from './reducer-result.js';
 
 /**
  * Non-blackboard message type → Console Families dirtied. The list preserves
@@ -140,26 +142,9 @@ export function alwaysPushConsoles(stationSystems, systemConsoleFamilies) {
 }
 
 /**
- * True when a blackboard update entry belongs to a human-seeking system —
- * recognised by the presence of the `host_station` KEY, `null` included (issue
- * #984). The server writes that key unconditionally on a seeking system's
- * blackboard for exactly this test; see `NavigationBlackboard::host_station`.
- *
- * The entry is `[systemId, { kind, data }]` — an adjacently-tagged
- * `SystemBlackboard`, the same envelope gui/sim-state.js unwraps — so the
- * field sits inside `data` rather than on the entry itself.
- *
- * @param {[string, object]|string} entry
- */
-function isSeekingBlackboard(entry) {
-  if (!Array.isArray(entry)) return false;
-  const tagged = entry[1];
-  const data = tagged && typeof tagged === 'object' ? tagged.data : null;
-  return !!data && typeof data === 'object' && 'host_station' in data;
-}
-
-/**
- * Console names dirtied by an inbound ServerMessage.
+ * Console names dirtied by an inbound ServerMessage and its merged reducer
+ * result. Blackboard routing consumes only semantic changed keys/domains; the
+ * original BlackboardUpdate payload is never inspected here.
  *
  * A seeking system's blackboard dirties EVERY station, not just the station
  * that authors it (issue #984). This is the one deliberate cross-read edge the
@@ -172,6 +157,8 @@ function isSeekingBlackboard(entry) {
  * is actually looking at — which is the console that has to be right.
  *
  * @param {{ type?: string, data?: object }} msg  decoded ServerMessage
+ * @param {{ changedDomains?: Set<string>, changedSystems?: Set<string>,
+ *           changedBlackboards?: Set<string> }} changes merged reducer result
  * @param {Object<string, string[]>|null|undefined} stationSystems
  *   simState.stationSystems (station id → owned fine system ids); may be
  *   missing before Welcome.
@@ -184,33 +171,27 @@ function isSeekingBlackboard(entry) {
  */
 export function dirtyConsolesFor(
   msg,
+  changes,
   stationSystems,
   systemConsoleFamilies,
   blackboardConsoleFamilies,
 ) {
-  if (!msg || !msg.type) return new Set();
-  if (msg.type === 'BlackboardUpdate') {
-    const dirty = new Set();
-    const updates = (msg.data && msg.data.updates) || [];
-    for (const entry of updates) {
-      const id = Array.isArray(entry) ? entry[0] : entry;
-      for (const family of familiesForBlackboardId(
-        id,
-        systemConsoleFamilies,
-        blackboardConsoleFamilies,
-      )) {
-        for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
-          dirty.add(name);
-        }
-      }
-      if (isSeekingBlackboard(entry)) {
-        for (const name of Object.keys(stationSystems || {}).sort()) dirty.add(name);
+  const dirty = new Set();
+  for (const id of changes?.changedBlackboards || []) {
+    for (const family of familiesForBlackboardId(
+      id,
+      systemConsoleFamilies,
+      blackboardConsoleFamilies,
+    )) {
+      for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
+        dirty.add(name);
       }
     }
-    return dirty;
   }
-  const dirty = new Set();
-  for (const family of STATIC_MESSAGE_FAMILIES[msg.type] || []) {
+  if (changes?.changedDomains?.has(CHANGE_DOMAINS.STATION_HOSTING)) {
+    for (const name of Object.keys(stationSystems || {}).sort()) dirty.add(name);
+  }
+  for (const family of STATIC_MESSAGE_FAMILIES[msg?.type] || []) {
     for (const name of owningConsoles(family, stationSystems, systemConsoleFamilies)) {
       dirty.add(name);
     }

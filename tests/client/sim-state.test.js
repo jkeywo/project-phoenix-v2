@@ -316,11 +316,12 @@ describe('BlackboardUpdate mirror', () => {
 
   it('stores blackboard data keyed by systemId', () => {
     const s = new ClientSimState();
-    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+    const changes = s.apply({ type: 'BlackboardUpdate', data: { updates: [
       ['helm', { kind: 'Helm', data: { yaw: 1.5, forward_speed: 42.0, x: 10, z: -20,
                                        impulse_charge: 0.3, boost_battery: 0.8,
                                        boost_active: false, boost_enabled: true } }],
     ] } });
+    expect([...changes.changedBlackboards]).toEqual(['helm']);
     expect(s.blackboards['helm']).toBeDefined();
     expect(s.blackboards['helm'].yaw).toBeCloseTo(1.5);
     expect(s.blackboards['helm'].forward_speed).toBeCloseTo(42.0);
@@ -341,11 +342,12 @@ describe('BlackboardUpdate mirror', () => {
 
   it('ignores updates with malformed entries', () => {
     const s = new ClientSimState();
-    s.apply({ type: 'BlackboardUpdate', data: { updates: [
+    const changes = s.apply({ type: 'BlackboardUpdate', data: { updates: [
       ['helm', null],
       ['helm', { kind: 'Helm' }],  // missing data
     ] } });
     expect(s.blackboards['helm']).toBeUndefined();
+    expect([...changes.changedBlackboards]).toEqual([]);
   });
 
   it('stores a blackboard kind it has never heard of without breaking (issue #1026)', () => {

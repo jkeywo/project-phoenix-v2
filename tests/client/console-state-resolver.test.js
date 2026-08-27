@@ -173,9 +173,10 @@ describe('Dock tracer and visiting Systems', () => {
         { kind: 'Dock', data: { range: 275, available: true, docked: false } },
       ]] },
     };
-    state.apply(update);
+    const changes = state.apply(update);
     expect(dirtyConsolesFor(
       update,
+      changes,
       state.stationSystems,
       state.systemConsoleFamilies,
       state.blackboardConsoleFamilies,

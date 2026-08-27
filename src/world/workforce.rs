@@ -251,10 +251,19 @@ pub struct WorkforceRegister {
 }
 
 impl WorkforceRegister {
-    /// Whether this world declared any side at all — the payload's skip
-    /// predicate, and the early-out every caller takes.
+    /// Whether this world declared any side at all **and** has never armed — the
+    /// payload's skip predicate, and the early-out every caller takes.
+    ///
+    /// The `armed` half is here for [`DeadlineTable::is_empty`]'s reason: the
+    /// latch is what stops a resumed mission putting a settled strike straight
+    /// back on, and a register that had armed and then lost its last side would
+    /// otherwise serialise as absent and come back unarmed — a state
+    /// `sim_digest::fold_scenario_records` folds apart but the payload could not
+    /// round-trip.
+    ///
+    /// [`DeadlineTable::is_empty`]: crate::world::deadlines::DeadlineTable::is_empty
     pub fn is_empty(&self) -> bool {
-        self.records.is_empty()
+        self.records.is_empty() && !self.armed
     }
 
     /// The record for `id`, or `None`.
@@ -462,11 +471,19 @@ mod tests {
     fn a_world_that_declares_no_side_arms_to_nothing() {
         let mut register = WorkforceRegister::default();
         assert!(register.arm(&[]).is_empty());
-        assert!(register.is_empty());
+        assert!(register.records.is_empty(), "no side was declared");
         assert!(
             register.armed,
             "and it counts as armed, so the system that arms it stops looking"
         );
+        // Deliberately NOT `register.is_empty()`, which is the payload's skip
+        // predicate and accounts for the latch (see `Self::is_empty`): an armed
+        // register is one a save has to carry even with no side in it, or the
+        // resumed mission re-arms from the world file. `arm_mission_workforces`
+        // never reaches this state — it early-returns on an empty authored table
+        // without latching — so nothing shipped writes such a register, but the
+        // pure module can and the payload now answers for it.
+        assert!(!register.is_empty());
     }
 
     // ── AC4: reversible, both ways, with the mirror following ────────────────

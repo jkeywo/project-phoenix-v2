@@ -18,6 +18,16 @@
 # AI-backfilled and parked, so it stays at low LOD — and `ai_power_allocation` is
 # `With<AiHighFidelity>`, so it never runs the helm rules at all. A band on a
 # rule that never resolves folds nothing.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state — this world's own
+# `on_world_loaded`/`on_destroyed` triggers are latches on
+# `WorldContentRuntime::trigger_states`, now walked by
+# `sim_digest::fold_scenario_records`, which did not happen when
+# 11531679067393217131 was measured. The thrust-band A/B is untouched — it is a
+# same-build comparison, and "0 helm power changes" is still the finding — but
+# the absolute value predates the fold and does not reproduce on a clean tree.
+# Re-measure before treating it as a baseline again.
 
 [global]
 seed = 42

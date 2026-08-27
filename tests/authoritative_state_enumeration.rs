@@ -571,23 +571,27 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // and the campaign handoff counters (#1043) — is folded rather than merely
     // snapshotted.
     //
-    // ── THE CLASSIFICATION RULE, STATED ONCE ────────────────────────────────
+    // ── THE CLASSIFICATION RULE ──────────────────────────────────────────────
     //
-    // `StateClass::Folded` means `sim_digest::world_digest` walks the WHOLE
-    // type. A type only PART of which is walked keeps `DeferredFold` (or, as
-    // here, stays unclassified) and carries an adjacent comment naming the
-    // folded halves and the excluded ones with their real reasons. Saying
-    // "folded" for a partly-folded type would be the kind of explicit-and-wrong
-    // claim this file exists to prevent — and the rule has to be one rule, so
-    // #1086's other two partly-folded types are held to it as well:
+    // Defined ONCE, at `authoritative::StateClass`'s own doc comment — not
+    // restated here, so the two copies cannot drift apart again. Short version:
+    // `Folded` means `sim_digest::world_digest` walks EVERY field of the type;
+    // anything less keeps `DeferredFold` (or, as here, stays unclassified) with
+    // an adjacent comment naming the folded/unfolded split.
+    //
+    // #1086's three partly-folded types are held to that rule in
+    // `server_app::registration`, each with its own naming comment:
     // `comms::server::CommsRuntime` (dialogues and hails walked; contacts, range
-    // flags, range_active and the broadcast bookkeeping not) and
-    // `world::server::WorldLayerMap` (each active layer's path, loader_path,
-    // position and flags walked; anchors, spawned handles, owned objective ids,
-    // the unload policy, the script units and the raw activation ordinal not)
-    // are declared `DeferredFold` in `server_app::registration` with exactly
-    // that comment. `comms::server::CommsInboxRes` is the one #1086 type that
-    // genuinely IS folded whole, and it is the only one declared `Folded`.
+    // flags, range_active and the broadcast bookkeeping not),
+    // `comms::server::CommsInboxRes` (the inbox's `records` walked; its `dirty`
+    // broadcast flag not — see the registration comment for why demoting it
+    // from an earlier `Folded` declaration was the correction, not the
+    // regression) and `world::server::WorldLayerMap` (each active layer's path,
+    // loader_path, position and flags walked; anchors, spawned handles, owned
+    // objective ids, the unload policy, the script units and the raw activation
+    // ordinal not) — all three `DeferredFold`. No #1086 type on the comms/world
+    // side is declared `Folded`; `CommsInboxRes` was, briefly, and the
+    // correction is the point of naming it here.
     //
     // What keeps both types below on THIS list, by that rule: `WorldContentRuntime`
     // still carries `pending_delayed_actions` (authoritative, and deliberately
@@ -731,10 +735,13 @@ fn every_registered_type_maps_to_the_digest_record() {
          the #894 digest-boundary record: {newly_unclassified:?}\n\
          Classify each one by declaring it at its OWNING plugin's `build()` via \
          `app.declare_state::<T>(class, pasm)` (issue #1220's registry):\n\
-         \x20 - if it is authoritative simulation state, declare it \
-         `StateClass::Folded` when `src/sim_digest.rs` folds it or \
-         `StateClass::DeferredFold` when it does not yet — the census feeds this \
-         authoritative set — and add its name to the owning PASM \
+         \x20 - if it is authoritative simulation state, pick the class by the \
+         rule at `authoritative::StateClass`'s own doc comment: \
+         `StateClass::Folded` ONLY when `src/sim_digest.rs` walks EVERY field of \
+         the type, `StateClass::DeferredFold` for anything less — a type \
+         `sim_digest.rs` folds PART of is `DeferredFold`, never `Folded`, with \
+         an adjacent comment naming the folded/unfolded split — the census feeds \
+         this authoritative set — and add its name to the owning PASM \
          `classification: authoritative` state entity's `implementation.symbols` \
          under pasm/spec/architecture/*.yaml;\n\
          \x20 - otherwise declare it with the right exclusion StateClass \

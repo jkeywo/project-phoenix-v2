@@ -78,6 +78,14 @@
 # fixes were confirmed the only way they can be: by putting
 # 11434311098359716284 back.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state — the flag stores and the
+# trigger latches this world's disable/destroy branches write (`on_flag_
+# cleared`, `on_destroyed`) among them — so every number above, including the
+# two shipped-world anchors, predates `sim_digest::fold_scenario_records` and
+# does not reproduce on a clean tree. Re-measure before treating any of it as a
+# baseline again.
+#
 # STILL 1078282553163286478 AFTER the AI-thrust-burst fix, and this one is worth
 # stating precisely because — unlike combat_test, patrol and falling_skyway,
 # which record 0 helm power changes — this world's `ship_harrow_patrol` picket

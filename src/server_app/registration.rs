@@ -513,20 +513,27 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 "comms-range-state",
             )
             // Issue #1086 put both types into `sim_digest::fold_comms_scope`,
-            // and they land on DIFFERENT classes because one is folded whole and
-            // the other is not — the standard stated once in
+            // and both land on `DeferredFold` — the standard stated once in
             // tests/authoritative_state_enumeration.rs's `WorldContentRuntime`
             // paragraph and applied here: `Folded` means the whole resource is
             // walked, and a partly-walked one keeps `DeferredFold` plus a comment
             // naming the halves.
             //
-            // `CommsInboxRes` IS folded whole: every field of every
-            // `CommsMessage`, the stored `sender_in_range` and per-response
+            // `CommsInboxRes` wraps `console::comms::inbox::CommsInbox`, which
+            // has TWO fields, and only one is folded: `records` — every field of
+            // every `CommsMessage`, the stored `sender_in_range` and per-response
             // `available` included (they are written once at injection and
             // carried verbatim by `snapshot::CommsState::inbox` — the per-tick
-            // stamping happens on clones, never on the stored message).
+            // stamping happens on clones, never on the stored message) — is
+            // walked by `fold_comms_scope`. `dirty` is not: it is broadcast
+            // bookkeeping (whether a client push is owed since the last
+            // broadcast), it is not carried by the snapshot payload, and
+            // `snapshot::restore_comms` re-establishes it unconditionally via
+            // `mark_dirty()` rather than restoring a captured value — the same
+            // shape `CommsRuntime`'s demotion below uses for its own broadcast
+            // bookkeeping.
             .declare_state::<crate::comms::server::CommsInboxRes>(
-                StateClass::Folded,
+                StateClass::DeferredFold,
                 "comms-inbox-state",
             )
             // `CommsRuntime` is folded in HALF: `active_dialogues` and

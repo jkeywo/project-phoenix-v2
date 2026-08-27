@@ -52,16 +52,41 @@ use std::collections::BTreeMap;
 /// `tests/authoritative_state_enumeration.rs`'s `EXCLUSIONS` list already uses;
 /// `TestInfra` is the fifth (state a test harness registers). `Folded` and
 /// `DeferredFold` are the two authoritative shapes the fold record
-/// distinguishes: state walked by `world_digest` every tick, versus
-/// authoritative state captured in the snapshot but deliberately deferred out
-/// of the per-tick fold (e.g. `WorldContentRuntime`'s pending queues).
+/// distinguishes, and THIS is the one place that distinction is defined — every
+/// other site that needs the rule (`tests/authoritative_state_enumeration.rs`,
+/// the declaration comments in `server_app::registration`) points back here
+/// rather than restating it:
+///
+/// * **`Folded`** means `sim_digest::world_digest` walks EVERY field of the
+///   type — not most of it, not "the fields that currently matter". And
+///   `world_digest` does not run every tick: no Bevy schedule registers it, and
+///   its only callers are `headless::replay`'s digest sampler, the
+///   cross-target probe, the resume tests and `server::bridge`'s save/restore
+///   pair (`sim_digest::world_digest`'s own doc comment, "Cheapness, and the
+///   empty-walk affordance"), so "folded" is a claim about what a sample/save/
+///   restore walks, never about tick frequency. A per-tick exchange is #1118's
+///   to introduce.
+/// * **`DeferredFold`** means anything LESS than the whole type is walked —
+///   anywhere from zero folded fields (e.g. `WorldContentRuntime`'s pending
+///   queues: authoritative, and deliberately kept out of the fold) to every
+///   field but one. Either way, the `app.declare_state::<T>(StateClass::
+///   DeferredFold, ..)` call carries an adjacent comment naming exactly which
+///   fields fold and which do not, and why —
+///   `comms::server::{CommsInboxRes, CommsRuntime}` and
+///   `world::server::WorldLayerMap` in `server_app::registration` are the
+///   worked examples. Declaring `Folded` for a type that is only partly walked
+///   is the exact explicit-and-wrong claim this registry exists to prevent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StateClass {
-    /// Authoritative simulation state folded into the per-tick digest
-    /// (`src/sim_digest.rs::world_digest`).
+    /// Authoritative simulation state with EVERY field folded into the digest
+    /// (`src/sim_digest.rs::world_digest`, run per digest sample and on
+    /// save/restore — not per tick). See this enum's own doc comment above for
+    /// the full rule: a type only partly walked is `DeferredFold`, never this.
     Folded,
-    /// Authoritative state captured in the snapshot (`src/snapshot.rs`) but
-    /// deliberately deferred out of the per-tick fold.
+    /// Authoritative state captured in the snapshot (`src/snapshot.rs`) with
+    /// LESS than every field folded into the digest — anywhere from none of it
+    /// to all but one field. The declaring plugin's call site names the
+    /// folded/unfolded split; see this enum's own doc comment above.
     DeferredFold,
     /// Presentation-only: it decides how something is DRAWN, and nothing reads
     /// it to decide what the fixed tick computes.

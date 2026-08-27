@@ -35,6 +35,13 @@
 # BASELINE. `--seed 42 --ticks 900` gives final digest 0xa878bb772b89f514
 # (12139658916083135764), and 11547223486943852427 at tick 0.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state — the `orders_issued` and
+# `hold_issued` flags `issue_orders`/`hold_the_kestrel` set above are FlagStore
+# entries, and the flag store is now walked by `sim_digest::fold_scenario_flags`
+# / `fold_scenario_records`, which did not happen when either number on this
+# page was measured. Re-measure before treating either as a baseline again.
+#
 # MOVED in #1027 for one reason, and it has nothing to do with traffic: the
 # depot `teal` docks at carries an `[[infrastructure.capacity]]`, and a
 # capacity's LEVEL is folded into the authoritative digest now that a `transfer`

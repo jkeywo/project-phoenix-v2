@@ -27,6 +27,16 @@
 # the history, oldest first; the first number in them is NOT the one to A/B
 # against.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state, and this world's
+# `on_world_loaded` trigger — the one that makes Federation and Harrow mutually
+# hostile before anything spawns — is a latch on
+# `WorldContentRuntime::trigger_states`, now walked by
+# `sim_digest::fold_scenario_records`, which did not happen when the CURRENT
+# VALUE above was measured. The whole lineage in this section predates the
+# fold and none of it reproduces on a clean tree. Re-measure before treating
+# any of it as a baseline again.
+#
 # 95852357729946676 was itself moved from 11542528846502171323 by the
 # `thrust_release_threshold` band (the thrust axis's mirror of the battery
 # axis's `min_reserve_*`/`min_restore_*` pair). 11542528846502171323 was itself

@@ -67,6 +67,15 @@
 # 14942520827746055774, patrol 11531679067393217131), so the claim below is
 # tested rather than asserted.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state, and the evidence log this
+# world exists to exercise — `WorldContentRuntime::evidence`, along with the
+# flag stores and trigger latches the two routes above also touch — is now
+# walked by `sim_digest::fold_scenario_records` rather than merely snapshotted.
+# Every number above, the two anchors included, predates that fold and does not
+# reproduce on a clean tree. Re-measure before treating any of it as a baseline
+# again.
+#
 # STILL 0x4567b7901a66ffe4 after the player-ship override fix (the defect found
 # in #1036), and that is a claim rather than an oversight. The fix makes this
 # world's `comms_console.ai.rule` override reach the spawned hull for the FIRST

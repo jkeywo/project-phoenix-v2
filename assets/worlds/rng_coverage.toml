@@ -42,6 +42,15 @@
 # NPCs stay at low LOD across the window and `ai_power_allocation` is
 # `With<AiHighFidelity>`.
 #
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state, and this world's
+# `on_world_loaded` trigger — the one that makes Harrow and Federation mutually
+# hostile and posts the patrol objective — is a latch on
+# `WorldContentRuntime::trigger_states`, now walked by
+# `sim_digest::fold_scenario_records`, which did not happen when any number
+# above (this world's own, or the two shipped-world anchors) was measured.
+# Re-measure before treating any of it as a baseline again.
+#
 # UNMOVED BY ISSUE #1053, and worth writing down because a reader who got this
 # far would expect the opposite. #1053 changed what happens when a helm power
 # shed leaves a hull ABOVE its new speed cap: the excess used to be deleted in

@@ -222,6 +222,17 @@
 # the player ship AI-backfilled and holding station, so no ship in this world
 # ever reaches the rule whose text changed. The two worlds that DO — `duel` and
 # `rng_coverage` — carry their own baselines and both moved.
+#
+# RECORDED PRE-#1086, AND NO LONGER REPRODUCIBLE. Issue #1086 widened the
+# authoritative digest over the scenario's own state, and this world's own
+# script populates plenty of it: the `mission_threat_remaining`/`ship_power`/
+# `waves_spawned` flags above are FlagStore entries, and the eight
+# `on_timer`/`on_all_destroyed`/`on_destroyed` triggers are latches — both now
+# walked by `sim_digest::fold_scenario_records` / `fold_scenario_flags`, neither
+# of which happened when 14942520827746055774 was measured. The thrust-band A/B
+# is untouched — it is a same-build comparison, and "0 helm power changes" is
+# still the finding — but the absolute value predates the fold and does not
+# reproduce on a clean tree. Re-measure before treating it as a baseline again.
 
 # [ai] Combat Test's timed waves require a human-hosted Navigation surface to
 # retain direct waypoint control. The selector names the hull-agnostic System

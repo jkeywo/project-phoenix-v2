@@ -1,3 +1,7 @@
+[build]
+# Keep eight logical processors available for Windows and interactive work.
+jobs = 16
+
 [target.wasm32-unknown-unknown]
 # bulk-memory / nontrapping-float-to-int are default-on for this target in
 # recent rustc, but trunk's bundled wasm-opt validates against the MVP

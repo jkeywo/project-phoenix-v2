@@ -1175,6 +1175,36 @@ mod tests {
                 marker: None,
                 config: None,
             });
+        // Typed Coordination addresses resolve only from authored Systems.
+        // This fixture expects both messages, so author their real receivers
+        // instead of relying on the pre-#1254 synthetic Station fallback.
+        for (id, kind, station) in [
+            (
+                crate::ship::system_registry::repair_system_id(),
+                crate::ship::system_registry::REPAIR_KIND,
+                "repair",
+            ),
+            (
+                crate::ship::system_registry::captain_system_id(),
+                crate::ship::system_registry::CAPTAIN_KIND,
+                "captain",
+            ),
+        ] {
+            config
+                .0
+                .systems
+                .push(crate::ship::config::SystemInstanceConfig {
+                    id,
+                    kind: kind.into(),
+                    station: Some(crate::core::messages::StationId(station.into())),
+                    ai_only: false,
+                    human_seeking: false,
+                    seek_order: Vec::new(),
+                    power_group: None,
+                    marker: None,
+                    config: None,
+                });
+        }
 
         let hull = crate::ship::damage::SystemHull::from_config(&[(sid.clone(), 100.0)]);
         let ship = app

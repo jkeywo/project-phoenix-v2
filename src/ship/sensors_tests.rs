@@ -507,12 +507,23 @@ fn test_app_with_factions() -> (App, uuid::Uuid, uuid::Uuid) {
         .world_mut()
         .query_filtered::<Entity, With<crate::server_app::LocalShip>>();
     let ship = ship_q.single_mut(app.world_mut()).unwrap();
+    // Threat coordination is addressed through the ship's authored topology.
+    // The lightweight `ShipConfigComponent::default()` fallback does not run
+    // EntityConfig's shield-arc synthesis, so this fixture must attach the same
+    // composed config a real battleship spawn receives.
+    let authored_ship_config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("the shipped battleship composes")
+    .ship_config
+    .expect("the shipped battleship declares its station topology");
     app.world_mut().entity_mut(ship).insert((
         crate::entities::spawner::EntityUuid(ship_uuid.clone()),
         SensorsThreatState::default(),
         crate::modifiers::ShipModifiers::new(),
         crate::entities::spawner::FactionComponent(fed_uuid),
         crate::ship::state::ShipPhysics::default(),
+        crate::ship_plugin::ShipConfigComponent(authored_ship_config),
     ));
 
     (app, fed_uuid, harrow_uuid)
@@ -533,6 +544,19 @@ fn threat_warning_emitted_for_hostile_in_range() {
     let (mut app, _fed, harrow) = test_app_with_factions();
     spawn_hostile(&mut app, "h-1", 0.0, -200.0, harrow); // directly ahead, 200m
 
+    let shield_address = {
+        let mut ships = app.world_mut().query_filtered::<
+            &crate::ship_plugin::ShipConfigComponent,
+            With<crate::server_app::LocalShip>,
+        >();
+        let config = ships.single(app.world()).expect("the local ship config");
+        crate::ship::coordination::address_for_system_kind(
+            &config.0,
+            crate::ship::system_registry::SHIELD_ARC_KIND,
+        )
+        .expect("the fixture authors one Shields Station for every shield arc")
+    };
+
     tick(&mut app);
 
     let log = app.world().resource::<EnqueueLog>();
@@ -543,12 +567,7 @@ fn threat_warning_emitted_for_hostile_in_range() {
         .expect("expected a ThreatBearing CoordinationEnqueue");
 
     assert_eq!(
-        threat.address,
-        crate::ship::coordination::address_for_system_kind(
-            &crate::ship_plugin::ShipConfigComponent::default().0,
-            crate::ship::system_registry::SHIELD_ARC_KIND,
-        )
-        .expect("default hull has a Shields Station"),
+        threat.address, shield_address,
         "ThreatBearing should address the Station that owns Shields"
     );
     match &threat.payload {

@@ -512,12 +512,17 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::DeferredFold,
                 "comms-range-state",
             )
+            // Both folded since issue #1086: `sim_digest::fold_comms_scope`
+            // walks the inbox, the live dialogues and the open-hail set every
+            // tick. `CommsRuntime`'s derived halves (`contacts`, `range_flags`,
+            // `range_active`, `needs_broadcast`) are recomputed each tick by
+            // `update_comms_range_flags` and are excluded there by name.
             .declare_state::<crate::comms::server::CommsInboxRes>(
-                StateClass::DeferredFold,
+                StateClass::Folded,
                 "comms-inbox-state",
             )
             .declare_state::<crate::comms::server::CommsRuntime>(
-                StateClass::DeferredFold,
+                StateClass::Folded,
                 "comms-dialogue-state",
             )
             .declare_state::<crate::console::navigation::NavigationWaypoint>(
@@ -732,8 +737,13 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
             StateClass::DeferredFold,
             "world-event-buffer-state",
         )
+        // Folded since issue #1086: `sim_digest::fold_scenario_flags` walks
+        // every ACTIVE layer's path, activation ordinal and `FlagStore`, which
+        // is the composition topology a snapshot recreates. The rest of a
+        // `WorldRuntime` row (anchors, spawned handles, owned objective ids)
+        // stays deferred.
         .declare_state::<crate::world::server::WorldLayerMap>(
-            StateClass::DeferredFold,
+            StateClass::Folded,
             "world-layer-runtime-state",
         );
     }

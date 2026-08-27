@@ -95,6 +95,27 @@
 //! namespace rule as above — a hull that authored a tractor and is holding
 //! nothing folds nothing — see [`fold_tractor_namespace`].
 //!
+//! **Folded (scenario scope — issue #1086):** the scenario's own memory, in
+//! five walks, between the run-scope preamble and the entity namespace. The
+//! base world's `FlagStore` and every ACTIVE layer's, sorted by name and folded
+//! with the layer's path and activation ordinal; every trigger's latch (`fired`,
+//! its `OnAllDestroyed` accumulation, and whether a `repeat`'s cooldown stamp is
+//! set — see [`fold_scenario_triggers`] for why the stamp's VALUE is not folded)
+//! with the table's row count and each row's `origin_layer`;
+//! the scripted `PendingCallbacks` queue and the queued `WorldEvent`s, both in
+//! queue order because that order is what fires; the named records — entity
+//! groups, the deadline table with its `armed` latch, the commitments ledger,
+//! the evidence log, the workforce register; and the whole of `CommsState` —
+//! inbox in inbox order, live dialogues sorted by message id, the open-hail set
+//! and the pending scripted opens. Before this issue the fold could agree about
+//! every hull in the world while the two hosts disagreed about whether the
+//! mission had been won. Membership was decided by one test — authoritative
+//! state a `PhoenixSnapshot` carries that the fold ignored — and the five walks
+//! take the empty-walk affordance below, so a world with no scenario resources
+//! at all (the cross-target probe) folds exactly as it did before. See
+//! [`fold_scenario_scope`], and [`fold_scenario_records`] for the four scenario
+//! fields deliberately left out with their reasons.
+//!
 //! **Folded (`AsteroidUuid` namespace, in `FoldKey` order):** every asteroid's
 //! id, its `Transform` translation as bit patterns (a rock's position is
 //! authoritative — it is what a collision resolves against), and its
@@ -135,8 +156,12 @@
 //! resources. Snapshot format 14 carries their stable projections (including
 //! process-local Entity keys projected through `EntityUuid`) together with the
 //! exact `Time<Fixed>` overstep. Weapons state machines, power allocation,
-//! modifier caches and the per-system blackboards are likewise deferred —
-//! **and the
+//! modifier caches, the per-system blackboards, and
+//! `WorldContentRuntime::pending_delayed_actions` (the one scenario field issue
+//! #1086 could not take — the payload refuses to carry it, and folding what a
+//! restore cannot reproduce would break the at-restore digest equality
+//! `tests/snapshot_resume.rs` asserts; see [`fold_scenario_records`]) are
+//! likewise deferred — **and the
 //! `WorldResource` projection narrowing itself**: the record's reviewer table
 //! lists `WorldResource` as IN unqualified, and this module is what actually
 //! narrows that to the seven-field projection above rather than the resource
@@ -186,10 +211,11 @@ use bevy::prelude::*;
 use vellum_digest::{digest_postcard, fnv1a, fold_digest, FOLD_SEED};
 
 use crate::civilian::{CivilianState, CivilianTraffic};
+use crate::comms::server::{CommsInboxRes, CommsRuntime};
 use crate::console::command::server::ShipStationStances;
 use crate::console::repair::external_server::ExternalRepairDispatch;
 use crate::core::balance::BalanceEvent;
-use crate::core::messages::GamePhase;
+use crate::core::messages::{CommsPriority, GamePhase};
 use crate::core::telemetry::RunTelemetry;
 use crate::dock::DockControl;
 use crate::entities::spawner::{EntitySystemHull, EntityUuid};
@@ -202,6 +228,9 @@ use crate::sim_rng::SimRng;
 use crate::sim_tick::SimTick;
 use crate::tractor::TractorBeam;
 use crate::umbilical::TransferUmbilical;
+use crate::world::content::WorldEvent;
+use crate::world::flags::FlagStore;
+use crate::world::server::{WorldContentRuntime, WorldLayerMap, WorldScriptRuntime};
 
 /// The declared namespace sequence. **Append only** — see the module docs.
 ///
@@ -303,6 +332,27 @@ pub fn fold_str(acc: u64, value: &str) -> u64 {
     fold_digest(acc, fnv1a(value.as_bytes()))
 }
 
+/// Fold an `i64` by its two's-complement bytes.
+///
+/// Its own helper rather than an `as u64` at each call site: a flag counter and
+/// a workforce disposition are both signed, and a cast written out five times is
+/// five chances to write one of them unsigned.
+fn fold_i64(acc: u64, value: i64) -> u64 {
+    fold_digest(acc, fnv1a(&value.to_le_bytes()))
+}
+
+/// Fold an optional string as a present/absent marker plus its bytes.
+///
+/// The marker is what keeps `None` and `Some("")` apart — an unowned scenario
+/// row (base world) and one owned by a layer whose path is empty are different
+/// states, and a bare `unwrap_or_default()` would fold them alike.
+fn fold_optional_str(acc: u64, value: Option<&str>) -> u64 {
+    match value {
+        Some(text) => fold_str(fold_u64(acc, 1), text),
+        None => fold_u64(acc, 0),
+    }
+}
+
 /// Fold a value whose serde shape is deliberately pinned.
 pub fn fold_serde<T: serde::Serialize>(acc: u64, value: &T) -> u64 {
     fold_digest(acc, digest_postcard(value))
@@ -333,6 +383,7 @@ pub fn state_digest(app: &App) -> u64 {
 pub fn world_digest(world: &World) -> u64 {
     let mut acc = FOLD_SEED;
     acc = fold_run_scope(world, acc);
+    acc = fold_scenario_scope(world, acc);
     acc = fold_entity_namespace(world, acc);
     acc = fold_infrastructure_namespace(world, acc);
     acc = fold_civilian_namespace(world, acc);
@@ -459,6 +510,595 @@ fn fold_optional_triple(acc: u64, value: Option<[f32; 3]>) -> u64 {
     match value {
         Some(v) => v.iter().fold(fold_u64(acc, 1), |acc, c| fold_f32(acc, *c)),
         None => fold_u64(acc, 0),
+    }
+}
+
+// ── Scenario scope (issue #1086) ─────────────────────────────────────────────
+
+/// The **scenario** the run is playing: its flags, its trigger latches, its
+/// scheduled future work, its named records, and the conversation it is in the
+/// middle of having.
+///
+/// # Why this exists
+///
+/// Until issue #1086 the fold walked entities and asteroids and *nothing the
+/// scenario itself remembers*. Two hosts could agree, byte for byte, on where
+/// every hull was and how much of each was left, while disagreeing about
+/// whether the mission had been won: one with `lyra_clear` set and the other
+/// without, one with a `ctx.schedule.after(..)` callback queued and the other
+/// with it already spent, one holding an open dialogue the other had answered.
+/// `p2p-design-deltas.yaml`'s `p2p-delta-scenario-state-must-ride-the-join`
+/// states the consequence plainly — a cross-peer hash exchange (#1118) cannot
+/// detect scenario-state divergence until the fold covers it — and the same
+/// hole made the headless determinism sweeps blind to the loudest class of
+/// divergence a scripted mission can produce.
+///
+/// # What decides membership
+///
+/// Authoritative state a [`crate::snapshot::PhoenixSnapshot`] carries and the
+/// fold ignored. That test is deliberate rather than convenient: the payload's
+/// field list is the one place in this repo that has already argued, field by
+/// field, about what a resumed run cannot re-derive, and anything on it is by
+/// construction something a second host cannot re-derive either. What that test
+/// leaves OUT is listed at [`fold_scenario_records`] and in the module docs.
+///
+/// # Cheapness, and the empty-walk affordance
+///
+/// This runs once per logical tick, so every walk is a borrow-and-fold: no
+/// clone of the inbox, no serialisation of a whole structure, and a sort only
+/// where the runtime's own container is a `HashMap`/`HashSet` whose iteration
+/// order must never reach a fold (the flag stores, the trigger accumulations,
+/// the entity groups, the live dialogues). Everything else is already an
+/// ordered `Vec`/`BTreeSet` whose order is *load-bearing* — a `PendingCallbacks`
+/// queue fires in its own order, and sorting the fold would hide a reordering
+/// that changes what the mission does.
+///
+/// Each of the five walks takes [`fold_infrastructure_namespace`]'s
+/// empty-walk affordance: with nothing to say it folds **nothing at all**, not
+/// even a marker. That is what keeps a scenario-free world — the cross-target
+/// probe (`crate::cross_target_probe`), which builds its world from Rust
+/// literals and registers no scenario resource whatsoever — folding to exactly
+/// the number it folded before this issue, so its committed ledger and the
+/// browser half of that claim are untouched by this widening.
+fn fold_scenario_scope(world: &World, mut acc: u64) -> u64 {
+    acc = fold_scenario_flags(world, acc);
+    acc = fold_scenario_triggers(world, acc);
+    acc = fold_scenario_schedule(world, acc);
+    acc = fold_scenario_records(world, acc);
+    fold_comms_scope(world, acc)
+}
+
+/// The base world's [`FlagStore`] and every active layer's, in activation order.
+///
+/// A flag is the scenario's memory: `when = "…"` predicates gate triggers on it,
+/// scripted handlers read and write it, and the campaign projection is built
+/// from it. Two hosts that disagree about one counter disagree about which
+/// triggers may still fire.
+///
+/// The **layer** half is folded with its path and its activation ordinal, not
+/// merely its flags, because that ordinal *is* the composition: a host that
+/// loaded a supporting world its peer did not has a different set of triggers,
+/// a different `parent:` chain and a different `FlagStore` to resolve names
+/// against, and the payload carries the same topology for the same reason
+/// (`PhoenixSnapshot::layer_flags`, `SNAPSHOT_FORMAT` 13). Only ACTIVE layers
+/// are folded — a failed-load sentinel occupies a path to suppress retries and
+/// is explicitly not part of the composition a snapshot recreates.
+///
+/// Both stores sort by name: a `FlagStore` is a `HashMap` and says so, and
+/// "set" is its whole vocabulary — `set_flag_value(name, 0)` removes the entry
+/// rather than storing a zero — so an unset name and a cleared one fold alike,
+/// which is what every other reader already believes.
+fn fold_scenario_flags(world: &World, mut acc: u64) -> u64 {
+    let base = world
+        .get_resource::<WorldContentRuntime>()
+        .map(|runtime| sorted_flags(&runtime.flags))
+        .unwrap_or_default();
+
+    let mut layers: Vec<(u64, &str, Vec<(&str, i64)>)> = world
+        .get_resource::<WorldLayerMap>()
+        .map(|map| {
+            map.0
+                .iter()
+                .filter(|(_, layer)| layer.is_active)
+                .map(|(path, layer)| {
+                    (
+                        layer.activation_order,
+                        path.as_str(),
+                        sorted_flags(&layer.flags),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if base.is_empty() && layers.is_empty() {
+        return acc;
+    }
+    // Activation order first, path as the tiebreak — the same key
+    // `snapshot::capture_layer_flags` sorts the payload's topology by, so the
+    // two orders cannot drift.
+    layers.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(b.1)));
+
+    acc = fold_str(acc, "scenario-flags");
+    acc = fold_flag_store(acc, &base);
+    acc = fold_u64(acc, layers.len() as u64);
+    for (order, path, flags) in layers {
+        acc = fold_u64(acc, order);
+        acc = fold_str(acc, path);
+        acc = fold_flag_store(acc, &flags);
+    }
+    acc
+}
+
+/// One flag store's set pairs, sorted by name — never `HashMap` order.
+fn sorted_flags(store: &FlagStore) -> Vec<(&str, i64)> {
+    let mut pairs: Vec<(&str, i64)> = store.iter().collect();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    pairs
+}
+
+fn fold_flag_store(mut acc: u64, pairs: &[(&str, i64)]) -> u64 {
+    acc = fold_u64(acc, pairs.len() as u64);
+    for (name, value) in pairs {
+        acc = fold_str(acc, name);
+        acc = fold_i64(acc, *value);
+    }
+    acc
+}
+
+/// Every live trigger's **latch**, in `trigger_states` order.
+///
+/// The single-shot `fired` flag and the `OnAllDestroyed` accumulation — two of
+/// the three fields a run moves, which is what
+/// [`crate::snapshot::TriggerRuntimeState`] carries. The trigger itself
+/// (condition, actions, `when`, `repeat`, `cooldown_secs`) is authored config
+/// both hosts rebuild from the same content, and `snapshot::content_digest` is
+/// what answers for content.
+///
+/// The row count is folded, and the `origin_layer` tag with each row, so a
+/// table that changed SHAPE — a supporting layer loaded on one host and not the
+/// other, which appends scripted triggers into the middle of this vec — moves
+/// the digest immediately rather than only once one of the new triggers fires.
+/// Index is positional and therefore never folded as a number: it is the order
+/// itself that is being pinned.
+///
+/// The accumulation sorts because it is a `HashSet` in the runtime; the payload
+/// sorts it for the same reason. Nothing else here needs a sort — the table's
+/// order is a deterministic replay of the same load on every host.
+///
+/// # `last_fired_elapsed` folds as present-or-absent, never as its value
+///
+/// The third field is the mission-elapsed reading a `repeat` trigger's
+/// `cooldown_secs` is measured from, and it is the one piece of scenario state
+/// a restore **reconstructs** rather than copies. `restore_scenario` rebuilds
+/// `mission_clock_anchor_secs` as `now - captured_elapsed` in `f32`, so every
+/// later reading in a resumed world can land an ULP away from the live one's:
+/// measured on `assets/worlds/probe_evidence.toml`, a trigger that fired at
+/// `5.0` in the live run stamps `5.0000005` in the resumed one. Folding the
+/// value would therefore report a divergence between a run and its own resume
+/// that no simulation ever made, and this module forbids the quantisation that
+/// would paper over it.
+///
+/// Losing it costs nothing a peer needs. `None` versus `Some` is folded, which
+/// is what a `ResetTrigger` moves; and two hosts that fired the same repeat
+/// trigger on *different ticks* have already disagreed about that trigger's
+/// EFFECTS — the flags it set, the entities it spawned, the threads it opened —
+/// every one of which this scope now folds, on the earlier of the two ticks.
+/// The stamp would restate a divergence a tick after something else caught it.
+fn fold_scenario_triggers(world: &World, mut acc: u64) -> u64 {
+    let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
+        return acc;
+    };
+    if runtime.trigger_states.is_empty() {
+        return acc;
+    }
+
+    acc = fold_str(acc, "scenario-triggers");
+    acc = fold_u64(acc, runtime.trigger_states.len() as u64);
+    for state in &runtime.trigger_states {
+        acc = fold_u64(acc, u64::from(state.fired));
+        acc = fold_optional_str(acc, state.origin_layer.as_deref());
+        acc = fold_u64(acc, u64::from(state.last_fired_elapsed.is_some()));
+        acc = fold_u64(acc, state.seen_destroyed.len() as u64);
+        if !state.seen_destroyed.is_empty() {
+            let mut seen: Vec<&str> = state.seen_destroyed.iter().map(String::as_str).collect();
+            seen.sort_unstable();
+            for name in seen {
+                acc = fold_str(acc, name);
+            }
+        }
+    }
+    acc
+}
+
+/// The scenario's queued FUTURE work: scripted `after(n, |ctx| …)` callbacks and
+/// the world events queued for the next tick's trigger pass.
+///
+/// # Why the queue order is folded as-is
+///
+/// `PendingCallbacks` is a `Vec` whose order is the order the scripts scheduled
+/// into it, and `tick_script_callbacks` fires the due entries in exactly that
+/// order — so their effects apply in that order too. Sorting the fold would hide
+/// the one divergence that matters most here: two hosts holding the same set of
+/// callbacks in a different order will run the same mission differently on the
+/// tick they come due. The payload refuses to sort it for the identical reason
+/// ([`crate::snapshot::ScenarioState::script_callbacks`]), and this is the fold
+/// half of that decision.
+///
+/// `pending_world_events` is the same shape one step earlier: it is non-empty
+/// exactly when the previous tick's delayed actions or script callbacks queued a
+/// chaining event for this one, and that is a tick a capture can land on.
+///
+/// The event's variant folds as a small integer tag written out at the call site
+/// rather than through a `derive` — `WorldEvent` is scenario vocabulary whose
+/// variant order this fold has no business pinning, and the tags below match the
+/// ones [`crate::snapshot::WorldEventRecord`] already writes, so the payload and
+/// the fold cannot disagree about what a queued event *is*.
+fn fold_scenario_schedule(world: &World, mut acc: u64) -> u64 {
+    let callbacks = world
+        .get_resource::<WorldScriptRuntime>()
+        .map(|script| script.pending_callbacks.0.as_slice())
+        .unwrap_or_default();
+    let events = world
+        .get_resource::<WorldContentRuntime>()
+        .map(|runtime| runtime.pending_world_events.as_slice())
+        .unwrap_or_default();
+
+    if callbacks.is_empty() && events.is_empty() {
+        return acc;
+    }
+
+    acc = fold_str(acc, "scenario-schedule");
+    acc = fold_u64(acc, callbacks.len() as u64);
+    for call in callbacks {
+        acc = fold_scheduled_call(acc, call);
+    }
+    acc = fold_u64(acc, events.len() as u64);
+    for event in events {
+        acc = fold_world_event(acc, event);
+    }
+    acc
+}
+
+/// One `ScheduledCall` — `(fire_tick, script_path, fn_name, origin_layer)`, the
+/// stable key the payload stores and the deadline table retracts against.
+fn fold_scheduled_call(mut acc: u64, call: &crate::world::script::schedule::ScheduledCall) -> u64 {
+    acc = fold_u64(acc, call.fire_tick);
+    acc = fold_str(acc, &call.script_path);
+    acc = fold_str(acc, &call.fn_name);
+    fold_optional_str(acc, call.origin_layer.as_deref())
+}
+
+/// One queued `WorldEvent`, as a tag plus its own fields — see
+/// [`fold_scenario_schedule`] for why the tag is written by hand.
+fn fold_world_event(mut acc: u64, event: &WorldEvent) -> u64 {
+    match event {
+        WorldEvent::Destroyed { uuid } => {
+            acc = fold_u64(acc, 0);
+            fold_str(acc, uuid)
+        }
+        WorldEvent::Attacked {
+            uuid,
+            attacker_uuid,
+        } => {
+            acc = fold_u64(acc, 1);
+            fold_str(fold_str(acc, uuid), attacker_uuid)
+        }
+        WorldEvent::HullDroppedBelow {
+            uuid,
+            previous_fraction,
+            current_fraction,
+        } => {
+            acc = fold_u64(acc, 2);
+            acc = fold_str(acc, uuid);
+            fold_f32(fold_f32(acc, *previous_fraction), *current_fraction)
+        }
+        WorldEvent::TimerElapsed { elapsed_secs } => {
+            acc = fold_u64(acc, 3);
+            fold_f32(acc, *elapsed_secs)
+        }
+        WorldEvent::Hailed { target_uuid } => {
+            acc = fold_u64(acc, 4);
+            fold_str(acc, target_uuid)
+        }
+        WorldEvent::FlagSet { name, origin_layer } => {
+            acc = fold_u64(acc, 5);
+            fold_optional_str(fold_str(acc, name), origin_layer.as_deref())
+        }
+        WorldEvent::FlagCleared { name, origin_layer } => {
+            acc = fold_u64(acc, 6);
+            fold_optional_str(fold_str(acc, name), origin_layer.as_deref())
+        }
+        WorldEvent::WorldLoaded => fold_u64(acc, 7),
+        WorldEvent::EnteredRegion { uuid } => {
+            acc = fold_u64(acc, 8);
+            fold_str(acc, uuid)
+        }
+        WorldEvent::ExitedRegion { uuid } => {
+            acc = fold_u64(acc, 9);
+            fold_str(acc, uuid)
+        }
+        WorldEvent::WaypointReached { uuid, waypoint } => {
+            acc = fold_u64(acc, 10);
+            fold_str(fold_str(acc, uuid), waypoint)
+        }
+    }
+}
+
+/// The scenario's named records: entity groups, the deadline table (#1024), the
+/// commitments ledger (#1029), the evidence log (#1031) and the workforce
+/// register (#1035).
+///
+/// Every one of these is authoritative, is carried whole by the payload, and was
+/// unfolded before issue #1086 — the "authoritative but not folded" bucket
+/// `pasm/spec/architecture/world-files.yaml` names for the dossier evidence
+/// store, taken as a group. A host that disagreed about whether a promise was
+/// kept, whether a deadline was cancelled, whether the crew had learned
+/// something or whether a side is still out is playing a different mission.
+///
+/// The `armed` latches on the deadline table and the workforce register are
+/// folded beside their rows, because they are the fields that decide whether the
+/// arming systems run again — an empty-but-armed table and an empty-and-unarmed
+/// one behave differently on the very next tick.
+///
+/// # What is deliberately NOT folded here, and why
+///
+/// * **Authored, immutable row fields** — a deadline's `label`/`visible`, a
+///   workforce side's `label`, an evidence entry's authored strings that were
+///   never a run's to move. Content is `snapshot::content_digest`'s to answer
+///   for, which is the standing division [`fold_infrastructure_namespace`] makes
+///   for authored capacities and [`fold_tractor_namespace`] for coupling terms.
+/// * **`WorldContentRuntime::name_to_uuid`** — the payload carries it because a
+///   *restore*-spawned entity has no re-run behind it to rebuild the name from.
+///   Two live hosts do: they re-run the same spawns, and a divergent spawn is
+///   already caught the tick it happens by the mint's per-namespace counters and
+///   by the entity namespace's own ids. Folding it would fold the same
+///   divergence a second time, at the cost of sorting a map every tick.
+/// * **`WorldContentRuntime::observed_hull_fractions`** — a one-tick-lagged copy
+///   of hull state the entity namespace already folds per system.
+/// * **`WorldContentRuntime::mission_clock_anchor_secs`** — a reading of
+///   `Time<Fixed>`, which is a function of the folded `SimTick`. It is also the
+///   one scenario field a restore *reconstructs* rather than copies (`anchor =
+///   now - captured_elapsed`), so folding it would compare an `f32`
+///   round-trip rather than a state.
+/// * **`WorldContentRuntime::pending_delayed_actions`** — authoritative, and the
+///   one genuine hole this issue leaves. The payload deliberately does not carry
+///   it: storing it means giving `TriggerAction`'s 22 variants a serde derive and
+///   pinning six authored-config types' shape as save format, which
+///   `snapshot::ScenarioState` refuses. Folding what a restore cannot reproduce
+///   would make `tests/snapshot_resume.rs`'s at-restore digest equality fail for
+///   any world that used it, so the fold follows the payload. No shipped world
+///   authors `action_delays`, so the queue is empty everywhere today; closing it
+///   properly belongs with the issue that widens the payload.
+/// * **`WorldContentRuntime::trigger_table_generation`** — declared at its own
+///   definition as a cache-invalidation token for index-keyed observers rather
+///   than authoritative state.
+fn fold_scenario_records(world: &World, mut acc: u64) -> u64 {
+    let Some(runtime) = world.get_resource::<WorldContentRuntime>() else {
+        return acc;
+    };
+    let deadlines = &runtime.deadlines;
+    let workforce = &runtime.workforce;
+    if runtime.entity_groups.is_empty()
+        && deadlines.records.is_empty()
+        && !deadlines.armed
+        && runtime.commitments.is_empty()
+        && runtime.evidence.is_empty()
+        && workforce.records.is_empty()
+        && !workforce.armed
+    {
+        return acc;
+    }
+
+    acc = fold_str(acc, "scenario-records");
+
+    // Groups: a `HashMap` of `HashSet`s in the runtime, so both levels sort.
+    let mut groups: Vec<(&str, Vec<&str>)> = runtime
+        .entity_groups
+        .iter()
+        .map(|(group, members)| {
+            let mut names: Vec<&str> = members.iter().map(String::as_str).collect();
+            names.sort_unstable();
+            (group.as_str(), names)
+        })
+        .collect();
+    groups.sort_by(|a, b| a.0.cmp(b.0));
+    acc = fold_u64(acc, groups.len() as u64);
+    for (group, members) in groups {
+        acc = fold_str(acc, group);
+        acc = fold_u64(acc, members.len() as u64);
+        for name in members {
+            acc = fold_str(acc, name);
+        }
+    }
+
+    // Deadlines, in authored order — never sorted, for the payload's reason.
+    acc = fold_u64(acc, u64::from(deadlines.armed));
+    acc = fold_u64(acc, deadlines.records.len() as u64);
+    for record in &deadlines.records {
+        acc = fold_str(acc, &record.id);
+        acc = fold_optional_str(acc, record.origin_layer.as_deref());
+        acc = fold_u64(acc, record.due_tick);
+        acc = fold_str(acc, record.state.as_str());
+        acc = match &record.armed {
+            Some(call) => fold_scheduled_call(fold_u64(acc, 1), call),
+            None => fold_u64(acc, 0),
+        };
+    }
+
+    // Promises, in the order they were made.
+    acc = fold_u64(acc, runtime.commitments.records.len() as u64);
+    for record in &runtime.commitments.records {
+        acc = fold_str(acc, &record.id);
+        acc = fold_str(acc, &record.made_to);
+        acc = fold_str(acc, &record.terms);
+        acc = fold_str(acc, &record.resolves_when);
+        acc = fold_str(acc, record.state.as_str());
+        acc = fold_u64(acc, record.made_at_tick);
+        acc = match record.resolved_at_tick {
+            Some(tick) => fold_u64(fold_u64(acc, 1), tick),
+            None => fold_u64(acc, 0),
+        };
+    }
+
+    // Findings, in the order they were made.
+    acc = fold_u64(acc, runtime.evidence.entries.len() as u64);
+    for entry in &runtime.evidence.entries {
+        acc = fold_str(acc, &entry.subject_uuid);
+        acc = fold_str(acc, &entry.text);
+        acc = fold_str(acc, entry.provenance.as_str());
+        acc = fold_u64(acc, entry.gathered_at_tick);
+    }
+
+    // The labour dispute, in authored order.
+    acc = fold_u64(acc, u64::from(workforce.armed));
+    acc = fold_u64(acc, workforce.records.len() as u64);
+    for record in &workforce.records {
+        acc = fold_str(acc, &record.id);
+        acc = fold_u64(acc, u64::from(record.on_strike));
+        acc = fold_i64(acc, record.disposition);
+    }
+    acc
+}
+
+/// The conversation the scenario is in the middle of having — the whole of
+/// [`crate::snapshot::CommsState`].
+///
+/// The inbox in inbox order, every live dialogue sorted by the message id that
+/// keys it, the open-hail set (already ordered — it is a `BTreeSet`), and the
+/// scripted `open_comms` requests queued but not yet materialised into threads.
+///
+/// Two hosts that disagree here disagree about what the crew can answer, and the
+/// pending-open queue is sharper still: `open_scripted_comms_threads` drains it
+/// front-to-back and mints a message id per request from the tick-scoped
+/// [`crate::world_id::WorldIdMint`], so a reordered queue hands different threads
+/// different ids. Queue order is therefore folded as-is, for
+/// [`fold_scenario_schedule`]'s reason.
+///
+/// # The two fields that are re-derived, and so are not folded
+///
+/// `CommsMessage::sender_in_range` and each response's `available` are rewritten
+/// every tick by `update_comms_range_flags` from ship and entity transforms the
+/// entity namespace already folds; `CommsRuntime`'s `contacts`, `range_flags`,
+/// `range_active` and `needs_broadcast` are the same class one level up (a
+/// restore sets `needs_broadcast` unconditionally rather than carrying it, which
+/// is the payload making the same call). Everything else the payload stores
+/// verbatim is folded verbatim.
+fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
+    let inbox = world.get_resource::<CommsInboxRes>();
+    let comms = world.get_resource::<CommsRuntime>();
+    let opens = world
+        .get_resource::<WorldScriptRuntime>()
+        .map(|script| script.pending_comms_opens.as_slice())
+        .unwrap_or_default();
+
+    let inbox_len = inbox.map_or(0, |inbox| inbox.0.len());
+    let dialogue_len = comms.map_or(0, |comms| comms.active_dialogues.len());
+    let hail_len = comms.map_or(0, |comms| comms.open_hails.len());
+    if inbox_len == 0 && dialogue_len == 0 && hail_len == 0 && opens.is_empty() {
+        return acc;
+    }
+
+    acc = fold_str(acc, "comms-scope");
+
+    acc = fold_u64(acc, inbox_len as u64);
+    if let Some(inbox) = inbox {
+        for message in inbox.0.iter() {
+            acc = fold_str(acc, &message.id);
+            acc = fold_str(acc, &message.thread_id);
+            acc = fold_str(acc, &message.sender_uuid);
+            acc = fold_str(acc, &message.sender_name);
+            acc = fold_str(acc, &message.subject);
+            acc = fold_str(acc, &message.body);
+            acc = fold_text_params(acc, &message.body_params);
+            acc = fold_u64(acc, message.responses.len() as u64);
+            for response in &message.responses {
+                acc = fold_str(acc, &response.text);
+                acc = fold_u64(acc, u64::from(response.important));
+            }
+            acc = match message.selected_response {
+                Some(index) => fold_u64(fold_u64(acc, 1), index as u64),
+                None => fold_u64(acc, 0),
+            };
+            acc = fold_u64(acc, u64::from(message.is_read));
+            acc = fold_u64(acc, u64::from(message.is_orphaned));
+            acc = fold_u64(acc, u64::from(message.is_urgent));
+            acc = fold_u64(acc, comms_priority_code(message.priority));
+        }
+    }
+
+    acc = fold_u64(acc, dialogue_len as u64);
+    if let Some(comms) = comms {
+        // `active_dialogues` is a `HashMap` keyed by message id; the payload
+        // sorts on that key and so does this.
+        let mut dialogues: Vec<(&str, &crate::comms::content::ActiveDialogue)> = comms
+            .active_dialogues
+            .iter()
+            .map(|(id, dialogue)| (id.as_str(), dialogue))
+            .collect();
+        dialogues.sort_by(|a, b| a.0.cmp(b.0));
+        for (message_id, dialogue) in dialogues {
+            acc = fold_str(acc, message_id);
+            acc = fold_str(acc, &dialogue.thread_id);
+            acc = fold_str(acc, &dialogue.current_node.body);
+            acc = fold_text_params(acc, &dialogue.current_node.body_params);
+            acc = fold_u64(acc, dialogue.current_node.responses.len() as u64);
+            for response in &dialogue.current_node.responses {
+                acc = fold_str(acc, &response.text);
+                acc = fold_u64(acc, u64::from(response.important));
+            }
+            acc = fold_str(acc, &dialogue.script.script_path);
+            acc = fold_optional_str(acc, dialogue.script.origin_layer.as_deref());
+            acc = fold_str(acc, &dialogue.script.node_fn);
+            acc = fold_u64(acc, dialogue.script.on_pick.len() as u64);
+            for on_pick in &dialogue.script.on_pick {
+                acc = fold_str(acc, on_pick);
+            }
+        }
+
+        acc = fold_u64(acc, hail_len as u64);
+        for target in &comms.open_hails {
+            acc = fold_str(acc, target);
+        }
+    } else {
+        acc = fold_u64(acc, 0);
+    }
+
+    acc = fold_u64(acc, opens.len() as u64);
+    for open in opens {
+        acc = fold_str(acc, &open.from);
+        acc = fold_str(acc, &open.root_fn);
+        acc = fold_optional_str(acc, open.display_name.as_deref());
+        acc = fold_optional_str(acc, open.thread_id.as_deref());
+        acc = fold_u64(acc, comms_priority_code(open.priority));
+        acc = fold_u64(acc, u64::from(open.urgent));
+        acc = fold_str(acc, &open.script_path);
+        acc = fold_optional_str(acc, open.origin_layer.as_deref());
+    }
+    acc
+}
+
+/// A `{placeholder}` table, in its own key order — it is a `BTreeMap`, so the
+/// order is already the sorted one every host agrees on.
+fn fold_text_params(mut acc: u64, params: &std::collections::BTreeMap<String, String>) -> u64 {
+    acc = fold_u64(acc, params.len() as u64);
+    for (key, value) in params {
+        acc = fold_str(acc, key);
+        acc = fold_str(acc, value);
+    }
+    acc
+}
+
+/// A comms priority as a small integer, matched at the call site.
+///
+/// Written out rather than folded through a `derive`, for
+/// [`fold_world_event`]'s reason and `GameOverReason`'s: a wire enum's variant
+/// order is not this fold's to pin.
+fn comms_priority_code(priority: CommsPriority) -> u64 {
+    match priority {
+        CommsPriority::Routine => 0,
+        CommsPriority::Urgent => 1,
+        CommsPriority::Critical => 2,
     }
 }
 

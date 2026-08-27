@@ -893,10 +893,26 @@ struct CommsMessageWire {
     sender_in_range: bool,
     #[serde(default)]
     thread_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_present_comms_priority")]
     priority: Option<CommsPriority>,
     #[serde(default)]
     is_urgent: bool,
+}
+
+/// A present wire priority is the enum itself, while an absent field remains
+/// `None` so legacy `is_urgent` can supply the compatibility fallback.
+///
+/// JSON represents `Option<T>` transparently and therefore hid the distinction;
+/// RON does not, so deriving this field as `Option<CommsPriority>` expected an
+/// authored `Some(...)` even though [`CommsMessage::serialize`] writes the bare
+/// enum. Decode the shape we actually emit without giving up absence detection.
+fn deserialize_present_comms_priority<'de, D>(
+    deserializer: D,
+) -> Result<Option<CommsPriority>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    CommsPriority::deserialize(deserializer).map(Some)
 }
 
 impl<'de> Deserialize<'de> for CommsMessage {

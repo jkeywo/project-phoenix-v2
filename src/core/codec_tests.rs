@@ -3878,6 +3878,53 @@ fn critical_serializes_with_legacy_urgent_projection() {
     assert_eq!(json["is_urgent"], true);
     let round_trip: CommsMessage = serde_json::from_value(json).expect("message decodes");
     assert_eq!(round_trip.priority, CommsPriority::Critical);
+
+    let ron = ron::to_string(&message).expect("message encodes as RON");
+    assert!(
+        ron.contains("priority:Critical"),
+        "the save format carries the same bare priority as the JSON wire: {ron}"
+    );
+    let round_trip: CommsMessage = ron::from_str(&ron).expect("RON message decodes");
+    assert_eq!(round_trip.priority, CommsPriority::Critical);
+    assert!(round_trip.is_urgent);
+}
+
+#[test]
+fn ron_comms_message_without_priority_uses_legacy_urgency() {
+    let legacy = r#"(
+        id: "m",
+        sender_uuid: "s",
+        sender_name: "Sender",
+        subject: "body",
+        body: "body",
+        responses: [],
+        selected_response: None,
+        is_read: false,
+        is_urgent: true,
+    )"#;
+    let decoded: CommsMessage = ron::from_str(legacy).expect("legacy RON message decodes");
+    assert_eq!(decoded.priority, CommsPriority::Urgent);
+    assert!(decoded.is_urgent);
+
+    let explicit = r#"(
+        id: "m",
+        sender_uuid: "s",
+        sender_name: "Sender",
+        subject: "body",
+        body: "body",
+        responses: [],
+        selected_response: None,
+        is_read: false,
+        priority: Routine,
+        is_urgent: true,
+    )"#;
+    let decoded: CommsMessage =
+        ron::from_str(explicit).expect("priority-bearing RON message decodes");
+    assert_eq!(decoded.priority, CommsPriority::Routine);
+    assert!(
+        !decoded.is_urgent,
+        "a present authoritative priority overrides the compatibility boolean"
+    );
 }
 
 #[test]

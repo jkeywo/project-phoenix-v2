@@ -3026,8 +3026,11 @@
         : { route: 'none' });
 
       if (joinRoute.route === 'none') {
+        // Not "no host id in the URL" — there are no host ids any more, and
+        // the QR would only reload this same page. The one thing that can help
+        // is a fresh load of a page whose modules all arrive.
         console.error('[client] transport module failed to load — cannot join');
-        setStatus(t('client.status_no_host_id'));
+        setStatus(t('client.status_transport_unavailable'));
         return;
       }
 
@@ -3208,7 +3211,11 @@
       const codes = window.joinCode;
       const transport = window.rendezvousTransport;
       if (!codes || !transport) {
-        setStatus(t('client.status_no_host_id'));
+        // Same condition as the route:'none' branch above, reached by the
+        // other door: a module this page needs never evaluated, so there is no
+        // join path at all and only a reload can produce one.
+        console.error('[client] join-code or transport module missing — cannot join');
+        setStatus(t('client.status_transport_unavailable'));
         return;
       }
 

@@ -1787,7 +1787,7 @@
     // Resolve a string id that came from authored DATA rather than from this
     // page's own markup — an `[[available_ships]] label`, a `[[scenario]]
     // label`. Phones get those already resolved, because every peer message
-    // crosses localiseTree() in gui/connection-manager.js; the host PULLS the
+    // crosses localiseTree() in gui/rendezvous-transport.js's deliver(); the host PULLS the
     // same catalog straight out of wasm_get_scenario_catalog() and so misses
     // that boundary entirely, which is why its scenario buttons rendered
     // `world.combat_test.global.title` verbatim (issue #949).
@@ -2239,6 +2239,16 @@
     // Set when the rendezvous service reports a failure, so renderConnDiag()
     // can tell the operator why no code appeared.
     let rendezvousFault = null;
+    // True while the transport has a re-registration pending — a LOST service
+    // (its socket died, or the record was swept), which it retries on a backoff
+    // and answers with a fresh code. False for a refusal it will not retry.
+    // The two diagnostics sentences differ on exactly this: "a new code is
+    // coming" versus "nobody can join until the service is back".
+    let rendezvousRetrying = false;
+    // Whether the transport re-registers after a lost service. Passed to
+    // createRendezvousHost AND read by renderConnDiag, from this one constant,
+    // so the sentence on screen cannot promise a retry that is switched off.
+    const RENDEZVOUS_REREGISTER = true;
     // Replaced by initHostTransport() once it has built its diagnostics
     // closure; a no-op before that, so the paint helpers below can call it
     // unconditionally rather than guarding every site.
@@ -2281,6 +2291,7 @@
       if (row) row.style.display = '';
       rendezvousCodeShown = true;
       rendezvousFault = null;
+      rendezvousRetrying = false;
       setConnectionStatus('ready');
       renderConnDiag();
     }
@@ -2374,8 +2385,15 @@
         else if (relaySource === 'openrelay') lines.push(t('server.relay_fallback_notice'));
         // Why there is no five-letter code on screen. A console.warn is not a
         // diagnostics surface: the operator is looking at the viewscreen, and
-        // an empty join panel explains nothing by itself.
-        if (rendezvousFault) lines.push(t('server.join.rendezvous_lost'));
+        // an empty join panel explains nothing by itself. Two sentences,
+        // because the operator's next move differs: a lost service is being
+        // re-registered and a new code is on its way, while anything else
+        // means nobody joins until the service comes back.
+        if (rendezvousFault) {
+          lines.push(t(rendezvousRetrying && RENDEZVOUS_REREGISTER
+            ? 'server.join.rendezvous_reregistering'
+            : 'server.join.rendezvous_lost'));
+        }
         for (const [id, state] of clientIceStages) {
           lines.push(t('server.client_ice_state', { id, state }));
         }
@@ -2388,6 +2406,8 @@
         // a silent lobby with no code is indistinguishable from a slow one.
         console.error('[host] transport module failed to load — no crew can join');
         rendezvousFault = 'unreachable';
+        // Nothing is retrying: there is no transport to do the retrying.
+        rendezvousRetrying = false;
         setConnectionStatus('error');
         renderConnDiag();
         return;
@@ -2406,12 +2426,30 @@
         // per-token map routeOutbound reads. It can finish negotiating either
         // BEFORE or AFTER Identify names the token, so both transitions run the
         // same rebind rather than one registering and the other assuming.
+        //
+        // Both halves are guarded on connection identity, the same discipline
+        // the `close` handler below applies. On a fast reconnect (same token,
+        // new peer id) two connections briefly exist for one token: the new one
+        // has already claimed `tokenConns`, and the old one is then torn down —
+        // which fires its own 'snapshot' transition. Unguarded, that stale
+        // event deleted the LIVE connection's lossy channel from the map, and
+        // every snapshot for that player silently fell back to the reliable
+        // path for the rest of the mission.
+        let boundSnapshot = null;
         function bindSnapshot() {
           const token = peerTokens.get(conn.peer);
           if (!token) return;
+          // Only the live connection for this token may write its entries.
+          if (tokenConns.get(token) !== conn) return;
           const chan = conn.snapshotChannel;
-          if (chan) tokenSnapshotConns.set(token, chan);
-          else if (tokenSnapshotConns.has(token)) tokenSnapshotConns.delete(token);
+          if (chan) {
+            tokenSnapshotConns.set(token, chan);
+            boundSnapshot = chan;
+          } else if (boundSnapshot && tokenSnapshotConns.get(token) === boundSnapshot) {
+            // Delete only the channel THIS connection put there.
+            tokenSnapshotConns.delete(token);
+            boundSnapshot = null;
+          }
         }
         conn.on('snapshot', bindSnapshot);
 
@@ -2543,6 +2581,7 @@
       rendezvousHost = transport.createRendezvousHost({
         base: rendezvousBase,
         iceServers,
+        reregister: RENDEZVOUS_REREGISTER,
         // The authoritative protocol/content verdict, answered by Rust's own
         // delivery::check_join_stamp — never re-decided in JavaScript, and
         // never delegated to the rendezvous service's version advice. Since
@@ -2598,11 +2637,15 @@
             // needs an on-screen reason for the missing letters.
             if (!rendezvousCodeShown) {
               rendezvousFault = reason;
+              // A refusal is not retried — the operator waits for the service,
+              // no new code is coming.
+              rendezvousRetrying = false;
               renderConnDiag();
             }
             return;
           }
           rendezvousFault = reason;
+          rendezvousRetrying = RENDEZVOUS_REREGISTER;
           const hadCode = rendezvousCodeShown;
           clearJoinCode();
           setConnectionStatus(hadCode ? 'disconnected' : 'error');
@@ -3295,8 +3338,27 @@
       // Pure target ⇒ connection-list resolution lives in
       // gui/host-peer-routing.js (issue #1230); this is now purely the
       // `.send(payload)` glue over the live tokenConns/tokenSnapshotConns Maps.
+      //
+      // Per-connection try/catch, because this runs inside the callback Rust's
+      // outbound flush invokes: one phone whose channel died between the map
+      // lookup and the send must not abort delivery to every remaining crew
+      // member. The other raiser is a payload over the SDP-negotiated
+      // max-message-size — 262144 bytes between two Chromiums — on a raw
+      // RTCDataChannel with no chunking layer under it (PeerJS used to provide
+      // one). Honestly stated: nothing shipped approaches that ceiling. The
+      // largest reliable payloads are the scenario catalogue and a ship manual,
+      // both kilobytes; snapshots are per-tick entity state and smaller; mod
+      // packs never cross this wire (the host reads the ZIP locally and clients
+      // fetch content over HTTP). So a throw here means a dead link or a bug,
+      // and either way the rest of the bridge still gets its frame.
       const conns = window.hostPeerRouting.outboundTargets(target, deliveryClass, { tokenConns, tokenSnapshotConns });
-      for (const c of conns) c.send(payload);
+      for (const c of conns) {
+        try {
+          c.send(payload);
+        } catch (e) {
+          console.warn('[host] outbound send failed for one connection — dropped that frame', e);
+        }
+      }
     }
 
 // ── Config Preload ──────────────────────────────────────────────────────

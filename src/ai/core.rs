@@ -660,16 +660,20 @@ pub fn score_doctrine_pool(
 ) -> Vec<crate::core::messages::ScoredObjective> {
     let mut pool: Vec<crate::core::messages::ScoredObjective> = doctrine
         .iter()
-        .map(|d| {
+        .filter_map(|d| {
+            // Templates are validated at load, but DoctrineObjective remains a
+            // public value and runtime systems (notably civilian traffic) can
+            // construct one directly. Treat a malformed runtime entry as no
+            // objective instead of panicking the authoritative tick.
+            let directive = parse_doctrine_directive(d).ok()?;
             let utility = crate::objectives::UtilityConfig {
                 base_priority: d.base_priority,
                 modifiers: d.modifiers.clone(),
                 zero_gates: d.zero_gates.clone(),
             };
             let score = utility.score(d.mandatory, conditions);
-            let directive = parse_doctrine_directive(d);
             let relevance = crate::objectives::directive_relevance(&directive);
-            crate::core::messages::ScoredObjective {
+            Some(crate::core::messages::ScoredObjective {
                 id: d.id.clone(),
                 score,
                 directive,
@@ -687,7 +691,7 @@ pub fn score_doctrine_pool(
                     targets: vec![],
                     source: crate::core::messages::ObjectiveSource::Doctrine,
                 },
-            }
+            })
         })
         .collect();
     pool.sort_by(|a, b| {
@@ -701,64 +705,20 @@ pub fn score_doctrine_pool(
 /// Read one authored doctrine entry as the [`AiDirective`] the runtime will
 /// actually fly.
 ///
-/// This is the **single** statement of which `directive_*` field each kind
-/// reads: `Patrol` takes the plural `directive_anchors`, `Reach`/`Retreat` the
-/// singular `directive_anchor`, and everything else takes neither. Public since
-/// issue #888 so the world-composition validator can ask the same question
-/// rather than re-deriving the field table a third time — a second copy is
-/// exactly how the Requiem courier ended up authoring `directive_anchors` on a
-/// `Reach` and resolving to nothing.
+/// This wrapper returns the shared typed rejection because not every entry is
+/// necessarily load-authored: runtime systems may construct a public
+/// `DoctrineObjective` directly. Scoring drops an invalid runtime entry rather
+/// than crashing the authoritative tick. Public since issue #888 so
+/// world-composition validation can inspect the runtime Directive without
+/// re-deriving authoring rules.
 ///
 /// [`AiDirective`]: crate::core::messages::AiDirective
 pub fn parse_doctrine_directive(
     d: &crate::entities::config::DoctrineObjective,
-) -> crate::core::messages::AiDirective {
-    match d.directive_kind.as_deref() {
-        Some("Patrol") => crate::core::messages::AiDirective::Patrol {
-            anchors: d.directive_anchors.clone(),
-            loop_path: d.directive_loop,
-        },
-        Some("Destroy") => crate::core::messages::AiDirective::Destroy {
-            target: d.directive_target.clone().unwrap_or_default(),
-        },
-        Some("Reach") => crate::core::messages::AiDirective::Reach {
-            anchor: d.directive_anchor.clone().unwrap_or_default(),
-        },
-        Some("Hail") => crate::core::messages::AiDirective::Hail {
-            target: d.directive_hail_target.clone().unwrap_or_default(),
-        },
-        Some("Scan") => crate::core::messages::AiDirective::Scan {
-            target: d.directive_scan_target.clone().unwrap_or_default(),
-        },
-        Some("Retreat") => crate::core::messages::AiDirective::Retreat {
-            anchor: d.directive_anchor.clone().unwrap_or_default(),
-        },
-        Some("Dock") => crate::core::messages::AiDirective::Dock {
-            target: d.directive_dock_target.clone().unwrap_or_default(),
-        },
-        // The issue-#1162 operate verbs, all reading the shared
-        // `directive_operate_target`.
-        Some("Tow") => crate::core::messages::AiDirective::Tow {
-            target: d.directive_operate_target.clone().unwrap_or_default(),
-        },
-        Some("Stabilise") => crate::core::messages::AiDirective::Stabilise {
-            target: d.directive_operate_target.clone().unwrap_or_default(),
-        },
-        Some("Escort") => crate::core::messages::AiDirective::Escort {
-            target: d.directive_operate_target.clone().unwrap_or_default(),
-        },
-        Some("Transfer") => crate::core::messages::AiDirective::Transfer {
-            target: d.directive_operate_target.clone().unwrap_or_default(),
-        },
-        Some("FieldRepair") => crate::core::messages::AiDirective::FieldRepair {
-            target: d.directive_operate_target.clone().unwrap_or_default(),
-        },
-        Some("Order") => crate::core::messages::AiDirective::Order {
-            target: d.directive_order_target.clone().unwrap_or_default(),
-            route: d.directive_order_route.clone().unwrap_or_default(),
-        },
-        _ => crate::core::messages::AiDirective::None,
-    }
+) -> Result<crate::core::messages::AiDirective, crate::objectives::directive::DirectiveError> {
+    crate::objectives::directive::interpret(&crate::entities::config::authored_doctrine_directive(
+        d,
+    ))
 }
 
 // ── plan_helm_travel ──────────────────────────────────────────────────────────

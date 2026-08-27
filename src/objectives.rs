@@ -25,6 +25,12 @@ use crate::core::messages::{
 use crate::ship::config::StationStanceConfig;
 use std::collections::BTreeMap;
 
+/// Canonical authoring vocabulary and validation for objective Directives.
+/// Entity doctrine and World actions keep their existing TOML field names, but
+/// both adapt into this one typed contract before a runtime `AiDirective` is
+/// built (issue #1268).
+pub mod directive;
+
 // ── Utility scoring types ──────────────────────────────────────────────────
 
 /// A condition-weighted modifier added to a utility score when the condition

@@ -87,6 +87,11 @@ pub struct DoctrineObjective {
     pub directive_order_target: Option<String>,
     #[serde(default)]
     pub directive_order_route: Option<String>,
+    /// Keys serde did not recognise on this doctrine entry. The shared
+    /// Directive contract rejects them after deserialization so both doctrine
+    /// and World actions fail loudly instead of silently discarding a typo.
+    #[serde(default, flatten)]
+    pub(crate) unrecognised_fields: std::collections::BTreeMap<String, toml::Value>,
     /// Base utility score before modifiers.
     #[serde(default)]
     pub base_priority: f32,
@@ -104,191 +109,87 @@ pub struct DoctrineObjective {
     #[serde(default = "default_maintain_range")]
     pub maintain_range: f32,
     /// Whether the AI may engage impulse drive while executing this objective.
-    /// When absent, defaults to `true` for Reach and Destroy, `false` for Patrol.
+    /// When absent, defaults from the interpreted runtime Directive: `false`
+    /// for Patrol and `true` for every other kind.
     #[serde(default)]
     pub use_impulse: Option<bool>,
 }
 
 impl DoctrineObjective {
     /// Resolved effective `use_impulse` value.
-    /// Returns `self.use_impulse` if set; otherwise defaults to `true` for
-    /// Reach and Destroy directives, `false` for Patrol.
-    pub fn effective_use_impulse(&self) -> bool {
-        self.use_impulse
-            .unwrap_or(!matches!(self.directive_kind.as_deref(), Some("Patrol")))
+    /// Returns `self.use_impulse` if set; otherwise defaults to `false` for the
+    /// already-interpreted Patrol directive and `true` for every other runtime
+    /// directive. The raw authoring-kind catalogue stays owned by the shared
+    /// Directive interpreter.
+    pub fn effective_use_impulse(&self, directive: &crate::core::messages::AiDirective) -> bool {
+        self.use_impulse.unwrap_or(!matches!(
+            directive,
+            crate::core::messages::AiDirective::Patrol { .. }
+        ))
     }
 }
 
-/// Which directive kind reads each `directive_*` field, for error messages.
-///
-/// The parse side of this table is `parse_doctrine_directive`
-/// (`src/ai/core.rs`): a field a directive kind does not read is simply never
-/// looked at, which is why authoring the wrong one is silent.
-const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
-    ("directive_anchors", "Patrol"),
-    ("directive_loop", "Patrol"),
-    ("directive_target", "Destroy"),
-    ("directive_anchor", "Reach / Retreat"),
-    ("directive_hail_target", "Hail"),
-    ("directive_scan_target", "Scan"),
-    ("directive_dock_target", "Dock"),
-    (
-        "directive_operate_target",
-        "Tow / Stabilise / Escort / Transfer / FieldRepair",
-    ),
-    ("directive_order_target", "Order"),
-    ("directive_order_route", "Order"),
-];
+/// Adapt the unchanged entity-doctrine TOML shape into the one typed Directive
+/// contract shared with World `add_objective` actions (issue #1268).
+pub fn authored_doctrine_directive(
+    doctrine: &DoctrineObjective,
+) -> crate::objectives::directive::AuthoredDirective {
+    use crate::objectives::directive::{AuthoredDirective, DirectiveField};
 
-/// Reject a doctrine entry that authors a `directive_*` field belonging to a
-/// *different* directive kind, or that omits one its own kind requires.
-///
-/// # Why this is a load-time error
-///
-/// `parse_doctrine_directive` reads exactly one field per kind and ignores the
-/// rest. `assets/entities/ship_requiem_courier.toml` authored
-/// `directive_anchors = ["destination"]` (the **Patrol** field, plural) on a
-/// `Reach` directive; `Reach` reads `directive_anchor` (singular), so the anchor
-/// resolved to `""`, `anchors.get("")` missed, and the courier's only goal never
-/// resolved — a shipped hull with nothing to do and no diagnostic anywhere. It
-/// is the same "silently reads as nothing" failure mode as an unvalidated
-/// `fact(...)` name, and gets the same treatment: the entity fails to load
-/// rather than reaching a live tick.
-///
-/// Absent-vs-default is the limit of what this can see: `directive_loop = false`
-/// and `directive_anchors = []` are indistinguishable from omission, so only a
-/// field carrying a real value is reported.
-///
-/// # The mission side has its own copy
-///
-/// A `add_objective` trigger action authors the same directive fields and can
-/// make the same mistake, so `parse_directive` (`src/world/config.rs`) runs the
-/// mirror of this check over `RawActionEntry`. It is a separate implementation
-/// rather than a shared one because the two field sets differ: a mission
-/// objective names its `Destroy`/`Hail` target with the shared `target` field,
-/// where a doctrine entry has `directive_target` and `directive_hail_target`.
-/// Keep the two in step — `DIRECTIVE_FIELD_OWNERS` exists on both sides.
+    let mut authored = AuthoredDirective::new(doctrine.directive_kind.clone());
+    authored.push_texts(
+        DirectiveField::PatrolAnchors,
+        doctrine.directive_anchors.clone(),
+    );
+    authored.push_bool(DirectiveField::PatrolLoop, doctrine.directive_loop);
+    authored.push_text(
+        DirectiveField::DoctrineDestroyTarget,
+        doctrine.directive_target.clone(),
+    );
+    authored.push_text(DirectiveField::Anchor, doctrine.directive_anchor.clone());
+    authored.push_text(
+        DirectiveField::DoctrineHailTarget,
+        doctrine.directive_hail_target.clone(),
+    );
+    authored.push_text(
+        DirectiveField::DoctrineScanTarget,
+        doctrine.directive_scan_target.clone(),
+    );
+    authored.push_text(
+        DirectiveField::DoctrineDockTarget,
+        doctrine.directive_dock_target.clone(),
+    );
+    authored.push_text(
+        DirectiveField::DoctrineOperateTarget,
+        doctrine.directive_operate_target.clone(),
+    );
+    authored.push_text(
+        DirectiveField::DoctrineOrderTarget,
+        doctrine.directive_order_target.clone(),
+    );
+    authored.push_text(
+        DirectiveField::DoctrineOrderRoute,
+        doctrine.directive_order_route.clone(),
+    );
+    authored.push_unknown_fields(doctrine.unrecognised_fields.keys().cloned());
+    authored
+}
+
+/// Reject invalid doctrine through the shared Directive contract. The adapter
+/// above owns only field projection; kind vocabulary, field ownership,
+/// requirements, defaults and runtime conversion all live in
+/// `objectives::directive`.
 pub fn validate_doctrine_directives(doctrine: &[DoctrineObjective]) -> Result<(), String> {
-    for d in doctrine {
-        let kind = d.directive_kind.as_deref();
-        let (allowed, required): (&[&str], &[&str]) = match kind {
-            None | Some("None") => (&[], &[]),
-            Some("Patrol") => (&["directive_anchors", "directive_loop"], &[]),
-            Some("Destroy") => (&["directive_target"], &[]),
-            // Mirrors the world-side `parse_directive`, which already rejects a
-            // `Reach`/`Retreat` mission objective with no `directive_anchor`.
-            Some("Reach") | Some("Retreat") => (&["directive_anchor"], &["directive_anchor"]),
-            Some("Hail") => (&["directive_hail_target"], &[]),
-            // A Scan without a target can never produce an admitted ScanTarget;
-            // reject it at authoring time rather than running an inert objective.
-            Some("Scan") => (&["directive_scan_target"], &["directive_scan_target"]),
-            // Issue #1028. Required for the same reason `Reach` requires its
-            // anchor: a Dock with nothing to dock at resolves to no destination
-            // and the hull silently never goes anywhere.
-            Some("Dock") => (&["directive_dock_target"], &["directive_dock_target"]),
-            // The issue-#1162 operate verbs. Each requires its shared
-            // `directive_operate_target` for the same reason `Dock` requires its
-            // target: an operate directive naming nothing resolves to no target
-            // and the seat silently never operates.
-            Some("Tow") | Some("Stabilise") | Some("Escort") | Some("Transfer")
-            | Some("FieldRepair") => (&["directive_operate_target"], &["directive_operate_target"]),
-            Some("Order") => (
-                &["directive_order_target", "directive_order_route"],
-                &["directive_order_target", "directive_order_route"],
-            ),
-            Some(other) => {
-                return Err(format!(
-                    "doctrine '{}': unknown directive_kind '{other}'; \
-                     valid: Patrol, Destroy, Reach, Retreat, Hail, Scan, Dock, \
-                     Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
-                    d.id
-                ))
-            }
-        };
-
-        // Fields the author actually filled in with a value.
-        let authored: Vec<&str> = [
-            (!d.directive_anchors.is_empty()).then_some("directive_anchors"),
-            d.directive_loop.then_some("directive_loop"),
-            d.directive_target.is_some().then_some("directive_target"),
-            d.directive_anchor
-                .as_deref()
-                .is_some_and(|a| !a.is_empty())
-                .then_some("directive_anchor"),
-            d.directive_hail_target
-                .is_some()
-                .then_some("directive_hail_target"),
-            d.directive_scan_target
-                .as_deref()
-                .is_some_and(|t| !t.trim().is_empty())
-                .then_some("directive_scan_target"),
-            d.directive_dock_target
-                .as_deref()
-                .is_some_and(|t| !t.is_empty())
-                .then_some("directive_dock_target"),
-            d.directive_operate_target
-                .as_deref()
-                .is_some_and(|t| !t.is_empty())
-                .then_some("directive_operate_target"),
-            d.directive_order_target
-                .as_deref()
-                .is_some_and(|t| !t.is_empty())
-                .then_some("directive_order_target"),
-            d.directive_order_route
-                .as_deref()
-                .is_some_and(|r| !r.is_empty())
-                .then_some("directive_order_route"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-
-        // Misplaced fields are reported before missing ones: authoring the
-        // neighbouring kind's field is the actual mistake, and "you set
-        // `directive_anchors` on a Reach" is far more use to the author than
-        // "a Reach needs a `directive_anchor`" when both are true at once.
-        for field in &authored {
-            if allowed.contains(field) {
-                continue;
-            }
-            let owner = DIRECTIVE_FIELD_OWNERS
-                .iter()
-                .find(|(f, _)| f == field)
-                .map(|(_, owner)| *owner)
-                .unwrap_or("no");
-            return Err(match kind {
-                Some(k) => format!(
-                    "doctrine '{}': `{field}` is read only for a {owner} directive, but \
-                     directive_kind = \"{k}\", which reads {}. A field belonging to another \
-                     directive kind is silently ignored, so it is rejected here instead.",
-                    d.id,
-                    if allowed.is_empty() {
-                        "no directive field".to_string()
-                    } else {
-                        allowed
-                            .iter()
-                            .map(|f| format!("`{f}`"))
-                            .collect::<Vec<_>>()
-                            .join(" / ")
-                    },
-                ),
-                None => format!(
-                    "doctrine '{}': `{field}` is read only for a {owner} directive, but no \
-                     directive_kind is authored, so nothing reads it.",
-                    d.id,
-                ),
-            });
-        }
-
-        for field in required {
-            if !authored.contains(field) {
-                return Err(format!(
-                    "doctrine '{}': directive_kind = \"{}\" requires a non-empty `{field}`",
-                    d.id,
-                    kind.unwrap_or("None"),
-                ));
-            }
-        }
+    for entry in doctrine {
+        crate::objectives::directive::interpret(&authored_doctrine_directive(entry)).map_err(
+            |error| {
+                format!(
+                    "doctrine '{}': {}",
+                    entry.id,
+                    error.describe(crate::objectives::directive::DirectiveSurface::Doctrine)
+                )
+            },
+        )?;
     }
     Ok(())
 }

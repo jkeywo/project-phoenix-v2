@@ -10872,7 +10872,7 @@ fn warhawk_artillery_bank() -> crate::entities::config::BlasterBankConfig {
 /// hull's own: a bare Destroy with no `use_impulse`, which is what
 /// `assets/worlds/duel.toml` and `combat_test.toml`'s wave 8 hand this hull
 /// when they replace its doctrine list wholesale, and which
-/// `effective_use_impulse()` resolves to TRUE. It is the permissive case, so
+/// `effective_use_impulse(&directive)` resolves to TRUE. It is the permissive case, so
 /// anything that holds here holds for the hull's own doctrine too.
 ///
 /// Each omitted name must actually be present to begin with, so this cannot

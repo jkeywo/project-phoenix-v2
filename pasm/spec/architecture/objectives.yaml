@@ -4,9 +4,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Objective Directive Contract
-      summary: Typed objective directives that express travel, combat, Comms, Navigation traffic orders, Sensors scans, docking and engineering/repair operations (or no AI action) and declare their relevant system affinities.
+      summary: One typed authoring contract validates and converts entity doctrine and World objective actions into runtime directives for travel, combat, Comms, Navigation traffic orders, Sensors scans, docking and engineering/repair operations (or no AI action), which then declare their relevant system affinities.
       rationale:
         - "Issue #1139 adds Scan { target } with Sensors-only affinity. Mission actions use their existing shared target field; doctrine uses a dedicated directive_scan_target so a misplaced Destroy/Hail/Scan field is rejected at load rather than silently ignored. Both front-ends parse to the same AiDirective, codec/decision-trace projections retain its target, and the Sensors host consumes only a positive Sensors-affined entry."
+        - "Issue #1268 removes the two authoring switches: objectives::directive owns the complete DirectiveKind catalogue, canonical value slots, required/defaulted fields, forbidden-field rules, typed rejection categories and the only AiDirective converter. Entity doctrine and World add_objective retain their shipped TOML spellings and only project those fields into AuthoredDirective. Missing, whitespace-empty scalar values, whitespace-blank elements inside a materially authored nonempty text list, cross-kind, unknown-kind and unknown-field cases therefore cross the same validator; equivalent complete rows for every kind produce identical runtime values."
+        - "Untargeted Destroy and an empty non-looping Patrol are deliberate established defaults. Shipped player/NPC combat doctrine uses untargeted Destroy to ask target selection for a visible hostile, while a Patrol with an omitted or explicitly empty `[]` anchor list resolves to a hold; a nonempty anchor list containing a blank element is malformed, not another spelling of hold. Reach/Retreat require an anchor; Hail/Scan/Dock and the operate family require a target; Order requires both target and route."
     architecture:
       kind: domain-model
       authority: authoritative
@@ -14,9 +16,9 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/objectives.rs, src/ai/core.rs]
-      symbols: [directive_relevance]
-      tests: [cargo test]
+      paths: [src/objectives/directive.rs, src/entities/config.rs, src/world/config.rs, src/world/script/effects.rs, src/objectives.rs, src/ai/core.rs]
+      symbols: [DirectiveKind, AuthoredDirective, DirectiveError, interpret, authored_doctrine_directive, authored_world_directive, directive_relevance]
+      tests: [cargo test doctrine_and_world_adapters --lib, cargo test nonempty_text_lists_reject_blank_elements --lib, cargo test unknown_directive_fields --lib, cargo test add_objective_rejects_an_unknown_directive_field --lib]
 
   - state: objective-directive-state
     core:
@@ -182,7 +184,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Objective AI Projection
-      summary: Publishes the shared scored objective pool to current Backfill Helm and Tactical AI, which select directives relevant to their system affinity.
+      summary: Publishes each ship's scored objective pool to Backfill Helm, Weapons/Tactical, Comms, Navigation, Sensors, Engineering, and Repair consumers, which select positive directives relevant to their system affinity.
     architecture:
       kind: projection
       authority: authoritative
@@ -190,8 +192,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/ai/core.rs, src/ai/server.rs, src/objectives.rs]
-      symbols: [score_doctrine_pool, plan_helm_travel, directive_relevance]
+      paths: [src/ai/core.rs, src/ai/server.rs, src/objectives.rs, src/console/comms/server.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/repair/external_server.rs, src/console_ai/server.rs]
+      symbols: [score_doctrine_pool, plan_helm_travel, directive_relevance, top_operate_directive, operate_comms_ai]
       tests: [cargo test]
 
   - component: captain-objective-priority
@@ -234,7 +236,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Objective Player Projection
-      summary: Projects objective snapshots into console blackboards and GUI objective lists. Captain sees mission objectives regardless of score and doctrine objectives only when score is positive; Comms receives the complete snapshot list.
+      summary: Projects objective snapshots into console blackboards and GUI objective lists. Captain and Comms share one visibility rule that always retains mission objectives and shows doctrine objectives only when score is positive.
       rationale:
         - "Issue #830 made publish_captain_blackboard per-Ship: ship-wide fields (red_alert, auto flags, hull integrity, game_status) are computed for every ship from its own per-entity components, while the player-only fields — the objectives list + boost, camera views, and view mode — are gated on Has<LocalShip>. NPCs get empty objective lists (nothing reads an NPC captain blackboard; the wire broadcaster is LocalShip-filtered). The objective projection itself is therefore the local ship's."
         - "Issue #831 made publish_comms_blackboard per-Ship the same way: comms is fundamentally a player channel, so the shared content (messages, objectives, contacts from the singleton inbox/runtime/objective managers) is gated on Has<LocalShip> and written to the local ship, while every NPC ship receives an empty Comms blackboard entry for architectural consistency."
@@ -377,7 +379,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Objective Player and AI Divergence Contract
-      summary: "Current player projections and AI consumption intentionally diverge: Captain and Comms render different objective subsets while Helm, Tactical, and Navigation consume scored affinity-relevant directives rather than player-facing text."
+      summary: "Player projection and AI consumption intentionally diverge in purpose, not visibility: Captain and Comms render the same visible objective subset, while Backfill system hosts consume positive scored directives selected for their own affinity rather than player-facing text."
     architecture:
       kind: projection-contract
       authority: authoritative
@@ -386,5 +388,5 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/console/captain/server.rs, src/console/comms/server.rs, src/ai/core.rs, src/console/navigation/mod.rs]
+      paths: [src/console/captain/server.rs, src/console/comms/server.rs, src/ai/core.rs, src/console/navigation/server.rs, src/console/weapons/server.rs, src/console/repair/external_server.rs, src/console_ai/server.rs]
       tests: [cargo test]

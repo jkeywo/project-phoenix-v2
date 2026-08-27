@@ -2,7 +2,7 @@
 title: World Data
 type: entity
 tags: [world, scenario, transform, ambient_light, snapshot, includes]
-sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/include_resolve.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
+sources: [src/world/config.rs, src/world/server.rs, src/world/server_tests.rs, src/world/layers.rs, src/world/validate.rs, src/world/deadlines.rs, src/world/script/load.rs, src/world/script/schedule.rs, src/comms/scripted.rs, src/entities/config_cache.rs, src/snapshot.rs, src/server/bridge.rs, server.html, src/server/renderer.rs, src/entities/config.rs, src/entities/entity_override.rs, src/entities/include_resolve.rs, src/objectives/directive.rs, tests/snapshot_resume.rs, assets/worlds/default.toml]
 updated: 2026-08-27
 ---
 
@@ -152,11 +152,14 @@ The tombstone is a **compose-layer marker only**, and writing one in a world
 `[[entity]].overrides` is an error rather than a no-op:
 `merge_entity_config_toml_with` returns `Result` and rejects any `_remove` key,
 at any depth, under `InstanceOverride`. It has to: relying on the parser to
-catch a stray marker does not work. `behaviour.doctrine` is the one array that
-reconciles at that layer, so a tombstone written there deep-merges *into* the
-matching template entry — and `DoctrineObjective` is **not**
-`deny_unknown_fields`, so serde could ignore it and leave the doctrine present.
-The merge therefore rejects every instance-override tombstone before parsing.
+enforce a merge policy puts the rule in the wrong layer. Historically,
+`behaviour.doctrine` was the clearest failure: it is the one array that
+reconciles here, so a tombstone deep-merged into the matching entry and serde
+silently ignored it. Issue #1268 now captures and rejects unknown doctrine keys,
+but sibling structs in `src/ship/config.rs` remain permissive and the parser
+still does not own whether a tombstone is legal. A subtractive marker that can
+silently do nothing is the failure mode #838 existed to end, so rejection stays
+in the merge, where the guarantee is stated.
 
 To take an entry away in a world override, restate the array without it, or
 clear the whole array with `[]`.

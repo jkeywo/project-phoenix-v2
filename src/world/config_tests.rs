@@ -1597,6 +1597,240 @@ directive_loop   = false
     }
 }
 
+/// Issue #1268's contract table: the two unchanged TOML shapes are adapters,
+/// not competing interpreters. Every kind (plus an absent kind) must therefore
+/// produce the same typed runtime value after projecting its surface-specific
+/// field names.
+#[test]
+fn doctrine_and_world_adapters_match_for_every_directive_kind_and_absence() {
+    use crate::entities::config::{authored_doctrine_directive, DoctrineObjective};
+    use crate::objectives::directive::{interpret, DirectiveKind};
+
+    let rows = std::iter::once(None)
+        .chain(DirectiveKind::ALL.into_iter().map(Some))
+        .collect::<Vec<_>>();
+
+    for row in rows {
+        let authored_kind = row.map(|kind| kind.name().to_string());
+        let mut doctrine = DoctrineObjective {
+            id: "equivalence".into(),
+            directive_kind: authored_kind.clone(),
+            ..Default::default()
+        };
+        let mut world = RawActionEntry {
+            kind: "add_objective".into(),
+            directive_kind: authored_kind,
+            ..Default::default()
+        };
+
+        match row.unwrap_or(DirectiveKind::None) {
+            DirectiveKind::None => {}
+            DirectiveKind::Patrol => {
+                doctrine.directive_anchors = vec!["alpha".into(), "beta".into()];
+                doctrine.directive_loop = true;
+                world.directive_anchors = Some(vec!["alpha".into(), "beta".into()]);
+                world.directive_loop = Some(true);
+            }
+            DirectiveKind::Destroy => {
+                doctrine.directive_target = Some("raider".into());
+                world.target = Some("raider".into());
+            }
+            DirectiveKind::Reach | DirectiveKind::Retreat => {
+                doctrine.directive_anchor = Some("haven".into());
+                world.directive_anchor = Some("haven".into());
+            }
+            DirectiveKind::Hail => {
+                doctrine.directive_hail_target = Some("axiom".into());
+                world.target = Some("axiom".into());
+            }
+            DirectiveKind::Scan => {
+                doctrine.directive_scan_target = Some("rung".into());
+                world.target = Some("rung".into());
+            }
+            DirectiveKind::Dock => {
+                doctrine.directive_dock_target = Some("berth".into());
+                world.target = Some("berth".into());
+            }
+            DirectiveKind::Tow
+            | DirectiveKind::Stabilise
+            | DirectiveKind::Escort
+            | DirectiveKind::Transfer
+            | DirectiveKind::FieldRepair => {
+                doctrine.directive_operate_target = Some("casualty".into());
+                world.target = Some("casualty".into());
+            }
+            DirectiveKind::Order => {
+                doctrine.directive_order_target = Some("freighter".into());
+                doctrine.directive_order_route = Some("shelter-run".into());
+                world.target = Some("freighter".into());
+                world.route = Some("shelter-run".into());
+            }
+        }
+
+        let doctrine_result = interpret(&authored_doctrine_directive(&doctrine));
+        let world_result = interpret(&authored_world_directive(&world));
+        assert_eq!(
+            doctrine_result, world_result,
+            "adapters diverged for {:?}",
+            row
+        );
+        assert!(
+            doctrine_result.is_ok(),
+            "the complete {:?} row must be accepted: {doctrine_result:?}",
+            row
+        );
+    }
+}
+
+/// Missing, empty, cross-kind, unknown-field and unknown-kind failures carry
+/// the same typed rejection after either adapter. Surface-specific spelling is
+/// applied only when the error is rendered for an author.
+#[test]
+fn doctrine_and_world_adapters_match_rejection_categories() {
+    use crate::entities::config::{authored_doctrine_directive, DoctrineObjective};
+    use crate::objectives::directive::interpret;
+
+    let assert_same = |doctrine: DoctrineObjective, world: RawActionEntry, case: &str| {
+        let doctrine_error = interpret(&authored_doctrine_directive(&doctrine))
+            .expect_err("doctrine fixture must fail");
+        let world_error =
+            interpret(&authored_world_directive(&world)).expect_err("World fixture must fail");
+        assert_eq!(doctrine_error, world_error, "{case} rejection diverged");
+    };
+
+    assert_same(
+        DoctrineObjective {
+            id: "missing".into(),
+            directive_kind: Some("Reach".into()),
+            ..Default::default()
+        },
+        RawActionEntry {
+            kind: "add_objective".into(),
+            directive_kind: Some("Reach".into()),
+            ..Default::default()
+        },
+        "missing field",
+    );
+
+    assert_same(
+        DoctrineObjective {
+            id: "empty".into(),
+            directive_kind: Some("Scan".into()),
+            directive_scan_target: Some("   ".into()),
+            ..Default::default()
+        },
+        RawActionEntry {
+            kind: "add_objective".into(),
+            directive_kind: Some("Scan".into()),
+            target: Some("   ".into()),
+            ..Default::default()
+        },
+        "empty field",
+    );
+
+    assert_same(
+        DoctrineObjective {
+            id: "blank-list-element".into(),
+            directive_kind: Some("Patrol".into()),
+            directive_anchors: vec!["alpha".into(), " \t ".into()],
+            ..Default::default()
+        },
+        RawActionEntry {
+            kind: "add_objective".into(),
+            directive_kind: Some("Patrol".into()),
+            directive_anchors: Some(vec!["alpha".into(), " \t ".into()]),
+            ..Default::default()
+        },
+        "blank list element",
+    );
+
+    assert_same(
+        DoctrineObjective {
+            id: "cross-kind".into(),
+            directive_kind: Some("Reach".into()),
+            directive_anchors: vec!["wrong".into()],
+            ..Default::default()
+        },
+        RawActionEntry {
+            kind: "add_objective".into(),
+            directive_kind: Some("Reach".into()),
+            directive_anchors: Some(vec!["wrong".into()]),
+            ..Default::default()
+        },
+        "cross-kind field",
+    );
+
+    let unknown = std::collections::BTreeMap::from([(
+        "directive_waypoints".into(),
+        toml::Value::Array(Vec::new()),
+    )]);
+    assert_same(
+        DoctrineObjective {
+            id: "unknown-field".into(),
+            directive_kind: Some("Patrol".into()),
+            unrecognised_fields: unknown.clone(),
+            ..Default::default()
+        },
+        RawActionEntry {
+            kind: "add_objective".into(),
+            directive_kind: Some("Patrol".into()),
+            unrecognised_fields: unknown,
+            ..Default::default()
+        },
+        "unknown field",
+    );
+
+    assert_same(
+        DoctrineObjective {
+            id: "unknown-kind".into(),
+            directive_kind: Some("Wander".into()),
+            ..Default::default()
+        },
+        RawActionEntry {
+            kind: "add_objective".into(),
+            directive_kind: Some("Wander".into()),
+            ..Default::default()
+        },
+        "unknown kind",
+    );
+}
+
+#[test]
+fn unknown_directive_fields_are_rejected_from_both_toml_surfaces() {
+    let world_error = actions(
+        r#"
+[[action]]
+type = "add_objective"
+id = "unknown-world-field"
+text = "Unknown"
+directive_kind = "Patrol"
+directive_waypoints = ["alpha"]
+"#,
+    )
+    .expect_err("an unknown World field must fail");
+    assert!(
+        world_error.contains("unknown Directive field `directive_waypoints`"),
+        "{world_error}"
+    );
+
+    let doctrine_error = crate::entities::config::EntityConfig::from_toml_in_mode(
+        r#"
+[behaviour]
+[[behaviour.doctrine]]
+id = "unknown-doctrine-field"
+directive_kind = "Patrol"
+directive_waypoints = ["alpha"]
+"#,
+        crate::entities::ai_declaration_manifest::AiDeclarationMode::Lenient,
+    )
+    .expect_err("an unknown doctrine field must fail")
+    .to_string();
+    assert!(
+        doctrine_error.contains("unknown Directive field `directive_waypoints`"),
+        "{doctrine_error}"
+    );
+}
+
 // -- Objective command-stance contribution (issue #1110) ----------------
 
 #[test]

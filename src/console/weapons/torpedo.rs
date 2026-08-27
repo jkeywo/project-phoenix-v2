@@ -192,7 +192,13 @@ pub fn targeted_objective_count(behaviour: &crate::entities::config::BehaviourCo
     behaviour
         .doctrine
         .iter()
-        .filter(|d| d.directive_kind.as_deref() == Some("Destroy") && d.directive_target.is_some())
+        .filter(|doctrine| {
+            matches!(
+                crate::ai::core::parse_doctrine_directive(doctrine),
+                Ok(crate::core::messages::AiDirective::Destroy { target })
+                    if !target.trim().is_empty()
+            )
+        })
         .count()
 }
 

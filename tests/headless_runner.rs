@@ -239,11 +239,10 @@ fn a_worlds_player_ship_overrides_apply_to_the_lobby_selected_hull() {
          as the Cruiser authored it, not as the placeholder Destroyer did (whose \
          entry differs in text, target_speed and maintain_range)"
     );
+    let mut expected_hold_station = doctrine(&cruiser_doctrine, "hold-station").clone();
+    expected_hold_station.base_priority = 77.0;
     assert_eq!(
-        DoctrineObjective {
-            base_priority: 77.0,
-            ..doctrine(&cruiser_doctrine, "hold-station").clone()
-        },
+        expected_hold_station,
         *doctrine(&flown, "hold-station"),
         "…and the override edited the Cruiser's own entry IN PLACE: one field \
          changed, every other field of it untouched"

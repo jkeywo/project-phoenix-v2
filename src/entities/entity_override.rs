@@ -94,13 +94,13 @@ pub enum MergePolicy {
     /// `EntityConfig` and be caught by `deny_unknown_fields`. It would not.
     /// `behaviour.doctrine` is the one array that reconciles at THIS layer, so
     /// a tombstone written there deep-merges into the matching template entry —
-    /// and `DoctrineObjective` is not `deny_unknown_fields`, so serde ignores
-    /// the key, `apply_overrides` returns `Ok`, and the doctrine is unchanged.
-    /// Measured against the real `ship_harrow_patrol` hull that was
-    /// `ACCEPTED SILENTLY`. Nothing in `ship::config` is
-    /// `deny_unknown_fields` either. That is precisely the silent-no-op failure
-    /// mode issue #838 existed to end, so the guarantee is now enforced where
-    /// it is stated rather than delegated to a parser that does not make it.
+    /// and, historically, `DoctrineObjective` let serde ignore the key;
+    /// `apply_overrides` returned `Ok` and the doctrine stayed unchanged.
+    /// Measured against the real `ship_harrow_patrol` hull, that was `ACCEPTED
+    /// SILENTLY`. Issue #1268 now captures and rejects unknown doctrine keys,
+    /// but the merge policy still owns whether this marker is honoured, and
+    /// the sibling `ship::config` structs remain permissive. Enforce the
+    /// guarantee where it is stated rather than delegating it downstream.
     #[default]
     InstanceOverride,
     /// One entity template merging onto its include closure.
@@ -302,9 +302,11 @@ pub fn find_removal_marker(value: &toml::Value) -> Option<String> {
 /// document that looks like it did what was asked and did not. A tombstone that
 /// reaches [`MergePolicy::InstanceOverride`] does not merely fail to remove: on
 /// `behaviour.doctrine`, the one array that reconciles at that layer, it
-/// deep-merges into the matching template entry and disappears into serde's
-/// unknown-field ignore, because `DoctrineObjective` is not
-/// `deny_unknown_fields`. So the load SUCCEEDS with the doctrine intact.
+/// deep-merges into the matching template entry. Before issue #1268 it then
+/// disappeared into serde's unknown-field ignore and the load SUCCEEDED with
+/// the doctrine intact. The doctrine parser now rejects unknown keys too, but
+/// this layer still owns the stronger rule: instance overrides do not honour
+/// tombstones anywhere, including in permissive sibling config structs.
 ///
 /// The key's mere presence is the mistake, so `_remove = false` is rejected
 /// too: at this layer there is no reading of the key that does anything.
@@ -482,12 +484,12 @@ fn merge_named_array(template: &[toml::Value], overrides: &[toml::Value]) -> Vec
 ///
 /// A marker left at the document's TOP level would be rejected there
 /// (`EntityConfig` is `deny_unknown_fields`); one left inside a
-/// `[[behaviour.doctrine]]` or a `[[system]]` entry would NOT be, because
-/// `DoctrineObjective` and the `ship::config` structs are not. That asymmetry
-/// is exactly why the marker is stripped structurally here rather than left for
-/// a parser to catch. Same shape as `include_resolve::take_includes` stripping
-/// `includes`, and for the same reason: an authoring marker must not exist at
-/// runtime.
+/// `[[system]]` entry would NOT be because the `ship::config` structs are
+/// permissive. `DoctrineObjective` joined the rejecting side in issue #1268,
+/// but that partial asymmetry is still why the marker is stripped structurally
+/// rather than left for a parser to catch. Same shape as
+/// `include_resolve::take_includes` stripping `includes`, and for the same
+/// reason: an authoring marker must not exist at runtime.
 pub fn strip_removals(value: &toml::Value) -> toml::Value {
     match value {
         toml::Value::Table(table) => toml::Value::Table(
@@ -1260,8 +1262,9 @@ kind = "power_reactor"
     /// `behaviour.doctrine` is the one array that reconciles at the instance
     /// layer, so a tombstone written there does not sit in the merged document
     /// waiting to be rejected — it deep-merges INTO the matching template entry.
-    /// `DoctrineObjective` is not `deny_unknown_fields`, so serde ignored it:
-    /// before this test, `apply_overrides` returned `Ok`, the doctrine came back
+    /// Before issue #1268 taught the doctrine contract to reject unknown keys,
+    /// serde ignored the marker: before this test, `apply_overrides` returned
+    /// `Ok`, the doctrine came back
     /// as `["patrol-ironveil", "destroy-hostiles"]`, and the author who asked
     /// for `destroy-hostiles` to be GONE got a hull that still had it and no
     /// warning. `src/ship/config.rs` has no `deny_unknown_fields` either, so

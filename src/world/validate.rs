@@ -858,11 +858,13 @@ fn doctrine_anchor_refs(
     let mut out = Vec::new();
     for entry in &behaviour.doctrine {
         match crate::ai::core::parse_doctrine_directive(entry) {
-            crate::core::messages::AiDirective::Patrol { anchors, .. } => {
+            Ok(crate::core::messages::AiDirective::Patrol { anchors, .. }) => {
                 out.extend(anchors.into_iter().map(|a| (a, "Patrol")));
             }
-            crate::core::messages::AiDirective::Reach { anchor } => out.push((anchor, "Reach")),
-            crate::core::messages::AiDirective::Retreat { anchor } => out.push((anchor, "Retreat")),
+            Ok(crate::core::messages::AiDirective::Reach { anchor }) => out.push((anchor, "Reach")),
+            Ok(crate::core::messages::AiDirective::Retreat { anchor }) => {
+                out.push((anchor, "Retreat"))
+            }
             _ => {}
         }
     }

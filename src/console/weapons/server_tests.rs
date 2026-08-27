@@ -11726,6 +11726,47 @@ fn launched_from_admitted_command(app: &mut App) -> bool {
         .any(|(_, m)| matches!(m, ServerMessage::TorpedoLaunched { .. }))
 }
 
+#[test]
+fn targeted_objective_count_ignores_malformed_runtime_doctrine() {
+    use crate::entities::config::{BehaviourConfig, DoctrineObjective};
+
+    let behaviour = BehaviourConfig {
+        doctrine: vec![
+            DoctrineObjective {
+                id: "valid-target".into(),
+                directive_kind: Some("Destroy".into()),
+                directive_target: Some("Starbase Alpha".into()),
+                ..Default::default()
+            },
+            DoctrineObjective {
+                id: "blank-target".into(),
+                directive_kind: Some("Destroy".into()),
+                directive_target: Some(" \t ".into()),
+                ..Default::default()
+            },
+            DoctrineObjective {
+                id: "cross-kind-field".into(),
+                directive_kind: Some("Destroy".into()),
+                directive_target: Some("Starbase Beta".into()),
+                directive_anchor: Some("wrong-for-destroy".into()),
+                ..Default::default()
+            },
+            DoctrineObjective {
+                id: "untargeted-standing-order".into(),
+                directive_kind: Some("Destroy".into()),
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        crate::console::weapons::torpedo::targeted_objective_count(&behaviour),
+        1,
+        "only the canonically valid Destroy directive with a nonblank target is a named engagement"
+    );
+}
+
 /// **AC1 (the symmetry claim).** A HUMAN-origin `FireTorpedo` is held by the
 /// conservation gate when the magazine is thin against a long mission.
 ///

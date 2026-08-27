@@ -784,6 +784,11 @@ pub(crate) struct RawActionEntry {
     /// as the static `[[entity]] overrides` field.
     #[serde(default)]
     pub(crate) overrides: Option<toml::Value>,
+    /// Keys not recognised by the flat action schema. `add_objective` routes
+    /// these through the shared Directive contract, which prevents a typo from
+    /// being accepted on World actions while doctrine rejects it (issue #1268).
+    #[serde(default, flatten)]
+    pub(crate) unrecognised_fields: std::collections::BTreeMap<String, toml::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1153,236 +1158,41 @@ pub struct Trigger {
 
 // -- Parser helpers -----------------------------------------------------------
 
-/// Which directive kind reads each `add_objective` directive field, for error
-/// messages.
-///
-/// The mission-side twin of `DIRECTIVE_FIELD_OWNERS` in
-/// `src/entities/config.rs`. One shape difference: a mission objective names its
-/// target-naming directives (`Destroy`/`Hail`/`Scan`/`Dock`, the issue-#1162
-/// operate verbs `Tow`/`Stabilise`/`Escort`/`Transfer`/`FieldRepair`, and
-/// `Order`) with the ONE
-/// shared `target` field, where a doctrine entry has a `directive_target`, a
-/// `directive_hail_target`, a `directive_dock_target` and a
-/// `directive_operate_target` of its own. `Order` additionally owns `route`.
-/// Both tables carry every directive kind — `Dock` used to be here on the
-/// doctrine side only, which this fixes.
-const DIRECTIVE_FIELD_OWNERS: &[(&str, &str)] = &[
-    ("directive_anchors", "Patrol"),
-    ("directive_loop", "Patrol"),
-    ("directive_anchor", "Reach / Retreat"),
-    (
-        "target",
-        "Destroy / Hail / Scan / Dock / Tow / Stabilise / Escort / Transfer / FieldRepair / Order",
-    ),
-    ("route", "Order"),
-];
+/// Adapt the unchanged flat World-action fields into the shared typed Directive
+/// contract. `targets` (plural) remains objective presentation metadata and is
+/// deliberately not projected here; only singular `target` is a Directive
+/// field.
+fn authored_world_directive(
+    raw: &RawActionEntry,
+) -> crate::objectives::directive::AuthoredDirective {
+    use crate::objectives::directive::{AuthoredDirective, DirectiveField};
 
-/// Build the [`AiDirective`] for an `add_objective` action, rejecting a
-/// directive that authors a field belonging to a *different* kind as well as one
-/// that omits a field its own kind requires.
-///
-/// # Why the misplaced-field half exists
-///
-/// Each arm below reads exactly one field and ignores the rest, so authoring the
-/// neighbouring kind's field does nothing at all and says nothing about it. That
-/// is the same silent-nothing failure that lost the Requiem Courier its only
-/// goal on the entity side (`validate_doctrine_directives`,
-/// `src/entities/config.rs`) — `directive_anchors` (the **Patrol** field,
-/// plural) on a `Reach`, which reads the singular `directive_anchor`. A mission
-/// `add_objective` can author the identical mistake, so it gets the identical
-/// treatment: the world fails to parse rather than activating an objective that
-/// can never fire.
-///
-/// Absent-vs-default is the limit of what this can see, matching the entity
-/// side: `directive_loop = false` and `directive_anchors = []` carry no intent
-/// worth reporting, so only a field with a real value counts as authored.
-///
-/// `targets` (plural — the nav-radar marker list) is *not* a directive field and
-/// is legitimate alongside any kind; only the singular `target` is checked.
+    let mut authored = AuthoredDirective::new(raw.directive_kind.clone());
+    authored.push_texts(
+        DirectiveField::PatrolAnchors,
+        raw.directive_anchors.clone().unwrap_or_default(),
+    );
+    authored.push_bool(
+        DirectiveField::PatrolLoop,
+        raw.directive_loop.unwrap_or(false),
+    );
+    authored.push_text(DirectiveField::Anchor, raw.directive_anchor.clone());
+    authored.push_text(DirectiveField::WorldTarget, raw.target.clone());
+    authored.push_text(DirectiveField::WorldRoute, raw.route.clone());
+    authored.push_unknown_fields(raw.unrecognised_fields.keys().cloned());
+    authored
+}
+
+/// Build the runtime [`AiDirective`] for an `add_objective` action through the
+/// same kind vocabulary, field ownership, requirements, defaults and converter
+/// that entity doctrine uses.
 fn parse_directive(raw: &RawActionEntry) -> Result<AiDirective, String> {
-    let kind = raw.directive_kind.as_deref();
-    let allowed: &[&str] = match kind {
-        None | Some("None") => &[],
-        Some("Patrol") => &["directive_anchors", "directive_loop"],
-        // Every target-naming directive reads the ONE shared `target` field on
-        // the mission side, including Scan (#1139), `Dock` (issue #1028) and
-        // the issue-#1162 operate verbs. Order (#1141) also reads `route`.
-        Some("Destroy") | Some("Hail") | Some("Scan") | Some("Dock") | Some("Tow")
-        | Some("Stabilise") | Some("Escort") | Some("Transfer") | Some("FieldRepair") => {
-            &["target"]
-        }
-        Some("Order") => &["target", "route"],
-        Some("Reach") | Some("Retreat") => &["directive_anchor"],
-        Some(other) => {
-            return Err(format!(
-                "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail, \
-                 Scan, Dock, Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
-                other
-            ))
-        }
-    };
-
-    // Fields the author actually filled in with a value.
-    let authored: Vec<&str> = [
-        raw.directive_anchors
-            .as_deref()
-            .is_some_and(|a| !a.is_empty())
-            .then_some("directive_anchors"),
-        raw.directive_loop
-            .unwrap_or(false)
-            .then_some("directive_loop"),
-        raw.directive_anchor
-            .as_deref()
-            .is_some_and(|a| !a.is_empty())
-            .then_some("directive_anchor"),
-        raw.target
-            .as_deref()
-            .is_some_and(|t| !t.is_empty())
-            .then_some("target"),
-        raw.route
-            .as_deref()
-            .is_some_and(|r| !r.is_empty())
-            .then_some("route"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    // Misplaced fields are reported before missing ones, for the same reason as
-    // on the entity side: when both are true at once, "you set
-    // `directive_anchors` on a Reach" tells the author far more than "a Reach
-    // needs a `directive_anchor`".
-    for field in &authored {
-        if allowed.contains(field) {
-            continue;
-        }
-        let owner = DIRECTIVE_FIELD_OWNERS
-            .iter()
-            .find(|(f, _)| f == field)
-            .map(|(_, owner)| *owner)
-            .unwrap_or("no");
-        let reads = if allowed.is_empty() {
-            "no directive field".to_string()
-        } else {
-            allowed
-                .iter()
-                .map(|f| format!("`{f}`"))
-                .collect::<Vec<_>>()
-                .join(" / ")
-        };
-        return Err(match kind {
-            Some(k) => format!(
-                "Action 'add_objective': `{field}` is read only for a {owner} directive, but \
-                 directive_kind = \"{k}\", which reads {reads}. A field belonging to another \
-                 directive kind is silently ignored, so it is rejected here instead."
-            ),
-            None => format!(
-                "Action 'add_objective': `{field}` is read only for a {owner} directive, but no \
-                 directive_kind is authored, so nothing reads it."
-            ),
-        });
-    }
-
-    match kind {
-        None | Some("None") => Ok(AiDirective::None),
-        Some("Patrol") => Ok(AiDirective::Patrol {
-            anchors: raw.directive_anchors.clone().unwrap_or_default(),
-            loop_path: raw.directive_loop.unwrap_or(false),
-        }),
-        Some("Destroy") => Ok(AiDirective::Destroy {
-            target: raw
-                .target
-                .clone()
-                .ok_or_else(|| "Directive 'Destroy' requires a 'target' field".to_string())?,
-        }),
-        Some("Reach") => Ok(AiDirective::Reach {
-            anchor: raw.directive_anchor.clone().ok_or_else(|| {
-                "Directive 'Reach' requires a 'directive_anchor' field".to_string()
-            })?,
-        }),
-        Some("Retreat") => Ok(AiDirective::Retreat {
-            anchor: raw.directive_anchor.clone().ok_or_else(|| {
-                "Directive 'Retreat' requires a 'directive_anchor' field".to_string()
-            })?,
-        }),
-        Some("Hail") => Ok(AiDirective::Hail {
-            target: raw
-                .target
-                .clone()
-                .ok_or_else(|| "Directive 'Hail' requires a 'target' field".to_string())?,
-        }),
-        Some("Scan") => Ok(AiDirective::Scan {
-            target: raw
-                .target
-                .as_ref()
-                .filter(|target| !target.trim().is_empty())
-                .cloned()
-                .ok_or_else(|| "Directive 'Scan' requires a 'target' field".to_string())?,
-        }),
-        // Dock (issue #1028) named the mission side's `target`, but the mission
-        // parser never carried it — the "out of step over Dock" the #1162
-        // decision fixes.
-        Some("Dock") => Ok(AiDirective::Dock {
-            target: raw
-                .target
-                .clone()
-                .ok_or_else(|| "Directive 'Dock' requires a 'target' field".to_string())?,
-        }),
-        // The issue-#1162 operate verbs, each naming its `target` the same way.
-        Some("Tow") => Ok(AiDirective::Tow {
-            target: raw
-                .target
-                .clone()
-                .ok_or_else(|| "Directive 'Tow' requires a 'target' field".to_string())?,
-        }),
-        Some("Stabilise") => Ok(AiDirective::Stabilise {
-            target: raw
-                .target
-                .clone()
-                .ok_or_else(|| "Directive 'Stabilise' requires a 'target' field".to_string())?,
-        }),
-        Some("Escort") => Ok(AiDirective::Escort {
-            target: raw
-                .target
-                .clone()
-                .ok_or_else(|| "Directive 'Escort' requires a 'target' field".to_string())?,
-        }),
-        Some("Transfer") => Ok(AiDirective::Transfer {
-            target: raw
-                .target
-                .clone()
-                .ok_or_else(|| "Directive 'Transfer' requires a 'target' field".to_string())?,
-        }),
-        Some("FieldRepair") => Ok(AiDirective::FieldRepair {
-            target: raw
-                .target
-                .clone()
-                .ok_or_else(|| "Directive 'FieldRepair' requires a 'target' field".to_string())?,
-        }),
-        Some("Order") => Ok(AiDirective::Order {
-            target: raw
-                .target
-                .clone()
-                .filter(|target| !target.is_empty())
-                .ok_or_else(|| {
-                    "Directive 'Order' requires a non-empty 'target' field".to_string()
-                })?,
-            route: raw
-                .route
-                .clone()
-                .filter(|route| !route.is_empty())
-                .ok_or_else(|| {
-                    "Directive 'Order' requires a non-empty 'route' field".to_string()
-                })?,
-        }),
-        // Unreachable: the `allowed` match above already returned for an
-        // unknown kind.
-        Some(other) => Err(format!(
-            "Unknown directive_kind '{}'; valid: Patrol, Destroy, Reach, Retreat, Hail, \
-             Scan, Dock, Tow, Stabilise, Escort, Transfer, FieldRepair, Order",
-            other
-        )),
-    }
+    crate::objectives::directive::interpret(&authored_world_directive(raw)).map_err(|error| {
+        format!(
+            "Action 'add_objective': {}",
+            error.describe(crate::objectives::directive::DirectiveSurface::World)
+        )
+    })
 }
 
 fn parse_utility_config(raw: &RawActionEntry) -> UtilityConfig {

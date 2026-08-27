@@ -1252,11 +1252,13 @@ fn dispatch_spawn_entity(action: &TriggerAction, context: &DispatchContext) -> D
                 // `[[shield_arc]]` and every weapon bank WHOLESALE, and does
                 // NOT honour the `_remove` tombstone. A tombstone written here
                 // is rejected BY THE MERGE, which is why the merge is fallible:
-                // it cannot be left to `from_toml` below, because the one array
-                // that reconciles at this layer is `behaviour.doctrine`, and
-                // `DoctrineObjective` is not `deny_unknown_fields` — the marker
-                // would deep-merge into the matching template entry, be ignored
-                // by serde, and the doctrine would be silently unchanged.
+                // it must not be left to `from_toml` below. Historically the
+                // one reconciling array, `behaviour.doctrine`, let the marker
+                // deep-merge into an entry and disappear into serde's
+                // unknown-field ignore. Issue #1268 now rejects unknown
+                // doctrine keys too, but merge policy remains the authoritative
+                // place to say that instance overrides never honour tombstones;
+                // permissive sibling config structs still need that guarantee.
                 // Element-wise array extension is a FRAGMENT-composition
                 // feature (`MergePolicy::ComposeFragments`), because widening it
                 // here would change what every shipped world already means.

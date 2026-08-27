@@ -94,8 +94,8 @@ impl HelmAxisHost for ImpulseAxis {
             .and_then(|obj| {
                 cx.behaviour
                     .and_then(|b| b.0.doctrine.iter().find(|d| d.id == obj.id))
+                    .map(|d| d.effective_use_impulse(&obj.directive))
             })
-            .map(|d| d.effective_use_impulse())
             .unwrap_or(false);
         if !use_impulse {
             return None;

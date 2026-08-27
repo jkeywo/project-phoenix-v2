@@ -1296,10 +1296,37 @@ fn doctrine_scan_parses_its_dedicated_target_field() {
     };
     assert_eq!(
         parse_doctrine_directive(&objective),
-        crate::core::messages::AiDirective::Scan {
+        Ok(crate::core::messages::AiDirective::Scan {
             target: "Ladder Depot B".into()
-        }
+        })
     );
+}
+
+#[test]
+fn score_doctrine_pool_skips_an_invalid_runtime_constructed_entry() {
+    use crate::entities::config::DoctrineObjective;
+    use crate::objectives::WorldConditions;
+
+    let doctrine = vec![
+        DoctrineObjective {
+            id: "invalid-runtime-reach".into(),
+            directive_kind: Some("Reach".into()),
+            base_priority: 100.0,
+            // Deliberately no directive_anchor: a runtime constructor can
+            // bypass entity-load validation, but scoring must stay total.
+            ..Default::default()
+        },
+        DoctrineObjective {
+            id: "valid-patrol".into(),
+            directive_kind: Some("Patrol".into()),
+            base_priority: 10.0,
+            ..Default::default()
+        },
+    ];
+
+    let pool = score_doctrine_pool(&doctrine, &WorldConditions::default());
+    assert_eq!(pool.len(), 1);
+    assert_eq!(pool[0].id, "valid-patrol");
 }
 
 #[test]
@@ -1334,6 +1361,7 @@ fn score_doctrine_pool_zero_gate_vetoes_destroy() {
         id: "flee".into(),
         text: "Flee".into(),
         directive_kind: Some("Reach".into()),
+        directive_anchor: Some("safe-harbour".into()),
         base_priority: 50.0,
         zero_gates: vec![ZeroGateCondition {
             condition: "hull_below".into(),

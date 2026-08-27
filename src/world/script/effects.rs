@@ -717,8 +717,11 @@ pub(crate) fn register_effects(engine: &mut HostRegistry) {
         |sink: &mut EffectSink, spec: Map| -> Result<(), Box<EvalAltResult>> {
             // Comms vocabulary, so it buffers onto the sink's SECOND buffer
             // rather than the ordered `ActionCmd`/`TriggerAction` one (see
-            // `EffectSink`). Read with the same map idiom as `add_objective` /
-            // `spawn_entity`: a missing required key raises, discarding the call.
+            // `EffectSink`). `open_comms_request` reads the fields it owns and,
+            // like `spawn_entity_action`, remains permissive about unrelated map
+            // keys. `add_objective_action` is deliberately stricter: it forwards
+            // unknown spellings to the shared `Directive` contract, which rejects
+            // them. A missing required comms key still raises, discarding the call.
             let open = open_comms_request(&spec).map_err(raise)?;
             sink.push_open(open);
             Ok(())
@@ -1025,6 +1028,24 @@ fn dynamic_to_toml(value: &Dynamic) -> Result<toml::Value, String> {
 /// `UtilityConfig` the declarative twin does — the scripted and TOML `add_objective`
 /// are two front-ends over one parser, not two implementations kept in sync.
 fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
+    const KNOWN_FIELDS: &[&str] = &[
+        "id",
+        "text",
+        "text_params",
+        "mandatory",
+        "targets",
+        "target",
+        "route",
+        "directive_kind",
+        "directive_anchors",
+        "directive_loop",
+        "directive_anchor",
+        "base_priority",
+        "source",
+        "modifiers",
+        "zero_gates",
+        "command_stance",
+    ];
     let raw = RawActionEntry {
         kind: "add_objective".to_string(),
         id: map_str(spec, "id"),
@@ -1043,6 +1064,13 @@ fn add_objective_action(spec: &Map) -> Result<TriggerAction, String> {
         modifiers: map_modifiers(spec)?,
         zero_gates: map_zero_gates(spec)?,
         command_stance: map_command_stance(spec)?,
+        // Only the spelling matters: an unrecognised key has no typed value
+        // slot and is rejected before conversion by the shared contract.
+        unrecognised_fields: spec
+            .keys()
+            .filter(|key| !KNOWN_FIELDS.contains(&key.as_str()))
+            .map(|key| (key.to_string(), toml::Value::Boolean(true)))
+            .collect(),
         ..Default::default()
     };
     parse_action_entry(&raw)
@@ -1165,7 +1193,8 @@ pub(super) fn destroy_entity_action(entity: &str) -> Result<TriggerAction, Strin
 ///
 /// A missing required key raises, discarding the whole call (settled decision
 /// 10), exactly as a malformed `add_objective` / `spawn_entity` map does. Unknown
-/// keys are ignored, matching those two.
+/// keys are ignored, matching `spawn_entity`; `add_objective` deliberately
+/// forwards them to the strict shared Directive contract.
 fn open_comms_request(spec: &Map) -> Result<OpenCommsRequest, String> {
     let from = map_str(spec, "from")
         .ok_or_else(|| "open_comms requires a string `from` (the sender ref id)".to_string())?;
@@ -1573,6 +1602,30 @@ mod tests {
              base_priority = 52.0",
         );
         assert_eq!(effs, vec![BufferedEffect::Action(toml)]);
+    }
+
+    /// The scripted World surface must not lose keys before the same typed
+    /// Directive contract sees them. Otherwise TOML would reject a typo while
+    /// the equivalent `#{ ... }` silently accepted it.
+    #[test]
+    fn add_objective_rejects_an_unknown_directive_field() {
+        let err = run_result(
+            r#"fn f(ctx) {
+                ctx.effects.add_objective(#{
+                    id: "unknown-field",
+                    text: "Unknown",
+                    directive_kind: "Patrol",
+                    directive_waypoints: ["alpha"],
+                });
+            }"#,
+            "f",
+        )
+        .expect_err("an unknown scripted Directive field must raise");
+        assert!(
+            err.to_string()
+                .contains("unknown Directive field `directive_waypoints`"),
+            "{err}"
+        );
     }
 
     /// `add_objective` now READS `modifiers`/`zero_gates` (the utility-config

@@ -2954,7 +2954,7 @@ fn harrow_warhawk_authors_no_hazard_guarded_transition() {
 /// Deliberately NOT expressed as `[[behaviour.doctrine]] use_impulse = false`:
 /// doctrine is the part of a hull a scenario replaces wholesale, and both
 /// `duel.toml` and `combat_test.toml`'s wave 8 do exactly that without
-/// authoring `use_impulse` — which `effective_use_impulse()` then resolves to
+/// authoring `use_impulse` — which `effective_use_impulse(&directive)` then resolves to
 /// TRUE. `harrow_warhawk_scenarios_cannot_re_enable_the_impulse_drive` pins
 /// that this is not hypothetical.
 #[test]
@@ -3025,7 +3025,7 @@ fn harrow_warhawk_authors_no_boost_drive_and_no_helm_radar() {
 /// actually fields this hull. That is asserted against the shipped world files
 /// rather than described, because the claim is about THEM: each replaces the
 /// doctrine list wholesale and none authors `use_impulse`, so
-/// `effective_use_impulse()` resolves TRUE for their non-Patrol directives.
+/// `effective_use_impulse(&directive)` resolves TRUE for their non-Patrol directives.
 /// The fix therefore has to live on the fine system's own policy, which is
 /// what the test above pins.
 #[test]
@@ -3035,8 +3035,10 @@ fn harrow_warhawk_scenarios_cannot_re_enable_the_impulse_drive() {
         use_impulse: None,
         ..Default::default()
     };
+    let directive = crate::ai::core::parse_doctrine_directive(&doctrine)
+        .expect("the fixture's Destroy directive is valid");
     assert!(
-        doctrine.effective_use_impulse(),
+        doctrine.effective_use_impulse(&directive),
         "precondition: an unauthored `use_impulse` on a Destroy directive \
              defaults to permitting the drive — that default is what makes a \
              doctrine-level fix worthless here"
@@ -3071,6 +3073,32 @@ fn harrow_warhawk_scenarios_cannot_re_enable_the_impulse_drive() {
                  `[helm_console.impulse_ai]` idle is still the whole story"
         );
     }
+}
+
+#[test]
+fn impulse_default_reads_the_interpreted_directive_not_the_raw_kind() {
+    let authored_destroy = DoctrineObjective {
+        directive_kind: Some("Destroy".into()),
+        ..Default::default()
+    };
+    let interpreted_patrol = crate::core::messages::AiDirective::Patrol {
+        anchors: Vec::new(),
+        loop_path: false,
+    };
+
+    assert!(
+        !authored_destroy.effective_use_impulse(&interpreted_patrol),
+        "the default must follow the typed Directive already selected by scoring, not reinterpret the raw kind"
+    );
+
+    let explicit_override = DoctrineObjective {
+        use_impulse: Some(true),
+        ..authored_destroy
+    };
+    assert!(
+        explicit_override.effective_use_impulse(&interpreted_patrol),
+        "an explicitly authored use_impulse value must still override the typed default"
+    );
 }
 
 /// The structural half of "decline rather than invent": the two range params
@@ -3835,10 +3863,10 @@ directive_order_route = "storm_shelter_run"
 
     assert_eq!(
         crate::ai::core::parse_doctrine_directive(doctrine),
-        crate::core::messages::AiDirective::Order {
+        Ok(crate::core::messages::AiDirective::Order {
             target: "Meridian Freight".into(),
             route: "storm_shelter_run".into(),
-        }
+        })
     );
 }
 

@@ -22,9 +22,8 @@ import path from 'path';
 /** The fake transport injected into every smoke page — see its own header
  *  comment for how it fakes the rendezvous socket and RTCPeerConnection over
  *  BroadcastChannel, including the `window.__wasmReady` latch and the
- *  `window.__transportShim` sever/revive test-only control. Exported so
- *  `transport-shim.spec.js` can exercise it directly. */
-export const SHIM = fs.readFileSync(path.join(__dirname, 'rendezvous-shim.js'), 'utf-8');
+ *  `window.__transportShim` sever/revive test-only control. */
+const SHIM = fs.readFileSync(path.join(__dirname, 'rendezvous-shim.js'), 'utf-8');
 
 /**
  * The delivery stamp the built client bundle declares

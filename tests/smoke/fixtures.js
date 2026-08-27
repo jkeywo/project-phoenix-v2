@@ -62,17 +62,17 @@ import { test as base, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 import {
-  SHIM,
   installTransportFixture,
   readHostJoinTarget,
   connectTestClient,
 } from './transport-fixture';
 
-// The one transport stand-in, installed by installTransportFixture() below.
-// Exported under both names: `SHIM` for transport-shim.spec.js, which tests it
-// directly, and `RENDEZVOUS_SHIM` for anything still naming it by what it fakes.
-export { SHIM };
-export const RENDEZVOUS_SHIM = SHIM;
+// The transport stand-in itself is no longer re-exported from here. It is
+// installed by installTransportFixture() below, and a spec that wants to drive
+// it directly (transport-shim.spec.js) does so through the pages this fixture
+// already gives it — window.PhoenixTransportFactories and
+// window.__transportShim — rather than by injecting a second copy of the
+// script into a context of its own.
 
 // The shim runs the REAL rendezvous registry inside the host page rather than a
 // second implementation of it, so that module has to be reachable as a URL. It

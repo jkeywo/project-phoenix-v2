@@ -19,6 +19,7 @@ import {
   createRendezvousHost,
   createRendezvousJoiner,
   DEV_RENDEZVOUS_URL,
+  JOIN_ATTEMPTS_BEFORE_ENTRY,
 } from '../../gui/rendezvous-transport.js';
 import { createRegistry, ROLE_HOST, ROLE_CLIENT } from '../../worker-rendezvous/src/registry.js';
 import {
@@ -208,10 +209,11 @@ async function hostOn(world, opts = {}) {
  * test tells it to. That is the only way to ask what the host does about a peer
  * that does not play by the handshake: the shipped joiner always does.
  */
-async function rogueJoin(factories, code, { onOpen, onMessage } = {}) {
+async function rogueJoin(factories, code, { onOpen, onMessage, lossy = false } = {}) {
   const socket = factories.socket('https://rendezvous.test/v1/join');
   let pc = null;
   let channel = null;
+  let snapshot = null;
   socket.onmessage = async (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === 'ready') {
@@ -219,6 +221,7 @@ async function rogueJoin(factories, code, { onOpen, onMessage } = {}) {
     } else if (msg.type === 'joined') {
       pc = factories.peer({ iceServers: [] });
       channel = pc.createDataChannel('reliable', { ordered: true });
+      if (lossy) snapshot = pc.createDataChannel('snapshot', { ordered: false, maxRetransmits: 0 });
       channel.onopen = () => { if (onOpen) onOpen(channel); };
       channel.onmessage = (ev) => {
         if (onMessage) onMessage(JSON.parse(ev.data), channel);
@@ -231,7 +234,10 @@ async function rogueJoin(factories, code, { onOpen, onMessage } = {}) {
     }
   };
   await settle();
-  return { get channel() { return channel; } };
+  return {
+    get channel() { return channel; },
+    get lossy() { return snapshot; },
+  };
 }
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
@@ -255,10 +261,29 @@ describe('service selection', () => {
     }
   });
 
-  it('still points at another service when one is named', () => {
-    // The lever that survives: a local `wrangler dev`, or a staging deployment.
-    expect(rendezvousBaseFromLocation('?rendezvous=https://other.test')).toBe('https://other.test');
+  it('honours the override for a loopback service — the dev lever that survives', () => {
     expect(rendezvousBaseFromLocation('?rendezvous=http://localhost:8787')).toBe('http://localhost:8787');
+    expect(rendezvousBaseFromLocation('?rendezvous=http://127.0.0.1:8787')).toBe('http://127.0.0.1:8787');
+    expect(rendezvousBaseFromLocation('?rendezvous=http://[::1]:8787')).toBe('http://[::1]:8787');
+    expect(rendezvousBaseFromLocation('?rendezvous=https://phoenix.localhost')).toBe('https://phoenix.localhost');
+  });
+
+  it('refuses to send a guest\'s signalling to an off-machine service named in a link', () => {
+    // Under #1111 this parameter was also the route opt-in, so an arbitrary
+    // origin only mattered to somebody deliberately turning the route on.
+    // Since #1112 it applies on every ordinary client load, and
+    // `client/index.html?rendezvous=https://attacker.example#<code>` handed to
+    // a guest would put their SDP, their ICE candidates and — through a
+    // hostile relay standing in as the host — their session token and display
+    // name in front of a third party, with nothing on screen saying so.
+    for (const hostile of [
+      '?rendezvous=https://attacker.example',
+      '?rendezvous=http://192.168.0.9:8787',
+      '?rendezvous=https://staging.kiwigamedesign.co.uk',
+      '?rendezvous=https://localhost.attacker.example',
+    ]) {
+      expect(rendezvousBaseFromLocation(hostile), hostile).toBe(DEV_RENDEZVOUS_URL);
+    }
   });
 
   it('upgrades the scheme when building a socket URL', () => {
@@ -311,11 +336,14 @@ describe('which route a client page load is on', () => {
     });
   });
 
-  it('honours a service override for both the code and the entry route', () => {
+  it('honours a loopback service override for both the code and the entry route', () => {
+    expect(joinRouteFromLocation('?rendezvous=http://localhost:8787', '#p_v_QUARK'))
+      .toMatchObject({ route: 'rendezvous', base: 'http://localhost:8787' });
+    expect(joinRouteFromLocation('?rendezvous=http://localhost:8787', ''))
+      .toMatchObject({ route: 'entry', base: 'http://localhost:8787' });
+    // …and an off-machine one on neither route.
     expect(joinRouteFromLocation('?rendezvous=http://x.test', '#p_v_QUARK'))
-      .toMatchObject({ route: 'rendezvous', base: 'http://x.test' });
-    expect(joinRouteFromLocation('?rendezvous=http://x.test', ''))
-      .toMatchObject({ route: 'entry', base: 'http://x.test' });
+      .toMatchObject({ route: 'rendezvous', base: DEV_RENDEZVOUS_URL });
   });
 });
 
@@ -515,20 +543,33 @@ describe('host compatibility handshake', () => {
   });
 
   it('tells the joiner when the host goes away', async () => {
-    const world = makeWorld();
-    const { host, code, factories } = await hostOn(world);
-    const errors = [];
-    createRendezvousJoiner({
-      base: 'https://rendezvous.test',
-      data: DATA,
-      code: code.suffix,
-      factories,
-      onError: (reason) => errors.push(reason),
-    });
-    await settle();
-    host.close();
-    await settle();
-    expect(errors).toContain('host-gone');
+    // Not off the `closed` frame, which arrives while the direct channel is
+    // still perfectly healthy — that frame is a statement about the rendezvous
+    // RECORD. The channel then closes with its host, the joiner re-resolves
+    // the same code on its backoff, and the service gives the honest answer:
+    // nothing holds those five letters any more.
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const { host, code, factories } = await hostOn(world);
+      const errors = [];
+      createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        factories,
+        onError: (reason) => errors.push(reason),
+      });
+      await settle();
+      host.close();
+      await settle();
+      expect(errors).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(errors).toContain('unknown');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('never hands the page a peer that skipped the handshake', async () => {
@@ -559,6 +600,44 @@ describe('host compatibility handshake', () => {
     await settle();
     expect(announced).toHaveLength(1);
     expect(inbound).toEqual([{ type: 'Identify', data: { token: 'proper' } }]);
+  });
+
+  it('severs BOTH channels when the host evicts a connection', async () => {
+    // server.html has exactly one eviction mechanism — conn.close() — and it
+    // uses it in two security-relevant places: the reserved-token gate ("refuse
+    // the connection outright rather than dispatch a single message under it")
+    // and the duplicate-token dance ("its WebRTC link is severed"). Closing
+    // only the reliable channel left the lossy one open with its own inbound
+    // handler still wired to deliver(), so an evicted device could keep
+    // dispatching into the simulation down the other pipe.
+    const world = makeWorld();
+    const { code, inbound, announced, factories } = await hostOn(world, {
+      checkStamp: () => ({ ok: true }),
+    });
+    const rogue = await rogueJoin(factories, code.suffix, {
+      lossy: true,
+      onOpen: (channel) => channel.send(JSON.stringify({
+        type: 'JoinHandshake',
+        data: { stamp: '1/x/1' },
+      })),
+    });
+    await settle();
+    rogue.channel.send(JSON.stringify({ type: 'Identify', data: { token: 'proper' } }));
+    await settle();
+    expect(announced).toHaveLength(1);
+    expect(inbound).toHaveLength(1);
+
+    announced[0].close();
+    await settle();
+
+    rogue.lossy.send(JSON.stringify({ type: 'SetThrust', data: { value: 1 } }));
+    rogue.channel.send(JSON.stringify({ type: 'SetThrust', data: { value: 2 } }));
+    await settle();
+
+    // Nothing arrived on EITHER channel after the eviction.
+    expect(inbound).toHaveLength(1);
+    expect(rogue.channel.readyState).toBe('closed');
+    expect(rogue.lossy.readyState).toBe('closed');
   });
 
   it('drops everything a refused peer sends after the refusal', async () => {
@@ -633,26 +712,40 @@ describe('a joiner that fails cleans up after itself', () => {
       peer: makePeerFactory(),
     };
 
-    const errors = [];
-    const statuses = [];
-    createRendezvousJoiner({
-      base: 'https://rendezvous.test',
-      data: DATA,
-      code: code.suffix,
-      factories,
-      onError: (reason) => errors.push(reason),
-      onStatus: (s) => statuses.push(s),
-    });
-    // Far enough for the join to be sent, nowhere near a direct channel.
-    await Promise.resolve();
-    await Promise.resolve();
-    joinSockets[0].close();
-    await settle();
+    vi.useFakeTimers();
+    try {
+      const errors = [];
+      const statuses = [];
+      createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        factories,
+        onError: (reason) => errors.push(reason),
+        onStatus: (s) => statuses.push(s),
+      });
+      // Far enough for the join to be sent, nowhere near a direct channel.
+      await Promise.resolve();
+      await Promise.resolve();
+      joinSockets[0].close();
+      await settle();
 
-    // A server-initiated close fires `close` with no preceding `error`, so
-    // without an onclose handler the guest sat on "connecting…" forever.
-    expect(errors).toContain('unreachable');
-    expect(statuses).toContain('error');
+      // A server-initiated close fires `close` with no preceding `error`, so
+      // without an onclose handler the guest sat on "connecting…" forever. It
+      // is ACTED on immediately — a second attempt, on the backoff — rather
+      // than reported immediately, which is what makes the escalating connect
+      // timeout reachable on a first join.
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(joinSockets.length).toBeGreaterThan(1);
+
+      // …and once the bounded pre-acceptance attempts are spent the guest is
+      // told, rather than left watching a silent backoff forever.
+      await vi.advanceTimersByTimeAsync(200_000);
+      expect(errors).toContain('unreachable');
+      expect(statuses).toContain('error');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('closes itself on a terminal frame, so a dead joiner cannot fire later', async () => {
@@ -900,61 +993,103 @@ describe('automatic reconnect', () => {
     // The host's compatibility verdict and a dead record are answers about the
     // BUILD and the CODE. Retrying either only gets the same sentence more
     // slowly, so both end the loop and go back to the entry field.
-    const world = makeWorld();
-    const { host, code, factories } = await hostOn(world);
-    const errors = [];
-    const statuses = [];
-    const joiner = createRendezvousJoiner({
-      base: 'https://rendezvous.test',
-      data: DATA,
-      code: code.suffix,
-      factories,
-      getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
-      onError: (r) => errors.push(r),
-      onStatus: (s) => statuses.push(s),
-    });
-    await settle();
-    expect(joiner.connected).toBe(true);
+    //
+    // The dead-record case reaches that answer through ONE retry rather than
+    // straight off the `closed` frame. While the direct channel is up, that
+    // frame is signalling-plane news about a record the session no longer
+    // needs; the channel closing is what ends the session, and the re-resolve
+    // that follows is where the service says the code names nothing.
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const { host, code, factories } = await hostOn(world);
+      const errors = [];
+      const statuses = [];
+      const joiner = createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        factories,
+        getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+        onError: (r) => errors.push(r),
+        onStatus: (s) => statuses.push(s),
+      });
+      await settle();
+      expect(joiner.connected).toBe(true);
 
-    host.close();
-    await settle();
+      host.close();
+      await settle();
+      expect(joiner.connected).toBe(false);
+      // Still in the loop, so still "reconnecting" — nothing in front of the
+      // guest yet.
+      expect(errors).toEqual([]);
+      expect(statuses.at(-1)).toBe('disconnected');
 
-    expect(errors).toContain('host-gone');
-    expect(joiner.connected).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(errors).toContain('unknown');
+      // A stopped loop must not read as "reconnecting…" with a retry control.
+      expect(statuses.at(-1)).toBe('error');
+      expect(joiner.connected).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('lets a link failure through to the page before the host has accepted it', async () => {
-    // The reconnect loop only starts once a build has been admitted. A guest
-    // still at the entry field who cannot reach the service must be told, not
-    // left watching a silent backoff.
-    const world = makeWorld();
-    const { code } = await hostOn(world);
-    const joinSockets = [];
-    const factories = {
-      socket: (url) => {
-        const s = world.socket(url);
-        if (String(url).endsWith('/v1/join')) joinSockets.push(s);
-        return s;
-      },
-      peer: makePeerFactory(),
-    };
-    const errors = [];
-    const statuses = [];
-    createRendezvousJoiner({
-      base: 'https://rendezvous.test',
-      data: DATA,
-      code: code.suffix,
-      factories,
-      onError: (r) => errors.push(r),
-      onStatus: (s) => statuses.push(s),
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    joinSockets[0].close();
-    await settle();
+  it('retries a link failure before acceptance too, then hands the page the reason', async () => {
+    // Retrying only once ESTABLISHED gave a first join exactly one 8s attempt,
+    // which made connectTimeoutMs's 8/16/30s ladder unreachable by the guest
+    // it was added for — TURN-over-TCP allocation on a cellular network is a
+    // first-join problem. The loop is bounded before acceptance, though: a
+    // guest who has never got in may be reading the wrong five letters, and a
+    // silent backoff would never say so.
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const { code } = await hostOn(world);
+      const joinSockets = [];
+      const factories = {
+        socket: (url) => {
+          const s = world.socket(url);
+          if (String(url).endsWith('/v1/join')) joinSockets.push(s);
+          return s;
+        },
+        peer: makePeerFactory(),
+      };
+      const errors = [];
+      const statuses = [];
+      const attempts = [];
+      createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: code.suffix,
+        factories,
+        onError: (r) => errors.push(r),
+        onStatus: (s) => statuses.push(s),
+        onDiag: (e) => { if (e.event === 'attempt') attempts.push(e.attempt); },
+      });
 
-    expect(errors).toEqual(['unreachable']);
-    expect(statuses.at(-1)).toBe('error');
+      await settle();
+      joinSockets[0].close();
+      await settle();
+      // Nothing in front of the guest, and no "Disconnected — reconnecting…"
+      // for a connection they never had.
+      expect(errors).toEqual([]);
+      expect(statuses).not.toContain('disconnected');
+
+      // The second attempt gets the SECOND rung of the ladder, 16s — which is
+      // the whole point: it was unreachable while the loop needed acceptance.
+      await vi.advanceTimersByTimeAsync(8_200);
+      expect(attempts).toEqual([1, 2]);
+      expect(errors).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(200_000);
+      expect(attempts).toEqual([1, 2, 3, 4]);
+      expect(attempts).toHaveLength(JOIN_ATTEMPTS_BEFORE_ENTRY);
+      expect(errors).toEqual(['unreachable']);
+      expect(statuses.at(-1)).toBe('error');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports the connection diagnostics the page renders under the link', async () => {
@@ -978,6 +1113,133 @@ describe('automatic reconnect', () => {
     expect(events).toContainEqual({ event: 'signaling', state: 'connecting' });
     expect(events).toContainEqual({ event: 'signaling', state: 'open' });
     expect(events).toContainEqual({ event: 'open' });
+  });
+});
+
+describe('signalling loss never reaches an established link', () => {
+  it('keeps every admitted crew connection when the host loses its record', async () => {
+    // The signalling socket and the DataChannels are independent planes. A
+    // Durable Object eviction, a worker redeploy or the registry's lazy TTL
+    // sweep all reach the host as a dead socket or an `unreachable` frame, and
+    // none of them is observable to a phone whose direct link is carrying the
+    // game. Tearing those down here emitted `close` on every admitted adapter,
+    // which in server.html is wasm_player_disconnected(token) — a whole crew
+    // dropped mid-mission, behind a code nobody could read yet.
+    vi.useFakeTimers();
+    try {
+      const world = makeWorld();
+      const hostSockets = [];
+      const factories = {
+        socket: (url) => {
+          const s = world.socket(url);
+          if (String(url).endsWith('/v1/host')) hostSockets.push(s);
+          return s;
+        },
+        peer: makePeerFactory(),
+      };
+      const codes = [];
+      const inbound = [];
+      const announced = [];
+      const severed = [];
+      createRendezvousHost({
+        base: 'https://rendezvous.test',
+        factories,
+        onCode: (c) => codes.push(c),
+        onConnection: (conn) => {
+          announced.push(conn);
+          conn.on('data', (raw) => inbound.push(JSON.parse(raw)));
+          conn.on('close', () => severed.push(conn.peer));
+        },
+      });
+      await settle();
+
+      const received = [];
+      const joinerStatuses = [];
+      const joinerErrors = [];
+      const joiner = createRendezvousJoiner({
+        base: 'https://rendezvous.test',
+        data: DATA,
+        code: codes[0].suffix,
+        factories,
+        getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+        onData: (m) => received.push(m),
+        onStatus: (s) => joinerStatuses.push(s),
+        onError: (r) => joinerErrors.push(r),
+      });
+      await settle();
+      expect(announced).toHaveLength(1);
+      expect(inbound).toEqual([{ type: 'Identify', data: { token: 'tok-1', name: 'Ada' } }]);
+
+      // The service goes.
+      hostSockets[0].onerror();
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      // A FRESH code, for joiners who have not got in yet…
+      expect(codes.length).toBeGreaterThan(1);
+      expect(codes[1].suffix).not.toBe(codes[0].suffix);
+      // …and nobody aboard was disconnected.
+      expect(severed).toEqual([]);
+      expect(announced[0].open).toBe(true);
+      expect(joiner.connected).toBe(true);
+      expect(joinerErrors).toEqual([]);
+      expect(joinerStatuses).not.toContain('error');
+
+      // Still a two-way link, not merely an object that has not been nulled.
+      joiner.send('SetThrust', { value: 1 }, 'reliable');
+      announced[0].send(JSON.stringify({ type: 'Welcome', data: {} }));
+      await settle();
+      expect(inbound.at(-1)).toEqual({ type: 'SetThrust', data: { value: 1 } });
+      expect(received.map((m) => m.type)).toContain('Welcome');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('plays on when the service tells a linked joiner the record has closed', async () => {
+    // `closed` is a statement about the rendezvous RECORD — registry.js's
+    // dropRecord sends it on the host socket closing AND on the TTL sweep —
+    // not about a host. Acting on it tore down a healthy RTCPeerConnection,
+    // and because 'host-gone' is terminal the joiner then stopped for good
+    // with the direct link still up.
+    const world = makeWorld();
+    const { code, inbound, factories: base } = await hostOn(world);
+    const joinSockets = [];
+    const factories = {
+      socket: (url) => {
+        const s = base.socket(url);
+        if (String(url).endsWith('/v1/join')) joinSockets.push(s);
+        return s;
+      },
+      peer: base.peer,
+    };
+    const errors = [];
+    const statuses = [];
+    const joiner = createRendezvousJoiner({
+      base: 'https://rendezvous.test',
+      data: DATA,
+      code: code.suffix,
+      factories,
+      getIdent: () => ({ token: 'tok-1', name: 'Ada' }),
+      onError: (r) => errors.push(r),
+      onStatus: (s) => statuses.push(s),
+    });
+    await settle();
+    expect(joiner.connected).toBe(true);
+
+    for (const frame of [{ type: 'closed', reason: 'host-gone' }, { type: 'error', reason: 'not-joined' }]) {
+      joinSockets[0].onmessage({ data: JSON.stringify({ v: 1, ...frame }) });
+      await settle();
+    }
+
+    expect(joiner.connected).toBe(true);
+    expect(errors).toEqual([]);
+    expect(statuses).not.toContain('error');
+    expect(statuses).not.toContain('disconnected');
+
+    // And the link is still carrying commands, not merely reporting open.
+    joiner.send('SetThrust', { value: 3 }, 'reliable');
+    await settle();
+    expect(inbound.at(-1)).toEqual({ type: 'SetThrust', data: { value: 3 } });
   });
 });
 

@@ -37,6 +37,29 @@
  * any client whose snapshot channel has not finished negotiating or has gone,
  * and the joiner's own `send` does the same on the way up.
  *
+ * ## Two planes, and they are independent
+ *
+ * The SIGNALLING plane is the rendezvous socket and its frames: registration,
+ * code lookup, presence, the SDP/ICE relay, `closed`, `error`. The MEDIA plane
+ * is an established `RTCPeerConnection` and its two DataChannels. Getting on
+ * the wire needs both; STAYING on it needs only the second. Once the channels
+ * are up they are a direct browser-to-browser link, and the phone cannot even
+ * observe what the service does afterwards.
+ *
+ * So a signalling event never touches an established link, on either half:
+ *
+ *   host    `lostService()` discards the socket, the code and the peers still
+ *           mid-signalling, then re-registers so NEW joiners have a way in.
+ *           Admitted adapters and their peer connections are untouched — a
+ *           Durable Object eviction is not a reason to end a mission.
+ *   joiner  a `closed`/`error` frame, or the signalling socket dying, is
+ *           logged and ignored while `linked()`. Only the DataChannel's own
+ *           close drives the reconnect loop, and only `close()` (or the host
+ *           severing the connection) ends a session.
+ *
+ * Both halves got this wrong at first, and both wrongnesses read as the same
+ * bug from the bridge: a service blip disconnecting everybody mid-mission.
+ *
  * ## The compatibility handshake
  *
  * `JoinHandshake` / `JoinAccepted` / `JoinRefused` are deliberately NOT
@@ -120,22 +143,67 @@ export function isRetryableReason(reason) {
   return !TERMINAL_REASONS.has(String(reason || ''));
 }
 
+/**
+ * How many attempts a guest who has NEVER been admitted gets before the join
+ * entry field comes back carrying the reason.
+ *
+ * Four, and the number is what makes the escalating connect timeout reachable
+ * on a FIRST join. `connectTimeoutMs` runs 8 s, 16 s, then 30 s thereafter,
+ * and it escalates for exactly the case a first join meets: TURN-over-TCP
+ * allocation on a cellular network, which regularly needs longer than eight
+ * seconds. One attempt and out — which is what "retry only once established"
+ * meant in practice — put that guest in front of the entry field reading
+ * "cannot reach the join service" for a link that would have come up on the
+ * second try, and the 16 s and 30 s rungs of the ladder were unreachable by
+ * anyone who had not already got in once.
+ *
+ * Bounded rather than endless, though, because a guest who has never been
+ * admitted may simply be reading the wrong five letters off the viewscreen,
+ * and a silent backoff tells them nothing. Four attempts is roughly a minute
+ * and a half of trying before the field comes back; after acceptance the loop
+ * is unbounded, because the code is known good.
+ */
+export const JOIN_ATTEMPTS_BEFORE_ENTRY = 4;
+
 // ── Pure helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Loopback hostnames — the only origins the `?rendezvous` override accepts.
+ * `new URL('http://[::1]:8787').hostname` keeps its brackets, so both
+ * spellings are listed rather than normalised.
+ */
+function isLoopbackHost(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1'
+    || h.endsWith('.localhost');
+}
 
 /**
  * Which rendezvous service this page should use.
  *
  * There is exactly one route now, so this no longer decides WHETHER to use the
- * service — only WHICH one. `?rendezvous=<url>` points a page at another
- * service (a `wrangler dev` on localhost, a staging deployment); anything else,
- * including no parameter at all, means the built-in one. The #1111 opt-in
- * spellings (`?rendezvous`, `=on`, `=1`, `=off`) are gone with PeerJS: a flag
- * whose only remaining value selects the default is a flag that lies about
- * having a choice.
+ * service — only WHICH one. `?rendezvous=<url>` is a DEVELOPMENT lever: it is
+ * honoured only for a loopback origin (`localhost`, `127.0.0.1`, `[::1]`, or a
+ * `*.localhost` name) — a `wrangler dev`, or a second service on the same
+ * machine. Every other value, a public staging URL included, falls back to the
+ * built-in service. The #1111 opt-in spellings (`?rendezvous`, `=on`, `=1`,
+ * `=off`) are gone with PeerJS: a flag whose only remaining value selects the
+ * default is a flag that lies about having a choice.
  *
- * A value that is not an http(s) URL is deliberately ignored rather than
- * honoured — an old `?rendezvous=on` bookmark must open the game, not try to
- * dial a service called "on" and throw building the socket URL.
+ * The loopback restriction is what the parameter's post-#1112 life needs.
+ * Under #1111 this was also the route opt-in, so it only mattered to somebody
+ * deliberately turning the new route on; since #1112 it applies on every
+ * ordinary load of client.html. A link of the form
+ * `client/index.html?rendezvous=https://attacker.example#<code>` handed to a
+ * guest would otherwise send their SDP, their ICE candidates and — through a
+ * hostile relay standing in as the host — their session token and display name
+ * to a third party, with nothing on screen saying where the join went. A
+ * loopback origin cannot be handed to somebody else's phone, which is exactly
+ * the property wanted from a dev lever.
+ *
+ * A value that is not an http(s) URL is likewise ignored rather than honoured
+ * — an old `?rendezvous=on` bookmark must open the game, not try to dial a
+ * service called "on" and throw building the socket URL.
  *
  * @returns {string} base URL — never null, because there is no "off"
  */
@@ -143,8 +211,9 @@ export function rendezvousBaseFromLocation(search, defaultBase = DEV_RENDEZVOUS_
   const value = (new URLSearchParams(search || '').get('rendezvous') || '').trim();
   if (!value) return defaultBase;
   try {
-    const { protocol } = new URL(value);
-    return protocol === 'http:' || protocol === 'https:' ? value : defaultBase;
+    const { protocol, hostname } = new URL(value);
+    if (protocol !== 'http:' && protocol !== 'https:') return defaultBase;
+    return isLoopbackHost(hostname) ? value : defaultBase;
   } catch {
     return defaultBase;
   }
@@ -230,8 +299,13 @@ const isChannelOpen = (c) => !!c && c.readyState === 'open';
  * `snapshotChannel` is the raw lossy `RTCDataChannel` once it has negotiated,
  * and null before that or after it goes; the `'snapshot'` event fires on every
  * transition so the page can keep its per-token map in step without polling.
+ *
+ * `hooks.onSever` runs when the PAGE closes this connection, so the host half
+ * can mark the peer refused; `hooks.onLog` carries a failed send.
  */
-function connectionAdapter(peerId, channel, pc) {
+function connectionAdapter(peerId, channel, pc, hooks = {}) {
+  const onSever = hooks.onSever || (() => {});
+  const onLog = hooks.onLog || (() => {});
   const listeners = { data: [], close: [], snapshot: [] };
   const adapter = {
     peer: peerId,
@@ -239,8 +313,55 @@ function connectionAdapter(peerId, channel, pc) {
     snapshotChannel: null,
     get open() { return channel.readyState === 'open'; },
     get readyState() { return channel.readyState; },
-    send(payload) { if (channel.readyState === 'open') channel.send(payload); },
-    close() { try { channel.close(); } catch { /* already gone */ } },
+    /**
+     * One reliable-channel send, and it may not throw.
+     *
+     * server.html's `routeOutbound` walks the whole target list inside the
+     * callback Rust's outbound flush invokes, so an exception here would abort
+     * delivery to every remaining crew member — not just to this one. Two
+     * things can raise it: a channel that died between the map lookup and the
+     * send, and a payload over the SDP-negotiated `max-message-size` (262144
+     * bytes between two Chromiums, and the smallest ceiling any browser pair
+     * negotiates in practice). This is a raw `RTCDataChannel` with no chunking
+     * layer under it — PeerJS used to provide one — so that ceiling is real,
+     * and the honest statement of where we stand against it is: nothing
+     * shipped approaches it. The largest reliable payloads are the scenario
+     * catalogue and a ship manual, both kilobytes; snapshots are per-tick
+     * entity state and smaller still; mod packs never cross this wire at all
+     * (the host reads the ZIP locally and clients fetch content over HTTP).
+     * A throw here therefore means a dead link or a bug, and either way the
+     * rest of the bridge still gets its frame.
+     */
+    send(payload) {
+      if (channel.readyState !== 'open') return;
+      try {
+        channel.send(payload);
+      } catch (e) {
+        onLog(`[rendezvous] send to ${peerId} failed — dropping this frame: ${e && e.message}`);
+      }
+    },
+    /**
+     * Sever this joiner: both channels AND the RTCPeerConnection.
+     *
+     * server.html uses this as its only eviction mechanism — the reserved-token
+     * refusal ("refuse the connection outright rather than dispatch a single
+     * message under it") and the duplicate-token dance ("its WebRTC link is
+     * severed"). Closing the reliable channel alone left the lossy one open
+     * with its own inbound handler still wired to `deliver()`, so an evicted
+     * device could keep dispatching into the simulation down the other pipe.
+     * `onSever` marks the host-side entry refused as well, so anything already
+     * in flight on either channel is dropped rather than delivered.
+     */
+    close() {
+      onSever();
+      const lossy = adapter.snapshotChannel;
+      adapter.snapshotChannel = null;
+      for (const c of [channel, lossy]) {
+        if (!c) continue;
+        try { c.close(); } catch { /* already gone */ }
+      }
+      try { pc.close(); } catch { /* already gone */ }
+    },
     on(event, cb) { (listeners[event] || (listeners[event] = [])).push(cb); },
     emit(event, arg) { for (const cb of listeners[event] || []) cb(arg); },
     /** Adopt the lossy channel negotiated alongside this one. */
@@ -359,7 +480,12 @@ export function createRendezvousHost(opts) {
         return;
       }
       if (channel.label !== RELIABLE_CHANNEL) return;
-      const adapter = connectionAdapter(id, channel, pc);
+      const adapter = connectionAdapter(id, channel, pc, {
+        // A page-initiated eviction is a refusal like any other: nothing this
+        // peer sends afterwards, on EITHER channel, may reach the page again.
+        onSever: () => { entry.refused = true; },
+        onLog,
+      });
       entry.adapter = adapter;
       pairSnapshot();
       channel.onmessage = (ev) => {
@@ -412,12 +538,26 @@ export function createRendezvousHost(opts) {
     }
   }
 
-  function dropPeers() {
-    for (const entry of peers.values()) {
+  /**
+   * Discard the peers that existed only inside the dead REGISTRATION.
+   *
+   * A joiner still mid-signalling is one of them: its offer and answer were
+   * crossing a socket that has gone, so no channel it is waiting on can ever
+   * open and nobody is going to relay the rest of its ICE. An ADMITTED joiner
+   * is NOT one of them. Its RTCPeerConnection and its two DataChannels are a
+   * direct browser-to-browser link that owes the signalling plane nothing once
+   * it is up — the phone cannot even observe that the record went away.
+   * Dropping those here ended live missions over a Durable Object eviction, a
+   * worker redeploy or a lazy TTL sweep: every admitted adapter got a `close`,
+   * which in server.html is `wasm_player_disconnected(token)`.
+   */
+  function dropUnadmittedPeers() {
+    for (const [id, entry] of [...peers]) {
+      if (entry.admitted && entry.adapter) continue;
       if (entry.adapter) entry.adapter.emit('close');
       try { entry.pc.close(); } catch { /* already closed */ }
+      peers.delete(id);
     }
-    peers.clear();
   }
 
   function handle(msg) {
@@ -465,6 +605,13 @@ export function createRendezvousHost(opts) {
    * here would be unjoinable until someone reloaded the viewscreen — which is
    * why this re-registers instead of only reporting.
    *
+   * **This is a SIGNALLING-plane event and it discards signalling state only**
+   * — the socket, the code, the registration — plus the peers that were still
+   * mid-signalling on it. Crew already playing keep playing: their
+   * DataChannels are direct and need no service at all, and only their own
+   * channel closing (or `close()` below) may ever reach the page as a
+   * disconnect. What re-registration buys is a way in for NEW joiners.
+   *
    * The replacement registration mints a DIFFERENT code, because the old record
    * really is gone and the letters on screen resolve to nothing. Keeping the
    * SAME code across a host drop needs persistence in the service and is
@@ -480,7 +627,7 @@ export function createRendezvousHost(opts) {
     const dying = socket;
     socket = null;
     code = null;
-    dropPeers();
+    dropUnadmittedPeers();
     if (dying) {
       dying.onopen = null; dying.onmessage = null; dying.onerror = null; dying.onclose = null;
       try { dying.close(); } catch { /* already gone */ }
@@ -540,15 +687,18 @@ export function createRendezvousHost(opts) {
  *
  * ## Reconnect (#1112 AC3)
  *
- * Once the host has accepted this build, a link failure is never terminal: the
- * joiner re-resolves THE SAME code on an exponential backoff, re-offers,
+ * A link failure is retried on an exponential backoff whether or not the host
+ * has accepted this build yet: the joiner re-resolves THE SAME code, re-offers,
  * re-sends the compatibility handshake and re-sends `Identify` with the same
  * session token — so the host restores the held station and pushes the current
  * projection, and the guest is never asked for five letters a second time.
  * `retryNow()` short-circuits the wait for the page's "retry now" control.
  *
- * Only a refusal a retry cannot fix (see {@link isRetryableReason}) ends the
- * loop and goes back to the entry field with its own sentence.
+ * Once the host has accepted this build the loop is unbounded; BEFORE that it
+ * runs {@link JOIN_ATTEMPTS_BEFORE_ENTRY} times, because a guest who has never
+ * got in may simply be reading the wrong five letters. Either way, only a
+ * refusal a retry cannot fix (see {@link isRetryableReason}) ends the loop
+ * early, and the entry field comes back with its own sentence.
  */
 export function createRendezvousJoiner(opts) {
   const {
@@ -624,21 +774,39 @@ export function createRendezvousJoiner(opts) {
   }
 
   /**
-   * This attempt failed. A terminal reason, or a failure before the host ever
-   * accepted us, goes back to the page; anything else is the reconnect loop.
+   * This attempt failed. A terminal reason, or a retryable one that has used up
+   * its pre-acceptance attempts, goes back to the page; anything else is the
+   * reconnect loop.
    */
   function fail(gen, reason, detail) {
     if (closed || gen !== generation || gen === failedGeneration) return;
     failedGeneration = gen;
     teardown();
-    if (established && isRetryableReason(reason)) {
+    // A retryable failure is retried whether or not the host has accepted this
+    // build yet. An ICE timeout, a dropped signalling socket and an unreachable
+    // service are the same transient thing on a first join as on a reconnect,
+    // and only by advancing `attemptIndex` here does `connectTimeoutMs`'s
+    // 8/16/30 s ladder become reachable by the cellular guest it exists for.
+    // Before acceptance the loop is BOUNDED (see JOIN_ATTEMPTS_BEFORE_ENTRY):
+    // a guest who has never got in may be reading the wrong five letters, and
+    // a silent backoff would never say so. After acceptance it is unbounded.
+    if (isRetryableReason(reason)
+        && (established || attemptIndex + 1 < JOIN_ATTEMPTS_BEFORE_ENTRY)) {
       onLog(`[rendezvous] link lost (${reason}) — retrying`);
-      onStatus('disconnected');
+      // 'disconnected' is the page's "Disconnected — reconnecting…" treatment,
+      // and it belongs to a link that WAS up. A guest still trying to get in
+      // for the first time stays on 'connecting' — attempt() re-reports it on
+      // the way out of the backoff — rather than being told a connection they
+      // never had has dropped.
+      if (established) onStatus('disconnected');
       scheduleRetry();
       return;
     }
+    // The loop has stopped. Report the terminal state whether or not this link
+    // was ever accepted: 'disconnected' renders as "reconnecting…" with a
+    // retry control under it, and nothing is retrying any more.
     onError(reason, detail);
-    onStatus(established ? 'disconnected' : 'error');
+    onStatus('error');
   }
 
   function scheduleRetry() {
@@ -761,13 +929,33 @@ export function createRendezvousJoiner(opts) {
       case 'signal':
         onSignal(gen, msg.payload).catch((e) => fail(gen, 'unreachable', String(e && e.message)));
         break;
-      // Both of these are answers, not blips: the record is gone, or the
-      // service refused the request. Tear the attempt down as well as
-      // reporting it, so a dead attempt can never fire a page callback later.
+      // Signalling-plane news. Before the direct channels are up these are
+      // answers, not blips — the record is gone, or the service refused the
+      // request — so the attempt is torn down as well as reported, and a dead
+      // attempt can never fire a page callback later.
+      //
+      // Once `linked()` is true they are INFORMATION. A `closed` frame is a
+      // statement about the rendezvous RECORD (its host's socket dropped, or
+      // the lazy TTL sweep took it — worker-rendezvous/src/registry.js's
+      // `dropRecord`), and an `error` frame is usually a race about a peer id
+      // the service no longer holds. Neither says anything about a DataChannel
+      // that is already carrying the game, and acting on them killed healthy
+      // sessions: `host-gone` is terminal, so the joiner stopped for good with
+      // the link still up. Only the channel's own close drives the reconnect
+      // loop from here — and if the link then genuinely goes, the next resolve
+      // gets the honest answer about the code.
       case 'closed':
+        if (linked()) {
+          onLog(`[rendezvous] record closed (${msg.reason || 'host-gone'}) — the direct link is up, playing on`);
+          break;
+        }
         fail(gen, msg.reason || 'host-gone');
         break;
       case 'error':
+        if (linked()) {
+          onLog(`[rendezvous] service error (${msg.reason}) — the direct link is up, playing on`);
+          break;
+        }
         fail(gen, msg.reason, msg.detail);
         break;
       default:
@@ -849,7 +1037,19 @@ export function createRendezvousJoiner(opts) {
           return;
         } catch { /* fall through to the reliable channel */ }
       }
-      if (isChannelOpen(channel)) channel.send(json);
+      if (!isChannelOpen(channel)) return;
+      // Same ceiling as the host's side of the adapter: the SDP-negotiated
+      // `max-message-size` (262144 bytes between two Chromiums) on a raw
+      // RTCDataChannel with no chunking under it. A ClientMessage is a command
+      // with a handful of fields, so nothing here is remotely near it — but an
+      // uncaught throw would propagate into whichever console control called
+      // `send`, and a dropped command is a better outcome than a broken UI
+      // handler.
+      try {
+        channel.send(json);
+      } catch (e) {
+        onLog(`[rendezvous] send failed (${type}) — dropping this command: ${e && e.message}`);
+      }
     },
     /** The page's "retry now" control: skip the backoff wait and go again. */
     retryNow() {
@@ -872,6 +1072,7 @@ if (typeof window !== 'undefined') {
     DEV_RENDEZVOUS_URL,
     RELIABLE_CHANNEL,
     SNAPSHOT_CHANNEL,
+    JOIN_ATTEMPTS_BEFORE_ENTRY,
     isRetryableReason,
     rendezvousBaseFromLocation,
     joinRouteFromLocation,

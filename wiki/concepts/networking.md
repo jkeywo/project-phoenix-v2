@@ -32,7 +32,7 @@ client #3 ──┘                   │               └── unordered Data
 - **The service** is `worker-rendezvous/`, a sibling Cloudflare Worker to the TURN one, with a Durable Object holding the live registry. All of its behaviour is the transport-free state machine in `worker-rendezvous/src/registry.js` (`/v1/host` and `/v1/join` WebSockets plus a `/v1/health` origin check); the Worker adapter decides nothing except who gets a socket, which is what lets `tests/client/rendezvous-registry.test.js` cover the protocol with no wrangler. Registry state is in memory only (a code dies with its host socket), and its bounds — lookup cap per socket, record TTL, peers per record, stored-field shapes — are authored in `[limits]`. Both upgrade endpoints require a present, allow-listed `Origin`; only `/v1/health` does not.
 - **The browser halves** are `gui/rendezvous-transport.js`, one module holding both ends of one frame vocabulary. `createRendezvousHost` registers, is issued a code, and hands each ADMITTED connection to `server.html`'s `attachHostConn` — an open DataChannel is not admission, so nothing reaches the Identify gate before the compatibility verdict, and frames sent before it or after a refusal are dropped. `createRendezvousJoiner` resolves a typed code, offers, opens both channels, completes the handshake and sends `Identify`. `localiseTree` runs on every inbound frame, in one place, so no console has to know which of its fields are localisable.
 - **The compatibility handshake** (`JoinHandshake` / `JoinAccepted` / `JoinRefused`) is transport-plane, not a `ClientMessage` — `pasm/spec/design/p2p-design-deltas.yaml` forbids layering transport concerns onto the crew protocol. The verdict comes from Rust: `wasm_check_client_stamp` → `delivery::check_join_stamp` → the same `check_client_stamp` the native host enforces over HTTP, so rendezvous version advice can never become the authority. The client's own stamp is written into `<meta name="phoenix-client-stamp">` by `scripts/build-client.mjs`. **Since #1112 a stamp is required**: absent and garbled are both refused as `client-stamp-missing`, because every client that can reach a Phoenix host is now a built Phoenix bundle.
-- **Service selection.** `?rendezvous=<url>` points a page at another service (a local `wrangler dev`, a staging deployment); anything else, including no parameter, uses the built-in one. The #1111 opt-in spellings (`?rendezvous`, `=on`, `=off`) are ignored rather than honoured, so an old bookmark still opens the game instead of trying to dial a host called "on".
+- **Service selection.** `?rendezvous=<url>` is a development lever and is honoured **only for a loopback origin** (`localhost`, `127.0.0.1`, `[::1]`, `*.localhost`) — a local `wrangler dev`. Every other value, a public staging URL included, falls back to the built-in service, because since #1112 this parameter applies on every ordinary client load: `client/index.html?rendezvous=https://attacker.example#<code>` handed to a guest would otherwise route their SDP, ICE candidates, session token and display name through a third party with nothing on screen saying so. The #1111 opt-in spellings (`?rendezvous`, `=on`, `=off`) are ignored rather than honoured, so an old bookmark still opens the game instead of trying to dial a host called "on".
 - **Deploy trap:** the same `ALLOWED_ORIGIN` drift as the TURN worker, except a stale value here means nobody can join at all rather than nobody getting relay. `/v1/health` echoes `origin_allowed` for exactly that check — see `docs/delivery-checklist.md` §3a. **The service is not deployed yet**, and since #1112 there is no second route underneath it.
 
 ## Identity model
@@ -102,17 +102,41 @@ a session holding the ship's authored Weapons Station; none resets shared caches
 A generation guard ignores callbacks from superseded
 attempts. The client offers **Retry now**, which skips the backoff wait.
 
-Only a refusal a retry cannot fix ends the loop and goes back to the entry field
-with its own sentence: an answer about the *code* (unknown, wrong-type,
+**A retryable failure is retried whether or not the host has accepted this build
+yet**, so the timeout ladder is reachable on a *first* join — which is the case
+it exists for, TURN-over-TCP allocation on cellular. Before acceptance the loop
+is bounded at `JOIN_ATTEMPTS_BEFORE_ENTRY` (4) attempts, after which the entry
+field comes back with the reason, because a guest who has never got in may
+simply be reading the wrong five letters. After acceptance it is unbounded.
+
+Only a refusal a retry cannot fix ends the loop early and goes back to the entry
+field with its own sentence: an answer about the *code* (unknown, wrong-type,
 version-mismatch, admission-closed, host-gone) or about the *build* (the host's
 `StampMismatch` codes). Everything else — an unreachable service, a signalling
 drop, an ICE timeout — is retried. `reconnect-midgame-sever.spec.js` exercises
 sever and revive during play.
 
-The host has a matching loop: a lost record re-registers on a backoff and is
-issued a **fresh** code, because the old record really is gone and the letters on
-screen resolve to nothing. Keeping the *same* code across a host drop needs
-persistence in the service and is issue #1115's.
+**Signalling and media are independent planes.** Once the two DataChannels are
+up, the rendezvous socket is expendable: a `closed` or `error` frame, or the
+socket itself dying, is logged and ignored while the link is live. A `closed`
+frame is a statement about the *record* (its host socket dropped, or the TTL
+sweep took it — `dropRecord` in the registry), not about a host whose direct
+link is carrying the game. Only the DataChannel's own close drives the reconnect
+loop.
+
+The host has a matching loop, and the same separation: a lost record
+re-registers on a backoff and is issued a **fresh** code, because the old record
+really is gone and the letters on screen resolve to nothing — while **every
+admitted crew connection stays up**. Only the peers still mid-signalling on the
+dead socket are discarded; an established `RTCPeerConnection` needs no service,
+and only its own channel closing reaches `wasm_player_disconnected`. Keeping the
+*same* code across a host drop needs persistence in the service and is issue
+#1115's.
+
+`connectionAdapter.close()` — the host's only eviction mechanism, used by the
+reserved-token refusal and the duplicate-token dance — closes **both** channels
+and the `RTCPeerConnection`, and marks the peer refused so anything still in
+flight on either channel is dropped rather than delivered.
 
 ## Host page cues via HUD/lobby push
 
@@ -131,12 +155,20 @@ Both pages show a coloured dot in the top-right:
 |---|---|---|
 | `connecting` | green (no label) | A first join attempt is in flight |
 | `ready` | green (no label) | The host accepted this build (`JoinAccepted`), or a code was issued |
-| `disconnected` | red + "Disconnected — reconnecting…" | An accepted link dropped; the transport is retrying on its own |
-| `error` | red + "Error — refresh to retry" | An answer a retry cannot change, before ever being accepted |
+| `disconnected` | red + "Disconnected — reconnecting…" | An accepted link dropped **and a retry is scheduled** |
+| `error` | red + "Error — refresh to retry" | The loop has stopped: a terminal answer, or a pre-acceptance link failure that used up its bounded attempts |
 
 `connecting` is deliberately **not** re-reported on each reconnect attempt: an
 accepted link that is down reads as "reconnecting" until it is actually back,
-rather than flashing the dot green several times a second.
+rather than flashing the dot green several times a second. A guest who has never
+been accepted stays on `connecting` across their bounded retries, for the same
+reason in reverse — "Disconnected — reconnecting…" would describe a connection
+they never had.
+
+The two rows are decided by which branch of `fail()` runs, not by whether the
+link was ever accepted: **`disconnected` is only ever reported alongside a
+scheduled retry**, so the page can never show "reconnecting…" for a loop that
+has stopped.
 
 ## ICE servers, TURN relay, and on-device diagnostics (2026-08 hotspot fix)
 
@@ -148,7 +180,7 @@ The base ICE list (`defaultIceServers()`) is **STUN-only**; TURN relay credentia
 - The client join screen shows a live diagnostics readout (`#conn-diag`): relay probe verdict (`probeTurnRelay()`, an `iceTransportPolicy:'relay'` throwaway connection) plus per-attempt ICE state and gathered candidate types, fed by the transport's `onDiag` events. "candidates: host, srflx" with no relay on a failing network is the TURN smoking gun.
 - The host lobby mirrors any inbound client stuck mid-ICE under the QR code, fed by `createRendezvousHost`'s `onPeerIce` callback — when ICE never completes no channel ever opens, so nothing else would report it.
 
-The per-attempt connect timeout escalates 8s → 16s → 30s (`connectTimeoutMs()`) since TURN-over-TCP allocation on cellular can exceed the old flat 8s.
+The per-attempt connect timeout escalates 8s → 16s → 30s (`connectTimeoutMs()`) since TURN-over-TCP allocation on cellular can exceed the old flat 8s — and because a pre-acceptance failure is retried too, the 16s and 30s rungs are reachable by the guest joining for the first time, which is the case the ladder was added for.
 
 Both workers validate CORS against the comma-separated `ALLOWED_ORIGIN` list in their own `wrangler.toml`. The deployed value only changes after `wrangler deploy`; an incorrect allowlist blocks the TURN credential fetch (removing relay) or the rendezvous upgrade (removing joining altogether).
 

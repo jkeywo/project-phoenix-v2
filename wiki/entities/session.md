@@ -3,16 +3,17 @@ title: Session
 type: entity
 tags: [session, server, identity, reconnect]
 sources: [src/lobby/session.rs, src/lobby/handler.rs, src/lobby/server.rs, src/server/bridge.rs]
-updated: 2026-08-27
+updated: 2026-08-28
 ---
 
 # Session
 
 `SessionManager` is the authoritative server-side record of every connected or
-recently disconnected [Player](./player.md). Identity is a UUID session token
-stored by the browser, not the ephemeral rendezvous peer id. The host bridge maps a
-peer to that token after `Identify` and passes only the token into simulation
-message handling.
+recently disconnected [Player](./player.md). Identity is the browser's 32-hex
+session token — held per tab in `sessionStorage`, with a persistent
+`localStorage` copy the first tab adopts — not the ephemeral rendezvous peer id.
+The host bridge maps a peer to that token after `Identify` and passes only the
+token into simulation message handling.
 
 ## Owned state
 

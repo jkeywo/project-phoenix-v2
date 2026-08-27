@@ -4,10 +4,10 @@ entities:
       status: implemented
       confidence: confirmed
       title: Session Identity Manager
-      summary: Host-owned persistent session records keyed by a client-held 32-hex session token rather than a transient rendezvous peer id or DataChannel.
+      summary: Host-owned persistent session records keyed by client-held UUID token rather than transient PeerJS peer id.
       rationale:
         - Reconnect must restore a player's identity and eligible station relationship after WebRTC peer replacement.
-        - "[ai] The token is 32 lowercase hex characters held primarily in sessionStorage, with a persistent localStorage copy the first tab adopts — not a UUIDv4 in localStorage, which is what AGENTS.md claimed until issue #1112 corrected it. Per-tab storage is load-bearing: two console tabs on one desktop sharing a token collapsed into one server-side player."
+        - "[ai] SUPERSEDES the summary above on two facts issue #1112 checked against gui/session-token.js. The token is 32 lowercase hex characters (crypto.getRandomValues over 16 bytes), not a UUIDv4, and it is held primarily in sessionStorage with a persistent localStorage copy the first tab adopts, not in localStorage alone. Per-tab storage is load-bearing: two console tabs on one desktop sharing a token collapsed into one server-side player. The ephemeral identifier it is contrasted with is now a rendezvous peer id and a DataChannel — PeerJS was retired in the same issue."
         - "[ai] Since #1112 the transport re-sends Identify with the same token on every automatic reconnect, so restoring the held station and pushing the current projection is the ordinary Identify path rather than a second mechanism."
     architecture:
       kind: session-manager
@@ -57,17 +57,22 @@ entities:
       status: removed
       confidence: confirmed
       title: Peer Transport Bridge
-      summary: >-
-        REMOVED (issue #1112). The PeerJS-based browser host and phone-client transport bridge that
-        mapped peer connections to session tokens. Its role is now rendezvous-transport-bridge,
-        which owns BOTH ends of the crew transport — this entity's `runs_in` of
-        phone-browser-runtime alone was always wrong, because the bridge ran host-side too.
-        Retained rather than deleted so crew-transport-peerjs-to-phoenix has an origin to name.
+      summary: Browser host and phone-client transport bridge that maps peer connections to session tokens and exchanges encoded messages.
       rationale:
+        - "[ai] SUPERSEDED by issue #1112: this bridge was PeerJS's, and PeerJS is gone. Its role belongs to rendezvous-transport-bridge in architecture/rendezvous-transport.yaml, which owns BOTH ends of the crew transport. `status` is the one unmarked field changed rather than annotated — implemented → removed — because leaving it claiming an implementation would make pasm scan's declared-versus-observed check assert a transport that is not in the tree."
+        - "[ai] The `runs_in: [phone-browser-runtime]` below was always incomplete: this bridge ran host-side too, which is why its replacement declares both runtimes. Left as written for ratification rather than corrected in place."
         - "[ai] It also duplicated client-network-interface in engineering-damage.yaml, which described the same client transport from another slice's point of view. WRITING_PASM §2.6 forbids duplicate truth; #1112 resolved it by giving rendezvous-transport-bridge the transport and leaving the other entity the client command gateway it actually is."
+        - "[ai] Retained rather than deleted so crew-transport-peerjs-to-phoenix has an origin to name."
+        - "[ai] Its `implementation:` block is gone rather than annotated. It declared `symbols: [ConnectionManager]` and `tests: [tests/client/connection-manager.test.js, tests/smoke/client-connect.spec.js]`, and #1112 deleted the class and that vitest file; a declaration pointing at symbols and tests no longer in the tree is exactly what pasm scan's declared-versus-observed check exists to catch. The paths it named live on crew-transport-peerjs-to-phoenix's legacy_paths/target_paths instead."
     architecture:
       kind: transport-adapter
       authority: non-authoritative
+      sends: [system-control-command, session-identify-command]
+      receives: [lobby-session-replica, simulation-state-replica]
+      runs_in: [phone-browser-runtime]
+      platforms:
+        allowed: [browser]
+        forbidden: [host-only]
 
   - migration: crew-transport-peerjs-to-phoenix
     core:
@@ -102,12 +107,11 @@ entities:
       status: implemented
       confidence: confirmed
       title: Session Identify Command
-      summary: >-
-        Client reconnect handshake carrying persistent token and player name to establish or restore
-        a host session. Sent on the reliable DataChannel, and only after the host's compatibility
-        gate has accepted the joining build.
+      summary: Client reconnect handshake carrying persistent token and player name to establish or restore a host session.
       rationale:
+        - "[ai] ADDS to the summary above, which stands: since #1112 it travels on the reliable DataChannel, and only after the host's compatibility gate has accepted the joining build — an open channel is not admission, so nothing before JoinAccepted reaches the Identify gate."
         - "[ai] Re-sent on EVERY reconnect since #1112, not only the first channel open: the host restores seat, rating and projection from the token each time it arrives, which is what makes an automatic reconnect resume the same station without the guest re-entering a join code."
+        - "[ai] `producer`, `paths` and `tests` below are repointed rather than annotated in place: peer-transport-bridge is `removed` and gui/connection-manager.js no longer sends anything, so a reference model that still named them would fail its own reference-integrity and declared-versus-observed checks. The producer is now rendezvous-transport-bridge; the JS path is gui/rendezvous-transport.js; the vitest is tests/client/rendezvous-transport.test.js."
     architecture:
       authority: request
       producer: [rendezvous-transport-bridge]

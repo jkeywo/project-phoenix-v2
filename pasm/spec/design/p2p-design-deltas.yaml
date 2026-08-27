@@ -93,6 +93,8 @@ entities:
         - "The crew protocol stays JSON over the MessageCodec seam and stays unchanged, exactly as #620 required; the host-to-host set is free to choose its own encoding for large snapshot payloads without touching it."
         - "The existing shim already simulates severed and offline pairs, so partition and rejoin cases remain reusable behavioral prior art even if the concrete PeerJS surface is retired."
         - "Managed TURN, candidate diagnostics and relay-degraded warnings are product requirements because public Wi-Fi, mobile hotspots and separate mobile networks cannot rely on direct candidates."
+        - "[ai] The replacement this decision anticipates has been DELIVERED, by issue #1112 — see crew-transport-peerjs-to-phoenix in architecture/sessions-replication.yaml. The 'delivered today' inventory in the summary above is therefore historical: the PeerJS DataChannels, the cloud signalling and the BroadcastChannel peerjs-shim are gone, replaced by the Phoenix rendezvous service, two direct DataChannels per client (reliable ordered plus lossy unordered) and tests/smoke/rendezvous-shim.js. What the decision itself settles is unchanged and still holds: the topology is a crew star, the host-to-host set stays separate from ClientMessage/ServerMessage, and the browser crew star remains a complete route."
+        - "[ai] The shim prior art it names survived the swap in substance: tests/smoke/rendezvous-shim.js carries window.__transportShim.sever()/revive(), so the severed-and-offline cases are still driveable, now against the real worker-rendezvous registry rather than a faked broker."
     game_design:
       must_not_be: [layered onto ClientMessage/ServerMessage, dependent on a TURN allowlist that is not verified at deploy time]
 

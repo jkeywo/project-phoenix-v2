@@ -803,6 +803,11 @@ pub fn wasm_init() {
         script_resolver: Box::new(crate::entities::config_cache::production_script_resolver()),
         single_threaded: false,
         raw_transform: None,
+        // Inert for a browser profile: which renderer the browser stands up is
+        // decided by the target (`#[cfg(target_arch = "wasm32")]`), not by the
+        // plan. The axis exists for the native host, which is both the shipped
+        // target and the test target and so has to decide at runtime.
+        native_surface: crate::boot::NativeRenderSurface::Contract,
     };
     // `HostPreloaded` neither reads nor validates a world, so `ingest_world` cannot
     // return `Err` for it — this `expect` documents an unreachable, not a runtime

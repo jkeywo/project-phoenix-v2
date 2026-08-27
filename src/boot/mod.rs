@@ -15,9 +15,17 @@
 //! The three agree on a core (panic/log/task-pool/time/transform/diagnostics/
 //! asset/scene/states) and differ in two axes: whether a real renderer is present,
 //! and whether they run inside a browser window. This module names those axes as a
-//! [`BootProfile`] and composes the core once, so the three inventories cannot
-//! drift apart unnoticed — a drift the [three-profile parity test](self#tests)
+//! [`BootProfile`] and composes the core once, so the inventories cannot
+//! drift apart unnoticed — a drift the [profile parity test](self#tests)
 //! guards permanently.
+//!
+//! Issue #1121 added the fourth: [`BootProfile::NativeHost`], a real renderer
+//! that is *not* a browser — the combination the original two predicates could
+//! express but no profile occupied. It varies two more things a browser profile
+//! cannot: [`NativeRenderSurface`] (a winit window, an offscreen wgpu device, or
+//! no wgpu at all, decided at runtime because native is both the shipped target
+//! and the test target) and the native entity-template cache it refuses to boot
+//! without ([`BootProfile::requires_native_templates`]).
 //!
 //! # The adapters
 //!
@@ -73,10 +81,10 @@ use crate::world::script::load::ScriptResolver;
 
 // ── Profile ──────────────────────────────────────────────────────────────────
 
-/// Which of the three inventories to compose.
+/// Which of the four inventories to compose.
 ///
-/// The two axes the three profiles vary along are read off this enum by the
-/// private predicates below rather than matched inline, so a fourth profile (or a
+/// The axes the profiles vary along are read off this enum by the private
+/// predicates below rather than matched inline, so a fifth profile (or a
 /// changed policy) has one place to change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BootProfile {
@@ -88,6 +96,18 @@ pub enum BootProfile {
     /// The browser under WebDriver automation: a browser window but no renderer
     /// (wgpu has no GPU in headless CI), so the render surrogate stands in.
     BrowserAutomation,
+    /// The native windowed authoritative host (issue #1121): the same
+    /// simulation/plugin graph the browser host runs, with the viewscreen drawn
+    /// by native Bevy/wgpu through winit instead of onto a `<canvas>`.
+    ///
+    /// It is a render-stack profile that is **not** a browser profile — the one
+    /// combination the original three could not express, and the reason this
+    /// enum's two predicates were written as separate questions rather than one
+    /// match. What it varies that the browser host does not is
+    /// [`BootPlan::native_surface`] (window / offscreen / no wgpu at all) and
+    /// the native template cache it insists on (see
+    /// [`BootProfile::requires_native_templates`]).
+    NativeHost,
 }
 
 impl BootProfile {
@@ -99,14 +119,20 @@ impl BootProfile {
     /// A browser host instead keeps booting — into a lobby that never leaves the
     /// gate — because a player mis-typing a `?scenario=` URL should see an error,
     /// not a dead page.
+    ///
+    /// [`NativeHost`](BootProfile::NativeHost) takes headless's side: it is
+    /// launched from a command line naming its world, so a broken world is a
+    /// mistyped flag or bad content, and there is no URL bar to correct it in.
+    /// Failing at the prompt beats opening a window onto a lobby that can never
+    /// start.
     fn broken_world_aborts(self) -> bool {
-        matches!(self, BootProfile::Headless)
+        matches!(self, BootProfile::Headless | BootProfile::NativeHost)
     }
 
     /// Whether this profile drives the real renderer ([`render_stack`]) rather
     /// than the [`render_surrogate`].
     fn has_render_stack(self) -> bool {
-        matches!(self, BootProfile::BrowserHost)
+        matches!(self, BootProfile::BrowserHost | BootProfile::NativeHost)
     }
 
     /// Whether this profile runs inside a browser window and so needs the
@@ -115,6 +141,74 @@ impl BootProfile {
         matches!(
             self,
             BootProfile::BrowserHost | BootProfile::BrowserAutomation
+        )
+    }
+
+    /// Whether this profile's world must already be in the **native** entity
+    /// template cache before it composes (issue #1121).
+    ///
+    /// Only [`NativeHost`](BootProfile::NativeHost). The browser profiles read a
+    /// different cache — the JS preload's `thread_local!`, filled before Bevy
+    /// starts — and headless populates the native one itself, one step earlier,
+    /// because its model-marker gate must abort before `App::new()`.
+    ///
+    /// This exists because `boot::build` calls no preload of its own and six
+    /// call sites read that cache with **no filesystem fallback**:
+    /// `lobby::server::update_session_with_config`, `server::radar`,
+    /// `server::reference_grid`, `server::asset_preload` (twice) and
+    /// `asteroids::lifecycle` (twice). An unpopulated cache does not fail there;
+    /// it answers `Default` — default helm radar range, default impulse-charge
+    /// duration, default hostile-arc colour — and a native host would run a
+    /// plausible-looking mission with the wrong numbers and nothing in the log.
+    /// See [`check_native_templates`]. Native-only: the cache it names does not
+    /// exist on wasm, where the browser's JS preload is the equivalent.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn requires_native_templates(self) -> bool {
+        matches!(self, BootProfile::NativeHost)
+    }
+}
+
+/// How a [`NativeHost`](BootProfile::NativeHost) boot puts pixels somewhere
+/// (issue #1121).
+///
+/// This is the axis a native host varies that no browser profile can: on the
+/// browser, "is there a renderer" is answered by the target itself
+/// (`#[cfg(target_arch = "wasm32")]`), whereas native is simultaneously the
+/// shipped host target AND the target `cargo test` runs on, and the machine
+/// running the tests has no GPU. So the choice has to be made at runtime, from
+/// the plan, rather than at compile time from a `cfg`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NativeRenderSurface {
+    /// No wgpu at all: compose the shared core plus the renderer's *contract*,
+    /// exactly as [`BrowserHost`](BootProfile::BrowserHost) does on the native
+    /// parity-test target.
+    ///
+    /// The default, and the only value a GPU-less CI runner can build, so it is
+    /// what the four-profile parity test uses. It is also the value the
+    /// native↔headless digest-equivalence test uses: the claim there is about
+    /// the *simulation* plugin graph, and a real surface would only add a GPU
+    /// requirement to a determinism check.
+    #[default]
+    Contract,
+    /// A real winit window driven by `DefaultPlugins` — the shipped
+    /// `phoenix-host --world …` viewscreen.
+    Window,
+    /// A real wgpu device with **no** window: `WinitPlugin` disabled and no
+    /// primary window, as `capture-billboard` and `tune-lods` already run. The
+    /// automated native render proof draws into an offscreen target through
+    /// this and reads the pixels back.
+    Offscreen,
+}
+
+impl NativeRenderSurface {
+    /// Whether this surface instantiates Bevy's real wgpu render plugins.
+    /// Native-only: no browser profile consults this axis, because the browser
+    /// answers the same question with a `cfg`.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn is_wgpu(self) -> bool {
+        matches!(
+            self,
+            NativeRenderSurface::Window | NativeRenderSurface::Offscreen
         )
     }
 }
@@ -199,6 +293,12 @@ pub struct BootPlan {
     /// [`LoadRequest`](crate::world::load::LoadRequest) [`ingest_world`] builds, so
     /// the load owns the one transform hook exactly as it owns the load itself.
     pub raw_transform: Option<Box<dyn Fn(toml::Value) -> Result<toml::Value, String>>>,
+    /// How a [`NativeHost`](BootProfile::NativeHost) boot presents — see
+    /// [`NativeRenderSurface`]. Inert for every other profile: the browser's
+    /// renderer is chosen by the target, and the two renderer-less profiles have
+    /// none to choose. Defaults to [`NativeRenderSurface::Contract`], which is
+    /// the only value a GPU-less machine can build.
+    pub native_surface: NativeRenderSurface,
 }
 
 /// Why [`build`] could not produce an `App`.
@@ -211,6 +311,12 @@ pub enum BootError {
     /// profile [aborts](BootProfile::broken_world_aborts) on a broken world. The
     /// string names the erroring findings.
     WorldInvalid(String),
+    /// This profile [requires](BootProfile::requires_native_templates) the
+    /// native entity-template cache to hold every template its world declares,
+    /// and these are missing (issue #1121). Nothing downstream would have
+    /// *failed* on them — the cache-only readers answer `Default` — which is
+    /// exactly why the boot refuses here instead.
+    NativeTemplatesMissing(Vec<String>),
 }
 
 impl fmt::Display for BootError {
@@ -218,6 +324,14 @@ impl fmt::Display for BootError {
         match self {
             BootError::WorldLoad(e) => write!(f, "world load failed: {e}"),
             BootError::WorldInvalid(msg) => write!(f, "world activation blocked: {msg}"),
+            BootError::NativeTemplatesMissing(missing) => write!(
+                f,
+                "native entity-template cache is missing {} template(s) this world \
+                 declares, so the host would read Default hull, radar and asteroid \
+                 configuration instead of the authored ones: {}",
+                missing.len(),
+                missing.join(", ")
+            ),
         }
     }
 }
@@ -266,7 +380,7 @@ pub fn build(plan: BootPlan) -> Result<App, BootError> {
     // renderer-less profiles keep the original shape: the shared core, then the
     // surrogate that stands in for a missing renderer.
     if plan.profile.has_render_stack() {
-        render_stack(&mut app, &plan.log_filter);
+        render_stack(&mut app, &plan.log_filter, plan.profile, plan.native_surface);
     } else {
         core_plugins(
             &mut app,
@@ -385,23 +499,48 @@ fn render_surrogate(app: &mut App) {
     app.insert_resource(RenderSurrogateApplied);
 }
 
-/// The real viewscreen renderer, for BrowserHost only.
+/// The real viewscreen renderer, for the two render-stack profiles.
 ///
-/// Owns the whole plugin stack for this profile (see [`build`]'s note): on the
-/// browser that is Bevy's `DefaultPlugins` — the shared core **and** the wgpu
-/// render plugins in one group — so [`core_plugins`] is *not* also called for
-/// BrowserHost.
+/// Owns the whole plugin stack for those profiles (see [`build`]'s note): the
+/// renderer is Bevy's `DefaultPlugins` — the shared core **and** the wgpu render
+/// plugins in one group — so [`core_plugins`] is *not* also called when the real
+/// stack goes in.
 ///
-/// The wgpu-backed render plugins are instantiated **only on the browser target**.
-/// A native build (the target the parity test runs on) cannot stand up the render
-/// stack at all — Bevy's `RenderPlugin` requests a GPU adapter and panics with none,
-/// which is the very reason the [`BrowserAutomation`](BootProfile::BrowserAutomation)
-/// inventory exists. So on native this composes the shared core ([`core_plugins`])
-/// plus the renderer's *contract* with the simulation (the same floor
-/// [`render_surrogate`] provides), which is what lets `build(BrowserHost)` compose on
-/// native and the parity test assert the shared four-asset/three-message floor.
-fn render_stack(app: &mut App, log_filter: &str) {
+/// Two targets, two different questions:
+///
+/// * **Browser** ([`BrowserHost`](BootProfile::BrowserHost)): the wgpu-backed
+///   plugins are instantiated only under `target_arch = "wasm32"`. A native
+///   build (the target the parity test runs on) cannot stand up that stack —
+///   Bevy's `RenderPlugin` requests a GPU adapter and panics with none, which is
+///   the very reason the [`BrowserAutomation`](BootProfile::BrowserAutomation)
+///   inventory exists. So on native this composes the shared core plus the
+///   renderer's *contract* (the same floor [`render_surrogate`] provides), which
+///   is what lets `build(BrowserHost)` compose on native at all.
+/// * **Native** ([`NativeHost`](BootProfile::NativeHost)): native is *both* the
+///   shipped host target and the test target, so the same question is answered
+///   at runtime from [`BootPlan::native_surface`] instead — see
+///   [`native_render_stack`].
+///
+/// Either way [`RenderStackApplied`] is inserted, because the profile named the
+/// real renderer; whether wgpu could actually be stood up on this target is a
+/// separate fact.
+fn render_stack(
+    app: &mut App,
+    log_filter: &str,
+    profile: BootProfile,
+    surface: NativeRenderSurface,
+) {
     app.insert_resource(RenderStackApplied);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    if profile == BootProfile::NativeHost {
+        native_render_stack(app, log_filter, surface);
+        return;
+    }
+    // Consumed only by the native arm above / the wasm arm below; naming them
+    // here keeps every target's build free of "unused variable" noise without a
+    // second `cfg` block per parameter.
+    let _ = (profile, surface);
 
     // `feature = "server"` as well as `wasm32` (issue #1194): this branch names the
     // presentation `crate::server::{renderer,viewscreen_border}` plugins, so the
@@ -463,6 +602,90 @@ fn render_stack(app: &mut App, log_filter: &str) {
         // so stand up the shared core and the renderer's contract instead — a
         // browser run never reaches this arm.
         core_plugins(app, BootProfile::BrowserHost, log_filter, false);
+        register_render_contract(app);
+    }
+}
+
+/// The native windowed host's renderer (issue #1121).
+///
+/// The browser arm above and this one compose the *same* three things —
+/// `DefaultPlugins`, the [`AiChatterEvent`] message, and the two presentation
+/// plugins — differing only in what the window is and where assets come from:
+///
+/// * **Window.** No `canvas`; a real winit window with the viewscreen title.
+///   [`NativeRenderSurface::Offscreen`] instead disables `WinitPlugin` and asks
+///   for no primary window at all, which is how `capture-billboard` and
+///   `tune-lods` already drive native wgpu in this repo — the shape the
+///   automated native render proof uses, because CI has no display.
+/// * **Assets.** The browser sets `AssetMetaCheck::Never` because no `.meta`
+///   sidecars ship and Cloudflare Pages answers a missing one with its SPA
+///   `index.html` at HTTP 200, which the default check reads as a corrupt
+///   sidecar and dies on. A native host reads real files off a real disk, so it
+///   keeps `AssetPlugin::default()` — and resolves it against `BEVY_ASSET_ROOT`,
+///   which `native_host::pin_content_root` sets from `--content-dir` so that
+///   Bevy's asset root and the CWD that `std::fs`-based world/template/sidecar
+///   reads resolve against cannot disagree.
+///
+/// Note what is deliberately absent: [`register_render_contract`]. With the real
+/// stack in, `DefaultPlugins` already `init_asset`s Shader/Image/Mesh/
+/// StandardMaterial and installs the `ShaderLoader`, and registering a second
+/// one panics in `DenseAssetStorage::insert` the moment a shader loads (the
+/// regression issue #1219 shipped). `AiChatterEvent` is not part of that
+/// render-owned set, so it is added explicitly; `add_message` is idempotent.
+///
+/// With [`NativeRenderSurface::Contract`] no wgpu is stood up at all and this
+/// falls back to the shared core plus the renderer's contract — the same
+/// treatment `BrowserHost` gets on native, and what makes the four-profile
+/// parity test and the native↔headless digest comparison runnable on a
+/// GPU-less CI runner.
+#[cfg(not(target_arch = "wasm32"))]
+fn native_render_stack(app: &mut App, log_filter: &str, surface: NativeRenderSurface) {
+    if !surface.is_wgpu() {
+        core_plugins(app, BootProfile::NativeHost, log_filter, false);
+        register_render_contract(app);
+        return;
+    }
+
+    #[cfg(feature = "server")]
+    {
+        use bevy::window::{ExitCondition, Window, WindowPlugin};
+        let window_plugin = match surface {
+            NativeRenderSurface::Offscreen => WindowPlugin {
+                primary_window: None,
+                exit_condition: ExitCondition::DontExit,
+                ..default()
+            },
+            _ => WindowPlugin {
+                primary_window: Some(Window {
+                    title: crate::native_host::WINDOW_TITLE.to_string(),
+                    ..default()
+                }),
+                ..default()
+            },
+        };
+        let plugins = bevy::DefaultPlugins
+            .set(window_plugin)
+            .set(LogPlugin {
+                filter: log_filter.to_string(),
+                ..default()
+            })
+            .set(AssetPlugin::default());
+        if surface == NativeRenderSurface::Offscreen {
+            app.add_plugins(plugins.disable::<bevy::winit::WinitPlugin>());
+        } else {
+            app.add_plugins(plugins);
+        }
+        app.add_message::<AiChatterEvent>();
+        app.add_plugins(crate::server::renderer::RendererPlugin)
+            .add_plugins(crate::server::viewscreen_border::ViewscreenBorderPlugin);
+    }
+    // A `--no-default-features` build has no presentation half to render with,
+    // so there is no native viewscreen to stand up — take the contract, exactly
+    // as `Contract` does. Nothing ships this combination; the boundary job
+    // compiles it.
+    #[cfg(not(feature = "server"))]
+    {
+        core_plugins(app, BootProfile::NativeHost, log_filter, false);
         register_render_contract(app);
     }
 }
@@ -607,6 +830,15 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
         return Err(BootError::WorldInvalid(invalid.join("; ")));
     }
 
+    // The native content gate (issue #1121), before anything is inserted into
+    // the `App`: a profile that reads the native template cache with no
+    // filesystem fallback must find that cache already carrying this world's
+    // declared templates. See [`check_native_templates`].
+    #[cfg(not(target_arch = "wasm32"))]
+    if plan.profile.requires_native_templates() {
+        check_native_templates(&loaded.config)?;
+    }
+
     loaded.ledger.apply();
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -626,6 +858,44 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     app.insert_resource(loaded.config);
     app.insert_resource(crate::world::server::PreCompiledScripts(loaded.scripts));
     Ok(())
+}
+
+/// Refuse to compose a native host whose world declares templates the native
+/// entity-template cache does not hold (issue #1121).
+///
+/// The set checked is [`crate::world::config::entity_template_paths`] with no
+/// curation — every static `[[entity]]`, every `available_ships[*]` hull, and
+/// every literal `template_path` a compiled script spawns. That is exactly the
+/// set the browser's JS preload fetches before Bevy starts, so this is the
+/// native statement of the same precondition rather than a new rule.
+///
+/// It is a *refusal*, not a warning, because the failure it guards is silent:
+/// `lobby::server::update_session_with_config` reads the selected hull straight
+/// out of this cache with no fallback, and on a miss keeps a `Default`
+/// `ShipClientConfig` — default helm radar range, default impulse-charge
+/// duration, default hostile-arc colour — while every log line stays clean and
+/// the mission still runs. `server::radar`, `server::reference_grid`,
+/// `server::asset_preload` and `asteroids::lifecycle` fail the same way.
+///
+/// The populate itself is
+/// [`crate::entities::template_preload::preload_entity_templates`], which the
+/// native host adapter runs before calling [`build`]. Boot does not run it
+/// here: the preload's model-marker gate has to abort *before* an `App` exists,
+/// and its findings belong to the adapter that will log them once a subscriber
+/// is installed.
+#[cfg(not(target_arch = "wasm32"))]
+fn check_native_templates(world: &crate::world::config::WorldConfig) -> Result<(), BootError> {
+    let cache = crate::entities::config_cache::get_config_cache();
+    let missing: Vec<String> = crate::world::config::entity_template_paths(world, &[])
+        .into_iter()
+        .map(|p| crate::entities::include_resolve::canonical_template_path(&p))
+        .filter(|p| !cache.contains_key(p))
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(BootError::NativeTemplatesMissing(missing))
+    }
 }
 
 /// Log every NON-error finding of one gate at warn level (issue #1046).

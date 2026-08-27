@@ -166,6 +166,19 @@ pub mod console;
 #[cfg(feature = "server")]
 pub mod server;
 
+/// The native windowed authoritative host (issue #1121): the same simulation
+/// and plugin graph the browser host runs, composed through the shared
+/// [`boot`] seam with the viewscreen drawn by native Bevy/wgpu, plus the
+/// transport seam a network transport plugs into.
+///
+/// Gated on `server` rather than on `host`, and native-only: it names the
+/// presentation `crate::server::{renderer,viewscreen_border}` plugins, and the
+/// `host` feature gates only the `phoenix-host` *binary* — keeping this module
+/// on the default feature set is what puts its tests in the plain `cargo test`
+/// CI runs rather than behind a feature nothing else turns on.
+#[cfg(all(feature = "server", not(target_arch = "wasm32")))]
+pub mod native_host;
+
 pub mod debug_overlay;
 
 /// Structured debug observability (PRD #1144): one read-only projection pipeline

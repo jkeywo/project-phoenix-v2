@@ -34,6 +34,12 @@ pub mod spawner;
 pub mod star;
 pub mod tags;
 pub mod target;
+/// The strict native entity-template preload every native process shares
+/// (issue #1121). Native-only: it walks the filesystem and writes the
+/// process-global native config cache, neither of which exists on wasm, where
+/// the JS preload is the equivalent.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod template_preload;
 /// Fading a visual in or out — the LOD cross-fade window and the mid-mission
 /// arrival flourish built on it (PRD #1023, module 5).
 pub mod visual_fade;

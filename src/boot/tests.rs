@@ -1,17 +1,23 @@
-//! Guard tests for the boot seam (issue #1217).
+//! Guard tests for the boot seam (issue #1217; fourth profile #1121).
 //!
-//! The headline is the three-profile registration-parity test: the whole point of
-//! the module is that Headless, BrowserHost and BrowserAutomation cannot drift on
-//! what the renderer (real or surrogate) owes the simulation, so a test builds all
-//! three and asserts they land on the same four-asset/three-message floor — and
-//! that only BrowserHost took the real render-stack path.
+//! The headline is the profile registration-parity test: the whole point of
+//! the module is that Headless, BrowserHost, BrowserAutomation and NativeHost
+//! cannot drift on what the renderer (real or surrogate) owes the simulation, so
+//! a test builds all four and asserts they land on the same
+//! four-asset/three-message floor — and that only the two render-stack profiles
+//! took the real render-stack path.
 //!
 //! Everything runs off an in-memory world fixture, so no filesystem, GPU, browser
-//! or window is involved and the tests are native-`cargo test` clean.
+//! or window is involved and the tests are native-`cargo test` clean. NativeHost
+//! is built with [`NativeRenderSurface::Contract`] for that reason, exactly as
+//! BrowserHost is composed here without wgpu: a GPU-less runner cannot stand up
+//! `RenderPlugin`, and what these tests assert is the *inventory*, not the
+//! device. The native render path's own proof is
+//! `tests/native_viewscreen_render.rs`, which draws a frame on a real GPU.
 
 use super::{
-    build, BootError, BootPlan, BootProfile, RenderStackApplied, RenderSurrogateApplied,
-    WorldIngest,
+    build, BootError, BootPlan, BootProfile, NativeRenderSurface, RenderStackApplied,
+    RenderSurrogateApplied, WorldIngest,
 };
 use bevy::prelude::*;
 
@@ -56,6 +62,7 @@ fn plan_with(profile: BootProfile, world: &str) -> BootPlan {
         script_resolver: Box::new(NoScriptResolver),
         single_threaded: false,
         raw_transform: None,
+        native_surface: NativeRenderSurface::Contract,
     }
 }
 
@@ -77,13 +84,15 @@ fn plan_with_child(profile: BootProfile, child: &str) -> BootPlan {
         script_resolver: Box::new(NoScriptResolver),
         single_threaded: false,
         raw_transform: None,
+        native_surface: NativeRenderSurface::Contract,
     }
 }
 
-const PROFILES: [(BootProfile, &str); 3] = [
+const PROFILES: [(BootProfile, &str); 4] = [
     (BootProfile::Headless, "headless"),
     (BootProfile::BrowserHost, "browser-host"),
     (BootProfile::BrowserAutomation, "browser-automation"),
+    (BootProfile::NativeHost, "native-host"),
 ];
 
 /// Assert the four render assets and three bridge messages are all registered.
@@ -120,7 +129,7 @@ fn assert_render_contract(app: &App, label: &str) {
 }
 
 #[test]
-fn all_three_profiles_register_the_same_asset_and_message_floor() {
+fn all_four_profiles_register_the_same_asset_and_message_floor() {
     for (profile, label) in PROFILES {
         let app = build(plan_for(profile)).unwrap_or_else(|e| panic!("{label} build failed: {e}"));
         assert_render_contract(&app, label);
@@ -129,21 +138,27 @@ fn all_three_profiles_register_the_same_asset_and_message_floor() {
 }
 
 #[test]
-fn the_render_stack_is_taken_only_for_the_browser_host() {
+fn the_render_stack_is_taken_only_by_the_profiles_that_name_a_renderer() {
     let headless = build(plan_for(BootProfile::Headless)).expect("headless build");
     let host = build(plan_for(BootProfile::BrowserHost)).expect("browser-host build");
     let automation =
         build(plan_for(BootProfile::BrowserAutomation)).expect("browser-automation build");
+    let native = build(plan_for(BootProfile::NativeHost)).expect("native-host build");
 
-    // BrowserHost drove the render stack and NOT the surrogate.
-    assert!(
-        host.world().contains_resource::<RenderStackApplied>(),
-        "BrowserHost must take the render-stack path"
-    );
-    assert!(
-        !host.world().contains_resource::<RenderSurrogateApplied>(),
-        "BrowserHost must not also take the surrogate path"
-    );
+    // The two render-stack profiles drove it and NOT the surrogate. That the
+    // native one composed the *contract* here (this runner has no GPU) is the
+    // `NativeRenderSurface` axis, not the profile axis: the profile still names
+    // a renderer, which is what the marker records.
+    for (app, label) in [(&host, "browser-host"), (&native, "native-host")] {
+        assert!(
+            app.world().contains_resource::<RenderStackApplied>(),
+            "{label} must take the render-stack path"
+        );
+        assert!(
+            !app.world().contains_resource::<RenderSurrogateApplied>(),
+            "{label} must not also take the surrogate path"
+        );
+    }
 
     // The two renderer-less profiles took the surrogate and NOT the stack.
     for (app, label) in [(&headless, "headless"), (&automation, "browser-automation")] {
@@ -160,15 +175,67 @@ fn the_render_stack_is_taken_only_for_the_browser_host() {
 }
 
 #[test]
+fn a_native_host_refuses_to_boot_a_world_whose_templates_are_not_in_the_native_cache() {
+    // The trap issue #1121 closes. `boot::build` runs no template preload of
+    // its own — the adapters do — and six call sites read the native cache with
+    // NO filesystem fallback, the worst being
+    // `lobby::server::update_session_with_config`: on a miss it silently keeps a
+    // DEFAULT `ShipClientConfig` (default helm radar range, default
+    // impulse-charge duration, default hostile-arc colour) and the mission runs
+    // on, looking plausible, with nothing in the log.
+    //
+    // The hull below exists on disk, so the world composes and validates
+    // cleanly; what it is not is *cached*. Nothing in the lib test binary
+    // populates the native cache with an `assets/entities/…` key (AGENTS.md
+    // confines `insert_native_config` to integration tests, and the handful of
+    // unit tests that do call it use `fixture/…` keys), so this is the genuine
+    // configless boot.
+    const HULL: &str = "assets/entities/alliance_destroyer.toml";
+    let world = format!("[global]\nseed = 1\n\n[[available_ships]]\ntemplate_path = \"{HULL}\"\n");
+
+    // Every other profile boots it: they read a different cache (the browser's
+    // JS preload) or populate this one themselves before boot is called.
+    for (profile, label) in PROFILES {
+        let result = build(plan_with(profile, &world));
+        match profile {
+            BootProfile::NativeHost => {
+                let err = result.expect_err("a native host must refuse a configless boot");
+                assert!(
+                    matches!(err, BootError::NativeTemplatesMissing(_)),
+                    "expected NativeTemplatesMissing, got {err:?}"
+                );
+                assert!(
+                    err.to_string().contains(HULL),
+                    "the refusal must name the template that is missing: {err}"
+                );
+            }
+            _ => {
+                assert!(
+                    result.is_ok(),
+                    "{label} must be unaffected by the native template cache"
+                );
+            }
+        }
+    }
+    crate::content_ledger::reset();
+}
+
+#[test]
 fn a_broken_world_aborts_headless_but_only_blocks_activation_for_the_browser() {
     // Headless is authoritative: a world whose scripts do not compile aborts the
-    // build outright, so it activates zero content.
-    let err = build(plan_with(BootProfile::Headless, BROKEN_SCRIPT_WORLD))
-        .expect_err("headless must abort on a broken world");
-    assert!(
-        matches!(err, BootError::WorldInvalid(_)),
-        "expected WorldInvalid, got {err:?}"
-    );
+    // build outright, so it activates zero content. The native host takes the
+    // same side, for the same reason from a different direction: it is launched
+    // from a command line naming its world, so failing at the prompt beats
+    // opening a window onto a lobby that can never start.
+    for profile in [BootProfile::Headless, BootProfile::NativeHost] {
+        let err = build(plan_with(profile, BROKEN_SCRIPT_WORLD))
+            .err()
+            .unwrap_or_else(|| panic!("{profile:?} must abort on a broken world"));
+        assert!(
+            matches!(err, BootError::WorldInvalid(_)),
+            "{profile:?}: expected WorldInvalid, got {err:?}"
+        );
+    }
 
     // A browser host keeps booting: the broken scripts are carried through as a
     // resource so the downstream WorldPlugin gate can refuse to activate them,
@@ -214,6 +281,7 @@ fn an_unreadable_world_is_a_load_error_for_every_profile() {
             script_resolver: Box::new(NoScriptResolver),
             single_threaded: false,
             raw_transform: None,
+            native_surface: NativeRenderSurface::Contract,
         };
         let err = build(plan).expect_err("a missing world must be a load error");
         assert!(
@@ -242,6 +310,7 @@ fn host_preloaded_ingest_neither_reads_the_reader_nor_inserts_the_world() {
         script_resolver: Box::new(NoScriptResolver),
         single_threaded: false,
         raw_transform: None,
+        native_surface: NativeRenderSurface::Contract,
     };
     let app = build(plan).expect("HostPreloaded must build without reading the world");
     assert!(

@@ -293,15 +293,24 @@ pub struct CoordinationEnqueue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CoordinationDelivery {
     Ai,
-    HumanPopup { token: String, sender_label: String },
+    HumanPopup {
+        token: String,
+        sender_label: String,
+        /// Position among every same-tick popup selected by the lag router.
+        /// Repair keeps this while applying its escalation rule, then hands it
+        /// back to the shared ordered flush.
+        order: u64,
+    },
 }
 
 /// Typed handoff emitted after a delayed Station-addressed Coordination
 /// message resolves to a live recipient.
 ///
 /// The lag router owns time, live routing, and the Popup/Consume/Suppress
-/// decision. System modules read this message to own the resulting behavior;
-/// the router does not reach into their private pending-state components.
+/// decision. For a human recipient the payload has also passed the router's
+/// visibility projection before it reaches this seam. System modules read the
+/// message to own the resulting behavior; the router does not reach into their
+/// private pending-state components.
 #[derive(Message, Clone, Debug)]
 pub struct DeliveredCoordination {
     pub source_entity: Entity,
@@ -309,6 +318,20 @@ pub struct DeliveredCoordination {
     pub payload: CoordinationPayload,
     pub presentation: crate::core::messages::CoordinationPresentation,
     pub delivery: CoordinationDelivery,
+}
+
+/// One human Coordination popup approved for the shared outbox, carrying the
+/// lag router's original same-tick enqueue position.
+///
+/// Generic Station and Ship popups reach this seam directly from the router.
+/// Repair's human outcome reaches it only after Repair has applied its own
+/// escalation latch. The final flush sorts both sources together, so moving a
+/// decision behind an owning-module receiver cannot reorder the visible bus.
+#[derive(Message, Clone, Debug)]
+pub(crate) struct OrderedCoordinationPopup {
+    pub order: u64,
+    pub token: String,
+    pub message: crate::core::messages::ServerMessage,
 }
 
 /// Load `ShipConfigComponent` from `assets/entities/alliance_battleship.toml`.

@@ -4,14 +4,17 @@ use crate::command_admission::ai_emit::emit_ai_command;
 use crate::core::broadcast::{Audience, Cadence, SimBroadcaster};
 use crate::core::messages::ModifierSlot;
 use crate::core::messages::{
-    QueueEntryPreview, RepairBlackboard, ServerMessage, SystemBlackboard, SystemHullStatus,
-    SystemId, TeamSlot,
+    CoordinationPayload, QueueEntryPreview, RepairBlackboard, ServerMessage, SystemBlackboard,
+    SystemHullStatus, SystemId, TeamSlot,
 };
 use crate::modifiers::repair_teams::RepairTeams;
 use crate::modifiers::ShipModifiers;
 use crate::ship::damage::DamageTier;
 use crate::ship::system_registry::{repair_system_id, REPAIR_SYSTEM_ID};
-use crate::ship_plugin::ShipSystemControlSources;
+use crate::ship_plugin::{
+    CoordinationDelivery, DeliveredCoordination, OrderedCoordinationPopup, RepairHumanAlerted,
+    ShipConfigComponent, ShipSystemControlSources,
+};
 
 // ── Resources ─────────────────────────────────────────────────────────────────
 
@@ -145,9 +148,15 @@ impl Plugin for RepairPlugin {
         // can send a team to a nearby ally; a hull without it carries no
         // component and the systems are no-ops for it.
         super::external_server::register_external_repair(app);
+        app.add_message::<DeliveredCoordination>();
+        app.add_message::<OrderedCoordinationPopup>();
         app.add_systems(
             FixedUpdate,
             (
+                receive_repair_coordination
+                    .in_set(crate::sim_sets::SimSet::Modifiers)
+                    .after(crate::ship_plugin::process_coordination_lag)
+                    .before(crate::ship_plugin::flush_coordination_popups),
                 // AC4 DETERMINISM (issue #785) — pin the remaining intra-Physics
                 // edge. `operate_repair_ai` (decide/emit) →
                 // `handle_dispatch_repair_team` + `handle_set_repair_priority` +
@@ -175,6 +184,121 @@ impl Plugin for RepairPlugin {
             ),
         )
         .add_plugins(repair_state_broadcaster());
+    }
+}
+
+// ── Coordination receiver ────────────────────────────────────────────────────
+
+/// Repair-owned receiver for delayed Coordination deliveries (issue #1257).
+///
+/// The generic lag route has already resolved the live Station recipient and,
+/// for a human popup, projected the payload through the recipient's hull-detail
+/// visibility. Repair owns the behavior behind that decision: AI deliveries
+/// merge into the per-ship severity queue, while human deliveries apply the
+/// first-damage / Disabled-or-Destroyed escalation latch before entering the
+/// shared enqueue-ordered popup flush.
+///
+/// The addressed Station is checked against the ship's live Repair owner so a
+/// `RepairRequest` sent to some other valid Station cannot mutate Repair state.
+/// Suppressed and offline outcomes never reach this receiver.
+pub(crate) fn receive_repair_coordination(
+    mut delivered: MessageReader<DeliveredCoordination>,
+    mut ships: Query<
+        (
+            &ShipConfigComponent,
+            Option<&mut RepairRequestQueue>,
+            Option<&mut RepairHumanAlerted>,
+            Has<crate::server_app::LocalShip>,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+    mut popup_writer: MessageWriter<OrderedCoordinationPopup>,
+) {
+    for message in delivered.read() {
+        let Ok((ship_config, mut queue, mut alerted, is_local)) =
+            ships.get_mut(message.source_entity)
+        else {
+            continue;
+        };
+        let repair_address =
+            crate::ship::coordination::address_for_system(&ship_config.0, &repair_system_id());
+        if repair_address.as_ref() != Some(&message.address) {
+            continue;
+        }
+        let CoordinationPayload::RepairRequest {
+            station_id,
+            station_label,
+            tier,
+            deficit,
+            ..
+        } = &message.payload
+        else {
+            continue;
+        };
+
+        match &message.delivery {
+            CoordinationDelivery::Ai => {
+                if let Some(queue) = queue.as_deref_mut() {
+                    queue.push_or_merge(RepairQueueEntry {
+                        station_id: station_id.clone(),
+                        station_label: station_label.clone(),
+                        tier: *tier,
+                        deficit: deficit.unwrap_or(0.0),
+                    });
+                }
+            }
+            CoordinationDelivery::HumanPopup {
+                token,
+                sender_label,
+                order,
+            } => {
+                if !is_local {
+                    continue;
+                }
+                let should_popup = alerted
+                    .as_deref_mut()
+                    .map(|state| state.accepts_popup(station_id, *tier))
+                    // Preserve the old optional-component behavior used by
+                    // small fixtures: without a latch there is nothing that
+                    // can remember and suppress a repeat.
+                    .unwrap_or(true);
+                if !should_popup {
+                    continue;
+                }
+                popup_writer.write(OrderedCoordinationPopup {
+                    order: *order,
+                    token: token.clone(),
+                    message: ServerMessage::CoordinationPopup {
+                        address: message.address.clone(),
+                        payload: message.payload.clone(),
+                        presentation: message.presentation.clone(),
+                        sender_label: sender_label.clone(),
+                        to_label: crate::ship::coordination::coordination_addressee_label(
+                            &message.address,
+                        ),
+                    },
+                });
+            }
+        }
+    }
+}
+
+impl RepairHumanAlerted {
+    /// Accept the first sub-Disabled damage report for a station, and every
+    /// Disabled/Destroyed report. The latter intentionally includes repeated
+    /// deliveries at the same tier: that is the pre-#1257 escalation behavior,
+    /// not a worsening-only comparison.
+    fn accepts_popup(&mut self, station_id: &str, tier: DamageTier) -> bool {
+        let already = self
+            .0
+            .get(station_id)
+            .copied()
+            .unwrap_or(DamageTier::Operational);
+        if tier < DamageTier::Disabled && already != DamageTier::Operational {
+            return false;
+        }
+        self.0.insert(station_id.to_string(), tier);
+        true
     }
 }
 

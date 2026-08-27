@@ -25,10 +25,16 @@ reconnect resync:
 ## Requests, dispatch, and repair
 
 A damage-tier crossing creates a typed `RepairRequest` through the ordinary
-coordination queue. Requests merge into the Repair queue and help prioritise
-work, but they are advisory: Engineering may dispatch a scarce team without
-one. Human controls and Backfill issue the same admitted dispatch and priority
-commands.
+coordination queue. The generic lag router resolves the live Repair recipient
+and applies `HullVisibility` before a human delivery crosses the typed delivery
+seam, so an ineligible popup carries its tier but no exact deficit. Repair's
+own receiver applies the first sub-Disabled / every Disabled-or-Destroyed alert
+latch and emits accepted popups to the shared enqueue-ordered flush. AI delivery
+retains the exact host-internal deficit and the same receiver merges it into
+`RepairRequestQueue`; that value is
+a ranking input rather than player knowledge. Requests remain advisory:
+Engineering may dispatch a scarce team without one. Human controls and Backfill
+issue the same admitted dispatch and priority commands.
 
 Travel time is therefore also an information gate. Once on site, a team sweeps
 the damaged fine systems owned by that station; its standing ordinal priority

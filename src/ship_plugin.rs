@@ -4,17 +4,19 @@ use crate::console_bridge::AiChatterEvent;
 
 pub(crate) use crate::ai::cadence::ai_tick_ready;
 pub(crate) use crate::ship::components::load_ship_config_from_disk;
+pub(crate) use crate::ship::components::OrderedCoordinationPopup;
 pub use crate::ship::components::{
-    ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationEnqueue,
-    CoordinationQueue, DeliveredCoordination, DockingMotionIntent, HelmWaypointClearance,
-    HumanSeekingHosts, ImpulseConfigResource, LastHelmInput, LastSystemTiers,
-    PendingArcBearingRequest, PendingShipConfig, PendingTacticalFrequencyHint, RepairHumanAlerted,
-    ScenarioDetailFloor, ShipConfigComponent, ShipPhysicsConfigResource, ShipSystemControlSources,
-    VisitingStationHosts, BANK_LERP_RATE,
+    ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationDelivery,
+    CoordinationEnqueue, CoordinationQueue, DeliveredCoordination, DockingMotionIntent,
+    HelmWaypointClearance, HumanSeekingHosts, ImpulseConfigResource, LastHelmInput,
+    LastSystemTiers, PendingArcBearingRequest, PendingShipConfig, PendingTacticalFrequencyHint,
+    RepairHumanAlerted, ScenarioDetailFloor, ShipConfigComponent, ShipPhysicsConfigResource,
+    ShipSystemControlSources, VisitingStationHosts, BANK_LERP_RATE,
 };
+pub(crate) use crate::ship::coordination_systems::flush_coordination_popups;
+pub(crate) use crate::ship::coordination_systems::process_coordination_lag;
 pub use crate::ship::coordination_systems::{
-    handle_coordination_enqueue, process_coordination_lag, resolve_human_seeking_hosts,
-    write_scenario_detail_floor,
+    handle_coordination_enqueue, resolve_human_seeking_hosts, write_scenario_detail_floor,
 };
 pub use crate::ship::damage_sync::{detect_damage_tier_crossings, sync_console_damage_tiers};
 pub(crate) use crate::ship::helm_admission::{
@@ -50,6 +52,7 @@ impl Plugin for ShipPlugin {
         app.init_resource::<BankConfigResource>()
             .add_message::<CoordinationEnqueue>()
             .add_message::<DeliveredCoordination>()
+            .add_message::<OrderedCoordinationPopup>()
             .add_message::<AiChatterEvent>();
         // The ONE shared AI decision cadence (issues #803, #889, #895).
         // Installed by every plugin that registers a gated system; the helper
@@ -261,6 +264,17 @@ impl Plugin for ShipPlugin {
                 )
                     .after(crate::lobby::LobbySystemSet),
             );
+
+        // Popup insertion is a shared final seam rather than part of the
+        // 20-system tuple above. Generic Station/Ship outcomes and Repair's
+        // later owning-module decision are sorted together by the enqueue
+        // sequence assigned in `process_coordination_lag`.
+        app.add_systems(
+            FixedUpdate,
+            flush_coordination_popups
+                .in_set(crate::sim_sets::SimSet::Modifiers)
+                .after(process_coordination_lag),
+        );
 
         // Human-seeking hosts (issue #984). Registered separately from the
         // tuple above because that tuple is at Bevy's 20-element limit.

@@ -587,6 +587,7 @@ mod tests {
                 delivery: CoordinationDelivery::HumanPopup {
                     token: "test-token".into(),
                     sender_label: "test-sender".into(),
+                    order: 0,
                 },
             });
         crate::ship::test_support::tick(&mut app);

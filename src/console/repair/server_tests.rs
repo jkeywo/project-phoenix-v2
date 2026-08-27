@@ -2105,6 +2105,154 @@ fn queue_severity_tie_breaks_on_smallest_station_id() {
     }
 }
 
+fn repair_delivery_app() -> (App, Entity) {
+    let mut app = App::new();
+    app.init_resource::<crate::lobby::LobbyOutbox>()
+        .add_message::<DeliveredCoordination>()
+        .add_message::<OrderedCoordinationPopup>()
+        .add_systems(
+            Update,
+            (
+                receive_repair_coordination,
+                crate::ship_plugin::flush_coordination_popups,
+            )
+                .chain(),
+        );
+    let ship = app
+        .world_mut()
+        .spawn((
+            crate::server_app::Ship,
+            crate::server_app::LocalShip,
+            crate::ship_plugin::ShipConfigComponent::default(),
+            RepairRequestQueue::default(),
+            RepairHumanAlerted::default(),
+        ))
+        .id();
+    (app, ship)
+}
+
+fn deliver_repair_request(
+    app: &mut App,
+    ship: Entity,
+    delivery: CoordinationDelivery,
+    station_id: &str,
+    tier: DamageTier,
+    deficit: Option<f32>,
+) {
+    app.world_mut()
+        .resource_mut::<Messages<DeliveredCoordination>>()
+        .write(DeliveredCoordination {
+            source_entity: ship,
+            address: CoordinationAddress::Station(StationId("repair".into())),
+            payload: CoordinationPayload::RepairRequest {
+                system_id: SystemId(format!("{station_id}-system")),
+                station_id: station_id.into(),
+                station_label: station_id.into(),
+                tier,
+                deficit,
+            },
+            presentation: CoordinationPresentation::titled("coordination.repair.title")
+                .with_title_param("label", station_id),
+            delivery,
+        });
+}
+
+/// Issue #1257: the delivered-message receiver, rather than the lag router,
+/// owns the queue's existing same-station merge and severity inputs.
+#[test]
+fn ai_repair_deliveries_merge_in_the_repair_owned_queue() {
+    let (mut app, ship) = repair_delivery_app();
+    deliver_repair_request(
+        &mut app,
+        ship,
+        CoordinationDelivery::Ai,
+        "helm",
+        DamageTier::Damaged,
+        Some(18.0),
+    );
+    deliver_repair_request(
+        &mut app,
+        ship,
+        CoordinationDelivery::Ai,
+        "helm",
+        DamageTier::Disabled,
+        Some(12.0),
+    );
+
+    app.update();
+
+    let queue = app
+        .world()
+        .get::<RepairRequestQueue>(ship)
+        .expect("fixture carries Repair's queue");
+    assert_eq!(queue.len(), 1, "same-station requests remain deduplicated");
+    let entry = queue.peek().expect("merged request");
+    assert_eq!(entry.station_id, "helm");
+    assert_eq!(entry.tier, DamageTier::Disabled, "worst tier wins");
+    assert_eq!(entry.deficit, 18.0, "largest exact deficit wins");
+    assert!(
+        app.world()
+            .resource::<crate::lobby::LobbyOutbox>()
+            .0
+            .is_empty(),
+        "AI consumption never also raises a popup"
+    );
+}
+
+/// The intentionally asymmetric legacy rule is load-bearing: the first
+/// sub-Disabled report is shown once, while Disabled and Destroyed reports are
+/// always shown even when the same tier repeats. Moving the latch behind the
+/// delivered-message seam must not quietly turn that into worsening-only.
+#[test]
+fn human_repair_deliveries_preserve_first_damage_and_urgent_repeat_policy() {
+    let (mut app, ship) = repair_delivery_app();
+    let popup = || CoordinationDelivery::HumanPopup {
+        token: "engineer".into(),
+        sender_label: "station.helm.name".into(),
+        order: 0,
+    };
+    for tier in [
+        DamageTier::Damaged,
+        DamageTier::Damaged,
+        DamageTier::Disabled,
+        DamageTier::Disabled,
+        DamageTier::Destroyed,
+    ] {
+        deliver_repair_request(&mut app, ship, popup(), "helm", tier, None);
+    }
+
+    app.update();
+
+    let outbox = &app.world().resource::<crate::lobby::LobbyOutbox>().0;
+    assert_eq!(
+        outbox.len(),
+        4,
+        "first Damaged + both Disabled deliveries + Destroyed; only repeated Damaged is suppressed"
+    );
+    let expected_presentation = CoordinationPresentation::titled("coordination.repair.title")
+        .with_title_param("label", "helm");
+    assert!(outbox.iter().all(|(target, message)| {
+        matches!(target, crate::lobby::handler::Target::Token(token) if token == "engineer")
+            && matches!(
+                message,
+                ServerMessage::CoordinationPopup {
+                    payload: CoordinationPayload::RepairRequest { deficit: None, .. },
+                    presentation,
+                    sender_label,
+                    ..
+                } if sender_label == "station.helm.name"
+                    && presentation == &expected_presentation
+            )
+    }));
+    assert!(
+        app.world()
+            .get::<RepairRequestQueue>(ship)
+            .expect("fixture carries Repair's queue")
+            .is_empty(),
+        "human presentation never mutates the AI queue"
+    );
+}
+
 /// `seed_repair_facts` exposes every reading an authored guard can name.
 #[test]
 fn seed_repair_facts_exposes_observable_damage_readings() {

@@ -1,8 +1,9 @@
 use super::*;
 use crate::core::messages::{CoordinationAddress, SystemId};
 use crate::server_app::Ship;
-use crate::ship::components::{LastSystemTiers, PendingArcBearingRequest};
+use crate::ship::components::{LastSystemTiers, PendingArcBearingRequest, RepairHumanAlerted};
 use crate::ship::control_source::ControlSource;
+use crate::ship::damage::DamageTier;
 use crate::ship::test_support::*;
 
 fn test_coordination_presentation() -> crate::core::messages::CoordinationPresentation {
@@ -185,9 +186,22 @@ fn destroyed_alert_refires_after_restore_and_re_destroy() {
 fn routing_test_app() -> App {
     let mut app = test_app();
     let ship = find_ship_entity(&mut app);
-    app.world_mut()
-        .entity_mut(ship)
-        .insert(LastSystemTiers::default());
+    app.world_mut().entity_mut(ship).insert((
+        LastSystemTiers::default(),
+        RepairHumanAlerted::default(),
+        crate::console::repair::server::RepairRequestQueue::default(),
+    ));
+    // `test_app` intentionally installs ShipPlugin only. Production also
+    // installs RepairPlugin, whose receiver owns RepairRequest outcomes after
+    // #1257; register that one receiver here without pulling the Repair AI and
+    // team-cycle systems into these routing fixtures.
+    app.add_systems(
+        FixedUpdate,
+        crate::console::repair::server::receive_repair_coordination
+            .in_set(crate::sim_sets::SimSet::Modifiers)
+            .after(process_coordination_lag)
+            .before(flush_coordination_popups),
+    );
     let mut q = app
         .world_mut()
         .query_filtered::<&mut ShipConfigComponent, With<Ship>>();
@@ -781,6 +795,25 @@ fn coordination_popups(app: &App) -> usize {
         .count()
 }
 
+fn coordination_popup_kinds(app: &App) -> Vec<&'static str> {
+    app.world()
+        .resource::<crate::lobby::LobbyOutbox>()
+        .0
+        .iter()
+        .filter_map(|(_, message)| match message {
+            crate::core::messages::ServerMessage::CoordinationPopup { payload, .. } => {
+                Some(match payload {
+                    CoordinationPayload::RepairRequest { .. } => "repair",
+                    CoordinationPayload::Alert { .. } => "alert",
+                    CoordinationPayload::IntentAdvisory { .. } => "ship",
+                    _ => "other",
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn enqueue_coordination(
     app: &mut App,
     sender_origin: ControlSource,
@@ -851,6 +884,7 @@ fn delayed_ai_station_delivery_emits_typed_handoff_for_the_owning_module() {
     );
     assert_eq!(delivered[0].source_entity, ship);
     assert_eq!(delivered[0].address, address);
+    assert_eq!(delivered[0].delivery, CoordinationDelivery::Ai);
     assert_eq!(
         delivered[0].payload,
         CoordinationPayload::FrequencyHint { frequency: 0.83 },
@@ -1782,6 +1816,144 @@ fn repair_popup_carries_the_exact_deficit_once_a_team_is_on_site() {
         "a team on site is the information gate opening; got {deficits:?}"
     );
     assert_repair_presentations_are_coarse(&app);
+}
+
+/// The full delayed path now ends in Repair's receiver: the generic router
+/// selects AI consumption and hands over the exact host-internal payload, then
+/// the receiver performs the established queue merge rather than the router.
+#[test]
+fn ai_repair_request_reaches_the_repair_owned_queue_after_generic_routing() {
+    let mut app = routing_test_app();
+    let ship = find_ship_entity(&mut app);
+    let repair_id = crate::ship::system_registry::repair_system_id();
+    let repair_station = {
+        let config = &app
+            .world()
+            .get::<ShipConfigComponent>(ship)
+            .expect("ship config")
+            .0;
+        let CoordinationAddress::Station(station) =
+            coordination::address_for_system(config, &repair_id).expect("Repair has an owner")
+        else {
+            panic!("Repair must be Station-addressed")
+        };
+        station
+    };
+    let station_systems: Vec<SystemId> = app
+        .world()
+        .get::<ShipConfigComponent>(ship)
+        .expect("ship config")
+        .0
+        .systems_for_station(&repair_station)
+        .map(|system| system.id.clone())
+        .collect();
+    for system in &station_systems {
+        set_ai(&mut app, system);
+    }
+
+    enqueue_coordination(
+        &mut app,
+        ControlSource::Human,
+        CoordinationAddress::Station(repair_station),
+        CoordinationPayload::RepairRequest {
+            system_id: SystemId("helm-radar".into()),
+            station_id: "helm".into(),
+            station_label: "Helm".into(),
+            tier: DamageTier::Disabled,
+            deficit: Some(37.0),
+        },
+    );
+    tick(&mut app);
+
+    let queue = app
+        .world()
+        .get::<crate::console::repair::server::RepairRequestQueue>(ship)
+        .expect("routing fixture carries Repair's queue");
+    let entry = queue.peek().expect("AI Repair receives the request");
+    assert_eq!(entry.station_id, "helm");
+    assert_eq!(entry.tier, DamageTier::Disabled);
+    assert_eq!(entry.deficit, 37.0, "AI retains the exact sort input");
+    assert_eq!(
+        coordination_popups(&app),
+        0,
+        "AI consumption does not also surface as a popup"
+    );
+}
+
+fn enqueue_human_repair_request(app: &mut App) {
+    let ship = find_ship_entity(app);
+    let repair_address = {
+        let config = &app
+            .world()
+            .get::<ShipConfigComponent>(ship)
+            .expect("ship config")
+            .0;
+        coordination::address_for_system(config, &crate::ship::system_registry::repair_system_id())
+            .expect("Repair has an owning Station")
+    };
+    enqueue_coordination(
+        app,
+        ControlSource::Ai,
+        repair_address,
+        CoordinationPayload::RepairRequest {
+            system_id: SystemId("helm-radar".into()),
+            station_id: "helm".into(),
+            station_label: "Helm".into(),
+            tier: DamageTier::Damaged,
+            deficit: Some(12.0),
+        },
+    );
+}
+
+fn enqueue_captain_alert(app: &mut App) {
+    enqueue_coordination(
+        app,
+        ControlSource::Ai,
+        CoordinationAddress::Station(StationId("captain".into())),
+        CoordinationPayload::Alert {
+            title: "test.alert.title".into(),
+            body: "test.alert.body".into(),
+        },
+    );
+}
+
+/// Repair decides whether its human delivery escalates, but that later
+/// receiver cannot move an accepted popup behind generic Station and Ship
+/// popups that were enqueued after it on the same lag-queue tick.
+#[test]
+fn repair_human_popup_stays_before_later_generic_and_ship_popups() {
+    let mut app = routing_test_app();
+    start_game_with_engineer(&mut app);
+
+    enqueue_human_repair_request(&mut app);
+    enqueue_captain_alert(&mut app);
+    enqueue_intent_advisory(&mut app, ControlSource::Ai);
+    tick(&mut app);
+
+    assert_eq!(
+        coordination_popup_kinds(&app),
+        vec!["repair", "alert", "ship", "ship", "ship"],
+        "the Repair receiver may decide escalation later, but popup order remains the lag queue's enqueue order"
+    );
+}
+
+/// The inverse order is just as load-bearing: deferring every popup through an
+/// ordered flush must not pull Repair ahead of generic work already enqueued.
+#[test]
+fn repair_human_popup_stays_after_earlier_generic_and_ship_popups() {
+    let mut app = routing_test_app();
+    start_game_with_engineer(&mut app);
+
+    enqueue_intent_advisory(&mut app, ControlSource::Ai);
+    enqueue_captain_alert(&mut app);
+    enqueue_human_repair_request(&mut app);
+    tick(&mut app);
+
+    assert_eq!(
+        coordination_popup_kinds(&app),
+        vec!["ship", "ship", "ship", "alert", "repair"],
+        "Repair remains after every generic popup whose source message preceded it"
+    );
 }
 
 // ── Issue #879: the ship-wide intent-advisory broadcast ──────────────────

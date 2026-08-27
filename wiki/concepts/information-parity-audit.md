@@ -38,6 +38,11 @@ reads the corresponding delivered state. Ship-addressed traffic fans out in
 authored Station order under the same live control policy. The payload never
 chooses a privileged AI-only route.
 
+For `RepairRequest`, the lag router applies the same `HullVisibility` policy as
+the Repair console before emitting a human-popup delivery. Repair's receiver
+therefore sees a recipient-projected human payload, but retains the exact
+host-internal deficit when merging an AI delivery into its severity queue.
+
 ## Audit guardrails
 
 - AI hosts read `AiHostEnv`, per-ship blackboards, live authoritative components explicitly granted to that station, and typed coordination delivery.

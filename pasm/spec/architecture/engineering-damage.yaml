@@ -344,21 +344,24 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Repair Router
-      summary: Per-entity server-side repair handler that applies each ship's own admitted station-level repair-team dispatches to that ship's own repair-team state, resolving the station to its most-damaged repairable fine system.
+      summary: Per-entity Repair-owned host adapter that consumes resolved Coordination repair requests and applies admitted station-level repair-team dispatches to that ship's own repair state.
       rationale:
         - "Issue #830: the router iterates every Ship (player + NPC) and writes each ship's own per-entity ShipRepairTeams component — the global ShipRepairTeams Resource and the dispatch's dual-write to it are gone. A same-source admitted DispatchRepairTeam lands on exactly the ship that owns it, whether a human Engineering console or an AI operator's ai:<uuid> emission produced it."
         - "It moved from SimSet::Input into SimSet::Physics `.after(operate_repair_ai)`: admission clears AdmittedCommands once per tick before Input, so the AI operator's same-tick emission is only visible when the applier runs after it in Physics. Human dispatches admitted before Input survive to Physics unchanged."
         - "Issue #785: the AI-side dispatch now ORIGINATES from an authored per-system target selector ([repair.selector] / RepairTargetSelector, ranked in operate_repair_ai) instead of a hardcoded (tier desc, deficit desc) comparator — but the router is untouched. The payload is the same station-granular DispatchRepairTeam (plus RepairTarget::Core for the ownerless bucket), admitted through the same validate_and_admit seam, and resolve_repair_target still owns the fine-system choice identically for human and AI dispatch. No RepairTarget variant was added, precisely so the AI cannot express anything the human wire cannot send: the §2 symmetry established here is preserved unchanged."
         - "The admitted DispatchRepairTeam is station-granular, so resolve_repair_target — the router's single fine-system resolver — decides which repairable fine system in the station heals first, IDENTICALLY for human and AI dispatch (§2 admission symmetry). The AI operator no longer carries a private per-system choice: its retired inline heuristic ranked by absolute HP deficit, whereas resolve_repair_target ranks by damage fraction, so for a station owning multiple simultaneously-damaged systems of differing max HP the healed-first system can differ from the pre-#830 choice. That is the intended dissolution of the AI's bespoke resolution into the shared seam, not a regression."
+        - "Issue #1257 makes receive_repair_coordination the owner of post-lag RepairRequest behavior. A resolved AI delivery merges by station with the existing worst-tier/largest-deficit RepairRequestQueue rule. A resolved human delivery applies RepairHumanAlerted's first sub-Disabled report rule while continuing to surface every Disabled or Destroyed delivery, including a repeated tier, before it emits the already-visibility-projected popup with the lag router's sequence. The shared ordered flush preserves global enqueue order against same-tick generic Station and Ship popups; process_coordination_lag owns neither Repair state representation."
     architecture:
       kind: subsystem
       authority: authoritative
       reads:
         - authoritative-damage-state
         - repair-team-state
+        - coordination-delivery-state
       consumes:
         - dispatch-repair-team-command
         - onsite-repair-priority-command
+        - ai-repair-request-signal
       depends_on:
         - host-command-admission
       must_not_depend_on:
@@ -369,15 +372,22 @@ entities:
       status: observed
       paths:
         - src/console/repair/dispatch.rs
+        - src/console/repair/server.rs
       symbols:
         - handle_dispatch_repair_team
         - handle_set_repair_priority
         - handle_set_repair_target_priority
         - register_repair_dispatch
+        - receive_repair_coordination
+        - RepairRequestQueue
+        - RepairHumanAlerted
       messages:
         - DispatchRepairTeam
         - SetRepairPriority
         - SetRepairTargetPriority
+        - DeliveredCoordination
+        - OrderedCoordinationPopup
+        - CoordinationPopup
       tests:
         - cargo test
     evidence:
@@ -388,6 +398,27 @@ entities:
           top-level `use crate::command_admission::AdmissionSet;` and pins the
           router `.after(AdmissionSet)`, so it can only ever read commands that
           admission already validated.
+      - kind: test
+        reference: ai_repair_deliveries_merge_in_the_repair_owned_queue
+        summary: >-
+          Two typed AI deliveries for one station reach Repair's receiver and
+          preserve the established one-entry, worst-tier, largest-deficit merge.
+      - kind: test
+        reference: human_repair_deliveries_preserve_first_damage_and_urgent_repeat_policy
+        summary: >-
+          The receiver shows the first Damaged report once and continues to
+          show repeated Disabled and Destroyed reports, while never mutating
+          the AI queue.
+      - kind: test
+        reference: repair_human_popup_stays_before_later_generic_and_ship_popups
+        summary: >-
+          A Repair popup approved by the owning receiver keeps its original
+          position ahead of later generic Station and authored-order Ship fan-out.
+      - kind: test
+        reference: repair_human_popup_stays_after_earlier_generic_and_ship_popups
+        summary: >-
+          The inverse enqueue order remains unchanged when the shared popup
+          flush combines direct router outcomes with Repair's later decision.
 
   - component: repair-visibility-publisher
     core:
@@ -793,8 +824,12 @@ entities:
           recipient's own systems keep the exact number. Everything else still
           raises the popup and still names the tier; the number is simply
           absent, which is the coarse "needs attention" signal. `deficit` stays
-          exact on the host-internal enqueue because the AI repair queue sorts
-          by it.
+          exact on the host-internal enqueue and AI `DeliveredCoordination`
+          because the Repair-owned queue sorts by it. For a human delivery the
+          lag router applies this projection before Repair's receiver applies
+          its escalation latch and emits the popup to the ordered flush, so the
+          ownership move in #1257 cannot expose the protected value between
+          those steps.
     architecture:
       classification: player-knowledge
       owner: repair-visibility-publisher
@@ -847,6 +882,12 @@ entities:
         summary: >-
           The paired positive: a team on site opens the same gate on the
           coordination bus that it opens on the wire projection.
+      - kind: test
+        reference: ai_repair_request_reaches_the_repair_owned_queue_after_generic_routing
+        summary: >-
+          The full delayed route retains the exact host-internal sort input for
+          an AI Repair recipient, emits no popup, and lands the request through
+          Repair's delivered-message receiver rather than direct router state mutation.
 
   - message: dispatch-repair-team-command
     core:
@@ -937,10 +978,10 @@ entities:
       status: accepted
       confidence: confirmed
       title: AI Repair Request Signal
-      summary: Advisory level-3 request emitted by AI-owned stations when they want Engineering attention.
+      summary: Advisory repair request whose post-lag outcome is either a projected human popup or an AI Repair queue input.
       rationale:
         - Human stations can ask socially, but AI-owned stations need an explicit in-game request surface.
-        - Requests are advisory and do not become durable workflow state.
+        - A human recipient treats the request as advisory rather than a forced dispatch; an AI recipient retains it in RepairRequestQueue until its damage group is operational.
     architecture:
       authority: advisory
       producer:

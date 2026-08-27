@@ -2,7 +2,7 @@
 title: ShipPlugin
 type: concept
 tags: [ship, helm, physics, coordination, control-source, ai]
-sources: [src/ship_plugin.rs, src/ship/components.rs, src/ship/helm_ai/, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/coordination_systems.rs, src/ship/rating_systems.rs, src/ship/damage_sync.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/core/messages.rs, src/server_app/collision.rs]
+sources: [src/ship_plugin.rs, src/ship/components.rs, src/ship/helm_ai/, src/ship/helm_admission.rs, src/ship/physics_systems.rs, src/ship/coordination_systems.rs, src/ship/rating_systems.rs, src/ship/damage_sync.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/core/messages.rs, src/server_app/collision.rs]
 updated: 2026-08-27
 ---
 
@@ -23,13 +23,16 @@ adapters, resolves human-seeking station hosts, and updates control sources when
 station ratings or tenure change. `process_coordination_lag` delays explicitly
 Station- or Ship-addressed messages, preserves each producer-owned presentation
 envelope beside its typed payload, resolves live recipient policy, emits
-`CoordinationPopup` or `DeliveredCoordination` for a human- or AI-operated
-Station respectively, and fans Ship delivery to eligible human seats in
-authored Station order. Owning domain receivers consume the same typed fact
+an ordered popup candidate or `DeliveredCoordination` for a human- or
+AI-operated Station respectively, and fans Ship delivery to eligible human
+seats in authored Station order. Owning domain receivers consume the same typed fact
 after Station delivery. Helm's receiver accepts only an AI delivery, rechecks
 the authored Station and live `helm-steering` policy, and owns arc-bearing and
 waypoint-clearance state. Tactical's frequency-hint receiver lives with Weapons;
-Repair and Shields follow in #1257–#1258.
+Repair's receiver merges AI requests into its severity queue or applies its
+human escalation latch before returning the already-projected popup to the
+shared sequence-ordered outbox flush. Shields
+remains the final private-state consumer in the router pending #1258.
 
 ## Physics ownership
 

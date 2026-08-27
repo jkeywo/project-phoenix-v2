@@ -6,13 +6,12 @@ use crate::lobby::{InboundMessage, Sessions};
 use crate::server_app::LocalShip;
 use crate::ship::components::{
     ActiveStationRatings, CoordinationDelivery, CoordinationEnqueue, CoordinationQueue,
-    DeliveredCoordination, HumanSeekingHosts, RepairHumanAlerted, ScenarioDetailFloor,
+    DeliveredCoordination, HumanSeekingHosts, OrderedCoordinationPopup, ScenarioDetailFloor,
     ShipConfigComponent, ShipSystemControlSources, VisitingStationHosts,
 };
 use crate::ship::control_source::ControlSource;
 use crate::ship::coordination;
 use crate::ship::coordination::QueuedCoordination;
-use crate::ship::damage::DamageTier;
 use crate::ship::helm_ai::helm_axes_operate_ai;
 
 pub fn handle_coordination_enqueue(
@@ -451,7 +450,7 @@ fn station_delivery_policy(
     )
 }
 
-pub fn process_coordination_lag(
+pub(crate) fn process_coordination_lag(
     time: Res<Time>,
     mut ship_components: Query<
         (
@@ -459,8 +458,6 @@ pub fn process_coordination_lag(
             &ShipConfigComponent,
             &ShipSystemControlSources,
             &mut CoordinationQueue,
-            Option<&mut RepairHumanAlerted>,
-            Option<&mut crate::console::repair::server::RepairRequestQueue>,
             Option<&mut crate::ship::shields::PendingShieldsThreatBearing>,
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::console::repair::server::ShipRepairTeams>,
@@ -469,19 +466,18 @@ pub fn process_coordination_lag(
         With<crate::server_app::Ship>,
     >,
     sessions: Res<Sessions>,
-    mut outbox: ResMut<crate::lobby::LobbyOutbox>,
     mut chatter_writer: MessageWriter<AiChatterEvent>,
     mut delivered_writer: MessageWriter<DeliveredCoordination>,
+    mut popup_writer: MessageWriter<OrderedCoordinationPopup>,
 ) {
     let repair_id = crate::ship::system_registry::repair_system_id();
     let now = time.elapsed_secs();
+    let mut popup_order = 0_u64;
     for (
         ship_entity,
         ship_config,
         control_sources,
         mut queue,
-        mut alerted,
-        mut repair_queue,
         mut pending_shields_threat,
         entity_hull,
         entity_teams,
@@ -520,9 +516,10 @@ pub fn process_coordination_lag(
                     let Some(token) = seat.holder.clone() else {
                         continue;
                     };
-                    outbox.0.push((
-                        crate::lobby::handler::Target::Token(token),
-                        crate::core::messages::ServerMessage::CoordinationPopup {
+                    popup_writer.write(OrderedCoordinationPopup {
+                        order: popup_order,
+                        token,
+                        message: crate::core::messages::ServerMessage::CoordinationPopup {
                             address: msg.address.clone(),
                             payload: coarsen_repair_request(
                                 &msg.payload,
@@ -533,7 +530,8 @@ pub fn process_coordination_lag(
                             sender_label: label.clone(),
                             to_label: to_label.clone(),
                         },
-                    ));
+                    });
+                    popup_order += 1;
                 }
                 continue;
             }
@@ -566,31 +564,9 @@ pub fn process_coordination_lag(
                         });
                     }
 
-                    // Repair and Shields remain legacy consumers until issues
-                    // #1257-#1258. Helm and Tactical own their typed behavior
-                    // behind DeliveredCoordination and are absent from this
-                    // router.
-                    if target_policy.operate_ai && repair_address.as_ref() == Some(&msg.address) {
-                        if let CoordinationPayload::RepairRequest {
-                            station_id,
-                            station_label,
-                            tier,
-                            deficit,
-                            ..
-                        } = &msg.payload
-                        {
-                            if let Some(ref mut rq) = repair_queue {
-                                rq.push_or_merge(
-                                    crate::console::repair::server::RepairQueueEntry {
-                                        station_id: station_id.clone(),
-                                        station_label: station_label.clone(),
-                                        tier: *tier,
-                                        deficit: deficit.unwrap_or(0.0),
-                                    },
-                                );
-                            }
-                        }
-                    }
+                    // Shields remains a legacy consumer until issue #1258.
+                    // Helm, Tactical, and Repair are absent from this router:
+                    // their owning receivers consume the typed handoff above.
                     if target_policy.operate_ai && shields_address.as_ref() == Some(&msg.address) {
                         if let CoordinationPayload::ThreatBearing { bearing_rad, .. } = &msg.payload
                         {
@@ -619,24 +595,6 @@ pub fn process_coordination_lag(
                     if !is_local {
                         continue;
                     }
-                    if repair_address.as_ref() == Some(&msg.address) {
-                        if let CoordinationPayload::RepairRequest {
-                            station_id, tier, ..
-                        } = &msg.payload
-                        {
-                            let already = alerted
-                                .as_deref()
-                                .and_then(|state| state.0.get(station_id).copied())
-                                .unwrap_or(DamageTier::Operational);
-                            if *tier < DamageTier::Disabled && already != DamageTier::Operational {
-                                continue;
-                            }
-                            if let Some(state) = alerted.as_deref_mut() {
-                                state.0.insert(station_id.clone(), *tier);
-                            }
-                        }
-                    }
-
                     let label = if msg.sender_label.is_empty() {
                         coordination::CHATTER_SENDER_AI.to_string()
                     } else {
@@ -647,24 +605,66 @@ pub fn process_coordination_lag(
                         .holder_for_station(station_id)
                         .map(|token| token.to_string())
                     {
-                        outbox.0.push((
-                            crate::lobby::handler::Target::Token(token),
-                            crate::core::messages::ServerMessage::CoordinationPopup {
-                                address: msg.address.clone(),
-                                payload: coarsen_repair_request(
-                                    &msg.payload,
-                                    repair_vis.as_ref(),
-                                    Some(station_id),
-                                ),
+                        let payload = coarsen_repair_request(
+                            &msg.payload,
+                            repair_vis.as_ref(),
+                            Some(station_id),
+                        );
+                        if repair_address.as_ref() == Some(&msg.address)
+                            && matches!(&payload, CoordinationPayload::RepairRequest { .. })
+                        {
+                            // Recipient and visibility stay generic concerns.
+                            // Repair owns the remaining human escalation rule
+                            // and the resulting popup insertion.
+                            delivered_writer.write(DeliveredCoordination {
+                                source_entity: ship_entity,
+                                address: msg.address,
+                                payload,
                                 presentation: msg.presentation,
-                                sender_label: label,
-                                to_label,
-                            },
-                        ));
+                                delivery: CoordinationDelivery::HumanPopup {
+                                    token,
+                                    sender_label: label,
+                                    order: popup_order,
+                                },
+                            });
+                        } else {
+                            popup_writer.write(OrderedCoordinationPopup {
+                                order: popup_order,
+                                token,
+                                message: crate::core::messages::ServerMessage::CoordinationPopup {
+                                    address: msg.address,
+                                    payload,
+                                    presentation: msg.presentation,
+                                    sender_label: label,
+                                    to_label,
+                                },
+                            });
+                        }
+                        popup_order += 1;
                     }
                 }
             }
         }
+    }
+}
+
+/// Publish every human Coordination popup in the lag queue's original order.
+///
+/// Some outcomes arrive here directly from the generic router; Repair reaches
+/// the same seam only after its owning receiver has decided whether escalation
+/// warrants a popup. Sorting the shared sequence restores their one global
+/// order without moving Repair's decision back into the router.
+pub(crate) fn flush_coordination_popups(
+    mut popups: MessageReader<OrderedCoordinationPopup>,
+    mut outbox: ResMut<crate::lobby::LobbyOutbox>,
+) {
+    let mut popups: Vec<_> = popups.read().cloned().collect();
+    popups.sort_by_key(|popup| popup.order);
+    for popup in popups {
+        outbox.0.push((
+            crate::lobby::handler::Target::Token(popup.token),
+            popup.message,
+        ));
     }
 }
 

@@ -2065,6 +2065,9 @@ pub(crate) fn receive_tactical_coordination(
     >,
 ) {
     for message in delivered.read() {
+        if message.delivery != crate::ship_plugin::CoordinationDelivery::Ai {
+            continue;
+        }
         let Ok((mut pending, control_sources, ship_config)) = ships.get_mut(message.source_entity)
         else {
             continue;

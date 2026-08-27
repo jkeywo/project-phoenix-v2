@@ -2,7 +2,7 @@
 title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, routing, delivery-class, coordination]
-sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/sim.rs, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js]
+sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/sim.rs, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js]
 updated: 2026-08-27
 ---
 
@@ -65,10 +65,14 @@ Cross-station facts enter as `CoordinationEnqueue` with an explicit
 `CoordinationAddress::Station(StationId)` or `CoordinationAddress::Ship`; the
 payload never implies its recipient. They serve the hull's authored lag in its
 per-ship queue and are routed from the live recipient control source. Station
-delivery emits a popup for a human recipient or `DeliveredCoordination` for an
-AI recipient. Ship delivery fans out deterministically in authored Station
-order under the same policy. Human/AI actor identity affects presentation, not
-the authoritative payload or domain applier.
+delivery emits `DeliveredCoordination` tagged with the selected
+`CoordinationDelivery::Ai` or owning-module `HumanPopup` outcome. Generic
+Station and Ship popups enter `OrderedCoordinationPopup` directly; an owning
+receiver enters an accepted human popup there after its decision. One shared
+flush sorts those candidates by the router's same-tick sequence before the
+outbox, while Ship fan-out stays in authored Station order. Human/AI
+actor identity affects presentation, not the authoritative payload or domain
+applier.
 
 Every emission also carries a required producer-owned
 `CoordinationPresentation`. The router preserves that envelope unchanged beside
@@ -92,6 +96,15 @@ For an AI Helm recipient, the router emits an AI-tagged
 outcome, rechecks the explicit Station and live `helm-steering` policy, then
 preserves exact `NavigateTo` generations and arc geometry. `ArcBearingWithdraw`
 clears the standing request across weapon families in delivered queue order.
+
+Repair owns both outcomes for a `RepairRequest`. An AI delivery retains the
+exact host-internal deficit and merges into `RepairRequestQueue`. A human-popup
+delivery already carries the resolved token, sender label, recipient-projected
+payload, and unchanged presentation envelope; `receive_repair_coordination`
+applies the first sub-Disabled / every Disabled-or-Destroyed latch before
+emitting it to the shared ordered popup flush. The generic router no longer
+reads Repair's queue or alert latch, and Repair does not reorder same-tick
+generic Station or Ship popups while making that decision.
 
 ## Codec resilience
 

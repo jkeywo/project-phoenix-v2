@@ -210,6 +210,18 @@ evolved this binary instead of adding a second one.
   --client-dir dist --solo
 ```
 
+`--solo` is currently the only mode that reaches a running mission: browser crew
+clients cannot join a native host until the Phoenix transport (issue #1112)
+replaces PeerJS, so without it the host waits in a lobby nothing can enter. It
+warns loudly at boot rather than refusing — the mode becomes correct the day
+#1112 lands. `--manifest` also narrows the **default hull** this process flies,
+not only the catalogue it publishes.
+
+The packaged Windows demo bundle is `phoenix-host.exe`, `dist/` and `assets/`
+side by side, so both of its README invocations run from that folder with the
+default `--content-dir .`. Passing `--content-dir assets` would look for
+`assets/assets/scenarios.toml` and refuse to start.
+
 ## Related
 
 - [Architecture](./architecture.md) · [Testing Strategy](./testing-strategy.md)

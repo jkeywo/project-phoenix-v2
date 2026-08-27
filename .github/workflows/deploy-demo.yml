@@ -444,11 +444,21 @@ jobs:
       - name: Build phoenix-host (release)
         run: cargo build --release --features host --bin phoenix-host
 
-      # `--content-dir assets` is the full assets/ tree, same as the browser
-      # build ships (curation is enforced by the swapped-in demo manifest and
-      # by wasm_add_mod_pack being compiled out, not by physically pruning
-      # files) — so shipping it here keeps the native bundle consistent with
-      # what the web demo already does.
+      # The bundle is `release/{phoenix-host.exe, dist/, assets/}` — the full
+      # assets/ tree, same as the browser build ships (curation is enforced by
+      # the swapped-in demo manifest and by wasm_add_mod_pack being compiled
+      # out, not by physically pruning files), so the native bundle stays
+      # consistent with what the web demo already does.
+      #
+      # Both README invocations below therefore resolve against `release/`
+      # itself and NEITHER passes --content-dir. The default (`.`) is the only
+      # value that works for this layout: --content-dir is the root the manifest
+      # path is joined to, and the manifest default is already
+      # `assets/scenarios.toml` — so the `--content-dir assets` this file used
+      # to print asked for `release/assets/assets/scenarios.toml` and the host
+      # exited 1 with "cannot read scenario manifest" before it took the port.
+      # The simulation line's `--world assets/worlds/…` resolves the same way,
+      # so the two commands agree about which tree they are reading.
       - name: Assemble the release bundle
         shell: bash
         run: |
@@ -461,8 +471,9 @@ jobs:
           cat > release/README.txt <<'EOF'
           Project Phoenix demo -- native host (Windows, unsigned)
 
-          Run:
-            phoenix-host.exe --client-dir dist --content-dir assets
+          Run (from this folder -- both commands below read the assets/ tree
+          sitting beside the executable, which is the default):
+            phoenix-host.exe --client-dir dist
 
           Windows will show a SmartScreen warning ("Windows protected your PC")
           because this binary is not code-signed. Click "More info" then "Run

@@ -110,6 +110,10 @@ node scripts/build-client.mjs                  # → dist/client/, then serve di
 # address.
 cargo build --release --features host --bin phoenix-host
 ./target/release/phoenix-host --client-dir dist
+#   Binds 0.0.0.0:8080 by default — LAN-reachable out of the box; Windows
+#   prompts to allow it through the firewall on first run. Pass
+#   --addr 127.0.0.1:8080 to restrict to this machine only. Both modes below
+#   bind the same way.
 #
 # --world makes the SAME process authoritative, running the ordinary simulation
 # and plugin graph with the shared viewscreen drawn by native Bevy/wgpu through
@@ -121,28 +125,30 @@ cargo build --release --features host --bin phoenix-host
 ./target/release/phoenix-host --world assets/worlds/combat_test.toml --solo
 #   --ship <PATH>   the player's hull [default: the world's first available_ships]
 #   --seed <N>      overrides the world's [global] seed
-#   --solo          start with nobody connected, every station on Backfill
+#   --solo          start with nobody connected, every station on Backfill.
+#                   CURRENTLY THE ONLY MODE THAT REACHES A RUNNING MISSION:
+#                   without it the host waits in a lobby nothing can enter
+#                   (see the #1112 note below), and it says so loudly in the
+#                   log at boot rather than refusing — the mode is correct, it
+#                   is the transport that is missing.
 #   --log / --log-entity  same grammar as phoenix-headless
+#   --manifest also narrows what this process FLIES, not only what it publishes:
+#     with a curating manifest in force the default hull is drawn from that
+#     manifest's allowlist (issue #917). An explicit --ship still wins.
 #   The composition seam is BootProfile::NativeHost in src/boot/ — a fourth
 #   profile, not a fourth hand-rolled App; src/boot/tests.rs's parity test
-#   covers all four. A native host refuses to boot when the world's declared
-#   templates are not in the native config cache: six call sites read that
-#   cache with NO filesystem fallback and answer Default on a miss, so a
-#   configless boot would run a plausible mission with the wrong numbers.
+#   covers all four. A native host refuses to boot when the COMPOSED world's
+#   declared templates (root + every extra_worlds child) or the selected hull
+#   are not in the native config cache: every cache-only reader
+#   (asteroids::lifecycle, lobby::server, server::{radar, reference_grid,
+#   asset_preload}, server_app::world_setup, world::server) has NO filesystem
+#   fallback and answers Default on a miss, so a configless boot would run a
+#   plausible mission with the wrong numbers.
 #   src/entities/template_preload.rs is the one strict populate every native
 #   process shares.
 #   NOT YET: browser clients cannot join a native host. That needs the Phoenix
 #   transport (issue #1112) — PeerJS is browser JS and cannot run natively.
 #   src/native_host/transport.rs is the seam it plugs into.
-
-# The native viewscreen render assertion (issue #1121). Needs a real GPU, so it
-# is #[ignore]d: every ci.yml job is ubuntu-latest and the one windows-latest
-# runner (deploy-demo.yml's package-native-demo) runs no tests. Renders
-# offscreen through the same wgpu path capture-billboard uses.
-cargo test --features capture --test native_viewscreen_render -- --ignored --nocapture
-#   Binds 0.0.0.0:8080 by default — LAN-reachable out of the box; Windows
-#   prompts to allow it through the firewall on first run. Pass
-#   --addr 127.0.0.1:8080 to restrict to this machine only.
 ./target/release/phoenix-host --help
 #   --manifest assets/scenarios.demo.toml  IS the catalogue restriction — the
 #     same lever `?manifest=` pulls in the browser (issue #917).
@@ -152,6 +158,33 @@ cargo test --features capture --test native_viewscreen_render -- --ignored --noc
 #   The catalogue it publishes is the browser host's own — src/delivery/payload.rs
 #     holds the single field list that wasm_get_scenario_catalog and the JSON
 #     encoder both walk, so the two surfaces cannot drift.
+
+# The native host's two determinism binaries. Each is its OWN test binary and
+# that is load-bearing, not tidiness: pinning the scheduler means a one-thread
+# TaskPoolPlugin, and bevy's task pools are process-global and fixed by
+# whichever app in the process builds first — so a digest claim made in a
+# shared binary is a claim about whoever won that race (the same reason
+# tests/rng_determinism.rs and tests/snapshot_resume.rs stand alone).
+cargo test --features headless --test native_headless_digest   # AC5, content half
+cargo test --test native_host_snapshot                         # AC5, snapshot half
+
+# The two native #[ignore]d GPU proofs (issue #1121). Both need a real GPU
+# adapter, and the repo has nowhere to run one: every ci.yml job is
+# ubuntu-latest and the one windows-latest runner (deploy-demo.yml's
+# package-native-demo) runs no tests. Both render offscreen through the same
+# wgpu path capture-billboard uses.
+cargo test --features capture --test native_viewscreen_render -- --ignored --nocapture
+cargo test --features headless --test native_headless_digest -- --ignored --nocapture
+#   The render proof samples the MIDDLE 40% of the read-back frame and asserts
+#   the browser spec's pair — more than one colour, and something lit. Both
+#   cameras are retargeted at the offscreen image and the 2-D UI camera stays
+#   active through InProgress, so a whole-frame colour count would pass on HUD
+#   chrome over a dead 3-D scene; the crop is what makes it a claim about the
+#   scene.
+#   The digest companion runs the same 240-frame native↔headless comparison
+#   under NativeRenderSurface::Offscreen — a REAL wgpu device — because the
+#   default Contract composition stands up no render stack and so cannot
+#   observe what one does to the main world.
 
 # Deployed header/caching contract (PRD #855). Takes a LIVE url; run it after a
 # public deploy, from a laptop (Node 20, no npm install) or by dispatching the
@@ -461,10 +494,18 @@ crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for testing
 [features]
 default = ["server"]
 server = []   # host build → server.html (bridge.rs compiled in)
-host = []     # native delivery binary → phoenix-host. Gates the BINARY only:
+host = ["server"]
+              # native host binary → phoenix-host (PRD #855 delivery + issue
+              # #1121 simulation). It still gates no code of its OWN:
               # `crate::delivery` is unconditional, because a feature-gated copy
               # of the catalogue contract would be the fork PRD #855 forbids —
               # and would leave its tests out of the plain `cargo test` CI runs.
+              # It DEPENDS on `server` because #1121's authoritative half draws
+              # the viewscreen through `crate::native_host`, which names the
+              # presentation `crate::server::{renderer,viewscreen_border}`
+              # plugins. Without that dependency `--no-default-features
+              # --features host` compiles a `main` naming a module that is not
+              # there — a combination CI never builds, so nothing would catch it.
 # The client page (client.html) is pure JS (gui/*.js) — there is no
 # `client` cargo feature and no client-side WASM (removed in #463).
 

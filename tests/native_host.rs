@@ -335,14 +335,27 @@ fn a_served_host_can_be_stopped_so_the_simulation_can_own_the_main_thread() {
 
     shutdown.stop();
     // Joinable, rather than leaked for the process to clean up. The poll
-    // interval is 25ms; anything approaching the timeout below is a hang.
-    let start = std::time::Instant::now();
-    handle.join().expect("the serving thread returns");
-    assert!(
-        start.elapsed() < std::time::Duration::from_secs(5),
-        "the serving thread took {:?} to stop",
-        start.elapsed()
-    );
+    // interval is 25ms, so a working stop path finishes in well under one.
+    //
+    // The deadline is POLLED rather than measured after `join()`, and that is
+    // the whole point of the guard: `join()` on a thread that never returns
+    // blocks forever, so an elapsed-time assertion placed after it can never
+    // run — `cargo test` would wedge instead of failing, which is strictly worse
+    // than the failure the assertion was written to report.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !handle.is_finished() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the serving thread did not stop within 5s of `shutdown.stop()` — it is \
+             parked in accept() with no way out, which is the hang `serve_until` exists \
+             to prevent"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    handle
+        .join()
+        .expect("the serving thread returns")
+        .expect("serving ends cleanly rather than reporting a missing stop path");
 }
 
 #[test]

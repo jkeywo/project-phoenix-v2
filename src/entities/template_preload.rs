@@ -13,12 +13,34 @@
 //!
 //! This walk used to live inside `headless::app`, behind the `headless`
 //! feature, which meant the one native host that most needed it — the windowed
-//! authoritative host of issue #1121 — could not reach it. It moved here
-//! unchanged so that **every** native process runs the same populate:
-//! recursive, sorted (the load order is observable through
+//! authoritative host of issue #1121 — could not reach it. It moved here so
+//! that **every** native process runs the same populate: recursive, sorted (the
+//! load order is observable through
 //! [`content_ledger::record`](crate::content_ledger::record)), skipping the
 //! non-spawnable `fragments/` tree, validating the model-marker contract, and
 //! gathering the AI-declaration manifest.
+//!
+//! # What the move deliberately STRENGTHENED
+//!
+//! Two behaviours changed, and neither is an accident of relocation — say so
+//! here rather than let "moved unchanged" quietly cover them:
+//!
+//! 1. **The cache key is canonicalised.** It was
+//!    `path.to_string_lossy().replace('\\', "/")`; it is now that string through
+//!    [`canonical_template_path`](crate::entities::include_resolve::canonical_template_path),
+//!    the same normalisation the content ledger keys by. Headless only ever
+//!    passed a root derived from `--ship`'s own directory, so in practice its
+//!    keys were already canonical; a root spelled `./assets/entities` would have
+//!    keyed every entry under `./assets/entities/…` and matched nothing a world
+//!    TOML authors — a full cache that answers every lookup with a miss. Safe
+//!    for the headless caller because canonicalising a key that was already
+//!    canonical is the identity.
+//! 2. **A walk that caches zero templates is now an error**, where it returned
+//!    `Ok((0, …))`. Headless's caller never observed a zero: it walks the
+//!    directory of a `--ship` it is about to load, so a zero means the hull it
+//!    was handed does not exist and the run was going to fail a step later
+//!    anyway — now it fails here, naming the directory, instead of one step on
+//!    with every cache-only reader answering `Default`.
 //!
 //! It is deliberately NOT the same walk as
 //! [`delivery::serve::preload_templates`](crate::delivery::serve::preload_templates),
@@ -125,8 +147,8 @@ impl TemplatePreload {
 /// exactly the templates this walk discovers and validates them *before*
 /// `App::new()` — a template it skips is a template whose markers nobody
 /// checks. Keeping the cache complete is a second, larger benefit than it once
-/// was: the six cache-only readers named in this module's docs have no
-/// filesystem fallback at all.
+/// was: the cache-only readers named in this module's docs have no filesystem
+/// fallback at all.
 ///
 /// `fragments/` is the one subdirectory excluded, and it is excluded for a
 /// reason that is a property of its contents rather than of its name: nothing in

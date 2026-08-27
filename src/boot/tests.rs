@@ -177,7 +177,7 @@ fn the_render_stack_is_taken_only_by_the_profiles_that_name_a_renderer() {
 #[test]
 fn a_native_host_refuses_to_boot_a_world_whose_templates_are_not_in_the_native_cache() {
     // The trap issue #1121 closes. `boot::build` runs no template preload of
-    // its own — the adapters do — and six call sites read the native cache with
+    // its own — the adapters do — and every cache-only reader reads it with
     // NO filesystem fallback, the worst being
     // `lobby::server::update_session_with_config`: on a miss it silently keeps a
     // DEFAULT `ShipClientConfig` (default helm radar range, default
@@ -216,6 +216,47 @@ fn a_native_host_refuses_to_boot_a_world_whose_templates_are_not_in_the_native_c
                 );
             }
         }
+    }
+    crate::content_ledger::reset();
+}
+
+#[test]
+fn the_native_template_gate_covers_a_hull_declared_only_by_a_static_child() {
+    // The gate's set must be the COMPOSED world, not just its root.
+    // `ingest_world` eager-records the declared entities of the root AND of
+    // every `extra_worlds` child, so boot itself already treats a child's
+    // templates as part of this world's declared content — and the cache-only
+    // readers cannot tell which file declared the hull they are about to answer
+    // `Default` for.
+    //
+    // The root below declares nothing; only the child names the hull, and the
+    // hull is real on disk (so the composition validates) but is not in the
+    // native cache.
+    const HULL: &str = "assets/entities/alliance_cruiser.toml";
+    let child = format!("[global]\nseed = 2\n\n[[available_ships]]\ntemplate_path = \"{HULL}\"\n");
+
+    let err = build(plan_with_child(BootProfile::NativeHost, &child))
+        .expect_err("a hull declared only by a static child must still be gated");
+    assert!(
+        matches!(err, BootError::NativeTemplatesMissing(_)),
+        "expected NativeTemplatesMissing, got {err:?}"
+    );
+    assert!(
+        err.to_string().contains(HULL),
+        "the refusal must name the child's template: {err}"
+    );
+
+    // And the other three profiles are unaffected, exactly as they are for a
+    // root-declared one.
+    for profile in [
+        BootProfile::Headless,
+        BootProfile::BrowserHost,
+        BootProfile::BrowserAutomation,
+    ] {
+        assert!(
+            build(plan_with_child(profile, &child)).is_ok(),
+            "{profile:?} must be unaffected by the native template cache"
+        );
     }
     crate::content_ledger::reset();
 }

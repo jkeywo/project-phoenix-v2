@@ -318,6 +318,18 @@ impl HostServer {
         }
     }
 
+    /// Install the shutdown poll seam [`serve_until`](Self::serve_until) needs,
+    /// so a caller can find out it is unavailable **before** it commits to the
+    /// arrangement that depends on it (issue #1121).
+    ///
+    /// `phoenix-host` calls this before it spawns the delivery thread, because
+    /// the next thing it does is hand the main thread to Bevy for the rest of
+    /// the process's life. Idempotent; `serve_until` calls it again itself, so a
+    /// caller that does not care may simply not call it.
+    pub fn enable_shutdown_polling(&self) -> std::io::Result<()> {
+        self.listener.set_nonblocking(true)
+    }
+
     /// [`serve_forever`](Self::serve_forever), with a way out (issue #1121).
     ///
     /// A native *authoritative* host runs this on a worker thread while Bevy
@@ -333,30 +345,31 @@ impl HostServer {
     /// listener's non-blocking flag, and a non-blocking read would make
     /// `read_head` see `WouldBlock`, give up, and answer 400 to a
     /// perfectly good request.
-    pub fn serve_until<F>(&self, shutdown: ShutdownSignal, on_event: F)
+    ///
+    /// **A listener that cannot be made non-blocking is fatal, not a fallback.**
+    /// This used to log and drop into `serve_forever`'s blocking loop, which
+    /// reads as graceful and is not: the caller's shutdown path is
+    /// `shutdown.stop()` followed by `handle.join()`, and a thread parked in
+    /// `accept()` never observes the flag — so the window would close, the join
+    /// would block forever, and the process would sit on port 8080 with nothing
+    /// on screen and no way out but the task manager. Returning `Err` lets
+    /// `enable_shutdown_polling`'s caller refuse to start at the prompt instead.
+    pub fn serve_until<F>(&self, shutdown: ShutdownSignal, on_event: F) -> Result<(), String>
     where
         F: Fn(HostEvent) + Send + Sync + 'static,
     {
         let on_event = Arc::new(on_event);
+        if let Err(e) = self.enable_shutdown_polling() {
+            let detail =
+                format!("cannot poll for shutdown ({e}); refusing to serve without a stop path");
+            on_event(HostEvent::Failed {
+                detail: detail.clone(),
+            });
+            return Err(detail);
+        }
         on_event(HostEvent::Bound {
             addr: self.local_addr(),
         });
-        if let Err(e) = self.listener.set_nonblocking(true) {
-            // Without the poll seam there is no shutdown path, so say so and
-            // fall back to the blocking loop rather than spinning on errors.
-            on_event(HostEvent::Failed {
-                detail: format!("cannot poll for shutdown ({e}); serving without one"),
-            });
-            for stream in self.listener.incoming() {
-                match stream {
-                    Ok(stream) => self.spawn_connection(stream, &on_event),
-                    Err(e) => on_event(HostEvent::Failed {
-                        detail: format!("accept failed: {e}"),
-                    }),
-                }
-            }
-            return;
-        }
         while !shutdown.is_stopped() {
             match self.listener.accept() {
                 Ok((stream, _)) => {
@@ -371,6 +384,7 @@ impl HostServer {
                 }),
             }
         }
+        Ok(())
     }
 
     /// Hand one accepted stream to its own thread. A panic in one connection

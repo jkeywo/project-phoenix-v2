@@ -58,12 +58,17 @@ name = "phoenix-perf"
 path = "src/bin/phoenix_perf.rs"
 required-features = ["perf"]
 
-# Native delivery host (PRD #855): serves the client bundle, the content
-# manifest and the scenario catalogue over HTTP. Native-only, and — like every
-# native-only bin here — it MUST carry `required-features` or Trunk's wasm build
-# finds a second target artifact and refuses to build. The `host` feature gates
-# only this BINARY: `crate::delivery` itself is unconditional, so its unit tests
-# run under the `cargo test` CI already runs, with no extra feature set.
+# Native host (PRD #855 delivery, issue #1121 authoritative simulation): serves
+# the client bundle, the content manifest and the scenario catalogue over HTTP,
+# and with `--world` runs the simulation with a native Bevy/wgpu viewscreen.
+# Native-only, and — like every native-only bin here — it MUST carry
+# `required-features` or Trunk's wasm build finds a second target artifact and
+# refuses to build. The `host` feature gates only this BINARY: `crate::delivery`
+# itself is unconditional, so its unit tests run under the `cargo test` CI
+# already runs, with no extra feature set. Since #1121 `host` PULLS IN `server`
+# (see the [features] note) because the authoritative half draws the viewscreen
+# through the presentation plugins — `required-features` stays `["host"]` because
+# the feature now implies the other.
 [[bin]]
 name = "phoenix-host"
 path = "src/bin/phoenix_host.rs"
@@ -162,12 +167,20 @@ falling-skyway-sim-tests = ["headless"]
 # exists to keep that binary out of the wasm target list rather than to gate any
 # code — see the `[[bin]]` note above.
 perf = []
-# Host feature: builds the `phoenix-host` native delivery binary (PRD #855).
-# Like `perf`, it gates a BINARY and no code — `crate::delivery` compiles on
-# both targets unconditionally, because the catalogue contract and the version
-# pin are shared with the browser host and a feature-gated copy would be exactly
-# the fork the PRD forbids.
-host = []
+# Host feature: builds the `phoenix-host` binary — PRD #855's delivery half and
+# issue #1121's authoritative half, one binary, two modes.
+#
+# It still gates no code OF ITS OWN: `crate::delivery` compiles on both targets
+# unconditionally, because the catalogue contract and the version pin are shared
+# with the browser host and a feature-gated copy would be exactly the fork the
+# PRD forbids. What changed in #1121 is that the binary grew a second half —
+# `--world` runs the simulation and draws the viewscreen through
+# `crate::native_host`, which is gated on `server` because it names the
+# presentation `crate::server::{renderer,viewscreen_border}` plugins. So `host`
+# now DEPENDS on `server` instead of standing alone: without that dependency
+# `--no-default-features --features host` compiles a `main` that names a module
+# which is not there, a combination CI never builds and nothing would catch.
+host = ["server"]
 # Capture feature: builds the `capture-billboard` tool, a native headless
 # renderer that bakes a model's far-LOD billboard atlas (see src/bin). Pulls in
 # the `image` crate for PNG encoding; kept out of the default/wasm builds because

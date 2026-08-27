@@ -152,14 +152,17 @@ impl BootProfile {
     /// starts — and headless populates the native one itself, one step earlier,
     /// because its model-marker gate must abort before `App::new()`.
     ///
-    /// This exists because `boot::build` calls no preload of its own and six
-    /// call sites read that cache with **no filesystem fallback**:
-    /// `lobby::server::update_session_with_config`, `server::radar`,
-    /// `server::reference_grid`, `server::asset_preload` (twice) and
-    /// `asteroids::lifecycle` (twice). An unpopulated cache does not fail there;
-    /// it answers `Default` — default helm radar range, default impulse-charge
-    /// duration, default hostile-arc colour — and a native host would run a
-    /// plausible-looking mission with the wrong numbers and nothing in the log.
+    /// This exists because `boot::build` calls no preload of its own and every
+    /// cache-only reader reads it with **no filesystem fallback**:
+    /// `asteroids::lifecycle`, `lobby::server`, `server::radar`,
+    /// `server::reference_grid`, `server::asset_preload`,
+    /// `server_app::world_setup` and `world::server`. (Deliberately named
+    /// rather than counted: the population grows as call sites are added, and a
+    /// number in prose drifts from the code the moment one does.) An
+    /// unpopulated cache does not fail there; it answers `Default` — default
+    /// helm radar range, default impulse-charge duration, default hostile-arc
+    /// colour — and a native host would run a plausible-looking mission with
+    /// the wrong numbers and nothing in the log.
     /// See [`check_native_templates`]. Native-only: the cache it names does not
     /// exist on wasm, where the browser's JS preload is the equivalent.
     #[cfg(not(target_arch = "wasm32"))]
@@ -281,10 +284,22 @@ pub struct BootPlan {
     /// Pin Bevy's [`TaskPoolPlugin`] to a single thread, so the executor runs
     /// systems in a fixed order run to run.
     ///
-    /// Only a headless `--deterministic`/`--seed` run asks for this — reproducing
-    /// a byte-identical digest needs the system execution order fixed, not just
-    /// the timestep. The browser profiles always leave it `false` (a rendered
-    /// host is not reproduced tick-for-tick, and wasm has its own pool policy).
+    /// A headless `--deterministic`/`--seed` run asks for this — reproducing a
+    /// byte-identical digest needs the system execution order fixed, not just
+    /// the timestep — and so does a
+    /// [`NativeHost`](BootProfile::NativeHost) built for a digest comparison
+    /// ([`crate::native_host::NativeHostConfig::deterministic`]). The browser
+    /// profiles always leave it `false` (a rendered host is not reproduced
+    /// tick-for-tick, and wasm has its own pool policy).
+    ///
+    /// **Honoured on every path that builds a task pool**, not only the
+    /// surrogate one: [`render_stack`]'s native fallbacks and the real
+    /// wgpu-backed [`native_render_stack`] all take it, the latter by
+    /// `.set(TaskPoolPlugin { .. })` on `DefaultPlugins`. A silently-ignored
+    /// determinism flag is worse than an absent one — it makes a digest
+    /// comparison look pinned when it is not, which is exactly the trap the
+    /// native↔headless equivalence test fell into before issue #1121's fix
+    /// round.
     pub single_threaded: bool,
     /// Optional transform applied to the raw world `toml::Value` **before** its
     /// scripts compile — the seam `headless::duel::apply_duel_sides` rewrites the
@@ -380,7 +395,13 @@ pub fn build(plan: BootPlan) -> Result<App, BootError> {
     // renderer-less profiles keep the original shape: the shared core, then the
     // surrogate that stands in for a missing renderer.
     if plan.profile.has_render_stack() {
-        render_stack(&mut app, &plan.log_filter, plan.profile, plan.native_surface);
+        render_stack(
+            &mut app,
+            &plan.log_filter,
+            plan.profile,
+            plan.native_surface,
+            plan.single_threaded,
+        );
     } else {
         core_plugins(
             &mut app,
@@ -410,16 +431,7 @@ pub fn build(plan: BootPlan) -> Result<App, BootError> {
 /// `single_threaded` pins the task pool to one thread, for a headless
 /// deterministic run — see [`BootPlan::single_threaded`].
 fn core_plugins(app: &mut App, profile: BootProfile, log_filter: &str, single_threaded: bool) {
-    // Both arms are a `TaskPoolPlugin`, so the tuple below stays one type; a
-    // deterministic run needs a fixed system execution order, which a
-    // single-threaded pool gives and the multithreaded default does not.
-    let task_pool = if single_threaded {
-        TaskPoolPlugin {
-            task_pool_options: bevy::app::TaskPoolOptions::with_num_threads(1),
-        }
-    } else {
-        TaskPoolPlugin::default()
-    };
+    let task_pool = task_pool_plugin(single_threaded);
     app.add_plugins((
         PanicHandlerPlugin,
         LogPlugin {
@@ -440,6 +452,23 @@ fn core_plugins(app: &mut App, profile: BootProfile, log_filter: &str, single_th
 
     if profile.is_browser() {
         browser_shell(app);
+    }
+}
+
+/// The [`TaskPoolPlugin`] every composition path takes, so
+/// [`BootPlan::single_threaded`] has exactly one implementation.
+///
+/// Both arms are a `TaskPoolPlugin`, so a caller can drop it into a plugin
+/// tuple or into `DefaultPlugins::set` without a type dance. A deterministic run
+/// needs a fixed system execution order, which a one-thread pool gives and the
+/// multithreaded default does not.
+fn task_pool_plugin(single_threaded: bool) -> TaskPoolPlugin {
+    if single_threaded {
+        TaskPoolPlugin {
+            task_pool_options: bevy::app::TaskPoolOptions::with_num_threads(1),
+        }
+    } else {
+        TaskPoolPlugin::default()
     }
 }
 
@@ -529,18 +558,19 @@ fn render_stack(
     log_filter: &str,
     profile: BootProfile,
     surface: NativeRenderSurface,
+    single_threaded: bool,
 ) {
     app.insert_resource(RenderStackApplied);
 
     #[cfg(not(target_arch = "wasm32"))]
     if profile == BootProfile::NativeHost {
-        native_render_stack(app, log_filter, surface);
+        native_render_stack(app, log_filter, surface, single_threaded);
         return;
     }
     // Consumed only by the native arm above / the wasm arm below; naming them
     // here keeps every target's build free of "unused variable" noise without a
     // second `cfg` block per parameter.
-    let _ = (profile, surface);
+    let _ = (profile, surface, single_threaded);
 
     // `feature = "server"` as well as `wasm32` (issue #1194): this branch names the
     // presentation `crate::server::{renderer,viewscreen_border}` plugins, so the
@@ -600,8 +630,11 @@ fn render_stack(
     {
         // The parity-test target. `DefaultPlugins`' wgpu renderer would panic here,
         // so stand up the shared core and the renderer's contract instead — a
-        // browser run never reaches this arm.
-        core_plugins(app, BootProfile::BrowserHost, log_filter, false);
+        // browser run never reaches this arm. `single_threaded` still travels:
+        // a production BrowserHost plan always leaves it `false`, and forwarding
+        // it rather than hardcoding one keeps "the plan is honoured" true on
+        // every branch instead of on most of them.
+        core_plugins(app, BootProfile::BrowserHost, log_filter, single_threaded);
         register_render_contract(app);
     }
 }
@@ -638,10 +671,22 @@ fn render_stack(
 /// treatment `BrowserHost` gets on native, and what makes the four-profile
 /// parity test and the native↔headless digest comparison runnable on a
 /// GPU-less CI runner.
+///
+/// [`BootPlan::single_threaded`] is honoured on **all three** of those paths,
+/// the real wgpu one included: `DefaultPlugins` carries its own
+/// [`TaskPoolPlugin`], so the plan's answer is `.set` over it rather than
+/// dropped. That is what lets the `#[ignore]`d `Offscreen` digest companion in
+/// `tests/native_headless_digest.rs` be a pinned comparison rather than a race
+/// between two task pools.
 #[cfg(not(target_arch = "wasm32"))]
-fn native_render_stack(app: &mut App, log_filter: &str, surface: NativeRenderSurface) {
+fn native_render_stack(
+    app: &mut App,
+    log_filter: &str,
+    surface: NativeRenderSurface,
+    single_threaded: bool,
+) {
     if !surface.is_wgpu() {
-        core_plugins(app, BootProfile::NativeHost, log_filter, false);
+        core_plugins(app, BootProfile::NativeHost, log_filter, single_threaded);
         register_render_contract(app);
         return;
     }
@@ -669,7 +714,11 @@ fn native_render_stack(app: &mut App, log_filter: &str, surface: NativeRenderSur
                 filter: log_filter.to_string(),
                 ..default()
             })
-            .set(AssetPlugin::default());
+            .set(AssetPlugin::default())
+            // `DefaultPlugins` brings its own `TaskPoolPlugin`, so the plan's
+            // determinism answer has to REPLACE it rather than ride alongside
+            // it — Bevy panics on a duplicate plugin.
+            .set(task_pool_plugin(single_threaded));
         if surface == NativeRenderSurface::Offscreen {
             app.add_plugins(plugins.disable::<bevy::winit::WinitPlugin>());
         } else {
@@ -685,7 +734,7 @@ fn native_render_stack(app: &mut App, log_filter: &str, surface: NativeRenderSur
     // compiles it.
     #[cfg(not(feature = "server"))]
     {
-        core_plugins(app, BootProfile::NativeHost, log_filter, false);
+        core_plugins(app, BootProfile::NativeHost, log_filter, single_threaded);
         register_render_contract(app);
     }
 }
@@ -836,7 +885,13 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
     // declared templates. See [`check_native_templates`].
     #[cfg(not(target_arch = "wasm32"))]
     if plan.profile.requires_native_templates() {
-        check_native_templates(&loaded.config)?;
+        // The COMPOSED world — root plus every `extra_worlds` child — because
+        // that is the set the eager record twenty lines below walks, and a
+        // template declared only by a static child is just as cache-only to the
+        // readers as one declared by the root.
+        check_native_templates(
+            std::iter::once(&loaded.config).chain(loaded.children.iter().map(|c| &c.config)),
+        )?;
     }
 
     loaded.ledger.apply();
@@ -865,9 +920,13 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
 ///
 /// The set checked is [`crate::world::config::entity_template_paths`] with no
 /// curation — every static `[[entity]]`, every `available_ships[*]` hull, and
-/// every literal `template_path` a compiled script spawns. That is exactly the
-/// set the browser's JS preload fetches before Bevy starts, so this is the
-/// native statement of the same precondition rather than a new rule.
+/// every literal `template_path` a compiled script spawns — over the **composed
+/// world**: the root and every `extra_worlds` child. That is exactly the set the
+/// browser's JS preload fetches before Bevy starts and exactly the set
+/// [`ingest_world`]'s eager record walks, so this is the native statement of the
+/// same precondition rather than a new rule. Checking the root alone would let a
+/// hull declared only by a static child through the gate and straight into the
+/// silent-`Default` failure below.
 ///
 /// It is a *refusal*, not a warning, because the failure it guards is silent:
 /// `lobby::server::update_session_with_config` reads the selected hull straight
@@ -884,13 +943,23 @@ fn ingest_world(app: &mut App, plan: &BootPlan) -> Result<(), BootError> {
 /// and its findings belong to the adapter that will log them once a subscriber
 /// is installed.
 #[cfg(not(target_arch = "wasm32"))]
-fn check_native_templates(world: &crate::world::config::WorldConfig) -> Result<(), BootError> {
+fn check_native_templates<'a>(
+    worlds: impl IntoIterator<Item = &'a crate::world::config::WorldConfig>,
+) -> Result<(), BootError> {
     let cache = crate::entities::config_cache::get_config_cache();
-    let missing: Vec<String> = crate::world::config::entity_template_paths(world, &[])
-        .into_iter()
-        .map(|p| crate::entities::include_resolve::canonical_template_path(&p))
-        .filter(|p| !cache.contains_key(p))
-        .collect();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut missing: Vec<String> = Vec::new();
+    for world in worlds {
+        for path in crate::world::config::entity_template_paths(world, &[]) {
+            let key = crate::entities::include_resolve::canonical_template_path(&path);
+            // Root and child may name the same hull; report it once, in the
+            // order the composed walk first met it.
+            if cache.contains_key(&key) || !seen.insert(key.clone()) {
+                continue;
+            }
+            missing.push(key);
+        }
+    }
     if missing.is_empty() {
         Ok(())
     } else {

@@ -127,7 +127,8 @@ fn main() {
     // Everything from here down is PRD #855's, unchanged: the startup bundle pin
     // runs before the bind so a host that will refuse every client does not
     // first take the port.
-    let server = match HostServer::bind(&bind_args(&args)) {
+    let bound = bind_args(&args);
+    let server = match HostServer::bind(&bound) {
         Ok(server) => server,
         Err(e) => {
             eprintln!("phoenix-host: {e}");
@@ -180,6 +181,34 @@ fn main() {
     cfg.solo = sim.solo;
     cfg.log_spec = sim.log_spec.clone();
     cfg.surface = project_phoenix::boot::NativeRenderSurface::Window;
+    // The catalogue restriction applies to what this process FLIES as well as to
+    // what it publishes (issue #917's native half): with a curating `--manifest`
+    // in force the default hull is drawn from that manifest's allowlist, so one
+    // host cannot serve a curated catalogue and simultaneously run something
+    // outside it. An explicit `--ship` still wins, as `?ship=` does in the
+    // browser. Read from the manifest the server actually loaded, by the same
+    // path, so the two cannot name different files.
+    let manifest_path = std::path::Path::new(&bound.content_dir).join(&bound.manifest);
+    cfg.curated_ships = match std::fs::read_to_string(&manifest_path) {
+        Ok(toml) => native_host::curated_hulls_for_world(&toml, &sim.world),
+        Err(e) => {
+            // Unreachable in practice: `HostServer::bind` above already read and
+            // parsed this exact file, so a failure here is a race with something
+            // editing it mid-start. Unrestricted is the pre-#1121 answer.
+            eprintln!(
+                "phoenix-host: cannot re-read {}: {e} — the default hull is not \
+                 restricted to the curated catalogue",
+                manifest_path.display()
+            );
+            Vec::new()
+        }
+    };
+    if !cfg.curated_ships.is_empty() {
+        eprintln!(
+            "phoenix-host: curated catalogue restricts the default hull to {}",
+            cfg.curated_ships.join(", ")
+        );
+    }
     cfg.log = match project_phoenix::logging::parse_log_spec(&sim.log_spec) {
         Ok(log) => log,
         Err(e) => {
@@ -205,11 +234,29 @@ fn main() {
 
     // Bevy owns the main thread (winit requires it on Windows); delivery moves
     // to a worker with a shutdown path so the window closing ends both.
+    //
+    // The poll seam is installed HERE, before the thread and before Bevy takes
+    // the main thread for the rest of the process's life. A listener that cannot
+    // be made non-blocking has no stop path, and a delivery thread with no stop
+    // path turns a clean window close into a process that hangs on the join with
+    // nothing on screen and port 8080 still held. Failing at the prompt is the
+    // only honest answer.
+    if let Err(e) = server.enable_shutdown_polling() {
+        eprintln!(
+            "phoenix-host: the delivery listener cannot be polled for shutdown ({e}), so an \
+             authoritative host could not stop it when the window closes"
+        );
+        std::process::exit(1);
+    }
     let shutdown = ShutdownSignal::new();
     let serving = shutdown.clone();
     let delivery = std::thread::Builder::new()
         .name("phoenix-host-delivery".to_string())
-        .spawn(move || server.serve_until(serving, log_event));
+        .spawn(move || {
+            if let Err(e) = server.serve_until(serving, log_event) {
+                eprintln!("phoenix-host: delivery stopped: {e}");
+            }
+        });
     if let Err(e) = &delivery {
         eprintln!("phoenix-host: cannot start the delivery thread: {e}");
         std::process::exit(1);

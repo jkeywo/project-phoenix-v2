@@ -99,7 +99,11 @@ SIMULATION
     --seed <N>            Override the world's [global] seed
     --solo                Start the mission immediately with nobody connected;
                           every station runs on Backfill. Without it the host
-                          waits in the lobby for participants to ready up.
+                          waits in the lobby for participants to ready up —
+                          but browser clients CANNOT JOIN A NATIVE HOST YET
+                          (issue #1112: PeerJS is browser JavaScript), so
+                          --solo is currently the only mode that ever reaches
+                          a running mission.
     --log <SPEC>          Log filter, e.g. info,ai=debug,admit=trace
     --log-entity <NAMES>  Restrict logging to these entity names
 

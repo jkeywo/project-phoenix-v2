@@ -30,8 +30,8 @@ pub mod app;
 pub mod transport;
 
 pub use app::{
-    build_native_host_app, preload_content_templates, run, NativeHostConfig, NativeHostError,
-    WINDOW_TITLE,
+    build_native_host_app, curated_hulls_for_world, preload_content_templates, run,
+    NativeHostConfig, NativeHostError, WINDOW_TITLE,
 };
 
 /// Make Bevy's asset root and the process working directory name the same

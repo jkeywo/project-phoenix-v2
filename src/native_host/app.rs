@@ -118,8 +118,28 @@ pub struct NativeHostConfig {
     ///
     /// The native twin of headless's auto-start and of the host page's
     /// force-start button. Without it the host boots to the lobby and waits for
-    /// participants to ready up, which is what a crewed session wants.
+    /// participants to ready up, which is what a crewed session wants — but
+    /// **no participant can arrive yet**: the transport is issue #1112's, and
+    /// there is no native force-start. [`build_native_host_app`] therefore warns
+    /// loudly when this is `false`, rather than refusing a mode that becomes
+    /// correct the moment #1112 lands.
     pub solo: bool,
+    /// The hulls a restricting `--manifest` publishes for this world (issue
+    /// #917's curated allowlist), or empty when the catalogue is unrestricted.
+    ///
+    /// Only the DEFAULT hull consults it: an explicit `--ship` still wins, the
+    /// way an explicit `?ship=` does in the browser. Its job is to stop one
+    /// process publishing a curated catalogue over HTTP and simultaneously
+    /// flying something that catalogue excludes.
+    pub curated_ships: Vec<String>,
+    /// Pin Bevy's task pool to one thread, so this host's system execution order
+    /// is fixed run to run — [`BootPlan::single_threaded`].
+    ///
+    /// `false` for a shipped host: a rendered viewscreen is not reproduced
+    /// tick-for-tick and the multithreaded pool is worth having. `true` is for a
+    /// digest comparison, where an unpinned executor makes the claim a race
+    /// rather than a measurement (see `tests/native_headless_digest.rs`).
+    pub deterministic: bool,
 }
 
 impl NativeHostConfig {
@@ -135,6 +155,8 @@ impl NativeHostConfig {
             log_spec: String::new(),
             surface: NativeRenderSurface::Contract,
             solo: false,
+            curated_ships: Vec::new(),
+            deterministic: false,
         }
     }
 }
@@ -163,6 +185,34 @@ pub fn preload_content_templates(content_dir: &str) -> Result<TemplatePreload, N
         format!("{root}/assets/entities")
     };
     preload_entity_templates(&dir).map_err(NativeHostError::Content)
+}
+
+/// The hulls a scenario manifest publishes for `world_path` — issue #917's
+/// curated allowlist, read for the process's OWN default hull.
+///
+/// `phoenix-host --manifest assets/scenarios.demo.toml` restricts what this
+/// process publishes over HTTP; without this it did not restrict what the same
+/// process flies, so one host could serve a curated catalogue and simultaneously
+/// run a hull that catalogue excludes. The browser has no such gap: its picker
+/// is built from the curated list.
+///
+/// Empty means **unrestricted**, and it is the answer for all three of "the
+/// manifest curates nothing", "the manifest does not publish this world at all"
+/// and "the manifest does not parse". That is deliberate: this is a narrowing
+/// of the default hull, not a second gate on the world — refusing a `--world`
+/// the catalogue happens not to list would break the ordinary dev invocation,
+/// where the world is named directly and the manifest is beside the point.
+pub fn curated_hulls_for_world(manifest_toml: &str, world_path: &str) -> Vec<String> {
+    let wanted = crate::entities::include_resolve::canonical_template_path(world_path);
+    let Ok(manifest) = crate::world::manifest::parse_manifest(manifest_toml) else {
+        return Vec::new();
+    };
+    manifest
+        .scenarios
+        .iter()
+        .find(|s| crate::entities::include_resolve::canonical_template_path(&s.world) == wanted)
+        .map(|s| s.ships.clone())
+        .unwrap_or_default()
 }
 
 /// Assemble the native host's `App`. Does not run it — see [`run`].
@@ -202,9 +252,11 @@ pub fn build_native_host_app(
         world_path: cfg.world_path.clone(),
         reader: Box::new(crate::world::load::FsReader),
         script_resolver: Box::new(crate::entities::config_cache::production_script_resolver()),
-        // A rendered host is not reproduced tick-for-tick, so it keeps the
-        // multithreaded pool — the same answer both browser profiles give.
-        single_threaded: false,
+        // A shipped rendered host is not reproduced tick-for-tick, so it keeps
+        // the multithreaded pool — the same answer both browser profiles give.
+        // A digest comparison asks for the pinned executor instead; boot
+        // honours it on every native composition path, wgpu included.
+        single_threaded: cfg.deterministic,
         raw_transform: None,
         native_surface: cfg.surface,
     };
@@ -235,20 +287,62 @@ pub fn build_native_host_app(
     };
 
     // The hull. `--ship` wins; otherwise the world's first `available_ships`
-    // entry, which is what the browser's ship picker pre-selects.
+    // entry the published catalogue still offers, which is what the browser's
+    // ship picker pre-selects — `entity_template_paths` filters that same list
+    // by the same allowlist, in the world's own authored order.
+    //
+    // Consulting `curated_ships` here is what stops one process publishing a
+    // curated catalogue over HTTP (`--manifest assets/scenarios.demo.toml`,
+    // issue #917's native half) and simultaneously flying a hull that catalogue
+    // excludes.
     let ship_path = match &cfg.ship_path {
         Some(path) => path.clone(),
         None => world_config
             .available_ships
-            .first()
+            .iter()
+            .find(|s| {
+                cfg.curated_ships.is_empty()
+                    || cfg.curated_ships.iter().any(|c| c == &s.template_path)
+            })
             .map(|s| s.template_path.clone())
             .ok_or_else(|| {
-                NativeHostError::NoShip(format!(
-                    "{} authors no [[available_ships]] and no --ship was given",
-                    cfg.world_path
-                ))
+                NativeHostError::NoShip(if cfg.curated_ships.is_empty() {
+                    format!(
+                        "{} authors no [[available_ships]] and no --ship was given",
+                        cfg.world_path
+                    )
+                } else {
+                    format!(
+                        "{} authors no [[available_ships]] the manifest's curated hull list \
+                         admits ({}), and no --ship was given",
+                        cfg.world_path,
+                        cfg.curated_ships.join(", ")
+                    )
+                })
             })?,
     };
+
+    // The hull's own half of boot's template-cache gate (issue #1121).
+    //
+    // `check_native_templates` sees the world's DECLARED set, and an explicit
+    // `--ship` need not be in it: issue #935 made the player's hull authored
+    // content that may sit outside `available_ships` entirely. So a `--ship`
+    // pointing at a template the preload never cached would walk straight past
+    // that gate, and `lobby::server::update_session_with_config` — which looks
+    // this exact path up in the cache with NO filesystem fallback — would keep
+    // a DEFAULT `ShipClientConfig`: default helm radar range, default
+    // impulse-charge duration, default hostile-arc colour, a plausible mission,
+    // a clean log. The refusal below is the same refusal boot makes, sited
+    // where the resolved hull is finally known.
+    let ship_key = crate::entities::include_resolve::canonical_template_path(&ship_path);
+    if crate::entities::config_cache::get_cached_entity_config(&ship_key).is_none() {
+        return Err(NativeHostError::Ship(format!(
+            "{ship_key} is not in the native entity-template cache, so the host would \
+             read a Default hull configuration — helm radar range, impulse-charge \
+             duration and hostile-arc colour — instead of this hull's authored one. \
+             Check --content-dir and that the hull lives under <content-dir>/assets/entities"
+        )));
+    }
 
     // Ship config, BEFORE `LobbyPlugin`: the native twin of
     // `wasm_validate_stations`. Without it `update_session_with_config` falls
@@ -315,6 +409,23 @@ pub fn build_native_host_app(
         app.add_systems(
             FixedUpdate,
             solo_auto_start.before(crate::sim_sets::SimSet::Input),
+        );
+    } else {
+        // The mode is correct and the flag is not refused — but today it opens a
+        // window onto a lobby nothing can start. Every route to `InProgress`
+        // needs a session: collective `SetReady` auto-start, or the host page's
+        // force-start (`drain_force_start_input`, wasm-only). With the transport
+        // deferred to issue #1112 no session can exist, and there is no native
+        // force-start, so say so at the top of the log rather than leaving an
+        // operator watching a lobby that will never move.
+        crate::pwarn!(
+            cfg.log,
+            crate::logging::LogCat::Lobby,
+            "no --solo: this host is waiting in the lobby for participants, but \
+             browser clients cannot join a native host yet (issue #1112 — PeerJS \
+             is browser JavaScript). Nothing can ready up and there is no native \
+             force-start, so the mission will not start. Re-run with --solo to \
+             fly it on Backfill."
         );
     }
 

@@ -12,9 +12,12 @@
 //! telemetry the harness loop reads.
 //!
 //! The template preload and its model-marker gate moved out to
-//! [`crate::entities::template_preload`] in issue #1121, unchanged, so the
-//! native windowed host runs the identical populate — it is behind no feature
-//! now, where it used to be reachable only with `--features headless`.
+//! [`crate::entities::template_preload`] in issue #1121, so the native windowed
+//! host runs the identical populate — it is behind no feature now, where it used
+//! to be reachable only with `--features headless`. Two behaviours were
+//! deliberately strengthened on the way (a canonicalised cache key; a
+//! zero-template walk refused rather than returned as an empty success); that
+//! module's docs say what each one is and why it is safe for this caller.
 
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;

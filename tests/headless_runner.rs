@@ -15935,11 +15935,12 @@ fn the_next_mission_opens_on_what_this_one_left_behind() {
         );
     }
     assert_eq!(
-        facts.tally("campaign.skyway.traffic.none"),
+        facts.tally("campaign.skyway.traffic.lost"),
         1,
-        "the crew-issued clearance survives projection as an exact no-loss fact"
+        "the storm's deterministic traffic loss survives projection"
     );
-    assert_eq!(facts.tally("campaign.skyway.traffic.lost"), 0);
+    assert_eq!(facts.tally("campaign.skyway.traffic.pell"), 1);
+    assert_eq!(facts.tally("campaign.skyway.traffic.none"), 0);
 
     // The road-specific facts this variant exists for, and the ones a follow-on
     // mission would actually branch on.

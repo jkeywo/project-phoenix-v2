@@ -362,7 +362,10 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "project_phoenix::world::server::PendingScenarioLoad",
     "project_phoenix::world::server::WorldContentRuntime",
     // The Rhai scripting seam (issue #984, Rhai M6 phase 2a/2b). Both are
-    // authoritative-but-deferred, exactly like `WorldContentRuntime` above:
+    // authoritative and PARTLY folded since issue #1086 — see the paragraph at
+    // the end of this block for exactly which fields moved into the fold and why
+    // neither type is declared `Folded` outright. The rest reads as it was
+    // written, before the widening, and still holds for what is left:
     // `RawWorldSource` is the world TOML the script loader reads at `Startup`
     // (as loaded, after any headless duel-side transform);
     // `WorldScriptRuntime` holds the compiled handler ASTs, the
@@ -554,6 +557,29 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     // authored none is that same registered type, instantiated where a script-free
     // world previously had nothing. See `src/world/layers.rs` and the parallel-vec
     // invariant documented on `WorldScriptRuntime::handlers`.
+    //
+    // Issue #1086 CASHED IN most of the "belongs in the same digest fold"
+    // language above, and the two entries stay here for a narrower reason than
+    // they used to. `sim_digest::fold_scenario_scope` now walks, every tick:
+    // `WorldContentRuntime`'s `flags`, `trigger_states` latches,
+    // `pending_world_events`, `entity_groups`, `deadlines`, `commitments`,
+    // `evidence` and `workforce`; and `WorldScriptRuntime`'s `pending_callbacks`
+    // and `pending_comms_opens`. So every FIELD the paragraphs above account for
+    // — the deadline table (#1024), the commitments ledger (#1029), the evidence
+    // log (#1031), the workforce register (#1035), the scanned-flag bit (#1038)
+    // and the campaign handoff counters (#1043) — is folded rather than merely
+    // snapshotted.
+    //
+    // What keeps both types on THIS list rather than declared `Folded` is that
+    // neither is folded whole, and saying otherwise would be the kind of
+    // explicit-and-wrong claim this file exists to prevent. `WorldContentRuntime`
+    // still carries `pending_delayed_actions` (authoritative, and deliberately
+    // out of both the payload and the fold — see `fold_scenario_records`),
+    // `name_to_uuid` and `observed_hull_fractions` (re-derived), the
+    // `mission_clock_anchor_secs` reading and `trigger_table_generation` (the
+    // cache token four bullets up). `WorldScriptRuntime` is mostly compiled ASTs,
+    // the per-tick budget and the content hash, none of which the AUTHORITATIVE
+    // fold has any business touching — `content_digest` answers for them.
     "project_phoenix::world::server::BridgeWorldSource",
     "project_phoenix::world::server::PreCompiledScripts",
     "project_phoenix::world::server::RawWorldSource",

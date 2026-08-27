@@ -633,7 +633,7 @@ fn fold_scenario_flags(world: &World, mut acc: u64) -> u64 {
 /// One flag store's set pairs, sorted by name — never `HashMap` order.
 fn sorted_flags(store: &FlagStore) -> Vec<(&str, i64)> {
     let mut pairs: Vec<(&str, i64)> = store.iter().collect();
-    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    pairs.sort_unstable_by_key(|(name, _)| *name);
     pairs
 }
 
@@ -902,7 +902,7 @@ fn fold_scenario_records(world: &World, mut acc: u64) -> u64 {
             (group.as_str(), names)
         })
         .collect();
-    groups.sort_by(|a, b| a.0.cmp(b.0));
+    groups.sort_unstable_by_key(|(group, _)| *group);
     acc = fold_u64(acc, groups.len() as u64);
     for (group, members) in groups {
         acc = fold_str(acc, group);
@@ -1036,7 +1036,7 @@ fn fold_comms_scope(world: &World, mut acc: u64) -> u64 {
             .iter()
             .map(|(id, dialogue)| (id.as_str(), dialogue))
             .collect();
-        dialogues.sort_by(|a, b| a.0.cmp(b.0));
+        dialogues.sort_unstable_by_key(|(message_id, _)| *message_id);
         for (message_id, dialogue) in dialogues {
             acc = fold_str(acc, message_id);
             acc = fold_str(acc, &dialogue.thread_id);

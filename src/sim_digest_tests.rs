@@ -687,3 +687,634 @@ fn identical_ledgers_do_not_diverge() {
     ledger.final_digest = 5;
     assert_eq!(ledger.first_divergence(&ledger.clone()), None);
 }
+
+// ── Scenario scope (issue #1086) ─────────────────────────────────────────────
+
+use crate::comms::content::{
+    ActiveDialogue, CommsDialogueNode, CommsResponse, OpenCommsRequest, ScriptedDialogue,
+};
+use crate::core::messages::{CommsMessage, CommsResponseView};
+use crate::dossier::evidence::EvidenceProvenance;
+use crate::world::commitments::{Commitment, CommitmentState};
+use crate::world::config::{Trigger, TriggerCondition};
+use crate::world::content::TriggerState;
+use crate::world::deadlines::{DeadlineRecord, DeadlineState};
+use crate::world::script::schedule::{PendingCallbacks, ScheduledCall, TickBudget};
+use crate::world::server::WorldRuntime;
+use crate::world::workforce::WorkforceRecord;
+
+/// A script runtime carrying no compiled units — enough to hold the two queues
+/// the fold walks.
+///
+/// Written out rather than built through `WorldScriptRuntime::from_compiled`,
+/// which returns `None` for an empty set on purpose (a script-free world
+/// inserts no resource at all, and that case is covered by
+/// [`an_empty_scenario_folds_as_no_scenario_at_all`]).
+fn empty_script_runtime() -> WorldScriptRuntime {
+    WorldScriptRuntime {
+        host: crate::world::script::engine::RuntimeHost::new(),
+        asts: std::collections::BTreeMap::new(),
+        ast_owners: std::collections::BTreeMap::new(),
+        triggers: Vec::new(),
+        handlers: Vec::new(),
+        budget: TickBudget::new(),
+        budget_tick: 0,
+        content_hash: 0,
+        pending_callbacks: PendingCallbacks::new(),
+        pending_comms_opens: Vec::new(),
+        deadline_handlers: Vec::new(),
+    }
+}
+
+/// [`fold_world`] plus every scenario resource the scope walks, all empty — the
+/// shape a booted world has before its first flag is set.
+fn scenario_world() -> World {
+    let mut world = fold_world();
+    world.insert_resource(WorldContentRuntime::default());
+    world.insert_resource(WorldLayerMap::default());
+    world.insert_resource(CommsRuntime::default());
+    world.insert_resource(CommsInboxRes::default());
+    world.insert_resource(empty_script_runtime());
+    world
+}
+
+/// A single-shot `on_destroyed` trigger, in the shape `world::content`'s own
+/// fixtures build.
+fn trigger_state(name: &str) -> TriggerState {
+    TriggerState {
+        trigger: Trigger {
+            condition: TriggerCondition::OnDestroyed {
+                entity_name: name.into(),
+            },
+            when: None,
+            id: None,
+            repeat: false,
+            cooldown_secs: None,
+        },
+        fired: false,
+        origin_layer: None,
+        seen_destroyed: std::collections::HashSet::new(),
+        last_fired_elapsed: None,
+    }
+}
+
+fn scheduled_call(fire_tick: u64, fn_name: &str) -> ScheduledCall {
+    ScheduledCall {
+        fire_tick,
+        script_path: "probe#script.main".into(),
+        fn_name: fn_name.into(),
+        origin_layer: None,
+    }
+}
+
+fn message(id: &str, body: &str) -> CommsMessage {
+    CommsMessage::injected(
+        id.into(),
+        "sender-uuid".into(),
+        "Skyway Control".into(),
+        body.into(),
+        std::collections::BTreeMap::new(),
+        vec![CommsResponseView {
+            text: "comms.response.acknowledge".into(),
+            important: false,
+            available: true,
+        }],
+        "thread-1".into(),
+        true,
+        false,
+    )
+}
+
+fn dialogue(node_fn: &str) -> ActiveDialogue {
+    ActiveDialogue {
+        current_node: CommsDialogueNode {
+            body: "comms.body.opening".into(),
+            body_params: std::collections::BTreeMap::new(),
+            responses: vec![CommsResponse {
+                text: "comms.response.acknowledge".into(),
+                important: false,
+            }],
+        },
+        thread_id: "thread-1".into(),
+        script: ScriptedDialogue {
+            script_path: "probe#script.comms".into(),
+            origin_layer: None,
+            node_fn: node_fn.into(),
+            on_pick: vec!["on_acknowledge".into()],
+        },
+    }
+}
+
+fn open_request(root_fn: &str) -> OpenCommsRequest {
+    OpenCommsRequest {
+        from: "control".into(),
+        root_fn: root_fn.into(),
+        display_name: None,
+        thread_id: None,
+        priority: CommsPriority::Routine,
+        urgent: false,
+        script_path: "probe#script.comms".into(),
+        origin_layer: None,
+    }
+}
+
+/// The compatibility claim the whole widening rests on: a world that carries
+/// every scenario resource but has *said nothing yet* folds to exactly the
+/// number a world with no scenario resource at all does.
+///
+/// This is [`fold_infrastructure_namespace`]'s empty-walk affordance taken five
+/// times over, and it is what leaves the committed cross-target ledger
+/// (`tests/fixtures/cross-target-ledger.json`) untouched by this issue: the
+/// probe builds its world from Rust literals and registers no scenario resource,
+/// so a widening that folded a zero for each empty walk would have moved a
+/// number that is verified in a browser.
+#[test]
+fn an_empty_scenario_folds_as_no_scenario_at_all() {
+    assert_eq!(world_digest(&fold_world()), world_digest(&scenario_world()));
+}
+
+/// A flag is the scenario's memory, and the counter is folded rather than its
+/// truth: `2` and `1` are different states to an `increment_flag` chain even
+/// though both read as "set".
+#[test]
+fn a_world_flag_moves_the_digest_and_its_counter_is_what_moves_it() {
+    let quiet = world_digest(&scenario_world());
+
+    let mut world = scenario_world();
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .flags
+        .set_flag("lyra_clear");
+    let one = world_digest(&world);
+    assert_ne!(quiet, one, "setting a flag must move the digest");
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .flags
+        .set_flag_value("lyra_clear", 2);
+    assert_ne!(one, world_digest(&world), "the counter is folded, not a bit");
+
+    // Clearing removes the entry, which is the store's whole vocabulary — so a
+    // cleared flag and one never set are the same authoritative state.
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .flags
+        .clear_flag("lyra_clear");
+    assert_eq!(
+        quiet,
+        world_digest(&world),
+        "a cleared flag folds as an unset one — the store removes the entry"
+    );
+}
+
+/// A layer's flags fold under the layer's identity, and only while the layer is
+/// ACTIVE: a failed-load sentinel occupies its path to suppress retries and is
+/// not part of the composition a peer has to agree with.
+#[test]
+fn only_an_active_layer_folds_and_its_path_and_order_fold_with_it() {
+    let quiet = world_digest(&scenario_world());
+
+    let mut world = scenario_world();
+    let mut sentinel = WorldRuntime::default();
+    sentinel.flags.set_flag("storm_warning");
+    world
+        .resource_mut::<WorldLayerMap>()
+        .0
+        .insert("layers/storm.toml".into(), sentinel);
+    assert_eq!(
+        quiet,
+        world_digest(&world),
+        "a layer that never activated folds nothing at all"
+    );
+
+    world
+        .resource_mut::<WorldLayerMap>()
+        .0
+        .get_mut("layers/storm.toml")
+        .expect("just inserted")
+        .is_active = true;
+    let active = world_digest(&world);
+    assert_ne!(quiet, active, "an active layer's flags are folded");
+
+    world
+        .resource_mut::<WorldLayerMap>()
+        .0
+        .get_mut("layers/storm.toml")
+        .expect("just inserted")
+        .activation_order = 3;
+    assert_ne!(
+        active,
+        world_digest(&world),
+        "the activation ordinal is the composition, so it folds too"
+    );
+}
+
+/// The latch, the accumulation, and the shape of the table itself.
+#[test]
+fn a_trigger_latch_moves_the_digest_and_so_does_the_tables_shape() {
+    let mut world = scenario_world();
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .trigger_states
+        .push(trigger_state("raider"));
+    let armed = world_digest(&world);
+    assert_ne!(
+        world_digest(&scenario_world()),
+        armed,
+        "a live trigger table is folded"
+    );
+
+    world.resource_mut::<WorldContentRuntime>().trigger_states[0].fired = true;
+    let fired = world_digest(&world);
+    assert_ne!(armed, fired, "the single-shot latch is the point of the walk");
+
+    world.resource_mut::<WorldContentRuntime>().trigger_states[0]
+        .seen_destroyed
+        .insert("escort".into());
+    let seen = world_digest(&world);
+    assert_ne!(fired, seen, "the OnAllDestroyed accumulation is folded");
+
+    world.resource_mut::<WorldContentRuntime>().trigger_states[0].origin_layer =
+        Some("layers/storm.toml".into());
+    let owned = world_digest(&world);
+    assert_ne!(seen, owned, "which layer owns the row is folded with it");
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .trigger_states
+        .push(trigger_state("courier"));
+    assert_ne!(
+        owned,
+        world_digest(&world),
+        "a table that grew a row — a layer loaded on one host and not the other \
+         — moves the digest before either new trigger fires"
+    );
+}
+
+/// The cooldown stamp folds as present-or-absent and never by value: a restore
+/// reconstructs the mission-clock anchor by `f32` subtraction, so its readings
+/// are not bit-exact across a resume. See `fold_scenario_triggers`.
+#[test]
+fn the_cooldown_stamp_folds_as_set_or_unset_but_not_as_a_number() {
+    let mut world = scenario_world();
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .trigger_states
+        .push(trigger_state("raider"));
+    let unset = world_digest(&world);
+
+    world.resource_mut::<WorldContentRuntime>().trigger_states[0].last_fired_elapsed = Some(5.0);
+    let stamped = world_digest(&world);
+    assert_ne!(
+        unset, stamped,
+        "whether a repeat trigger has ever fired is folded — a ResetTrigger \
+         moves it"
+    );
+
+    world.resource_mut::<WorldContentRuntime>().trigger_states[0].last_fired_elapsed =
+        Some(5.000_000_5);
+    assert_eq!(
+        stamped,
+        world_digest(&world),
+        "the reading itself is NOT folded: a resumed world's anchor is rebuilt \
+         by subtraction and lands an ULP away, which is not a divergence"
+    );
+}
+
+/// The scripted callback queue, and its ORDER — which is what fires.
+#[test]
+fn a_scheduled_callback_moves_the_digest_and_so_does_its_place_in_the_queue() {
+    let quiet = world_digest(&scenario_world());
+
+    let mut world = scenario_world();
+    world
+        .resource_mut::<WorldScriptRuntime>()
+        .pending_callbacks
+        .push(scheduled_call(120, "on_survey"));
+    let one = world_digest(&world);
+    assert_ne!(quiet, one, "queued future work is authoritative and folded");
+
+    world
+        .resource_mut::<WorldScriptRuntime>()
+        .pending_callbacks
+        .push(scheduled_call(120, "on_admission"));
+    let both = world_digest(&world);
+
+    let mut swapped = scenario_world();
+    {
+        let mut script = swapped.resource_mut::<WorldScriptRuntime>();
+        script
+            .pending_callbacks
+            .push(scheduled_call(120, "on_admission"));
+        script.pending_callbacks.push(scheduled_call(120, "on_survey"));
+    }
+    assert_ne!(
+        both,
+        world_digest(&swapped),
+        "two callbacks due on the same tick fire in queue order, so the queue's \
+         order is folded rather than sorted away"
+    );
+}
+
+/// A chained world event queued for the next tick's trigger pass.
+#[test]
+fn a_queued_world_event_moves_the_digest() {
+    let quiet = world_digest(&scenario_world());
+
+    let mut world = scenario_world();
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .pending_world_events
+        .push(WorldEvent::FlagSet {
+            name: "lyra_clear".into(),
+            origin_layer: None,
+        });
+    let set = world_digest(&world);
+    assert_ne!(quiet, set, "a queued event is folded");
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .pending_world_events[0] = WorldEvent::FlagCleared {
+        name: "lyra_clear".into(),
+        origin_layer: None,
+    };
+    assert_ne!(
+        set,
+        world_digest(&world),
+        "and the variant is folded, not just the name it carries"
+    );
+}
+
+/// Every named record: groups, deadlines, promises, findings, the dispute.
+#[test]
+fn each_named_scenario_record_moves_the_digest() {
+    let mut world = scenario_world();
+    let mut previous = world_digest(&world);
+
+    let step = |world: &World, what: &str, previous: &mut u64| {
+        let now = world_digest(world);
+        assert_ne!(*previous, now, "{what} must move the digest");
+        *previous = now;
+    };
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .entity_groups
+        .entry("escorts".into())
+        .or_default()
+        .insert("courier".into());
+    step(&world, "an entity group", &mut previous);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .deadlines
+        .records
+        .push(DeadlineRecord {
+            id: "stabiliser_failure".into(),
+            origin_layer: None,
+            label: "world.deadline.stabiliser".into(),
+            visible: true,
+            due_tick: 900,
+            state: DeadlineState::default(),
+            armed: Some(scheduled_call(900, "on_stabiliser_failure")),
+        });
+    step(&world, "an armed deadline", &mut previous);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .deadlines
+        .records[0]
+        .due_tick = 1_500;
+    step(&world, "a slipped deadline", &mut previous);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .commitments
+        .records
+        .push(Commitment {
+            id: "evacuate_lyra".into(),
+            made_to: "Skyway strike committee".into(),
+            terms: "world.commitment.evacuate".into(),
+            resolves_when: "world.commitment.evacuate.resolves".into(),
+            state: CommitmentState::Open,
+            made_at_tick: 300,
+            resolved_at_tick: None,
+        });
+    step(&world, "a promise", &mut previous);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .commitments
+        .records[0]
+        .state = CommitmentState::Kept;
+    step(&world, "keeping a promise", &mut previous);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .evidence
+        .append(
+            "subject-uuid",
+            "world.evidence.stress_fracture",
+            EvidenceProvenance::Scan,
+            420,
+        );
+    step(&world, "a gathered finding", &mut previous);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .workforce
+        .records
+        .push(WorkforceRecord {
+            id: "dockers".into(),
+            label: "world.workforce.dockers".into(),
+            on_strike: false,
+            disposition: 0,
+        });
+    step(&world, "a declared workforce side", &mut previous);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .workforce
+        .records[0]
+        .on_strike = true;
+    step(&world, "a side walking out", &mut previous);
+
+    world
+        .resource_mut::<WorldContentRuntime>()
+        .workforce
+        .records[0]
+        .disposition = -3;
+    step(&world, "a side's disposition", &mut previous);
+}
+
+/// The `armed` latches are folded beside their rows: an empty-but-armed table
+/// and an empty-and-unarmed one behave differently on the very next tick,
+/// because the arming systems read exactly that bit.
+#[test]
+fn an_armed_but_empty_table_is_not_an_unarmed_one() {
+    let unarmed = world_digest(&scenario_world());
+
+    let mut world = scenario_world();
+    world.resource_mut::<WorldContentRuntime>().deadlines.armed = true;
+    let deadlines_armed = world_digest(&world);
+    assert_ne!(unarmed, deadlines_armed, "the deadline table's armed latch");
+
+    world.resource_mut::<WorldContentRuntime>().workforce.armed = true;
+    assert_ne!(
+        deadlines_armed,
+        world_digest(&world),
+        "the workforce register's armed latch"
+    );
+}
+
+/// The inbox, and the two states an officer moves on it.
+#[test]
+fn an_inbox_message_moves_the_digest_and_so_does_answering_it() {
+    let quiet = world_digest(&scenario_world());
+
+    let mut world = scenario_world();
+    world
+        .resource_mut::<CommsInboxRes>()
+        .0
+        .inject(message("msg-1", "comms.body.opening"));
+    let injected = world_digest(&world);
+    assert_ne!(quiet, injected, "an unread message is folded");
+
+    world
+        .resource_mut::<CommsInboxRes>()
+        .0
+        .record_response("msg-1", 0);
+    assert_ne!(
+        injected,
+        world_digest(&world),
+        "the response the officer picked is what the scenario reads back"
+    );
+}
+
+/// The two comms fields the range system rewrites every tick are excluded, so a
+/// host whose contact drifted out of range does not read as a divergence.
+#[test]
+fn the_re_derived_comms_fields_do_not_move_the_digest() {
+    let mut world = scenario_world();
+    world
+        .resource_mut::<CommsInboxRes>()
+        .0
+        .inject(message("msg-1", "comms.body.opening"));
+    let in_range = world_digest(&world);
+
+    let mut out_of_range = scenario_world();
+    let mut drifted = message("msg-1", "comms.body.opening");
+    drifted.sender_in_range = false;
+    drifted.responses[0].available = false;
+    out_of_range.resource_mut::<CommsInboxRes>().0.inject(drifted);
+
+    assert_eq!(
+        in_range,
+        world_digest(&out_of_range),
+        "`sender_in_range` and a response's `available` are recomputed every \
+         tick by `update_comms_range_flags` from transforms the entity namespace \
+         already folds"
+    );
+}
+
+/// A live dialogue, an open hail and a queued scripted open — the rest of
+/// `CommsState`.
+#[test]
+fn every_other_comms_surface_moves_the_digest() {
+    let mut world = scenario_world();
+    let mut previous = world_digest(&world);
+
+    world
+        .resource_mut::<CommsRuntime>()
+        .active_dialogues
+        .insert("msg-1".into(), dialogue("node_opening"));
+    let opened = world_digest(&world);
+    assert_ne!(previous, opened, "a live dialogue is folded");
+    previous = opened;
+
+    world
+        .resource_mut::<CommsRuntime>()
+        .active_dialogues
+        .get_mut("msg-1")
+        .expect("just inserted")
+        .script
+        .node_fn = "node_second".into();
+    let advanced = world_digest(&world);
+    assert_ne!(
+        previous, advanced,
+        "which node a thread is showing is what it can be answered from"
+    );
+    previous = advanced;
+
+    world
+        .resource_mut::<CommsRuntime>()
+        .open_hails
+        .insert("contact-uuid".into());
+    let hailed = world_digest(&world);
+    assert_ne!(previous, hailed, "a hail this ship made and has not cleared");
+    previous = hailed;
+
+    world
+        .resource_mut::<WorldScriptRuntime>()
+        .pending_comms_opens
+        .push(open_request("node_foreman"));
+    assert_ne!(
+        previous,
+        world_digest(&world),
+        "a scripted open queued but not yet materialised mints an id when it \
+         drains, so two hosts must agree the queue holds it"
+    );
+}
+
+/// The whole reason every `HashMap` walk in this scope sorts: two worlds that
+/// reached the same scenario state by inserting it in a different order are the
+/// same state, and must fold to the same number.
+///
+/// Without the sorts this passes or fails on the hasher's mood, which is the
+/// failure mode a per-tick cross-peer comparison would surface as a phantom
+/// divergence.
+#[test]
+fn insertion_order_does_not_reach_the_fold() {
+    let names = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"];
+
+    let build = |order: &[&str]| {
+        let mut world = scenario_world();
+        {
+            let mut runtime = world.resource_mut::<WorldContentRuntime>();
+            for name in order {
+                // Keyed off the NAME, never the insertion index — the two runs
+                // must reach the same state, not merely the same set of names.
+                runtime
+                    .flags
+                    .set_flag_value(name, i64::from(name.as_bytes()[0]));
+                runtime
+                    .entity_groups
+                    .entry((*name).into())
+                    .or_default()
+                    .insert(format!("{name}-member"));
+            }
+            let mut state = trigger_state("raider");
+            for name in order {
+                state.seen_destroyed.insert((*name).into());
+            }
+            runtime.trigger_states.push(state);
+        }
+        {
+            let mut comms = world.resource_mut::<CommsRuntime>();
+            for name in order {
+                comms.active_dialogues.insert((*name).into(), dialogue(name));
+                comms.open_hails.insert((*name).into());
+            }
+        }
+        world_digest(&world)
+    };
+
+    let forwards: Vec<&str> = names.to_vec();
+    let backwards: Vec<&str> = names.iter().rev().copied().collect();
+    assert_eq!(
+        build(&forwards),
+        build(&backwards),
+        "the same scenario state reached in a different insertion order must \
+         fold to the same number"
+    );
+}

@@ -8975,11 +8975,11 @@ fn skyway_at_act_two() -> (bevy::prelude::App, bevy::prelude::Entity) {
         1,
         "later-act fixtures must enter through the admitted scan-backed safety response"
     );
-    // These are engaged-crew fixtures for the strike and back half, not the
-    // idle-storm branch. Clear the endangered traffic through Navigation in
-    // the forty-second margin before Control's forecast and well before band
-    // one; the ordinary compliance machine still carries every order.
-    skyway_order_corridor_to_shelter(&mut app);
+    // Navigation remains genuinely Backfilled. Once Control posts the three
+    // payload-bearing traffic objectives at the authored forecast, #1141's
+    // production policy orders each craft clear through the ordinary command
+    // and compliance path; this fixture must not pre-empt that behavior with
+    // synthetic inputs.
     // This fixture substitutes for the crew's Helm travel as well as their
     // Comms input. The opening safety scan takes the destroyer to the head and
     // its Backfill Helm continues flying while the survey clock advances, so
@@ -10180,7 +10180,7 @@ fn forcing_the_skyway_picket_open_is_faster_and_the_bill_arrives_on_a_console() 
     use project_phoenix::core::messages::ObjectiveStatus;
     use project_phoenix::world::server::WorldContentRuntime;
 
-    let (mut app, _ship) = skyway_at_act_two();
+    let (mut app, _ship) = skyway_at_strike_post();
 
     let before = skyway_condition(&mut app, SKYWAY_DEPOT_B);
     skyway_pick(
@@ -10271,7 +10271,7 @@ fn forcing_the_skyway_picket_open_is_faster_and_the_bill_arrives_on_a_console() 
 #[test]
 fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
     // Talked down to first: they are further dug in, and it goes worse.
-    let mut app = skyway_at_act_two().0;
+    let mut app = skyway_at_strike_post().0;
     skyway_pick(
         &mut app,
         SKYWAY_COMMITTEE,
@@ -10286,7 +10286,7 @@ fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
 
     // The same run again from a fresh app on the same seed: the risk is resolved
     // from state, so it does not move.
-    let mut repeat = skyway_at_act_two().0;
+    let mut repeat = skyway_at_strike_post().0;
     skyway_pick(
         &mut repeat,
         SKYWAY_COMMITTEE,
@@ -10305,7 +10305,7 @@ fn the_skyway_casualty_count_is_read_off_the_ground_the_order_was_given_on() {
 
     // The captain's lever: ten minutes on the open channel takes a step off the
     // count, and costs time doing it.
-    let mut warned = skyway_at_act_two().0;
+    let mut warned = skyway_at_strike_post().0;
     skyway_pick(
         &mut warned,
         SKYWAY_CUTTER,
@@ -11744,17 +11744,18 @@ fn scanning_ladder_b_against_its_own_maintenance_record_opens_the_evidence_route
     );
 }
 
-/// **AC6/AC7's control run.** The same mission, played by a crew who never
-/// pointed anything at the rung.
+/// **AC6/AC7's control run.** The passively available soft strike thread,
+/// played by a crew who never pointed anything at the rung.
 ///
 /// Nothing is written — no finding, no flag — and the difference is not that the
-/// mission stalls. The act still opened, the committee are still talking, and
-/// the settlement is still there to be reached: it costs BOTH promises instead
-/// of one, which is what "changes the available endings rather than blocking
-/// progress" means in this scenario.
+/// mission stalls. The committee are hailable from the authored opening and the
+/// settlement is still there to be reached before hardening: it costs BOTH
+/// promises instead of one, which is what "changes the available endings rather
+/// than blocking progress" means in this control.
 #[test]
 fn a_crew_who_never_scan_the_rung_find_nothing_and_are_blocked_by_nothing() {
-    let (mut app, _ship) = skyway_at_act_two();
+    let (mut app, _ship) = skyway_strike_app(42);
+    skyway_hail(&mut app, SKYWAY_COMMITTEE);
     let rung = scan_uuid_named(&mut app, SKYWAY_DEPOT_B);
 
     assert_eq!(
@@ -15210,7 +15211,7 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
     assert_eq!(skyway_flag(&app, "skyway_window_served_convoy"), 1);
     assert_eq!(skyway_flag(&app, "skyway_window_served_havelock"), 0);
 
-    // AC4: the ledger, settled at this scene, both promises kept.
+    // AC4: the ledger, settled at this scene, all three promises kept.
     assert_eq!(
         skyway_promise(&app, "skyway_safe_passage"),
         "kept",
@@ -15219,11 +15220,15 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
     assert_eq!(skyway_promise(&app, "skyway_protect_witness"), "kept");
     assert_eq!(
         skyway_promise(&app, "skyway_surface_records"),
-        "unknown",
-        "a promise that was never made is not a promise that was broken — the file was \
-         shown rather than sworn about, which is what saved the captain this one"
+        "kept",
+        "the hardened late negotiation demanded this promise as well as the file; the \
+         unnamed confrontation put the record on the open channel and kept it"
     );
     assert_eq!(skyway_flag(&app, "commitment.skyway_safe_passage.kept"), 1);
+    assert_eq!(
+        skyway_flag(&app, "commitment.skyway_surface_records.kept"),
+        1
+    );
 
     // AC3: the excluded party's fate lands on their own channel, and what it
     // cost is read off the mission rather than rolled.
@@ -15288,7 +15293,7 @@ fn falling_skyway_carries_the_workers_and_the_convoy_and_keeps_the_captains_word
     assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.storm"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 1);
-    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.kept"), 2);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.kept"), 3);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.broken"), 0);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.clean"), 1);
 }
@@ -15458,8 +15463,10 @@ fn a_captain_who_leaves_the_workers_behind_hears_the_promise_read_back() {
 /// The two most expensive claims were 22 and 26 and the numbers decided which
 /// pair fitted.
 ///
-/// It is also the mixed-ledger run: the captain gave both promises to get the
-/// vote, kept the one about the corridor and broke the one about the file.
+/// It is also the mixed-ledger run: the hardened negotiation makes an
+/// initially empty-handed captain obtain the operator's copy and give both
+/// promises, then they keep the one about the corridor and break the one about
+/// filing that copy.
 #[test]
 fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
     use project_phoenix::core::messages::ObjectiveStatus;
@@ -15476,6 +15483,27 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
     let settled_by = window_now(&app) + 24.0;
     window_run_to(&mut app, settled_by);
     assert_eq!(skyway_flag(&app, "skyway_strike_settled"), 1);
+
+    let forecast = skyway_deadline_secs(&app, "storm_front_due") as f64;
+    window_run_to(&mut app, forecast + 4.0);
+    let shelter_order =
+        project_phoenix::civilian::CivilianOrder::divert_to_route("storm_shelter_run");
+    let traffic_orders = SKYWAY_CORRIDOR_TRAFFIC.map(|name| {
+        let state = civilian_state_of(&mut app, name);
+        (
+            name,
+            state.order().cloned(),
+            state.compliance(),
+            state.route().map(str::to_string),
+        )
+    });
+    assert!(
+        traffic_orders
+            .iter()
+            .all(|(_, order, _, _)| order.as_ref() == Some(&shelter_order)),
+        "Backfill Navigation must consume all three forecast objectives before the first band: \
+         {traffic_orders:?}"
+    );
 
     let projection = skyway_deadline_secs(&app, "skyhook_failure_due") as f64;
     let watch_opens = skyway_deadline_secs(&app, "storm_passed_due") as f64;
@@ -15554,15 +15582,39 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
         0,
         "the backstop never had to fire: the option was withheld before it could be picked"
     );
+    let traffic_losses = SKYWAY_CORRIDOR_TRAFFIC.map(|name| {
+        let suffix = if name == SKYWAY_CORRIDOR_TRAFFIC[0] {
+            "meridian"
+        } else if name == SKYWAY_CORRIDOR_TRAFFIC[1] {
+            "lark"
+        } else {
+            "pell"
+        };
+        (
+            name,
+            skyway_flag(&app, &format!("skyway_traffic_lost_{suffix}")),
+        )
+    });
+    assert_eq!(
+        skyway_flag(&app, "a2_traffic_lost"),
+        1,
+        "Backfill issued all three shelter orders at the forecast boundary, but this mixed \
+         human-Comms run leaves Pell exposed to the authored sweep: {traffic_losses:?}"
+    );
+    assert_eq!(
+        traffic_losses.map(|(_, lost)| lost),
+        [0, 0, 1],
+        "the traffic consequence is named and deterministic"
+    );
     assert_eq!(
         skyway_flag(&app, "skyway_left_convoy_cost"),
-        2,
+        3,
         "a party with no ground of its own, on a corridor whose head is standing and \
-         whose rung is moving, and a lane the crew never proved they could work"
+         whose rung is moving, plus the traffic loss this run actually recorded"
     );
     assert_eq!(
         skyway_last_said(&app, SKYWAY_CONVOY),
-        "world.falling_skyway.comms.convoy_rides_it_out"
+        "world.falling_skyway.comms.convoy_rides_it_out_hurt"
     );
     assert_eq!(
         skyway_last_said(&app, WINDOW_CONTROL),
@@ -15589,8 +15641,9 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
         1
     );
     assert_eq!(skyway_flag(&app, "campaign.skyway.strike.negotiated"), 1);
-    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.none"), 1);
-    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 2);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.records"), 1);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.none"), 0);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 3);
     assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.kept"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.broken"), 1);

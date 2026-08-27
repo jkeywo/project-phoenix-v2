@@ -10,7 +10,7 @@ updated: 2026-08-27
 
 `SessionManager` is the authoritative server-side record of every connected or
 recently disconnected [Player](./player.md). Identity is a UUID session token
-stored by the browser, not the ephemeral PeerJS peer id. The host bridge maps a
+stored by the browser, not the ephemeral rendezvous peer id. The host bridge maps a
 peer to that token after `Identify` and passes only the token into simulation
 message handling.
 

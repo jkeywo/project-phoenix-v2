@@ -15,7 +15,7 @@ updated: 2026-08-28
 | `TRUNK_BUILD_RELEASE=true trunk build --release` | `dist/index.html` (server.html → view screen) | Builds the Rust/Bevy WASM host with the default `server` feature and enables the release-only post-build optimisation hook. |
 | `node scripts/build-client.mjs` | `dist/client/index.html` plus GUI assets | First rejects a stale Rust-derived Debug Surface module, then copies the pure HTML/JS phone client; there is no client-side WASM feature. |
 
-The server is authoritative and runs the simulation. The client is a pure JS shell that connects to the host via PeerJS/WebRTC and renders HTML console panels.
+The server is authoritative and runs the simulation. The client is a pure JS shell that joins the host by a typed five-letter code through the rendezvous service, connects over WebRTC DataChannels, and renders HTML console panels.
 
 ## Local dev
 
@@ -31,7 +31,7 @@ TRUNK_BUILD_RELEASE=true trunk build --release
 node scripts/build-client.mjs
 ```
 
-Outputs land in `dist/` with the client at `dist/client/`. The QR code on the view screen encodes `https://<host>/client/index.html#<peerId>` so phones land on the right page.
+Outputs land in `dist/` with the client at `dist/client/`. The QR code on the view screen encodes `https://<host>/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` so phones land on the right page already carrying the join code; the same code's five-letter suffix is printed beside it for guests who type instead of scanning.
 
 Debug Surface identity, stable order, and wire names are authored in the Rust
 macro at `src/core/debug_surface.rs`. Run `npm run debug-surfaces` after changing
@@ -189,9 +189,10 @@ Windows prompts to allow it through the firewall on first run. Pass
   serves: a bundle built for other content refuses to start, before the port is
   taken. `/host/manifest.json` pins a running client's protocol per request.
 - With no `--world` it serves **delivery only**, exactly as PRD #855 shipped it:
-  the authoritative simulation is `server.html` or `phoenix-headless`, and
-  PeerJS signalling is unchanged. Either way there is no TLS or auth — LAN or
-  behind something else, never a public address.
+  the authoritative simulation is `server.html` or `phoenix-headless`, and crew
+  signalling goes through the rendezvous service exactly as in a browser.
+  Either way there is no TLS or auth — LAN or behind something else, never a
+  public address.
 
 The catalogue it publishes is the browser host's own: `src/delivery/payload.rs`
 holds the single field list that both `wasm_get_scenario_catalog` and the JSON

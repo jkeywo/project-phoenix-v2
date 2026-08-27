@@ -9,7 +9,7 @@ updated: 2026-08-27
 # Player
 
 A Player is one participant record in authoritative session state. The stable
-key is the browser's UUID session token, not its current PeerJS connection id.
+key is the browser's 32-hex session token, not its current rendezvous peer id.
 
 The wire record carries the player's name, connection and readiness state,
 optional directly claimed `StationId`, last human rating for reconnect

@@ -35,7 +35,10 @@ WASM layer.
 ## Browser smoke and rendering
 
 Playwright boots the real server WASM and client pages in Chromium, replacing
-only PeerJS transport with the `BroadcastChannel` shim. The normal project
+only the transport — a `BroadcastChannel` stand-in for the rendezvous socket
+and for WebRTC, terminating the REAL worker-rendezvous registry inside the host
+page (`tests/smoke/rendezvous-shim.js`, behind the `tests/smoke/transport-fixture.js`
+seam). The normal project
 checks message flow and DOM behavior without a GPU. The render project uses
 SwiftShader and includes a pixel-level viewscreen check so a clean-console
 render-graph failure cannot silently produce a blank scene.

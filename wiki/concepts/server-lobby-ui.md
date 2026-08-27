@@ -19,7 +19,7 @@ The host page is the only consumer of this push channel: each viewer of `server.
 3. **JS callback registration.** `set_host_channel_callback(window.__hostChannel)` is invoked once in `server.html` when WASM is ready; the dispatcher's handlers table routes `"lobby"` payloads to `window.__updateLobby`.
 4. **View model and DOM mutation.** `gui/host-lobby-view.js` derives the render model; `window.__updateLobby` in `server.html` applies it to the lobby DOM.
 
-This is a **one-way state-push channel** that runs in parallel to the regular [Message Flow](./message-flow.md) (which targets specific peers via PeerJS). Lobby state is broadcast-equivalent: only the host's own DOM consumes it.
+This is a **one-way state-push channel** that runs in parallel to the regular [Message Flow](./message-flow.md) (which targets specific peers over their own DataChannels). Lobby state is broadcast-equivalent: only the host's own DOM consumes it.
 
 ## Payload shape
 

@@ -8,7 +8,7 @@ updated: 2026-08-27
 
 # Architecture
 
-Project Phoenix is an authoritative Rust/Bevy simulation hosted by `server.html`, with pure HTML/CSS/JavaScript phone clients connected through PeerJS in a star topology.
+Project Phoenix is an authoritative Rust/Bevy simulation hosted by `server.html`, with pure HTML/CSS/JavaScript phone clients connected through the Phoenix transport — a project-owned rendezvous service for typed join codes and WebRTC signalling, then direct DataChannels — in a star topology.
 
 ```text
 phone clients
@@ -21,7 +21,7 @@ phone clients
 
 ## Runtime boundaries
 
-- `server.html` loads the Rust/WASM host, owns PeerJS connections, and displays the shared viewscreen.
+- `server.html` loads the Rust/WASM host, registers with the rendezvous service, owns the per-token connections, and displays the shared viewscreen.
 - `client.html` and `gui/` are pure JavaScript; there is no client-side Rust or WASM.
 - `src/server/bridge.rs` is the JavaScript/WASM boundary. Rust never owns sockets.
 - `src/server_app/registration.rs` composes the fixed-tick simulation; `src/server_app/mod.rs` is its stable facade.
@@ -40,7 +40,7 @@ Cross-domain infrastructure has narrow homes:
 
 ## State and authority
 
-Session tokens identify players; peer ids identify transient transports. The server owns session tenure, game phase, world/runtime content, ship state, objectives, and outcomes. A phone stores only the latest projected state needed to render its consoles.
+Session tokens identify players; rendezvous peer ids and DataChannels identify transient transports. The server owns session tenure, game phase, world/runtime content, ship state, objectives, and outcomes. A phone stores only the latest projected state needed to render its consoles.
 
 Human and AI actors submit the same `ControlSystem` commands. Admission records authority once; domain appliers never branch on actor type. Every gameplay decision advances on the authored logical tick, not on rendered frames.
 

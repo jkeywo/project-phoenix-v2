@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking uses PeerJS (WebRTC) in a star topology.
+A browser-based spaceship bridge simulator. One browser tab shows a shared 3D view of space. Players join from phones by scanning a QR code, or by typing the five letters shown next to it — no installation. The host (view screen) runs Rust/Bevy compiled to WebAssembly and is the authoritative server; the client (phone console) is **pure HTML/CSS/JS** — no client-side WASM. Clients send inputs and receive state snapshots. Networking is the **Phoenix transport** (issue #1112) in a star topology: a Phoenix-owned rendezvous service (`worker-rendezvous/`, a Cloudflare Worker + Durable Object) carries typed join-code lookup and WebRTC signalling over a secure WebSocket, and the game traffic then runs over direct WebRTC DataChannels — a reliable ordered one for commands and reliable messages, and a lossy unordered one for the snapshot class. PeerJS and its public cloud broker were retired in #1112.
 
 For the current feature set, read **[wiki/concepts/project-overview.md](./wiki/concepts/project-overview.md)** and the relevant PASM slice under [`pasm/spec/`](./pasm/spec/). Planned work lives on the GitHub issue tracker (label `PRD`). Domain vocabulary lives in **[CONTEXT.md](./CONTEXT.md)** — use those terms, don't invent synonyms.
 
@@ -105,9 +105,9 @@ node scripts/build-client.mjs                  # → dist/client/, then serve di
 # modes. With no --world it serves a built bundle, the content manifest, the
 # scenario catalogue and a version stamp from a native process instead of an
 # open browser tab: DELIVERY ONLY, the authoritative simulation is still
-# server.html or phoenix-headless and PeerJS signalling is unchanged. There is
-# no TLS or auth in either mode — LAN or behind something else, never a public
-# address.
+# server.html or phoenix-headless, and crew signalling goes through the
+# rendezvous service exactly as it does in a browser. There is no TLS or auth
+# in either mode — LAN or behind something else, never a public address.
 cargo build --release --features host --bin phoenix-host
 ./target/release/phoenix-host --client-dir dist
 #   Binds 0.0.0.0:8080 by default — LAN-reachable out of the box; Windows
@@ -347,26 +347,58 @@ Prerequisites: Rust stable + `rustup target add wasm32-unknown-unknown`, `cargo 
 
 ## Message Flow (The Core Loop)
 
+### Getting on the wire (the Phoenix transport, issues #1111/#1112)
+
+```
+server.html initHostTransport()          gui/rendezvous-transport.js
+  ↓  wss:// to the rendezvous service, `host-open`
+worker-rendezvous registry               worker-rendezvous/src/registry.js
+  ↓  mints a private five-letter suffix, answers `hosted`
+server.html showJoinCode()
+  ↓  paints the letters + a QR of client/index.html#<PROJECT_VERSION_CODE>
+client.html startPhoenixJoin()           five letters typed, pasted, or scanned
+  ↓  wss:// `join` with the full code → `joined` (unknown / wrong-type /
+  ↓  version-mismatch are three distinct refusals)
+  ↓  SDP + ICE relayed by the service; the JOINER creates BOTH channels:
+  ↓    'reliable'  {ordered: true}                — commands, reliable messages
+  ↓    'snapshot'  {ordered:false, maxRetransmits:0} — the snapshot class
+  ↓  in-band JoinHandshake { stamp } on the reliable channel
+server.html checkStamp → wasm_check_client_stamp → delivery::check_join_stamp
+  ↓  JoinAccepted (or JoinRefused with a StampMismatch code — a stamp is
+  ↓  REQUIRED since #1112) — the page only sees an ADMITTED connection
+client.html → Identify { token, name }   the ordinary crew protocol starts here
+```
+
+The signalling socket is expendable once the DataChannels are up. A link that
+drops is re-resolved against the SAME code on a backoff, with the same session
+token re-sent as `Identify` — the host restores the held station and pushes the
+current projection, and nobody re-types five letters.
+
+### Once on the wire
+
 ```
 Player phone (client.html, pure JS)
-  ↓  sends WebRTC message with JSON
-server.html JavaScript
-  ↓  resolves peer ID → session token, calls wasm_receive_message(token, json)
+  ↓  sends JSON on the reliable DataChannel
+server.html JavaScript: attachHostConn()
+  ↓  Identify gate resolves rendezvous peer → session token,
+  ↓  calls wasm_receive_message(token, json)
 server/bridge.rs: drain_inbound()
   ↓  queues InboundMessage into Bevy's pull-based message system
 lobby/server.rs (or console plugins via SimSet::Input)
   ↓  reads InboundMessage, mutates SessionManager / ship state
   ↓  writes OutboundMessage events
 server/bridge.rs: flush_outbound()
-  ↓  encodes ServerMessage → JSON, calls JS callback
-server.html JavaScript: routeOutbound()
-  ↓  broadcasts to all peers / targeted peer
+  ↓  encodes ServerMessage → JSON, calls JS callback with a DeliveryClass
+server.html JavaScript: routeOutbound(target, payload, deliveryClass)
+  ↓  gui/host-peer-routing.js resolves 'all' | 'token:<t>' | 'except:<t>' to
+  ↓  connections, preferring the lossy channel for 'snapshot' and falling back
+  ↓  PER TOKEN to the reliable one for any client that has none
 client.html JavaScript: handleMessage()
   ↓  gui/sim-state.js apply() folds message into client state
   ↓  gui/console-state.js build*() → JSON pushed into per-console iframes
 ```
 
-In-game commands are `ClientMessage::ControlSystem { target: SystemId, payload }` — humans and AI issue the same commands. See `wiki/concepts/message-flow.md`.
+In-game commands are `ClientMessage::ControlSystem { target: SystemId, payload }` — humans and AI issue the same commands. See `wiki/concepts/message-flow.md` and `wiki/concepts/networking.md`.
 
 ---
 
@@ -400,8 +432,15 @@ src/
 gui/            — CLIENT: pure JS modules + one HTML file per console (iframe),
                   mount-plan.js owns the station-id → DOM-id/URL mount plan
 assets/         — TOML configs: worlds/, entities/, factions/; models, shaders, sounds
-server.html     — Host page: loads server WASM, runs Bevy, owns PeerJS host peer
-client.html     — Client page: pure HTML/JS, connects via PeerJS peer ID in URL hash
+server.html     — Host page: loads server WASM, runs Bevy, registers with the
+                  rendezvous service and owns the per-token connection maps
+client.html     — Client page: pure HTML/JS, joins by typed five-letter code or
+                  by the structured code a QR link puts in the URL fragment
+worker-rendezvous/ — The rendezvous service (Cloudflare Worker + Durable
+                  Object): typed join codes, presence, WebRTC signalling relay.
+                  `src/registry.js` is the whole protocol as a pure state
+                  machine; `src/index.js` only terminates the socket. NOT
+                  DEPLOYED yet — see docs/delivery-checklist.md
 tests/client/   — Vitest tests for gui/*.js
 tests/smoke/    — Playwright smoke tests
 wiki/           — LLM-maintained knowledge base. Read SCHEMA.md first; update as you work.
@@ -413,14 +452,14 @@ docs/           — Draft design notes (numbered).
 ## Key Constraints & Rules
 
 1. **`serde_json` only in `codec.rs`.** Never import it directly in other modules. (Planned exception: PRD #116's own save path, which does not exist yet. The module issue #862 actually created is **`src/snapshot.rs`**, and it is deliberately *not* that exception: a world snapshot is written as RON inside `vellum-save`'s envelope, so it imports no `serde_json` at all. If #116 ever lands a JSON save, it needs its own line here rather than inheriting this one.)
-2. **Server = authority.** Bevy runs the simulation and decides everything; clients are stateless spokes that never talk to each other. Session tokens (UUIDv4 in `localStorage`) are the identity system — peer IDs are ephemeral.
+2. **Server = authority.** Bevy runs the simulation and decides everything; clients are stateless spokes that never talk to each other. Session tokens are the identity system — rendezvous peer ids and DataChannels are ephemeral. A token is **32 lowercase hex characters** (`crypto.getRandomValues(new Uint8Array(16))`, not a UUIDv4) held **primarily in `sessionStorage`**, so two console tabs on one desktop are two distinct players; `localStorage` holds a *persistent* copy that the first/only tab adopts, so one phone reconnects onto its station after a full browser restart. The resolution rule is the pure `decideToken()` in `gui/session-token.js`, backed by a `phoenix-live-tabs` liveness registry with a 2 s heartbeat and a 6 s TTL. Reserved token shapes (`__local_console__`, the `ai:` prefix) are refused at the network edge in `server.html` *and* in `lobby/handler.rs`.
 3. **Client is pure JS.** No client-side Rust/WASM, no new Rust glue for the client. Client state is built by pure `gui/*.js` modules (Vitest-tested); console UIs are per-console HTML iframes.
 4. **Captain authority.** Only the player at `CaptainChair` can set Red Alert (`SetRedAlert { active }`). Game start is collective `SetReady` auto-start, not a captain-only command.
 5. **Station ownership is authoritative.** `Player.station: Option<StationId>` is the ownership field; console access derives from the station + `ShipConfig`. On disconnect the station keeps its holder and flips to the `Backfill` rating (AI operates its systems) until reconnect or a new claim.
 6. **Humans and AI are symmetric.** Both issue `ControlSystem { target: SystemId, payload }`; admission strips source identity. Never branch on human-vs-AI downstream of admission. The command log (issue #898) keeps this at the *recording* site too: it records everything the network boundary admits, without asking what a token looks like. What stays out of it is what a replay re-derives — the in-process AI emissions of `emit_ai_command`, which never cross that boundary.
 7. **AI decisions run on fixed ticks, not frames.** The whole simulation advances on a fixed logical tick (issue #895): `SimSet` is configured in Bevy's `FixedUpdate` at the TOML-authored `[global] sim_tick_hz` (default 60 Hz), counted by `SimTick` (`src/sim_tick.rs`). Helm commands apply the tick they are admitted (`AdmittedCommands` is cleared and refilled at admission each tick). **Every** AI policy host — the six per-axis helm systems, shield focus, power allocation, torpedo load/auto-fire, frequency hint, phaser and blaster auto-fire, AI target selection, Captain, Sensors — runs under `run_if` on the one shared cadence in `src/ai/cadence.rs`, derived from the tick count as `sim_tick_hz / ai_tick_hz` logical ticks per decision (default 30 Hz; the slower `ai_snapshot_hz` cadence is a further whole multiple; both ratios are validated at world load), never once per rendered frame and never off a wall clock. An ungated sim system now runs once per *logical tick* — still gate deciders that must run slower. Never gate a decider inside its own body with an `Option<Res<_>>` that falls back to running every tick: every bare-`App` fixture takes that arm, so the shipped cadence ends up covered by no test at all (issue #889). **"Apply the tick they are admitted" still stands after the command log (issue #898), and now says so explicitly rather than by implication:** a logged command carries the tick it applies on, `command_admission::log::CommandDelay` is the gap between admission and that tick, and it is `0` for a local host. A non-zero delay is P2P lockstep's (#854) to negotiate, and setting one is the deliberate amendment of this rule — not something the plumbing can do by accident.
 8. **Deterministic asteroids.** Per-cell density is seeded from `(layer salt, gx, gz) + Perlin noise` over the single composed lattice. Destroyed asteroids respawn fresh when the player leaves the cell and returns.
-9. **WebGL2 rendering; PeerJS cloud broker** (not self-hosted, deferred post-PoC).
+9. **WebGL2 rendering; Phoenix-owned rendezvous** (`worker-rendezvous/`, issue #1112 — no third-party broker). TURN credentials still come from the separate stateless `worker/`. **Neither worker is deployed by CI**: both are manual `wrangler deploy` steps on the delivery checklist, and since PeerJS was retired an undeployed rendezvous service means *nobody can join at all*, not a degraded connection.
 10. **Pure modules are Bevy-free.** `lobby/handler`, `radar`, `ship/{damage,physics,rating,control_source,coordination}`, `modifiers/repair_teams`, `world/{content,flags,dispatch,layers,scenario,delayed}`, `comms/{content,range}`, and friends have no Bevy imports — fully unit-testable on native. Where a pure module needs a Bevy adapter, the adapter is a sibling (`ship/*_systems.rs`, `comms/server.rs`, `world/server.rs`) — never an import into the pure file.
 11. **No hardcoded gameplay values.** All gameplay data (stats, icons, colours, sizes, behaviours) comes from TOML config, loaded into entities/components and sent over the network where the client needs it. The only acceptable hardcoded values are: (a) defaults applied while parsing a TOML file (`unwrap_or(...)`-style fallbacks), and (b) client-side placeholders shown while waiting for authoritative data from the server. If a value could plausibly be tuned by a designer, it belongs in TOML — never inline it "for now", and never add a hardcoded branch that can override what the config says. **Display text is the one sanctioned exception**: it lives in `assets/strings/strings.csv` (not TOML), referenced by string id — see `docs/strings-authoring-guide.md`. Never hardcode player-visible English in Rust, JS, or HTML; `scripts/check-strings.mjs --strict` gates this in CI.
 
@@ -473,7 +512,7 @@ Two rules that are easy to get wrong:
   The sibling is the old `mod tests { ... }` body dedented one level, unchanged otherwise: same `use super::*;` (still resolves — `super` is the production module, unaffected by where the file lives) plus whatever other imports the tests need, same `#[test]` fns, same fixture helpers. This is a **test-only move** — it must not touch a line of production code and must not change what a test does, only where it lives; a relocation commit's diff on the production file should be `-mod tests { ... }` / `+#[path] mod tests;` and nothing else.
   Companion convention for the fixture bodies themselves: an inline literal (a large JSON payload, an embedded Rhai program) that's reused by name across several tests hoists to a named `const`/helper item near the top of the sibling, instead of staying duplicated inline at each call site. A literal used by exactly one test stays inline next to the assertion it supports — hoisting a single-use fixture away from its only reader makes the test harder to read, not easier.
 - **JS tests (`npx vitest run`):** `tests/client/*.test.js` covering the pure `gui/*.js` modules (state builders, action map, registries, panels) and the pure `scripts/balance-runs.mjs` merge/format/expand fns (`tests/client/balance-runs.test.js`, fabricated report JSON — no sim).
-- **Smoke tests (`tests/smoke/`, Playwright):** boot real server WASM in headless Chromium with a `BroadcastChannel`-backed PeerJS shim (no real WebRTC). Two projects in `playwright.config.js`: `chromium` runs the message/DOM specs with no GPU (`src/server/bridge.rs` skips `RenderPlugin` under `navigator.webdriver`), and `render` runs `*.render.spec.js` under SwiftShader with that flag hidden, so the viewscreen actually draws. `npx playwright test` runs both.
+- **Smoke tests (`tests/smoke/`, Playwright):** boot real server WASM in headless Chromium with a `BroadcastChannel`-backed transport stand-in, `tests/smoke/rendezvous-shim.js` (CI has no real WebRTC and no deployed worker). It fakes only the WebSocket and the `RTCPeerConnection`: the rendezvous protocol it terminates is the REAL `worker-rendezvous/src/registry.js`, imported into the host page. `tests/smoke/transport-fixture.js` is the single seam every transport assumption lives behind — `fixtures.js` and the ~40 specs that use `readHostPeerId`/`createTestClient` know nothing about it. `tests/smoke/transport-shim.spec.js` tests the stand-in itself. Two projects in `playwright.config.js`: `chromium` runs the message/DOM specs with no GPU (`src/server/bridge.rs` skips `RenderPlugin` under `navigator.webdriver`), and `render` runs `*.render.spec.js` under SwiftShader with that flag hidden, so the viewscreen actually draws. `npx playwright test` runs both.
 - **Viewscreen render check (`tests/smoke/viewscreen.render.spec.js`):** boots combat_test and falling_skyway to a live viewscreen and reads canvas pixels back through a screenshot, asserting the scene area is not one flat colour. It exists because a render-graph break need not log anything — the PRD #1023 HDR regression turned the canvas black with a completely clean console (see `render_setup::apply_target_hdr`), and no other test in this repo draws a frame. Covers both the shipped `[render]` defaults and the documented `hdr = false` retreat.
 - **Headless runner (`tests/headless_runner.rs`, `--features headless`):** boots the whole simulation natively with nobody connected and asserts on end state. Lives in an *integration* test, not an inline `mod tests`, because building a headless app populates the process-global native template cache — inside the lib test binary that leaks into ~2500 unrelated unit tests. Anything calling `config_cache::insert_native_config` belongs here.
 - **PASM model checks (`uv run pasm validate`, `uv run pasm scan`, `uv run pasm traceability`):** the fleet tool's own deterministic checks over the design model in `pasm/spec/` — reference integrity, cross-domain links, declared-versus-observed drift, traceability roll-ups. **These assert on the spec YAML, so editing a slice can fail them without touching a line of Rust.** `cargo test` will not catch it; CI's `pasm` job will. Run them whenever you touch `pasm/spec/`. `validate` is green at `Status: OK` with ~39 informational warnings and exit 0. There is no pytest suite here — the tool, and its tests, live in [vellum](https://github.com/jkeywo/vellum) (de-vendored in `ada7a172`); see [pasm/README.md](./pasm/README.md).
@@ -521,7 +560,7 @@ host = ["server"]
 
 - Server: `https://pp-dev.kiwigamedesign.co.uk/`
 - Client: `https://pp-dev.kiwigamedesign.co.uk/client/`
-- Server QR encodes: `https://pp-dev.kiwigamedesign.co.uk/client/index.html#<peerId>`
+- Server QR encodes: `https://pp-dev.kiwigamedesign.co.uk/client/index.html#<PROJECT_GUID>_<VERSION_GUID>_<CODE>` — the same structured code whose five-letter suffix is printed beside it, so scanning and typing are one join by two routes.
 
 ---
 
@@ -535,7 +574,7 @@ When extending `ClientMessage` or `ServerMessage` (prefer a new `SystemControlPa
 4. Client inbound: fold into state in `gui/sim-state.js` `apply()` (or `gui/comms-state.js` / `gui/lobby-state.js`), then surface via the relevant `build*()` in `gui/console-state.js`
 5. Client outbound: add the UI action to `gui/action-map.js` (and the button/control to the console's `gui/<name>-console.html`)
 6. Add/extend Vitest coverage in `tests/client/`
-7. Touch `server.html` `routeOutbound()` / `client.html` only if routing or the PeerJS handshake changes
+7. Touch `server.html` `routeOutbound()` / `client.html` only if routing or the join handshake changes. The transport-plane frames (`JoinHandshake`/`JoinAccepted`/`JoinRefused`) are deliberately NOT `ClientMessage`/`ServerMessage` variants — see `gui/rendezvous-transport.js` and `pasm/spec/design/p2p-design-deltas.yaml`
 
 ## AI-origin decisions
 

@@ -95,8 +95,13 @@ entities:
     core:
       status: implemented
       confidence: confirmed
-      title: Client Network Interface
-      summary: PeerJS/WebRTC client transport for console messages and state snapshots.
+      title: Client Command Gateway
+      summary: >-
+        The phone's outbound command boundary: it builds every ControlSystem envelope and hands it
+        to the live link. It does NOT own the transport — rendezvous-transport-bridge does; this
+        entity resolves that bridge and calls it.
+      rationale:
+        - "[ai] Narrowed in issue #1112. It used to describe \"the PeerJS/WebRTC client transport\", which duplicated peer-transport-bridge in sessions-replication.yaml — two entities claiming the same thing, which WRITING_PASM §2.6 forbids. The transport now has one owner and this slice keeps the part it actually needed: where a console action turns into a wire envelope. The id is unchanged because four other slices reference it; only the claim it makes has narrowed."
     architecture:
       kind: adapter
       authority: non-authoritative
@@ -108,14 +113,11 @@ entities:
       status: observed
       paths:
         - client.html
-        - gui/connection-manager.js
         - gui/command-gateway.js
       symbols:
-        - ConnectionManager
         - sendControlSystem
         - controlSystemEnvelope
       tests:
-        - tests/client/connection-manager.test.js
         - tests/client/command-gateway.test.js
     evidence:
       - kind: test
@@ -123,7 +125,7 @@ entities:
         summary: >-
           gui/command-gateway.js is the explicit client command gateway: it
           builds every ControlSystem envelope and resolves the transport, either
-          an injected send or the live ConnectionManager singleton.
+          an injected send or the page's live link.
 
   - component: repair-console-interface
     core:

@@ -87,8 +87,8 @@ of the uploaded directory, so no dashboard configuration is needed for them.
       means something was unreachable.
 
 - [ ] **Leave `require_isolation` off.** Cross-origin isolation buys the current
-      single-threaded build nothing and would break the cross-origin PeerJS and
-      TURN fetches. It becomes a requirement only if the worker-thread spike in
+      single-threaded build nothing and would break the cross-origin rendezvous
+      socket and TURN fetches. It becomes a requirement only if the worker-thread spike in
       §5 says yes.
 
 The check is deliberately not a push gate: it talks to a live origin, so as a
@@ -170,7 +170,13 @@ promise. Everything below still needs doing.
 
 ## 3a. The rendezvous workers — the same trap, worse consequences
 
-`worker-rendezvous/` (issue #1111) is a **sibling** of `worker/`: same two-config
+> **BLOCKING SINCE ISSUE #1112.** This service is not deployed, and PeerJS —
+> which used to be underneath it — is gone. Until the boxes below are ticked,
+> a deployed build has **no join path at all**: the viewscreen shows no code,
+> the diagnostics row says the service was lost, and no phone can reach the
+> host by any route. This is no longer an opt-in extra; it is the transport.
+
+`worker-rendezvous/` (issues #1111/#1112) is a **sibling** of `worker/`: same two-config
 pattern (`wrangler.toml` = `phoenix-rendezvous`, `wrangler.demo.toml` =
 `phoenix-rendezvous-demo`), same `ALLOWED_ORIGIN` var, same repo secrets for the
 deploy itself, and **no secrets of its own**. It is not a route on the TURN
@@ -232,11 +238,18 @@ mitigation, so do not skip the health check.
 - [ ] **Keep the two `ALLOWED_ORIGIN` lists in step with reality**, and **record
       what you deployed** — date and value, per worker. Same reasoning as §3: a
       worker only picks up `[vars]` on `wrangler deploy`.
-- [ ] **Note that the join route is opt-in in the shipped build.** Until #1112
-      retires PeerJS, both pages reach for the rendezvous service only when
-      opened with `?rendezvous` — or with a structured join code in the fragment,
-      which implies it. A rendezvous outage therefore cannot break the PeerJS
-      route today.
+- [ ] **Do not look for an opt-in flag: there is not one any more.** #1111
+      shipped this route behind `?rendezvous`; #1112 retired PeerJS and with it
+      the flag. Both pages now reach for the service on every load.
+      `?rendezvous=<url>` survives as a service OVERRIDE — point a dev build at
+      a local `wrangler dev` — and the retired spellings (`?rendezvous`, `=on`,
+      `=off`) are ignored rather than honoured, so an old bookmark still opens
+      the game instead of dialling a host called "on".
+- [ ] **Expect a fresh code after a service blip.** A host that loses its record
+      re-registers on a backoff and is issued a NEW code, because the old record
+      really is gone and the letters on screen resolve to nothing. Anyone reading
+      a code aloud across the room has to re-read it. Keeping the SAME code
+      across a host drop needs persistence in the service and is issue #1115.
 
 ---
 
@@ -296,8 +309,9 @@ State this in any release notes, because the gap is not obvious from the name:
 - It serves assets, the content manifest, the catalogue and the version pin. It
   does **not** run the simulation — the authoritative sim is still the browser
   host (`server.html`) or `phoenix-headless`.
-- It does **not** do PeerJS signalling. Clients still reach the host through the
-  PeerJS cloud broker exactly as they do today.
+- It does **not** do rendezvous signalling. Clients still reach the host through
+  the rendezvous Worker (§3a) exactly as they do in a pure browser session; the
+  native host is a delivery server, not a signalling one.
 - It has no snapshot, save, or session surface.
 
 ---
@@ -313,8 +327,8 @@ not quietly skipped later:
       (`phoenix-perf`'s `browser` scenario and the committed baselines) and
       state what a multi-threaded build would have to beat.
 - [ ] **Price the cost, not just the win.** Isolation means COOP/COEP on both
-      entry points, which blocks every cross-origin subresource — PeerJS and the
-      TURN credential worker included. Both would need a same-origin path or a
+      entry points, which blocks every cross-origin subresource — the rendezvous
+      service and the TURN credential worker included. Both would need a same-origin path or a
       CORP header from their side before isolation is even possible.
 - [ ] **Only then** flip `require_isolation` on in the header-check workflow and
       add the COOP/COEP rules to `deploy/cloudflare/_headers`. The checker

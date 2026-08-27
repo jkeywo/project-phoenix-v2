@@ -10,9 +10,9 @@ updated: 2026-08-28
 
 ```text
 phone client (pure HTML/CSS/JS)
-  → PeerJS JSON
+  → JSON on a WebRTC DataChannel (reliable, or lossy for the snapshot class)
 server.html
-  → peer id resolves to session token
+  → the Identify gate resolves the rendezvous peer id to a session token
   → wasm_receive_message(token, json)
 src/server/bridge.rs
   → JsonCodec decode
@@ -57,7 +57,7 @@ back to reliable when that channel is absent.
 
 ## Reconnect and disconnect
 
-Session tokens are persistent identity; peer ids are transport details. On disconnect, station tenure is retained for reconnection while that station's live rating becomes `Backfill`, allowing its systems to continue under AI. A later valid claim or the original token's reconnect updates tenure through the authoritative lobby path and forces the appropriate state projections to the client.
+Session tokens are persistent identity; rendezvous peer ids are transport details. On disconnect, station tenure is retained for reconnection while that station's live rating becomes `Backfill`, allowing its systems to continue under AI. A later valid claim or the original token's reconnect updates tenure through the authoritative lobby path and forces the appropriate state projections to the client.
 
 During `InProgress`, the token-targeted `Welcome` also invokes registered
 replication owners in stable key order. Each owner reconstructs its current

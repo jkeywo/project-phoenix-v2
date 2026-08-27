@@ -4,7 +4,7 @@ entities:
       status: implemented
       confidence: confirmed
       title: Host Local Console Bridge
-      summary: Routes host-page HTML console actions through the shared gui/action-map.js dispatch table into full ClientMessage envelopes and injects them via wasm_receive_message under the dedicated local-console identity, allowing only the host's local ship to be controlled without a PeerJS session claim.
+      summary: Routes host-page HTML console actions through the shared gui/action-map.js dispatch table into full ClientMessage envelopes and injects them via wasm_receive_message under the dedicated local-console identity, allowing only the host's local ship to be controlled without a network session claim.
     architecture:
       kind: local-command-bridge
       authority: authoritative

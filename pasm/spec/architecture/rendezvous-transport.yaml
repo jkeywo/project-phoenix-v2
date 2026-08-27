@@ -44,8 +44,9 @@ entities:
       rationale:
         - One registry instance sees both typed namespaces and every active release at once, which is the only way unknown, wrong-type and version-mismatch stay three answers instead of one.
         - The Worker adapter decides nothing, so the contract tests drive the shipped protocol without wrangler, miniflare or a socket.
-        - Issue #1111 issues codes in both namespaces but admits joins only to the client one; enabling server-code joining (#1114) adds an entry to joinableNamespaces rather than reshaping the lookup.
-        - It replaces the public PeerJS broker for the crew star, per p2p-delta-transport-is-a-star-today; the crew protocol itself is untouched.
+        - Codes are issued in both namespaces but joins are admitted only to the client one; enabling server-code joining (#1114) adds an entry to joinableNamespaces rather than reshaping the lookup.
+        - It replaced the public PeerJS broker for the crew star in issue #1112, per p2p-delta-transport-is-a-star-today; the crew protocol itself is untouched. See crew-transport-peerjs-to-phoenix.
+        - "[ai] Since that cutover it is a HARD dependency: there is no second route underneath it, so an undeployed or origin-blocked service means nobody can join at all rather than a degraded connection. docs/delivery-checklist.md §3a says so at the top; it is not deployed yet."
         - "[ai] All registry state is in memory in one Durable Object instance and nothing is written to storage: a code cannot outlive its host socket or a redeploy. That is #1111's whole scope — persistence is what #1115 (rotation) and #1120 (rebinding) would add — and the module doc says so rather than leaving it inferred."
         - "[ai] The service is unauthenticated and its codes are private over a 25^5 space, so the bounds are authored data in join-codes.toml's [limits]: a per-connection lookup cap that cuts the socket off, a record TTL swept lazily, a per-record peer cap, and length/shape validation on anything stored. Cross-socket rate limiting stays Cloudflare's edge to apply."
         - "[ai] Both upgrade endpoints REQUIRE a present, allow-listed Origin; only /v1/health keeps the no-Origin exemption, because the deploy verification recipe is a bare curl. Every legitimate browser upgrade is cross-origin here, so exempting requests without an Origin would exempt only the scripted caller the refusal exists to stop."
@@ -122,25 +123,28 @@ entities:
 
   - component: rendezvous-transport-bridge
     core:
-      status: partially-implemented
+      status: implemented
       confidence: confirmed
       title: Rendezvous Transport Bridge
       summary: >-
-        The browser halves of the Phoenix join path: a host that registers, is issued a code and
-        answers offers into the existing Identify gate, and a client that resolves a typed code,
-        offers, opens a direct reliable DataChannel and completes the compatibility handshake
-        before speaking ordinary crew protocol. Additive in #1111 — the PeerJS bridge remains the
-        default route until #1112.
+        The browser halves of the Phoenix crew transport, and since issue #1112 the ONLY crew
+        transport: a host that registers, is issued a code and answers offers into the Identify
+        gate, and a client that resolves a typed code, offers, opens a reliable and a lossy
+        DataChannel, completes the compatibility handshake and then speaks ordinary crew protocol —
+        keeping that link alive across drops on its own backoff.
       rationale:
-        - The host adapter presents the channel with PeerJS's DataConnection shape, so server.html's reserved-token refusal, duplicate-token dance and disconnect guard are reused rather than reimplemented.
-        - "[ai] An open DataChannel is not admission: the adapter reaches the page only after the compatibility verdict is ok. Frames before that are dropped rather than buffered, everything after a refusal is dropped, and the 250ms before the channel closes is a send-flush for the refusal — otherwise a build the host had just refused could still dispatch into the simulation."
-        - "[ai] The client route is OFF by default, like the host's: a bare page load with an empty fragment keeps the old no-host-id dead end rather than presenting an entry field wired to a service that is not deployed. A structured code in the fragment is its own opt-in, because that is what the QR carries."
-        - "[ai] A failed attempt tears its own joiner down — the page closes the previous one before each retry, and a terminal error/closed frame closes itself — so an abandoned attempt cannot keep a socket, a registry connection and a peer connection alive and still fire into the page's callbacks."
-        - "[ai] A host whose rendezvous service is unreachable keeps the PeerJS URL and QR on the join panel and names the failure on its own diagnostics row; the code panel takes over only once a code is actually issued, and yields again if the service is lost."
-        - Inbound frames go through localiseTree exactly as the PeerJS path does; every console downstream assumes string ids are already resolved.
+        - The host hands the page one connection object carrying both channels, so server.html's reserved-token refusal, duplicate-token dance and disconnect guard are reused rather than reimplemented.
+        - "[ai] An open DataChannel is not admission: the connection reaches the page only after the compatibility verdict is ok. Frames before that are dropped rather than buffered, everything after a refusal is dropped, and the 250ms before the channel closes is a send-flush for the refusal — otherwise a build the host had just refused could still dispatch into the simulation."
+        - "[ai] BOTH channels are created by the JOINER, before the offer, so the answering host picks them up by label off one negotiation. The lossy one is opened whether or not anything ends up riding it: negotiating it lazily would run the first minute of every session's snapshots down the reliable channel for no reason."
+        - "[ai] Nothing assumes the lossy channel exists. gui/host-peer-routing.js falls back to the reliable channel PER TOKEN, so one phone whose snapshot channel never came up cannot drag the whole bridge onto the reliable path; the joiner's own send applies the same rule upward."
+        - "[ai] Reconnect re-resolves the SAME code and re-sends Identify with the SAME session token, so a dropped radio never puts five letters back in front of the guest. Only an answer a retry cannot change ends the loop — one about the code (unknown, wrong-type, version-mismatch, admission-closed, host-gone) or about the build (the host's StampMismatch codes); an unreachable service, a signalling drop or an ICE timeout is retried."
+        - "[ai] 'connecting' is not re-reported on each reconnect attempt. Once the host has accepted the build the page is in its reconnect loop, and reporting 'connecting' per attempt flashed the status dot green and hid the retry control several times a second."
+        - "[ai] The page holds a STABLE façade over whichever joiner is current (window.phoenixLink), because the joiner behind it is replaced on every reconnect — anything holding the joiner itself would be driving a dead connection immediately after the event it exists to survive."
+        - "[ai] A failed attempt tears its own transport down before the next one, and a terminal frame closes the joiner, so an abandoned attempt cannot keep a socket, a registry connection and a peer connection alive and still fire into the page's callbacks."
+        - "[ai] A host that loses its record re-registers on a backoff and is issued a FRESH code, and the join panel blanks until it arrives. There is no PeerJS route underneath any more, so a host that merely reported the loss would be unjoinable until someone reloaded the viewscreen; keeping the SAME code across a host drop needs persistence in the service and is #1115's."
+        - "[ai] There is no route flag left. `?rendezvous=<url>` survives as a SERVICE override for a local wrangler dev; the #1111 opt-in spellings are ignored rather than honoured, so an old bookmark opens the game instead of dialling a host called \"on\". A fragment that is not a valid code is not a third route either — it goes through the same parse and gets a stated reason in front of the entry field."
+        - Inbound frames go through localiseTree in exactly one place; every console downstream assumes string ids are already resolved.
         - WebSocket and RTCPeerConnection come from an injectable factory pair, which is what lets the browser smoke suite drive the whole path with no real WebRTC and what a native in-process station pane will supply later.
-      open_questions:
-        - The lossy unordered snapshot channel, reconnect/backoff and PeerJS retirement are #1112; #1111 opens only the reliable channel.
     architecture:
       kind: transport-adapter
       authority: non-authoritative
@@ -154,12 +158,19 @@ entities:
       paths:
         - gui/rendezvous-transport.js
         - gui/rendezvous-protocol.js
+        - gui/host-peer-routing.js
+        - gui/connection-manager.js
         - server.html
         - client.html
-      symbols: [createRendezvousHost, createRendezvousJoiner, joinRouteFromLocation]
+      symbols: [createRendezvousHost, createRendezvousJoiner, joinRouteFromLocation, outboundTargets]
       tests:
         - tests/client/rendezvous-transport.test.js
+        - tests/client/host-peer-routing.test.js
         - tests/smoke/rendezvous-join.spec.js
+        - tests/smoke/multi-client-crew.spec.js
+        - tests/smoke/snapshot-channel.spec.js
+        - tests/smoke/reconnect-midgame-sever.spec.js
+        - tests/smoke/transport-shim.spec.js
 
   - component: join-compatibility-gate
     core:
@@ -173,8 +184,9 @@ entities:
         one version authority rather than two.
       rationale:
         - The rendezvous service's version GUID is coarse discovery advice; p2p-human-readable-join-namespaces forbids it replacing the host handshake, so the verdict is computed in Rust and only relayed by JavaScript.
-        - An absent stamp is admitted, because the PeerJS route has never stamped anything and #1111 is additive; a garbled stamp is refused, because a broken stamp is not evidence of compatibility.
+        - "[ai] A stamp is REQUIRED since #1112: absent and garbled are both refused as client-stamp-missing. #1111 admitted an absent one because PeerJS was still the default route and had never stamped anything, so refusing the unstamped would have locked out the shipped join path. With PeerJS retired, every client that can reach a host is a built Phoenix bundle carrying the field, so admitting the silent case would leave the only version-skew hole exactly where a stale cached bundle sits."
         - A host that has not yet loaded a manifest binds the protocol half only — a browser host in the lobby has no content identity to compare, and refusing every phone until it does would be a race rather than a safety property.
+        - "[ai] The host page still admits when it cannot reach wasm_check_client_stamp at all. A host that cannot ask cannot refuse, and locking out every phone because an export was unreachable is a worse failure than admitting one build the check would have caught."
     architecture:
       kind: version-gate
       authority: authoritative

@@ -489,7 +489,21 @@ pub const SNAPSHOT_FORMAT: u32 = 14;
 /// recorded under other rules is not a save this build can honour, and the only
 /// available honesty is to refuse it — `Run` has no migration hook and is not
 /// meant to.
-pub const SIMULATION_RULES: &str = "0.1";
+///
+/// `"0.2"` — issue #1086 widened [`crate::sim_digest`] over the scenario's own
+/// state (the flag stores, the trigger latches, the scheduled queues, the named
+/// records and the whole of comms). Nothing about the PAYLOAD changed, so
+/// [`SNAPSHOT_FORMAT`] stays 13 and an unedited world's content digest is
+/// unchanged — which is exactly the problem this bump solves. Every pre-#1086
+/// save of a scripted world recorded a NARROWER digest than this build
+/// recomputes, and [`restore`]'s equality check would have reported that as "the
+/// save did not restore cleanly": a corruption message for a save that is
+/// perfectly intact and merely older than the rules. The rules dimension is the
+/// one that can say what actually happened, and refusing on it is what makes it
+/// say so. Earlier fold widenings (#1025/#1028/#1041/#1107/#1156) left this
+/// alone because each moved the digest only for the worlds that used the surface
+/// it added; this one moves it for essentially every scenario world.
+pub const SIMULATION_RULES: &str = "0.2";
 
 /// The authored data, computed rather than remembered.
 ///

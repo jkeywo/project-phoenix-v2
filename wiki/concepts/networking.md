@@ -153,7 +153,7 @@ Both pages show a coloured dot in the top-right:
 
 | State | Dot | Reached when |
 |---|---|---|
-| `connecting` | green (no label) | A first join attempt is in flight |
+| `connecting` | green (no label) | A join attempt is in flight and the host has never accepted this build — re-reported on each of the bounded pre-acceptance retries |
 | `ready` | green (no label) | The host accepted this build (`JoinAccepted`), or a code was issued |
 | `disconnected` | red + "Disconnected — reconnecting…" | An accepted link dropped **and a retry is scheduled** |
 | `error` | red + "Error — refresh to retry" | The loop has stopped: a terminal answer, or a pre-acceptance link failure that used up its bounded attempts |

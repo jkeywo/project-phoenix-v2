@@ -168,6 +168,65 @@ promise. Everything below still needs doing.
 
 ---
 
+## 3a. The rendezvous workers — the same trap, worse consequences
+
+`worker-rendezvous/` (issue #1111) is a **sibling** of `worker/`: same two-config
+pattern (`wrangler.toml` = `phoenix-rendezvous`, `wrangler.demo.toml` =
+`phoenix-rendezvous-demo`), same `ALLOWED_ORIGIN` var, same repo secrets for the
+deploy itself, and **no secrets of its own**. It is not a route on the TURN
+worker because it holds live state — the join-code registry, presence and the
+signalling relay live in a Durable Object.
+
+**Read §3 first, then read this sentence: for TURN a stale `ALLOWED_ORIGIN`
+degrades the connection; for rendezvous it means nobody can join at all.** There
+is no OpenRelay-shaped safety net here — a rendezvous service is not something a
+client can silently fall back to a free public copy of. Verification is the
+mitigation, so do not skip the health check.
+
+- [ ] **Decide the Durable Objects tier.** They are an account-plan decision, and
+      this is the repository's first use of any Cloudflare primitive beyond
+      Workers and Pages. Nothing deploys until the account allows them.
+- [ ] **Deploy the dev worker** — manual, like the dev TURN worker, and no CI
+      step deploys it, which is half of how §3's drift happened:
+
+      ```
+      cd worker-rendezvous && npx wrangler deploy
+      ```
+- [ ] **Deploy the demo worker** alongside the demo build:
+
+      ```
+      cd worker-rendezvous && npx wrangler deploy --config wrangler.demo.toml
+      ```
+
+      Add the matching `cloudflare/wrangler-action@v3` step to
+      `.github/workflows/deploy-demo.yml` (`workingDirectory: worker-rendezvous`)
+      when the demo build starts using this route, together with a
+      sweep-and-verify patch of the service URL literal — the same treatment
+      `DEV_TURN_URL` already gets, for the same reason: the literal is baked into
+      more than one built file, so a hardcoded file list would miss one.
+- [ ] **Verify each worker by hand after any origin change.** This service has a
+      health endpoint precisely because a WebSocket upgrade is awkward to curl
+      and an origin refusal is otherwise invisible from the page's side:
+
+      ```
+      curl -s -H "Origin: https://pp-demo.kiwigamedesign.co.uk" \
+        https://phoenix-rendezvous-demo.project-phoenix.workers.dev/v1/health
+      ```
+
+      Expect `{"ok":true,…,"origin_allowed":true}`, with the `origin` field
+      echoing what you sent. `"origin_allowed":false` is the 2026-08 failure
+      class, caught before a player meets it.
+- [ ] **Keep the two `ALLOWED_ORIGIN` lists in step with reality**, and **record
+      what you deployed** — date and value, per worker. Same reasoning as §3: a
+      worker only picks up `[vars]` on `wrangler deploy`.
+- [ ] **Note that the join route is opt-in in the shipped build.** Until #1112
+      retires PeerJS, both pages reach for the rendezvous service only when
+      opened with `?rendezvous` — or with a structured join code in the fragment,
+      which implies it. A rendezvous outage therefore cannot break the PeerJS
+      route today.
+
+---
+
 ## 4. Native host — packaging and hosting
 
 `phoenix-host` builds and runs today, and the tests cover it, but nothing about

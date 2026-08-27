@@ -1,0 +1,168 @@
+entities:
+  - component: join-code-scheme
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Typed Join-Code Scheme
+      summary: >-
+        Pure canonicalisation, composition and parsing of PROJECT_GUID_VERSION_GUID_CODE join
+        identifiers, with distinct stable client and server project GUIDs, one compatible-release
+        version GUID, five-letter suffixes and an authored deny-list. Normal entry supplies only the
+        suffix from local project/version context; the full form is what a QR fragment or a paste
+        carries.
+      rationale:
+        - The alphabet excludes every letter the confusable map folds away, so a minted code always survives the normalisation that makes it typeable.
+        - Deny-list entries are authored in ordinary spelling and canonicalised before comparison, so one entry refuses every confusable spelling of the word.
+        - Machine reasons map to strings.csv ids in the one module, so the phone and the host page cannot describe the same failure differently.
+    architecture:
+      kind: identifier-scheme
+      authority: non-authoritative
+      runs_in: [host-browser-runtime, phone-browser-runtime, node-tooling-runtime]
+    implementation:
+      status: declared
+      paths: [gui/join-code.js, assets/join/join-codes.json]
+      symbols: [canonicaliseSuffix, validateSuffix, parseJoinCode, mintSuffix]
+      tests: [tests/client/join-code.test.js]
+
+  - component: rendezvous-service
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Phoenix Rendezvous Service
+      summary: >-
+        Secure-WebSocket rendezvous and signalling service owning typed join-code lookup, code
+        issue and lifecycle, admission state, presence and the WebRTC signalling relay. A sibling
+        Cloudflare Worker to the stateless TURN-credential worker, with the live registry in a
+        Durable Object and the whole protocol in a transport-free state machine beside it.
+      rationale:
+        - One registry instance sees both typed namespaces and every active release at once, which is the only way unknown, wrong-type and version-mismatch stay three answers instead of one.
+        - The Worker adapter decides nothing, so the contract tests drive the shipped protocol without wrangler, miniflare or a socket.
+        - Issue #1111 issues codes in both namespaces but admits joins only to the client one; enabling server-code joining (#1114) adds an entry to joinableNamespaces rather than reshaping the lookup.
+        - It replaces the public PeerJS broker for the crew star, per p2p-delta-transport-is-a-star-today; the crew protocol itself is untouched.
+    architecture:
+      kind: signalling-service
+      authority: non-authoritative
+      owns: [join-code-registry-state]
+      receives: [rendezvous-signalling-frame]
+      platforms:
+        allowed: [browser]
+        forbidden: [host-only]
+    implementation:
+      status: declared
+      paths:
+        - worker-rendezvous/src/registry.js
+        - worker-rendezvous/src/index.js
+        - worker-rendezvous/wrangler.toml
+        - worker-rendezvous/wrangler.demo.toml
+      symbols: [createRegistry, RendezvousRegistry]
+      tests: [tests/client/rendezvous-registry.test.js]
+
+  - state: join-code-registry-state
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Join-Code Registry State
+      summary: >-
+        Live map from a typed (project, version, suffix) identifier to the host socket holding it,
+        with its admission state and attached joiner presence. Transport-plane only: it never
+        enters simulation state, a snapshot, or another ship host's state.
+      rationale:
+        - p2p-human-readable-join-namespaces forbids a join code being stored in authoritative simulation state or shared between hosts; keeping the registry outside every host process is what makes that structural rather than a rule to remember.
+        - A host's code dies with its socket in #1111. Rotation, stale-record invalidation and rebinding a code to a replacement host are #1115 and #1120.
+    architecture:
+      classification: transport
+      owner: rendezvous-service
+      writers: [rendezvous-service]
+    implementation:
+      status: declared
+      paths: [worker-rendezvous/src/registry.js]
+      symbols: [createRegistry]
+      tests: [tests/client/rendezvous-registry.test.js]
+
+  - message: rendezvous-signalling-frame
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Rendezvous Signalling Frame
+      summary: >-
+        The versioned JSON vocabulary between a host or client page and the rendezvous service —
+        host-open, host-admission, host-close, resolve, join, signal, leave inbound; hosted,
+        resolved, joined, peer-joined, peer-left, signal, closed, error outbound. Every frame
+        carries its protocol revision and a frame from another revision is refused rather than
+        guessed at.
+      rationale:
+        - Deliberately NOT a ClientMessage/ServerMessage variant — p2p-delta-transport-is-a-star-today forbids layering transport concerns onto the crew protocol, which is unchanged by this work.
+        - Failures are a stable machine reason, never prose, so the service ships no player-visible text and the phone resolves the wording through strings.csv.
+    architecture:
+      authority: request
+      producer: [rendezvous-transport-bridge]
+      consumer: [rendezvous-service]
+      validator: [rendezvous-service]
+      trust_boundary: client-to-host
+      payload: RendezvousFrame
+    implementation:
+      status: declared
+      paths: [worker-rendezvous/src/registry.js, gui/rendezvous-transport.js]
+      tests: [tests/client/rendezvous-registry.test.js, tests/client/rendezvous-transport.test.js]
+
+  - component: rendezvous-transport-bridge
+    core:
+      status: partially-implemented
+      confidence: confirmed
+      title: Rendezvous Transport Bridge
+      summary: >-
+        The browser halves of the Phoenix join path: a host that registers, is issued a code and
+        answers offers into the existing Identify gate, and a client that resolves a typed code,
+        offers, opens a direct reliable DataChannel and completes the compatibility handshake
+        before speaking ordinary crew protocol. Additive in #1111 — the PeerJS bridge remains the
+        default route until #1112.
+      rationale:
+        - The host adapter presents the channel with PeerJS's DataConnection shape, so server.html's reserved-token refusal, duplicate-token dance and disconnect guard are reused rather than reimplemented.
+        - Inbound frames go through localiseTree exactly as the PeerJS path does; every console downstream assumes string ids are already resolved.
+        - WebSocket and RTCPeerConnection come from an injectable factory pair, which is what lets the browser smoke suite drive the whole path with no real WebRTC and what a native in-process station pane will supply later.
+      open_questions:
+        - The lossy unordered snapshot channel, reconnect/backoff and PeerJS retirement are #1112; #1111 opens only the reliable channel.
+    architecture:
+      kind: transport-adapter
+      authority: non-authoritative
+      sends: [rendezvous-signalling-frame, session-identify-command]
+      runs_in: [host-browser-runtime, phone-browser-runtime]
+      platforms:
+        allowed: [browser]
+        forbidden: [host-only]
+    implementation:
+      status: declared
+      paths: [gui/rendezvous-transport.js, server.html, client.html]
+      symbols: [createRendezvousHost, createRendezvousJoiner, joinRouteFromLocation]
+      tests:
+        - tests/client/rendezvous-transport.test.js
+        - tests/smoke/rendezvous-join.spec.js
+
+  - component: join-compatibility-gate
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Host Join Compatibility Gate
+      summary: >-
+        The host's authoritative protocol/content check on a joining client, run over the direct
+        DataChannel before Identify. Reuses the delivery version pin — the same DeliveryStamp and
+        check_client_stamp a native host enforces at /host/manifest.json — so a Phoenix host has
+        one version authority rather than two.
+      rationale:
+        - The rendezvous service's version GUID is coarse discovery advice; p2p-human-readable-join-namespaces forbids it replacing the host handshake, so the verdict is computed in Rust and only relayed by JavaScript.
+        - An absent stamp is admitted, because the PeerJS route has never stamped anything and #1111 is additive; a garbled stamp is refused, because a broken stamp is not evidence of compatibility.
+        - A host that has not yet loaded a manifest binds the protocol half only — a browser host in the lobby has no content identity to compare, and refusing every phone until it does would be a race rather than a safety property.
+    architecture:
+      kind: version-gate
+      authority: authoritative
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths:
+        - src/delivery/mod.rs
+        - src/delivery/stamp.rs
+        - src/server/bridge.rs
+        - src/core/codec.rs
+        - scripts/client-stamp.mjs
+      symbols: [check_join_stamp, parse_stamp_field, wasm_check_client_stamp, encode_join_verdict]
+      tests: [cargo test, tests/client/client-stamp.test.js]

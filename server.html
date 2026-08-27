@@ -194,6 +194,20 @@
       line-height: 1.35;
       -webkit-user-select: all; user-select: all;
     }
+    /* The five-letter join code (issue #1111). Sized to be read across a room
+       — that is the entire reason it exists next to a 90-character URL. */
+    #join-code-row {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+    }
+    #join-code-caption {
+      font-size: var(--text-xs); letter-spacing: var(--tracking-wide);
+      text-transform: uppercase; color: var(--ink-faint);
+    }
+    #join-code {
+      font-family: var(--font-mono); font-size: var(--text-display);
+      letter-spacing: var(--tracking-widest); color: var(--gold-bright);
+      -webkit-user-select: all; user-select: all;
+    }
     #top-bar {
       position: absolute; top: 0.75rem; right: 0.75rem; z-index: 20;
       display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; font-family: monospace;
@@ -1435,6 +1449,14 @@
             <span id="qr-url-label" data-i18n="server.qr_url_label">or type this in</span>
             <span id="qr-url"></span>
           </div>
+          <!-- The five letters a guest reads across the room and types into
+               their phone (issue #1111). Populated only when this host is
+               registered with a rendezvous service; the URL row above stays
+               the answer for the PeerJS route. -->
+          <div id="join-code-row" style="display:none">
+            <span id="join-code-caption" data-i18n="server.join.code_caption">or type this code</span>
+            <span id="join-code"></span>
+          </div>
         </div>
         <!-- Relay-degraded warning + inbound-connection ICE stage. Populated by
              initPeerJS(); empty (and invisible) in the normal healthy case. -->
@@ -1643,6 +1665,13 @@
        is only ever invoked from an async WASM callback registered near the
        bottom of this page, long after every module island here has loaded. -->
   <script type="module" src="gui/host-peer-routing.js"></script>
+
+  <!-- Typed five-letter join codes and the Phoenix rendezvous route (issue
+       #1111). Both publish onto window for the classic script below. Additive:
+       nothing here runs unless the page is opened with ?rendezvous, so the
+       PeerJS host block is untouched on an ordinary load. -->
+  <script type="module" src="gui/join-code.js"></script>
+  <script type="module" src="gui/rendezvous-transport.js"></script>
 
   <!-- ICE/TURN config bridge (issue #1226): gui/connection-manager.js is the
        single source of truth for the STUN pair, the OpenRelay TURN fallback
@@ -2185,6 +2214,69 @@
       .map(b => b.toString(16).padStart(2, '0')).join('');
     const joinUrl = location.href.replace(/[^/]*$/, '') + 'client/index.html#' + hostPeerId;
 
+    // ── Phoenix rendezvous (issue #1111) ───────────────────────────────────
+    // Opt-in per page load: `?rendezvous` uses the built-in service,
+    // `?rendezvous=<url>` another one, and no parameter at all leaves this
+    // host on the PeerJS route exactly as before. The five-letter code the
+    // service issues replaces a 32-hex peer id in a ~90-character URL as the
+    // thing a guest across the room can actually act on.
+    //
+    // Resolved inside initPeerJS() rather than here, and only after its first
+    // await: this classic script is evaluated during parsing, when the deferred
+    // `gui/rendezvous-transport.js` module has not run and window.rendezvousTransport
+    // does not exist yet. Same hazard the ICE-config latch below exists for.
+    let rendezvousBase = null;
+    let rendezvousActive = false;
+    // Held so a PeerJS retry — which re-runs initPeerJS() after a transient
+    // signalling error — cannot register a SECOND host record and mint a
+    // second code while the first one is still live. The rendezvous route has
+    // no equivalent transient failure of its own to recover from here.
+    let rendezvousHost = null;
+
+    /** This host's delivery stamp as `<protocol>/<content_id>/<content_epoch>`. */
+    function hostDeliveryStampField() {
+      try {
+        const bindings = window.wasmBindings;
+        if (!bindings || typeof bindings.wasm_delivery_stamp !== 'function') return null;
+        const s = JSON.parse(bindings.wasm_delivery_stamp());
+        return `${s.protocol}/${s.content_id}/${s.content_epoch}`;
+      } catch (_) {
+        // Published to the rendezvous as ADVISORY discovery metadata only, so
+        // not knowing it yet costs a joiner nothing — the binding handshake
+        // runs on the DataChannel later, when the host certainly does know.
+        return null;
+      }
+    }
+
+    /** Paint an issued join code: the letters, the QR and the copyable link. */
+    function showJoinCode(code) {
+      const url = window.rendezvousTransport.joinUrlForCode(
+        location.href, code.full, rendezvousBase,
+      );
+      const canvas = document.getElementById('qr');
+      if (canvas && typeof QRCode !== 'undefined') {
+        canvas.style.display = 'block';
+        QRCode.toCanvas(canvas, url, { width: 200 });
+      }
+      const qrLink = document.getElementById('qr-link');
+      if (qrLink) {
+        qrLink.href = url;
+        qrLink.onclick = (e) => {
+          e.preventDefault();
+          window.open(url, '_blank', 'popup,noopener,width=440,height=800');
+        };
+      }
+      // Written from the one `url` variable, like the PeerJS path, so the QR
+      // and the text under it can never disagree.
+      const qrUrl = document.getElementById('qr-url');
+      if (qrUrl) qrUrl.textContent = url;
+      const codeEl = document.getElementById('join-code');
+      if (codeEl) codeEl.textContent = code.suffix;
+      const row = document.getElementById('join-code-row');
+      if (row) row.style.display = '';
+      setConnectionStatus('ready');
+    }
+
     // ── ICE config latch (issue #1226) ─────────────────────────────────────
     // gui/connection-manager.js's fetchIceServers() is now the single source
     // of truth for the STUN/TURN server list and the worker→OpenRelay
@@ -2212,6 +2304,14 @@
       const { servers: iceServers, relayAvailable, relaySource } = await getIceServers();
       console.log('[PeerJS] ICE config:', iceServers.map(s => s.urls));
       console.log(`[PeerJS] host peer ID: ${hostPeerId}`);
+
+      // Safe to ask now: the ICE latch above only resolves once a module has
+      // run, so every deferred module island — including the join-code and
+      // rendezvous ones — has evaluated by this point (issue #1111).
+      rendezvousBase = window.rendezvousTransport
+        ? window.rendezvousTransport.rendezvousBaseFromLocation(location.search)
+        : null;
+      rendezvousActive = !!rendezvousBase;
 
       // Lobby diagnostics under the QR: relay-degraded warning plus the ICE
       // stage of any inbound client that is struggling to complete. When ICE
@@ -2248,6 +2348,11 @@
       peer.on('open', () => {
         console.log('[PeerJS] signaling open — ready for clients');
         setConnectionStatus('ready');
+        // When this host is also registered with a rendezvous service, the
+        // join panel belongs to the five-letter code — writing the PeerJS URL
+        // over it would leave whichever finished last on screen. The PeerJS
+        // peer itself stays up, so both routes remain joinable.
+        if (rendezvousActive) return;
         const canvas = document.getElementById('qr');
         canvas.style.display = 'block';
         QRCode.toCanvas(canvas, joinUrl, { width: 200 });
@@ -2274,6 +2379,171 @@
         setConnectionStatus('disconnected');
         peer.reconnect();
       });
+
+      // Everything a client connection does AFTER it exists: the Identify
+      // gate, the reserved-token refusal, the duplicate-token dance, the
+      // host-intercepted message types and the disconnect guard. Extracted
+      // from peer.on('connection') (issue #1111) so the Phoenix rendezvous
+      // route below reuses it verbatim rather than growing a second, quietly
+      // different copy — `conn` only has to offer PeerJS's DataConnection
+      // shape (`peer`, `open`, `send`, `close`, `on('data'|'close')`), which
+      // gui/rendezvous-transport.js's channel adapter also provides.
+      function attachHostConn(conn, onIdentified) {
+        const shortId = String(conn.peer).slice(0, 8);
+
+        conn.on('data', (raw) => {
+          const json = typeof raw === 'string' ? raw : JSON.stringify(raw);
+          let token = peerTokens.get(conn.peer);
+
+          // First message from this peer must be Identify — extract the token
+          if (!token) {
+            try {
+              const msg = JSON.parse(json);
+              if (msg.type === 'Identify') {
+                const claimed = msg.data && msg.data.token;
+                // A peer's token is self-declared, and two token shapes are
+                // RESERVED for the host runtime: LOCAL_CONSOLE_TOKEN, which
+                // command admission grants a blanket bypass
+                // (`src/command_admission/policy.rs`) and which the settings
+                // cog's mid-mission exit-to-lobby is keyed on (issue #939), and
+                // the `ai:` prefix, which routes commands to an NPC's own
+                // entity (`admit_system_commands`). A phone that simply typed
+                // one of those into its Identify would inherit host authority,
+                // so refuse the connection outright rather than dispatch a
+                // single message under it. `handle_identify` refuses the same
+                // shapes server-side; this is the gate that matters, because
+                // every LATER message from this peer is dispatched under the
+                // token recorded here.
+                if (!isPeerTokenAllowed(claimed)) {
+                  console.warn(
+                    `[host] REJECTED ${shortId}… — Identify claimed the reserved ` +
+                    `token "${String(claimed).slice(0, 24)}", which only the host ` +
+                    `runtime may use. Closing the connection.`,
+                  );
+                  conn.close();
+                  return;
+                }
+                token = claimed;
+                // Duplicate-token detection. If another open connection already
+                // claims this token, update tokenConns to the new connection
+                // first (so the old close handler's guard prevents a spurious
+                // wasm_player_disconnected), then close the prior connection.
+                // The old device becomes a ghost — its WebRTC link is severed
+                // so it can't receive further state updates.
+                const prior = tokenConns.get(token);
+                peerTokens.set(conn.peer, token);
+                tokenConns.set(token, conn);
+                // Only now is this connection's token known. A transport whose
+                // lossy channel can finish negotiating BEFORE Identify names
+                // the token needs that moment to promote it (the PeerJS route
+                // does; see its call site). Passing the hook in keeps one copy
+                // of the gate above rather than one per transport.
+                if (typeof onIdentified === 'function') onIdentified(token, prior);
+                if (prior && prior !== conn && (prior.open || prior.readyState === 'open')) {
+                  console.warn(
+                    `[host] DUPLICATE TOKEN ${token.slice(0, 8)}… — a second device ` +
+                    `identified with a token already held by an open connection. ` +
+                    `Closing the earlier connection — the old device will become a ghost.`,
+                  );
+                  prior.close();
+                }
+                console.log(`[host] ${shortId}… identified as token ${token.slice(0, 8)}…`);
+                // Deliver the QR-first scenario catalog to a phone that
+                // connects before the world is loaded (issue #755). Once a
+                // world is loading, phones get Welcome instead (guarded inside).
+                sendCatalogTo(conn);
+              }
+            } catch (_) { return; }
+          }
+
+          if (token) {
+            // Intercept ToggleQrCode — purely visual server-side toggle, no Rust message needed.
+            try {
+              const parsed = JSON.parse(json);
+              if (parsed.type === 'ToggleQrCode') {
+                qrVisible = !qrVisible;
+                const qrOverlay = document.getElementById('overlay');
+                if (qrOverlay) qrOverlay.style.display = qrVisible ? 'block' : 'none';
+                return;
+              }
+              // QR-first pre-scenario selections (issue #755): phones send these
+              // over the datachannel before any world is loaded, so Bevy isn't
+              // running to consume them — feed the host-runtime arbiter directly.
+              // No token gate: a phone can make the first valid selection.
+              if (parsed.type === 'SelectScenario') {
+                arbiterSelectScenario(parsed.data && parsed.data.scenario_id);
+                return;
+              }
+              if (parsed.type === 'SelectPlayerShip') {
+                arbiterSelectShip(parsed.data && parsed.data.template_path);
+                return;
+              }
+            } catch (_) {}
+            dispatchToWasm(token, json);
+          }
+        });
+
+        conn.on('close', () => {
+          clientIceStages.delete(shortId);
+          renderConnDiag();
+          const token = peerTokens.get(conn.peer);
+          console.log(`[host] connection closed — ${shortId}… (token ${token ? token.slice(0, 8) + '…' : 'unknown'})`);
+          peerTokens.delete(conn.peer);
+          if (!token) return;
+          // On a browser refresh the new page may have already reconnected
+          // (same token, new peer id) before this stale connection's close
+          // arrives. Only tear the token down if THIS conn is still the live
+          // one — otherwise we'd disconnect the freshly-restored session and
+          // delete the new routing entry.
+          if (tokenConns.get(token) !== conn) return;
+          tokenSnapshotConns.delete(token);
+          wasmBindings.wasm_player_disconnected(token);
+          tokenConns.delete(token);
+        });
+      }
+
+      // ── Phoenix rendezvous host (issue #1111) ──────────────────────────────
+      // Opt-in and additive: without ?rendezvous this whole branch is dead and
+      // the PeerJS block below is exactly what it was. With it, this host also
+      // registers with the rendezvous service, is issued a five-letter code,
+      // and answers offers into the SAME attachHostConn above.
+      if (rendezvousActive && !rendezvousHost && window.rendezvousTransport) {
+        const transport = window.rendezvousTransport;
+        rendezvousHost = transport.createRendezvousHost({
+          base: rendezvousBase,
+          stamp: hostDeliveryStampField(),
+          iceServers,
+          // The authoritative protocol/content verdict, answered by Rust's own
+          // delivery::check_join_stamp — never re-decided in JavaScript, and
+          // never delegated to the rendezvous service's version advice.
+          checkStamp: (clientStamp) => {
+            try {
+              const bindings = window.wasmBindings;
+              if (!bindings || typeof bindings.wasm_check_client_stamp !== 'function') {
+                return { ok: true };
+              }
+              const verdict = JSON.parse(bindings.wasm_check_client_stamp(clientStamp || ''));
+              return verdict.ok
+                ? { ok: true }
+                : { ok: false, code: verdict.code, detail: verdict.detail };
+            } catch (e) {
+              // A host that cannot ask cannot refuse: admit, exactly as the
+              // PeerJS route does today, rather than locking everyone out.
+              console.warn('[rendezvous] stamp check unavailable — admitting', e);
+              return { ok: true };
+            }
+          },
+          onCode: (code) => showJoinCode(code),
+          onConnection: (conn) => {
+            console.log(`[rendezvous] channel open — ${String(conn.peer).slice(0, 8)}…`);
+            attachHostConn(conn);
+          },
+          onError: (reason, detail) => {
+            console.warn(`[rendezvous] ${reason}${detail ? `: ${detail}` : ''}`);
+          },
+          onLog: (msg) => console.log(msg),
+        });
+      }
 
       peer.on('connection', (conn) => {
         const shortId = conn.peer.slice(0, 8);
@@ -2380,115 +2650,16 @@
           }
         });
 
-        conn.on('data', (raw) => {
-          const json = typeof raw === 'string' ? raw : JSON.stringify(raw);
-          let token = peerTokens.get(conn.peer);
-
-          // First message from this peer must be Identify — extract the token
-          if (!token) {
-            try {
-              const msg = JSON.parse(json);
-              if (msg.type === 'Identify') {
-                const claimed = msg.data && msg.data.token;
-                // A peer's token is self-declared, and two token shapes are
-                // RESERVED for the host runtime: LOCAL_CONSOLE_TOKEN, which
-                // command admission grants a blanket bypass
-                // (`src/command_admission/policy.rs`) and which the settings
-                // cog's mid-mission exit-to-lobby is keyed on (issue #939), and
-                // the `ai:` prefix, which routes commands to an NPC's own
-                // entity (`admit_system_commands`). A phone that simply typed
-                // one of those into its Identify would inherit host authority,
-                // so refuse the connection outright rather than dispatch a
-                // single message under it. `handle_identify` refuses the same
-                // shapes server-side; this is the gate that matters, because
-                // every LATER message from this peer is dispatched under the
-                // token recorded here.
-                if (!isPeerTokenAllowed(claimed)) {
-                  console.warn(
-                    `[PeerJS] REJECTED ${shortId}… — Identify claimed the reserved ` +
-                    `token "${String(claimed).slice(0, 24)}", which only the host ` +
-                    `runtime may use. Closing the connection.`,
-                  );
-                  conn.close();
-                  return;
-                }
-                token = claimed;
-                // Duplicate-token detection. If another open connection already
-                // claims this token, update tokenConns to the new connection
-                // first (so the old close handler's guard prevents a spurious
-                // wasm_player_disconnected), then close the prior connection.
-                // The old device becomes a ghost — its WebRTC link is severed
-                // so it can't receive further state updates.
-                const prior = tokenConns.get(token);
-                peerTokens.set(conn.peer, token);
-                tokenConns.set(token, conn);
-                // A duplicate-token takeover changes ownership of both
-                // transports. Remove the prior snapshot route before promoting
-                // the replacement so a not-yet-open replacement falls back to
-                // its reliable connection rather than retaining a closed raw
-                // channel entry owned by the old DataConnection.
-                if (prior && prior !== conn) tokenSnapshotConns.delete(token);
-                promoteSnapshot();
-                if (prior && prior !== conn && prior.open) {
-                  console.warn(
-                    `[PeerJS] DUPLICATE TOKEN ${token.slice(0, 8)}… — a second device ` +
-                    `identified with a token already held by an open connection. ` +
-                    `Closing the earlier connection — the old device will become a ghost.`,
-                  );
-                  prior.close();
-                }
-                console.log(`[PeerJS] ${shortId}… identified as token ${token.slice(0, 8)}…`);
-                // Deliver the QR-first scenario catalog to a phone that
-                // connects before the world is loaded (issue #755). Once a
-                // world is loading, phones get Welcome instead (guarded inside).
-                sendCatalogTo(conn);
-              }
-            } catch (_) { return; }
-          }
-
-          if (token) {
-            // Intercept ToggleQrCode — purely visual server-side toggle, no Rust message needed.
-            try {
-              const parsed = JSON.parse(json);
-              if (parsed.type === 'ToggleQrCode') {
-                qrVisible = !qrVisible;
-                const qrOverlay = document.getElementById('overlay');
-                if (qrOverlay) qrOverlay.style.display = qrVisible ? 'block' : 'none';
-                return;
-              }
-              // QR-first pre-scenario selections (issue #755): phones send these
-              // over the datachannel before any world is loaded, so Bevy isn't
-              // running to consume them — feed the host-runtime arbiter directly.
-              // No token gate: a phone can make the first valid selection.
-              if (parsed.type === 'SelectScenario') {
-                arbiterSelectScenario(parsed.data && parsed.data.scenario_id);
-                return;
-              }
-              if (parsed.type === 'SelectPlayerShip') {
-                arbiterSelectShip(parsed.data && parsed.data.template_path);
-                return;
-              }
-            } catch (_) {}
-            dispatchToWasm(token, json);
-          }
-        });
-
-        conn.on('close', () => {
-          clientIceStages.delete(shortId);
-          renderConnDiag();
-          const token = peerTokens.get(conn.peer);
-          console.log(`[PeerJS] connection closed — ${shortId}… (token ${token ? token.slice(0, 8) + '…' : 'unknown'})`);
-          peerTokens.delete(conn.peer);
-          if (!token) return;
-          // On a browser refresh the new page may have already reconnected
-          // (same token, new peer id) before this stale connection's close
-          // arrives. Only tear the token down if THIS conn is still the live
-          // one — otherwise we'd disconnect the freshly-restored session and
-          // delete the new routing entry.
-          if (tokenConns.get(token) !== conn) return;
-          tokenSnapshotConns.delete(token);
-          wasmBindings.wasm_player_disconnected(token);
-          tokenConns.delete(token);
+        // Identify gate, token maps and disconnect handling — shared verbatim
+        // with the Phoenix rendezvous route (issue #1111). The hook is this
+        // route's own: a raw snapshot channel may already have opened before
+        // Identify named the token, so promote it (idempotently) here, and drop
+        // the prior route first on a duplicate-token takeover so a not-yet-open
+        // replacement falls back to its reliable connection rather than
+        // retaining a closed raw channel owned by the old DataConnection.
+        attachHostConn(conn, (token, prior) => {
+          if (prior && prior !== conn) tokenSnapshotConns.delete(token);
+          promoteSnapshot();
         });
 
         conn.on('error', (err) => console.error(`[PeerJS] connection error — ${shortId}…`, err));

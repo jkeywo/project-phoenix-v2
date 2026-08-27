@@ -70,6 +70,25 @@ import {
 
 export { SHIM };
 
+// The Phoenix rendezvous + WebRTC stand-in (issue #1111). Inert on an ordinary
+// page load: gui/rendezvous-transport.js only reaches for these factories when
+// a page is opened with ?rendezvous, so every existing PeerJS spec is
+// unaffected by its presence.
+export const RENDEZVOUS_SHIM = fs.readFileSync(
+  path.join(__dirname, 'rendezvous-shim.js'),
+  'utf-8',
+);
+
+// The shim runs the REAL rendezvous registry inside the host page rather than a
+// second implementation of it, so that module has to be reachable as a URL. It
+// is not part of dist/ (it is a Cloudflare Worker's source), so it is served
+// from disk through a route. Its own `../../gui/join-code.js` import resolves
+// against the site root, where the built gui/ directory already sits.
+export const RENDEZVOUS_REGISTRY_JS = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'worker-rendezvous', 'src', 'registry.js'),
+  'utf-8',
+);
+
 // Stub CDN scripts so they don't overwrite the shim or block execution.
 // In CI environments the unpkg / jsdelivr CDN can be slow or blocked, and
 // synchronous <script src="..."> tags block all inline scripts below them.
@@ -171,6 +190,14 @@ export const test = base.extend({
     const ctx = await browser.newContext();
     await installTransportFixture(ctx);
     await ctx.addInitScript({ content: STUB_QRCODE });
+    // The PeerJS SHIM itself is installed by installTransportFixture() above
+    // (issue #1112 prep); only the rendezvous stand-in is added here.
+    await ctx.addInitScript({ content: RENDEZVOUS_SHIM });
+
+    // Serve the rendezvous service's own registry module to the host page.
+    await ctx.route('**/__rendezvous-registry.js', (route) =>
+      route.fulfill({ contentType: 'application/javascript', body: RENDEZVOUS_REGISTRY_JS }),
+    );
 
     // Intercept the QR CDN load — stub QRCode so it doesn't block. The
     // transport CDN is intercepted by installTransportFixture() above.

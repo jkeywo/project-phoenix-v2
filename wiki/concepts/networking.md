@@ -1,14 +1,14 @@
 ---
 title: Networking
 type: concept
-tags: [networking, peerjs, webrtc, session-token, star-topology, datachannel, snapshot]
-sources: [server.html, client.html, gui/connection-manager.js, gui/session-token.js, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/ship/shields.rs, AGENTS.md]
+tags: [networking, peerjs, webrtc, rendezvous, join-code, session-token, star-topology, datachannel, snapshot]
+sources: [server.html, client.html, gui/connection-manager.js, gui/rendezvous-transport.js, gui/join-code.js, worker-rendezvous/src/registry.js, gui/session-token.js, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/weapons/blackboard.rs, src/ship/shields.rs, AGENTS.md]
 updated: 2026-08-28
 ---
 
 # Networking
 
-Phoenix uses **PeerJS** (WebRTC + a public signalling broker) in a **star topology** with **two DataChannels** per client.
+Phoenix uses **PeerJS** (WebRTC + a public signalling broker) in a **star topology** with **two DataChannels** per client. Since issue #1111 there is a second, opt-in join path beside it — a project-owned rendezvous service and a typed five-letter join code — described at the end of this page.
 
 ## Topology
 
@@ -125,14 +125,28 @@ The worker validates CORS against the comma-separated `ALLOWED_ORIGIN` list in
 changes after `wrangler deploy`; an incorrect allowlist blocks credential
 fetches and removes TURN availability for clients.
 
+## The Phoenix rendezvous route (issue #1111) — a second, opt-in join path
+
+PeerJS is still the default and is unchanged. Beside it there is now a project-owned join path, which #1112 will make the only one.
+
+- **Join identifiers** are `PROJECT_GUID_VERSION_GUID_CODE`. `gui/join-code.js` is the pure scheme — canonicalisation (upper-case; `0`→`O`, `1`/`L`→`I`, `J` distinct), five-letter validation, deny-list refusal, compose/parse and minting — reading its alphabet, GUIDs and deny-list from the authored `assets/join/join-codes.json`. Client and server joining have separate project GUIDs, so a fleet code typed into the crew field is a *wrong-type* answer rather than a miss.
+- **The service** is `worker-rendezvous/`, a sibling Cloudflare Worker to the TURN one, with a Durable Object holding the live registry. All of its behaviour is the transport-free state machine in `worker-rendezvous/src/registry.js` (`/v1/host` and `/v1/join` WebSockets plus a `/v1/health` origin check); the Worker adapter decides nothing, which is what lets `tests/client/rendezvous-registry.test.js` cover the protocol with no wrangler.
+- **The browser halves** are `gui/rendezvous-transport.js`. The host registers, is issued a code, and hands each opened channel to `server.html`'s existing Identify gate through a PeerJS-shaped adapter (`attachHostConn` is shared by both routes). The client resolves a typed code, offers, opens one reliable DataChannel and sends `Identify`. `localiseTree` runs on every inbound frame, exactly as on the PeerJS path.
+- **The compatibility handshake** (`JoinHandshake` / `JoinAccepted` / `JoinRefused`) is transport-plane, not a `ClientMessage`. The verdict comes from Rust — `wasm_check_client_stamp` → `delivery::check_join_stamp` → the same `check_client_stamp` the native host enforces over HTTP — so rendezvous version advice can never become the authority. The client's own stamp is written into `<meta name="phoenix-client-stamp">` by `scripts/build-client.mjs`; an absent stamp is admitted, a garbled one is not.
+- **Turning it on:** `?rendezvous` (built-in service), `?rendezvous=<url>`, or a structured code in the client page's fragment, which implies it. `?rendezvous=off` restores the old no-host-id dead end.
+- **Deploy trap:** the same `ALLOWED_ORIGIN` drift as the TURN worker, except a stale value here means nobody can join at all rather than nobody getting relay. `/v1/health` echoes `origin_allowed` for exactly that check — see `docs/delivery-checklist.md` §3a.
+
 ## Why no real backend
 
-- Game data is peer-to-peer. Only the WebRTC handshake touches PeerJS's public broker.
-- Hosting is GitHub Pages — pure static.
+- Game data is peer-to-peer. Only the WebRTC handshake touches a signalling service — PeerJS's public broker today, Phoenix's own rendezvous Worker on the #1111 route.
+- Hosting is GitHub Pages — pure static. The rendezvous Worker holds transport metadata only; no game state lives on it.
+- Self-hosted PeerJS was an explicit out-of-scope item from PRD #1. PRD #1093 reverses that by *replacing* PeerJS rather than self-hosting it.
 
 ## Smoke testing without WebRTC
 
 The Playwright suite swaps `window.Peer` for a `BroadcastChannel`-backed shim before any page script runs (`addInitScript`). The shim (`tests/smoke/peerjs-shim.js`) includes a `DataChannel` implementation that propagates sub-channel creation via control messages, so the snapshot DataChannel works end-to-end in smoke tests. Same surface, no signalling server. See [Testing Strategy](./testing-strategy.md) and `tests/smoke/snapshot-channel.spec.js`.
+
+`tests/smoke/rendezvous-shim.js` does the same job one layer lower for the Phoenix route: a fake WebSocket onto the **real** `worker-rendezvous` registry running inside the host page, and a fake `RTCPeerConnection` that pairs two pages' DataChannels over a `BroadcastChannel`. Installed as `window.PhoenixTransportFactories`, which `gui/rendezvous-transport.js` takes its socket and peer from — so only the transport is faked, never the protocol. See `tests/smoke/rendezvous-join.spec.js`.
 
 ## Related
 

@@ -3345,12 +3345,14 @@
       // member. The other raiser is a payload over the SDP-negotiated
       // max-message-size — 262144 bytes between two Chromiums — on a raw
       // RTCDataChannel with no chunking layer under it (PeerJS used to provide
-      // one). Honestly stated: nothing shipped approaches that ceiling. The
-      // largest reliable payloads are the scenario catalogue and a ship manual,
-      // both kilobytes; snapshots are per-tick entity state and smaller; mod
-      // packs never cross this wire (the host reads the ZIP locally and clients
-      // fetch content over HTTP). So a throw here means a dead link or a bug,
-      // and either way the rest of the bridge still gets its frame.
+      // one). Where the shipped payload classes stand against that ceiling is
+      // stated at gui/rendezvous-transport.js's adapter.send: the two that
+      // scale with content are WorldData (one EntitySnapshot per static
+      // entity; the largest authored world has 17) and the per-tick snapshot
+      // (tens of KB at worst), and mod packs never cross this wire. So a throw
+      // here is a dead link or a bug rather than an ordinary payload — and if
+      // one ever does cross the ceiling, ONE client loses that frame instead
+      // of the whole bridge losing the flush.
       const conns = window.hostPeerRouting.outboundTargets(target, deliveryClass, { tokenConns, tokenSnapshotConns });
       for (const c of conns) {
         try {

@@ -323,14 +323,17 @@ function connectionAdapter(peerId, channel, pc, hooks = {}) {
      * send, and a payload over the SDP-negotiated `max-message-size` (262144
      * bytes between two Chromiums, and the smallest ceiling any browser pair
      * negotiates in practice). This is a raw `RTCDataChannel` with no chunking
-     * layer under it — PeerJS used to provide one — so that ceiling is real,
-     * and the honest statement of where we stand against it is: nothing
-     * shipped approaches it. The largest reliable payloads are the scenario
-     * catalogue and a ship manual, both kilobytes; snapshots are per-tick
-     * entity state and smaller still; mod packs never cross this wire at all
-     * (the host reads the ZIP locally and clients fetch content over HTTP).
-     * A throw here therefore means a dead link or a bug, and either way the
-     * rest of the bridge still gets its frame.
+     * layer under it — PeerJS used to provide one — so that ceiling is real.
+     * Where the shipped payload classes actually stand against it, since a
+     * bare "it's fine" is worth nothing: the two that scale with content are
+     * `WorldData` (one EntitySnapshot per STATIC entity, and the largest world
+     * in assets/worlds authors 17 `[[entity]]` blocks) and the per-tick
+     * snapshot (dynamic entities — hundreds of asteroids at worst, a few tens
+     * of KB). Mod packs never cross this wire at all: the host reads the ZIP
+     * locally and clients fetch content over HTTP. So a throw here is a dead
+     * link or a bug rather than an ordinary payload — and if a future world
+     * ever does cross the ceiling, ONE client loses that frame, visibly,
+     * instead of the whole bridge silently losing the flush.
      */
     send(payload) {
       if (channel.readyState !== 'open') return;

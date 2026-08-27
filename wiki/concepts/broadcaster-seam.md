@@ -3,7 +3,7 @@ title: Broadcaster Seam
 type: concept
 tags: [broadcast, messages, audience, cadence, delivery-class, snapshot, reliable]
 sources: [src/core/broadcast/, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/lobby/server.rs, src/debug_overlay.rs]
-updated: 2026-08-27
+updated: 2026-08-28
 ---
 
 # Broadcaster Seam
@@ -59,17 +59,37 @@ direct Reliable exception because it must still publish while the fixed
 simulation loop is paused. `flush_outbound` in `src/server/bridge.rs` preserves
 the class at the Rust-to-JavaScript boundary.
 
-## Cache resets
+## Stable-keyed replication lifecycle
 
-Snapshot delta caches are registered in `src/core/broadcast/cache_registry.rs`. `reset_all` clears them on entry to `InProgress`, forcing a complete first publication for a new run. Domain caches such as `LastWeaponsUpdate` remain defined beside their producers but participate in the same reset contract. Shields has no delta cache: its sole periodic publisher reads the current authoritative component and targets only the live holder of the authored Shields System.
+`src/core/broadcast/lifecycle.rs` lets each replication owner register a
+`ReplicationLifecycleAdapter` under a stable semantic key with a reset callback,
+a reconnect projection callback, or both. The registry is a `BTreeMap`, so
+reset and reconnect runners invoke owners in lexical key order regardless of
+plugin insertion order. Reconnect callbacks return current permitted
+`ServerMessage` projections; the central caller targets them only to the
+reconnecting token as Snapshot traffic.
+
+Blackboards are the first migrated owner. `LastBroadcastBlackboards`, its live
+diff publisher, reset, and reconnect projector live together in
+`src/server_app/broadcast_publish.rs`. Reset also clears the per-recipient
+`LastVisibleRepairBlackboard`; reconnect sorts every current Blackboard by
+`SystemId`, applies the same Repair visibility policy as live publication, and
+does not mutate either cache.
+
+`src/core/broadcast/cache_registry.rs` is the transitional census for owners
+not yet migrated. It resets position, health, Hull, and Weapons caches. On
+reconnect it directly reconstructs Hull and Weapons plus uncached Shields;
+position and health travel in `Welcome`'s world snapshot. It retains
+specialized UUID pruning for position and health.
 
 ## Adding a producer
 
 1. Keep authoritative state in its owning domain.
 2. Build a registered producer or use `SimOutbox` for arbitrary per-message targets.
 3. Select the narrowest typed `Audience`, suitable `Cadence`, and explicit delivery class at the owning seam.
-4. Register the broadcaster from the owning plugin or `src/server_app/registration.rs`.
-5. Add an observable routing/cadence test; do not write directly to the bridge from the domain system.
+4. Register reset/reconnect behavior beside any replicated-state owner through a stable lifecycle key.
+5. Register the broadcaster from the owning plugin or `src/server_app/registration.rs`.
+6. Add an observable routing/cadence test; do not write directly to the bridge from the domain system.
 
 ## Related
 

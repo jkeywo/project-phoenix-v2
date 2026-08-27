@@ -23,6 +23,91 @@
 
 use super::*;
 
+/// Stable lifecycle key for the wire projection of per-System blackboards.
+pub(crate) const BLACKBOARD_REPLICATION_KEY: &str = "blackboards";
+
+/// Last live-broadcast blackboard state per System.
+///
+/// The live publisher compares `ShipSystemBlackboards` against this cache and
+/// emits only entries that changed. Its run reset and cache-independent
+/// reconnect projection are registered beside the publisher below.
+#[derive(Resource, Default)]
+pub struct LastBroadcastBlackboards(
+    pub  std::collections::HashMap<
+        crate::core::messages::SystemId,
+        crate::core::messages::SystemBlackboard,
+    >,
+);
+
+/// Register Blackboard-owned replication lifecycle behavior.
+///
+/// This is called once by the simulation composition root beside
+/// [`broadcast_blackboard_updates`]. The generic lifecycle runner sees only
+/// `BLACKBOARD_REPLICATION_KEY` and function pointers; cache types, visibility,
+/// and payload construction stay here with the live producer.
+pub(crate) fn register_blackboard_replication_lifecycle(app: &mut App) {
+    use crate::authoritative::{DeclareState, StateClass};
+    use crate::core::broadcast::{RegisterReplicationLifecycle, ReplicationLifecycleAdapter};
+
+    app.init_resource::<LastBroadcastBlackboards>()
+        .init_resource::<crate::console::repair::visibility::LastVisibleRepairBlackboard>()
+        .declare_state::<LastBroadcastBlackboards>(StateClass::Cache, "digest-exclusion-classes")
+        .declare_state::<crate::console::repair::visibility::LastVisibleRepairBlackboard>(
+            StateClass::Cache,
+            "digest-exclusion-classes",
+        )
+        .register_replication_lifecycle(
+            ReplicationLifecycleAdapter::new(BLACKBOARD_REPLICATION_KEY)
+                .with_reset(reset_blackboard_replication)
+                .with_reconnect(reconnect_blackboard_projection),
+        );
+}
+
+fn reset_blackboard_replication(world: &mut World) {
+    *world.resource_mut::<LastBroadcastBlackboards>() = LastBroadcastBlackboards::default();
+    world
+        .resource_mut::<crate::console::repair::visibility::LastVisibleRepairBlackboard>()
+        .clear();
+}
+
+/// Build every current Blackboard the reconnecting session is permitted to
+/// receive. This reads no delta cache and writes no projection cache.
+fn reconnect_blackboard_projection(world: &mut World, token: &str) -> Vec<ServerMessage> {
+    use crate::console::repair::visibility;
+    use crate::lobby::Sessions;
+
+    let hull_visibility = visibility::hull_visibility(world);
+    let station = world
+        .get_resource::<Sessions>()
+        .and_then(|sessions| sessions.0.station_for_token(token).cloned());
+    let mut query = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+    let Ok(blackboards) = query.single(world) else {
+        return Vec::new();
+    };
+
+    let mut updates: Vec<_> = blackboards
+        .0
+        .iter()
+        .map(|(system_id, blackboard)| {
+            (
+                system_id.clone(),
+                visibility::project_blackboard_for_token(
+                    hull_visibility.as_ref(),
+                    station.as_ref(),
+                    blackboard,
+                ),
+            )
+        })
+        .collect();
+    updates.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if updates.is_empty() {
+        Vec::new()
+    } else {
+        vec![ServerMessage::BlackboardUpdate { updates }]
+    }
+}
+
 /// Returns a [`SimBroadcaster`] pre-configured with the `ModifierAdded` and
 /// `ModifierRemoved` producers.
 ///
@@ -399,31 +484,12 @@ pub(crate) fn on_game_over_enter(
 /// multi-game restart case where stale cache from a previous game would
 /// otherwise suppress initial updates.
 ///
-/// Delegates to [`crate::core::broadcast::cache_registry::reset_all`] (issue
-/// #613), the single place that knows about all five shared, registry-covered
-/// broadcast delta caches. The repair path's per-token projection cache is
-/// cleared here too, without making it a registry member.
-pub(crate) fn reset_broadcast_caches_on_start(
-    mut hull: ResMut<LastBroadcastHull>,
-    mut positions: ResMut<LastBroadcastEntityPositions>,
-    mut health: ResMut<LastBroadcastEntityHealth>,
-    mut weapons: ResMut<LastWeaponsUpdate>,
-    mut last_bb: ResMut<LastBroadcastBlackboards>,
-    last_repair_bb: Option<ResMut<crate::console::repair::visibility::LastVisibleRepairBlackboard>>,
-) {
-    // `LastVisibleRepairBlackboard` stores per-token Repair projections (issue
-    // #737) outside the five-member `reset_all` registry; clear it alongside
-    // those registry-covered caches so a restarted game re-sends.
-    if let Some(mut last_repair_bb) = last_repair_bb {
-        last_repair_bb.clear();
-    }
-    crate::core::broadcast::cache_registry::reset_all(
-        &mut hull,
-        &mut positions,
-        &mut health,
-        &mut weapons,
-        &mut last_bb,
-    );
+/// The transitional cache census resets its remaining owners first; the
+/// stable-keyed lifecycle runner then invokes migrated owners (currently
+/// Blackboards) without knowing their resource types.
+pub(crate) fn reset_broadcast_caches_on_start(world: &mut World) {
+    crate::core::broadcast::cache_registry::reset_unregistered(world);
+    crate::core::broadcast::reset_registered_replication(world);
 }
 
 /// Emit `BlackboardUpdate` for any system whose blackboard has changed since
@@ -922,5 +988,233 @@ pub(crate) fn reconcile_runtime_entities(
                 ServerMessage::EntityDespawned { uuid: uuid.clone() },
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use crate::console::repair::visibility::{self, LastVisibleRepairBlackboard};
+    use crate::core::broadcast::{
+        reconnect_registered_replication, reset_registered_replication,
+        ReplicationLifecycleRegistry,
+    };
+    use crate::core::messages::{HelmBlackboard, RepairBlackboard, SystemBlackboard, SystemId};
+    use crate::entities::spawner::EntitySystemHull;
+    use crate::lobby::{Sessions, Target};
+    use crate::modifiers::repair_teams::RepairTeams;
+    use crate::ship::config::ShipConfig;
+    use crate::ship::damage::SystemHull;
+    use crate::ship_plugin::ShipConfigComponent;
+
+    fn helm_blackboard() -> SystemBlackboard {
+        SystemBlackboard::Helm(HelmBlackboard {
+            boost_battery: 1.0,
+            boost_enabled: true,
+            ..Default::default()
+        })
+    }
+
+    fn blackboard_lifecycle_app() -> App {
+        let config = ShipConfig::from_toml(
+            r#"
+[[station]]
+id = "helm"
+name = "Helm"
+description = "Flying."
+rank = "Ltn."
+
+[[station]]
+id = "engineering"
+name = "Engineering"
+description = "Fixing."
+rank = "Ltn."
+
+[[system]]
+id = "helm-radar"
+kind = "helm_radar"
+station = "helm"
+
+[[system]]
+id = "repair"
+kind = "repair"
+station = "engineering"
+"#,
+            &["helm_radar", "repair"],
+        )
+        .expect("Blackboard lifecycle fixture must parse");
+
+        let mut sessions = crate::lobby::session::SessionManager::new();
+        sessions.register("eng".into(), "Engineer".into()).unwrap();
+        sessions.register("pilot".into(), "Pilot".into()).unwrap();
+        sessions.set_station(
+            "eng",
+            Some(crate::core::messages::StationId("engineering".into())),
+        );
+        sessions.set_station(
+            "pilot",
+            Some(crate::core::messages::StationId("helm".into())),
+        );
+
+        let mut blackboards = ShipSystemBlackboards::default();
+        // The raw Repair payload deliberately contains detail. The projection
+        // must keep only the detail each recipient can see.
+        blackboards.0.insert(
+            SystemId("repair".into()),
+            SystemBlackboard::Repair(RepairBlackboard {
+                aggregate_hull_fraction: Some(0.5),
+                destroyed_hull_fraction: Some(0.25),
+                damageable_systems: vec![
+                    SystemId("core".into()),
+                    SystemId("helm-radar".into()),
+                    SystemId("repair".into()),
+                ],
+                ..Default::default()
+            }),
+        );
+        blackboards
+            .0
+            .insert(SystemId("z-shared".into()), helm_blackboard());
+
+        let mut app = App::new();
+        app.insert_resource(Sessions(sessions));
+        register_blackboard_replication_lifecycle(&mut app);
+        app.world_mut().spawn((
+            LocalShip,
+            ShipConfigComponent(config),
+            EntitySystemHull(SystemHull::from_config(&[
+                (SystemId("core".into()), 100.0),
+                (SystemId("helm-radar".into()), 100.0),
+                (SystemId("repair".into()), 100.0),
+            ])),
+            crate::console::repair::server::ShipRepairTeams(RepairTeams::new(1)),
+            blackboards,
+        ));
+        app
+    }
+
+    fn live_updates_for_token(app: &mut App, token: &str) -> Vec<(SystemId, SystemBlackboard)> {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
+        let mut current: Vec<_> = query
+            .single(app.world())
+            .expect("LocalShip Blackboards")
+            .0
+            .iter()
+            .map(|(id, blackboard)| (id.clone(), blackboard.clone()))
+            .collect();
+        current.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let hull_visibility = visibility::hull_visibility(app.world_mut());
+        let viewers = visibility::connected_viewers(app.world());
+        let mut last = LastVisibleRepairBlackboard::default();
+        let pending = visibility::project_repair_blackboards(
+            current,
+            hull_visibility.as_ref(),
+            &viewers,
+            &mut last,
+        );
+
+        let mut visible = Vec::new();
+        for (target, message) in pending {
+            let for_recipient = matches!(target, Target::All)
+                || matches!(&target, Target::Token(target_token) if target_token == token);
+            if !for_recipient {
+                continue;
+            }
+            if let ServerMessage::BlackboardUpdate { updates } = message {
+                visible.extend(updates);
+            }
+        }
+        visible.sort_by(|a, b| a.0.cmp(&b.0));
+        visible
+    }
+
+    fn reconnect_updates_for_token(
+        app: &mut App,
+        token: &str,
+    ) -> Vec<(SystemId, SystemBlackboard)> {
+        reconnect_registered_replication(app.world_mut(), token)
+            .into_iter()
+            .flat_map(|message| match message {
+                ServerMessage::BlackboardUpdate { updates } => updates,
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn blackboard_owner_registers_reset_for_both_live_projection_caches() {
+        let mut app = blackboard_lifecycle_app();
+        app.world_mut()
+            .resource_mut::<LastBroadcastBlackboards>()
+            .0
+            .insert(SystemId("cached".into()), helm_blackboard());
+        {
+            let mut projected = app
+                .world_mut()
+                .resource_mut::<LastVisibleRepairBlackboard>();
+            projected
+                .projections
+                .insert("eng".into(), RepairBlackboard::default());
+            projected.stations.insert(
+                "eng".into(),
+                Some(crate::core::messages::StationId("engineering".into())),
+            );
+        }
+
+        assert_eq!(
+            app.world()
+                .resource::<ReplicationLifecycleRegistry>()
+                .keys()
+                .collect::<Vec<_>>(),
+            vec![BLACKBOARD_REPLICATION_KEY]
+        );
+        reset_registered_replication(app.world_mut());
+
+        assert!(app
+            .world()
+            .resource::<LastBroadcastBlackboards>()
+            .0
+            .is_empty());
+        let projected = app.world().resource::<LastVisibleRepairBlackboard>();
+        assert!(projected.projections.is_empty());
+        assert!(projected.stations.is_empty());
+    }
+
+    #[test]
+    fn reconnect_projection_matches_live_visibility_for_each_recipient() {
+        let mut app = blackboard_lifecycle_app();
+
+        for token in ["eng", "pilot"] {
+            let live = live_updates_for_token(&mut app, token);
+            let reconnect = reconnect_updates_for_token(&mut app, token);
+            assert_eq!(
+                reconnect, live,
+                "reconnect must reproduce the live Blackboard visibility for {token}"
+            );
+            assert_eq!(
+                reconnect
+                    .iter()
+                    .map(|(id, _)| id.0.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["repair", "z-shared"],
+                "every current permitted Blackboard must be present in stable order"
+            );
+        }
+
+        let pilot = reconnect_updates_for_token(&mut app, "pilot");
+        let repair = pilot
+            .iter()
+            .find_map(|(_, blackboard)| match blackboard {
+                SystemBlackboard::Repair(repair) => Some(repair),
+                _ => None,
+            })
+            .expect("pilot receives the withholding Repair overwrite");
+        assert!(repair.system_hull.is_empty());
+        assert!(repair.damageable_systems.is_empty());
+        assert!(repair.aggregate_hull_fraction.is_none());
+        assert!(repair.destroyed_hull_fraction.is_none());
     }
 }

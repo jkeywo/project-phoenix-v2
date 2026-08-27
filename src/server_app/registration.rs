@@ -326,10 +326,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 "digest-exclusion-classes",
             )
             .declare_state::<LastBroadcastHull>(StateClass::Cache, "digest-exclusion-classes")
-            .declare_state::<LastBroadcastBlackboards>(
-                StateClass::Cache,
-                "digest-exclusion-classes",
-            )
             // Cache of the presentation-only debug flags (issue #940):
             // `report_debug_state` compares against it to skip re-announcing.
             // "debug-overlay-state" is the PASM state entity in
@@ -715,7 +711,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<LastBroadcastEntityHealth>()
         .init_resource::<LastBroadcastHull>()
-        .init_resource::<LastBroadcastBlackboards>()
         .init_resource::<crate::core::messages::InterSystemQueue>()
         // `handle_collisions` (registered below, in SimSet::Damage) writes this,
         // so the simulation owns it. `DebugOverlayPlugin` also init_resource's it
@@ -932,8 +927,14 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         crate::command_admission::warn_unrouted_admitted_commands
             .after(crate::sim_sets::SimSet::Broadcast)
             .run_if(in_state(GamePhase::InProgress)),
-    )
-    .add_systems(
+    );
+
+    // The Blackboard cache owner registers its reset/reconnect adapter beside
+    // the live publisher. The composition root only calls the owner registrar;
+    // neither lifecycle runner learns the cache or payload shape.
+    register_blackboard_replication_lifecycle(app);
+
+    app.add_systems(
         FixedUpdate,
         broadcast_blackboard_updates.in_set(crate::sim_sets::SimSet::PublishAggregate),
     )

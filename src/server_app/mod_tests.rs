@@ -495,7 +495,6 @@ fn test_app() -> App {
     .init_resource::<LastBroadcastEntityPositions>()
     .init_resource::<LastBroadcastEntityHealth>()
     .init_resource::<LastBroadcastHull>()
-    .init_resource::<LastBroadcastBlackboards>()
     .init_resource::<crate::core::messages::InterSystemQueue>()
     .init_resource::<crate::ai::server::AiTokenRegistry>()
     .init_resource::<Outbox>()
@@ -543,6 +542,7 @@ fn test_app() -> App {
     .add_plugins(sim_state_broadcaster())
     .add_plugins(modifier_events_broadcaster())
     .add_systems(PostUpdate, collect);
+    register_blackboard_replication_lifecycle(&mut app);
     // One fixed step per update (issue #895): the sim chain above lives in
     // `FixedUpdate`, and each 200 ms harness tick advances it once (so the
     // Hz-based SimBroadcaster timers always fire within a single update).

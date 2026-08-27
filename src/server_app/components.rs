@@ -404,19 +404,13 @@ impl SimOutbox {
     }
 }
 
-/// Broadcast delta caches — [`LastBroadcastEntityPositions`],
-/// [`LastBroadcastEntityHealth`], [`LastBroadcastHull`],
-/// [`LastBroadcastBlackboards`] — now live in
-/// [`crate::core::broadcast::cache_registry`] (issue #613), which is the
-/// single module that knows about all five `reset_all`-covered broadcast delta
-/// caches (the fifth member, `LastWeaponsUpdate`, stays in `console::weapons`)
-/// and owns
-/// `reset_all` / `resync_for_token` / `prune`. Re-exported here so existing
-/// `crate::server_app::LastBroadcastX` / `crate::server_app::LastBroadcastX`
-/// references are unaffected by the move.
+/// The delta caches not yet migrated to owner-local lifecycle registration.
+/// `LastBroadcastBlackboards` now lives beside its publisher in
+/// `broadcast_publish`; `LastWeaponsUpdate` stays in `console::weapons`.
+/// These remaining cache types retain their existing server-app re-export
+/// while the dependency-ordered replication slices migrate them.
 pub use crate::core::broadcast::cache_registry::{
-    LastBroadcastBlackboards, LastBroadcastEntityHealth, LastBroadcastEntityPositions,
-    LastBroadcastHull,
+    LastBroadcastEntityHealth, LastBroadcastEntityPositions, LastBroadcastHull,
 };
 
 /// Tracks non-asteroid entities that have been reported to clients via

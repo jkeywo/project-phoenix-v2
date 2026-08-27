@@ -7,6 +7,8 @@ entities:
       summary: Publishes each system's current authoritative state during the simulation publish phase and then aggregates ship-wide views.
       rationale:
         - Systems need a shared, inspectable state surface without reading or mutating each other's private implementation state.
+        - The live client projection, LastBroadcastBlackboards cache, run reset, and reconnect projector are co-located in server_app/broadcast_publish.rs. The owner registers reset and reconnect through the stable replication lifecycle registry rather than adding another cache parameter or BlackboardUpdate branch to the central runner.
+        - Reconnect reads every current LocalShip Blackboard in sorted SystemId order and applies the same Repair visibility projection as live publication. It targets only the reconnecting session and does not touch shared or per-recipient delta caches.
     architecture:
       kind: state-publisher
       authority: authoritative
@@ -14,8 +16,8 @@ entities:
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/sim_sets.rs, src/ship/viewscreen.rs, src/core/messages.rs]
-      symbols: [SimSet]
+      paths: [src/sim_sets.rs, src/ship/viewscreen.rs, src/core/messages.rs, src/server_app/broadcast_publish.rs, src/core/broadcast/lifecycle.rs]
+      symbols: [SimSet, broadcast_blackboard_updates, LastBroadcastBlackboards, ReplicationLifecycleAdapter]
       messages: [BlackboardUpdate]
       tests: [cargo test]
 

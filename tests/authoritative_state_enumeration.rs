@@ -271,7 +271,6 @@ const UNCLASSIFIED_BASELINE: &[&str] = &[
     "project_phoenix::console::repair::server::RepairRequestQueue",
     "project_phoenix::console::repair::server::RepairTargetSelector",
     "project_phoenix::console::repair::server::ShipRepairTeams",
-    "project_phoenix::console::repair::visibility::LastVisibleRepairBlackboard",
     "project_phoenix::console::weapons::server::NpcFrequencyMatchStates",
     "project_phoenix::console::weapons::server::PhaserRenderConfig",
     "project_phoenix::console::weapons::server::WeaponsArcRequestState",

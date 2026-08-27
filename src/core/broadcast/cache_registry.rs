@@ -10,13 +10,12 @@
 //! cache entries for despawned entities — respawning asteroids get a fresh
 //! UUID every cycle, so their old health-cache entries lived forever.
 //!
-//! This module is the single place that knows about all five shared,
-//! registry-covered delta caches and exposes three operations against them:
+//! This module is the transitional home of the delta caches that have not yet
+//! moved to the stable-keyed replication lifecycle registry. It exposes the
+//! legacy operations against those caches:
 //!
-//! - [`reset_all`] — zero all five registry-covered caches. Used on
-//!   `OnEnter(GamePhase::InProgress)` (covers the multi-game restart case where
-//!   stale cache from a previous game would otherwise suppress the first
-//!   tick's updates).
+//! - [`reset_unregistered`] — zero the caches still listed here. Used beside
+//!   the lifecycle reset runner on `OnEnter(GamePhase::InProgress)`.
 //! - [`resync_for_token`] — push a full-state snapshot to exactly one session
 //!   token (used on a mid-game `Welcome`, i.e. a reconnect) **without**
 //!   touching the shared caches, so every other client's next tick remains a
@@ -33,29 +32,30 @@
 //!
 //! ## What it owns
 //!
-//! The four registry-owned cache resources live in this module:
+//! Three remaining cache resources still live in this module:
 //! [`LastBroadcastEntityPositions`], [`LastBroadcastEntityHealth`],
-//! [`LastBroadcastHull`], [`LastBroadcastBlackboards`]. They are re-exported
-//! from `server_app` (and transitively `crate::server_app`) so existing
+//! and [`LastBroadcastHull`]. They are re-exported
+//! transitively through `crate::server_app` so existing
 //! `ResMut<LastBroadcastX>` system parameters across the codebase are
 //! unaffected by the move.
 //!
-//! The fifth cache, `LastWeaponsUpdate` (`src/console/weapons/blackboard.rs`),
+//! [`crate::server_app::LastBroadcastBlackboards`] and its reset/reconnect
+//! projection moved beside the live Blackboard publisher in issue #1263. The
+//! generic lifecycle runner invokes that owner without this module knowing its
+//! cache or message shape. Issue #1250 removed `LastBroadcastShields` when the
+//! live Shields publisher moved to an owner-local broadcaster without a delta
+//! cache.
+//!
+//! `LastWeaponsUpdate` (`src/console/weapons/blackboard.rs`)
 //! stays defined in its natural home next to the weapons producer that reads
 //! and writes it every tick — moving the type would ripple through that
-//! file's producer closure for no behavioural benefit. This registry's
-//! `reset_all` still resets it (via a `ResMut` parameter), so the registry's
-//! *interface* still covers all five registry-covered caches even though one
-//! struct definition lives elsewhere, exactly as the module-level docs on
-//! `src/ship/system_registry.rs` describe conventions without forcing every
-//! consumer through one physical type.
+//! file's producer closure for no behavioural benefit. Until issue #1265 moves
+//! it onto the lifecycle seam, [`reset_unregistered`] still resets it.
 //!
 //! [`crate::console::repair::visibility::LastVisibleRepairBlackboard`] is a
-//! separate per-token Repair projection cache. It remains owned by the
-//! repair-visibility path and is not part of this registry's
-//! [`reset_all`], [`resync_for_token`], or [`prune`] operations.
-//! `reset_broadcast_caches_on_start` clears it explicitly alongside the five
-//! registry-covered caches when a game starts.
+//! separate per-token Repair projection cache owned by the Blackboard
+//! lifecycle adapter. It is not part of this transitional registry or its
+//! [`resync_for_token`] / [`prune`] operations.
 //!
 //! ## Session bookkeeping (PRD story 9)
 //!
@@ -72,7 +72,7 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-use crate::core::messages::{ServerMessage, ShieldFacingStatus, SystemBlackboard, SystemId};
+use crate::core::messages::{ServerMessage, ShieldFacingStatus};
 use crate::lobby::Target;
 
 // ── Cache resources ─────────────────────────────────────────────────────────
@@ -122,39 +122,27 @@ pub struct LastBroadcastHull(
     pub HashMap<String, crate::console::repair::visibility::HullProjection>,
 );
 
-/// Last-broadcast blackboard state per system. The `broadcast_blackboard_updates`
-/// system compares `ShipSystemBlackboards` against this and only emits a
-/// `BlackboardUpdate` for systems whose blackboard has changed.
-#[derive(Resource, Default)]
-pub struct LastBroadcastBlackboards(pub HashMap<SystemId, SystemBlackboard>);
-
 // ── Registry interface ──────────────────────────────────────────────────────
 
-/// Zero all five shared, registry-covered broadcast delta caches.
+/// Zero the delta caches not yet owned by lifecycle adapters.
 ///
 /// Called from `OnEnter(GamePhase::InProgress)` so the first broadcast tick
 /// of a (re)started game always sends full state to all players — this also
 /// covers the multi-game restart case where a stale cache from a previous
 /// game would otherwise suppress initial updates.
-pub fn reset_all(
-    hull: &mut LastBroadcastHull,
-    positions: &mut LastBroadcastEntityPositions,
-    health: &mut LastBroadcastEntityHealth,
-    weapons: &mut crate::console::weapons::LastWeaponsUpdate,
-    blackboards: &mut LastBroadcastBlackboards,
-) {
-    *hull = LastBroadcastHull::default();
-    *positions = LastBroadcastEntityPositions::default();
-    *health = LastBroadcastEntityHealth::default();
-    *weapons = crate::console::weapons::LastWeaponsUpdate::default();
-    *blackboards = LastBroadcastBlackboards::default();
+pub fn reset_unregistered(world: &mut World) {
+    *world.resource_mut::<LastBroadcastHull>() = LastBroadcastHull::default();
+    *world.resource_mut::<LastBroadcastEntityPositions>() = LastBroadcastEntityPositions::default();
+    *world.resource_mut::<LastBroadcastEntityHealth>() = LastBroadcastEntityHealth::default();
+    *world.resource_mut::<crate::console::weapons::LastWeaponsUpdate>() =
+        crate::console::weapons::LastWeaponsUpdate::default();
 }
 
 /// Remove a set of despawned entity UUIDs from the UUID-keyed caches.
 ///
 /// Only [`LastBroadcastEntityPositions`] and [`LastBroadcastEntityHealth`]
-/// are keyed by entity UUID; the other three caches are ship-scoped or
-/// station-scoped (not entity-scoped) and are untouched by prune. Hooked
+/// are keyed by entity UUID; the other caches are ship-scoped or station-scoped
+/// (not entity-scoped) and are untouched by prune. Hooked
 /// into the despawn/reconciliation paths so respawning entities that reuse
 /// UUIDs (they don't — new UUIDs every cycle) or entities that simply vanish
 /// (asteroids, runtime-spawned entities) don't leave permanent cache entries
@@ -181,17 +169,18 @@ pub fn prune(
 /// (`refresh_caches_on_midgame_reconnect`), which zeroed the shared caches
 /// and thus caused the *next* tick to broadcast full state to *all* clients.
 ///
-/// Constructs `SystemHullUpdate`, `ShieldStatus`, `BlackboardUpdate`, and
+/// Constructs the still-unregistered `SystemHullUpdate`, `ShieldStatus`, and
 /// (when the reconnecting token currently holds the ship's authored weapons
 /// station)
-/// `WeaponsUpdate` directly from live `LocalShip` component state (the same
-/// projections the regular live publishers use) and pushes them
-/// into `SimOutbox` targeted at `Target::Token(token)`. Entity
+/// `WeaponsUpdate` directly from live `LocalShip` component state. Registered
+/// lifecycle owners contribute their projections at the former Blackboard
+/// slot, without this runner knowing their cache or payload types. The combined
+/// batch is pushed into `SimOutbox` targeted at `Target::Token(token)`. Entity
 /// positions/health for the wider world are already covered by the
 /// `Welcome` message's `GameState.world` snapshot (built from the live
 /// `WorldResource`), so this function does not duplicate that here.
 ///
-/// `WeaponsUpdate` is gated on station ownership (unlike the other three
+/// `WeaponsUpdate` is gated on station ownership (unlike the other current
 /// messages, which are unconditional) because, unlike hull/shields/
 /// blackboards, it is genuinely station-scoped: it's normally only ever sent
 /// to whoever holds the ship's weapons station (`Audience::HoldingWeapons` in
@@ -199,16 +188,16 @@ pub fn prune(
 /// that station has no use for it and should not receive it here either.
 /// The owning station is resolved from the ship config — it's "tactical" on
 /// the crewed hulls but "pilot" on the single-station Courier.
-/// This deliberately does **not** touch `LastWeaponsUpdate`,
-/// `LastBroadcastHull`, or `LastBroadcastBlackboards`, so their next periodic
-/// broadcaster ticks still diff normally instead of being forced to re-send.
+/// This deliberately does **not** touch `LastWeaponsUpdate` — same rule as
+/// every registered lifecycle projection — so the next periodic broadcaster
+/// tick still diffs normally instead of being forced to re-send to everyone.
 /// `ShieldStatus` has no delta cache after issue #1250; reconnect builds that
 /// one-shot projection directly from the live `ShipShields` component.
 pub fn resync_for_token(world: &mut World, token: &str) {
     use crate::console::weapons::compute_current_weapons_update;
     use crate::core::messages::StationId;
     use crate::lobby::Sessions;
-    use crate::server_app::{LocalShip, ShipSystemBlackboards, SimOutbox};
+    use crate::server_app::{LocalShip, SimOutbox};
     use crate::ship::shields::ShipShields;
 
     let target = Target::Token(token.to_string());
@@ -232,44 +221,12 @@ pub fn resync_for_token(world: &mut World, token: &str) {
         }
     }
 
-    // ── BlackboardUpdate: every current blackboard, not just changed ones.
-    // The repair blackboard carries exact hull detail, so it goes through the
-    // same #737 projection as the live path; the rest pass through untouched.
-    {
-        let vis = crate::console::repair::visibility::hull_visibility(world);
-        let station = world
-            .resource::<Sessions>()
-            .0
-            .station_for_token(token)
-            .cloned();
-        let mut q = world.query_filtered::<&ShipSystemBlackboards, With<LocalShip>>();
-        if let Ok(bb) = q.single(world) {
-            // Sorted for the same reason `broadcast_blackboard_updates` sorts
-            // its changed set (issue #965): `ShipSystemBlackboards` is a
-            // `HashMap` deliberately — see its docs — on the understanding that
-            // ordering happens wherever its iteration order is OBSERVED, and
-            // this resync payload is one of those places. Unsorted, two hosts
-            // replaying the same reconnect emitted the same blackboards in a
-            // different order. Once per reconnect, over a handful of systems.
-            let mut updates: Vec<(SystemId, SystemBlackboard)> =
-                bb.0.iter()
-                    .map(|(id, bb)| {
-                        (
-                            id.clone(),
-                            crate::console::repair::visibility::project_blackboard_for_token(
-                                vis.as_ref(),
-                                station.as_ref(),
-                                bb,
-                            ),
-                        )
-                    })
-                    .collect();
-            updates.sort_by(|a, b| a.0.cmp(&b.0));
-            if !updates.is_empty() {
-                messages.push(ServerMessage::BlackboardUpdate { updates });
-            }
-        }
-    }
+    // Registered owner projections occupy the old Blackboard position in the
+    // batch. The lifecycle registry invokes them by stable key; this runner
+    // deliberately knows none of their cache resources or message variants.
+    messages.extend(crate::core::broadcast::reconnect_registered_replication(
+        world, token,
+    ));
 
     // ── WeaponsUpdate: only meaningful if the reconnecting token currently
     // holds the ship's authored weapons station. WeaponsUpdate is normally
@@ -323,10 +280,13 @@ pub fn resync_for_token(world: &mut World, token: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server_app::{LocalShip, ShipSystemBlackboards, SimOutbox};
+    use crate::core::messages::{SystemBlackboard, SystemId};
+    use crate::server_app::{
+        LastBroadcastBlackboards, LocalShip, ShipSystemBlackboards, SimOutbox,
+    };
 
     #[test]
-    fn reset_all_zeroes_every_cache() {
+    fn reset_unregistered_zeroes_each_remaining_cache() {
         let mut hull = LastBroadcastHull::default();
         hull.0.insert(
             "token-1".into(),
@@ -351,56 +311,43 @@ mod tests {
         health
             .0
             .insert("uuid-1".into(), (Some(1.0), Some(1.0), None, None));
-        let mut weapons = crate::console::weapons::LastWeaponsUpdate {
+        let weapons = crate::console::weapons::LastWeaponsUpdate {
             target_uuid: Some("uuid-1".into()),
             ..Default::default()
         };
-        let mut blackboards = LastBroadcastBlackboards::default();
-        blackboards.0.insert(
-            SystemId("helm".into()),
-            SystemBlackboard::Helm(crate::core::messages::HelmBlackboard {
-                yaw: 1.0,
-                forward_speed: 1.0,
-                x: 1.0,
-                z: 1.0,
-                impulse_charge: 1.0,
-                boost_battery: 1.0,
-                boost_active: true,
-                boost_enabled: true,
-                radar_range: 0.0,
-                lateral_speed: 0.0,
-                hostile_weapon_arcs: Vec::new(),
-            }),
-        );
 
-        reset_all(
-            &mut hull,
-            &mut positions,
-            &mut health,
-            &mut weapons,
-            &mut blackboards,
-        );
+        let mut app = App::new();
+        app.insert_resource(hull);
+        app.insert_resource(positions);
+        app.insert_resource(health);
+        app.insert_resource(weapons);
+
+        reset_unregistered(app.world_mut());
 
         assert!(
-            hull.0.is_empty(),
-            "hull cache must be empty after reset_all"
+            app.world().resource::<LastBroadcastHull>().0.is_empty(),
+            "hull cache must be empty after reset_unregistered"
         );
         assert!(
-            positions.0.is_empty(),
-            "positions cache must be empty after reset_all"
+            app.world()
+                .resource::<LastBroadcastEntityPositions>()
+                .0
+                .is_empty(),
+            "positions cache must be empty after reset_unregistered"
         );
         assert!(
-            health.0.is_empty(),
-            "health cache must be empty after reset_all"
+            app.world()
+                .resource::<LastBroadcastEntityHealth>()
+                .0
+                .is_empty(),
+            "health cache must be empty after reset_unregistered"
         );
         assert_eq!(
-            weapons,
-            crate::console::weapons::LastWeaponsUpdate::default(),
-            "weapons cache must be default after reset_all"
-        );
-        assert!(
-            blackboards.0.is_empty(),
-            "blackboards cache must be empty after reset_all"
+            &*app
+                .world()
+                .resource::<crate::console::weapons::LastWeaponsUpdate>(),
+            &crate::console::weapons::LastWeaponsUpdate::default(),
+            "weapons cache must be default after reset_unregistered"
         );
     }
 
@@ -520,6 +467,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(crate::lobby::LobbyPlugin);
         app.init_resource::<crate::server_app::SimOutbox>();
+        crate::server_app::register_blackboard_replication_lifecycle(&mut app);
         let ship = app
             .world_mut()
             .spawn((
@@ -550,22 +498,24 @@ mod tests {
                 .world_mut()
                 .query_filtered::<&mut ShipSystemBlackboards, With<LocalShip>>();
             if let Ok(mut bbs) = q.single_mut(app.world_mut()) {
-                bbs.0.insert(
-                    SystemId("helm".into()),
-                    SystemBlackboard::Helm(crate::core::messages::HelmBlackboard {
-                        yaw: 0.0,
-                        forward_speed: 0.0,
-                        x: 0.0,
-                        z: 0.0,
-                        impulse_charge: 0.0,
-                        boost_battery: 1.0,
-                        boost_active: false,
-                        boost_enabled: true,
-                        radar_range: 0.0,
-                        lateral_speed: 0.0,
-                        hostile_weapon_arcs: Vec::new(),
-                    }),
-                );
+                let value = SystemBlackboard::Helm(crate::core::messages::HelmBlackboard {
+                    yaw: 0.0,
+                    forward_speed: 0.0,
+                    x: 0.0,
+                    z: 0.0,
+                    impulse_charge: 0.0,
+                    boost_battery: 1.0,
+                    boost_active: false,
+                    boost_enabled: true,
+                    radar_range: 0.0,
+                    lateral_speed: 0.0,
+                    hostile_weapon_arcs: Vec::new(),
+                });
+                // Deliberately insert in non-key order. The reconnect payload
+                // must contain every current entry in stable SystemId order.
+                for id in ["zulu", "alpha", "middle"] {
+                    bbs.0.insert(SystemId(id.into()), value.clone());
+                }
             }
         }
 
@@ -583,12 +533,19 @@ mod tests {
                 "every resync message must target only the reconnecting token"
             );
         }
-        let has_bb_update = outbox
-            .iter()
-            .any(|(_, msg)| matches!(msg, ServerMessage::BlackboardUpdate { .. }));
-        assert!(
-            has_bb_update,
-            "resync must include a BlackboardUpdate with full blackboard state"
+        let blackboard_ids = outbox.iter().find_map(|(_, msg)| match msg {
+            ServerMessage::BlackboardUpdate { updates } => Some(
+                updates
+                    .iter()
+                    .map(|(id, _)| id.0.as_str())
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        });
+        assert_eq!(
+            blackboard_ids,
+            Some(vec!["alpha", "middle", "zulu"]),
+            "resync must include every current Blackboard in stable SystemId order"
         );
     }
 
@@ -617,6 +574,20 @@ mod tests {
                     hostile_weapon_arcs: Vec::new(),
                 }),
             );
+        {
+            let mut projected = app
+                .world_mut()
+                .resource_mut::<crate::console::repair::visibility::LastVisibleRepairBlackboard>(
+            );
+            projected.projections.insert(
+                "existing-client".into(),
+                crate::core::messages::RepairBlackboard::default(),
+            );
+            projected.stations.insert(
+                "existing-client".into(),
+                Some(crate::core::messages::StationId("engineering".into())),
+            );
+        }
 
         resync_for_token(app.world_mut(), "reconnector");
 
@@ -642,6 +613,19 @@ mod tests {
                 }
             )),
             "resync_for_token must not mutate the shared LastBroadcastBlackboards cache"
+        );
+        let projected = app
+            .world()
+            .resource::<crate::console::repair::visibility::LastVisibleRepairBlackboard>();
+        assert!(projected.projections.contains_key("existing-client"));
+        assert_eq!(
+            projected
+                .stations
+                .get("existing-client")
+                .and_then(Option::as_ref)
+                .map(|station| station.0.as_str()),
+            Some("engineering"),
+            "reconnect must not invalidate another client's live Repair projection"
         );
     }
 

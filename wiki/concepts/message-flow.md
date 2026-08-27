@@ -3,7 +3,7 @@ title: Message Flow
 type: concept
 tags: [messages, bridge, wasm, bevy, routing, delivery-class, coordination]
 sources: [src/server/bridge.rs, src/core/codec.rs, src/core/messages.rs, src/core/broadcast/, src/lobby/server.rs, src/lobby/handler.rs, src/command_admission/, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/ship/shields.rs, src/ship/coordination.rs, src/ship/coordination_systems.rs, src/console/helm/server.rs, src/console/weapons/server.rs, src/console/repair/server.rs, src/console_bridge.rs, server.html, client.html, gui/client-router.js, gui/sim-state.js, gui/console-state.js, gui/coordination-popup.js]
-updated: 2026-08-27
+updated: 2026-08-28
 ---
 
 # Message Flow
@@ -58,6 +58,12 @@ back to reliable when that channel is absent.
 ## Reconnect and disconnect
 
 Session tokens are persistent identity; peer ids are transport details. On disconnect, station tenure is retained for reconnection while that station's live rating becomes `Backfill`, allowing its systems to continue under AI. A later valid claim or the original token's reconnect updates tenure through the authoritative lobby path and forces the appropriate state projections to the client.
+
+During `InProgress`, the token-targeted `Welcome` also invokes registered
+replication owners in stable key order. Each owner reconstructs its current
+Snapshot projection only for that token without mutating shared delta caches.
+The Blackboard adapter applies the same Repair visibility policy as live
+publication.
 
 ## Coordination
 

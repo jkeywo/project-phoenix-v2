@@ -117,17 +117,42 @@ entities:
       rationale:
         - Simulation producers choose Snapshot or Reliable at the point where cadence and loss semantics are known. SimOutbox stores that producer-owned class behind explicit push_snapshot/push_reliable insertion methods; its raw queue is private and the forwarding broadcaster never classifies by payload variant.
         - Reconnect projections are latest-state snapshots targeted at the reconnecting token. Entity-lifecycle, combat, comms, objective, and scenario events remain reliable because losing one is not repaired by the next periodic projection.
+        - Replication owners register cache resets and reconnect projection functions under stable semantic keys. The generic runner invokes those adapters in lexical key order and supplies the reconnecting token target without knowing cache resources or message variants.
     architecture:
       kind: replication-service
       authority: authoritative
       produces: [lobby-session-replica, simulation-state-replica]
       reads: [session-identity-state, session-station-ownership-state]
+      depends_on: [replication-lifecycle-registry]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/broadcast, src/core/broadcast/cache_registry.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/lobby/server.rs, src/server/bridge.rs]
-      symbols: [SimBroadcaster, LobbyBroadcaster, SimOutbox, push_snapshot, push_reliable, Audience, Cadence]
+      paths: [src/core/broadcast, src/core/broadcast/lifecycle.rs, src/core/broadcast/cache_registry.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/lobby/server.rs, src/server/bridge.rs]
+      symbols: [SimBroadcaster, LobbyBroadcaster, SimOutbox, push_snapshot, push_reliable, Audience, Cadence, reconnect_registered_replication, reset_registered_replication]
       tests: [cargo test, tests/smoke/snapshot-channel.spec.js]
+
+  - component: replication-lifecycle-registry
+    core:
+      status: implemented
+      confidence: confirmed
+      title: Replication Lifecycle Registry
+      summary: Stable-keyed host catalogue through which each replication owner contributes its run reset and targeted reconnect projection beside its live publisher.
+      rationale:
+        - A BTreeMap orders adapters by semantic owner key, so plugin insertion order cannot change the sequence of reconnect snapshots.
+        - Adapters may register reset only, reconnect only, or both. This keeps UUID pruning specialized rather than inventing a generic lifecycle operation that unrelated caches do not have.
+        - The Blackboard adapter owns LastBroadcastBlackboards and the per-recipient Repair projection cache. Its reconnect projection sorts every current SystemId, applies the same Repair visibility function as the live path, and reads but never mutates either cache.
+    architecture:
+      kind: replication-registry
+      authority: authoritative
+      reads: [session-identity-state, session-station-ownership-state, ship-system-blackboards-state]
+      produces: [simulation-state-replica]
+      runs_in: [host-browser-runtime]
+    implementation:
+      status: declared
+      paths: [src/core/broadcast/lifecycle.rs, src/server_app/broadcast_publish.rs, src/core/broadcast/cache_registry.rs]
+      symbols: [ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards]
+      messages: [BlackboardUpdate]
+      tests: [cargo test]
 
   - state: lobby-session-replica
     core:

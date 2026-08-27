@@ -2,8 +2,8 @@
 title: Server App Composition
 type: concept
 tags: [architecture, plugins, server, composition, fixed-tick]
-sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/server_app/collision.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/ship/shields.rs, src/server/bridge.rs]
-updated: 2026-08-27
+sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/server_app/collision.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/core/broadcast/lifecycle.rs, src/core/broadcast/cache_registry.rs, src/ship/shields.rs, src/server/bridge.rs]
+updated: 2026-08-28
 ---
 
 # Server App Composition
@@ -18,7 +18,7 @@ updated: 2026-08-27
 | `src/server_app/registration.rs` | The composition root: `SimPluginOptions`, fixed-tick setup, Rapier ordering, plugin registration, resources, systems, and broadcaster registration. |
 | `src/server_app/components.rs` | Cross-cutting ECS components, resources, and `SystemParam` bundles owned by the simulation assembly, including the explicitly classified `SimOutbox`. |
 | `src/server_app/broadcast.rs` | Authoritative simulation snapshot builders, including `sim_state_broadcaster`. |
-| `src/server_app/broadcast_publish.rs` | Publish/HUD systems plus `modifier_events_broadcaster`, the class-preserving `sim_outbox_broadcaster`, and world-setup publication. |
+| `src/server_app/broadcast_publish.rs` | Publish/HUD systems, Blackboard live/lifecycle projection, `modifier_events_broadcaster`, the class-preserving `sim_outbox_broadcaster`, and world-setup publication. |
 | `src/server_app/collision.rs` | Rapier contact handling and collision damage. |
 | `src/server_app/world_setup.rs` | Static world setup and game-start entity spawning. |
 | `src/server_app_render.rs` | Render-only entity materialisation and mesh LOD updates, registered only when `SimPluginOptions::render` is true. |
@@ -50,6 +50,13 @@ The registration root installs:
 private, so producers must choose `Snapshot` or `Reliable` through an explicit
 insertion method. `sim_outbox_broadcaster` drains and forwards that stored class
 without matching on the message variant. See [Broadcaster Seam](./broadcaster-seam.md).
+
+`register_blackboard_replication_lifecycle` initialises and declares
+`LastBroadcastBlackboards` beside its live publisher, then registers its reset
+and targeted reconnect projector under the stable `blackboards` key. The
+generic lifecycle runners invoke registered owners in key order without knowing
+their cache resources or message shapes. Shared composition retains only the
+transitional cache census for owners not yet migrated.
 
 ## Tests
 

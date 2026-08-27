@@ -553,10 +553,16 @@ export function createRendezvousHost(opts) {
    * Dropping those here ended live missions over a Durable Object eviction, a
    * worker redeploy or a lazy TTL sweep: every admitted adapter got a `close`,
    * which in server.html is `wasm_player_disconnected(token)`.
+   *
+   * An admitted entry whose reliable channel has already gone is swept too. It
+   * is pure bookkeeping — the page was told about that close when it happened —
+   * and since this no longer clears the whole map, a host that lost the service
+   * a few times would otherwise keep every dead peer it ever had: `peer-left`
+   * can never arrive for one whose record is gone.
    */
   function dropUnadmittedPeers() {
     for (const [id, entry] of [...peers]) {
-      if (entry.admitted && entry.adapter) continue;
+      if (entry.admitted && entry.adapter && entry.adapter.open) continue;
       if (entry.adapter) entry.adapter.emit('close');
       try { entry.pc.close(); } catch { /* already closed */ }
       peers.delete(id);

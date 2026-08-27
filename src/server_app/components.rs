@@ -404,13 +404,13 @@ impl SimOutbox {
     }
 }
 
-/// The delta caches not yet migrated to owner-local lifecycle registration.
-/// `LastBroadcastBlackboards` now lives beside its publisher in
-/// `broadcast_publish`; `LastWeaponsUpdate` stays in `console::weapons`.
-/// These remaining cache types retain their existing server-app re-export
-/// while the dependency-ordered replication slices migrate them.
+/// Owner-local Hull delta-cache compatibility export.
+pub use crate::console::repair::visibility::LastBroadcastHull;
+/// Remaining transitional delta-cache compatibility exports. Hull and
+/// Blackboard caches now live beside their publishers and register their own
+/// lifecycle; `LastWeaponsUpdate` stays in `console::weapons`.
 pub use crate::core::broadcast::cache_registry::{
-    LastBroadcastEntityHealth, LastBroadcastEntityPositions, LastBroadcastHull,
+    LastBroadcastEntityHealth, LastBroadcastEntityPositions,
 };
 
 /// Tracks non-asteroid entities that have been reported to clients via

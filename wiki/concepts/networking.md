@@ -2,7 +2,7 @@
 title: Networking
 type: concept
 tags: [networking, peerjs, webrtc, session-token, star-topology, datachannel, snapshot]
-sources: [server.html, client.html, gui/connection-manager.js, gui/session-token.js, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/ship/shields.rs, AGENTS.md]
+sources: [server.html, client.html, gui/connection-manager.js, gui/session-token.js, src/core/broadcast/sim.rs, src/core/broadcast/lifecycle.rs, src/server/bridge.rs, src/server_app/components.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/ship/shields.rs, AGENTS.md]
 updated: 2026-08-28
 ---
 
@@ -77,7 +77,7 @@ Reconnect uses persistent exponential backoff from 100 ms to a 30 s cap.
 `_identSent` resets on DataChannel close/error so every reopen re-identifies and
 enters the server-side seat/rating restore flow. During a round, registered
 replication owners reconstruct current Snapshot state in stable key order for
-that token only; the Blackboard adapter reproduces live recipient visibility
+that token only; the Blackboard and Hull adapters reproduce live recipient visibility
 without resetting shared caches. The client offers **Retry now**, and a
 generation guard ignores callbacks from superseded attempts.
 `reconnect-midgame-sever.spec.js` exercises sever and revive during play.

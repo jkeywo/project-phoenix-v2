@@ -438,6 +438,10 @@ entities:
         - >-
           One projection serves both the live broadcast and the reconnect
           resync, so reconnecting cannot be used to obtain withheld detail.
+          The Repair owner registers the Hull cache reset and reconnect
+          projector under the stable `hull` lifecycle key; the generic runner
+          knows neither LastBroadcastHull nor SystemHullUpdate and targets the
+          returned Snapshot only to the reconnecting session.
         - >-
           The boundary needs two gates, not one. Filtering `system_hull` alone
           left `RepairBlackboard.queue_depth` — every *damaged* system's exact
@@ -489,9 +493,12 @@ entities:
         - src/console/repair/visibility.rs
       symbols:
         - HullVisibility
+        - LastBroadcastHull
         - push_hull_updates
         - project_repair_blackboards
         - hull_update_for_token
+        - register_hull_replication_lifecycle
+        - ReplicationLifecycleAdapter
         - may_receive_repair_blackboard
         - project_repair_blackboard
       tests:
@@ -513,10 +520,16 @@ entities:
         reference: live_broadcast_gives_a_station_owner_only_its_own_systems
         summary: A station holder receives exact detail for its own systems only.
       - kind: test
-        reference: reconnect_resync_honours_the_same_gating_as_the_live_broadcast
+        reference: registered_reconnect_honours_off_site_visibility_without_mutating_caches
         summary: >-
-          The reconnect payload for a token is byte-identical in row set to what
-          the live broadcaster sent it.
+          The registered reconnect payload for Engineering and a station owner
+          is byte-identical in row set and aggregates to live publication while
+          leaving every recipient's live Hull cache unchanged.
+      - kind: test
+        reference: registered_reconnect_honours_on_site_visibility_without_mutating_caches
+        summary: >-
+          An on-site Engineering reconnect receives the same newly revealed
+          non-Core detail as the live publisher, without changing delta caches.
       - kind: test
         reference: repair_blackboard_fans_out_per_token_while_others_stay_broadcast
         summary: >-

@@ -81,6 +81,9 @@ use crate::ship::system_registry::repair_system_id;
 /// agree on one spelling.
 pub const CORE_BUCKET_ID: &str = "core";
 
+/// Stable lifecycle key for the recipient-projected Hull snapshot.
+pub(crate) const HULL_REPLICATION_KEY: &str = "hull";
+
 // ── Cached per-recipient projections ──────────────────────────────────────────
 
 /// One recipient's view of the ship's damage state.
@@ -93,6 +96,46 @@ pub struct HullProjection {
     pub entries: Vec<SystemHullStatus>,
     pub aggregate_fraction: Option<f32>,
     pub destroyed_fraction: Option<f32>,
+}
+
+/// Last live-broadcast Hull projection per session token.
+///
+/// The cache lives with the projection and publisher that own its meaning. A
+/// recipient's entry can change without hull HP changing (for example when a
+/// repair team arrives on site or the recipient changes Station), so this is
+/// intentionally token-keyed and replaced wholesale on each live publication.
+#[derive(Resource, Default)]
+pub struct LastBroadcastHull(pub HashMap<String, HullProjection>);
+
+/// Register Hull-owned replication lifecycle behavior.
+///
+/// [`super::server::RepairPlugin`] calls this beside the repair visibility
+/// publisher. The generic lifecycle runner sees only a stable key and function
+/// pointers; it does not know the cache resource or `SystemHullUpdate` shape.
+pub(crate) fn register_hull_replication_lifecycle(app: &mut App) {
+    use crate::authoritative::{DeclareState, StateClass};
+    use crate::core::broadcast::{RegisterReplicationLifecycle, ReplicationLifecycleAdapter};
+
+    app.init_resource::<LastBroadcastHull>()
+        .declare_state::<LastBroadcastHull>(StateClass::Cache, "digest-exclusion-classes")
+        .register_replication_lifecycle(
+            ReplicationLifecycleAdapter::new(HULL_REPLICATION_KEY)
+                .with_reset(reset_hull_replication)
+                .with_reconnect(reconnect_hull_projection),
+        );
+}
+
+fn reset_hull_replication(world: &mut World) {
+    *world.resource_mut::<LastBroadcastHull>() = LastBroadcastHull::default();
+}
+
+/// Build the reconnecting session's current permitted Hull projection.
+///
+/// This deliberately reads no delta cache and writes no projection cache, so
+/// another session's reconnect cannot perturb any connected client's next
+/// live delta.
+fn reconnect_hull_projection(world: &mut World, token: &str) -> Vec<ServerMessage> {
+    hull_update_for_token(world, token).into_iter().collect()
 }
 
 /// Last-sent repair blackboard projection per session token.
@@ -562,11 +605,10 @@ fn viewers(world: &World) -> Vec<(String, Option<StationId>)> {
 /// *visible* detail changed since the last send.
 ///
 /// Replaces the pre-#737 single `Target::All` push. The cache is keyed by token
-/// (see [`crate::core::broadcast::LastBroadcastHull`]) because the projection
+/// (see [`LastBroadcastHull`]) because the projection
 /// can change without the hull changing — a repair team arriving, or a player
 /// moving station, both alter what a given recipient may see.
 pub fn push_hull_updates(world: &mut World) {
-    use crate::core::broadcast::LastBroadcastHull;
     use crate::server_app::SimOutbox;
 
     let Some(vis) = hull_visibility(world) else {
@@ -1373,7 +1415,7 @@ station = "engineering"
         use crate::ship_plugin::ShipConfigComponent;
 
         let mut app = App::new();
-        app.init_resource::<crate::core::broadcast::LastBroadcastHull>();
+        register_hull_replication_lifecycle(&mut app);
         app.init_resource::<crate::server_app::SimOutbox>();
 
         let mut sessions = crate::lobby::session::SessionManager::new();
@@ -1439,6 +1481,83 @@ station = "engineering"
 
     fn rows_for<'a>(sent: &'a [SentHull], token: &str) -> &'a Vec<String> {
         &for_token(sent, token).rows
+    }
+
+    fn reconnected_hull(app: &mut App, token: &str) -> SentHull {
+        crate::core::broadcast::reconnect_registered_replication(app.world_mut(), token)
+            .into_iter()
+            .find_map(|message| match message {
+                ServerMessage::SystemHullUpdate {
+                    entries,
+                    aggregate_fraction,
+                    destroyed_fraction,
+                } => Some(SentHull {
+                    token: token.to_string(),
+                    rows: entries.into_iter().map(|entry| entry.system_id.0).collect(),
+                    aggregate: aggregate_fraction,
+                    destroyed: destroyed_fraction,
+                }),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("registered Hull reconnect projection missing for {token}"))
+    }
+
+    fn assert_registered_reconnect_matches_live(app: &mut App, token: &str) {
+        let live = sent_hull(app);
+        let live = for_token(&live, token);
+        let cached_before = app.world().resource::<LastBroadcastHull>().0.clone();
+
+        let reconnect = reconnected_hull(app, token);
+
+        assert_eq!(
+            reconnect.rows, live.rows,
+            "reconnect must reproduce the live row visibility for {token}"
+        );
+        assert_eq!(reconnect.aggregate, live.aggregate);
+        assert_eq!(reconnect.destroyed, live.destroyed);
+        assert_eq!(
+            app.world().resource::<LastBroadcastHull>().0,
+            cached_before,
+            "a targeted reconnect must not mutate any recipient's live Hull cache"
+        );
+    }
+
+    #[test]
+    fn repair_plugin_registers_hull_lifecycle_and_state_census_locally() {
+        let mut app = App::new();
+        app.add_plugins(crate::console::repair::server::RepairPlugin);
+        crate::server_app::register_blackboard_replication_lifecycle(&mut app);
+
+        assert_eq!(
+            app.world()
+                .resource::<crate::core::broadcast::ReplicationLifecycleRegistry>()
+                .keys()
+                .collect::<Vec<_>>(),
+            vec!["blackboards", "hull"],
+            "owner registration must retain stable lexical lifecycle ordering"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<crate::authoritative::StateCensus>()
+                .get(std::any::type_name::<LastBroadcastHull>()),
+            Some((
+                crate::authoritative::StateClass::Cache,
+                "digest-exclusion-classes"
+            )),
+            "the owner must keep the Hull cache classified in StateCensus"
+        );
+    }
+
+    #[test]
+    fn registered_run_reset_clears_the_hull_delta_cache() {
+        let mut app = world_app(RepairTeams::new(1));
+        let sent = sent_hull(&mut app);
+        assert_eq!(sent.len(), 2);
+        assert_eq!(app.world().resource::<LastBroadcastHull>().0.len(), 2);
+
+        crate::core::broadcast::reset_registered_replication(app.world_mut());
+
+        assert!(app.world().resource::<LastBroadcastHull>().0.is_empty());
     }
 
     #[test]
@@ -1528,28 +1647,28 @@ station = "engineering"
     }
 
     #[test]
-    fn reconnect_resync_honours_the_same_gating_as_the_live_broadcast() {
-        let mut app = world_app(RepairTeams::new(1));
-
-        let live = sent_hull(&mut app);
+    fn registered_reconnect_honours_off_site_visibility_without_mutating_caches() {
         for token in ["eng", "pilot"] {
-            let ServerMessage::SystemHullUpdate {
-                entries,
-                aggregate_fraction,
-                destroyed_fraction,
-            } = hull_update_for_token(app.world_mut(), token).expect("resync payload")
-            else {
-                unreachable!()
-            };
-            let resync: Vec<String> = entries.iter().map(|e| e.system_id.0.clone()).collect();
-            assert_eq!(
-                &resync,
-                rows_for(&live, token),
-                "reconnect must not hand {token} detail the live path withholds"
-            );
-            assert!(aggregate_fraction.is_some());
-            assert!(destroyed_fraction.is_some());
+            let mut app = world_app(RepairTeams::new(1));
+            assert_registered_reconnect_matches_live(&mut app, token);
         }
+    }
+
+    #[test]
+    fn registered_reconnect_honours_on_site_visibility_without_mutating_caches() {
+        let mut teams = RepairTeams::new(1);
+        let mut hull = hull_with(&[("helm-radar", 100.0)]);
+        hull.set_hp(&SystemId("helm-radar".into()), 30.0);
+        teams.dispatch(0, SystemId("helm-radar".into()), "Radar".into());
+        teams.tick(6.0, &mut hull, None);
+
+        let mut app = world_app(teams);
+        assert_registered_reconnect_matches_live(&mut app, "eng");
+        let reconnect = reconnected_hull(&mut app, "eng");
+        assert!(
+            reconnect.rows.contains(&"helm-radar".to_string()),
+            "an on-site Engineering reconnect must receive the detail live publication reveals"
+        );
     }
 
     #[test]

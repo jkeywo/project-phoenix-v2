@@ -141,17 +141,18 @@ entities:
         - A BTreeMap orders adapters by semantic owner key, so plugin insertion order cannot change the sequence of reconnect snapshots.
         - Adapters may register reset only, reconnect only, or both. This keeps UUID pruning specialized rather than inventing a generic lifecycle operation that unrelated caches do not have.
         - The Blackboard adapter owns LastBroadcastBlackboards and the per-recipient Repair projection cache. Its reconnect projection sorts every current SystemId, applies the same Repair visibility function as the live path, and reads but never mutates either cache.
+        - The Hull adapter is registered by the Repair owner under the stable `hull` key. It owns LastBroadcastHull, reuses HullVisibility for live and reconnect projection, and never mutates the token-keyed live delta cache while reconstructing one session.
     architecture:
       kind: replication-registry
       authority: authoritative
-      reads: [session-identity-state, session-station-ownership-state, ship-system-blackboards-state]
+      reads: [session-identity-state, session-station-ownership-state, ship-system-blackboards-state, authoritative-damage-state, repair-team-state]
       produces: [simulation-state-replica]
       runs_in: [host-browser-runtime]
     implementation:
       status: declared
-      paths: [src/core/broadcast/lifecycle.rs, src/server_app/broadcast_publish.rs, src/core/broadcast/cache_registry.rs]
-      symbols: [ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards]
-      messages: [BlackboardUpdate]
+      paths: [src/core/broadcast/lifecycle.rs, src/server_app/broadcast_publish.rs, src/console/repair/visibility.rs, src/console/repair/server.rs, src/core/broadcast/cache_registry.rs]
+      symbols: [ReplicationLifecycleRegistry, ReplicationLifecycleAdapter, RegisterReplicationLifecycle, LastBroadcastBlackboards, LastBroadcastHull, register_hull_replication_lifecycle]
+      messages: [BlackboardUpdate, SystemHullUpdate]
       tests: [cargo test]
 
   - state: lobby-session-replica

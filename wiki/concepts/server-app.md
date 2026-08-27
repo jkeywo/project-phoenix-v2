@@ -2,7 +2,7 @@
 title: Server App Composition
 type: concept
 tags: [architecture, plugins, server, composition, fixed-tick]
-sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/server_app/collision.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/core/broadcast/lifecycle.rs, src/core/broadcast/cache_registry.rs, src/ship/shields.rs, src/server/bridge.rs]
+sources: [src/server_app/mod.rs, src/server_app/registration.rs, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/server_app/collision.rs, src/server_app/world_setup.rs, src/server_app_render.rs, src/core/broadcast/lifecycle.rs, src/core/broadcast/cache_registry.rs, src/console/repair/visibility.rs, src/ship/shields.rs, src/server/bridge.rs]
 updated: 2026-08-28
 ---
 
@@ -53,10 +53,12 @@ without matching on the message variant. See [Broadcaster Seam](./broadcaster-se
 
 `register_blackboard_replication_lifecycle` initialises and declares
 `LastBroadcastBlackboards` beside its live publisher, then registers its reset
-and targeted reconnect projector under the stable `blackboards` key. The
-generic lifecycle runners invoke registered owners in key order without knowing
-their cache resources or message shapes. Shared composition retains only the
-transitional cache census for owners not yet migrated.
+and targeted reconnect projector under the stable `blackboards` key.
+`RepairPlugin` likewise registers token-keyed `LastBroadcastHull` beside the
+Hull visibility publisher under the stable `hull` key. The generic lifecycle
+runners invoke registered owners in key order without knowing their cache
+resources or message shapes. Shared composition retains only the transitional
+cache census for owners not yet migrated.
 
 ## Tests
 

@@ -325,7 +325,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
                 StateClass::Cache,
                 "digest-exclusion-classes",
             )
-            .declare_state::<LastBroadcastHull>(StateClass::Cache, "digest-exclusion-classes")
             // Cache of the presentation-only debug flags (issue #940):
             // `report_debug_state` compares against it to skip re-announcing.
             // "debug-overlay-state" is the PASM state entity in
@@ -710,7 +709,6 @@ pub fn add_simulation_plugins_with(app: &mut App, opts: SimPluginOptions) {
         .init_resource::<SimOutbox>()
         .init_resource::<LastBroadcastEntityPositions>()
         .init_resource::<LastBroadcastEntityHealth>()
-        .init_resource::<LastBroadcastHull>()
         .init_resource::<crate::core::messages::InterSystemQueue>()
         // `handle_collisions` (registered below, in SimSet::Damage) writes this,
         // so the simulation owns it. `DebugOverlayPlugin` also init_resource's it

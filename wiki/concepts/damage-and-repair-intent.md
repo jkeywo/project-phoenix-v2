@@ -3,7 +3,7 @@ title: Damage and Repair Information
 type: concept
 tags: [damage, repair, engineering, station, information]
 sources: [pasm/spec/architecture/engineering-damage.yaml, src/ship/damage_sync.rs, src/ship/coordination_systems.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/modifiers/repair_teams.rs, gui/console-state.js, gui/components/ph-repair-teams.js]
-updated: 2026-08-27
+updated: 2026-08-28
 ---
 
 # Damage and Repair Information
@@ -21,6 +21,12 @@ reconnect resync:
 - `system_hull` and `queue_depth` are filtered by that policy, while the list
   of legal dispatch targets remains whole so Engineering can send a team into
   an area it cannot inspect remotely.
+
+`RepairPlugin` owns the token-keyed `LastBroadcastHull` cache beside that live
+publisher and registers its reset and reconnect projector under the stable
+`hull` lifecycle key. Reconnect reads the same `HullVisibility` projection
+without mutating the cache, so another session's return cannot perturb an
+existing recipient's next live delta.
 
 ## Requests, dispatch, and repair
 

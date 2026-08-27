@@ -133,6 +133,11 @@ pub struct RepairPlugin;
 
 impl Plugin for RepairPlugin {
     fn build(&self, app: &mut App) {
+        // Hull owns its token-keyed live delta cache and its cache-independent
+        // reconnect projection beside the visibility publisher. Registering
+        // here keeps both shapes out of the generic lifecycle runner and the
+        // server composition root.
+        super::visibility::register_hull_replication_lifecycle(app);
         // The shared AI decision cadence (issue #889): `operate_repair_ai` was
         // one of four hosts #895's FixedUpdate migration left ungated — see
         // the identical note on `NavigationPlugin::build`. `register_ai_cadence`

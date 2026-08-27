@@ -2,7 +2,7 @@
 title: Broadcaster Seam
 type: concept
 tags: [broadcast, messages, audience, cadence, delivery-class, snapshot, reliable]
-sources: [src/core/broadcast/, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/lobby/server.rs, src/debug_overlay.rs]
+sources: [src/core/broadcast/, src/server_app/components.rs, src/server_app/broadcast.rs, src/server_app/broadcast_publish.rs, src/console/weapons/blackboard.rs, src/ship/power.rs, src/ship/shields.rs, src/console/repair/server.rs, src/console/repair/visibility.rs, src/lobby/server.rs, src/debug_overlay.rs]
 updated: 2026-08-28
 ---
 
@@ -69,18 +69,16 @@ plugin insertion order. Reconnect callbacks return current permitted
 `ServerMessage` projections; the central caller targets them only to the
 reconnecting token as Snapshot traffic.
 
-Blackboards are the first migrated owner. `LastBroadcastBlackboards`, its live
-diff publisher, reset, and reconnect projector live together in
-`src/server_app/broadcast_publish.rs`. Reset also clears the per-recipient
-`LastVisibleRepairBlackboard`; reconnect sorts every current Blackboard by
-`SystemId`, applies the same Repair visibility policy as live publication, and
-does not mutate either cache.
+Blackboards and Hull are migrated owners:
+
+- `LastBroadcastBlackboards`, its live diff publisher, reset, and reconnect projector live together in `src/server_app/broadcast_publish.rs`. Reset also clears the per-recipient `LastVisibleRepairBlackboard`; reconnect sorts every current Blackboard by `SystemId`, applies the same Repair visibility policy as live publication, and does not mutate either cache.
+- `RepairPlugin` registers token-keyed `LastBroadcastHull` beside `push_hull_updates` under the stable `hull` key. Reconnect uses the same `HullVisibility` projection as live publication, including on-site detail, without writing the cache or perturbing another recipient's next delta.
 
 `src/core/broadcast/cache_registry.rs` is the transitional census for owners
-not yet migrated. It resets position, health, Hull, and Weapons caches. On
-reconnect it directly reconstructs Hull and Weapons plus uncached Shields;
-position and health travel in `Welcome`'s world snapshot. It retains
-specialized UUID pruning for position and health.
+not yet migrated. It resets position, health, and Weapons caches. On reconnect
+it directly reconstructs Weapons plus uncached Shields; position and health
+travel in `Welcome`'s world snapshot. It retains specialized UUID pruning for
+position and health.
 
 ## Adding a producer
 

@@ -1,7 +1,7 @@
 ---
 title: Server HTML Lobby UI
 type: concept
-tags: [lobby, server, html, ui, bridge, responsive]
+tags: [lobby, server, html, ui, bridge, responsive, accessibility, reduced-motion]
 sources: [server.html, gui/host-lobby-view.js, src/server/viewscreen_border.rs, src/console_bridge.rs, src/server/bridge.rs]
 updated: 2026-08-27
 ---
@@ -98,6 +98,18 @@ The lobby cards, rail, QR area, and responsive layout are DOM owned by
 `server.html` and `gui/host-lobby-view.js`; Bevy publishes data but does not
 build a lobby UI tree.
 
+## Viewscreen reduced motion
+
+The viewscreen's motion preference is presentation state and never enters the
+authoritative digest. In the browser host, `server.html` observes
+`prefers-reduced-motion` and calls `wasm_set_reduced_motion`; the bridge latch
+is drained into `ViewscreenMotion` by `sync_reduced_motion`. The native path
+seeds the same resource from `PHOENIX_REDUCED_MOTION` at startup. Consumers
+therefore share one decision: reduced motion zeroes hull-damage camera/page
+shake and caps the shield flash, while the host CSS disables the Red Alert
+vignette pulse. The default keeps the normal effects, and
+`ViewscreenMotion.shake_intensity` is the future comfort-slider seam.
+
 ## Tests
 
 Smoke coverage in `tests/smoke/lobby-responsive.spec.js`:
@@ -108,6 +120,11 @@ Smoke coverage in `tests/smoke/lobby-responsive.spec.js`:
 Protocol-level lobby coverage stays in `tests/smoke/lobby.spec.js` (station
 selection, readiness, assignment broadcasts, and invalid claims). Those tests
 do not assert responsive DOM layout.
+
+`tests/smoke/viewscreen-reduced-motion.render.spec.js` exercises the live WASM
+motion latch and asserts zero page translation plus a disabled vignette pulse;
+the pure Rust tests beside `ViewscreenMotion` cover shake scaling and the
+reduced-motion flash cap.
 
 ## Sources
 

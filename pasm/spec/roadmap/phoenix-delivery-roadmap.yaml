@@ -677,7 +677,7 @@ entities:
 
   - component: roadmap-release-polish
     core:
-      status: accepted
+      status: partially-implemented
       confidence: confirmed
       title: Per-Release Visual, UX, and Accessibility Delivery
       summary: "Every band on BOTH tracks carries its own scoped visual/UX polish pass and accessibility increment, written in detail just before that band starts. Content-track passes (C1-C9) follow the new player surfaces, viewscreen/effects, onboarding and session flow; technical-track passes (T1-T6) cover the operator- and setup-facing surfaces that band ships. Accessibility is one continuous programme. Content ladder: C2 complexity composition; C3 alternative motion/docking/multi-ship paths; C4 mastery-task assistance; C5 dense tactical information; C6 continuing-mode maps/summary/return; C7 strategy; C8 generation constraints; C9 alternative participation and completion audit. Technical ladder — each band pairs its band-surface pass with ONE platform-wide, non-content improvement stream (2026-08-21 grill over the accessibility and polish reports): T1 the programme's opening seams (settings/profile/presentation/eligibility) plus native bridge and pane setup, PLUS interaction foundations — keyboard operability of every console, focus integrity (modal traps, Escape, visible focus styling), accessible names across the shadow-DOM components, and completing #1102's inert seams (wire data-contrast and data-reduced-motion into console CSS, make viewscreen shake/flash/vignette honour reduced motion). T2 GM MVP surfaces, Workshop/mod editing and save-slot UX, PLUS the shared input and feedback layer — a keybinding registry above action-map.js, player-facing action remapping, and one state-driven UI microinteraction system. T3 GM facilitation and safety tooling, PLUS presentation and comfort — colour-independent state coding, larger-target/density mode, viewscreen comfort toggles to zero, photosensitivity review of flash effects. T4 the integrated Workshop/Live Inspector and dense GM information, PLUS audio — bus hierarchy with per-channel volumes, ducking, cue variation, and captions/visual equivalents for meaningful audio cues. T5 multi-ship join flow and session diagnostics, PLUS localisation robustness — plural support, pseudoloc and overflow passes, font coverage, promoting the untranslated-literal check from warning to error. T6 campaign continuity summaries and recap."
@@ -687,14 +687,18 @@ entities:
         - "Scope is visual and UX only: defects are fixed as they arise and never occupy a polish slot."
         - "The console visual system is worked hull by hull in the same order as the catalogue rollout, so a hull's look lands with its tutorials and balance rather than later."
         - "Accessibility increments may align naturally with a band's systems but are not required to be fictionally or mechanically tied to that band's content. Low-cost seams land when their owning UI/authority layer is already changing."
-        - "T1's platform-stream PRD published as #1168 (interaction foundations), broken into issues #1170-#1178: keyboard tracer #1170, then floors #1175 gate the three family sweeps #1176-#1178, with modal contract #1174, high-contrast #1171 and reduced-motion #1172/#1173 alongside. Latency instrumentation filed as #1169 under #1144. T2-T5 platform-stream PRDs are written just-in-time as each band opens."
+        - "T1's platform-stream PRD #1168 (interaction foundations) is delivered through issues #1170-#1178: keyboard tracer #1170, then floors #1175 gated the three completed family sweeps #1176-#1178, with modal contract #1174, high-contrast #1171 and reduced-motion #1172/#1173 alongside. The floors now carry no interaction debt. Latency instrumentation remains #1169 under #1144. T2-T5 platform-stream PRDs are written just-in-time as each band opens."
         - "2026-08-21 platform-stream decisions: the bar is WCAG-INFORMED engineering (keyboard operability, name/role hygiene, focus integrity, contrast, no colour-only or drag-only paths), explicitly NOT WCAG conformance, evaluation methodology, or legal mappings. Structured text alternatives for the canvas displays and full screen-reader support are deliberately unscheduled (see roadmap-planned-not-scheduled). The T1 pass uses per-component keyboard handlers; the binding registry and remapping deliberately wait for T2 so T1 stays thin, accepting some rework. Input-to-feedback latency instrumentation is #1144's scope (debug observability feeding #868 budgets), not a polish stream. New floors are gated the #1023 way: structural tests over source (control-floors.test.js pattern) for focusability, accessible names, and keyboard reachability — not an external audit tool."
     architecture:
       kind: roadmap-milestone
       authority: non-authoritative
       reads: [world-content-pack-state]
       coordinates: [post-demo-release-bands]
-      runs_in: [host-browser-runtime]
+      runs_in: [host-browser-runtime, phone-browser-runtime, native-host-runtime]
+    implementation:
+      status: declared
+      paths: [gui/accessibility-profile.js, gui/focus-trap.js, gui/roving-tabindex.js, gui/tokens.css, src/server/viewscreen_border.rs]
+      tests: [tests/client/interaction-floors.test.js, tests/smoke/modal-focus-keyboard.spec.js, tests/smoke/viewscreen-reduced-motion.render.spec.js]
 
   - state: world-snapshot-artifact
     core:

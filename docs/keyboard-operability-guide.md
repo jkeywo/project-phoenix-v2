@@ -1,11 +1,10 @@
 # Keyboard operability — the conventions
 
-Issue #1170 made **one** console operable from the keyboard: the Destroyer's
-Tactical (Weapons) console. It is the tracer for PRD #1168 (T1 Interaction
-Foundations), and its job was less to fix one screen than to **set the
-conventions the family sweeps copy**. Issues #1176–#1178 apply these same
-patterns to the remaining consoles; this guide is what they follow so the
-bridge ends up with one keyboard contract rather than thirty-eight.
+Issue #1170 made the Destroyer's Tactical (Weapons) console the keyboard
+tracer for PRD #1168 (T1 Interaction Foundations). Its job was less to fix one
+screen than to **set the conventions every console follows**. Issues
+#1176–#1178 then applied those patterns to the remaining families, so the
+bridge now has one keyboard contract rather than thirty-eight local ones.
 
 Everything here is deliberately thin. The keybinding **registry** and
 player-facing remapping are T2's input-and-feedback layer — not this band. In
@@ -31,8 +30,11 @@ a tactical console has a radar plus three weapon panels with a dozen buttons
 between them, and without roving tabindex that is a dozen-plus Tab presses to
 cross one screen.
 
-Helm is untouched. Its existing key relay (`gui/key-relay.js`) and gamepad
-bindings are a separate, already-working path; do not fold Helm into this.
+Helm keeps its existing key relay (`gui/key-relay.js`) and gamepad bindings as
+the one flight-control path. Issue #1176 made its composites focusable and
+named without adding a second arrow-key handler; new Helm controls must keep
+that deliberate coexistence so a focused control cannot double-fire or steal a
+game binding.
 
 ---
 
@@ -173,7 +175,7 @@ code path, no binding registry (that is T2).
 
 ---
 
-## 6. How to make the next console keyboard-operable (the #1176–#1178 recipe)
+## 6. How to keep a new console keyboard-operable
 
 1. For each custom composite, add `role` + `aria-label` (§3), naming it from the
    string id its heading already uses.
@@ -188,10 +190,11 @@ code path, no binding registry (that is T2).
    Enter/Space for free.
 6. Adopt the shared control family so the focus ring appears — never write an
    outline (§2).
-7. Once the family is converted, **delete its block from the #1175 allow-list**
-   (`DEBT` in `tests/client/interaction-floors.test.js`). That deletion *is* the
-   sweep's done-ness — and it is not optional: a converted component left in the
-   list fails the `allow-list is honest` test (§7).
+7. Keep the #1175 `DEBT` registry in
+   `tests/client/interaction-floors.test.js` empty. If an explicitly scheduled
+   follow-up ever needs a temporary entry, name the owning issue and remove the
+   entry with that fix; a converted component left behind fails the
+   `allow-list is honest` test (§7).
 
 ---
 
@@ -218,17 +221,16 @@ control gets text — its own, a descendant's, or a runtime fill by `id` — or 
 `aria-label`. The scanner is in `tests/client/interaction-scan.js`, shared the
 way `css-scan.js` is; the coarse edge (a component that mixes a real `<button>`
 with a delegated `<div>` click reads as focusable, and that div escapes) is why
-the *sweep's* fine-grained conversion still carries its own jsdom + smoke tests.
+the completed family sweeps also shipped their own jsdom + smoke tests.
 
-**The allow-list is the mechanism the sweeps run against.** `DEBT`, grouped by
-sweep (#1176/#1177/#1178), names every component that fails a floor today; the
-floors run green against it. A sweep converts its family, then deletes its
-block. Two tests keep that honest: a still-failing entry is acknowledged debt,
-but an entry that **no longer fails** breaks `the allow-list is honest` — so a
-fix cannot quietly leave a component listed. The tracer (the Tactical console)
-is on neither list and passes every floor clean. Structural non-controls take an
-`EXEMPT` entry with a reason instead (e.g. `ph-radar`, the base scope canvas
-that is always wrapped by a labelled group and so is never its own tab stop).
+**The allow-list was the migration mechanism for the family sweeps and is now
+empty.** Issues #1176–#1178 removed their blocks as each family converted, so
+every detected console surface runs against the floors with no acknowledged
+interaction debt. The honesty test remains: a temporary `DEBT` entry that no
+longer fails breaks `the allow-list is honest`, so a later fix cannot quietly
+leave its escape behind. Structural non-controls take an `EXEMPT` entry with a
+reason instead (e.g. `ph-radar`, the base scope canvas that is always wrapped
+by a labelled group and so is never its own tab stop).
 
 ## 8. What proves it
 
@@ -237,8 +239,8 @@ that is always wrapped by a labelled group and so is never its own tab stop).
   the **negative fixtures** that prove each floor can fail (an unnamed button, a
   glyph with no `aria-label`, an unreachable drag widget, a stranded control).
 - **`tests/client/interaction-floors.test.js`** — the four floors over the live
-  console surface, the debt allow-list, and the honesty check that forces a
-  sweep to strike off what it fixes.
+  console surface, the empty debt registry, and the honesty check that removes
+  any temporary escape once its component is fixed.
 - **`tests/client/tactical-keyboard.test.js`** — roles, names, the single Tab
   stop, the glyph steppers' names, and the two key handlers (blaster
   hold-to-fire, radar cursor) in jsdom.

@@ -1,39 +1,53 @@
 entities:
   - decision: accessibility-private-effect-profile
     core:
-      status: accepted
+      status: partially-implemented
       confidence: confirmed
       title: Private Effect-Named Accessibility Profile
-      summary: "Band A2 establishes one shared Accessibility settings surface and a private per-player profile used by web and native panes. Settings name functional effects such as text scale, contrast, motion, timing or assistance; they never name or infer a diagnosis. OS preferences supply defaults where available and explicit player overrides win."
+      summary: "T1 establishes one shared Accessibility settings surface and a private per-player profile for web and native panes. The browser profile and its presentation consumers are implemented; native panes must reuse that contract when they land. Settings name functional effects such as text scale, contrast, motion, timing or assistance; they never name or infer a diagnosis. OS preferences supply defaults where available and explicit player overrides win."
       rationale:
         - "The profile belongs to the player/pane, not the physical bridge layout, station claim or scenario save."
         - "Other players never receive the settings or reasons. Only a derived functional result required for eligibility or an explicitly requested assistance state crosses the client boundary."
-        - "A2 owns the schema and cheap presentation controls while the settings shell, native panes and shared Hero Bar are already changing; later bands add deeper assistance without replacing the profile."
+        - "T1 owns the schema and cheap presentation controls while the settings shell, native panes and shared Hero Bar are changing; later bands add deeper assistance without replacing the profile."
+        - "The browser implementation arrived through #1102 and #1168. Native-pane reuse remains with T1's native delivery rather than forking a second profile."
     game_design:
       must_not_be: [labelled by medical need, exposed to other players, stored as part of a bridge hardware profile, allowed to make the browser route secondary]
+    implementation:
+      status: declared
+      paths: [gui/accessibility-profile.js, gui/settings-panel.js, gui/tokens.css]
+      tests: [tests/client/accessibility-profile.test.js, tests/client/design-tokens.test.js]
 
   - decision: accessibility-station-eligibility-contract
     core:
-      status: accepted
+      status: implemented
       confidence: confirmed
       title: Anonymous Station and Rating Eligibility
       summary: "A client evaluates whether the complete station surface at a required rating is compatible with its private profile and publishes only an eligible/ineligible functional result. Station selection explains incompatibility locally; the human-seeking resolver skips an ineligible destination without disclosing why."
       rationale:
         - "Eligibility covers the base hull at full supported player count. It does not account for missing players or guarantee that one person can operate every station required by a complex scenario."
-        - "Every base hull must validate at least one compatible station/rating under the complete supported option set for a simple scenario. Band B adds the scenario-floor composition and authoring validation on A2's transport/resolver seam."
+        - "Every base hull must validate at least one compatible station/rating under the complete supported option set for a simple scenario. Content band C2 adds the scenario-floor composition and authoring validation on T1's transport/resolver seam."
         - "Assistance is a per-function override layered separately from station rating even when both delegate work to the same limited-AI policy runtime."
     game_design:
       must_not_be: [a disclosure of enabled settings, a promise of solo complex-scenario completion, implemented as a second automation engine]
+    implementation:
+      status: declared
+      paths: [client.html, gui/accessibility-profile.js, gui/lobby-view.js, src/core/messages.rs, src/lobby/handler.rs, src/lobby/session.rs, src/ship/coordination_systems.rs, src/ship/eligibility.rs]
+      tests: [tests/client/accessibility-eligibility.test.js, cargo test]
 
   - decision: accessibility-incremental-delivery
     core:
-      status: accepted
+      status: partially-implemented
       confidence: confirmed
-      title: Accessibility Delivered Across Bands A2–I
-      summary: "Accessibility is one continuing programme with concrete increments in each release: A2 settings/profile/presentation/eligibility seams; B complexity composition and validation; C alternative motion/docking/multi-ship paths; D mastery-task assistance; E dense tactical information; F continuing-mode navigation and return; G strategy; H generation constraints; I alternative participation and completion audit."
+      title: Accessibility Delivered Across the C/T Roadmap
+      summary: "Accessibility is one continuing programme across both roadmap tracks. T1's browser profile, anonymous eligibility, real contrast/reduced-motion presentation, keyboard operability, focus integrity and accessible-name floors are implemented; native-pane reuse remains with T1's native delivery. Content increments continue through C2 complexity composition, C3 alternative motion and docking, C4 mastery-task assistance, C5 dense tactical information, C6 continuing-mode navigation and return, C7 strategy, C8 generation constraints and C9 alternative participation and completion audit. Technical bands T2-T6 carry matching improvements for the operator surfaces they introduce."
       rationale:
         - "An increment lands when the owning UI, authority or authoring seam is already changing, avoiding a late retrofit. It need not be fictionally or mechanically tied to the band’s headline content."
         - "Every band still has its own visual/UX polish pass. Accessibility is planned and tested alongside that pass but remains a distinct set of requirements."
-        - "Band I completes richer authorised spectator monitors and the whole-product audit; it is not the first point at which accessibility work occurs."
+        - "PRD #1168 delivered T1's platform interaction tranche through #1170-#1178: shared keyboard conventions, empty structural debt floors, modal focus, high contrast and reduced motion on both console and viewscreen surfaces."
+        - "C9 completes richer authorised spectator monitors and the whole-product audit; it is not the first point at which accessibility work occurs."
     game_design:
       must_not_be: [deferred as one final polish project, treated as identical to difficulty, required to map one-to-one onto scenario fiction]
+    implementation:
+      status: declared
+      paths: [gui/accessibility-profile.js, gui/focus-trap.js, gui/roving-tabindex.js, gui/tokens.css, src/server/viewscreen_border.rs]
+      tests: [tests/client/interaction-floors.test.js, tests/smoke/modal-focus-keyboard.spec.js, tests/smoke/viewscreen-reduced-motion.render.spec.js]

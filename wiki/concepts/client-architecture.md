@@ -1,8 +1,8 @@
 ---
 title: Client Architecture
 type: concept
-tags: [client, javascript, iframe, console, state, vitest]
-sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/sim-state.js, gui/console-state.js, gui/action-map.js, gui/iframe-bridge.js, tests/client/]
+tags: [client, javascript, iframe, console, state, accessibility, keyboard, vitest]
+sources: [client.html, gui/mount-plan.js, gui/hero-bar.js, gui/sim-state.js, gui/console-state.js, gui/action-map.js, gui/iframe-bridge.js, gui/accessibility-profile.js, gui/roving-tabindex.js, gui/focus-trap.js, gui/tokens.css, tests/client/]
 updated: 2026-08-27
 ---
 
@@ -52,6 +52,10 @@ Outbound: each console iframe posts `console_action` messages; `gui/action-map.j
 | `phase-toggle.js` | Lobby vs in-game section visibility (`GameOver` counts as in-game) |
 | `phone-bezel.js` | Diegetic phone bezel chrome |
 | `console-ui.js` | Shared iframe UI primitives (`reconcileRows`, `setBtn`, `setBar`, `setAutoState`, `setText`, keyed rebuild) |
+| `accessibility-profile.js` | Private per-player presentation profile: OS defaults plus explicit overrides, resolved to `data-contrast` and `data-reduced-motion` on the shell and console roots |
+| `roving-tabindex.js` | Shared one-Tab-stop keyboard navigation for composite controls; arrows move inside the composite while actions continue through `action-map.js` |
+| `focus-trap.js` | Shared modal contract: move and trap focus, close on Escape, inert the background, then restore the invoking control |
+| `tokens.css`, `components/ph-console-styles.js` | Shared high-contrast, reduced-motion and visible-focus presentation consumed on both sides of shadow roots |
 | `console-core.js`, `device-orientation.js`, `help-panel.js`, `manual-panel.js`, `settings-panel.js` | Iframe boot glue, orientation handling, and the phone Settings menu, including current-station help and the ship manual |
 
 Each console UI is one HTML file per ship class (`gui/battleship/helm.html`, `gui/cruiser/science.html`, …) loaded as an iframe; the URL comes from the station's TOML `console` field via `gui/console-resolver.js`, and the section/iframe DOM ids from `gui/mount-plan.js`. See [Console UI Authoring Library](./console-ui-library.md) for the authoring pattern.
@@ -69,7 +73,39 @@ Navigation and Comms visiting surfaces use this shared mounted-station path.
 Tactical's unrelated Intel toggle uses the generic overlay pattern in
 `gui/console-overlays.js`.
 
+## Interaction and presentation accessibility
+
+The Accessibility profile is local presentation state, not simulation state.
+`gui/accessibility-profile.js` resolves the OS contrast and motion preferences
+unless the player has explicitly overridden them, persists that private choice,
+and stamps the resolved attributes onto the shell and every console root.
+`gui/tokens.css` consumes those attributes once: the high-contrast palette and
+focus-ring pair are shared tokens, while the reduced-motion layer suppresses
+looping and decorative animation across document and shadow-root boundaries.
+
+The structural floor in `tests/client/interaction-floors.test.js` scans every
+console surface and rejects coarse regressions such as a surface with nothing
+focusable, an unnamed glyph, or a composite with no role. It deliberately does
+not claim per-control coverage: delegated child controls that a source scan can
+miss are exercised by the mounted jsdom family tests and keyboard smoke cases.
+Custom composites with discrete options present one named, roled Tab stop and
+use `gui/roving-tabindex.js` for arrow movement inside the component. Continuous
+Helm controls retain the one document-level key-relay path, and passive scopes
+stay named and roled without inventing a selection interaction. Keyboard
+activation dispatches the same named `action-map.js` actions as the pointer
+path. The migration debt registry is empty after the #1176–#1178 family sweeps.
+Modal surfaces share `gui/focus-trap.js`; they cannot each invent their own Tab,
+Escape or focus-restoration behaviour.
+
+This is name/role and keyboard hygiene, not full screen-reader narration.
+Structured text alternatives for canvas scopes remain planned rather than
+being inferred from the focusable canvas wrappers.
+
 ## Build & test
 
 - `node scripts/build-client.mjs` — file copy → `dist/client/` (no compile step).
 - `npx vitest run` — `tests/client/*.test.js` cover every pure module above.
+- `tests/client/interaction-floors.test.js` and the keyboard-family tests keep
+  focusability, naming, roles and keyboard reachability under source-level and
+  jsdom regression coverage; `tests/smoke/*keyboard*.spec.js` exercise the real
+  console documents without pointer events.

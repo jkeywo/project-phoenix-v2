@@ -432,7 +432,7 @@ fn update_session_with_config(
                 })
                 .collect();
             // Anonymous accessibility eligibility projection (issue #1103):
-            // per station → per rating → the A2 assist-functions the station
+            // per station → per rating → the T1 assist-functions the station
             // would force its holder to operate manually at that rating. Derived
             // purely from hull topology + rating automation
             // (`eligibility::projected_assist_gaps`) so the client runs the SAME

@@ -22,11 +22,13 @@
  *
  * The cost of a source scan is a coarse edge: a component that mixes a real
  * <button> with a delegated `e.target.closest('.pip')` click on a <div> reads
- * as "has a focusable control" and its div-pips escape this floor. The family
- * sweeps (#1176–#1178) carry the fine-grained per-control conversion with
- * mounted jsdom and keyboard smokes; this floor is the structural minimum that
- * stops the egregious regression — a surface with NOTHING focusable, a glyph
- * with no name, a composite with no role — and pins the debt in an allow-list.
+ * as "has a focusable control" and its div-pips escape this floor. The completed
+ * family sweeps (#1176–#1178) therefore carried fine-grained per-control checks
+ * in mounted jsdom and keyboard smokes. This floor remains the structural
+ * minimum that stops the egregious regression — a surface with NOTHING
+ * focusable, a glyph with no name, or a composite with no role. During the
+ * migration those violations were pinned in an allow-list; its debt registry is
+ * now empty and remains only as a time-bounded escape for a scheduled fix.
  *
  * The scanning primitives (comment stripping, the console-surface enumerators)
  * are shared with css-scan.js rather than re-derived here.

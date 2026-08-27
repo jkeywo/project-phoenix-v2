@@ -1317,7 +1317,7 @@ pub struct ShipClientConfig {
     pub station_systems: HashMap<String, Vec<String>>,
     /// Anonymous accessibility eligibility projection (issue #1103).
     ///
-    /// Per station id → per rating name → the A2 assist-function ids the station
+    /// Per station id → per rating name → the T1 assist-function ids the station
     /// would force its holder to operate MANUALLY at that rating (the "gaps").
     /// This is projected CONFIG derived from the hull topology + rating
     /// automation (`crate::ship::eligibility::projected_assist_gaps`) — never the

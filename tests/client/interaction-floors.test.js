@@ -23,19 +23,16 @@
  * ── The allow-list, and why it is the point ────────────────────────────────
  *
  * #1170 converted ONE console — the Destroyer's Tactical (Weapons) — as the
- * tracer. The other consoles are debt. Rather than let that debt sit as
- * thirty-odd silently-failing assertions, it is written DOWN: DEBT below names
- * every component that fails a floor today, grouped by the family sweep that
- * will fix it (#1176/#1177/#1178). The floors run green against the list.
+ * tracer. Issues #1176/#1177/#1178 then converted the remaining families and
+ * removed every migration entry from DEBT below. The floors now run over the
+ * whole detected surface with no acknowledged interaction debt.
  *
- * The list is the mechanism the sweeps run against. "Done" for a sweep is
- * mechanical: convert the family's components, then delete the family's block
- * here. Two tests make that non-optional — a DEBT entry that STILL fails keeps
- * the floor green (its debt is acknowledged), but a DEBT entry that NO LONGER
- * fails breaks `the allow-list is honest`, so a sweep cannot quietly leave a
- * fixed component listed. The surface is enumerated live from the filesystem,
- * so a sweep adds nothing here to bring a new console under the floor — it only
- * ever removes.
+ * The registry stays as the time-bounded escape mechanism for an explicitly
+ * scheduled future fix. Two tests keep it honest — a DEBT entry that STILL
+ * fails keeps the floor green (its debt is acknowledged), but an entry that NO
+ * LONGER fails breaks `the allow-list is honest`, so a fix cannot quietly leave
+ * its escape behind. The surface is enumerated live from the filesystem, so a
+ * new console enters the floor without an entry here.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -55,8 +52,9 @@ const TRACER = [
 ];
 
 /**
- * The debt, grouped by the sweep that clears it. A sweep deletes its whole
- * block when its family is converted (see the honesty test below).
+ * The debt registry. It is empty after the #1176–#1178 family sweeps; any
+ * future entry must name its scheduled owner and be removed with that fix (see
+ * the honesty test below).
  *
  * Each reason says what fails AND what the sweep does about it, so the entry
  * is a work item, not just a silence.
@@ -199,10 +197,10 @@ describe('the interaction allow-list is honest', () => {
     }
   });
 
-  // The forcing function for the sweeps: a DEBT entry that has stopped failing
-  // must be REMOVED. If #1177 converts ph-power-controls but forgets to delete
-  // its block, this fails with "no longer violates any floor" — which is the
-  // exact reminder to strike it off.
+  // The forcing function for any future scheduled debt: an entry that has
+  // stopped failing must be REMOVED. If a component is fixed but its temporary
+  // entry remains, this fails with "no longer violates any floor" — the exact
+  // reminder to strike it off.
   it('every debt entry still fails a floor (a fixed one must be struck off)', () => {
     const stale = [];
     for (const [path] of DEBT_BY_PATH) {

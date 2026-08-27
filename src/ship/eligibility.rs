@@ -1,6 +1,6 @@
 //! Anonymous Station/rating accessibility eligibility (issue #1103).
 //!
-//! A2 (design: `accessibility-station-eligibility-contract`) evaluates whether a
+//! T1 (design: `accessibility-station-eligibility-contract`) evaluates whether a
 //! complete Station surface at a required rating is compatible with a player's
 //! PRIVATE assistance profile, and publishes only an anonymous eligible /
 //! ineligible result. This module is the RUST source of truth for that rule —
@@ -11,7 +11,7 @@
 //! ## The rule
 //!
 //! A player's profile may request assistance (`ASSIST_REQUEST`) on one of the
-//! four A2 assist-functions below. A station is **INELIGIBLE** for that player
+//! four T1 assist-functions below. A station is **INELIGIBLE** for that player
 //! iff the player requests assistance on some assist-function whose underlying
 //! system the station would force them to operate MANUALLY at the required
 //! rating — i.e. the station hosts a directly-operated system of that kind that
@@ -28,7 +28,7 @@
 //! Both facts come from authored `[[system]]` config, so this stays pure config
 //! evaluation with no hidden gameplay values.
 //!
-//! Assistance itself is DECLARED-BUT-INERT in A2 (no AI implemented). This module
+//! Assistance itself is DECLARED-BUT-INERT in T1 (no AI implemented). This module
 //! only builds the eligibility seam: the mapping registry, the evaluator, the
 //! projection the client needs, and the guarantee that every base hull keeps a
 //! compatible seat.
@@ -53,7 +53,7 @@ pub const ASSIST_SENSORS_CONTACT_TRIAGE: &str = "sensors.contact-triage";
 /// Timing dialogue responses at Comms.
 pub const ASSIST_COMMS_DIALOGUE_TIMING: &str = "comms.dialogue-timing";
 
-/// The A2 assist-function vocabulary, in a stable order. Mirrors the client's
+/// The T1 assist-function vocabulary, in a stable order. Mirrors the client's
 /// `ASSISTANCE_FUNCTIONS`.
 pub const ASSIST_FUNCTIONS: &[&str] = &[
     ASSIST_HELM_COURSE_KEEPING,
@@ -345,7 +345,7 @@ mod tests {
     }
 
     /// AC4: every base playable hull, at full crew (every non-auxiliary seat
-    /// filled), with a profile requesting ALL A2 assist functions and a simple
+    /// filled), with a profile requesting ALL T1 assist functions and a simple
     /// scenario (empty scenario detail-floor), retains AT LEAST ONE compatible
     /// (station, rating) combination.
     ///
@@ -397,7 +397,7 @@ mod tests {
                 });
             assert!(
                 compatible,
-                "{stem}: no (station, rating) is eligible with all A2 assist \
+                "{stem}: no (station, rating) is eligible with all T1 assist \
                  functions requested — the full-crew accessibility guarantee is \
                  violated for this base hull"
             );

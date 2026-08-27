@@ -382,6 +382,7 @@ pub fn emit_shields_coordination(
             &ShipShields,
             &crate::ship::state::ShipRedAlert,
             &crate::ship_plugin::ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
             &mut ShieldsCoordinationState,
             Option<&ShieldsAiConfigResource>,
         ),
@@ -397,8 +398,15 @@ pub fn emit_shields_coordination(
     // falls back to the parse-time default the type already supplies for a TOML
     // that omits the section.
     let default_ai_cfg = ShieldsAiConfigResource::default();
-    for (entity, shields, red_alert, control_sources, mut coord_state, ai_config_comp) in
-        ship_q.iter_mut()
+    for (
+        entity,
+        shields,
+        red_alert,
+        control_sources,
+        ship_config,
+        mut coord_state,
+        ai_config_comp,
+    ) in ship_q.iter_mut()
     {
         let ai_config: &ShieldsAiConfigResource = ai_config_comp.unwrap_or(&default_ai_cfg);
         let snapshots = shields.0.snapshot();
@@ -419,6 +427,12 @@ pub fn emit_shields_coordination(
             .as_ref()
             .map(|sid| control_sources.0.source_for(sid))
             .unwrap_or_default();
+        let Some(helm_address) = crate::ship::coordination::address_for_system(
+            &ship_config.0,
+            &crate::ship::system_registry::helm_steering_system_id(),
+        ) else {
+            continue;
+        };
 
         for (i, snap) in snapshots.iter().enumerate() {
             if !snap.online {
@@ -433,7 +447,7 @@ pub fn emit_shields_coordination(
                     writer.write(CoordinationEnqueue {
                         source_entity: entity,
                         sender_origin,
-                        target: crate::ship::system_registry::helm_station_key(),
+                        address: helm_address.clone(),
                         payload,
                         sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
                         sender_system: first_arc_sid
@@ -457,7 +471,7 @@ pub fn emit_shields_coordination(
                     writer.write(CoordinationEnqueue {
                         source_entity: entity,
                         sender_origin,
-                        target: crate::ship::system_registry::helm_station_key(),
+                        address: helm_address.clone(),
                         payload,
                         sender_label: crate::ship::coordination::CHATTER_SENDER_SHIELDS.to_string(),
                         sender_system: first_arc_sid

@@ -313,12 +313,24 @@ describe('routeMessage — no-render cases', () => {
   });
 
   it('CoordinationPopup emits the popup effect and never renders', () => {
-    const msg = { type: 'CoordinationPopup', data: { target: 'tactical', payload: { type: 'Alert' }, sender_label: 'Helm AI' } };
+    const address = { type: 'Station', data: 'tactical' };
+    const msg = { type: 'CoordinationPopup', data: { address, payload: { type: 'Alert' }, sender_label: 'Helm AI' } };
     const r = routeMessage(msg, ctx(baseUiState()));
     expect(r.sideEffects).toEqual([{
-      effect: 'coordination-popup', payload: { type: 'Alert' }, senderLabel: 'Helm AI', targetLabel: 'tactical',
+      effect: 'coordination-popup', address, payload: { type: 'Alert' }, senderLabel: 'Helm AI', targetLabel: 'tactical',
     }]);
     expect(r.shouldRender).toBe(false);
+  });
+
+  it('ship-wide CoordinationPopup keeps its typed address and has no Station label', () => {
+    const address = { type: 'Ship' };
+    const r = routeMessage({
+      type: 'CoordinationPopup',
+      data: { address, payload: { type: 'IntentAdvisory' }, sender_label: 'Tactical' },
+    }, ctx(baseUiState()));
+    expect(r.sideEffects[0]).toMatchObject({
+      effect: 'coordination-popup', address, targetLabel: null,
+    });
   });
 
   it('WorldSetup / EntitySpawned / AsteroidSpawned skip the render', () => {

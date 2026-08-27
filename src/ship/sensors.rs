@@ -171,8 +171,7 @@ pub fn handle_sensors_messages(
     )>,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
-    for (entity, admitted, _ship_config, mut entity_target, control_sources) in
-        ship_query.iter_mut()
+    for (entity, admitted, ship_config, mut entity_target, control_sources) in ship_query.iter_mut()
     {
         for cmd in admitted.for_target(crate::ship::system_registry::SENSORS_SYSTEM_ID) {
             let uuid = match &cmd.payload {
@@ -201,10 +200,16 @@ pub fn handle_sensors_messages(
                 .0
                 .source_for(&crate::ship::system_registry::sensors_system_id());
 
+            let Some(address) = crate::ship::coordination::address_for_system(
+                &ship_config.0,
+                &crate::ship::system_registry::tactical_radar_system_id(),
+            ) else {
+                continue;
+            };
             writer.write(CoordinationEnqueue {
                 source_entity: entity,
                 sender_origin,
-                target: crate::ship::system_registry::tactical_station_key(),
+                address,
                 payload: CoordinationPayload::TargetDesignation {
                     uuid: uuid.clone(),
                     label,
@@ -246,6 +251,7 @@ pub fn tick_sensors_frequency_hint(
             Entity,
             &crate::server_app::ShipSystemBlackboards,
             &crate::ship_plugin::ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
             &mut SensorsFrequencyState,
             Has<crate::ai::server::AiHighFidelity>,
         ),
@@ -257,7 +263,9 @@ pub fn tick_sensors_frequency_hint(
         &crate::ship::shields::ShipShields,
     )>,
 ) {
-    for (entity, blackboards, control_sources, mut state, is_high_fidelity) in ship_q.iter_mut() {
+    for (entity, blackboards, control_sources, ship_config, mut state, is_high_fidelity) in
+        ship_q.iter_mut()
+    {
         // LOD split only (issue #873) — see this system's doc comment. Do NOT
         // re-add an `operate_ai` conjunct here: it would put the emission of a
         // coordination fact back under the control of who holds the console.
@@ -308,10 +316,16 @@ pub fn tick_sensors_frequency_hint(
             .0
             .source_for(&crate::ship::system_registry::sensors_system_id());
 
+        let Some(address) = crate::ship::coordination::address_for_system(
+            &ship_config.0,
+            &crate::ship::system_registry::tactical_radar_system_id(),
+        ) else {
+            continue;
+        };
         writer.write(CoordinationEnqueue {
             source_entity: entity,
             sender_origin,
-            target: crate::ship::system_registry::tactical_station_key(),
+            address,
             payload: CoordinationPayload::FrequencyHint { frequency },
             sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
             sender_system: crate::ship::system_registry::sensors_system_id(),
@@ -434,6 +448,7 @@ pub fn tick_sensors_threat_warning(
             &crate::entities::spawner::EntityUuid,
             &crate::ship::state::ShipPhysics,
             &crate::ship_plugin::ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
             &mut SensorsThreatState,
             &crate::modifiers::ShipModifiers,
             Option<&crate::entities::spawner::FactionComponent>,
@@ -478,6 +493,7 @@ pub fn tick_sensors_threat_warning(
         self_uuid,
         physics,
         control_sources,
+        ship_config,
         mut state,
         modifiers,
         self_faction,
@@ -561,10 +577,16 @@ pub fn tick_sensors_threat_warning(
             .0
             .source_for(&crate::ship::system_registry::sensors_system_id());
 
+        let Some(address) = crate::ship::coordination::address_for_system_kind(
+            &ship_config.0,
+            crate::ship::system_registry::SHIELD_ARC_KIND,
+        ) else {
+            continue;
+        };
         writer.write(CoordinationEnqueue {
             source_entity: entity,
             sender_origin,
-            target: crate::ship::system_registry::shields_system_id(),
+            address,
             payload: CoordinationPayload::ThreatBearing {
                 bearing_rad: relative_bearing,
                 label,

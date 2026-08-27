@@ -1,15 +1,15 @@
 //! System-kind registry and stable `SystemId` helpers.
 //!
-//! ## The three id namespaces (issue #801)
+//! ## Identity and wire-address types (issues #801 and #1254)
 //!
-//! One id, one meaning. Every identifier in the station/system architecture
-//! belongs to exactly one of three namespaces:
+//! One id, one meaning. Authored System and Station identities stay distinct,
+//! and each wire envelope uses the type appropriate to its job:
 //!
-//! | Namespace | What it names | Type | Examples |
+//! | Type | What it names | Rust type | Examples |
 //! |-----------|---------------|------|----------|
-//! | **System id** | A declared `[[system]]` instance: gets a `ControlSource`, gates admission, can be damaged/repaired | `SystemId` | `"helm-thrust"`, `"phaser-fore"`, `"sensors"` |
-//! | **Station id** | A crew station (console). Keys console-level blackboards and channel-3 coordination routing | `StationId` (carried as `SystemId` in blackboard maps and coordination envelopes — see below) | `"helm"`, `"tactical"`, `"science"` |
-//! | **Wire target** | The `target` string of a `ClientMessage::ControlSystem` envelope. Always a system id | JSON string | `"helm-steering"`, `"tactical-radar"`, `"phaser-control"` |
+//! | **System id** | A declared `[[system]]` instance: gets a `ControlSource`, gates admission, can be damaged/repaired, and is the only valid `ControlSystem.target` | `SystemId` | `"helm-thrust"`, `"phaser-fore"`, `"sensors"` |
+//! | **Station id** | A crew Station (console) and console-level blackboard identity | `StationId` | `"helm"`, `"tactical"`, `"science"` |
+//! | **Coordination address** | One explicit Station or the whole source Ship; never inferred from a payload | `CoordinationAddress` | `Station(StationId("helm"))`, `Ship` |
 //!
 //! The coarse `helm` and `tactical` *systems* were deleted by #801: `"helm"`
 //! and `"tactical"` are now station ids only. Console-level blackboards (the
@@ -78,23 +78,24 @@ pub const GOD_MODE_SYSTEM_ID: &str = "god-mode";
 
 // ── Station ids (console namespace, issue #801) ──────────────────────────────
 //
-// These are NOT system ids. `"helm"` and `"tactical"` name crew stations
-// (consoles). They key console-level blackboard entries and channel-3
-// coordination routing, both of which are typed `SystemId` on the wire and in
-// the per-ship blackboard map — so the station-id string is carried inside a
-// `SystemId` value via the `*_station_key()` helpers. No `[[system]]` block
-// declares these ids, no `ControlSource` is registered for them, and no
-// `ControlSystem` wire message may target them.
+// These are NOT system ids. `"helm"` and `"tactical"` name crew Stations.
+// They still key console-level blackboard entries, whose map/wire shape is
+// temporarily `SystemId`, so those strings are wrapped only by the
+// `*_station_key()` aggregate-blackboard helpers. Coordination uses the
+// separate `CoordinationAddress` type. No `[[system]]` block declares these
+// ids, no `ControlSource` is registered for them, and no `ControlSystem` wire
+// message may target them.
 
-/// Station id for the Helm console. Keys the Helm console blackboard and
-/// helm-directed coordination messages.
+/// Station id for the Helm console. Also keys the Helm aggregate blackboard;
+/// Helm-directed Coordination carries this as a `StationId` directly.
 pub const HELM_STATION_ID: &str = "helm";
 
 /// Station id for the Tactical (weapons) console on the crewed hulls. Keys the
-/// Weapons console blackboard and tactical-directed coordination messages.
+/// Weapons console aggregate blackboard. Tactical-directed Coordination uses
+/// the authored owning Station resolved from the ship config.
 /// Note the *station* owning a hull's weapons is resolved from the ship config
 /// (`ShipConfig::weapons_station`) — a single-station hull may own its guns on
-/// `"pilot"` — but the blackboard/coordination key is always this string.
+/// `"pilot"` — while this legacy aggregate-blackboard key remains `"tactical"`.
 pub const TACTICAL_STATION_ID: &str = "tactical";
 
 // ── Station-owned coarse systems ─────────────────────────────────────────────
@@ -240,8 +241,9 @@ pub const HELM_BOOST_SYSTEM_ID: &str = "helm-boost";
 //
 // The coarse `tactical` kind is gone entirely (#512 removed the `[[system]]`
 // block; #801 removed the id from the system namespace). `"tactical"` survives
-// only as [`TACTICAL_STATION_ID`] — the station-id key for the Weapons console
-// blackboard and coordination routing. Ship-level operations moved to real
+// only as [`TACTICAL_STATION_ID`] — the legacy aggregate-blackboard key and
+// conventional Station id. Coordination carries the owning Station explicitly;
+// ship-level operations moved to real
 // declared systems: `SetTarget` targets `tactical-radar`; `SetPhaserMode` /
 // `SetPhaserFrequency` target `phaser-control`.
 
@@ -649,19 +651,18 @@ pub fn red_alert_system_id() -> SystemId {
 
 // ── Station-key helpers (console namespace, issue #801) ──────────────────────
 //
-// These return the station-id string wrapped in a `SystemId` because the
-// blackboard map (`ShipSystemBlackboards`), the `BlackboardUpdate` wire
-// message and the coordination envelope are all typed `SystemId`. They are
-// NOT system ids: nothing registers a `ControlSource` for them and no
-// `ControlSystem` message may target them.
+// These return the Station-id string wrapped in a `SystemId` solely because the
+// aggregate blackboard map (`ShipSystemBlackboards`) and `BlackboardUpdate`
+// wire message still use `SystemId` keys. Coordination no longer uses these
+// helpers. They are NOT declared Systems: nothing registers a `ControlSource`
+// for them and no `ControlSystem` message may target them.
 
-/// Station-id key for the Helm console blackboard / helm-directed coordination.
+/// Station-id key for the Helm aggregate console blackboard.
 pub fn helm_station_key() -> SystemId {
     SystemId(HELM_STATION_ID.to_string())
 }
 
-/// Station-id key for the Weapons console blackboard / tactical-directed
-/// coordination.
+/// Station-id key for the Weapons aggregate console blackboard.
 pub fn tactical_station_key() -> SystemId {
     SystemId(TACTICAL_STATION_ID.to_string())
 }

@@ -473,12 +473,25 @@ pub fn tick_power_system(
 // — the single applier for the human and AI paths alike (the intermediate
 // `PowerReactorIntents` + `integrate_power_state` adapter has been retired).
 
-/// Map a power group id string to the target `SystemId` for coordination.
-fn system_id_for_power_group(group: &str) -> Option<SystemId> {
+/// Map a power group to its explicit Coordination destination. Multi-instance
+/// Shields has no coarse System, so it resolves the shared `shield_arc` owner.
+fn address_for_power_group(
+    config: &crate::ship::config::ShipConfig,
+    group: &str,
+) -> Option<crate::core::messages::CoordinationAddress> {
     match group {
-        WEAPONS_POWER_GROUP => Some(crate::ship::system_registry::tactical_station_key()),
-        HELM_POWER_GROUP => Some(crate::ship::system_registry::helm_station_key()),
-        SHIELDS_POWER_GROUP => Some(crate::ship::system_registry::shields_system_id()),
+        WEAPONS_POWER_GROUP => crate::ship::coordination::address_for_system(
+            config,
+            &crate::ship::system_registry::tactical_radar_system_id(),
+        ),
+        HELM_POWER_GROUP => crate::ship::coordination::address_for_system(
+            config,
+            &crate::ship::system_registry::helm_steering_system_id(),
+        ),
+        SHIELDS_POWER_GROUP => crate::ship::coordination::address_for_system_kind(
+            config,
+            crate::ship::system_registry::SHIELD_ARC_KIND,
+        ),
         _ => None,
     }
 }
@@ -522,12 +535,13 @@ pub fn tick_power_brownout_advisory(
             &ShipPowerSystem,
             &mut PowerBrownoutState,
             &crate::ship_plugin::ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
         ),
         With<crate::server_app::Ship>,
     >,
     mut writer: MessageWriter<CoordinationEnqueue>,
 ) {
-    for (entity, power, mut brownout_state, control_sources) in ships.iter_mut() {
+    for (entity, power, mut brownout_state, control_sources, ship_config) in ships.iter_mut() {
         // Consume this tick's lock-changed edge. Only a transition INTO the
         // locked state is a brownout; an unlock (recovery) consumes the edge and
         // clears the announced set so the next exhaustion re-announces.
@@ -546,11 +560,11 @@ pub fn tick_power_brownout_advisory(
         brownout_state.notified_groups.clear();
         for (group_id, level) in power.0.iter() {
             brownout_state.notified_groups.insert(group_id.0.clone());
-            if let Some(sys_id) = system_id_for_power_group(&group_id.0) {
+            if let Some(address) = address_for_power_group(&ship_config.0, &group_id.0) {
                 writer.write(CoordinationEnqueue {
                     source_entity: entity,
                     sender_origin,
-                    target: sys_id,
+                    address,
                     payload: CoordinationPayload::PowerBrownout {
                         group: group_id.0.clone(),
                         label: power_group_label(&group_id.0).to_string(),

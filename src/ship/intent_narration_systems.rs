@@ -268,7 +268,7 @@ pub fn tick_intent_narration(
             writer.write(CoordinationEnqueue {
                 source_entity: entity,
                 sender_origin,
-                target: SystemId(station_id.0.clone()),
+                address: crate::core::messages::CoordinationAddress::Ship,
                 payload: CoordinationPayload::IntentAdvisory {
                     kind: change.kind,
                     subject: change.subject,

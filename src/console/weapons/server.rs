@@ -140,6 +140,7 @@ impl Plugin for WeaponsPlugin {
             .add_message::<AsteroidDestroyedVfx>()
             .add_message::<ShipDestroyedVfx>()
             .add_message::<CoordinationEnqueue>()
+            .add_message::<crate::ship_plugin::DeliveredCoordination>()
             .add_observer(on_beam_started)
             .add_observer(on_beam_ended)
             .add_systems(
@@ -222,6 +223,9 @@ impl Plugin for WeaponsPlugin {
                     apply_tactical_frequency_hint
                         .in_set(crate::sim_sets::SimSet::Input)
                         .after(tick_npc_auto_match_frequency),
+                    receive_tactical_coordination
+                        .in_set(crate::sim_sets::SimSet::Modifiers)
+                        .after(crate::ship_plugin::process_coordination_lag),
                     // Blaster auto-fire DECIDE (issue #781): emits an admitted
                     // `ChargeBlasterStart` through the shared AI seam, converging
                     // with the human path at `handle_fire_blaster` (Physics).
@@ -803,6 +807,7 @@ fn tick_weapons_arc_request(
             Entity,
             &ShipSystemControlSources,
             &ShipPhysics,
+            &crate::ship_plugin::ShipConfigComponent,
             &crate::server_app::ShipSystemBlackboards,
             Option<&PhaserCombatConfigResource>,
             Option<&blaster::BlasterSystemResource>,
@@ -841,6 +846,7 @@ fn tick_weapons_arc_request(
         ship_entity,
         control_sources,
         physics,
+        ship_config,
         blackboards,
         combat_config_opt,
         blaster_opt,
@@ -851,6 +857,12 @@ fn tick_weapons_arc_request(
         mut state,
     ) in ship_q.iter_mut()
     {
+        let Some(helm_address) = crate::ship::coordination::address_for_system(
+            &ship_config.0,
+            &crate::ship::system_registry::helm_steering_system_id(),
+        ) else {
+            continue;
+        };
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3).
         let combat_lock = match blackboards
             .0
@@ -1057,7 +1069,7 @@ fn tick_weapons_arc_request(
                     writer.write(CoordinationEnqueue {
                         source_entity: ship_entity,
                         sender_origin,
-                        target: crate::ship::system_registry::helm_station_key(),
+                        address: helm_address.clone(),
                         payload: CoordinationPayload::ArcBearingWithdraw {
                             family: withdrawn_family,
                         },
@@ -1095,7 +1107,7 @@ fn tick_weapons_arc_request(
         writer.write(CoordinationEnqueue {
             source_entity: ship_entity,
             sender_origin,
-            target: crate::ship::system_registry::helm_station_key(),
+            address: helm_address,
             payload: CoordinationPayload::ArcBearingRequest {
                 uuid: target_uuid,
                 label,
@@ -2006,14 +2018,53 @@ fn tick_npc_auto_match_frequency(
     }
 }
 
+/// Tactical-owned receiver for delayed Coordination deliveries (issue #1254).
+///
+/// The generic lag router emits only after resolving this Station to an AI
+/// consumer. Tactical retains ownership of what a typed `FrequencyHint` does:
+/// latch its frequency for the existing next-tick applier. Re-checking the
+/// live owning Station and Tactical control state closes the same late-claim
+/// window the applier checks below.
+pub(crate) fn receive_tactical_coordination(
+    mut delivered: MessageReader<crate::ship_plugin::DeliveredCoordination>,
+    mut ships: Query<
+        (
+            &mut crate::ship_plugin::PendingTacticalFrequencyHint,
+            &crate::ship_plugin::ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
+        ),
+        With<crate::server_app::Ship>,
+    >,
+) {
+    for message in delivered.read() {
+        let Ok((mut pending, control_sources, ship_config)) = ships.get_mut(message.source_entity)
+        else {
+            continue;
+        };
+        let crate::core::messages::CoordinationAddress::Station(addressed_station) =
+            &message.address
+        else {
+            continue;
+        };
+        if ship_config.0.weapons_station().as_ref() != Some(addressed_station)
+            || !shared::any_tactical_system_operates_ai(control_sources, &ship_config.0)
+        {
+            continue;
+        }
+        if let CoordinationPayload::FrequencyHint { frequency } = &message.payload {
+            pending.0 = Some(*frequency);
+        }
+    }
+}
+
 /// Apply a channel-3 `FrequencyHint` that a backfilled Tactical has consumed
 /// (issue #873).
 ///
 /// This is the "react" half of the Sensors→Tactical advisory. The routing half
-/// lives in `process_coordination_lag`, which only lands a value in
-/// [`PendingTacticalFrequencyHint`] when this ship's Tactical actually operates
-/// AI *and* the message has served its full coordination lag — so the reaction
-/// delay is the bus's, not a second timer here.
+/// lives in `process_coordination_lag`; the Tactical-owned receiver above lands
+/// a value in [`PendingTacticalFrequencyHint`] only after the full lag and while
+/// this ship's Tactical still operates AI. The reaction delay is the bus's,
+/// not a second timer here.
 ///
 /// Deliberately blind to the *sender's* origin (AGENTS.md rule 6): the hint is
 /// applied whether it came from a human on Sensors or from that ship's own

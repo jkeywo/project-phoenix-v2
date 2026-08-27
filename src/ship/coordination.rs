@@ -1,4 +1,4 @@
-pub use crate::core::messages::CoordinationPayload;
+pub use crate::core::messages::{CoordinationAddress, CoordinationPayload};
 use crate::core::messages::{StationId, SystemId};
 use crate::ship::control_source::{ControlSource, ControlSourceResolver, ControlTickPolicy};
 use std::collections::HashMap;
@@ -18,34 +18,76 @@ pub const CHATTER_SENDER_NAVIGATION: &str = "chatter.sender.navigation";
 pub const CHATTER_SENDER_POWER: &str = "chatter.sender.power";
 pub const CHATTER_SENDER_SHIELDS: &str = "chatter.sender.shields";
 
-/// Sender/target label id for a channel-3 message a ship's Core owns — the
-/// systems that belong to no station. A message from or to an ownerless system
-/// is addressed to "Core" rather than to a bare system name.
+/// Sender label id for a channel-3 message emitted by a ship's Core — a System
+/// that belongs to no Station. Coordination destinations themselves are always
+/// an explicit Station or the whole Ship.
 pub const CHATTER_ADDRESSEE_CORE: &str = "chatter.addressee.core";
+pub const CHATTER_ADDRESSEE_SHIP: &str = "chatter.addressee.ship";
 
-/// Client-resolvable display id naming the STATION that owns `target`, or
-/// [`CHATTER_ADDRESSEE_CORE`] when the target is ownerless.
+/// Client-resolvable display id naming an explicit Coordination destination.
 ///
 /// Channel-3 (the AI-coordination bus) addresses crew by STATION, not by the
 /// fine system underneath it: John's playtest note is that "Navigation → Helm
 /// Navigation" should read "Helm" on both sides — the station alone, never the
 /// station+system pair, and never the raw system. Both the sender identity
-/// (resolved at enqueue from the emitting system) and the target label (resolved
-/// at delivery from the routed system) run through here, so the viewscreen
-/// chatter bubble and the phone popup name the same station from the same
-/// [`station_for_target`] resolution the router already trusts.
+/// (resolved at enqueue from the emitting system) and the destination label
+/// (read directly from the typed address) run through the same vocabulary, so
+/// the viewscreen chatter bubble and phone popup cannot disagree about the
+/// route.
 ///
-/// The returned value is a `station.<id>.name` string id (or the Core id),
+/// The returned value is a `station.<id>.name` or whole-ship string id,
 /// resolved to words by `localiseTree` on the client exactly as the
-/// `chatter.sender.*` ids were — nothing downstream composes the word.
-pub fn station_addressee_label(
-    config: &crate::ship::config::ShipConfig,
-    target: &SystemId,
-) -> String {
-    match station_for_target(config, target) {
-        Some(station) => format!("station.{}.name", station.0),
-        None => CHATTER_ADDRESSEE_CORE.to_string(),
+/// `chatter.sender.*` ids are — nothing downstream composes the word.
+pub fn coordination_addressee_label(address: &CoordinationAddress) -> String {
+    match address {
+        CoordinationAddress::Station(station) => format!("station.{}.name", station.0),
+        CoordinationAddress::Ship => CHATTER_ADDRESSEE_SHIP.to_string(),
     }
+}
+
+/// Resolve a fine System's owning Station into an explicit Coordination
+/// address at the producer boundary.
+///
+/// Returning `None` for an ownerless or unknown System is deliberate. A
+/// producer that means "the whole ship" must author [`CoordinationAddress::Ship`]
+/// explicitly; a failed System lookup must never turn into a broadcast.
+pub fn address_for_system(
+    config: &crate::ship::config::ShipConfig,
+    system: &SystemId,
+) -> Option<CoordinationAddress> {
+    config
+        .system(system)
+        .and_then(|entry| entry.station.clone())
+        .map(CoordinationAddress::Station)
+}
+
+/// Resolve the single owning Station shared by every authored System of a kind.
+///
+/// This is for multi-instance receiver families such as `shield_arc`, where no
+/// coarse System exists to stand in for the Station. A missing kind, an
+/// ownerless instance, or instances split across Stations is ambiguous and
+/// returns `None`; callers must never widen any of those cases to `Ship`.
+pub fn address_for_system_kind(
+    config: &crate::ship::config::ShipConfig,
+    kind: &str,
+) -> Option<CoordinationAddress> {
+    let mut systems = config.systems.iter().filter(|system| system.kind == kind);
+    let station = systems.next()?.station.clone()?;
+    systems
+        .all(|system| system.station.as_ref() == Some(&station))
+        .then_some(CoordinationAddress::Station(station))
+}
+
+/// Display label for the Station that owns an emitting System, with Core as
+/// the sender-side label for ownerless Systems.
+pub fn system_addressee_label(
+    config: &crate::ship::config::ShipConfig,
+    system: &SystemId,
+) -> String {
+    address_for_system(config, system)
+        .as_ref()
+        .map(coordination_addressee_label)
+        .unwrap_or_else(|| CHATTER_ADDRESSEE_CORE.to_string())
 }
 
 /// What to do with a delivered coordination message.
@@ -76,35 +118,6 @@ pub fn route_coordination(
         (ControlSource::Human, ControlSource::Human)
         | (ControlSource::Human, ControlSource::Offline) => DeliverAction::Suppress,
     }
-}
-
-/// Resolves a channel-3 target to the station that should receive a popup.
-///
-/// Coordination uses both fine system ids and console-level keys. Unlike
-/// command admission, the latter are valid delivery addresses: Helm and
-/// Tactical are not `[[system]]` ids, while legacy aggregate targets can name
-/// an authored station directly. An unresolved target remains ownerless so the
-/// existing fallback delivery policy can decide what to do with it.
-pub fn station_for_target(
-    config: &crate::ship::config::ShipConfig,
-    target: &SystemId,
-) -> Option<StationId> {
-    if let Some(system) = config.system(target) {
-        return system.station.clone();
-    }
-
-    if *target == crate::ship::system_registry::helm_station_key() {
-        return config
-            .system(&crate::ship::system_registry::helm_steering_system_id())
-            .and_then(|system| system.station.clone());
-    }
-
-    if *target == crate::ship::system_registry::tactical_station_key() {
-        return config.weapons_station();
-    }
-
-    let station = StationId(target.0.clone());
-    config.station(&station).map(|_| station)
 }
 
 // ── Ship-wide broadcast (issue #879) ──────────────────────────────────────────
@@ -486,8 +499,8 @@ pub fn seeking_seats(
 pub struct QueuedCoordination {
     /// Sender control origin captured at enqueue time.
     pub sender_origin: ControlSource,
-    /// Target system instance — resolved to live control source at delivery time.
-    pub target: SystemId,
+    /// Explicit Station or whole-ship destination, resolved live at delivery.
+    pub address: CoordinationAddress,
     /// Typed coordination payload.
     pub payload: CoordinationPayload,
     /// Human-readable label for the sender (e.g. "AI Tactical", "Captain").

@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::messages::SystemId;
+use crate::core::messages::{CoordinationAddress, SystemId};
 use crate::server_app::Ship;
 use crate::ship::components::LastSystemTiers;
 use crate::ship::control_source::ControlSource;
@@ -64,9 +64,9 @@ fn destroyed_crossing_emits_alert_to_captain() {
         .collect();
     assert_eq!(alerts.len(), 1, "expected exactly one Alert");
     assert_eq!(
-        alerts[0].target,
-        crate::ship::system_registry::captain_system_id(),
-        "Alert must target Captain system"
+        alerts[0].address,
+        crate::core::messages::CoordinationAddress::Station(StationId("captain".into())),
+        "Alert must address the Captain Station"
     );
     assert_eq!(alerts[0].sender_label, "tactical");
     assert!(
@@ -232,10 +232,82 @@ fn destroyed_alert_shows_popup_for_human_captain() {
     );
 }
 
+#[test]
+fn a_fully_offline_station_consumes_without_popup_or_ai_handoff() {
+    let mut app = routing_test_app();
+    start_game_with_helm_and_science(&mut app);
+    let ship = find_ship_entity(&mut app);
+    let station = StationId("captain".into());
+    let owned: Vec<_> = app
+        .world()
+        .get::<ShipConfigComponent>(ship)
+        .expect("ship config")
+        .0
+        .systems_for_station(&station)
+        .map(|system| system.id.clone())
+        .collect();
+    assert!(!owned.is_empty(), "fixture Station owns Systems");
+    {
+        let mut sources = app
+            .world_mut()
+            .get_mut::<ShipSystemControlSources>(ship)
+            .expect("ship control sources");
+        for system in owned {
+            sources.0.set_offline(system, true);
+        }
+    }
+
+    enqueue_coordination(
+        &mut app,
+        ControlSource::Ai,
+        CoordinationAddress::Station(station),
+        CoordinationPayload::Alert {
+            title: "test.alert.title".into(),
+            body: "test.alert.body".into(),
+        },
+    );
+    tick(&mut app);
+    tick(&mut app);
+
+    assert_eq!(coordination_popups(&app), 0);
+}
+
+#[test]
+fn station_control_is_resolved_live_after_enqueue_not_frozen_in_the_queue() {
+    let mut app = routing_test_app();
+    start_game_with_helm_and_science(&mut app);
+    let ship = find_ship_entity(&mut app);
+    set_captain_control_source(&mut app, ControlSource::Ai);
+    app.world_mut()
+        .get_mut::<CoordinationQueue>(ship)
+        .expect("ship Coordination queue")
+        .0
+        .enqueue(coordination::QueuedCoordination {
+            sender_origin: ControlSource::Ai,
+            address: CoordinationAddress::Station(StationId("captain".into())),
+            payload: CoordinationPayload::Alert {
+                title: "test.alert.title".into(),
+                body: "test.alert.body".into(),
+            },
+            sender_label: "station.sensors.name".into(),
+            due_time: 0.0,
+        });
+
+    // Ownership changes after enqueue but before the due delivery is routed.
+    set_captain_control_source(&mut app, ControlSource::Human);
+    tick(&mut app);
+
+    assert_eq!(
+        coordination_popups(&app),
+        1,
+        "the live human holder receives the delayed advisory; queued AI state is not frozen"
+    );
+}
+
 // ── Issue #737: the repair-request popup is subject to the same boundary ──
 //
-// `CoordinationPayload::RepairRequest` targets the `repair` system, which
-// resolves to the Engineering holder. Before the gate, every worsening tier
+// `CoordinationPayload::RepairRequest` is addressed to the Station that owns
+// Repair, which resolves to the Engineering holder. Before the gate, every worsening tier
 // crossing handed Engineering the exact HP deficit of an arbitrary non-Core
 // system with no team dispatched and no travel elapsed — the projection's
 // boundary, walked around through the coordination bus.
@@ -464,18 +536,23 @@ fn give_ship_tactical_frequency_surface(app: &mut App) {
     ));
 }
 
-/// Register the react half in the set production puts it in
-/// (`SimSet::Input`), so the tick boundary these tests reason about is the
-/// real one: `process_coordination_lag` lands a value in `Modifiers`, and
-/// the applier reads it in the FOLLOWING tick's `Input`.
+/// Register Tactical's receiving pipeline in the sets production puts it in,
+/// so the tick boundary these tests reason about is the real one: the lag
+/// router emits a typed handoff in `Modifiers`, Tactical's receiver lands it
+/// later in that set, and the applier reads it in the FOLLOWING tick's `Input`.
 fn add_tactical_hint_applier(app: &mut App) {
-    // `FixedUpdate` (issue #895): the applier joins the SimSet chain in
-    // the schedule the chain lives in, preserving the one-tick handover
-    // window between the router (Modifiers) and next tick's Input.
+    // `FixedUpdate` (issue #895): both systems join the SimSet chain in the
+    // schedule it lives in, preserving the one-tick handover window between
+    // the receiver (Modifiers) and next tick's Input.
     app.add_systems(
         FixedUpdate,
-        crate::console::weapons::apply_tactical_frequency_hint
-            .in_set(crate::sim_sets::SimSet::Input),
+        (
+            crate::console::weapons::receive_tactical_coordination
+                .in_set(crate::sim_sets::SimSet::Modifiers)
+                .after(process_coordination_lag),
+            crate::console::weapons::apply_tactical_frequency_hint
+                .in_set(crate::sim_sets::SimSet::Input),
+        ),
     );
 }
 
@@ -623,7 +700,7 @@ fn coordination_popups(app: &App) -> usize {
 fn enqueue_coordination(
     app: &mut App,
     sender_origin: ControlSource,
-    target: SystemId,
+    address: CoordinationAddress,
     payload: CoordinationPayload,
 ) {
     let ship = find_ship_entity(app);
@@ -632,7 +709,7 @@ fn enqueue_coordination(
         .write(CoordinationEnqueue {
             source_entity: ship,
             sender_origin,
-            target,
+            address,
             payload,
             sender_label: "Sensors".into(),
             sender_system: crate::core::messages::SystemId(String::new()),
@@ -644,6 +721,86 @@ fn drain_chatter(app: &mut App) -> Vec<AiChatterEvent> {
         .resource_mut::<Messages<AiChatterEvent>>()
         .drain()
         .collect()
+}
+
+#[derive(Resource, Default)]
+struct DeliveredCoordinationBox(Vec<DeliveredCoordination>);
+
+fn collect_delivered_coordination(
+    mut reader: MessageReader<DeliveredCoordination>,
+    mut delivered: ResMut<DeliveredCoordinationBox>,
+) {
+    delivered.0.extend(reader.read().cloned());
+}
+
+#[test]
+fn delayed_ai_station_delivery_emits_typed_handoff_for_the_owning_module() {
+    let mut app = routing_test_app();
+    start_game_with_sensors_officer(&mut app);
+    backfill_tactical_to_ai(&mut app);
+    give_ship_tactical_frequency_surface(&mut app);
+    app.init_resource::<DeliveredCoordinationBox>().add_systems(
+        FixedUpdate,
+        collect_delivered_coordination
+            .in_set(crate::sim_sets::SimSet::Modifiers)
+            .after(process_coordination_lag),
+    );
+    let address = CoordinationAddress::Station(StationId(
+        crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+    ));
+
+    enqueue_coordination(
+        &mut app,
+        ControlSource::Human,
+        address.clone(),
+        CoordinationPayload::FrequencyHint { frequency: 0.83 },
+    );
+    tick(&mut app);
+
+    let ship = find_ship_entity(&mut app);
+    let delivered = &app.world().resource::<DeliveredCoordinationBox>().0;
+    assert_eq!(
+        delivered.len(),
+        1,
+        "one delayed AI delivery crosses the seam"
+    );
+    assert_eq!(delivered[0].source_entity, ship);
+    assert_eq!(delivered[0].address, address);
+    assert_eq!(
+        delivered[0].payload,
+        CoordinationPayload::FrequencyHint { frequency: 0.83 },
+        "the owning Tactical module receives the typed value unchanged"
+    );
+}
+
+#[test]
+fn tactical_receiver_consumes_a_delivered_frequency_hint_without_router_state_mutation() {
+    let mut app = routing_test_app();
+    add_tactical_hint_applier(&mut app);
+    start_game_with_sensors_officer(&mut app);
+    backfill_tactical_to_ai(&mut app);
+    give_ship_tactical_frequency_surface(&mut app);
+    let ship = find_ship_entity(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<DeliveredCoordination>>()
+        .write(DeliveredCoordination {
+            source_entity: ship,
+            address: CoordinationAddress::Station(StationId(
+                crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+            )),
+            payload: CoordinationPayload::FrequencyHint { frequency: 0.61 },
+        });
+    tick(&mut app);
+
+    assert_eq!(
+        app.world()
+            .get::<crate::ship_plugin::PendingTacticalFrequencyHint>(ship)
+            .expect("fixture carries Tactical's pending slot")
+            .0,
+        Some(0.61),
+        "Tactical owns the behavior behind DeliveredCoordination"
+    );
 }
 
 /// AC5, end to end in ONE app. A human sits at Sensors; Tactical is unmanned
@@ -736,7 +893,9 @@ fn spectator_send_coordination_is_dropped_but_crew_is_queued() {
             .0
             .len()
     }
-    let target = crate::ship::system_registry::tactical_station_key();
+    let address = crate::core::messages::CoordinationAddress::Station(StationId(
+        crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+    ));
     let payload = CoordinationPayload::FrequencyHint { frequency: 0.5 };
 
     // Registered non-spectator: enqueued.
@@ -754,7 +913,7 @@ fn spectator_send_coordination_is_dropped_but_crew_is_queued() {
         &mut app,
         "crew",
         ClientMessage::SendCoordination {
-            target: target.clone(),
+            address: address.clone(),
             payload: payload.clone(),
         },
     );
@@ -785,7 +944,7 @@ fn spectator_send_coordination_is_dropped_but_crew_is_queued() {
     push(
         &mut app,
         "spec",
-        ClientMessage::SendCoordination { target, payload },
+        ClientMessage::SendCoordination { address, payload },
     );
     tick(&mut app);
     assert_eq!(
@@ -804,7 +963,9 @@ fn only_ai_to_ai_coordination_reaches_viewscreen_chatter() {
     enqueue_coordination(
         &mut human_sender,
         ControlSource::Human,
-        crate::ship::system_registry::tactical_station_key(),
+        CoordinationAddress::Station(StationId(
+            crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+        )),
         CoordinationPayload::FrequencyHint { frequency: 0.83 },
     );
     tick(&mut human_sender);
@@ -821,7 +982,9 @@ fn only_ai_to_ai_coordination_reaches_viewscreen_chatter() {
     enqueue_coordination(
         &mut ai_sender,
         ControlSource::Ai,
-        crate::ship::system_registry::tactical_station_key(),
+        CoordinationAddress::Station(StationId(
+            crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+        )),
         CoordinationPayload::FrequencyHint { frequency: 0.83 },
     );
     tick(&mut ai_sender);
@@ -832,7 +995,7 @@ fn only_ai_to_ai_coordination_reaches_viewscreen_chatter() {
         1,
         "AI→AI coordination remains visible on the viewscreen"
     );
-    // Task 3: the TARGET is named by the owning STATION alone, as a
+    // Task 3: the destination is named by the owning Station alone, as a
     // `station.<id>.name` id — never the raw system key and never a
     // station+system composite. The target here is the Tactical station.
     assert_eq!(
@@ -862,7 +1025,9 @@ fn a_senders_system_is_addressed_as_its_owning_station() {
         .write(CoordinationEnqueue {
             source_entity: ship,
             sender_origin: ControlSource::Ai,
-            target: crate::ship::system_registry::tactical_station_key(),
+            address: crate::core::messages::CoordinationAddress::Station(StationId(
+                crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+            )),
             payload: CoordinationPayload::FrequencyHint { frequency: 0.83 },
             // A raw `chatter.sender.*` fallback that MUST be overridden by
             // the station the sensors system resolves to.
@@ -978,7 +1143,9 @@ fn ai_sensors_advisory_reaches_a_backfilled_tactical_the_same_way() {
     enqueue_coordination(
         &mut app,
         ControlSource::Ai,
-        crate::ship::system_registry::tactical_station_key(),
+        CoordinationAddress::Station(StationId(
+            crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+        )),
         CoordinationPayload::FrequencyHint { frequency: 0.83 },
     );
     tick(&mut app);
@@ -1004,10 +1171,9 @@ fn ai_sensors_advisory_reaches_a_backfilled_tactical_the_same_way() {
     );
 }
 
-/// AC3. A human-held Tactical must route exactly as it did before: the new
-/// branch is only taken when `any_tactical_system_operates_ai` holds, so a
-/// manned Tactical still falls through to `policy_for` and an AI-origin
-/// advisory still surfaces to the human.
+/// AC3. A human-held Tactical must route exactly as it did before: the live
+/// Station policy resolves Human and an AI-origin advisory surfaces only to
+/// that holder.
 #[test]
 fn a_human_held_tactical_still_routes_an_ai_advisory_to_a_popup() {
     let mut app = routing_test_app();
@@ -1020,7 +1186,9 @@ fn a_human_held_tactical_still_routes_an_ai_advisory_to_a_popup() {
     enqueue_coordination(
         &mut app,
         ControlSource::Ai,
-        crate::ship::system_registry::tactical_station_key(),
+        CoordinationAddress::Station(StationId(
+            crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+        )),
         CoordinationPayload::FrequencyHint { frequency: 0.83 },
     );
     tick(&mut app);
@@ -1043,6 +1211,29 @@ fn a_human_held_tactical_still_routes_an_ai_advisory_to_a_popup() {
         popup_targets,
         vec!["tactical"],
         "an advisory addressed to Tactical must reach only Tactical, never Target::All"
+    );
+    let popup = app
+        .world()
+        .resource::<crate::lobby::LobbyOutbox>()
+        .0
+        .iter()
+        .find_map(|(_, message)| match message {
+            crate::core::messages::ServerMessage::CoordinationPopup {
+                address, payload, ..
+            } => Some((address, payload)),
+            _ => None,
+        })
+        .expect("the Tactical holder receives one popup");
+    assert_eq!(
+        popup.0,
+        &CoordinationAddress::Station(StationId(
+            crate::ship::system_registry::TACTICAL_STATION_ID.into()
+        ))
+    );
+    assert_eq!(
+        popup.1,
+        &CoordinationPayload::FrequencyHint { frequency: 0.83 },
+        "the human popup preserves the typed frequency through the delayed path"
     );
     assert!(
         app.world()
@@ -1069,10 +1260,48 @@ fn a_human_held_tactical_still_routes_an_ai_advisory_to_a_popup() {
     );
 }
 
-/// The handover window. `process_coordination_lag` lands a value in
-/// `Modifiers` and `apply_tactical_frequency_hint` reads it in the NEXT
-/// tick's `Input` — so there is exactly one tick in which a human can claim
-/// Tactical after the router decided the addressee was an AI.
+#[test]
+fn an_unknown_station_address_is_dropped_never_widened_to_all_clients() {
+    let mut app = routing_test_app();
+    start_game_with_engineer(&mut app);
+
+    enqueue_coordination(
+        &mut app,
+        ControlSource::Ai,
+        CoordinationAddress::Station(StationId("not-on-this-hull".into())),
+        CoordinationPayload::Alert {
+            title: "test.alert.title".into(),
+            body: "test.alert.body".into(),
+        },
+    );
+    tick(&mut app);
+    tick(&mut app);
+
+    assert_eq!(
+        coordination_popups(&app),
+        0,
+        "an invalid Station address must be rejected, never widened to the Ship"
+    );
+    assert!(
+        app.world()
+            .resource::<crate::lobby::LobbyOutbox>()
+            .0
+            .iter()
+            .all(|(target, message)| !matches!(
+                (target, message),
+                (
+                    crate::lobby::handler::Target::All,
+                    crate::core::messages::ServerMessage::CoordinationPopup { .. }
+                )
+            )),
+        "unknown Coordination destinations must never use the legacy all-client fallback"
+    );
+}
+
+/// The handover window. `process_coordination_lag` emits the typed delivery and
+/// Tactical's receiver lands it in `Modifiers`; `apply_tactical_frequency_hint`
+/// reads it in the NEXT tick's `Input` — so there is exactly one tick in which a
+/// human can claim Tactical after delivery resolved the addressee as AI.
 ///
 /// The applier must therefore re-ask the router's own question,
 /// `any_tactical_system_operates_ai`, and DROP the value when the answer has
@@ -1093,11 +1322,14 @@ fn a_hint_pending_when_a_human_claims_tactical_is_dropped_not_applied() {
     enqueue_coordination(
         &mut app,
         ControlSource::Human,
-        crate::ship::system_registry::tactical_station_key(),
+        CoordinationAddress::Station(StationId(
+            crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+        )),
         CoordinationPayload::FrequencyHint { frequency: 0.83 },
     );
-    // Tick 1 only: the router has consumed the hint into the pending slot,
-    // and the applier has not yet run on it.
+    // Tick 1 only: the lag router has emitted the typed delivery and Tactical's
+    // receiver has consumed it into the pending slot; the applier has not yet
+    // run on it.
     tick(&mut app);
     let ship = find_ship_entity(&mut app);
     assert_eq!(
@@ -1201,7 +1433,9 @@ fn human_sender_advisory_is_consumed_by_a_backfilled_helm() {
     enqueue_coordination(
         &mut app,
         ControlSource::Human,
-        crate::ship::system_registry::helm_station_key(),
+        CoordinationAddress::Station(StationId(
+            crate::ship::system_registry::HELM_STATION_ID.into(),
+        )),
         CoordinationPayload::ArcBearingRequest {
             uuid: target_uuid.to_string(),
             label: "Harrow Raider".into(),
@@ -1482,7 +1716,7 @@ fn enqueue_intent_advisory(app: &mut App, sender_origin: ControlSource) {
     enqueue_coordination(
         app,
         sender_origin,
-        crate::ship::system_registry::tactical_station_key(),
+        CoordinationAddress::Ship,
         CoordinationPayload::IntentAdvisory {
             kind: crate::core::messages::IntentKind::TargetSwitched,
             subject: Some("Harrow Raider".into()),
@@ -1515,6 +1749,82 @@ fn an_intent_advisory_reaches_every_human_seat_and_no_ai_seat() {
         vec!["captain".to_string(), "helm".to_string()],
         "every HUMAN seat on the ship, in authored station order — and not \
          the backfilled Repair seat, whose holder token is still there"
+    );
+}
+
+/// Addressing, not payload knowledge, selects the whole-Ship path. An Alert is
+/// normally Station-addressed; carrying it on `Ship` must still fan it out to
+/// every connected human seat in deterministic authored order.
+#[test]
+fn a_ship_address_broadcasts_a_non_intent_payload_in_authored_order() {
+    let mut app = routing_test_app();
+    start_game_with_engineer(&mut app);
+    backfill_tactical_to_ai(&mut app);
+
+    enqueue_coordination(
+        &mut app,
+        ControlSource::Ai,
+        CoordinationAddress::Ship,
+        CoordinationPayload::Alert {
+            title: "test.alert.title".into(),
+            body: "test.alert.body".into(),
+        },
+    );
+    tick(&mut app);
+    tick(&mut app);
+
+    let tokens: Vec<_> = app
+        .world()
+        .resource::<crate::lobby::LobbyOutbox>()
+        .0
+        .iter()
+        .filter_map(|(target, message)| match (target, message) {
+            (
+                crate::lobby::handler::Target::Token(token),
+                crate::core::messages::ServerMessage::CoordinationPopup {
+                    payload: CoordinationPayload::Alert { .. },
+                    ..
+                },
+            ) => Some(token.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        tokens,
+        vec![
+            "captain".to_string(),
+            "helm".to_string(),
+            "engineer".to_string()
+        ],
+        "the Ship address alone selects deterministic fan-out; payload kind is irrelevant"
+    );
+}
+
+/// The inverse regression: an Intent payload carried on a Station address is
+/// still a one-Station message. Looking at the variant would leak it across the
+/// bridge despite the explicit address.
+#[test]
+fn a_station_address_keeps_an_intent_payload_at_one_station() {
+    let mut app = routing_test_app();
+    start_game_with_engineer(&mut app);
+
+    enqueue_coordination(
+        &mut app,
+        ControlSource::Ai,
+        CoordinationAddress::Station(StationId("captain".into())),
+        CoordinationPayload::IntentAdvisory {
+            kind: crate::core::messages::IntentKind::TargetSwitched,
+            subject: Some("Harrow Raider".into()),
+            generation: 9,
+        },
+    );
+    tick(&mut app);
+    tick(&mut app);
+
+    assert_eq!(
+        intent_popup_tokens(&app),
+        vec!["captain".to_string()],
+        "an Intent variant cannot override its explicit Station address"
     );
 }
 

@@ -18,7 +18,15 @@ The current AI axes are thrust, steering, lateral thrust, vertical thrust, impul
 
 ## Coordination and station state
 
-The plugin registers `CoordinationEnqueue`, owns the per-ship coordination queue adapters, resolves human-seeking station hosts, and updates control sources when station ratings or tenure change. `process_coordination_lag` delivers the typed coordination payload after the hull's authored lag; recipients then consume the same delivered fact whether the station is human- or AI-operated.
+The plugin registers `CoordinationEnqueue`, owns the per-ship coordination queue
+adapters, resolves human-seeking station hosts, and updates control sources when
+station ratings or tenure change. `process_coordination_lag` delays explicitly
+Station- or Ship-addressed messages, resolves live recipient policy, emits
+`CoordinationPopup` or `DeliveredCoordination` for a human- or AI-operated
+Station respectively, and fans Ship delivery to eligible human seats in
+authored Station order. Owning domain receivers consume the same typed fact
+after Station delivery; Tactical's frequency-hint receiver lives with Weapons
+while Helm, Repair, and Shields follow in #1256–#1258.
 
 ## Physics ownership
 

@@ -28,7 +28,15 @@ Static selection inputs such as a hull's authored power rating may be shown at s
 
 ## Coordination facts
 
-Cross-station requests use the typed coordination queue and serve the hull's authored lag before delivery. Current payloads cover target designation, threat bearing, shield-frequency hints, weapon arc bearing, navigation clearance, repair requests, shield-facing changes, and power brownout. A human recipient receives a popup/console projection; an AI recipient reads the corresponding delivered state. Producers do not choose a privileged AI-only route.
+Cross-station requests use the typed coordination queue, carry an explicit
+`CoordinationAddress::Station` or `CoordinationAddress::Ship`, and serve the
+hull's authored lag before delivery. Current payloads cover target designation,
+threat bearing, shield-frequency hints, weapon arc bearing, navigation
+clearance, repair requests, shield-facing changes, and power brownout. A human
+Station recipient receives a popup/console projection; an AI Station recipient
+reads the corresponding delivered state. Ship-addressed traffic fans out in
+authored Station order under the same live control policy. The payload never
+chooses a privileged AI-only route.
 
 ## Audit guardrails
 

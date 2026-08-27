@@ -39,6 +39,10 @@ where
     assert_eq!(msg, decoded);
 }
 
+fn station_address(id: &str) -> CoordinationAddress {
+    CoordinationAddress::Station(StationId(id.to_string()))
+}
+
 fn player() -> Player {
     Player {
         token: "tok".into(),
@@ -211,9 +215,7 @@ fn client_message_table() -> Vec<(ClientMessageDiscriminants, ClientMessage)> {
         (
             ClientMessageDiscriminants::SendCoordination,
             ClientMessage::SendCoordination {
-                // Coordination targets are station-id keys (issue #801) —
-                // console-level routing, not system admission.
-                target: crate::ship::system_registry::tactical_station_key(),
+                address: station_address("tactical"),
                 payload: CoordinationPayload::FrequencyHint { frequency: 0.33 },
             },
         ),
@@ -738,7 +740,7 @@ fn server_message_table() -> Vec<(ServerMessageDiscriminants, ServerMessage)> {
         (
             ServerMessageDiscriminants::CoordinationPopup,
             ServerMessage::CoordinationPopup {
-                target: crate::ship::system_registry::helm_station_key(),
+                address: station_address("helm"),
                 payload: CoordinationPayload::Alert {
                     title: "Shield down".into(),
                     body: "Fore shield offline".into(),
@@ -1250,7 +1252,7 @@ fn unload_tube_control_system_round_trips() {
 #[test]
 fn target_designation_coordination_payload_round_trips() {
     let send_msg = ClientMessage::SendCoordination {
-        target: crate::ship::system_registry::tactical_station_key(),
+        address: station_address("tactical"),
         payload: CoordinationPayload::TargetDesignation {
             uuid: "asteroid-42".into(),
             label: "Asteroid".into(),
@@ -1260,7 +1262,7 @@ fn target_designation_coordination_payload_round_trips() {
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
     let popup_msg = ServerMessage::CoordinationPopup {
-        target: crate::ship::system_registry::tactical_station_key(),
+        address: station_address("tactical"),
         payload: CoordinationPayload::TargetDesignation {
             uuid: "asteroid-42".into(),
             label: "Asteroid".into(),
@@ -1271,13 +1273,40 @@ fn target_designation_coordination_payload_round_trips() {
     assert_server_roundtrip(&PrettyJsonCodec, popup_msg);
 }
 
+#[test]
+fn coordination_wire_shape_distinguishes_station_and_ship_addresses() {
+    let station = ClientMessage::SendCoordination {
+        address: station_address("tactical"),
+        payload: CoordinationPayload::FrequencyHint { frequency: 0.83 },
+    };
+    assert_eq!(
+        JsonCodec.encode_client(&station).unwrap(),
+        r#"{"type":"SendCoordination","data":{"address":{"type":"Station","data":"tactical"},"payload":{"type":"FrequencyHint","data":{"frequency":0.83}}}}"#,
+        "a Station address is a typed StationId, never a SystemId-shaped target"
+    );
+
+    let ship = ServerMessage::CoordinationPopup {
+        address: CoordinationAddress::Ship,
+        payload: CoordinationPayload::Alert {
+            title: "coordination.test.title".into(),
+            body: "coordination.test.body".into(),
+        },
+        sender_label: "station.tactical.name".into(),
+    };
+    assert_eq!(
+        JsonCodec.encode_server(&ship).unwrap(),
+        r#"{"type":"CoordinationPopup","data":{"address":{"type":"Ship"},"payload":{"type":"Alert","data":{"title":"coordination.test.title","body":"coordination.test.body"}},"sender_label":"station.tactical.name"}}"#,
+        "whole-Ship delivery is explicit in the wire shape, not inferred from Alert or Intent"
+    );
+}
+
 /// `CoordinationPayload::ArcBearingRequest` round-trip, embedded in both
 /// directions of the channel-3 bus (issue #677 — Weapons asks Helm to
 /// bring the phaser firing arc to bear).
 #[test]
 fn arc_bearing_request_coordination_payload_round_trips() {
     let send_msg = ClientMessage::SendCoordination {
-        target: crate::ship::system_registry::helm_station_key(),
+        address: station_address("helm"),
         payload: CoordinationPayload::ArcBearingRequest {
             uuid: "hostile-7".into(),
             label: "Raider".into(),
@@ -1300,7 +1329,7 @@ fn arc_bearing_request_coordination_payload_round_trips() {
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
     let popup_msg = ServerMessage::CoordinationPopup {
-        target: crate::ship::system_registry::helm_station_key(),
+        address: station_address("helm"),
         payload: CoordinationPayload::ArcBearingRequest {
             uuid: "hostile-7".into(),
             label: "Raider".into(),
@@ -1323,7 +1352,7 @@ fn arc_bearing_request_coordination_payload_round_trips() {
 #[test]
 fn arc_bearing_withdraw_coordination_payload_round_trips() {
     let send_msg = ClientMessage::SendCoordination {
-        target: crate::ship::system_registry::helm_station_key(),
+        address: station_address("helm"),
         payload: CoordinationPayload::ArcBearingWithdraw {
             family: crate::core::messages::WeaponFamily::Torpedoes,
         },
@@ -1332,7 +1361,7 @@ fn arc_bearing_withdraw_coordination_payload_round_trips() {
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
     let popup_msg = ServerMessage::CoordinationPopup {
-        target: crate::ship::system_registry::helm_station_key(),
+        address: station_address("helm"),
         payload: CoordinationPayload::ArcBearingWithdraw {
             family: crate::core::messages::WeaponFamily::Blasters,
         },
@@ -1347,7 +1376,7 @@ fn arc_bearing_withdraw_coordination_payload_round_trips() {
 #[test]
 fn power_brownout_coordination_payload_round_trips() {
     let send_msg = ClientMessage::SendCoordination {
-        target: crate::ship::system_registry::tactical_station_key(),
+        address: station_address("tactical"),
         payload: CoordinationPayload::PowerBrownout {
             group: "weapons".into(),
             label: "WEAPONS".into(),
@@ -1358,7 +1387,7 @@ fn power_brownout_coordination_payload_round_trips() {
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
     let popup_msg = ServerMessage::CoordinationPopup {
-        target: crate::ship::system_registry::tactical_station_key(),
+        address: station_address("tactical"),
         payload: CoordinationPayload::PowerBrownout {
             group: "weapons".into(),
             label: "WEAPONS".into(),
@@ -1387,7 +1416,7 @@ fn power_brownout_coordination_payload_round_trips() {
 fn navigate_to_coordination_payload_round_trips() {
     let generation = u64::MAX - 1;
     let send_msg = ClientMessage::SendCoordination {
-        target: crate::ship::system_registry::helm_station_key(),
+        address: station_address("helm"),
         payload: CoordinationPayload::NavigateTo {
             generation,
             x: 300.0,
@@ -1398,7 +1427,7 @@ fn navigate_to_coordination_payload_round_trips() {
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
     let popup_msg = ServerMessage::CoordinationPopup {
-        target: crate::ship::system_registry::helm_station_key(),
+        address: station_address("helm"),
         payload: CoordinationPayload::NavigateTo {
             generation,
             x: 300.0,
@@ -1415,7 +1444,7 @@ fn navigate_to_coordination_payload_round_trips() {
 #[test]
 fn repair_request_coordination_payload_round_trips() {
     let send_msg = ClientMessage::SendCoordination {
-        target: crate::ship::system_registry::repair_system_id(),
+        address: station_address("repair"),
         payload: CoordinationPayload::RepairRequest {
             system_id: crate::core::messages::SystemId("helm-radar".into()),
             station_id: "helm".into(),
@@ -1428,7 +1457,7 @@ fn repair_request_coordination_payload_round_trips() {
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
     let popup_msg = ServerMessage::CoordinationPopup {
-        target: crate::ship::system_registry::repair_system_id(),
+        address: station_address("repair"),
         payload: CoordinationPayload::RepairRequest {
             system_id: crate::core::messages::SystemId("helm-radar".into()),
             station_id: "helm".into(),
@@ -1449,7 +1478,7 @@ fn repair_request_coordination_payload_round_trips() {
 #[test]
 fn threat_bearing_coordination_payload_round_trips() {
     let send_msg = ClientMessage::SendCoordination {
-        target: crate::ship::system_registry::shields_system_id(),
+        address: station_address("shields"),
         payload: CoordinationPayload::ThreatBearing {
             bearing_rad: 0.698,
             label: "Hostile closing".into(),
@@ -1459,7 +1488,7 @@ fn threat_bearing_coordination_payload_round_trips() {
     assert_client_roundtrip(&PrettyJsonCodec, send_msg);
 
     let popup_msg = ServerMessage::CoordinationPopup {
-        target: crate::ship::system_registry::shields_system_id(),
+        address: station_address("shields"),
         payload: CoordinationPayload::ThreatBearing {
             bearing_rad: 2.094,
             label: "Incoming torpedo".into(),
@@ -1476,7 +1505,7 @@ fn threat_bearing_coordination_payload_round_trips() {
 #[test]
 fn intent_advisory_coordination_payload_round_trips() {
     let popup_msg = ServerMessage::CoordinationPopup {
-        target: crate::ship::system_registry::tactical_station_key(),
+        address: CoordinationAddress::Ship,
         payload: CoordinationPayload::IntentAdvisory {
             kind: crate::core::messages::IntentKind::TargetSwitched,
             subject: Some("Harrow Raider".into()),
@@ -1489,7 +1518,7 @@ fn intent_advisory_coordination_payload_round_trips() {
 
     // The subject-less kinds, which serialise without the optional field.
     let bare = ServerMessage::CoordinationPopup {
-        target: crate::ship::system_registry::helm_station_key(),
+        address: CoordinationAddress::Ship,
         payload: CoordinationPayload::IntentAdvisory {
             kind: crate::core::messages::IntentKind::BreakingOff,
             subject: None,

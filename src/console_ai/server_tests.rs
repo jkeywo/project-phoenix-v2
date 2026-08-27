@@ -804,6 +804,7 @@ fn freq_hint_test_app() -> App {
         .spawn((
             crate::server_app::Ship,
             control_sources,
+            crate::ship_plugin::ShipConfigComponent(sensors_ship_config()),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some("target-1".into())),
             ShipFrequencyHintState::default(),
@@ -861,9 +862,11 @@ fn frequency_hint_propagates_after_the_authored_reaction_delay() {
         other => panic!("expected FrequencyHint, got {other:?}"),
     }
     assert_eq!(
-        hint.target,
-        crate::ship::system_registry::tactical_station_key(),
-        "frequency hint should target Tactical"
+        hint.address,
+        crate::core::messages::CoordinationAddress::Station(crate::core::messages::StationId(
+            crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+        ),),
+        "frequency hint should address Tactical"
     );
 }
 
@@ -896,6 +899,7 @@ fn npc_frequency_hint_reads_its_own_tuning_not_the_global_resource() {
         .spawn((
             crate::server_app::Ship,
             tuned_sources,
+            crate::ship_plugin::ShipConfigComponent(sensors_ship_config()),
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some("target-1".into())),
             ShipFrequencyHintState::default(),
@@ -1012,12 +1016,23 @@ auto_hint = {}
 name = "Std"
 automated_systems = []
 
+[[station]]
+id = "tactical"
+name = "Tactical"
+description = "Weapons control."
+rank = "Ltn."
+
 [[system]]
 id = "sensors"
 kind = "sensors"
 station = "sensors"
+
+[[system]]
+id = "tactical-radar"
+kind = "tactical_radar"
+station = "tactical"
 "#;
-    crate::ship::config::ShipConfig::from_toml(toml, &["sensors"]).unwrap()
+    crate::ship::config::ShipConfig::from_toml(toml, &["sensors", "tactical_radar"]).unwrap()
 }
 
 /// Adds `ShipConfigComponent` + `ActiveStationRatings` to the ship spawned

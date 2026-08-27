@@ -1233,8 +1233,10 @@ fn human_set_waypoint_emits_navigate_to_with_current_generation() {
         })
         .expect("a human-set waypoint must enqueue the same NavigateTo clearance the AI path does");
     assert_eq!(
-        nav_to.target,
-        crate::ship::system_registry::helm_station_key()
+        nav_to.address,
+        crate::core::messages::CoordinationAddress::Station(crate::core::messages::StationId(
+            crate::ship::system_registry::HELM_STATION_ID.into(),
+        ),)
     );
     assert_eq!(
         nav_to.sender_origin,

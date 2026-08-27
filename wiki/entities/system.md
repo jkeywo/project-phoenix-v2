@@ -2,7 +2,7 @@
 title: System
 type: entity
 tags: [system, systemid, console-family, control-source, ai, wire-protocol, damage-tier]
-sources: [src/ship/config.rs, src/ship/system_registry.rs, src/command_admission/policy.rs, src/command_admission/router.rs, src/server_app/registration.rs, src/world/server.rs, src/core/messages.rs, src/entities/spawner.rs, src/dock/server.rs, src/lobby/server.rs, src/ship/control_source.rs, src/ship/damage_sync.rs, src/ship/damage.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml]
+sources: [src/ship/config.rs, src/ship/system_registry.rs, src/command_admission/policy.rs, src/command_admission/router.rs, src/server_app/registration.rs, src/world/server.rs, src/core/messages.rs, src/entities/spawner.rs, src/dock/server.rs, src/lobby/server.rs, src/ship/control_source.rs, src/ship/coordination.rs, src/ship/damage_sync.rs, src/ship/damage.rs, gui/sim-state.js, gui/console-state.js, gui/console-families.js, gui/console-payload.js, gui/dirty-consoles.js, gui/action-map.js, assets/entities/alliance_destroyer.toml]
 updated: 2026-08-27
 ---
 
@@ -57,9 +57,11 @@ are registry keys and may use snake case. Use the helpers in
 `src/ship/system_registry.rs` instead of duplicating stable ids in Rust.
 
 Station ids and system ids are separate namespaces. `helm` and `tactical` are
-station keys used for console-level blackboards and coordination; Helm axes and
-Tactical operations target declared systems such as `helm-steering`,
-`tactical-radar`, and `phaser-control`.
+Station identities used for console-level blackboards; Helm axes and Tactical
+operations target declared Systems such as `helm-steering`, `tactical-radar`,
+and `phaser-control`. Coordination has its own explicit
+`CoordinationAddress::Station(StationId)` or `CoordinationAddress::Ship` wire
+type and never disguises a Station as `SystemId`.
 
 ## Console Family
 

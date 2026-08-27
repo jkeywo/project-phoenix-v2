@@ -592,10 +592,13 @@ fn shield_facing_down_coordination_sent_to_helm_when_facing_goes_offline() {
         "expected a ShieldFacingDown CoordinationEnqueue to be sent"
     );
     assert!(
-        down_msgs
-            .iter()
-            .all(|m| m.target == crate::ship::system_registry::helm_station_key()),
-        "ShieldFacingDown should target the helm system"
+        down_msgs.iter().all(|m| m.address
+            == crate::core::messages::CoordinationAddress::Station(
+                crate::core::messages::StationId(
+                    crate::ship::system_registry::HELM_STATION_ID.into(),
+                ),
+            )),
+        "ShieldFacingDown should address the Helm Station"
     );
 }
 
@@ -782,6 +785,7 @@ fn npc_shield_restore_notify_reads_its_own_tuning_not_the_player_ships_global_re
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            crate::ship_plugin::ShipConfigComponent::default(),
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             arc_sources(),
             red_alert(),
@@ -794,6 +798,7 @@ fn npc_shield_restore_notify_reads_its_own_tuning_not_the_player_ships_global_re
         .world_mut()
         .spawn((
             crate::server_app::Ship,
+            crate::ship_plugin::ShipConfigComponent::default(),
             ShipShields(crate::weapons::shield::ShieldSystem::new(&config), 0.5),
             arc_sources(),
             red_alert(),
@@ -869,10 +874,13 @@ fn shield_facing_down_coordination_carries_ai_sender_origin_for_routing() {
         "default sender_origin should be Ai (shields console has no holder)"
     );
     assert!(
-        down_msgs
-            .iter()
-            .all(|m| m.target == crate::ship::system_registry::helm_station_key()),
-        "ShieldFacingDown should target the helm system"
+        down_msgs.iter().all(|m| m.address
+            == crate::core::messages::CoordinationAddress::Station(
+                crate::core::messages::StationId(
+                    crate::ship::system_registry::HELM_STATION_ID.into(),
+                ),
+            )),
+        "ShieldFacingDown should address the Helm Station"
     );
 }
 

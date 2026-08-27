@@ -1002,7 +1002,8 @@ chatter.sender.navigation,Coordination chatter/popup — sender label for the Na
 chatter.sender.power,Coordination chatter/popup — sender label for the Power system,Power
 chatter.sender.shields,Coordination chatter/popup — sender label for the Shields system,Shields
 chatter.sender.ai,Coordination chatter/popup — generic sender label when the origin system is unnamed,AI
-chatter.addressee.core,Coordination chatter/popup — sender/target label for a system the ship's Core owns (belongs to no station),Core
+chatter.addressee.core,Coordination chatter — sender label for a system the ship's Core owns (belongs to no station),Core
+chatter.addressee.ship,Coordination chatter/popup — destination label for a ship-wide advisory,[Ship]
 coordination.advisory.fallback_title,Coordination popup — title for a bare advisory that carries no sender label,Advisory
 coordination.alert.fallback_title,Coordination popup — title for an alert that carries no title of its own,Alert
 coordination.frequency_hint.title,"Coordination popup/chatter — Sensors-to-Tactical shield-frequency hint, title",Frequency Hint

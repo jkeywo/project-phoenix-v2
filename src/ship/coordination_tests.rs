@@ -1,5 +1,9 @@
 use super::*;
 
+fn station_address(id: &str) -> CoordinationAddress {
+    CoordinationAddress::Station(StationId(id.to_string()))
+}
+
 // ── Routing matrix ────────────────────────────────────────────────────
 
 #[test]
@@ -23,26 +27,109 @@ fn target_human_sender_human_suppresses() {
 }
 
 #[test]
-fn station_for_target_resolves_console_keys_and_ownerless_targets() {
-    let config = crate::ship::components::ShipConfigComponent::default().0;
+fn address_for_system_resolves_owning_station_and_never_widens_unknown_to_ship() {
+    let config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("the shipped battleship composes")
+    .ship_config
+    .expect("the shipped battleship declares a ship config");
 
     assert_eq!(
-        station_for_target(&config, &crate::ship::system_registry::helm_station_key()),
+        address_for_system(
+            &config,
+            &crate::ship::system_registry::helm_steering_system_id()
+        ),
         config
             .system(&crate::ship::system_registry::helm_steering_system_id())
             .and_then(|system| system.station.clone())
+            .map(CoordinationAddress::Station)
     );
     assert_eq!(
-        station_for_target(
+        address_for_system(
             &config,
-            &crate::ship::system_registry::tactical_station_key()
+            &crate::ship::system_registry::tactical_radar_system_id()
         ),
-        config.weapons_station()
+        config.weapons_station().map(CoordinationAddress::Station)
     );
     assert_eq!(
-        station_for_target(&config, &SystemId("not-a-real-target".into())),
+        address_for_system(&config, &SystemId("not-a-real-system".into())),
         None
     );
+
+    let shields_station = config
+        .systems
+        .iter()
+        .find(|system| system.kind == crate::ship::system_registry::SHIELD_ARC_KIND)
+        .and_then(|system| system.station.clone())
+        .expect("the default player hull stations its shield arcs");
+    assert_eq!(
+        address_for_system_kind(&config, crate::ship::system_registry::SHIELD_ARC_KIND),
+        Some(CoordinationAddress::Station(shields_station))
+    );
+    assert_eq!(address_for_system_kind(&config, "not_a_kind"), None);
+
+    let mut split_kind = config.clone();
+    let second_arc = split_kind
+        .systems
+        .iter_mut()
+        .filter(|system| system.kind == crate::ship::system_registry::SHIELD_ARC_KIND)
+        .nth(1)
+        .expect("the default hull has multiple shield arcs");
+    second_arc.station = Some(StationId("helm".into()));
+    assert_eq!(
+        address_for_system_kind(&split_kind, crate::ship::system_registry::SHIELD_ARC_KIND),
+        None,
+        "an ambiguous kind owner is rejected, never widened to the Ship"
+    );
+}
+
+#[test]
+fn shipped_hulls_resolve_coordination_from_authored_topology_not_literal_station_names() {
+    for stem in [
+        "alliance_battleship",
+        "alliance_cruiser",
+        "alliance_destroyer",
+        "alliance_courier",
+    ] {
+        let config = crate::entities::include_resolve::load_entity_config(&format!(
+            "assets/entities/{stem}.toml"
+        ))
+        .unwrap_or_else(|error| panic!("{stem} must compose: {error}"))
+        .ship_config
+        .unwrap_or_else(|| panic!("{stem} must declare a ship config"));
+
+        assert_eq!(
+            address_for_system(
+                &config,
+                &crate::ship::system_registry::tactical_radar_system_id()
+            ),
+            config.weapons_station().map(CoordinationAddress::Station),
+            "{stem}: Tactical address follows the Station that owns the radar"
+        );
+        assert_eq!(
+            address_for_system(
+                &config,
+                &crate::ship::system_registry::helm_steering_system_id()
+            ),
+            config
+                .system(&crate::ship::system_registry::helm_steering_system_id())
+                .and_then(|system| system.station.clone())
+                .map(CoordinationAddress::Station),
+            "{stem}: Helm address follows authored ownership"
+        );
+
+        let shield_owner = config
+            .systems
+            .iter()
+            .find(|system| system.kind == crate::ship::system_registry::SHIELD_ARC_KIND)
+            .and_then(|system| system.station.clone());
+        assert_eq!(
+            address_for_system_kind(&config, crate::ship::system_registry::SHIELD_ARC_KIND),
+            shield_owner.map(CoordinationAddress::Station),
+            "{stem}: multi-arc Shields resolves its real Station (including composite Stations)"
+        );
+    }
 }
 
 #[test]
@@ -170,6 +257,24 @@ fn a_backfilled_senders_advisory_reaches_every_human_seat_and_no_other() {
 fn a_human_seat_with_no_connected_holder_receives_nothing() {
     let seats = vec![seat("helm", ControlSource::Human, None)];
     assert!(broadcast_to_ship(ControlSource::Ai, &seats).is_empty());
+}
+
+/// A complete auxiliary/visiting Station is presented inside its host's
+/// already-connected console; it is not a second Session seat. Ship fan-out
+/// therefore reaches the host once and does not duplicate the popup for the
+/// holder-less visiting identity.
+#[test]
+fn a_visiting_station_does_not_duplicate_its_hosts_ship_popup() {
+    let seats = vec![
+        seat("comms", ControlSource::Human, Some("uhura")),
+        seat("navigation", ControlSource::Human, None),
+    ];
+
+    let recipients = broadcast_to_ship(ControlSource::Ai, &seats);
+
+    assert_eq!(recipients.len(), 1);
+    assert_eq!(recipients[0].station, StationId("comms".into()));
+    assert_eq!(recipients[0].holder.as_deref(), Some("uhura"));
 }
 
 /// The broadcast is `route_coordination` applied per seat, so it inherits
@@ -689,7 +794,7 @@ fn enqueue_adds_message() {
     let mut queue = CoordinationLagQueue::new();
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
-        target: SystemId("helm".into()),
+        address: station_address("helm"),
         payload: CoordinationPayload::Advisory {
             message: "test".into(),
         },
@@ -705,7 +810,7 @@ fn due_messages_returns_nothing_before_deadline() {
     let mut queue = CoordinationLagQueue::new();
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
-        target: SystemId("helm".into()),
+        address: station_address("helm"),
         payload: CoordinationPayload::Advisory {
             message: "test".into(),
         },
@@ -722,7 +827,7 @@ fn due_messages_returns_ready_at_deadline() {
     let mut queue = CoordinationLagQueue::new();
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
-        target: SystemId("helm".into()),
+        address: station_address("helm"),
         payload: CoordinationPayload::Advisory {
             message: "test".into(),
         },
@@ -739,7 +844,7 @@ fn due_messages_returns_ready_after_deadline() {
     let mut queue = CoordinationLagQueue::new();
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
-        target: SystemId("helm".into()),
+        address: station_address("helm"),
         payload: CoordinationPayload::Advisory {
             message: "test".into(),
         },
@@ -756,7 +861,7 @@ fn due_messages_respects_per_message_deadlines() {
     let mut queue = CoordinationLagQueue::new();
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
-        target: SystemId("helm".into()),
+        address: station_address("helm"),
         payload: CoordinationPayload::Advisory {
             message: "first".into(),
         },
@@ -765,7 +870,7 @@ fn due_messages_respects_per_message_deadlines() {
     });
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
-        target: SystemId("helm".into()),
+        address: station_address("helm"),
         payload: CoordinationPayload::Advisory {
             message: "early".into(),
         },
@@ -774,7 +879,7 @@ fn due_messages_respects_per_message_deadlines() {
     });
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
-        target: SystemId("helm".into()),
+        address: station_address("helm"),
         payload: CoordinationPayload::Advisory {
             message: "late".into(),
         },
@@ -810,7 +915,7 @@ fn sender_origin_is_captured_at_enqueue_time() {
     let mut queue = CoordinationLagQueue::new();
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
-        target: SystemId("helm".into()),
+        address: station_address("helm"),
         payload: CoordinationPayload::Alert {
             title: "AI Alert".into(),
             body: "Incoming threat detected.".into(),
@@ -825,12 +930,12 @@ fn sender_origin_is_captured_at_enqueue_time() {
 }
 
 #[test]
-fn target_is_resolved_live_at_delivery_time() {
+fn explicit_address_survives_the_delay_unchanged() {
     let mut queue = CoordinationLagQueue::new();
-    let target = SystemId("red-alert".into());
+    let address = station_address("captain");
     queue.enqueue(QueuedCoordination {
         sender_origin: ControlSource::Ai,
-        target: target.clone(),
+        address: address.clone(),
         payload: CoordinationPayload::Alert {
             title: "test".into(),
             body: "body".into(),
@@ -839,49 +944,37 @@ fn target_is_resolved_live_at_delivery_time() {
         due_time: 1.0,
     });
     let due = queue.due_messages(2.0);
-    assert_eq!(due[0].target, target);
+    assert_eq!(due[0].address, address);
 }
 
-/// Channel-3 addresses crew by STATION, not by the fine system: a message
-/// whose target is the `navigation` SYSTEM must name the station that OWNS
-/// navigation (here `tactical`), rendered as that station's display id — the
-/// station ALONE, never a `station.tactical.navigation` composite, and never
-/// the bare `chatter.sender.navigation` system label (Task 2/3).
+/// A producer resolves its fine System once, then the explicit address alone
+/// supplies the delayed message's addressee label.
 #[test]
-fn station_addressee_names_the_owning_station_not_the_system() {
+fn coordination_addressee_names_station_or_ship_from_the_explicit_address() {
     let config = seeking_config();
+    let navigation_address = address_for_system(
+        &config,
+        &crate::ship::system_registry::navigation_system_id(),
+    )
+    .expect("navigation has an owning Station");
 
-    // A system that belongs to a station → that station's display id.
     assert_eq!(
-        station_addressee_label(
-            &config,
-            &crate::ship::system_registry::navigation_system_id()
-        ),
+        coordination_addressee_label(&navigation_address),
         "station.tactical.name",
-        "navigation is owned by the tactical station on this hull, so it \
-         addresses as the STATION alone"
+        "navigation resolves to its owning Station before enqueue"
     );
-
-    // A station-level target key → the same station id, resolved once.
     assert_eq!(
-        station_addressee_label(&config, &SystemId("comms".into())),
+        coordination_addressee_label(&station_address("comms")),
         "station.comms.name"
     );
-
-    // An ownerless / unknown target → the ship's Core, never a bare system.
     assert_eq!(
-        station_addressee_label(&config, &SystemId("repair".into())),
-        CHATTER_ADDRESSEE_CORE,
-        "a target no station owns is addressed to Core, not to a system name"
+        coordination_addressee_label(&CoordinationAddress::Ship),
+        CHATTER_ADDRESSEE_SHIP
     );
 
-    // The resolved id carries no system suffix in either shape.
     for id in [
-        station_addressee_label(
-            &config,
-            &crate::ship::system_registry::navigation_system_id(),
-        ),
-        station_addressee_label(&config, &SystemId("comms".into())),
+        coordination_addressee_label(&navigation_address),
+        coordination_addressee_label(&station_address("comms")),
     ] {
         assert!(
             id.starts_with("station.") && id.ends_with(".name"),

@@ -995,9 +995,16 @@ fn brownout_test_app() -> App {
         .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
         .single(app.world())
         .unwrap();
-    app.world_mut()
-        .entity_mut(ship)
-        .insert(ShipPowerSystem(PowerSystem::default()));
+    let ship_config = crate::entities::include_resolve::load_entity_config(
+        "assets/entities/alliance_battleship.toml",
+    )
+    .expect("the shipped battleship composes")
+    .ship_config
+    .expect("the shipped battleship declares a ship config");
+    app.world_mut().entity_mut(ship).insert((
+        ShipPowerSystem(PowerSystem::default()),
+        crate::ship_plugin::ShipConfigComponent(ship_config),
+    ));
     app.init_resource::<CoordEnqueueBox>()
         .add_systems(PostUpdate, collect_coord);
     app
@@ -1067,6 +1074,26 @@ fn tick_power_brownout_advisory_fires_only_on_reactor_lock() {
             matches!(&e.payload, CoordinationPayload::PowerBrownout { .. }),
             "expected PowerBrownout, got {:?}",
             e.payload
+        );
+    }
+    let routes: std::collections::HashMap<_, _> = emitted
+        .iter()
+        .filter_map(|event| match &event.payload {
+            CoordinationPayload::PowerBrownout { group, .. } => {
+                Some((group.as_str(), event.address.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    for (group, station) in [
+        (HELM_POWER_GROUP, "helm"),
+        (WEAPONS_POWER_GROUP, "tactical"),
+        (SHIELDS_POWER_GROUP, "shields"),
+    ] {
+        assert_eq!(
+            routes.get(group),
+            Some(&CoordinationAddress::Station(StationId(station.into()))),
+            "each brownout group resolves the authored owning Station; `{group}` must not use a fake System target"
         );
     }
 

@@ -412,13 +412,14 @@ fn issue_navigate_to_clearance(
             &NavigationWaypoint,
             &mut NavClearanceIssueState,
             &crate::ship_plugin::ShipSystemControlSources,
+            &crate::ship_plugin::ShipConfigComponent,
             Option<&crate::ship_plugin::HelmWaypointClearance>,
         ),
         With<crate::server_app::Ship>,
     >,
     mut coordination_writer: MessageWriter<crate::ship_plugin::CoordinationEnqueue>,
 ) {
-    for (entity, waypoint, mut state, control_sources, clearance) in ships.iter_mut() {
+    for (entity, waypoint, mut state, control_sources, ship_config, clearance) in ships.iter_mut() {
         let helm_ai = crate::ship_plugin::helm_axes_operate_ai(control_sources);
         let flipped_to_ai = helm_ai && !state.helm_axes_were_ai;
         state.helm_axes_were_ai = helm_ai;
@@ -441,6 +442,12 @@ fn issue_navigate_to_clearance(
 
         let new_generation = state.issued_generation != Some(generation);
         if new_generation || flipped_to_ai {
+            let Some(address) = crate::ship::coordination::address_for_system(
+                &ship_config.0,
+                &crate::ship::system_registry::helm_steering_system_id(),
+            ) else {
+                continue;
+            };
             coordination_writer.write(crate::ship_plugin::CoordinationEnqueue {
                 source_entity: entity,
                 // The origin is the navigation system's resolved control
@@ -449,7 +456,7 @@ fn issue_navigate_to_clearance(
                 sender_origin: control_sources
                     .0
                     .source_for(&crate::ship::system_registry::navigation_system_id()),
-                target: crate::ship::system_registry::helm_station_key(),
+                address,
                 payload: crate::core::messages::CoordinationPayload::NavigateTo {
                     generation,
                     // Coords for the chatter popup's display only (issue #977);

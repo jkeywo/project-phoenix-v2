@@ -13,6 +13,7 @@ Use these names consistently. Runtime detail belongs in code/wiki; intended beha
 - **Viewscreen**: the shared host display.
 - **Waypoint**: Navigation-owned shared destination.
 - **Coordination**: inter-system advisory messages; it does not bypass system authority.
+- **Coordination Address**: an explicit `Station` or whole-`Ship` destination for Coordination, distinct from the `SystemId` targeted by an admitted command.
 - **PASM**: Phoenix Architecture & System Model, the repository's design and architecture record.
 - **String Table**: `assets/strings/strings.csv`, the single source of all display text, keyed by String Id; `[bracketed]` English marks unreviewed agent-drafted copy.
 - **String Id**: stable dotted key (`console.common.no_target`) that code and TOML carry instead of prose; the client resolves it at render time.

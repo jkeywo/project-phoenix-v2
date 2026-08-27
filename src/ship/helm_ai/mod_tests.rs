@@ -7125,7 +7125,11 @@ fn withdraw_fore_arc_request(app: &mut App, family: crate::core::messages::Weapo
         .write(crate::ship_plugin::CoordinationEnqueue {
             source_entity: ship,
             sender_origin: ControlSource::Ai,
-            target: crate::ship::system_registry::helm_station_key(),
+            address: crate::core::messages::CoordinationAddress::Station(
+                crate::core::messages::StationId(
+                    crate::ship::system_registry::HELM_STATION_ID.into(),
+                ),
+            ),
             payload: crate::core::messages::CoordinationPayload::ArcBearingWithdraw { family },
             sender_label: "Weapons".to_string(),
             sender_system: crate::core::messages::SystemId(String::new()),

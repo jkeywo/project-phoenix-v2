@@ -1,12 +1,12 @@
 use bevy::prelude::*;
 
 use crate::console_bridge::AiChatterEvent;
-use crate::core::messages::{ClientMessage, CoordinationPayload};
+use crate::core::messages::{ClientMessage, CoordinationAddress, CoordinationPayload, StationId};
 use crate::lobby::{InboundMessage, Sessions};
 use crate::server_app::LocalShip;
 use crate::ship::components::{
-    ActiveStationRatings, CoordinationEnqueue, CoordinationQueue, HelmWaypointClearance,
-    HumanSeekingHosts, PendingArcBearingRequest, PendingTacticalFrequencyHint, RepairHumanAlerted,
+    ActiveStationRatings, CoordinationEnqueue, CoordinationQueue, DeliveredCoordination,
+    HelmWaypointClearance, HumanSeekingHosts, PendingArcBearingRequest, RepairHumanAlerted,
     ScenarioDetailFloor, ShipConfigComponent, ShipSystemControlSources, VisitingStationHosts,
 };
 use crate::ship::control_source::ControlSource;
@@ -45,11 +45,11 @@ pub fn handle_coordination_enqueue(
         let sender_label = if ev.sender_system.0.is_empty() {
             ev.sender_label.clone()
         } else {
-            coordination::station_addressee_label(&ship_config.0, &ev.sender_system)
+            coordination::system_addressee_label(&ship_config.0, &ev.sender_system)
         };
         queue.0.enqueue(QueuedCoordination {
             sender_origin: ev.sender_origin,
-            target: ev.target.clone(),
+            address: ev.address.clone(),
             payload: ev.payload.clone(),
             sender_label,
             due_time: now + lag,
@@ -67,7 +67,7 @@ pub fn handle_coordination_enqueue(
     };
     let lag = ship_config.0.coordination_lag_secs;
     for msg in &inbound_msgs {
-        let ClientMessage::SendCoordination { target, payload } = &msg.msg else {
+        let ClientMessage::SendCoordination { address, payload } = &msg.msg else {
             continue;
         };
         let player = match sessions.0.players().iter().find(|p| p.token == msg.token) {
@@ -89,7 +89,7 @@ pub fn handle_coordination_enqueue(
         };
         queue.0.enqueue(QueuedCoordination {
             sender_origin,
-            target: target.clone(),
+            address: address.clone(),
             payload: payload.clone(),
             sender_label: player.name.clone(),
             due_time: now + lag,
@@ -390,10 +390,65 @@ pub fn resolve_human_seeking_hosts(
     }
 }
 
+fn station_delivery_policy(
+    config: &crate::ship::config::ShipConfig,
+    control_sources: &ShipSystemControlSources,
+    station: &StationId,
+) -> (
+    crate::ship::control_source::ControlTickPolicy,
+    ControlSource,
+) {
+    let helm_station = coordination::address_for_system(
+        config,
+        &crate::ship::system_registry::helm_steering_system_id(),
+    );
+    if helm_station.as_ref() == Some(&CoordinationAddress::Station(station.clone())) {
+        if helm_axes_operate_ai(control_sources) {
+            return (
+                crate::ship::control_source::control_tick_policy(ControlSource::Ai),
+                ControlSource::Ai,
+            );
+        }
+        let representative = crate::ship::system_registry::helm_steering_system_id();
+        return (
+            control_sources.0.policy_for(&representative),
+            control_sources.0.source_for(&representative),
+        );
+    }
+
+    if config.weapons_station().as_ref() == Some(station) {
+        let source = if crate::console::weapons::shared::any_tactical_system_operates_ai(
+            control_sources,
+            config,
+        ) {
+            ControlSource::Ai
+        } else {
+            ControlSource::Human
+        };
+        return (
+            crate::ship::control_source::control_tick_policy(source),
+            source,
+        );
+    }
+
+    let policies: Vec<_> = config
+        .systems
+        .iter()
+        .filter(|system| system.station.as_ref() == Some(station))
+        .map(|system| control_sources.0.policy_for(&system.id))
+        .collect();
+    let source = coordination::seat_control_source(&policies);
+    (
+        crate::ship::control_source::control_tick_policy(source),
+        source,
+    )
+}
+
 pub fn process_coordination_lag(
     time: Res<Time>,
     mut ship_components: Query<
         (
+            Entity,
             &ShipConfigComponent,
             &ShipSystemControlSources,
             &mut CoordinationQueue,
@@ -402,10 +457,6 @@ pub fn process_coordination_lag(
             Option<&mut RepairHumanAlerted>,
             Option<&mut crate::console::repair::server::RepairRequestQueue>,
             Option<&mut crate::ship::shields::PendingShieldsThreatBearing>,
-            Option<&mut PendingTacticalFrequencyHint>,
-            // Read-only, and only for the #737 popup gate below: the same
-            // damage store and repair-team state machine the visibility
-            // projection reads, so the popup cannot drift from the wire rule.
             Option<&crate::entities::spawner::EntitySystemHull>,
             Option<&crate::console::repair::server::ShipRepairTeams>,
             Has<LocalShip>,
@@ -415,11 +466,13 @@ pub fn process_coordination_lag(
     sessions: Res<Sessions>,
     mut outbox: ResMut<crate::lobby::LobbyOutbox>,
     mut chatter_writer: MessageWriter<AiChatterEvent>,
+    mut delivered_writer: MessageWriter<DeliveredCoordination>,
 ) {
     let repair_id = crate::ship::system_registry::repair_system_id();
-    let shields_id = crate::ship::system_registry::shields_system_id();
+    let helm_system = crate::ship::system_registry::helm_steering_system_id();
     let now = time.elapsed_secs();
     for (
+        ship_entity,
         ship_config,
         control_sources,
         mut queue,
@@ -428,22 +481,17 @@ pub fn process_coordination_lag(
         mut alerted,
         mut repair_queue,
         mut pending_shields_threat,
-        mut pending_tactical_hint,
         entity_hull,
         entity_teams,
         is_local,
     ) in ship_components.iter_mut()
     {
-        // The #737 damage-visibility projection for this ship. Built once per
-        // ship per tick and only used to decide how much detail a
-        // `CoordinationPopup` may carry — see `coarsen_repair_request`.
-        //
-        // Deliberately built by `ship_hull_visibility`, the same constructor the
-        // wire projection uses, rather than by calling `HullVisibility
-        // ::from_parts` directly: a second on-site resolution path here is free
-        // to drift from the one the broadcast enforces, which is the very shape
-        // of bug this issue closes. Issue #830: every ship (player + NPC) reads
-        // its own per-entity `ShipRepairTeams` — no global-Resource fallback.
+        let repair_address = coordination::address_for_system(&ship_config.0, &repair_id);
+        let shields_address = coordination::address_for_system_kind(
+            &ship_config.0,
+            crate::ship::system_registry::SHIELD_ARC_KIND,
+        );
+        let helm_address = coordination::address_for_system(&ship_config.0, &helm_system);
         let repair_vis = entity_hull.map(|hull| {
             crate::console::repair::visibility::ship_hull_visibility(
                 &hull.0,
@@ -451,22 +499,12 @@ pub fn process_coordination_lag(
                 entity_teams,
             )
         });
-        let due = queue.0.due_messages(now);
-        for msg in due {
-            // ── Ship-wide broadcast (issue #879) ─────────────────────────
-            //
-            // An intent advisory is not addressed to one console: it goes to
-            // every human seat on the SOURCE ship, so a partly-backfilled
-            // bridge shares one picture of what the automation is doing. The
-            // decision of who receives it is the pure
-            // `coordination::broadcast_to_ship`, which is `route_coordination`
-            // applied per seat — so a backfilled sender pops up at every human
-            // seat, an AI or offline seat gets nothing, and a human sender is
-            // suppressed at every seat exactly as human→human always has been.
-            // The addressed path below is untouched for every other payload.
-            if matches!(msg.payload, CoordinationPayload::IntentAdvisory { .. }) {
-                // Popups require a browser-connected console holder; only the
-                // LocalShip has one, so NPC bridges narrate to nobody.
+
+        for msg in queue.0.due_messages(now) {
+            // Whole-ship delivery is selected by its address, never by looking
+            // for a particular payload variant. The authored Station order is
+            // retained for deterministic fan-out.
+            if msg.address == CoordinationAddress::Ship {
                 if !is_local {
                     continue;
                 }
@@ -483,15 +521,7 @@ pub fn process_coordination_lag(
                     outbox.0.push((
                         crate::lobby::handler::Target::Token(token),
                         crate::core::messages::ServerMessage::CoordinationPopup {
-                            target: msg.target.clone(),
-                            // The #737 gate, re-applied PER RECIPIENT. An
-                            // intent advisory carries no figures of its own,
-                            // but a broadcast fans one payload out to seats
-                            // with different entitlements, so the coarsening
-                            // has to be resolved against each seat rather than
-                            // once for the message — otherwise a ship-wide
-                            // send would be a way around the boundary the
-                            // addressed path enforces.
+                            address: msg.address.clone(),
                             payload: coarsen_repair_request(
                                 &msg.payload,
                                 repair_vis.as_ref(),
@@ -504,62 +534,16 @@ pub fn process_coordination_lag(
                 continue;
             }
 
-            // Coordination targets are console-level station-id keys (issue
-            // #801), so a helm-directed message cannot gate on a `helm`
-            // system that no longer exists. The Helm console's effective
-            // control source derives from its stick axes: AI when both
-            // `helm-thrust` and `helm-steering` are AI-operated (the shape
-            // Backfill and NPC spawn produce), otherwise the steering axis —
-            // the axis helm-directed coordination (arc bearings, navigation
-            // clearances) actually drives — is the representative. Every
-            // other target resolves through `policy_for` as before.
-            //
-            // Issue #873: the Tactical station key gets the same treatment, for
-            // the same reason. `SystemId("tactical")` is a *station* key with no
-            // registered `[[system]]` behind it (#801 deleted the coarse block),
-            // so `policy_for` resolved it to the `Human` default on every hull —
-            // which made a BACKFILLED Tactical invisible to the router. A
-            // frequency hint or target designation aimed at an AI-run Tactical
-            // could only Suppress (human sender) or raise an ownerless broadcast
-            // popup (AI sender); it could never Consume, and the AI running the
-            // guns never saw it. `any_tactical_system_operates_ai` is the
-            // Tactical analogue of `helm_axes_operate_ai` — the same predicate
-            // `ai_target_selection` and `tick_npc_auto_match_frequency` already
-            // use to decide the guns are on AI — so the bus and the gunnery now
-            // agree about who is holding Tactical. When it is false the key
-            // falls through to `policy_for` exactly as before, so a human-held
-            // Tactical routes unchanged.
-            let helm_key = crate::ship::system_registry::helm_station_key();
-            let tactical_key = crate::ship::system_registry::tactical_station_key();
-            let (target_policy, target_control) = if msg.target == helm_key {
-                if helm_axes_operate_ai(control_sources) {
-                    (
-                        crate::ship::control_source::control_tick_policy(ControlSource::Ai),
-                        ControlSource::Ai,
-                    )
-                } else {
-                    let rep = crate::ship::system_registry::helm_steering_system_id();
-                    (
-                        control_sources.0.policy_for(&rep),
-                        control_sources.0.source_for(&rep),
-                    )
-                }
-            } else if msg.target == tactical_key
-                && crate::console::weapons::shared::any_tactical_system_operates_ai(
-                    control_sources,
-                    &ship_config.0,
-                )
-            {
-                (
-                    crate::ship::control_source::control_tick_policy(ControlSource::Ai),
-                    ControlSource::Ai,
-                )
-            } else {
-                (
-                    control_sources.0.policy_for(&msg.target),
-                    control_sources.0.source_for(&msg.target),
-                )
+            let CoordinationAddress::Station(station_id) = &msg.address else {
+                continue;
             };
+            if ship_config.0.station(station_id).is_none() {
+                // An explicit but unknown Station is invalid for this hull. It
+                // is not silently widened to the whole ship.
+                continue;
+            }
+            let (target_policy, target_control) =
+                station_delivery_policy(&ship_config.0, control_sources, station_id);
             let action = if !target_policy.operate_ai && !target_policy.accept_human_input {
                 coordination::DeliverAction::Consume
             } else {
@@ -568,8 +552,19 @@ pub fn process_coordination_lag(
 
             match action {
                 coordination::DeliverAction::Consume => {
-                    // RepairRequest for AI repair: push into the priority queue.
-                    if target_policy.operate_ai && msg.target == repair_id {
+                    if target_policy.operate_ai {
+                        delivered_writer.write(DeliveredCoordination {
+                            source_entity: ship_entity,
+                            address: msg.address.clone(),
+                            payload: msg.payload.clone(),
+                        });
+                    }
+
+                    // Legacy consumers move behind DeliveredCoordination in
+                    // issues #1256-#1258. Tactical's FrequencyHint is the
+                    // tracer implemented in this slice and is intentionally
+                    // absent from this router.
+                    if target_policy.operate_ai && repair_address.as_ref() == Some(&msg.address) {
                         if let CoordinationPayload::RepairRequest {
                             station_id,
                             station_label,
@@ -584,58 +579,34 @@ pub fn process_coordination_lag(
                                         station_id: station_id.clone(),
                                         station_label: station_label.clone(),
                                         tier: *tier,
-                                        // Host-internal path: the enqueue side
-                                        // always fills this in. A coarsened
-                                        // `None` never reaches the queue, but
-                                        // sorting on 0.0 is the safe reading if
-                                        // one ever does.
                                         deficit: deficit.unwrap_or(0.0),
                                     },
                                 );
                             }
                         }
                     }
-                    // AI Helm folds a consumed arc-bearing request into its
-                    // steering (issue #677) rather than only chattering about it.
-                    if target_policy.operate_ai && msg.target == helm_key {
+                    if target_policy.operate_ai && helm_address.as_ref() == Some(&msg.address) {
                         if let CoordinationPayload::ArcBearingRequest { uuid, arcs, .. } =
                             &msg.payload
                         {
                             if let Some(pending) = pending_bearing.as_deref_mut() {
-                                // Carry the emitting family's arcs (issue #767)
-                                // so `ai_helm_steering` biases toward — and
-                                // self-clears against — that family's geometry.
                                 pending.target = uuid::Uuid::parse_str(uuid).ok();
                                 pending.arcs = arcs.clone();
                             }
                         }
-                        // Issue #932: withdraw a standing request whose
-                        // emitting family has gone unusable. This is expiry,
-                        // not a steering decision — cleared unconditionally,
-                        // never gated on `leg_yields_to_arc_requests` (#918),
-                        // which only ever gates the steering WRITE a live
-                        // request can bias.
                         if let CoordinationPayload::ArcBearingWithdraw { .. } = &msg.payload {
                             if let Some(pending) = pending_bearing.as_deref_mut() {
                                 pending.target = None;
                                 pending.arcs.clear();
                             }
                         }
-                        // Channel-3 Navigation-to-Helm handoff (issues #681,
-                        // #702): the order has now served its delivery lag, so
-                        // clear the AI Helm to follow this generation of the
-                        // ship's `NavigationWaypoint`. No position is copied —
-                        // the waypoint is the goal, and `operate_helm` reads it
-                        // straight off the ship.
                         if let CoordinationPayload::NavigateTo { generation, .. } = &msg.payload {
                             if let Some(clearance) = waypoint_clearance.as_deref_mut() {
                                 clearance.0 = Some(*generation);
                             }
                         }
                     }
-                    // AI Shields consumes a Sensors threat bearing to rotate
-                    // the closest facing toward the incoming threat (issue #683).
-                    if target_policy.operate_ai && msg.target == shields_id {
+                    if target_policy.operate_ai && shields_address.as_ref() == Some(&msg.address) {
                         if let CoordinationPayload::ThreatBearing { bearing_rad, .. } = &msg.payload
                         {
                             if let Some(pending) = pending_shields_threat.as_deref_mut() {
@@ -643,30 +614,7 @@ pub fn process_coordination_lag(
                             }
                         }
                     }
-                    // A backfilled Tactical folds a consumed Sensors frequency
-                    // hint into its phaser frequency (issue #873) rather than
-                    // dropping it on the floor. `apply_tactical_frequency_hint`
-                    // reads this next tick. The sender may be a human on
-                    // Sensors or that ship's own Sensors AI — the payload is
-                    // identical and nothing here inspects `sender_origin`,
-                    // which is what makes a human-crewed Sensors console able
-                    // to advise a backfilled Tactical at all.
-                    if target_policy.operate_ai && msg.target == tactical_key {
-                        if let CoordinationPayload::FrequencyHint { frequency } = &msg.payload {
-                            if let Some(pending) = pending_tactical_hint.as_deref_mut() {
-                                pending.0 = Some(*frequency);
-                            }
-                        }
-                    }
-                    // AI→AI: emit viewscreen chatter for the LocalShip only.
-                    // The typed payload crosses to the client, which turns it
-                    // into words through the same `gui/coordination-popup.js`
-                    // normaliser the phone popup uses (issue #975) — no sentence
-                    // is composed here. `from_label` is the sender's owning
-                    // STATION id (resolved at enqueue), and `to_label` is the
-                    // target's owning STATION id (resolved here) — the station
-                    // ALONE, never the station+system pair (Task 3). Both are
-                    // `station.*.name` ids the client's `localiseTree` resolves.
+
                     if is_local && msg.sender_origin == ControlSource::Ai {
                         let from_label = if msg.sender_label.is_empty() {
                             coordination::CHATTER_SENDER_AI.to_string()
@@ -675,39 +623,30 @@ pub fn process_coordination_lag(
                         };
                         chatter_writer.write(AiChatterEvent {
                             from_label,
-                            to_label: coordination::station_addressee_label(
-                                &ship_config.0,
-                                &msg.target,
-                            ),
+                            to_label: coordination::coordination_addressee_label(&msg.address),
                             payload: msg.payload.clone(),
                         });
                     }
                 }
                 coordination::DeliverAction::Suppress => {}
                 coordination::DeliverAction::Popup => {
-                    // Popups require a browser-connected console holder.
-                    // Only the LocalShip has one — NPCs drain silently.
                     if !is_local {
                         continue;
                     }
-
-                    // Escalation-only filter for repair popups (issue #682):
-                    // human repair sees popups only on first-damage and
-                    // Disabled/Destroyed tier crossings.
-                    if msg.target == repair_id {
+                    if repair_address.as_ref() == Some(&msg.address) {
                         if let CoordinationPayload::RepairRequest {
                             station_id, tier, ..
                         } = &msg.payload
                         {
                             let already = alerted
                                 .as_deref()
-                                .and_then(|a| a.0.get(station_id).copied())
+                                .and_then(|state| state.0.get(station_id).copied())
                                 .unwrap_or(DamageTier::Operational);
                             if *tier < DamageTier::Disabled && already != DamageTier::Operational {
                                 continue;
                             }
-                            if let Some(a) = alerted.as_deref_mut() {
-                                a.0.insert(station_id.clone(), *tier);
+                            if let Some(state) = alerted.as_deref_mut() {
+                                state.0.insert(station_id.clone(), *tier);
                             }
                         }
                     }
@@ -717,43 +656,19 @@ pub fn process_coordination_lag(
                     } else {
                         msg.sender_label
                     };
-
-                    if let Some(station_id) =
-                        coordination::station_for_target(&ship_config.0, &msg.target)
+                    if let Some(token) = sessions
+                        .0
+                        .holder_for_station(station_id)
+                        .map(|token| token.to_string())
                     {
-                        if ship_config.0.station(&station_id).is_some() {
-                            let token: Option<String> = sessions
-                                .0
-                                .holder_for_station(&station_id)
-                                .map(|t| t.to_string());
-
-                            if let Some(token) = token {
-                                outbox.0.push((
-                                    crate::lobby::handler::Target::Token(token),
-                                    crate::core::messages::ServerMessage::CoordinationPopup {
-                                        target: msg.target.clone(),
-                                        payload: coarsen_repair_request(
-                                            &msg.payload,
-                                            repair_vis.as_ref(),
-                                            Some(&station_id),
-                                        ),
-                                        sender_label: label,
-                                    },
-                                ));
-                            }
-                        }
-                    } else {
-                        // Ownerless target — broadcast. No recipient is
-                        // entitled to exact non-Core detail, so coarsen against
-                        // "no station".
                         outbox.0.push((
-                            crate::lobby::handler::Target::All,
+                            crate::lobby::handler::Target::Token(token),
                             crate::core::messages::ServerMessage::CoordinationPopup {
-                                target: msg.target.clone(),
+                                address: msg.address.clone(),
                                 payload: coarsen_repair_request(
                                     &msg.payload,
                                     repair_vis.as_ref(),
-                                    None,
+                                    Some(station_id),
                                 ),
                                 sender_label: label,
                             },

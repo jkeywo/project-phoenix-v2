@@ -23,7 +23,7 @@ use uuid::Uuid;
 ///
 /// A versioning boundary, not a gameplay value, so it is a code constant
 /// (AGENTS.md rule 11), exactly like `manifest::SUPPORTED_PACK_FORMAT`.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Typed OR-aggregated boolean ship flags (formerly `core/flag_kind.rs`,
 /// inlined here — it is a wire type like everything else in this module).
@@ -238,6 +238,19 @@ pub enum DeliveryClass {
 /// addressing unit for station ownership in the station/system architecture.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct StationId(pub String);
+
+/// Explicit destination for a delayed Coordination message.
+///
+/// Coordination is addressed either to one authored crew Station or to the
+/// whole source ship. A System id is deliberately not accepted here: Systems
+/// remain command-authority targets, while Coordination is an operator/bridge
+/// message whose recipient is resolved at delivery time.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum CoordinationAddress {
+    Station(StationId),
+    Ship,
+}
 
 /// Stable, designer-authored identifier for one capability instance on a ship.
 ///
@@ -2365,7 +2378,7 @@ pub enum ClientMessage {
     /// Channel-3 coordination envelope. Carries a typed coordination payload
     /// to be queued with lag and routed at delivery time (issue #494).
     SendCoordination {
-        target: SystemId,
+        address: CoordinationAddress,
         payload: CoordinationPayload,
     },
     /// Sent from the GameOver screen to return everyone to the Lobby for
@@ -3345,12 +3358,13 @@ pub enum ServerMessage {
         shield: f32,
     },
     /// Channel-3 coordination popup delivered to a specific player (issue #494).
-    /// Sent to the holder of the target system's console. Carries the typed
+    /// Sent to the holder(s) resolved from the explicit destination. Carries the typed
     /// coordination payload and the originating sender info.
     CoordinationPopup {
-        target: SystemId,
+        address: CoordinationAddress,
         payload: CoordinationPayload,
-        /// Human-readable label for the origin (e.g. "AI Tactical", "Captain").
+        /// Origin display label: normally a String Table id for a System, or a
+        /// connected human sender's player name.
         #[serde(default)]
         sender_label: String,
     },

@@ -5602,6 +5602,7 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
+            crate::ship_plugin::ShipConfigComponent::default(),
             shipped_weapons_doctrine(),
             PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
                 banks: vec![crate::entities::config::PhaserBankConfig {
@@ -5648,8 +5649,10 @@ fn tick_weapons_arc_request_fires_when_target_in_range_but_outside_arc() {
         .expect("expected an ArcBearingRequest CoordinationEnqueue event");
     assert_eq!(request.source_entity, ship_entity);
     assert_eq!(
-        request.target,
-        crate::ship::system_registry::helm_station_key()
+        request.address,
+        crate::core::messages::CoordinationAddress::Station(crate::core::messages::StationId(
+            crate::ship::system_registry::HELM_STATION_ID.into(),
+        ),)
     );
     match &request.payload {
         CoordinationPayload::ArcBearingRequest { uuid, .. } => {
@@ -5675,6 +5678,7 @@ fn tick_weapons_arc_request_does_not_fire_when_target_in_arc() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
         shipped_weapons_doctrine(),
         PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
             banks: vec![crate::entities::config::PhaserBankConfig {
@@ -5732,6 +5736,7 @@ fn tick_weapons_arc_request_is_debounced_for_unchanged_miss() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
         shipped_weapons_doctrine(),
         PhaserCombatConfigResource(crate::entities::config::PhaserCombatConfig {
             banks: vec![crate::entities::config::PhaserBankConfig {
@@ -5848,6 +5853,7 @@ fn tick_weapons_arc_request_fires_for_blaster_family_in_range_out_of_arc() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
         shipped_weapons_doctrine(),
         // No phaser config: blasters are the only capable family.
         blaster_res(0.0, 30.0, 50.0),
@@ -5904,6 +5910,7 @@ fn tick_weapons_arc_request_fires_for_torpedo_family_in_range_out_of_arc() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
         shipped_weapons_doctrine(),
         loaded_torpedo_res(0.0, 30.0),
     ));
@@ -5983,6 +5990,7 @@ fn spawn_two_family_arc_miss(
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
         doctrine,
         // A 30-degree fore beam and a 30-degree fore tube. The target below sits
         // 90 degrees off both, inside both reaches, so BOTH families qualify.
@@ -6109,6 +6117,7 @@ fn a_ship_with_no_authored_doctrine_asks_helm_for_nothing() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
         // …and deliberately NO WeaponsDoctrineAiPolicy.
         loaded_torpedo_res(0.0, 30.0),
     ));
@@ -6150,6 +6159,7 @@ fn tick_weapons_arc_request_silent_when_family_incapable() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
         shipped_weapons_doctrine(),
         BlasterSystemResource(vec![]), // capable of nothing
     ));
@@ -6189,6 +6199,7 @@ fn tick_weapons_arc_request_silent_when_family_offline() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
         shipped_weapons_doctrine(),
         blaster_res(0.0, 30.0, 50.0),
     ));
@@ -6226,6 +6237,7 @@ fn tick_weapons_arc_request_silent_when_target_out_of_range() {
         crate::server_app::ShipSystemBlackboards::default(),
         TacticalRadarSelection(Some(target_uuid.to_string())),
         WeaponsArcRequestState::default(),
+        crate::ship_plugin::ShipConfigComponent::default(),
         shipped_weapons_doctrine(),
         blaster_res(0.0, 30.0, 50.0),
     ));
@@ -6265,6 +6277,7 @@ fn tick_weapons_arc_request_clears_when_target_enters_arc() {
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
+            crate::ship_plugin::ShipConfigComponent::default(),
             shipped_weapons_doctrine(),
             blaster_res(0.0, 30.0, 50.0),
         ))
@@ -6325,6 +6338,7 @@ fn tick_weapons_arc_request_withdraws_when_the_standing_family_drains_to_empty()
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
+            crate::ship_plugin::ShipConfigComponent::default(),
             shipped_weapons_doctrine(),
             loaded_torpedo_res(0.0, 30.0),
         ))
@@ -6409,6 +6423,7 @@ fn tick_weapons_arc_request_withdrawal_is_not_repeated_every_tick() {
             crate::server_app::ShipSystemBlackboards::default(),
             TacticalRadarSelection(Some(target_uuid.to_string())),
             WeaponsArcRequestState::default(),
+            crate::ship_plugin::ShipConfigComponent::default(),
             shipped_weapons_doctrine(),
             loaded_torpedo_res(0.0, 30.0),
         ))

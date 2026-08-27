@@ -14,7 +14,7 @@ The Tactical/weapons module follows the pure-root plus server-adapter convention
 
 | File | Responsibility |
 |---|---|
-| `src/console/weapons/server.rs` | Plugin assembly, shared state, admitted-consumer registration, Tactical AI target selection, coordination adapters. |
+| `src/console/weapons/server.rs` | Plugin assembly, shared state, admitted-consumer registration, Tactical AI target selection, and the Tactical-owned receiver for delivered frequency hints. |
 | `src/console/weapons/beam.rs` | Phaser banks, target-lock application, auto-fire, beam lifecycle, and damage. |
 | `src/console/weapons/torpedo.rs` | Tube load/fire commands, target snapshots, torpedo lifecycle, and detonation. |
 | `src/console/weapons/blaster.rs` | NPC blaster charge/fire and hit application. |
@@ -29,6 +29,16 @@ Pure weapon state machines and geometry used by these adapters live under `src/w
 Each authored bank, tube, and Tactical control is a fine `SystemId`. Human controls and AI hosts emit identical admitted payloads. In particular, `ai_target_selection` emits `SetTarget`; `handle_set_target` is the sole writer of the authoritative Tactical selection. Auto-fire reads that selection but does not bypass target admission.
 
 The Tactical selector ranks the ship's visible/scored objective surface deterministically. A named positive operate/destroy directive can nominate its exact live target; ordinary acquisition remains bounded by the authored radar reach and hostility rules.
+
+## Coordination
+
+Weapons resolves its fine Tactical/Helm Systems to explicit owning-Station
+addresses before enqueue. An out-of-arc target produces an
+`ArcBearingRequest` addressed to Helm. A delayed `FrequencyHint` addressed to
+Tactical reaches `receive_tactical_coordination`; that Tactical-owned receiver
+rechecks the live control policy before latching the unchanged frequency for
+the existing next-tick applier. The payload never selects or widens its own
+recipient.
 
 ## Damage pipelines
 

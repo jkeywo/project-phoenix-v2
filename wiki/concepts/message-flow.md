@@ -61,9 +61,19 @@ Session tokens are persistent identity; peer ids are transport details. On disco
 
 ## Coordination
 
-Cross-station facts enter as `CoordinationEnqueue`, serve the hull's authored lag in its per-ship queue, and are routed from the live recipient control source. Human recipients receive `CoordinationPopup`; AI recipients consume the typed delivered fact. Human/AI actor identity affects presentation, not the authoritative payload or domain applier.
+Cross-station facts enter as `CoordinationEnqueue` with an explicit
+`CoordinationAddress::Station(StationId)` or `CoordinationAddress::Ship`; the
+payload never implies its recipient. They serve the hull's authored lag in its
+per-ship queue and are routed from the live recipient control source. Station
+delivery emits a popup for a human recipient or `DeliveredCoordination` for an
+AI recipient. Ship delivery fans out deterministically in authored Station
+order under the same policy. Human/AI actor identity affects presentation, not
+the authoritative payload or domain applier.
 
-Damage-tier destruction alerts target the Captain-owned system. Tactical arc-bearing requests and Navigation clearances use their authored owning systems; they do not fall back to all clients when an address is valid but vacant.
+Damage-tier destruction alerts address the Station that owns Captain. Tactical
+arc-bearing requests and Navigation clearances resolve their fine System to its
+authored owning Station; they do not widen to all clients when an address is
+valid but vacant.
 
 ## Codec resilience
 

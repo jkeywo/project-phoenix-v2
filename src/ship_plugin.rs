@@ -6,11 +6,11 @@ pub(crate) use crate::ai::cadence::ai_tick_ready;
 pub(crate) use crate::ship::components::load_ship_config_from_disk;
 pub use crate::ship::components::{
     ActiveStationRatings, BankConfigResource, BoostConfigResource, CoordinationEnqueue,
-    CoordinationQueue, DockingMotionIntent, HelmWaypointClearance, HumanSeekingHosts,
-    ImpulseConfigResource, LastHelmInput, LastSystemTiers, PendingArcBearingRequest,
-    PendingShipConfig, PendingTacticalFrequencyHint, RepairHumanAlerted, ScenarioDetailFloor,
-    ShipConfigComponent, ShipPhysicsConfigResource, ShipSystemControlSources, VisitingStationHosts,
-    BANK_LERP_RATE,
+    CoordinationQueue, DeliveredCoordination, DockingMotionIntent, HelmWaypointClearance,
+    HumanSeekingHosts, ImpulseConfigResource, LastHelmInput, LastSystemTiers,
+    PendingArcBearingRequest, PendingShipConfig, PendingTacticalFrequencyHint, RepairHumanAlerted,
+    ScenarioDetailFloor, ShipConfigComponent, ShipPhysicsConfigResource, ShipSystemControlSources,
+    VisitingStationHosts, BANK_LERP_RATE,
 };
 pub use crate::ship::coordination_systems::{
     handle_coordination_enqueue, process_coordination_lag, resolve_human_seeking_hosts,
@@ -49,6 +49,7 @@ impl Plugin for ShipPlugin {
         crate::console::helm::dispatch::register_helm_dispatch(app);
         app.init_resource::<BankConfigResource>()
             .add_message::<CoordinationEnqueue>()
+            .add_message::<DeliveredCoordination>()
             .add_message::<AiChatterEvent>();
         // The ONE shared AI decision cadence (issues #803, #889, #895).
         // Installed by every plugin that registers a gated system; the helper

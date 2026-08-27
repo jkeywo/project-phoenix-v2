@@ -220,9 +220,11 @@ fn sensors_set_science_target_enqueues_target_designation_for_tactical() {
         .expect("expected a TargetDesignation CoordinationEnqueue event");
 
     assert_eq!(
-        enqueued.target,
-        crate::ship::system_registry::tactical_station_key(),
-        "TargetDesignation should be enqueued for the Tactical system"
+        enqueued.address,
+        CoordinationAddress::Station(StationId(
+            crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+        )),
+        "TargetDesignation should be enqueued for the Tactical Station"
     );
     match &enqueued.payload {
         CoordinationPayload::TargetDesignation { uuid, label } => {
@@ -425,8 +427,10 @@ fn low_fidelity_ships_emit_here_regardless_of_who_holds_sensors() {
              delivery-routing tag"
         );
         assert_eq!(
-            hint.target,
-            crate::ship::system_registry::tactical_station_key(),
+            hint.address,
+            CoordinationAddress::Station(StationId(
+                crate::ship::system_registry::TACTICAL_STATION_ID.into(),
+            )),
             "the hint is addressed to Tactical either way"
         );
     }
@@ -539,9 +543,13 @@ fn threat_warning_emitted_for_hostile_in_range() {
         .expect("expected a ThreatBearing CoordinationEnqueue");
 
     assert_eq!(
-        threat.target,
-        crate::ship::system_registry::shields_system_id(),
-        "ThreatBearing should target the Shields system"
+        threat.address,
+        crate::ship::coordination::address_for_system_kind(
+            &crate::ship_plugin::ShipConfigComponent::default().0,
+            crate::ship::system_registry::SHIELD_ARC_KIND,
+        )
+        .expect("default hull has a Shields Station"),
+        "ThreatBearing should address the Station that owns Shields"
     );
     match &threat.payload {
         CoordinationPayload::ThreatBearing { bearing_rad, label } => {

@@ -780,8 +780,8 @@ entities:
         - >-
           The wire projection is not the only door into this state. The
           channel-3 coordination bus carries
-          `CoordinationPayload::RepairRequest`, which targets the `repair`
-          system and therefore lands on the Engineering holder as a
+          `CoordinationPayload::RepairRequest`, which is explicitly addressed
+          to the Station owning the `repair` System and therefore lands on the Engineering holder as a
           `CoordinationPopup`. It was introduced by issue #682 carrying the
           exact HP deficit, which handed Engineering that number on every
           worsening tier crossing of an arbitrary non-Core system, with no team

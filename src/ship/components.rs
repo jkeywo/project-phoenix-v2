@@ -127,19 +127,17 @@ pub struct PendingArcBearingRequest {
 /// Pending Sensors→Tactical shield-frequency advisory, delivered via the
 /// channel-3 coordination bus (issue #873).
 ///
-/// The Tactical *station key* (`SystemId("tactical")`) is not a registered fine
-/// system, so before #873 a `FrequencyHint` aimed at it could only ever resolve
-/// to the default `Human` policy — Popup or Suppress, never Consume. A
-/// backfilled Tactical was therefore invisible to the router: the advisory
-/// either vanished (human sender) or broadcast an ownerless popup to every
-/// connected client (AI sender), and in neither case reached the AI that was
-/// actually running the guns.
+/// Before #873 Tactical was represented by a Station-shaped
+/// `SystemId("tactical")`, which had no registered fine System and therefore
+/// resolved to the default Human policy. A backfilled Tactical was invisible
+/// to the router and never consumed the hint.
 ///
-/// `process_coordination_lag` now resolves the Tactical key through
-/// [`crate::console::weapons::shared::any_tactical_system_operates_ai`] — the
-/// Tactical analogue of the Helm's `helm_axes_operate_ai` — and lands a consumed
-/// hint here. [`crate::console::weapons::apply_tactical_frequency_hint`] reads
-/// it the following tick and sets the ship's phaser frequency.
+/// Issue #1254 addresses the authored Tactical Station explicitly. After the
+/// shared lag router resolves an AI delivery,
+/// [`crate::console::weapons::receive_tactical_coordination`] owns the typed
+/// `FrequencyHint` behavior and lands its unchanged value here.
+/// [`crate::console::weapons::apply_tactical_frequency_hint`] reads it the
+/// following tick and sets the ship's phaser frequency.
 ///
 /// `None` = nothing pending. The applier `take()`s it, so a hint is applied
 /// exactly once.
@@ -148,12 +146,14 @@ pub struct PendingTacticalFrequencyHint(pub Option<f32>);
 
 /// The per-ship channel-3 BUS SLOTS, named once (issue #873).
 ///
-/// Every member is the same shape: `process_coordination_lag` lands a consumed
-/// coordination payload in it, and a system one tick later folds that value into
-/// the receiving system's state. Each is inserted by hand at
+/// Every member is the same shape: the post-lag receiving path lands a consumed
+/// Coordination value in it, and a System one tick later folds that value into
+/// its state. Legacy Helm/Shields slots are still written inside the lag router;
+/// Tactical is written by its owning receiver from `DeliveredCoordination`.
+/// Each is inserted by hand at
 /// [`PER_SHIP_BUS_SPAWN_SITES`], and a ship that misses one silently cannot
-/// RECEIVE that advisory at all — the router writes into a component that is not
-/// there, and nothing anywhere warns.
+/// RECEIVE that advisory at all — the consumer writes into a component that is
+/// not there, and nothing anywhere warns.
 ///
 /// That is the failure mode `#785`, `#786`, `#882` and `#885` each shipped: a
 /// per-ship component wired into `entities::spawner::spawn_entity` and forgotten
@@ -264,7 +264,7 @@ pub struct PendingShipConfig(pub ShipConfig);
 pub struct CoordinationEnqueue {
     pub source_entity: Entity,
     pub sender_origin: ControlSource,
-    pub target: crate::core::messages::SystemId,
+    pub address: crate::core::messages::CoordinationAddress,
     pub payload: CoordinationPayload,
     /// Fallback origin label, used only when `sender_system` does not resolve to
     /// a station (a human sender's name, or an already-resolved `station.*.name`
@@ -272,10 +272,23 @@ pub struct CoordinationEnqueue {
     pub sender_label: String,
     /// The fine system this message speaks FOR. Channel-3 addresses crew by
     /// STATION, so the enqueue handler resolves this to the owning station's
-    /// display id (or Core) via [`crate::ship::coordination::station_addressee_label`].
+    /// display id (or Core) via [`crate::ship::coordination::system_addressee_label`].
     /// An empty id opts out — the pre-resolved `sender_label` is kept as-is
     /// (the intent-narration path, which already stamps its own station id).
     pub sender_system: crate::core::messages::SystemId,
+}
+
+/// Typed handoff emitted after a delayed Station-addressed Coordination
+/// message resolves to an AI consumer.
+///
+/// The lag router owns time, live routing, and the Popup/Consume/Suppress
+/// decision. System modules read this message to own the resulting behavior;
+/// the router does not reach into their private pending-state components.
+#[derive(Message, Clone, Debug)]
+pub struct DeliveredCoordination {
+    pub source_entity: Entity,
+    pub address: crate::core::messages::CoordinationAddress,
+    pub payload: CoordinationPayload,
 }
 
 /// Load `ShipConfigComponent` from `assets/entities/alliance_battleship.toml`.

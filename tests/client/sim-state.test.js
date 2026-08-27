@@ -634,10 +634,20 @@ describe('apply entity lifecycle', () => {
     expect(s.world.entities).toEqual([]);
   });
 
-  it('CoordinationPopup stores target, payload and sender label', () => {
+  it('CoordinationPopup stores address, payload and sender label', () => {
     const s = new ClientSimState();
-    s.apply({ type: 'CoordinationPopup', data: { target: 'tactical', payload: { type: 'FrequencyHint', frequency: 0.75 }, sender_label: 'Sensors' } });
-    expect(s.coordinationPopup).toMatchObject({ target: 'tactical', payload: { type: 'FrequencyHint', frequency: 0.75 }, senderLabel: 'Sensors' });
+    const address = { type: 'Station', data: 'tactical' };
+    const payload = { type: 'FrequencyHint', data: { frequency: 0.75 } };
+    s.apply({
+      type: 'CoordinationPopup',
+      data: { address, payload, sender_label: 'Sensors' },
+    });
+    expect(s.coordinationPopup).toMatchObject({
+      address,
+      payload,
+      senderLabel: 'Sensors',
+    });
+    expect(s.frequencyHint).toBe(0.75);
   });
 
   it('ObjectiveSummary stores mission objectives', () => {

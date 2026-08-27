@@ -1447,6 +1447,7 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
             Entity,
             &crate::ship_plugin::ShipSystemControlSources,
             &crate::server_app::ShipSystemBlackboards,
+            &crate::ship_plugin::ShipConfigComponent,
             &mut ShipFrequencyHintState,
             Option<&crate::ship::sensors::SensorsAiConfigResource>,
         ),
@@ -1468,7 +1469,9 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
     let dt = if hz > 0.0 { 1.0 / hz } else { 0.0 };
     let sensors_sid = crate::ship::system_registry::sensors_system_id();
 
-    for (entity, control_sources, blackboards, mut hint_state, ai_config_comp) in ships.iter_mut() {
+    for (entity, control_sources, blackboards, ship_config, mut hint_state, ai_config_comp) in
+        ships.iter_mut()
+    {
         // Frozen Combat Lock from this ship's viewscreen (issue #829, spec §3),
         // identical to how the low-fidelity twin `tick_sensors_frequency_hint`
         // and the firing paths read it — never the tactical radar's live
@@ -1522,10 +1525,16 @@ pub(crate) fn tick_frequency_hint_high_fidelity(
 
         if let crate::console_ai::FrequencyHintOutput::Hint { frequency } = output {
             let sender_origin = control_sources.0.source_for(&sensors_sid);
+            let Some(address) = crate::ship::coordination::address_for_system(
+                &ship_config.0,
+                &crate::ship::system_registry::tactical_radar_system_id(),
+            ) else {
+                continue;
+            };
             writer.write(crate::ship_plugin::CoordinationEnqueue {
                 source_entity: entity,
                 sender_origin,
-                target: crate::ship::system_registry::tactical_station_key(),
+                address,
                 payload: crate::core::messages::CoordinationPayload::FrequencyHint { frequency },
                 sender_label: crate::ship::coordination::CHATTER_SENDER_SENSORS.to_string(),
                 sender_system: sensors_sid.clone(),

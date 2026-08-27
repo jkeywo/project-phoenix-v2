@@ -515,7 +515,7 @@ export class ClientSimState {
         changes.changedDomains.add(CHANGE_DOMAINS.WORLD_ENTITY_REMOVED);
         break;
       case 'CoordinationPopup':
-        this.coordinationPopup = { target: d.target, payload: d.payload, senderLabel: d.sender_label, ts: Date.now() };
+        this.coordinationPopup = { address: d.address, payload: d.payload, senderLabel: d.sender_label, ts: Date.now() };
         // Populate frequencyHint from FrequencyHint coordination payloads.
         if (d.payload && d.payload.type === 'FrequencyHint' && d.payload.data && typeof d.payload.data.frequency === 'number') {
           this.frequencyHint = d.payload.data.frequency;

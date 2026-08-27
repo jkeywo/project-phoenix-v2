@@ -183,17 +183,22 @@ pub fn detect_damage_tier_crossings(
                     }
 
                     let sender_origin = sources.0.source_for(system_id);
-                    coord_writer.write(CoordinationEnqueue {
-                        source_entity: entity,
-                        sender_origin,
-                        target: crate::ship::system_registry::captain_system_id(),
-                        payload: CoordinationPayload::Alert {
-                            title: format!("System Destroyed: {}", system_id.0),
-                            body: format!("{} destroyed.", system_id.0),
-                        },
-                        sender_label: system_id.0.clone(),
-                        sender_system: system_id.clone(),
-                    });
+                    let captain_system = crate::ship::system_registry::captain_system_id();
+                    if let Some(address) =
+                        crate::ship::coordination::address_for_system(&config.0, &captain_system)
+                    {
+                        coord_writer.write(CoordinationEnqueue {
+                            source_entity: entity,
+                            sender_origin,
+                            address,
+                            payload: CoordinationPayload::Alert {
+                                title: format!("System Destroyed: {}", system_id.0),
+                                body: format!("{} destroyed.", system_id.0),
+                            },
+                            sender_label: system_id.0.clone(),
+                            sender_system: system_id.clone(),
+                        });
+                    }
                     // NO `continue` here (issue #1013). The Alert is an
                     // addition to the RepairRequest below, not a replacement
                     // for it: a system that crosses straight from Operational
@@ -224,24 +229,29 @@ pub fn detect_damage_tier_crossings(
                 let deficit = entry.max - entry.current;
                 let sender_origin = sources.0.source_for(system_id);
 
-                coord_writer.write(CoordinationEnqueue {
-                    source_entity: entity,
-                    sender_origin,
-                    target: crate::ship::system_registry::repair_system_id(),
-                    payload: CoordinationPayload::RepairRequest {
-                        system_id: system_id.clone(),
-                        station_id,
-                        station_label,
-                        tier: current_tier,
-                        // Exact on the host-internal enqueue — the AI repair
-                        // queue sorts by it. Coarsened to `None` on the way out
-                        // to a human console unless the recipient is entitled
-                        // to exact detail for this system (issue #737).
-                        deficit: Some(deficit),
-                    },
-                    sender_label: system_id.0.clone(),
-                    sender_system: system_id.clone(),
-                });
+                let repair_system = crate::ship::system_registry::repair_system_id();
+                if let Some(address) =
+                    crate::ship::coordination::address_for_system(&config.0, &repair_system)
+                {
+                    coord_writer.write(CoordinationEnqueue {
+                        source_entity: entity,
+                        sender_origin,
+                        address,
+                        payload: CoordinationPayload::RepairRequest {
+                            system_id: system_id.clone(),
+                            station_id,
+                            station_label,
+                            tier: current_tier,
+                            // Exact on the host-internal enqueue — the AI repair
+                            // queue sorts by it. Coarsened to `None` on the way out
+                            // to a human console unless the recipient is entitled
+                            // to exact detail for this system (issue #737).
+                            deficit: Some(deficit),
+                        },
+                        sender_label: system_id.0.clone(),
+                        sender_system: system_id.clone(),
+                    });
+                }
             } else if current_tier == DamageTier::Operational && prev_tier > DamageTier::Operational
             {
                 let system_config = config.0.system(system_id);
@@ -1230,16 +1240,21 @@ mod tests {
         );
         assert_eq!(*deficit, Some(100.0), "the whole hull row is the deficit");
         assert_eq!(
-            requests[0].target,
-            crate::ship::system_registry::repair_system_id(),
-            "the request must be addressed to Repair"
+            requests[0].address,
+            crate::core::messages::CoordinationAddress::Station(crate::core::messages::StationId(
+                "repair".into()
+            )),
+            "the request must be addressed explicitly to the Repair Station"
         );
 
         assert!(
             emitted
                 .iter()
                 .any(|e| matches!(&e.payload, CoordinationPayload::Alert { .. })
-                    && e.target == crate::ship::system_registry::captain_system_id()),
+                    && e.address
+                        == crate::core::messages::CoordinationAddress::Station(
+                            crate::core::messages::StationId("captain".into())
+                        )),
             "the captain Alert is KEPT — the request is an addition to it, not a \
              replacement, got {emitted:?}"
         );

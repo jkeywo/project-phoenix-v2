@@ -5,16 +5,41 @@
 #     = cargo build --release --features headless --bin phoenix-headless
 #       && node scripts/balance-runs.mjs scripts/balance-runs.falling-skyway.toml --out .balance-out
 #
-# This is a recorded diagnostic sweep, not a CI gate. It measures whether the
-# fully Backfilled player ship completes the scenario's WHOLE mandatory
-# objective set, independently of victory/defeat classification. The current
-# 1850-second sweep crosses the ratified t=1800 window close and its 26-second
-# ending delay. Keep the fixed seeds so later changes compare run-for-run.
+# This ratified sweep measures whether the fully Backfilled player ship
+# completes the scenario's six-objective mandatory spine, independently of
+# victory/defeat classification. Protected player decisions (`obj-a2-shelter`
+# clearance and `obj-a3-window` booking), optional scan work, and dynamically
+# posted warning/report objectives are deliberately outside the measured set.
+# The 1850-second sweep crosses the t=1800 window close, its 26-second mission
+# fact-finalisation delay, and the final t=1836 acknowledgement grace. Keep the
+# fixed seeds so later changes compare run-for-run.
 
-seeds       = [1, 2, 3, 4, 5]
+seeds       = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
 sim_seconds = 1850
 hz          = 30
 world       = "assets/worlds/falling_skyway.toml"
+enforce_thresholds = true
+
+# Execution controls only: the result remains the same fixed seed×content
+# matrix. Each whole-mission run is substantially heavier than a short duel,
+# so do not fan this config out to every logical CPU or inherit the generic
+# 300-second per-process kill switch. The bounded pool also makes the ratified
+# sweep coexist predictably with CI and other local worktrees.
+concurrency = 4
+run_timeout_secs = 900
+
+# Explicit IDs prevent later-posted objectives from making an early terminal
+# report pass vacuously, and prevent protected side decisions from entering the
+# Backfill completion rate. Missing IDs are measured failures, not telemetry
+# gaps. Order is the authored scenario spine and is retained in merged reports.
+mandatory_objective_ids = [
+  "obj-a1-survey",
+  "obj-a1-triage",
+  "obj-a2-line",
+  "obj-a2-rescue",
+  "obj-a2-storm",
+  "obj-a3-head",
+]
 
 # A short player-hull alias resolves through the scenario-sweep convention to
 # assets/entities/alliance_destroyer.toml and is passed as --ship. The scenario
@@ -22,6 +47,9 @@ world       = "assets/worlds/falling_skyway.toml"
 scenario_hulls = ["destroyer"]
 
 [thresholds]
+min_mandatory_set_completion_rate = 0.80
+max_mandatory_set_completion_rate = 0.95
+max_mandatory_set_unmeasurable = 0
 max_failures = 0
 
 # BASELINE RECORDED ON #1130:
@@ -33,5 +61,7 @@ max_failures = 0
 # This pre-#1131 0% result is the regression floor #1129 starts from, not an
 # acceptable final balance target. #1131 retuned the scenario clock and moved
 # the standing sweep to the whole-mission 1850-second budget; later slices
-# improve scenario and Backfill behaviour against the preserved evidence. Do
-# not move the seeds or shorten the run to manufacture movement.
+# improve scenario and Backfill behaviour against the preserved evidence.
+# Seeds 1..5 preserve that historical comparison; 6..20 give the ratified
+# 80–95% band five-point resolution (16–19 completions). Do not move the seeds
+# or shorten the run to manufacture movement.

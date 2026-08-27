@@ -6,6 +6,7 @@ import {
   formatPhases,
   matchupLabel,
   resolveSeeds,
+  resolveMandatoryObjectiveIds,
   expandMatchups,
   buildRunTasks,
   buildRunArgs,
@@ -14,6 +15,7 @@ import {
   formatThresholds,
   failedThresholds,
   formatStationActivity,
+  formatMandatoryObjectives,
 } from '../../scripts/balance-runs.mjs';
 
 // A fabricated report shaped like the real phoenix-headless JSON, minimal to
@@ -89,6 +91,19 @@ const fallingSkywayRun = (seed, scenario) => ({
   }),
 });
 
+const FALLING_SKYWAY_MANDATORY_IDS = [
+  'obj-a1-survey',
+  'obj-a1-triage',
+  'obj-a2-line',
+  'obj-a2-rescue',
+  'obj-a2-storm',
+  'obj-a3-head',
+];
+const mergeFallingSkywayReports = (runs) => mergeReports(
+  runs,
+  { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS },
+);
+
 describe('matchupLabel', () => {
   it('joins side compositions, dropping side_b for a scenario sweep', () => {
     expect(matchupLabel(['cruiser'], ['destroyer'])).toBe('cruiser_vs_destroyer');
@@ -106,6 +121,25 @@ describe('resolveSeeds', () => {
   it('rejects nonsense', () => {
     expect(() => resolveSeeds(0)).toThrow();
     expect(() => resolveSeeds('x')).toThrow();
+  });
+});
+
+describe('resolveMandatoryObjectiveIds', () => {
+  it('preserves author order, trims IDs, and leaves an absent set in legacy mode', () => {
+    expect(resolveMandatoryObjectiveIds(undefined)).toBeNull();
+    expect(resolveMandatoryObjectiveIds(null)).toBeNull();
+    expect(resolveMandatoryObjectiveIds([' obj-a1-survey ', 'obj-a2-rescue'])).toEqual([
+      'obj-a1-survey',
+      'obj-a2-rescue',
+    ]);
+  });
+
+  it('rejects empty, malformed, and duplicate configured sets', () => {
+    expect(() => resolveMandatoryObjectiveIds([])).toThrow(/non-empty array/);
+    expect(() => resolveMandatoryObjectiveIds('obj-a1-survey')).toThrow(/non-empty array/);
+    expect(() => resolveMandatoryObjectiveIds([''])).toThrow(/non-empty strings/);
+    expect(() => resolveMandatoryObjectiveIds([7])).toThrow(/non-empty strings/);
+    expect(() => resolveMandatoryObjectiveIds(['same', ' same '])).toThrow(/duplicate ID/);
   });
 });
 
@@ -449,11 +483,173 @@ describe('mergeReports — mandatory objective sets', () => {
     expect(summary.matchups.zero.mandatorySetCompletion).toMatchObject({ completed: 0, sampled: 2, rate: 0 });
     expect(summary.matchups.no_data.mandatorySetCompletion).toMatchObject({ completed: 0, sampled: 0, rate: null });
   });
+
+  it('measures exactly the configured six-objective spine and ignores protected side decisions', () => {
+    const scenario = {
+      objectives: [
+        ...FALLING_SKYWAY_MANDATORY_IDS.map((id) => objective('Completed', true, id)),
+        objective('Active', true, 'obj-a2-shelter'),
+        objective('Failed', true, 'obj-a3-window'),
+        objective('Active', false, 'obj-a2-rescue-scan'),
+      ],
+    };
+    const summary = mergeReports([
+      {
+        matchup: 'destroyer', seed: 1,
+        report: report({ outcome: 'victory', playerDealt: 0, enemyDealt: 0, scenario }),
+      },
+    ], { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS });
+
+    expect(summary.matchups.destroyer.mandatorySetCompletion).toMatchObject({
+      completed: 1,
+      sampled: 1,
+      rate: 1,
+      objectiveIds: FALLING_SKYWAY_MANDATORY_IDS,
+    });
+  });
+
+  it('counts missing expected objectives as sampled failures and reports every objective status', () => {
+    const complete = FALLING_SKYWAY_MANDATORY_IDS.map((id) => objective('Completed', true, id));
+    const incomplete = [
+      objective('Active', true, 'obj-a1-survey'),
+      objective('Failed', true, 'obj-a1-triage'),
+      // obj-a2-line is absent: a valid early-terminal projection, not a telemetry gap.
+      objective('Completed', false, 'obj-a2-rescue'),
+      objective('Completed', true, 'obj-a2-storm'),
+      objective('Completed', true, 'obj-a3-head'),
+    ];
+    const summary = mergeReports([
+      {
+        matchup: 'destroyer', seed: 1,
+        report: report({
+          outcome: 'victory', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: complete },
+        }),
+      },
+      {
+        matchup: 'destroyer', seed: 2,
+        report: report({
+          outcome: 'defeat', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: incomplete },
+        }),
+      },
+    ], { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS });
+
+    expect(summary.matchups.destroyer.mandatorySetCompletion).toEqual({
+      completed: 1,
+      sampled: 2,
+      rate: 0.5,
+      unmeasurable: {
+        total: 0,
+        missingScenario: 0,
+        malformedObjectives: 0,
+        noMandatoryObjectives: 0,
+      },
+      objectiveIds: FALLING_SKYWAY_MANDATORY_IDS,
+      objectives: [
+        { id: 'obj-a1-survey', completed: 1, active: 1, failed: 0, missing: 0, notMandatory: 0 },
+        { id: 'obj-a1-triage', completed: 1, active: 0, failed: 1, missing: 0, notMandatory: 0 },
+        { id: 'obj-a2-line', completed: 1, active: 0, failed: 0, missing: 1, notMandatory: 0 },
+        { id: 'obj-a2-rescue', completed: 1, active: 0, failed: 0, missing: 0, notMandatory: 1 },
+        { id: 'obj-a2-storm', completed: 2, active: 0, failed: 0, missing: 0, notMandatory: 0 },
+        { id: 'obj-a3-head', completed: 2, active: 0, failed: 0, missing: 0, notMandatory: 0 },
+      ],
+    });
+  });
+
+  it('keeps an early terminal report in the denominator while diagnosing all unposted spine objectives', () => {
+    const summary = mergeReports([
+      {
+        matchup: 'destroyer', seed: 1,
+        report: report({
+          outcome: 'defeat', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: [
+            objective('Completed', true, 'obj-a1-survey'),
+            objective('Completed', true, 'obj-a1-triage'),
+          ] },
+        }),
+      },
+    ], { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS });
+    const metric = summary.matchups.destroyer.mandatorySetCompletion;
+
+    expect(metric).toMatchObject({ completed: 0, sampled: 1, rate: 0 });
+    expect(metric.unmeasurable.total).toBe(0);
+    expect(metric.objectives.map(({ id, missing }) => [id, missing])).toEqual([
+      ['obj-a1-survey', 0],
+      ['obj-a1-triage', 0],
+      ['obj-a2-line', 1],
+      ['obj-a2-rescue', 1],
+      ['obj-a2-storm', 1],
+      ['obj-a3-head', 1],
+    ]);
+  });
+
+  it('keeps malformed objective telemetry unmeasurable even when an explicit set is configured', () => {
+    const summary = mergeReports([
+      {
+        matchup: 'destroyer', seed: 1,
+        report: report({
+          outcome: 'timeout', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: [
+            objective('Completed', true, 'obj-a1-survey'),
+            { id: 'broken', mandatory: true, status: 'Unknown' },
+          ] },
+        }),
+      },
+      {
+        matchup: 'destroyer', seed: 2,
+        report: report({
+          outcome: 'defeat', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: [] },
+        }),
+      },
+    ], { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS });
+    const metric = summary.matchups.destroyer.mandatorySetCompletion;
+
+    expect(metric).toMatchObject({ completed: 0, sampled: 1, rate: 0 });
+    expect(metric.unmeasurable).toMatchObject({ total: 1, malformedObjectives: 1 });
+    expect(metric.objectives.every((objectiveStatus) => objectiveStatus.missing === 1)).toBe(true);
+  });
+
+  it('canonicalises reported IDs before matching and rejects whitespace-equivalent duplicates', () => {
+    const canonical = mergeReports([{
+      matchup: 'destroyer', seed: 1,
+      report: report({
+        outcome: 'timeout', playerDealt: 0, enemyDealt: 0,
+        scenario: {
+          objectives: FALLING_SKYWAY_MANDATORY_IDS.map((id) => objective('Completed', true, ` ${id} `)),
+        },
+      }),
+    }], { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS });
+    expect(canonical.matchups.destroyer.mandatorySetCompletion).toMatchObject({
+      completed: 1,
+      sampled: 1,
+      rate: 1,
+      unmeasurable: { total: 0 },
+    });
+
+    const duplicate = mergeReports([{
+      matchup: 'destroyer', seed: 2,
+      report: report({
+        outcome: 'timeout', playerDealt: 0, enemyDealt: 0,
+        scenario: { objectives: [
+          objective('Completed', true, 'obj-a1-survey'),
+          objective('Completed', true, ' obj-a1-survey '),
+        ] },
+      }),
+    }], { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS });
+    expect(duplicate.matchups.destroyer.mandatorySetCompletion).toMatchObject({
+      completed: 0,
+      sampled: 0,
+      rate: null,
+      unmeasurable: { total: 1, malformedObjectives: 1 },
+    });
+  });
 });
 
 describe('mergeReports — Falling Skyway clean ledger', () => {
   it('classifies a completed mandatory set with all four clean campaign facts as clean', () => {
-    const summary = mergeReports([
+    const summary = mergeFallingSkywayReports([
       fallingSkywayRun(1, {
         objectives: [
           ...fallingSkywayMandatorySpine(),
@@ -498,7 +694,7 @@ describe('mergeReports — Falling Skyway clean ledger', () => {
     ];
     const complete = fallingSkywayMandatorySpine();
 
-    const metric = mergeReports([
+    const metric = mergeFallingSkywayReports([
       fallingSkywayRun(1, { objectives: complete, flags: trafficLost }),
       fallingSkywayRun(2, { objectives: complete, flags: commitmentBroken }),
       fallingSkywayRun(3, { objectives: complete, flags: skyhookLost }),
@@ -514,7 +710,7 @@ describe('mergeReports — Falling Skyway clean ledger', () => {
   });
 
   it('classifies an unfinished mandatory set as incomplete even when the campaign facts are clean', () => {
-    const metric = mergeReports([
+    const metric = mergeFallingSkywayReports([
       fallingSkywayRun(1, {
         objectives: fallingSkywayMandatorySpine({ 'obj-a2-rescue': 'Active' }),
         flags: fallingSkywayCleanFlags(),
@@ -532,7 +728,7 @@ describe('mergeReports — Falling Skyway clean ledger', () => {
   it('classifies a missing locked-spine objective as incomplete, not unmeasurable', () => {
     const objectives = fallingSkywayMandatorySpine()
       .filter((objectiveRow) => objectiveRow.id !== 'obj-a3-head');
-    const metric = mergeReports([
+    const metric = mergeFallingSkywayReports([
       fallingSkywayRun(1, { objectives, flags: fallingSkywayCleanFlags() }),
     ]).matchups.falling_skyway.fallingSkywayCleanLedger;
 
@@ -546,7 +742,7 @@ describe('mergeReports — Falling Skyway clean ledger', () => {
   });
 
   it('counts malformed canonical flags as unmeasurable rather than a benchmark failure', () => {
-    const metric = mergeReports([
+    const metric = mergeFallingSkywayReports([
       fallingSkywayRun(1, {
         objectives: fallingSkywayMandatorySpine(),
         flags: [
@@ -572,7 +768,7 @@ describe('mergeReports — Falling Skyway clean ledger', () => {
   });
 
   it('does not apply the benchmark or its markdown column to unrelated scenarios', () => {
-    const summary = mergeReports([{
+    const summary = mergeFallingSkywayReports([{
       matchup: 'combat_test',
       seed: 1,
       report: report({
@@ -595,7 +791,7 @@ describe('mergeReports — Falling Skyway clean ledger', () => {
     const trafficLost = fallingSkywayCleanFlags()
       .filter((flag) => flag.name !== 'campaign.skyway.traffic.none')
       .concat(scenarioFlag('campaign.skyway.traffic.lost'));
-    const summary = mergeReports([
+    const summary = mergeFallingSkywayReports([
       fallingSkywayRun(1, { objectives: complete, flags: fallingSkywayCleanFlags() }),
       fallingSkywayRun(2, { objectives: complete, flags: trafficLost }),
       fallingSkywayRun(3, {
@@ -784,6 +980,68 @@ describe('evaluateThresholds', () => {
     expect(() => evaluateThresholds(summary, [], { min_wine_rate: 0.5 })).toThrow(/unknown threshold/);
     expect(() => evaluateThresholds(summary, [], { min_win_rate: 'high' })).toThrow(/must be a number/);
   });
+
+  it('enforces the inclusive 80–95% mandatory-set completion band', () => {
+    const summaryAt = (completed) => {
+      const runs = Array.from({ length: 20 }, (_, i) => ({
+        matchup: 'destroyer',
+        seed: i + 1,
+        report: report({
+          outcome: 'timeout',
+          playerDealt: 0,
+          enemyDealt: 0,
+          scenario: {
+            objectives: FALLING_SKYWAY_MANDATORY_IDS.map((id, objectiveIndex) => objective(
+              i < completed || objectiveIndex > 0 ? 'Completed' : 'Failed',
+              true,
+              id,
+            )),
+          },
+        }),
+      }));
+      return mergeReports(runs, { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS });
+    };
+    const thresholds = {
+      min_mandatory_set_completion_rate: 0.80,
+      max_mandatory_set_completion_rate: 0.95,
+    };
+
+    for (const completed of [16, 19]) {
+      expect(evaluateThresholds(summaryAt(completed), [], thresholds).every((check) => check.pass)).toBe(true);
+    }
+
+    const below = Object.fromEntries(
+      evaluateThresholds(summaryAt(15), [], thresholds).map((check) => [check.metric, check]),
+    );
+    expect(below.min_mandatory_set_completion_rate).toMatchObject({ actual: 0.75, pass: false });
+    expect(below.max_mandatory_set_completion_rate.pass).toBe(true);
+
+    const above = Object.fromEntries(
+      evaluateThresholds(summaryAt(20), [], thresholds).map((check) => [check.metric, check]),
+    );
+    expect(above.min_mandatory_set_completion_rate.pass).toBe(true);
+    expect(above.max_mandatory_set_completion_rate).toMatchObject({ actual: 1, pass: false });
+  });
+
+  it('gates malformed mandatory-set telemetry independently from completion rate', () => {
+    const summary = mergeReports([
+      {
+        matchup: 'destroyer', seed: 1,
+        report: report({
+          outcome: 'timeout', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: {} },
+        }),
+      },
+    ], { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS });
+    const checks = Object.fromEntries(evaluateThresholds(summary, [], {
+      min_mandatory_set_completion_rate: 0.80,
+      max_mandatory_set_unmeasurable: 0,
+    }).map((check) => [check.metric, check]));
+
+    expect(checks.min_mandatory_set_completion_rate).toMatchObject({ actual: null, pass: null });
+    expect(checks.max_mandatory_set_unmeasurable).toMatchObject({ actual: 1, pass: false });
+    expect(failedThresholds(Object.values(checks))).toHaveLength(2);
+  });
 });
 
 describe('formatThresholds', () => {
@@ -867,6 +1125,24 @@ describe('formatMarkdown', () => {
     expect(md).toContain('| Mandatory set complete |');
     expect(md).toContain('| zero | 2 | 0% | 0/0/0/2 | 0 | 0/2 (0%) |');
     expect(md).toContain('| no_data | 1 | 0% | 0/0/0/1 | 0 | 0/0 (no data; 1 no mandatory objectives) |');
+  });
+
+  it('renders the configured spine as a deterministic per-objective status table', () => {
+    const summary = mergeReports([
+      {
+        matchup: 'destroyer', seed: 1,
+        report: report({
+          outcome: 'defeat', playerDealt: 0, enemyDealt: 0,
+          scenario: { objectives: [objective('Completed', true, 'obj-a1-survey')] },
+        }),
+      },
+    ], { mandatoryObjectiveIds: FALLING_SKYWAY_MANDATORY_IDS });
+    const md = formatMarkdown(summary);
+
+    expect(formatMandatoryObjectives(summary)).toContain('### Mandatory objective status');
+    expect(md).toContain('| Matchup | Objective | Completed | Active | Failed | Missing | Not mandatory | Complete |');
+    expect(md).toContain('| destroyer | obj-a1-survey | 1 | 0 | 0 | 0 | 0 | 100% |');
+    expect(md).toContain('| destroyer | obj-a2-rescue | 0 | 0 | 0 | 1 | 0 | 0% |');
   });
 });
 

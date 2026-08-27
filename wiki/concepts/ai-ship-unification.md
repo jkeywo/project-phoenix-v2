@@ -2,7 +2,8 @@
 title: AI Ship Unification
 type: concept
 tags: [ai, npc, ship, ecs, components, per-kind-plugin, control-source, prd-520]
-updated: 2026-07-16
+sources: [src/console/weapons/server.rs, src/console/weapons/beam.rs, src/tractor/server.rs, src/ai/selector.rs, src/ai/host.rs, src/ship/control_source.rs, src/ship/helm_ai/mod.rs, src/ai/core.rs]
+updated: 2026-08-27
 ---
 
 # AI Ship Unification
@@ -70,8 +71,8 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 
 | System | File | Status |
 |--------|------|--------|
-| `ai_helm_thrust` / `ai_helm_steering` / `ai_helm_lateral_thrust` / `ai_helm_impulse` | `src/ship/helm_ai.rs` | ✅ Full — per-axis, replaced the `operate_helm_ai` monolith in #704 ([details](./ai-helm-decomposition.md)) |
-| `ai_target_selection` | `src/console/weapons/mod.rs` | ✅ Full (all ships; replaced `operate_tactical_ai` in #700) |
+| `ai_helm_thrust` / `ai_helm_steering` / `ai_helm_lateral_thrust` / `ai_helm_impulse` | `src/ship/helm_ai/engines.rs`, `src/ship/helm_ai/steering.rs`, `src/ship/helm_ai/lateral.rs`, `src/ship/helm_ai/impulse.rs` | ✅ Full — per-axis, replaced the `operate_helm_ai` monolith in #704 ([details](./ai-helm-decomposition.md)) |
+| `ai_target_selection` | `src/console/weapons/server.rs` | ✅ Full (all ships; replaced `operate_tactical_ai` in #700) |
 | `operate_captain_ai` | `src/console/captain/server.rs` | ✅ |
 | `ai_power_allocation` | `src/console_ai/server.rs` | ✅ (replaced the `operate_power_ai` stub) |
 | `ai_shield_focus` | `src/console_ai/server.rs` | ✅ (replaced `operate_shields_ai`; high-LOD only) |
@@ -82,7 +83,7 @@ Each system kind has (or will have) a dedicated Bevy system that runs after `AiT
 
 ## Objective-driven Backfill bridge
 
-The player ship's Backfill AI is the same code path as NPC AI: `publish_viewscreen_blackboard` scores active `ObjectiveManager` entries into the ship's viewscreen blackboard; the per-axis helm AI systems consume Patrol, Destroy, and Reach directives from that scored pool, building a `WorldView` that includes runtime scenario aliases from `WorldContentRuntime.name_to_uuid`. A Captain priority selection ranks its objective ahead of every other active objective in that ship's pool, so Helm, Tactical, Navigation, and other relevant Backfill systems converge on the selected directive. `ai_target_selection` uses the same pool to lock the top positive Destroy target before the phaser/torpedo automation runs.
+The player ship's Backfill AI is the same code path as NPC AI: `publish_viewscreen_blackboard` scores active `ObjectiveManager` entries into the ship's viewscreen blackboard; the per-axis helm AI systems consume Patrol, Destroy, and Reach directives from that scored pool, building a `WorldView` that includes runtime scenario aliases from `WorldContentRuntime.name_to_uuid`. A Captain priority selection ranks its objective ahead of every other active objective in that ship's pool, so Helm, Tactical, Navigation, and other relevant Backfill systems converge on the selected directive. `ai_target_selection` uses the same pool to lock the top positive Destroy target before the phaser/torpedo automation runs, and its directive-gated `objective-operate` source gives Tow, Stabilise, Escort, and FieldRepair their named non-hostile lock. That one explicit target is acquirable only inside Tactical radar or its installed operation's authored executable reach (tractor or external repair), evaluated in full 3D like the operation itself; ordinary contacts remain radar-gated, and a target outside both acquisition horizons is rejected. Once a tractor actually couples that exact active target, the coupling is authoritative contact and keeps it eligible even if the authored rig offset carries it outside radar or operation reach; ending either the directive or coupling restores the ordinary range gate. The bounded exception lets Backfill execute a named physical order without turning objective awareness into global target visibility.
 
 This is used by `assets/worlds/combat_test.toml`: `obj-defend` patrols four anchors around Starbase Alpha, while each spawned `wave_N` gets a higher-scored Destroy objective that resolves through the runtime `wave_N -> uuid` mapping. Missing named targets are ignored rather than falling back to an arbitrary hostile.
 

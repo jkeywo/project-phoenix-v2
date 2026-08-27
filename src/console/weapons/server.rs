@@ -1417,6 +1417,13 @@ fn ai_target_selection(
     // The three read-only scan surfaces bundled as one `SystemParam` (issue
     // #1185). See [`TargetSelectionScans`].
     scans: TargetSelectionScans,
+    // Kept out of the already-maximal ship tuple: these read-only operation
+    // components provide objective-directed executable reach and live coupling
+    // identity for the exact ship being selected.
+    operate_systems: Query<(
+        Option<&crate::tractor::TractorBeam>,
+        Option<&crate::console::repair::ExternalRepairDispatch>,
+    )>,
     // The read-only AI-host world context — flag chain, sessions, and origin
     // stamps — behind one bare-`Res` system param (issue #1207). A fixture that
     // runs this host must register it (`register_ai_host_env`) or fail loudly at
@@ -1442,17 +1449,22 @@ fn ai_target_selection(
         .map(|r| &r.0)
         .unwrap_or(&registry_default);
 
-    // World-space (x, z) of a targetable UUID, asteroid or entity.
-    let target_xz = |uuid: &str| -> Option<(f32, f32)> {
+    // World-space position of a targetable UUID, asteroid or entity. Tactical
+    // radar deliberately projects this onto (x, z), while an operation's
+    // executable reach uses all three axes like the tractor/repair appliers do.
+    let target_xyz = |uuid: &str| -> Option<(f32, f32, f32)> {
         asteroid_q
             .iter()
-            .find_map(|(u, t)| (u.0 == uuid).then_some((t.translation.x, t.translation.z)))
+            .find_map(|(u, t)| {
+                (u.0 == uuid).then_some((t.translation.x, t.translation.y, t.translation.z))
+            })
             .or_else(|| {
                 other_ships_q.iter().find_map(|(u, t, _)| {
-                    (u.0 == uuid).then_some((t.translation.x, t.translation.z))
+                    (u.0 == uuid).then_some((t.translation.x, t.translation.y, t.translation.z))
                 })
             })
     };
+    let target_xz = |uuid: &str| -> Option<(f32, f32)> { target_xyz(uuid).map(|(x, _, z)| (x, z)) };
 
     // Resolve a targetable UUID to a display name for readable log lines,
     // falling back to the raw UUID when the entity carries no `EntityName`.
@@ -1481,6 +1493,9 @@ fn ai_target_selection(
         is_static_point_defence,
     ) in ship_query.iter_mut()
     {
+        // A query of two optional components matches every live entity. Keep a
+        // defensive empty fallback for minimal fixtures and despawn boundaries.
+        let (tractor, external_repair) = operate_systems.get(ship_entity).unwrap_or((None, None));
         // Only select for ships whose TACTICAL RADAR is AI-controlled (issue
         // #887). The lock belongs to the radar, so the radar's own policy is
         // what licenses an AI selection — the same `SystemId` admission checks
@@ -1565,9 +1580,11 @@ fn ai_target_selection(
         // the SOLE writer of `TacticalRadarSelection`: the selector only RANKS;
         // the host applies the chosen UUID directly below (AC4).
         //
-        // The host keeps owning the live, damage-scaled horizon: every
-        // candidate is pre-filtered to `within_range` here (AC5), so the
-        // selector's own authored horizon is a static outer bound only.
+        // The host keeps owning the live, damage-scaled horizon: ordinary
+        // candidates are pre-filtered to `within_range` here (AC5), so the
+        // selector's own authored horizon is a static outer bound only. The
+        // one explicit exception is an objective-operate candidate within its
+        // installed system's authored executable reach, resolved below.
         let top_destroy = top_destroy_objective_target(Some(&*blackboards));
         // A Patrol objective that names a visible entity is a defend marker:
         // Backfill still flies its route, but when hostiles arrive it chooses
@@ -1596,10 +1613,21 @@ fn ai_target_selection(
         // UUID the same way a Destroy target is. `None` unless an active
         // Tow/Stabilise/Escort/FieldRepair names something, keeping the
         // `source_operate` candidate inert in ordinary combat.
-        let operate_target: Option<String> = top_operate_objective_target(Some(&*blackboards))
-            .and_then(|name| {
-                resolve_objective_target_uuid(name, Some(ai_env.content_runtime()), &other_ships_q)
-            });
+        let operate_order = top_operate_objective_target(Some(&*blackboards));
+        let operate_target: Option<String> = operate_order.and_then(|(name, _)| {
+            resolve_objective_target_uuid(name, Some(ai_env.content_runtime()), &other_ships_q)
+        });
+        // An explicit operate objective names work for a concrete installed
+        // system. That system's authored executable reach is an authoritative
+        // acquisition horizon for this ONE candidate: Tow/Stabilise/Escort use
+        // the tractor reach, FieldRepair uses the external dispatch reach.
+        // Ordinary combat/scan candidates remain Tactical-radar bounded.
+        let operate_range = operate_order.and_then(|(_, system)| match system {
+            OperateLockSystem::Tractor => tractor.map(|beam| beam.config.range),
+            OperateLockSystem::ExternalRepair => {
+                external_repair.map(|dispatch| dispatch.config.range)
+            }
+        });
 
         // The advisory Sensors designation (AC2), read from the FROZEN
         // viewscreen `science_target` (#829) — never the channel-3
@@ -1630,8 +1658,30 @@ fn ai_target_selection(
         // `detectable` is implied by passing the host's own range gate.
         let make_candidate =
             |uuid: &str, source_fact: &str| -> Option<crate::ai::selector::SelectorCandidate> {
-                let (tx, tz) = target_xz(uuid)?;
-                if range_bounds_targets && !within_range(uuid) {
+                let (tx, ty, tz) = target_xyz(uuid)?;
+                // Acquisition remains bounded by Tactical radar. Once the
+                // tractor is actually holding the active operate target,
+                // however, the coupling itself is authoritative contact: its
+                // authored offset may place the load outside that radar on the
+                // very next tick. Preserve only that exact lock while the exact
+                // operate directive remains active; ending either the coupling
+                // or directive restores the ordinary range gate immediately.
+                let is_operate_target =
+                    source_fact == crate::entities::ai_flag_hosts::SOURCE_OPERATE.name();
+                let operation_distance =
+                    Vec3::new(physics.x, physics.y, physics.z).distance(Vec3::new(tx, ty, tz));
+                let is_within_operate_reach = is_operate_target
+                    && operate_range.is_some_and(|range| operation_distance <= range);
+                let is_coupled_operate_target = is_operate_target
+                    && matches!(operate_order, Some((_, OperateLockSystem::Tractor)))
+                    && tractor
+                        .and_then(|beam| beam.coupled_target.as_deref())
+                        .is_some_and(|coupled| coupled == uuid);
+                if range_bounds_targets
+                    && !within_range(uuid)
+                    && !is_within_operate_reach
+                    && !is_coupled_operate_target
+                {
                     return None;
                 }
                 use crate::entities::ai_flag_hosts as fid;
@@ -2075,9 +2125,17 @@ fn top_defend_objective_target(
 /// `Transfer` (dock + umbilical, which use the docked partner, not the combat
 /// lock) never pulls a lock. Returns `None` when no such directive is active, so
 /// the source injects no candidate and the widened eligibility term stays inert.
-fn top_operate_objective_target(
+/// The returned system kind selects the candidate's authored executable reach:
+/// tractor for Tow/Stabilise/Escort, external dispatch for FieldRepair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum OperateLockSystem {
+    Tractor,
+    ExternalRepair,
+}
+
+pub(super) fn top_operate_objective_target(
     blackboards: Option<&crate::server_app::ShipSystemBlackboards>,
-) -> Option<&str> {
+) -> Option<(&str, OperateLockSystem)> {
     let bb = blackboards?
         .0
         .get(&crate::ship::system_registry::viewscreen_system_id())?;
@@ -2091,14 +2149,18 @@ fn top_operate_objective_target(
         match &objective.directive {
             crate::core::messages::AiDirective::Tow { target }
             | crate::core::messages::AiDirective::Stabilise { target }
-            | crate::core::messages::AiDirective::Escort { target }
-            | crate::core::messages::AiDirective::FieldRepair { target } => Some(target.as_str()),
+            | crate::core::messages::AiDirective::Escort { target } => {
+                Some((target.as_str(), OperateLockSystem::Tractor))
+            }
+            crate::core::messages::AiDirective::FieldRepair { target } => {
+                Some((target.as_str(), OperateLockSystem::ExternalRepair))
+            }
             _ => None,
         }
     })
 }
 
-fn resolve_objective_target_uuid(
+pub(super) fn resolve_objective_target_uuid(
     target_name: &str,
     runtime: Option<&crate::world::server::WorldContentRuntime>,
     targetable_q: &Query<

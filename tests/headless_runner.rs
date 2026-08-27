@@ -9717,6 +9717,58 @@ fn falling_skyway_full_backfill_scans_and_files_the_opening_survey() {
     );
 }
 
+/// **Issue #1142, rescue-Scan proof.** Nobody connects and the fixture emits no
+/// command. At the storm forecast Helm consumes the real Reach objective while
+/// Sensors consumes the optional Lyra Scan objective; only ordinary admission
+/// and the shared scan applier can raise `scan.lyra_ascending.taken` and let the
+/// scenario complete the visible step.
+#[test]
+fn falling_skyway_full_backfill_scans_lyra_from_the_rescue_objective() {
+    use project_phoenix::core::messages::ObjectiveStatus;
+
+    let clear_due = skyway_authored_deadline_secs("lyra_clear_due") as f64;
+    let args = HeadlessArgs {
+        world_path: SKYWAY_WORLD.into(),
+        ship_path: "assets/entities/alliance_destroyer.toml".into(),
+        dt: SKYWAY_DT,
+        max_ticks: ticks_for_sim_seconds(clear_due, SKYWAY_DT),
+        deterministic: true,
+        seed: Some(1142),
+        ..test_args()
+    };
+    let mut app = build_headless_app(&args).expect("the scenario world must load and build");
+    app.finish();
+    app.cleanup();
+
+    let mut scanned_at = None;
+    for tick in 1..=args.max_ticks {
+        app.update();
+        if skyway_flag(&app, "scan.lyra_ascending.taken") > 0 {
+            scanned_at = Some(tick as f64 * SKYWAY_DT);
+            // Let the queued FlagSet callback project the reading onto the
+            // scenario objective before inspecting its public state.
+            app.update();
+            break;
+        }
+        if app.world().resource::<State<GamePhase>>().get() == &GamePhase::GameOver {
+            break;
+        }
+    }
+
+    let scanned_at = scanned_at.expect(
+        "Backfill must acquire a real Lyra reading from the rescue Scan objective before its clock",
+    );
+    assert!(
+        scanned_at < clear_due,
+        "the rescue reading returned at t={scanned_at:.2}, after the t={clear_due:.2} deadline"
+    );
+    assert_eq!(
+        objective_status(&app, "obj-a2-rescue-scan"),
+        ObjectiveStatus::Completed,
+        "the shared scan flag must complete the visible rescue assessment"
+    );
+}
+
 /// A first scan taken after the routine check-in refreshes that live thread;
 /// the proof response does not have to wait for the Critical second hail.
 #[test]
@@ -11530,6 +11582,7 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     let front_at = skyway_deadline_secs(&probe, "storm_front_due") as f64;
     let band_at = skyway_deadline_secs(&probe, "storm_band_one_due") as f64;
     let clear_by = skyway_deadline_secs(&probe, "lyra_clear_due") as f64;
+    let lark_first_hail_at = skyway_deadline_secs(&probe, "lark_first_hail_due") as f64;
     drop(probe);
 
     // Six seconds past the rescue's own deadline: long enough to see the Lyra
@@ -11544,6 +11597,7 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     // comes from the lobby-selected template wholesale — found by the LocalShip
     // marker rather than by an [operations] table it no longer authors (#1165).
     let (ship, _ship_uuid) = skyway_crew_hull(&mut app);
+    seat_skyway_comms(&mut app, ship);
 
     // The crew set off with ten seconds to spare before the first band — early
     // enough to bank real progress in clear air, late enough that the weather
@@ -11555,6 +11609,8 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
          ({front_at} s, {start_at} s)"
     );
     let mut opened = false;
+    let mut lark_answered = false;
+    let mut tactical_seated = false;
     let mut recovered_at: Option<f64> = None;
 
     // The berth the crew hold the rescue from, captured once when they set off
@@ -11565,7 +11621,36 @@ fn falling_skyway_act_2_rescue_lands_when_the_crew_start_before_the_band() {
     let mut station: Option<bevy::prelude::Vec3> = None;
     for tick in 0..args.max_ticks {
         let sim_t = tick as f64 * dt;
+        // Preserve the opening's protected human decision while this fixture
+        // advances into Act 2: the scan above unlocks the one authoritative
+        // unsafe response, and the crew send it after Lark's first hail.
+        if !lark_answered && sim_t >= lark_first_hail_at + 1.0 {
+            skyway_pick(
+                &mut app,
+                SKYWAY_LARK,
+                "world.falling_skyway.comms.lark_unsafe_response",
+            );
+            assert_eq!(skyway_flag(&app, "lark_corridor_cancelled"), 1);
+            lark_answered = true;
+        }
+        // This is the CREW-run arm, not the fully-Backfilled proof below. Let
+        // the ordinary Tactical Backfill defend the destroyer through Act 1,
+        // then seat an idle officer just before the forecast posts the rescue:
+        // #1142's objective-operate selector cannot pre-empt their deliberate
+        // lock, without leaving an undefended hull in combat for seven minutes.
+        if !tactical_seated && sim_t >= front_at - 1.0 {
+            skyway_seat_idle_tactical(&mut app);
+            tactical_seated = true;
+        }
         if !opened && sim_t >= start_at {
+            assert_eq!(
+                app.world()
+                    .resource::<WorldContentRuntime>()
+                    .flags
+                    .counter("a2_lyra_recovered"),
+                0,
+                "precondition: Backfill did not complete the rescue before the crew's lock"
+            );
             let drift = position_of(&mut app, SKYWAY_LYRA);
             station = Some(bevy::prelude::Vec3::new(
                 drift.x + 40.0,
@@ -13995,26 +14080,28 @@ fn skyway_set_lock(
     ship: bevy::prelude::Entity,
     uuid: Option<String>,
 ) {
+    let tactical = project_phoenix::core::messages::StationId(
+        project_phoenix::ship::system_registry::TACTICAL_STATION_ID.into(),
+    );
+    let tactical_systems: Vec<_> = app
+        .world()
+        .get::<project_phoenix::ship_plugin::ShipConfigComponent>(ship)
+        .expect("the crew's hull carries its authored ship config")
+        .0
+        .systems_for_station(&tactical)
+        .map(|system| system.id.clone())
+        .collect();
     if let Some(mut sources) = app
         .world_mut()
         .get_mut::<project_phoenix::ship_plugin::ShipSystemControlSources>(ship)
     {
-        use project_phoenix::ship::system_registry as reg;
         // Seat a person at the WHOLE Tactical station — the radar AND the weapon
-        // banks. Just the radar is not enough: a crew who lock a friendly
-        // structure to work it do not open fire on it, but an AI phaser bank left
-        // on a human-designated lock will, and a mixed-rating hull (human radar,
-        // AI banks) is exactly that shape. Seating the banks human stands the guns
-        // down while the crew hold the beam.
-        for sysid in [
-            reg::tactical_radar_system_id(),
-            reg::phaser_fore_system_id(),
-            reg::phaser_aft_system_id(),
-            reg::torpedo_magazine_system_id(),
-            reg::torpedo_tube_fore_port_system_id(),
-            reg::torpedo_tube_fore_starboard_system_id(),
-            reg::torpedo_tube_aft_system_id(),
-        ] {
+        // banks. Derive the whole set from the hull: a crew who lock a friendly
+        // structure to work it do not open fire on it, but ANY AI bank left on a
+        // human-designated lock will. The destroyer carries authored blaster
+        // banks as well as phasers and torpedoes, and a partial list silently
+        // leaves those banks firing at the rescue target.
+        for sysid in tactical_systems {
             sources.0.set(
                 sysid,
                 project_phoenix::ship::control_source::ControlSource::Human,
@@ -17202,24 +17289,24 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
     });
     assert_eq!(
         skyway_flag(&app, "a2_traffic_lost"),
-        1,
-        "Backfill issued all three shelter orders at the forecast boundary, but this mixed \
-         human-Comms run leaves Pell exposed to the authored sweep: {traffic_losses:?}"
+        0,
+        "Backfill Navigation owns this mixed run's shelter work and must carry all three \
+         forecast orders through the authored routes: {traffic_losses:?}"
     );
     assert_eq!(
         traffic_losses.map(|(_, lost)| lost),
-        [0, 0, 1],
-        "the traffic consequence is named and deterministic"
+        [0, 0, 0],
+        "a fully Backfilled Navigation bridge saves every named corridor craft"
     );
     assert_eq!(
         skyway_flag(&app, "skyway_left_convoy_cost"),
-        3,
-        "a party with no ground of its own, on a corridor whose head is standing and \
-         whose rung is moving, plus the traffic loss this run actually recorded"
+        2,
+        "the intact shelter run avoids the traffic-loss surcharge, leaving only the \
+         convoy's base cost of being left behind without ground of its own"
     );
     assert_eq!(
         skyway_last_said(&app, SKYWAY_CONVOY),
-        "world.falling_skyway.comms.convoy_rides_it_out_hurt"
+        "world.falling_skyway.comms.convoy_rides_it_out"
     );
     assert_eq!(
         skyway_last_said(&app, WINDOW_CONTROL),
@@ -17254,7 +17341,7 @@ fn the_lift_runs_out_and_the_third_claimant_is_never_offered_one() {
          the crew's verified discrepancy or as a filing"
     );
     assert_eq!(skyway_flag(&app, "campaign.skyway.evidence.none"), 0);
-    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 3);
+    assert_eq!(skyway_flag(&app, "campaign.skyway.casualties.total"), 2);
     assert_eq!(skyway_flag(&app, "campaign.skyway.skyhook.held"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.kept"), 1);
     assert_eq!(skyway_flag(&app, "campaign.skyway.commitments.broken"), 1);

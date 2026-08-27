@@ -6789,10 +6789,14 @@ fn spawn_asteroid_target(app: &mut App, uuid: &str, x: f32, z: f32) {
 }
 
 fn spawn_entity_target(app: &mut App, uuid: &str, x: f32, z: f32) {
+    spawn_entity_target_xyz(app, uuid, x, 0.0, z);
+}
+
+fn spawn_entity_target_xyz(app: &mut App, uuid: &str, x: f32, y: f32, z: f32) {
     app.world_mut().spawn((
         crate::entities::spawner::EntityUuid(uuid.into()),
         AdmittedCommands::default(),
-        Transform::from_xyz(x, 0.0, z),
+        Transform::from_xyz(x, y, z),
     ));
 }
 
@@ -8016,6 +8020,92 @@ fn insert_operate_objective_blackboard(app: &mut App, target: &str, score: f32) 
     );
 }
 
+/// Insert the FieldRepair mirror of [`insert_operate_objective_blackboard`].
+/// Its lock is executable through external repair, never through a tractor
+/// coupling that happens to name the same target.
+fn insert_field_repair_objective_blackboard(app: &mut App, target: &str, score: f32) {
+    use crate::core::messages::{
+        AiDirective, ObjectiveSnapshot, ObjectiveSource, ObjectiveStatus, ScoredObjective,
+        SystemAffinity, SystemBlackboard, ViewscreenBlackboard,
+    };
+    use crate::server_app::ShipSystemBlackboards;
+
+    let viewscreen = ViewscreenBlackboard {
+        scored_objectives: vec![ScoredObjective {
+            id: format!("obj-field-repair-{target}"),
+            score,
+            directive: AiDirective::FieldRepair {
+                target: target.into(),
+            },
+            source: ObjectiveSource::Mission,
+            relevance: vec![SystemAffinity::Repair],
+            snapshot: ObjectiveSnapshot {
+                id: format!("obj-field-repair-{target}"),
+                text: format!("Field repair {target}"),
+                text_params: Default::default(),
+                mandatory: true,
+                status: ObjectiveStatus::Active,
+                targets: vec![target.into()],
+                source: ObjectiveSource::Mission,
+            },
+        }],
+        ..Default::default()
+    };
+    let mut q = app
+        .world_mut()
+        .query_filtered::<&mut ShipSystemBlackboards, With<crate::server_app::LocalShip>>();
+    let mut bbs = q
+        .single_mut(app.world_mut())
+        .expect("LocalShip must have ShipSystemBlackboards");
+    bbs.0.insert(
+        crate::ship::system_registry::viewscreen_system_id(),
+        SystemBlackboard::Viewscreen(viewscreen),
+    );
+}
+
+/// Attach the authored executable reach the operate-selector host reads. The
+/// weapons-only fixture does not install `TractorPlugin`, so this component is
+/// stable while the selector test ticks.
+fn insert_test_tractor(app: &mut App, coupled_target: Option<&str>) {
+    let local_ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .expect("LocalShip must exist");
+    let mut beam = crate::tractor::TractorBeam::new(
+        crate::tractor::TractorConfig {
+            range: 500.0,
+            coupling_offset: [0.0, 0.0, -90.0],
+            min_power_level: 2,
+            tow_load: crate::tractor::TowLoadCurve {
+                half_penalty_mass: 10_000.0,
+                max_penalty: 0.8,
+            },
+        },
+        crate::core::messages::PowerGroupId("helm".into()),
+    );
+    beam.engaged = coupled_target.is_some();
+    beam.coupled_target = coupled_target.map(str::to_string);
+    app.world_mut().entity_mut(local_ship).insert(beam);
+}
+
+/// Attach the authored external-repair reach read by the operate-selector host.
+fn insert_test_external_repair(app: &mut App, range: f32) {
+    let local_ship = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::server_app::LocalShip>>()
+        .single(app.world())
+        .expect("LocalShip must exist");
+    app.world_mut().entity_mut(local_ship).insert(
+        crate::console::repair::ExternalRepairDispatch::new(
+            crate::console::repair::ExternalRepairConfig {
+                range,
+                repair_rate: 1.0,
+            },
+        ),
+    );
+}
+
 /// D2 MANDATORY regression (issue #1162): a combat AI with NO operate directive
 /// active never locks a non-hostile it reaches only by radar/scan. The widened
 /// `source_operate` eligibility disjunct must be INERT unless an operate
@@ -8075,6 +8165,298 @@ fn ai_target_selection_locks_a_nonhostile_only_via_an_operate_directive() {
         Some(derelict_uuid.as_str()),
         "an active Tow directive naming a non-hostile must lock it through the directive-gated \
          `source_operate` eligibility disjunct (issue #1162 D2)"
+    );
+}
+
+/// An explicit operate objective identifies both the target and the installed
+/// system that can execute it. That system's authored reach is a bounded,
+/// objective-only acquisition horizon; it does not widen radar candidates.
+#[test]
+fn ai_target_selection_acquires_an_operate_target_within_tractor_reach() {
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 50.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    // Outside Tactical radar, but inside the installed tractor's authored 500.
+    spawn_entity_target(&mut app, &derelict_uuid, 0.0, -247.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), derelict_uuid.clone());
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    insert_test_tractor(&mut app, None);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(derelict_uuid.as_str()),
+        "an explicit Tow target inside the installed tractor's authored reach is acquirable even \
+         when ordinary Tactical radar cannot surface it"
+    );
+}
+
+/// A tractor can author a coupling offset wider than Tactical radar. Once the
+/// AI has acquired and coupled the active operate target, moving the load to
+/// that offset must not make Tactical drop the very lock the tractor requires.
+/// Acquisition is still bounded by radar or the named operation's executable
+/// reach; this is retention for the exact live coupling and exact active
+/// operate target only.
+#[test]
+fn ai_target_selection_retains_a_coupled_operate_target_beyond_radar() {
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 50.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+
+    // The target is now at the tractor's authored 90-unit coupling offset,
+    // outside the 50-unit Tactical radar that originally acquired it.
+    spawn_entity_target(&mut app, &derelict_uuid, 0.0, -90.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), derelict_uuid.clone());
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    set_weapons_target(&mut app, Some(derelict_uuid.clone()));
+    set_local_last_attacker(&mut app, None);
+
+    insert_test_tractor(&mut app, Some(&derelict_uuid));
+
+    tick(&mut app);
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(derelict_uuid.as_str()),
+        "the exact target held for an active operate directive remains a detectable selector \
+         candidate after its coupling offset carries it beyond Tactical radar"
+    );
+}
+
+/// A stale tractor coupling is not authoritative contact for a FieldRepair
+/// objective. Outside both Tactical radar and the installed external-repair
+/// reach, the selector must drop the candidate even when the tractor still
+/// names that same UUID from an earlier operation.
+#[test]
+fn ai_target_selection_rejects_stale_tractor_coupling_for_field_repair() {
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 50.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    spawn_entity_target(&mut app, &derelict_uuid, 0.0, -600.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), derelict_uuid.clone());
+    insert_field_repair_objective_blackboard(&mut app, "hulk", 80.0);
+    insert_test_external_repair(&mut app, 500.0);
+    insert_test_tractor(&mut app, Some(&derelict_uuid));
+    set_weapons_target(&mut app, Some(derelict_uuid));
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    let local = local_ship_entity(&mut app);
+    let bb = weapons_blackboard_of(&mut app, local).expect("weapons blackboard");
+    assert!(
+        bb.locked_target.is_none(),
+        "a FieldRepair target cannot inherit retention from a stale tractor coupling"
+    );
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "outside radar and external-repair reach, the authoritative lock must also be clear"
+    );
+}
+
+/// Operation reach must not become omniscient target acquisition. A directive
+/// beyond both Tactical radar and the installed system's authored reach remains
+/// ineligible until Helm brings it into one of those explicit horizons.
+#[test]
+fn ai_target_selection_rejects_an_operate_target_beyond_tractor_reach() {
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 50.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    spawn_entity_target(&mut app, &derelict_uuid, 0.0, -600.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), derelict_uuid.clone());
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    insert_test_tractor(&mut app, None);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "an active operate directive does not acquire a target beyond both Tactical radar and \
+         the installed tractor's authored executable reach"
+    );
+}
+
+/// Tractor and external-repair execution use `Vec3::distance`, so their lock
+/// exception must not flatten altitude the way Tactical radar deliberately
+/// does. This target is only 100 units away in X/Z but more than 500 away in 3D.
+#[test]
+fn ai_target_selection_rejects_a_vertically_unreachable_operate_target() {
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+
+    set_tactical_radar_range(&mut app, 50.0);
+    set_tactical_control_source(&mut app, crate::ship::control_source::ControlSource::Ai);
+    spawn_entity_target_xyz(&mut app, &derelict_uuid, 100.0, 600.0, 0.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), derelict_uuid.clone());
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    insert_test_tractor(&mut app, None);
+    set_local_last_attacker(&mut app, None);
+
+    tick(&mut app);
+
+    let local = local_ship_entity(&mut app);
+    let bb = weapons_blackboard_of(&mut app, local).expect("weapons blackboard");
+    assert!(
+        bb.locked_target.is_none(),
+        "the selector must reject an operate target outside the installed system's full 3D reach"
+    );
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "a vertically unreachable operate target must not reach the authoritative lock"
+    );
+}
+
+/// Pin the same 3D boundary at the shared authoritative applier independently
+/// of the AI selector. A named objective does not license a target command when
+/// the installed operation could not execute at that altitude.
+#[test]
+fn handle_set_target_rejects_a_vertically_unreachable_operate_target() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+    set_tactical_radar_range(&mut app, 50.0);
+    spawn_entity_target_xyz(&mut app, &derelict_uuid, 100.0, 600.0, 0.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), derelict_uuid.clone());
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    insert_test_tractor(&mut app, None);
+
+    let ship = local_ship_entity(&mut app);
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<AdmittedCommands>()
+        .expect("local ship admitted-command buffer")
+        .0
+        .push(AdmittedCommand {
+            target: crate::ship::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: derelict_uuid,
+            },
+            response_token: None,
+        });
+
+    app.world_mut()
+        .run_system_once(handle_set_target)
+        .expect("target applier should run");
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "the shared applier must enforce the operation's full 3D executable reach"
+    );
+}
+
+/// Coupling is authoritative contact, not a fresh acquisition. While the same
+/// Tow directive remains active, the shared applier must retain that exact held
+/// target even if an authored offset carries it beyond radar and tractor range.
+#[test]
+fn handle_set_target_retains_the_exact_coupled_operate_target_beyond_all_reach() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+    set_tactical_radar_range(&mut app, 50.0);
+    spawn_entity_target(&mut app, &derelict_uuid, 0.0, -600.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), derelict_uuid.clone());
+    insert_operate_objective_blackboard(&mut app, "hulk", 80.0);
+    insert_test_tractor(&mut app, Some(&derelict_uuid));
+
+    let ship = local_ship_entity(&mut app);
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<AdmittedCommands>()
+        .expect("local ship admitted-command buffer")
+        .0
+        .push(AdmittedCommand {
+            target: crate::ship::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: derelict_uuid.clone(),
+            },
+            response_token: None,
+        });
+
+    app.world_mut()
+        .run_system_once(handle_set_target)
+        .expect("target applier should run");
+
+    assert_eq!(
+        get_weapons_target(&mut app).as_deref(),
+        Some(derelict_uuid.as_str()),
+        "the shared applier must retain the exact target held by the active Tow operation"
+    );
+}
+
+/// Pin the same operation-kind boundary at the shared authoritative applier.
+/// A stale tractor coupling cannot license a FieldRepair lock beyond the
+/// external dispatch's authored reach.
+#[test]
+fn handle_set_target_rejects_stale_tractor_coupling_for_field_repair() {
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut app = test_app();
+    let derelict_uuid = uuid::Uuid::new_v4().to_string();
+    set_tactical_radar_range(&mut app, 50.0);
+    spawn_entity_target(&mut app, &derelict_uuid, 0.0, -600.0);
+    app.world_mut()
+        .resource_mut::<crate::world::server::WorldContentRuntime>()
+        .name_to_uuid
+        .insert("hulk".into(), derelict_uuid.clone());
+    insert_field_repair_objective_blackboard(&mut app, "hulk", 80.0);
+    insert_test_external_repair(&mut app, 500.0);
+    insert_test_tractor(&mut app, Some(&derelict_uuid));
+
+    let ship = local_ship_entity(&mut app);
+    app.world_mut()
+        .entity_mut(ship)
+        .get_mut::<AdmittedCommands>()
+        .expect("local ship admitted-command buffer")
+        .0
+        .push(AdmittedCommand {
+            target: crate::ship::system_registry::tactical_radar_system_id(),
+            payload: SystemControlPayload::SetTarget {
+                uuid: derelict_uuid,
+            },
+            response_token: None,
+        });
+
+    app.world_mut()
+        .run_system_once(handle_set_target)
+        .expect("target applier should run");
+
+    assert!(
+        get_weapons_target(&mut app).is_none(),
+        "the shared applier must not treat tractor contact as FieldRepair contact"
     );
 }
 

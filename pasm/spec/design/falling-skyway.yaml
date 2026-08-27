@@ -314,9 +314,11 @@ entities:
       title: The Rescue's Clock
       summary: >
         [ai] She is under control by the second band or the band has her.
-        Names the player work (the tow) and what failing it costs; the AI
-        batch's Operate emitter is what makes this reachable by a
-        backfilled crew.
+        Names the player work (the tow) and what failing it costs. An optional
+        Lyra scan step exercises the same admitted Sensors path as the opening
+        survey while the mandatory rescue remains the tractor's physical work.
+        The system-specific Backfill emitters make both reachable without
+        branching on actor identity.
     game_design:
       requires_player_action: [fs-order-the-tow]
       deadline_id: lyra_clear_due
@@ -491,13 +493,17 @@ entities:
         living in one; a 60-point civilian hauler cannot cross one at all.
         Each forty-second front is a narrow, corridor-long physical box: it
         takes traffic left on the lane while the lateral shelter and ladder
-        routes remain clear. The cadence and damage are unchanged. The storm
-        era's world-driven terminal: pure silence leaves ships — possibly the
-        crew's — in the weather.
+        routes remain clear. Cadence, geometry, pierce, and dwell remain
+        unchanged; the scenario-local 11.85 damage per second exposes the
+        existing seeded per-system damage allocation. Most Backfill crossings
+        preserve propulsion, while a few lose it before the final band clears
+        and remain in the hazard until hull loss. The storm era's world-driven
+        terminal: pure silence leaves ships — possibly the crew's — in the
+        weather.
     game_design:
       terminal: true
       handler: on_storm_band_one
-      magnitude_source: what was still on the lane when the band arrived
+      magnitude_source: what was still on the lane when the band arrived, plus the existing seeded per-system damage allocation
   - consequence: fs-lyra-lost
     core: {status: proposed, confidence: provisional, origin: ai, title: The Lyra Is Lost, summary: "[ai] The band takes her and her crew; the loss report objective opens and the campaign remembers."}
     game_design:
@@ -728,25 +734,28 @@ entities:
       measured_by: [falling_skyway_ordered_traffic_clears_all_three_bands_while_the_idle_rescue_fails]
   - design_principle: fs-backfill-completes-the-set
     core:
-      status: proposed
-      confidence: provisional
+      status: accepted
+      confidence: confirmed
       origin: ai
       title: A Fully Backfilled Crew Completes the Mandatory Set
       summary: >
-        [ai] With the Scan/Operate/Order verb surface, a fully backfilled
-        crew completes the mandatory objective set in 80-95% of seeded runs
-        — high enough that AI teammates are real, low enough that humans
-        still matter. Issue #1139 proves the opening slice end to end: the
-        ordinary Sensors and Comms emitters scan all three structures and file
-        the report before the unchanged t=360 deadline. Whole-scenario balance
-        remains the aggregate measure after the remaining verbs land.
+        [ai] The fixed 20-seed, 1850-second fully Backfilled sweep completed
+        the explicit six-objective mandatory set in 17/20 runs (85%). Seeds
+        7, 13, and 14 failed the set; every report was measurable and every
+        process completed successfully. The committed balance matrix gates
+        mandatory-set completion inclusively at 80-95% and permits zero
+        unmeasurable runs, so this is a measured pass: AI teammates are real,
+        while the scenario retains a deterministic chance of failure.
     game_design:
       strength: hard
       context: fully AI-backfilled crew, seeded balance-runs sweeps over the mandatory set
       construction: [fs-survey-thread, fs-lyra-clear, fs-traffic-thread, fs-skyhook-holds-or-falls]
       expected_dynamic: every mandatory objective is AI-addressable by construction; humans and AI differ only in engagement timing
       experience_hypothesis: a short-handed crew experiences a functioning bridge, not a haunted one
-      measured_by: [falling_skyway_full_backfill_scans_and_files_the_opening_survey, balance-runs mandatory-objective completion aggregate (80-95% target)]
+      measured_by:
+        - falling_skyway_full_backfill_scans_and_files_the_opening_survey
+        - falling_skyway_full_backfill_scans_lyra_from_the_rescue_objective
+        - "scripts/balance-runs.falling-skyway.toml: seeds 1-20 at 1850 seconds; six mandatory objective ids; 17/20 completed (85%); failed seeds 7, 13 and 14; zero unmeasurable reports; zero process failures; inclusive completion gates 80-95%; max unmeasurable 0"
   - design_principle: fs-silence-fails-loudly
     core:
       status: proposed

@@ -556,13 +556,25 @@ pub(crate) fn on_beam_ended(
 ///
 /// # Range
 ///
-/// The horizon is this ship's own `[weapons_console.radar] range` scaled by its
-/// live `RadarRange` modifier, not the `LocalShip`-only
+/// The ordinary horizon is this ship's own `[weapons_console.radar] range`
+/// scaled by its live `RadarRange` modifier, not the `LocalShip`-only
 /// `ShipClientConfigResource` (which is the player's radar, and meaningless on
 /// an NPC). A non-positive or non-finite range means **unbounded** — the hull
 /// declares no radar, so range never culls a lock. That is the same rule
 /// `ai_target_selection` applies to its candidates, which matters because no NPC
 /// hull authors `[weapons_console.radar]` at all.
+///
+/// One narrowly-authorised alternative horizon exists: when an active
+/// Tow/Stabilise/Escort/FieldRepair directive names this exact UUID, the
+/// installed operation system's authored executable reach (tractor or external
+/// repair dispatch) may admit the lock. This check is origin-neutral and lives
+/// in the shared applier, after admission has stripped human/AI identity. It
+/// therefore cannot turn an AI-only selector allowance into a command that the
+/// authoritative path immediately refuses, and it does not widen ordinary
+/// combat or scan targeting. Executable reach is a full three-dimensional
+/// distance, matching the operation appliers. An already coupled tractor target
+/// remains authoritative contact while that exact operate directive stays
+/// active, even if the held offset is outside both acquisition horizons.
 ///
 /// An unresolvable UUID clears the lock. That is how the AI drops a target
 /// (`SetTarget { uuid: "" }`), and equally what a human gets for naming
@@ -575,14 +587,35 @@ pub(crate) fn handle_set_target(
             &mut TacticalRadarSelection,
             Option<&crate::modifiers::ShipModifiers>,
             Option<&crate::entities::spawner::WeaponsConsoleSection>,
+            Option<&crate::server_app::ShipSystemBlackboards>,
+            Option<&crate::tractor::TractorBeam>,
+            Option<&crate::console::repair::ExternalRepairDispatch>,
         ),
         With<crate::server_app::Ship>,
     >,
     mut outbox: ResMut<SimOutbox>,
+    content_runtime: Option<Res<crate::world::server::WorldContentRuntime>>,
     asteroid_q: Query<(&AsteroidUuid, &Transform), Without<crate::entities::spawner::EntityUuid>>,
     entity_q: Query<(&crate::entities::spawner::EntityUuid, &Transform), Without<AsteroidUuid>>,
+    targetable_q: Query<
+        (
+            &crate::entities::spawner::EntityUuid,
+            &Transform,
+            Option<&crate::entities::spawner::EntityName>,
+        ),
+        Without<crate::server_app::Asteroid>,
+    >,
 ) {
-    for (admitted, physics, mut weapons_target, modifiers, weapons_section) in ship_query.iter_mut()
+    for (
+        admitted,
+        physics,
+        mut weapons_target,
+        modifiers,
+        weapons_section,
+        blackboards,
+        tractor,
+        external_repair,
+    ) in ship_query.iter_mut()
     {
         let radar_range_mult = modifiers
             .map(|m| m.get(&ModifierSlot::RadarRange))
@@ -594,21 +627,63 @@ pub(crate) fn handle_set_target(
         let range_bounds_targets =
             effective_weapons_range > 0.0 && effective_weapons_range.is_finite();
 
+        let operate_order = super::server::top_operate_objective_target(blackboards);
+        let operate_target = operate_order.and_then(|(name, _)| {
+            super::server::resolve_objective_target_uuid(
+                name,
+                content_runtime.as_deref(),
+                &targetable_q,
+            )
+        });
+        let operate_range = operate_order.and_then(|(_, system)| match system {
+            super::server::OperateLockSystem::Tractor => tractor.map(|beam| beam.config.range),
+            super::server::OperateLockSystem::ExternalRepair => {
+                external_repair.map(|dispatch| dispatch.config.range)
+            }
+        });
+
         for cmd in admitted.for_target(crate::ship::system_registry::TACTICAL_RADAR_SYSTEM_ID) {
             let SystemControlPayload::SetTarget { uuid } = &cmd.payload else {
                 continue;
             };
 
-            let live_pos = live_entity_xz(uuid.as_str(), &asteroid_q, &entity_q);
+            let live_pos = asteroid_q
+                .iter()
+                .find_map(|(candidate, transform)| {
+                    (candidate.0.as_str() == uuid.as_str()).then_some(transform.translation)
+                })
+                .or_else(|| {
+                    entity_q.iter().find_map(|(candidate, transform)| {
+                        (candidate.0.as_str() == uuid.as_str()).then_some(transform.translation)
+                    })
+                });
             let locked = match live_pos {
                 None => false,
-                Some((x, z)) => {
+                Some(target_pos) => {
                     if !range_bounds_targets {
                         true
                     } else {
-                        let dx = x - physics.x;
-                        let dz = z - physics.z;
-                        dx * dx + dz * dz <= effective_weapons_range * effective_weapons_range
+                        let dx = target_pos.x - physics.x;
+                        let dz = target_pos.z - physics.z;
+                        let distance_sq = dx * dx + dz * dz;
+                        let inside_tactical_radar =
+                            distance_sq <= effective_weapons_range * effective_weapons_range;
+                        let is_named_operation = operate_target.as_deref() == Some(uuid.as_str());
+                        let operation_distance =
+                            Vec3::new(physics.x, physics.y, physics.z).distance(target_pos);
+                        let inside_operation_reach = is_named_operation
+                            && operate_range.is_some_and(|range| operation_distance <= range);
+                        let is_coupled_operation_target = is_named_operation
+                            && matches!(
+                                operate_order,
+                                Some((_, super::server::OperateLockSystem::Tractor))
+                            )
+                            && tractor
+                                .and_then(|beam| beam.coupled_target.as_deref())
+                                .is_some_and(|coupled| coupled == uuid);
+                        inside_tactical_radar
+                            || inside_operation_reach
+                            || is_coupled_operation_target
                     }
                 }
             };

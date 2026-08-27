@@ -43,24 +43,27 @@
 //   - Damage margin per run = player.damage_dealt - enemy.damage_dealt; the
 //     merge reports the mean over every run that produced a report. Positive =
 //     the player side out-damaged the enemy.
-//   - Mandatory-set completion is a whole-run measure: a measurable run has at
-//     least one mandatory scenario objective, and succeeds only when ALL of
-//     them finish `Completed`. `Active` and `Failed` both fail the set. Reports
-//     with no usable objective projection are excluded from the denominator
-//     and counted by telemetry-gap reason; process failures remain failures and
-//     are excluded too.
-//   - The Falling Skyway clean-ledger classification applies only when a report
-//     carries `campaign.skyway.*` flags. A sampled run is `clean` when the
-//     locked six-objective spine is complete and all four campaign facts hold
-//     (no traffic lost, commitments clean, skyhook held, evidence filed),
-//     `completedButMid` when that spine completed but a campaign fact did not,
-//     and `incomplete` when the spine did not complete. Malformed objective or
-//     flag telemetry is unmeasurable, never silently classified.
+//   - Mandatory-set completion is a whole-run measure. By default a measurable
+//     run has at least one mandatory scenario objective and succeeds only when
+//     ALL finish `Completed`. A config may instead declare the authoritative
+//     `mandatory_objective_ids` set. In that mode exactly those objectives are
+//     measured: an expected objective that has not been posted yet is `Missing`
+//     and fails the run, while unrelated mandatory/optional objectives do not
+//     affect the result. Reports with no usable objective projection are
+//     excluded from the denominator and counted by telemetry-gap reason;
+//     process failures remain failures and are excluded too.
+//   - The Falling Skyway clean-ledger classification consumes that same explicit
+//     configured objective set. It is `clean` when the set completes and all
+//     four campaign facts hold (no traffic lost, commitments clean, skyhook
+//     held, evidence filed), `completedButMid` when the set completes but a
+//     campaign fact does not, and `incomplete` when the set does not complete.
+//     Malformed objective or flag telemetry is unmeasurable, never silently
+//     classified.
 //
-// The pure exports (mergeReports / formatMarkdown / formatMatrix / expandMatchups
-// / buildRunTasks / buildRunArgs
-// / resolveSeeds / evaluateThresholds / formatThresholds / failedThresholds / formatPhases /
-// formatStationActivity / runFileName) are unit-tested in
+// The pure exports (mergeReports / formatMarkdown / formatMandatoryObjectives /
+// formatMatrix / expandMatchups / buildRunTasks / buildRunArgs / resolveSeeds /
+// resolveMandatoryObjectiveIds / evaluateThresholds / formatThresholds /
+// failedThresholds / formatPhases / formatStationActivity / runFileName) are unit-tested in
 // tests/client/balance-runs.test.js with
 // fabricated report objects — no simulation required. Everything that spawns a
 // process lives in main() and its helpers.
@@ -81,7 +84,9 @@
 //
 // Known metrics: min_win_rate / max_win_rate (over completed runs),
 // min_ttk_median / max_ttk_median (seconds), min_damage_margin /
-// max_damage_margin (mean player-minus-enemy damage), max_failures.
+// max_damage_margin (mean player-minus-enemy damage),
+// min_mandatory_set_completion_rate / max_mandatory_set_completion_rate,
+// max_mandatory_set_unmeasurable, and max_failures.
 // Threshold results are RECORDED — written into merged.json and summary.md —
 // and never change the exit code unless the ratified config explicitly sets
 // `enforce_thresholds = true`.
@@ -149,6 +154,33 @@ export function resolveSeeds(seeds) {
     throw new Error(`\`seeds\` must be a positive integer count or an array, got ${JSON.stringify(seeds)}`);
   }
   return Array.from({ length: n }, (_, i) => i + 1);
+}
+
+/**
+ * Validate and canonicalise an optional authoritative mandatory-objective set.
+ * `null`/`undefined` preserves the legacy "all reported mandatory objectives"
+ * mode. An explicitly configured set must be non-empty, string-only, and
+ * unique after trimming so a typo cannot silently weaken the measurement.
+ */
+export function resolveMandatoryObjectiveIds(ids) {
+  if (ids == null) return null;
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error('`mandatory_objective_ids` must be a non-empty array of objective IDs');
+  }
+  const resolved = [];
+  const seen = new Set();
+  for (const raw of ids) {
+    if (typeof raw !== 'string' || raw.trim().length === 0) {
+      throw new Error('`mandatory_objective_ids` entries must be non-empty strings');
+    }
+    const id = raw.trim();
+    if (seen.has(id)) {
+      throw new Error(`\`mandatory_objective_ids\` contains duplicate ID ${JSON.stringify(id)}`);
+    }
+    seen.add(id);
+    resolved.push(id);
+  }
+  return resolved;
 }
 
 /**
@@ -285,31 +317,48 @@ function objectiveRowsObservation(report) {
     return { sampled: false, reason: 'malformedObjectives' };
   }
   const ids = new Set();
+  const canonical = [];
   for (const objective of objectives) {
+    const id = typeof objective?.id === 'string' ? objective.id.trim() : null;
     if (
       objective === null
       || typeof objective !== 'object'
-      || typeof objective.id !== 'string'
-      || objective.id.trim().length === 0
+      || id === null
+      || id.length === 0
       || typeof objective.mandatory !== 'boolean'
       || !['Active', 'Completed', 'Failed'].includes(objective.status)
-      || ids.has(objective.id)
+      || ids.has(id)
     ) {
       return { sampled: false, reason: 'malformedObjectives' };
     }
-    ids.add(objective.id);
+    ids.add(id);
+    canonical.push({ ...objective, id });
   }
-  return { sampled: true, objectives };
+  return { sampled: true, objectives: canonical };
 }
 
 /**
- * Classify one report's generic mandatory-objective set without allowing absent
+ * Classify one report's mandatory-objective set without allowing absent
  * telemetry to masquerade as either a loss or vacuous success.
  */
-function mandatorySetObservation(report) {
+function mandatorySetObservation(report, expectedIds) {
   const observation = objectiveRowsObservation(report);
   if (!observation.sampled) return observation;
   const { objectives } = observation;
+  if (expectedIds) {
+    const byId = new Map(objectives.map((objective) => [objective.id, objective]));
+    const objectivesByStatus = expectedIds.map((id) => {
+      const objective = byId.get(id);
+      if (!objective) return { id, status: 'Missing' };
+      if (!objective.mandatory) return { id, status: 'NotMandatory' };
+      return { id, status: objective.status };
+    });
+    return {
+      sampled: true,
+      completed: objectivesByStatus.every((objective) => objective.status === 'Completed'),
+      objectives: objectivesByStatus,
+    };
+  }
   const mandatory = objectives.filter((objective) => objective.mandatory);
   if (mandatory.length === 0) {
     return { sampled: false, reason: 'noMandatoryObjectives' };
@@ -327,22 +376,17 @@ const FALLING_SKYWAY_CLEAN_FLAGS = [
   'campaign.skyway.skyhook.held',
   'campaign.skyway.evidence.filed',
 ];
-const FALLING_SKYWAY_MANDATORY_SPINE = [
-  'obj-a1-survey',
-  'obj-a1-triage',
-  'obj-a2-line',
-  'obj-a2-rescue',
-  'obj-a2-storm',
-  'obj-a3-head',
-];
-
 /**
  * Classify the Falling Skyway clean-ledger benchmark from the canonical
  * end-of-run scenario projection. Reports from other scenarios are explicitly
  * not applicable; telemetry gaps in an identifiable Falling Skyway report are
  * unmeasurable rather than a benchmark failure.
  */
-function fallingSkywayCleanLedgerObservation(report) {
+function fallingSkywayCleanLedgerObservation(report, expectedIds) {
+  // The benchmark is meaningful only when the sweep declares its measured
+  // spine. This keeps it on exactly the same config semantics as the completion
+  // rate instead of maintaining a second hard-coded interpretation.
+  if (!expectedIds) return { applicable: false };
   const scenario = report?.scenario;
   if (scenario === null || typeof scenario !== 'object' || Array.isArray(scenario)) {
     return { applicable: false };
@@ -374,16 +418,11 @@ function fallingSkywayCleanLedgerObservation(report) {
     values.set(flag.name, flag.value);
   }
 
-  const objectiveRows = objectiveRowsObservation(report);
-  if (!objectiveRows.sampled) {
-    return { applicable: true, sampled: false, reason: objectiveRows.reason };
+  const mandatorySet = mandatorySetObservation(report, expectedIds);
+  if (!mandatorySet.sampled) {
+    return { applicable: true, sampled: false, reason: mandatorySet.reason };
   }
-  const objectivesById = new Map(objectiveRows.objectives.map((objective) => [objective.id, objective]));
-  const mandatorySpineComplete = FALLING_SKYWAY_MANDATORY_SPINE.every((id) => {
-    const objective = objectivesById.get(id);
-    return objective?.mandatory === true && objective.status === 'Completed';
-  });
-  if (!mandatorySpineComplete) {
+  if (!mandatorySet.completed) {
     return { applicable: true, sampled: true, classification: 'incomplete' };
   }
 
@@ -403,7 +442,8 @@ function fallingSkywayCleanLedgerObservation(report) {
  * A run WITH a report is classified by `report.outcome`; a run WITHOUT one
  * (error set) is a failure — counted, never fatal.
  */
-export function mergeReports(runs) {
+export function mergeReports(runs, { mandatoryObjectiveIds = null } = {}) {
+  const expectedMandatoryIds = resolveMandatoryObjectiveIds(mandatoryObjectiveIds);
   const byMatchup = new Map();
   const ensure = (run) => {
     let m = byMatchup.get(run.matchup);
@@ -441,6 +481,15 @@ export function mergeReports(runs) {
           noMandatoryObjectives: 0,
           malformedFlags: 0,
         },
+        mandatoryObjectiveStatuses: expectedMandatoryIds
+          ? Object.fromEntries(expectedMandatoryIds.map((id) => [id, {
+            completed: 0,
+            active: 0,
+            failed: 0,
+            missing: 0,
+            notMandatory: 0,
+          }]))
+          : null,
       };
       byMatchup.set(run.matchup, m);
     }
@@ -504,15 +553,26 @@ export function mergeReports(runs) {
       }
     }
 
-    const mandatorySet = mandatorySetObservation(run.report);
+    const mandatorySet = mandatorySetObservation(run.report, expectedMandatoryIds);
     if (mandatorySet.sampled) {
       m.mandatorySetSampled += 1;
       if (mandatorySet.completed) m.mandatorySetCompleted += 1;
+      for (const objective of mandatorySet.objectives ?? []) {
+        const counts = m.mandatoryObjectiveStatuses[objective.id];
+        switch (objective.status) {
+          case 'Completed': counts.completed += 1; break;
+          case 'Active': counts.active += 1; break;
+          case 'Failed': counts.failed += 1; break;
+          case 'Missing': counts.missing += 1; break;
+          case 'NotMandatory': counts.notMandatory += 1; break;
+          default: break;
+        }
+      }
     } else {
       m.mandatorySetUnmeasurable[mandatorySet.reason] += 1;
     }
 
-    const cleanLedger = fallingSkywayCleanLedgerObservation(run.report);
+    const cleanLedger = fallingSkywayCleanLedgerObservation(run.report, expectedMandatoryIds);
     if (cleanLedger.applicable) {
       m.fallingSkywayCleanLedgerApplicable = true;
       if (cleanLedger.sampled) {
@@ -567,6 +627,13 @@ export function mergeReports(runs) {
           ? m.mandatorySetCompleted / m.mandatorySetSampled
           : null,
         unmeasurable: mandatorySetUnmeasurable,
+        ...(expectedMandatoryIds ? {
+          objectiveIds: [...expectedMandatoryIds],
+          objectives: expectedMandatoryIds.map((id) => ({
+            id,
+            ...m.mandatoryObjectiveStatuses[id],
+          })),
+        } : {}),
       },
       fallingSkywayCleanLedger: m.fallingSkywayCleanLedgerApplicable ? {
         clean: m.fallingSkywayCleanLedgerClean,
@@ -688,7 +755,38 @@ export function formatMarkdown(summary) {
   lines.push(
     `**Totals:** ${t.runs} runs — ${t.wins}W / ${t.losses}L / ${t.draws}D / ${t.timeouts}T, ${t.failures} failed.`,
   );
+  const mandatoryObjectives = formatMandatoryObjectives(summary);
+  if (mandatoryObjectives) lines.push('', mandatoryObjectives);
   return lines.join('\n');
+}
+
+/**
+ * Render the configured mandatory set one objective at a time. Legacy sweeps
+ * have no authoritative ID list and therefore return no section.
+ */
+export function formatMandatoryObjectives(summary) {
+  const rows = [];
+  for (const s of Object.values(summary.matchups)) {
+    for (const objective of s.mandatorySetCompletion?.objectives ?? []) {
+      const sampled = objective.completed
+        + objective.active
+        + objective.failed
+        + objective.missing
+        + objective.notMandatory;
+      const completionRate = sampled > 0 ? objective.completed / sampled : null;
+      rows.push(
+        `| ${s.label} | ${objective.id} | ${objective.completed} | ${objective.active} | ${objective.failed} | ${objective.missing} | ${objective.notMandatory} | ${pct(completionRate)} |`,
+      );
+    }
+  }
+  if (rows.length === 0) return '';
+  return [
+    '### Mandatory objective status',
+    '',
+    '| Matchup | Objective | Completed | Active | Failed | Missing | Not mandatory | Complete |',
+    '|---|---|---:|---:|---:|---:|---:|---:|',
+    ...rows,
+  ].join('\n');
 }
 
 /**
@@ -764,6 +862,18 @@ const THRESHOLD_METRICS = {
   max_ttk_median: { actual: (s) => s.ttk.median, ok: (a, limit) => a <= limit },
   min_damage_margin: { actual: (s) => s.damageMargin.mean, ok: (a, limit) => a >= limit },
   max_damage_margin: { actual: (s) => s.damageMargin.mean, ok: (a, limit) => a <= limit },
+  min_mandatory_set_completion_rate: {
+    actual: (s) => s.mandatorySetCompletion.rate,
+    ok: (a, limit) => a >= limit,
+  },
+  max_mandatory_set_completion_rate: {
+    actual: (s) => s.mandatorySetCompletion.rate,
+    ok: (a, limit) => a <= limit,
+  },
+  max_mandatory_set_unmeasurable: {
+    actual: (s) => s.mandatorySetCompletion.unmeasurable.total,
+    ok: (a, limit) => a <= limit,
+  },
   max_failures: { actual: (s) => s.failures, ok: (a, limit) => a <= limit },
 };
 
@@ -965,6 +1075,8 @@ and merges the per-run reports. Markdown summary → stdout; with --out <dir>,
 merged.json + summary.md + the per-run AAR reports (runs/<matchup>-seed<N>.json)
 are also written there (keep that dir out of git). A config [thresholds] table
 (and per-[[matchup]] overrides) is evaluated and recorded in both outputs.
+Set mandatory_objective_ids = [...] to measure exactly one scenario spine;
+unposted expected objectives count as failures rather than vacuous success.
 Set enforce_thresholds = true in a ratified config to fail the batch when a
 threshold is exceeded or cannot be measured.
 
@@ -987,6 +1099,7 @@ async function main() {
   }
 
   const config = parseToml(await readFile(cli.config, 'utf8'));
+  const mandatoryObjectiveIds = resolveMandatoryObjectiveIds(config.mandatory_objective_ids);
   const matchups = expandMatchups(config);
   const tasks = buildRunTasks(config, matchups);
   const concurrency = config.concurrency ?? os.cpus().length;
@@ -1005,7 +1118,7 @@ async function main() {
     return result;
   });
 
-  const summary = mergeReports(runs);
+  const summary = mergeReports(runs, { mandatoryObjectiveIds });
   const markdown = formatMarkdown(summary);
 
   let out = markdown;

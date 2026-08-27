@@ -1363,6 +1363,7 @@ world.falling_skyway.comms.traffic_lost_lark,Urgent Skyway Control report when H
 world.falling_skyway.comms.traffic_lost_pell,Urgent Skyway Control report when Hauler Pell is destroyed,[Control to destroyer. Hauler Pell is gone. We have logged the loss.]
 world.falling_skyway.comms.traffic_lost_wick,Urgent Skyway Control report when Shuttle Wick is destroyed,[Control to destroyer. Shuttle Wick is gone. We have logged the loss.]
 world.falling_skyway.objective.approach.text,Objective text — the Act 2 approach to the stricken craft in Falling Skyway,"[Lyra Ascending is adrift in the lane with no drive. Close on her before the front does.]"
+world.falling_skyway.objective.rescue_scan.text,Objective step — assess Lyra Ascending through the shared Sensors scan path,[Scan Lyra Ascending and assess her drive.]
 world.falling_skyway.objective.rescue.text,Objective text — the Act 2 tow rescue in Falling Skyway,"[Get a line on Lyra Ascending and pull her clear before the second band.]"
 world.falling_skyway.objective.storm.text,Objective text — the Act 2 storm watch in Falling Skyway,[See the sweep through. The corridor is yours again when the last band passes.]
 world.falling_skyway.objective.lee.text,Objective text — the Act 2 withdrawal to the storm lee in Falling Skyway,[Take the ship west into the lee and ride the rest of it out.]

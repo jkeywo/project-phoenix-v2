@@ -2992,6 +2992,7 @@ on_deadline("storm_band_two_due", "on_storm_band_two");
 on_deadline("storm_band_three_due", "on_storm_band_three");
 on_deadline("lyra_clear_due", "on_lyra_clear_due");
 on_deadline("storm_passed_due", "on_storm_passed");
+on_flag_set("scan.lyra_ascending.taken", "on_lyra_scanned");
 
 // THE RESCUE'S COMPLETION SIGNAL. The tractor's arrest-decline (issue #1158)
 // recovers the towed craft's condition while the beam holds, and the Lyra
@@ -3073,12 +3074,13 @@ fn on_storm_front(ctx) {
     if ctx.flags.skyway_traffic_lost_pell > 0 {
         ctx.effects.fail_objective("obj-a2-shelter-pell");
     }
-    // TWO OBJECTIVES FOR ONE RESCUE, and the split is forced by what a Reach
-    // directive MEANS: `detect_reached_objective_completion` completes any
-    // objective whose Reach anchor an AI-flown helm arrives at. An objective
-    // carrying the approach therefore cannot also be the one that records the
-    // tow — it would complete the moment the ship got there, whether or not
-    // anybody ever put a line on her.
+    // TWO OPERATIONAL OBJECTIVES FOR ONE RESCUE, and the split is forced by
+    // what a Reach directive MEANS: `detect_reached_objective_completion`
+    // completes any objective whose Reach anchor an AI-flown helm arrives at.
+    // An objective carrying the approach therefore cannot also be the one that
+    // records the tow — it would complete the moment the ship got there,
+    // whether or not anybody ever put a line on her. Science's optional scan
+    // beside them observes the rescue without deciding it.
     //
     // The approach, then, carries the Helm directive, while the rescue carries
     // the Engineering-owned Tow directive below. Both consume the SAME
@@ -3094,6 +3096,21 @@ fn on_storm_front(ctx) {
         directive_anchor: "lyra_drift",
         targets: ["world.falling_skyway.entity.lyra_ascending.name"],
     }, "skyway_lyra_recovered");
+    // Science gets its own observable rescue step. It is optional because the
+    // tow, not the reading, decides whether Lyra lives; nevertheless it carries
+    // the same Scan directive a human Sensors console uses. The Reach objective
+    // brings the hull into range, Sensors retries through ordinary admission,
+    // and the shared scan applier raises the authored `scan.<id>.taken` memory.
+    post_remembered_objective(ctx, #{
+        id: "obj-a2-rescue-scan",
+        text: "world.falling_skyway.objective.rescue_scan.text",
+        mandatory: false,
+        source: "mission",
+        base_priority: 71,
+        directive_kind: "Scan",
+        target: "world.falling_skyway.entity.lyra_ascending.name",
+        targets: ["world.falling_skyway.entity.lyra_ascending.name"],
+    }, "scan.lyra_ascending.taken");
     // The rescue still resolves only from what the crew DID — the tow's own
     // threshold crossing, or the deadline — but the directive makes that work
     // addressable by the same Engineering Backfill host a human shares.
@@ -3121,16 +3138,31 @@ fn on_storm_front(ctx) {
 // The dwell is a property of the band, and a band that spawned without one
 // would be a wall. Falling Skyway overrides the template sphere with a narrow,
 // corridor-long box: the front physically takes traffic left on the lane while
-// the shelter and ladder routes remain laterally clear. The forty-second dwell
-// and template-authored damage are deliberately unchanged (#1044 remains the
-// playtest-tuning issue).
+// the shelter and ladder routes remain laterally clear.
+//
+// #1142's fixed Backfill sweep completed the mandatory spine in all 20 seeds at
+// the shared template's 5 damage/s. The scenario-specific 11.85 damage/s keeps the
+// same authored fronts, pierce, movement tax and forty-second dwell, but turns
+// their existing SEEDED region-damage distribution into material system
+// pressure: most distributions preserve enough propulsion to cross, while a few
+// knock it out before the final band clears and trap the destroyer in the hazard
+// until hull loss. This is the permitted hardening after AI-first improvements
+// made failure impossible; no new randomness or later deadline is introduced.
+// Keep the one helper as the single tuning site.
+fn storm_band_overrides() {
+    #{
+        shape: #{ type: "box", half_extents: [flt("260"), flt("260"), flt("1100")] },
+        effects: #{ damage_zone: #{ damage_per_second: flt("11.85") } },
+    }
+}
+
 fn on_storm_band_one(ctx) {
     ctx.effects.spawn_entity(#{
         template_path: "assets/entities/region_radiation_band.toml",
         name: "storm_band_one",
         anchor: "storm_band_north",
         groups: ["storm_bands"],
-        overrides: #{ shape: #{ type: "box", half_extents: [flt("260"), flt("260"), flt("1100")] } },
+        overrides: storm_band_overrides(),
     });
     ctx.schedule.in_seconds(40).destroy_entity("storm_band_one");
     ctx.flags.increment("a2_band_one", 1);
@@ -3142,7 +3174,7 @@ fn on_storm_band_two(ctx) {
         name: "storm_band_two",
         anchor: "storm_band_gate",
         groups: ["storm_bands"],
-        overrides: #{ shape: #{ type: "box", half_extents: [flt("260"), flt("260"), flt("1100")] } },
+        overrides: storm_band_overrides(),
     });
     ctx.schedule.in_seconds(40).destroy_entity("storm_band_two");
     ctx.flags.increment("a2_band_two", 1);
@@ -3154,10 +3186,17 @@ fn on_storm_band_three(ctx) {
         name: "storm_band_three",
         anchor: "storm_band_head",
         groups: ["storm_bands"],
-        overrides: #{ shape: #{ type: "box", half_extents: [flt("260"), flt("260"), flt("1100")] } },
+        overrides: storm_band_overrides(),
     });
     ctx.schedule.in_seconds(40).destroy_entity("storm_band_three");
     ctx.flags.increment("a2_band_three", 1);
+}
+
+// A returned reading, never objective bookkeeping, is the rescue scan's
+// authority. The flag is latched by science::server at the same site that
+// produces a human scan result; completing a step here cannot fabricate it.
+fn on_lyra_scanned(ctx) {
+    ctx.effects.complete_objective("obj-a2-rescue-scan");
 }
 
 // The rescue landed. The flag rose because the tractor's recovery carried her

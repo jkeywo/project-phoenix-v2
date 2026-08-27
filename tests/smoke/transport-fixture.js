@@ -1,68 +1,79 @@
-// tests/smoke/transport-fixture.js — the seam where every PeerJS-specific
-// assumption in the smoke suite is concentrated (prep for issue #1112, the
-// PeerJS→Phoenix transport replacement).
+// tests/smoke/transport-fixture.js — the seam where every transport-specific
+// assumption in the smoke suite is concentrated (issue #1112).
 //
 // `fixtures.js` exposes a stable, transport-agnostic surface to specs: a
-// neutral "read the host's join target off the page" helper and a
-// `TestClient` façade (`send`/`waitForMessage`/`lastMessage`/`close`). This
-// module is the one place that knows *how* that surface is actually
-// implemented today — that the join target is a PeerJS peer id living in the
-// QR link's URL hash, that connecting means `new window.Peer()` +
-// `peer.connect(...)`, and that the fake transport injected for CI is
-// `peerjs-shim.js` riding a `BroadcastChannel`.
+// neutral "read the host's join target off the page" helper and a `TestClient`
+// façade (`send`/`waitForMessage`/`lastMessage`/`close`). This module is the
+// one place that knows *how* that surface is actually implemented — that the
+// join target is a structured Phoenix join code living in the QR link's URL
+// fragment, that connecting means a rendezvous socket, an SDP exchange, a pair
+// of DataChannels and a compatibility handshake, and that the fake transport
+// injected for CI is `rendezvous-shim.js`.
 //
-// When #1112 swaps the real transport, the intent is that only this file and
-// its fake counterpart (`peerjs-shim.js`, or whatever replaces it) need to
-// change. `fixtures.js` and the ~40 spec files that import `readHostPeerId` /
-// `createTestClient` from it should not.
+// It used to know a different set of facts: `new window.Peer()`,
+// `peer.connect(peerId)` and a `peerjs-shim.js` riding a BroadcastChannel. That
+// swap is the whole of #1112 as far as this suite is concerned, and it is why
+// this file exists at all — `fixtures.js` and the ~40 spec files that import
+// `readHostPeerId` / `createTestClient` from it did not change with it.
 
 import fs from 'fs';
 import path from 'path';
 
 /** The fake transport injected into every smoke page — see its own header
- *  comment for how it fakes `window.Peer` over BroadcastChannel, including
- *  the `window.__wasmReady` latch and the `window.__peerjsShim` sever/revive
- *  test-only control. Exported so `shim.spec.js` can unit-test it directly
- *  without going through a live page. */
-export const SHIM = fs.readFileSync(path.join(__dirname, 'peerjs-shim.js'), 'utf-8');
-
-// Stub the real transport CDN script so it can't clobber the shim's
-// window.Peer, and so a slow/blocked CDN in CI can't stall page load behind
-// a synchronous <script src="...">.
-export const STUB_TRANSPORT_SCRIPT = `'use strict';
-// No-op — window.Peer is already provided by the transport-fixture shim's
-// addInitScript.
-if (typeof window.Peer === 'undefined') { window.Peer = function Peer() {}; };
-`;
-
-// The URL glob the real transport library ships from today, intercepted by
-// installTransportFixture() below so the stub above always wins.
-const TRANSPORT_CDN_GLOB = '**/peerjs*.js';
+ *  comment for how it fakes the rendezvous socket and RTCPeerConnection over
+ *  BroadcastChannel, including the `window.__wasmReady` latch and the
+ *  `window.__transportShim` sever/revive test-only control. Exported so
+ *  `transport-shim.spec.js` can exercise it directly. */
+export const SHIM = fs.readFileSync(path.join(__dirname, 'rendezvous-shim.js'), 'utf-8');
 
 /**
- * Install the fake transport into a fresh BrowserContext: inject the CDN
- * stub and the BroadcastChannel shim as init scripts (so they run before any
- * page script), and intercept the CDN script itself so a real network
- * fetch can't race the stub. Called once from the `context` fixture in
- * `fixtures.js` — every page created in that context inherits it.
+ * The delivery stamp the built client bundle declares
+ * (`<meta name="phoenix-client-stamp">`, written by scripts/build-client.mjs).
+ *
+ * A test client is a blank page, not the client bundle, so it has no meta tag
+ * of its own — but since #1112 the host REFUSES a joiner that presents no
+ * stamp, so it cannot simply omit one. Reading the real bundle's field keeps
+ * these clients honest: they present exactly what a phone presents, and a
+ * protocol or content bump that stopped reaching the client page would fail
+ * here too rather than being quietly waved through.
+ */
+export const CLIENT_STAMP = (() => {
+  try {
+    const html = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'dist', 'client', 'index.html'),
+      'utf-8',
+    );
+    const m = /<meta\s+name="phoenix-client-stamp"\s+content="([^"]*)"/.exec(html);
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+})();
+
+/**
+ * Install the fake transport into a fresh BrowserContext: inject the shim as
+ * an init script so it runs before any page script and
+ * `gui/rendezvous-transport.js` finds `window.PhoenixTransportFactories`
+ * already published. Called once from the `context` fixture in `fixtures.js` —
+ * every page created in that context inherits it.
+ *
+ * There is no CDN script to stub any more: #1112 deleted the PeerJS tag from
+ * both pages, and the transport is a module island served from the same origin
+ * as everything else.
  */
 export async function installTransportFixture(ctx) {
-  await ctx.addInitScript({ content: STUB_TRANSPORT_SCRIPT });
   await ctx.addInitScript({ content: SHIM });
-  await ctx.route(TRANSPORT_CDN_GLOB, (route) =>
-    route.fulfill({ contentType: 'application/javascript', body: STUB_TRANSPORT_SCRIPT }),
-  );
 }
 
 /**
  * Read the host's join target off a live server page.
  *
- * Today that target is a PeerJS peer id embedded in the QR link's URL hash
- * (`client/index.html#<peerId>`); the #1111 brief has the host keep
- * `#qr-link.href` populated with whatever a rendezvous join code looks like,
- * so this scrape is expected to survive that change with only its docstring
- * needing an update. Treat the return value as an opaque join target, not as
- * "the peer id" — that's exactly the assumption this helper exists to hide.
+ * That target is the structured join code the rendezvous service issued,
+ * embedded in the QR link's URL fragment (`client/index.html#<full code>`) —
+ * the same string a phone's camera opens and a guest can paste. Treat the
+ * return value as an opaque join target, not as "the peer id": that assumption
+ * is exactly what this helper exists to hide, and it stopped being true in
+ * #1112.
  */
 export async function readHostJoinTarget(serverPage) {
   await serverPage.waitForFunction(
@@ -70,7 +81,7 @@ export async function readHostJoinTarget(serverPage) {
       const el = document.getElementById('qr-link');
       return el?.href?.includes('#');
     },
-    { timeout: 20_000 },
+    { timeout: 30_000 },
   );
   return serverPage.evaluate(() => {
     const href = document.getElementById('qr-link').href;
@@ -84,48 +95,112 @@ export async function readHostJoinTarget(serverPage) {
  * surface `createTestClient` (in `fixtures.js`) folds into the stable
  * `TestClient` façade alongside `page`/`token`/`close`.
  *
- * This is the single PeerJS-shaped chunk of the client-connect path: `new
- * window.Peer()`, `peer.connect(joinTarget)`, the reliable
- * `DataConnection`'s `on('open'|'data')`, and sending the initial `Identify`.
- * It also defines the page-side contract that specs reach into directly from
- * their own `page.evaluate` calls, BYPASSING the exported façade — and that
- * blast radius is large, not small: `window.__messages` (the inbound message
- * log) is read/filtered/mutated directly by ~29 spec files, and
- * `window.__conn`'s API is used raw by two (`snapshot-channel.spec.js`
- * touches `conn.peerConnection.createDataChannel`, genuine PeerJS/WebRTC
- * internals; `tactical-fire-flow.spec.js` calls `window.__conn.send`).
- * Separately, `shim.spec.js` constructs `window.Peer` itself and
- * `reconnect-midgame-sever.spec.js` drives `window.__peerjsShim.sever/revive`
- * plus production `window.connectionManager`. #1112 must therefore preserve
- * the page-global contract's names/shape/timing exactly (or edit those specs)
- * — keeping the exported `createTestClient`/`readHostPeerId` façade stable is
- * necessary but not sufficient.
+ * This is a joiner in its own right rather than a call into
+ * `gui/rendezvous-transport.js`: it speaks the same rendezvous frames and the
+ * same handshake, but it does NOT run `localiseTree` over inbound messages, so
+ * `window.__messages` holds the raw wire shapes the specs assert on. Importing
+ * the shipped module here would resolve every string id to display text and
+ * silently change what ~29 spec files are asserting.
+ *
+ * It also defines the page-side contract specs reach into directly from their
+ * own `page.evaluate` calls, BYPASSING the exported façade, and that blast
+ * radius is large: `window.__messages` (the inbound message log) is
+ * read/filtered/mutated directly by ~29 spec files, and `window.__conn` — the
+ * reliable DataChannel — is used raw by `tactical-fire-flow.spec.js`
+ * (`__conn.send`). Both names and shapes are preserved across the #1112 swap;
+ * `window.__conn` is now the channel itself rather than a PeerJS
+ * DataConnection, which is API-compatible for the one method that is used.
+ * `window.__reliableMessages` / `window.__snapshotMessages` are new alongside
+ * them: the same messages split by the channel they arrived on, which is how
+ * snapshot-channel.spec.js asserts a delivery CLASS rather than merely that a
+ * message turned up.
  *
  * @param {import('@playwright/test').Page} page
  * @param {string} joinTarget
- * @param {{ token: string, name: string, waitFor: string }} opts
+ * @param {{ token: string, name: string, waitFor: string, snapshot?: boolean, stamp?: string }} opts
+ *   `snapshot` (default true) negotiates the lossy unordered channel alongside
+ *   the reliable one, exactly as the shipped client does. Pass `false` to model
+ *   a client whose lossy channel never came up, which is what the host's
+ *   per-token snapshot→reliable fallback exists for.
  * @returns {Promise<{
  *   send: (type: string, data?: object) => Promise<void>,
  *   waitForMessage: (type: string, timeout?: number) => Promise<object>,
  *   lastMessage: (type: string) => Promise<object|null>,
  * }>}
  */
-export async function connectTestClient(page, joinTarget, { token, name, waitFor }) {
+export async function connectTestClient(
+  page,
+  joinTarget,
+  { token, name, waitFor, snapshot = true, stamp = CLIENT_STAMP },
+) {
   await page.evaluate(
-    ({ joinTarget, token, name, waitFor }) =>
+    ({ joinTarget, token, name, waitFor, snapshot, stamp }) =>
       new Promise((resolve, reject) => {
         window.__messages = [];
-        const peer = new window.Peer();
-        peer.on('open', () => {
-          const conn = peer.connect(joinTarget);
+        // The same inbound messages, split by the channel they arrived on, so a
+        // spec can assert a delivery CLASS rather than only that a message
+        // turned up. `__messages` stays the merged log every other spec reads.
+        window.__reliableMessages = [];
+        window.__snapshotMessages = [];
+        const factories = window.PhoenixTransportFactories;
+        const socket = factories.socket('https://rendezvous.test/v1/join');
+        let pc = null;
+
+        const record = (raw, log) => {
+          try {
+            const msg = JSON.parse(raw);
+            window.__messages.push(msg);
+            log.push(msg);
+          } catch { /* ignore */ }
+        };
+
+        const offer = async () => {
+          pc = factories.peer({ iceServers: [] });
+          const conn = pc.createDataChannel('reliable', { ordered: true });
           window.__conn = conn;
-          conn.on('open', () => {
-            conn.send(JSON.stringify({ type: 'Identify', data: { token, name } }));
-          });
-          conn.on('data', (raw) => {
-            try { window.__messages.push(JSON.parse(raw)); } catch { /* ignore */ }
-          });
-        });
+          window.__snapshotConn = snapshot
+            ? pc.createDataChannel('snapshot', { ordered: false, maxRetransmits: 0 })
+            : null;
+          if (window.__snapshotConn) {
+            window.__snapshotConn.onmessage = (e) => record(e.data, window.__snapshotMessages);
+          }
+          conn.onopen = () => {
+            // The host's compatibility handshake first; Identify only once it
+            // has accepted this build.
+            conn.send(JSON.stringify({ type: 'JoinHandshake', data: { stamp } }));
+          };
+          conn.onmessage = (e) => {
+            let msg = null;
+            try { msg = JSON.parse(e.data); } catch { return; }
+            if (msg.type === 'JoinAccepted') {
+              conn.send(JSON.stringify({ type: 'Identify', data: { token, name } }));
+              return;
+            }
+            if (msg.type === 'JoinRefused') {
+              reject(new Error(`host refused this client: ${msg.data?.code} ${msg.data?.detail || ''}`));
+              return;
+            }
+            window.__messages.push(msg);
+            window.__reliableMessages.push(msg);
+          };
+          const description = await pc.createOffer();
+          await pc.setLocalDescription(description);
+          socket.send(JSON.stringify({ v: 1, type: 'signal', payload: { sdp: pc.localDescription } }));
+        };
+
+        socket.onmessage = async (e) => {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'ready') {
+            socket.send(JSON.stringify({ v: 1, type: 'join', code: joinTarget }));
+          } else if (msg.type === 'joined') {
+            await offer();
+          } else if (msg.type === 'signal' && msg.payload?.sdp) {
+            await pc.setRemoteDescription(msg.payload.sdp);
+          } else if (msg.type === 'error' || msg.type === 'closed') {
+            reject(new Error(`rendezvous refused the join: ${msg.reason}`));
+          }
+        };
+
         const t = setInterval(() => {
           if (window.__messages?.some((m) => m.type === waitFor)) {
             clearInterval(t);
@@ -134,7 +209,7 @@ export async function connectTestClient(page, joinTarget, { token, name, waitFor
         }, 50);
         setTimeout(() => { clearInterval(t); reject(new Error(`${waitFor} timeout (token=${token})`)); }, 15_000);
       }),
-    { joinTarget, token, name, waitFor },
+    { joinTarget, token, name, waitFor, snapshot, stamp },
   );
 
   return {

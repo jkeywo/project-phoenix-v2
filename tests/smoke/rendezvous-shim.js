@@ -1,7 +1,11 @@
-// A local stand-in for the Phoenix rendezvous service and for WebRTC, so the
-// browser smoke suite can drive the whole #1111 join tracer. CI has no real
-// WebRTC and no deployed worker; this is the same trick tests/smoke/peerjs-shim.js
-// plays for PeerJS, one layer lower.
+// tests/smoke/rendezvous-shim.js — the ONE transport stand-in for the browser
+// smoke suite (issues #1111, #1112).
+//
+// CI has no real WebRTC and no deployed rendezvous worker, so the suite needs a
+// fake for both. It used to need two — this and a whole `window.Peer`
+// replacement (`peerjs-shim.js`) — because two transports were live at once.
+// #1112 retired PeerJS, and this file went with it from "the #1111 tracer's
+// fake" to "the transport every smoke spec runs on".
 //
 // Two fakes, installed as window.PhoenixTransportFactories, which
 // gui/rendezvous-transport.js takes its WebSocket and RTCPeerConnection from:
@@ -14,18 +18,33 @@
 //                only the socket between them is fake.
 //   peer(config) an RTCPeerConnection that pairs two pages' DataChannels over a
 //                BroadcastChannel once an offer/answer has crossed the (real)
-//                relay.
+//                relay. Honours the `createDataChannel` init bag, so the lossy
+//                'snapshot' channel is distinguishable from the reliable one.
 //
 // The first page to open a `/v1/host` socket owns the registry; every other
-// page relays its frames to that page over a BroadcastChannel. #1111's tracer
-// is one host and N crew clients, so one owner is enough — a multi-host smoke
-// case (#1114) would need an election here.
+// page relays its frames to that page over a BroadcastChannel. The product is
+// one host and N crew clients, so one owner is enough — a multi-host smoke case
+// (#1114) would need an election here.
+//
+// It also carries the two things the whole suite is wired to, inherited from
+// the shim it replaced:
+//
+//   window.__wasmReady / the 'wasm-ready' event — set once the host page has
+//       BOTH opened its rendezvous socket AND dispatched PhoenixReady. Every
+//       spec gates on it through fixtures.js's waitForWasmReady.
+//   window.__transportShim.sever()/revive() — a page-local kill switch for the
+//       "phone's radio slept" failure: channels close on both ends without
+//       either side calling close(), and every retry keeps failing until the
+//       test explicitly revives, so auto-reconnect cannot race the assertion.
 
 (() => {
   const SIGNAL_BUS = 'phoenix-rendezvous-shim';
   const MEDIA_BUS = 'phoenix-rtc-shim';
   const REGISTRY_URL = '/__rendezvous-registry.js';
   const FORMAT_URL = '/assets/join/join-codes.json';
+
+  // Set by sever(); nothing on this page can reach the network while true.
+  let offline = false;
 
   // ── The fake rendezvous socket ────────────────────────────────────────────
 
@@ -81,7 +100,6 @@
   function makeSocket(url) {
     const connId = `shim-${Math.random().toString(16).slice(2, 10)}`;
     const role = String(url).endsWith('/v1/host') ? 'host' : 'client';
-    if (role === 'host' && !registryReady) becomeOwner();
 
     const sock = {
       url,
@@ -91,21 +109,41 @@
       onerror: null,
       onclose: null,
       send(text) {
+        if (this.readyState !== 1) return;
         callOwner({ op: 'receive', connId, frame: JSON.parse(text) });
       },
       close() {
         if (this.readyState === 3) return;
+        const wasOpen = this.readyState === 1;
         this.readyState = 3;
         localSockets.delete(connId);
-        callOwner({ op: 'disconnect', connId });
+        if (wasOpen) callOwner({ op: 'disconnect', connId });
         if (this.onclose) this.onclose();
       },
     };
+
+    // A severed page cannot reach the service at all. Fire the same
+    // error-then-close a real socket does when the network is gone, so the
+    // transport's own retry loop is what the test observes rather than a
+    // fabricated one.
+    if (offline) {
+      setTimeout(() => {
+        if (sock.readyState === 3) return;
+        sock.readyState = 3;
+        if (sock.onerror) sock.onerror();
+        if (sock.onclose) sock.onclose();
+      }, 0);
+      return sock;
+    }
+
+    if (role === 'host' && !registryReady) becomeOwner();
     localSockets.set(connId, sock);
     setTimeout(() => {
+      if (sock.readyState === 3) return;
       sock.readyState = 1;
       if (sock.onopen) sock.onopen();
       callOwner({ op: 'connect', connId, role });
+      if (role === 'host') { hostSocketOpen = true; maybeDispatchReady(); }
     }, 0);
     return sock;
   }
@@ -123,22 +161,31 @@
     const channel = link.channels.get(msg.label);
     if (!channel) return;
     if (msg.close) {
+      if (channel.readyState === 'closed') return;
       channel.readyState = 'closed';
       if (channel.onclose) channel.onclose();
       return;
     }
+    if (offline) return;
     if (channel.onmessage) channel.onmessage({ data: msg.data });
   };
 
-  function makeChannel(linkId, side, label) {
+  function makeChannel(linkId, side, label, init) {
+    const opts = init || {};
     return {
       label,
       readyState: 'connecting',
+      // Recorded, and mirrored onto the answering end, so a spec can prove the
+      // snapshot channel really negotiated unordered and non-retransmitting
+      // rather than being the reliable channel under another name.
+      ordered: opts.ordered !== false,
+      maxRetransmits: opts.maxRetransmits ?? null,
       onopen: null,
       onmessage: null,
       onclose: null,
       onerror: null,
       send(data) {
+        if (offline || this.readyState !== 'open') return;
         media.postMessage({ link: linkId, side, label, data });
       },
       close() {
@@ -152,6 +199,7 @@
 
   function openChannels(link) {
     for (const channel of link.channels.values()) {
+      if (channel.readyState !== 'connecting') continue;
       channel.readyState = 'open';
       if (channel.onopen) channel.onopen();
     }
@@ -161,31 +209,32 @@
     let linkId = null;
     let side = null;
     let link = null;
-    const localLabels = [];
+    const localChannels = [];
 
     const pc = {
       localDescription: null,
       remoteDescription: null,
       onicecandidate: null,
+      oniceconnectionstatechange: null,
       ondatachannel: null,
       iceConnectionState: 'connected',
       addEventListener() {},
       removeEventListener() {},
       getStats: () => Promise.resolve(new Map()),
-      createDataChannel(label) {
+      createDataChannel(label, init) {
         if (!linkId) {
           linkId = `link-${Math.random().toString(16).slice(2, 10)}`;
           side = 'offer';
           link = { side, channels: new Map() };
           links.set(linkId, link);
         }
-        localLabels.push(label);
-        const channel = makeChannel(linkId, side, label);
+        localChannels.push({ label, init: init || {} });
+        const channel = makeChannel(linkId, side, label, init);
         link.channels.set(label, channel);
         return channel;
       },
       async createOffer() {
-        return { type: 'offer', link: linkId, channels: [...localLabels] };
+        return { type: 'offer', link: linkId, channels: localChannels.map((c) => ({ ...c })) };
       },
       async createAnswer() {
         return { type: 'answer', link: linkId };
@@ -200,9 +249,9 @@
           side = 'answer';
           link = { side, channels: new Map() };
           links.set(linkId, link);
-          for (const label of d.channels || []) {
-            const channel = makeChannel(linkId, side, label);
-            link.channels.set(label, channel);
+          for (const spec of d.channels || []) {
+            const channel = makeChannel(linkId, side, spec.label, spec.init);
+            link.channels.set(spec.label, channel);
             if (this.ondatachannel) this.ondatachannel({ channel });
           }
           // Both ends are wired the moment the answerer has seen the offer;
@@ -224,9 +273,104 @@
 
   window.PhoenixTransportFactories = { socket: makeSocket, peer: makePeer };
 
+  // ── wasm-ready signalling ─────────────────────────────────────────────────
+  //
+  // __wasmReady is set when BOTH:
+  //   1. the host page has opened its rendezvous socket (so the join panel is
+  //      about to carry a code readHostJoinTarget can scrape), AND
+  //   2. PhoenixReady has fired — dispatched by server.html's finishInit()
+  //      after the async config preload completes and wasm_init() has been
+  //      called.
+  //
+  // Both halves matter: TrunkApplicationStarted fires before the async
+  // map/entity config fetch sequence completes, which used to cause Welcome
+  // timeouts.
+
+  let hostSocketOpen = false;
+  let phoenixReady = false;
+  let readyFired = false;
+
+  function maybeDispatchReady() {
+    if (!hostSocketOpen || !phoenixReady || readyFired) return;
+    readyFired = true;
+    window.__wasmReady = true;
+    window.dispatchEvent(new CustomEvent('wasm-ready'));
+  }
+
+  window.addEventListener('PhoenixReady', () => {
+    phoenixReady = true;
+    maybeDispatchReady();
+  });
+
+  // ── Test-only kill/revive support (issue #614, re-homed in #1112) ─────────
+  //
+  // Simulates a silently-dropped link — a phone's radio sleeping mid-game —
+  // without either side calling close() on its own connection. Real WebRTC
+  // failures like this fire the DataChannel's close on BOTH ends, which is
+  // exactly what the transport's reconnect-with-backoff loop needs to observe.
+  //
+  // Page-scoped rather than addressed by a pair of ids, because that is what a
+  // dropped radio actually is: everything THIS page has goes, and everything it
+  // tries next fails, until the test brings it back. The severed page also
+  // cannot reach the rendezvous service, so its automatic retries keep failing
+  // and cannot race ahead of the assertion that the retry control appeared.
+  window.__transportShim = {
+    /** Kill every link this page holds and keep it off the network. */
+    sever() {
+      offline = true;
+      // Channels first: the far end learns the link is gone from the media
+      // frames, and the send() guard above cannot swallow them because they
+      // are posted by close() before `offline` blocks anything else.
+      for (const [id, link] of links) {
+        for (const channel of link.channels.values()) {
+          if (channel.readyState === 'closed') continue;
+          channel.readyState = 'closed';
+          media.postMessage({ link: id, label: channel.label, side: link.side, close: true });
+          if (channel.onclose) channel.onclose();
+        }
+      }
+      for (const sock of [...localSockets.values()]) sock.close();
+    },
+
+    /**
+     * Put this page back on the network. Existing links stay dead — the
+     * transport must retry to build fresh ones, which is the real user-visible
+     * "retry now" path.
+     */
+    revive() {
+      offline = false;
+    },
+
+    /**
+     * Every DataChannel this page holds, for inspection:
+     * `{ "<label>@<link>": { readyState, ordered, maxRetransmits, side } }`.
+     */
+    dataChannels() {
+      const out = {};
+      for (const [id, link] of links) {
+        for (const [label, channel] of link.channels) {
+          out[`${label}@${id}`] = {
+            readyState: channel.readyState,
+            ordered: channel.ordered,
+            maxRetransmits: channel.maxRetransmits,
+            side: link.side,
+          };
+        }
+      }
+      return out;
+    },
+  };
+
   // A closed page must not leave a live record behind, or the next attempt
-  // resolves a host that is not there.
+  // resolves a host that is not there — and the host must run its
+  // wasm_player_disconnected lifecycle rather than keeping a console
+  // "occupied" by a phone that has gone.
   window.addEventListener('pagehide', () => {
+    for (const link of links.values()) {
+      for (const channel of link.channels.values()) {
+        try { channel.close(); } catch { /* already gone */ }
+      }
+    }
     for (const sock of [...localSockets.values()]) sock.close();
   });
 })();

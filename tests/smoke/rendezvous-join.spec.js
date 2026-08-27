@@ -1,4 +1,4 @@
-// Issue #1111 — the typed five-letter join, end to end in a browser.
+// Issues #1111/#1112 — the typed five-letter join, end to end in a browser.
 //
 // One host page registers with a rendezvous service and is issued a code; a
 // separate client page types those five letters, resolves the host, opens a
@@ -8,19 +8,16 @@
 // pairs the two pages' DataChannels over a BroadcastChannel — CI has no real
 // WebRTC and no deployed worker.
 //
-// The PeerJS route is untouched by all of this: it is what every other spec in
-// this directory still exercises, and this host keeps running it too.
+// Nothing here opts in any more. #1112 made this THE route: the host registers
+// on an ordinary page load and the client page asks for five letters with no
+// parameter set, which is exactly what these specs now exercise.
 
 import { test, expect, waitForWasmReady } from './fixtures';
 import { ts } from './strings';
 
-const SERVICE = 'http://localhost:3000/__rendezvous';
-
 async function bootHost(context) {
   const page = await context.newPage();
-  await page.goto(
-    `/?scenario=assets/worlds/default.toml&rendezvous=${encodeURIComponent(SERVICE)}`,
-  );
+  await page.goto('/?scenario=assets/worlds/default.toml');
   await waitForWasmReady(page);
   await page.waitForFunction(
     () => /^[A-Z]{5}$/.test(document.getElementById('join-code')?.textContent ?? ''),
@@ -32,7 +29,7 @@ async function bootHost(context) {
 const joinCodeOn = (page) => page.evaluate(() => document.getElementById('join-code').textContent);
 const joinLinkOn = (page) => page.evaluate(() => document.getElementById('qr-link').href);
 
-async function openClient(context, search = `?rendezvous=${encodeURIComponent(SERVICE)}`) {
+async function openClient(context, search = '') {
   const page = await context.newPage();
   await page.goto(`/client/${search}`);
   return page;

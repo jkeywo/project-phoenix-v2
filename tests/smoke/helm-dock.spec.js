@@ -2,7 +2,7 @@
 //
 // This is the browser-level smoke the AC asks for. It runs under the same
 // Playwright harness as the other `tests/smoke/*.spec.js` (WASM host + real
-// PeerJS-shimmed clients), so it is GATE/CI work, not part of the cheap
+// shimmed-transport clients), so it is GATE/CI work, not part of the cheap
 // `npx vitest run` unit pass — building the WASM host and launching browsers is
 // expensive and is not run inline during development.
 //

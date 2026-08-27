@@ -5,15 +5,22 @@
 // page itself closes and a brand-new page reconnects with the same token),
 // this test simulates a silently dropped DataChannel — e.g. a phone's radio
 // sleeping — while the SAME client.html page stays alive. That is exactly the
-// case connection-manager.js's new reconnect-with-backoff logic exists for:
+// case the Phoenix transport's reconnect-with-backoff loop exists for:
 // the page never reloads, so it's the manager's own retry loop (not a fresh
 // page load) that must re-establish the connection, re-send Identify, and
 // land back on the same station.
 //
 // Drives the REAL client.html DOM (not the raw createTestClient JS shim) so
-// the assertions exercise the actual `gui/connection-manager.js` +
+// the assertions exercise the actual `gui/rendezvous-transport.js` +
 // `setConnectionStatus` UI wiring described in the issue, and the actual
 // `gui/sim-state.js` state that consoles render from.
+//
+// Issue #1112 replaced the mechanism and kept every assertion: the sever is
+// now the transport shim's page-scoped kill switch rather than a PeerJS peer
+// pair, and the instrumented link is `window.phoenixLink` rather than
+// `window.connectionManager`. What is being proved is the #1112 reconnect AC
+// almost word for word — same code, same session token, station and projection
+// restored, and no five letters typed a second time.
 
 import { test, expect, readHostPeerId, createServerPage } from './fixtures';
 
@@ -63,6 +70,49 @@ test('sever + revive mid-game: seat restored and console reflects current system
   // Solo crew: Captain covers every console at 1P, so a single player can
   // Engage and the game moves into InProgress.
   const client = await context.newPage();
+
+  // Instrument the WIRE before anything connects, so we can assert Identify
+  // was re-sent after revive.
+  //
+  // Identify is the transport's own frame, not something the page sends
+  // through `window.phoenixLink` — wrapping the link would record commands and
+  // miss the one message under test. This wraps the peer factory the transport
+  // takes its RTCPeerConnections from, which records everything this phone puts
+  // on a DataChannel and survives a reconnect: the joiner builds a NEW peer
+  // connection and NEW channels for every attempt, so anything wrapped lower
+  // down would be thrown away by exactly the event being tested.
+  //
+  // It has to be installed BEFORE the page connects, because the transport
+  // resolves its factories once at construction; the baseline captured below is
+  // what separates the reconnect's Identify from the original one.
+  await client.addInitScript(() => {
+    window.__sentMessages = [];
+    const install = () => {
+      const factories = window.PhoenixTransportFactories;
+      if (!factories) return false;
+      const makePeer = factories.peer;
+      factories.peer = (config) => {
+        const pc = makePeer(config);
+        const create = pc.createDataChannel.bind(pc);
+        pc.createDataChannel = (label, init) => {
+          const channel = create(label, init);
+          const send = channel.send.bind(channel);
+          channel.send = (payload) => {
+            try {
+              const msg = JSON.parse(payload);
+              window.__sentMessages.push({ type: msg.type, data: msg.data, channel: label });
+            } catch (_) { /* not JSON — not ours */ }
+            return send(payload);
+          };
+          return channel;
+        };
+        return pc;
+      };
+      return true;
+    };
+    if (!install()) document.addEventListener('DOMContentLoaded', install, { once: true });
+  });
+
   await client.goto(`/client/#${hostId}`);
   await client.waitForSelector('#station-list .station-row', { timeout: 15_000 });
   await client.click('#station-list .station-row:has-text("Captain") button.claim-btn');
@@ -83,28 +133,21 @@ test('sever + revive mid-game: seat restored and console reflects current system
     { timeout: 10_000 },
   );
 
-  // Instrument: record every ConnectionManager.send() call so we can assert
-  // Identify was re-sent after revive. Also wrap simState.apply(), which is
-  // the first stop for every inbound ServerMessage, and record only fresh
-  // system-state messages that arrive after that reconnect Identify.
-  const { myPeerId, myToken } = await client.evaluate(() => {
-    window.__sentMessages = [];
-    window.__recordPostReconnectState = false;
+  // Baseline the Identify log, and wrap simState.apply() — the first stop for
+  // every inbound ServerMessage — so only the state messages that arrive after
+  // the RECONNECT's Identify are recorded. Without the baseline the phone's
+  // original Identify would arm the recorder and the final assertion could pass
+  // on state cached before the sever.
+  const { myToken } = await client.evaluate(() => {
+    const identifies = () => window.__sentMessages.filter((m) => m.type === 'Identify').length;
+    const baseline = identifies();
+    window.__identifyBaseline = baseline;
     window.__postReconnectStateMessages = [];
-    const cm = window.connectionManager;
-    const originalSend = cm.send.bind(cm);
-    cm.send = (type, data) => {
-      window.__sentMessages.push({ type, data });
-      if (type === 'Identify') {
-        window.__recordPostReconnectState = true;
-      }
-      return originalSend(type, data);
-    };
     const simState = window.simState;
     const originalApply = simState.apply.bind(simState);
     simState.apply = (msg) => {
       if (
-        window.__recordPostReconnectState &&
+        identifies() > baseline &&
         (msg?.type === 'BlackboardUpdate' || msg?.type === 'SystemHullUpdate' || msg?.type === 'SimState')
       ) {
         window.__postReconnectStateMessages.push({
@@ -115,30 +158,21 @@ test('sever + revive mid-game: seat restored and console reflects current system
       }
       return originalApply(msg);
     };
-    return {
-      myPeerId: cm.peer?.id,
-      myToken: sessionStorage.getItem('session-token'),
-    };
+    return { myToken: sessionStorage.getItem('session-token') };
   });
 
-  expect(myPeerId).toBeTruthy();
   expect(myToken).toBeTruthy();
 
   const stateBeforeSever = await consoleSystemState(client);
   expect(stateBeforeSever.repairHull.length > 0 || !!stateBeforeSever.captainBlackboard).toBe(true);
 
   // ── Sever ──────────────────────────────────────────────────────────────
-  // Kill the DataChannel on both ends via the shim's test-only API. The shim
-  // broadcasts this control message to every page context, so the server-side
-  // conn.on('close') path runs too. It also holds the link offline until the
-  // explicit revive below, preventing auto-retry from racing past the visible
-  // retry assertion.
-  await client.evaluate(
-    ({ myPeerId, hostId }) => {
-      window.__peerjsShim.severConnection(myPeerId, hostId);
-    },
-    { myPeerId, hostId },
-  );
+  // Kill this page's DataChannels without either side calling close(). The
+  // shim posts the close to the far end too, so the server-side
+  // conn.on('close') path runs. It also holds this page off the network until
+  // the explicit revive below, so the transport's own backoff loop cannot race
+  // past the visible-retry assertion by reconnecting on its own.
+  await client.evaluate(() => window.__transportShim.sever());
 
   // The UI must show the disconnected/retrying state with a visible
   // "Retry now" control — this is the acceptance-criteria affordance, not
@@ -155,26 +189,26 @@ test('sever + revive mid-game: seat restored and console reflects current system
   // (real DOM click) rather than waiting out the full backoff schedule. This
   // exercises the same retryNow() path a real user's tap would, and keeps the
   // test fast/deterministic.
-  await client.evaluate(
-    ({ myPeerId, hostId }) => {
-      window.__peerjsShim.reviveConnection(myPeerId, hostId);
-    },
-    { myPeerId, hostId },
-  );
+  await client.evaluate(() => window.__transportShim.revive());
   await client.click('#retry-now-btn');
 
-  // Reconnect re-establishes the DataChannel, which must re-send Identify
-  // (bug #1 from the issue: _identSent must reset on close).
+  // Reconnect re-establishes the DataChannel, which must re-send Identify —
+  // with the SAME session token, and without the guest re-entering the join
+  // code (#1112 AC3).
   await client.waitForFunction(
-    () => window.__sentMessages?.some((m) => m.type === 'Identify'),
+    () => window.__sentMessages.filter((m) => m.type === 'Identify').length
+      > window.__identifyBaseline,
     undefined,
-    { timeout: 10_000 },
+    { timeout: 15_000 },
   );
   const identifyCalls = await client.evaluate(
     () => window.__sentMessages.filter((m) => m.type === 'Identify'),
   );
-  expect(identifyCalls.length).toBeGreaterThanOrEqual(1);
+  expect(identifyCalls.length).toBeGreaterThanOrEqual(2);
   expect(identifyCalls[identifyCalls.length - 1].data.token).toBe(myToken);
+  // …and it went out on the reliable channel, which is where the host's
+  // Identify gate reads it.
+  expect(identifyCalls[identifyCalls.length - 1].channel).toBe('reliable');
 
   // Prove a fresh post-reconnect system-state message landed through the
   // client state pipeline after Identify. Without this, the final simState

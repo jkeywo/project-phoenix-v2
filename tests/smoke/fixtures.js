@@ -61,18 +61,21 @@
 import { test as base, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
+import {
+  SHIM,
+  installTransportFixture,
+  readHostJoinTarget,
+  connectTestClient,
+} from './transport-fixture';
 
-
-export const SHIM = fs.readFileSync(path.join(__dirname, 'peerjs-shim.js'), 'utf-8');
+export { SHIM };
 
 // Stub CDN scripts so they don't overwrite the shim or block execution.
 // In CI environments the unpkg / jsdelivr CDN can be slow or blocked, and
 // synchronous <script src="..."> tags block all inline scripts below them.
-const STUB_PEER_JS = `'use strict';
-// No-op — window.Peer is already provided by the peerjs-shim addInitScript.
-if (typeof window.Peer === 'undefined') { window.Peer = function Peer() {}; };
-`;
-
+// The transport CDN's own stub lives in transport-fixture.js, next to the
+// shim it protects; the QR library is unrelated to the transport, so its
+// stub stays here.
 const STUB_QRCODE = `'use strict';
 // Minimal stub so server.html QR rendering code doesn't crash during tests.
 window.QRCode = { toCanvas: function () { return Promise.resolve(); } };
@@ -166,15 +169,11 @@ fn on_survey(ctx) {
 export const test = base.extend({
   context: async ({ browser }, use) => {
     const ctx = await browser.newContext();
-    await ctx.addInitScript({ content: STUB_PEER_JS });
+    await installTransportFixture(ctx);
     await ctx.addInitScript({ content: STUB_QRCODE });
-    await ctx.addInitScript({ content: SHIM });
 
-    // Intercept CDN script loads — stub PeerJS so the real library doesn't
-    // overwrite the shim, and stub QRCode so it doesn't block.
-    await ctx.route('**/peerjs*.js', (route) =>
-      route.fulfill({ contentType: 'application/javascript', body: STUB_PEER_JS }),
-    );
+    // Intercept the QR CDN load — stub QRCode so it doesn't block. The
+    // transport CDN is intercepted by installTransportFixture() above.
     await ctx.route('**/qrcode*.js', (route) =>
       route.fulfill({ contentType: 'application/javascript', body: STUB_QRCODE }),
     );
@@ -320,67 +319,21 @@ export async function createTestClient(
   await page.goto(`http://localhost:3000/blank-${routeKey}`);
 
   // Connect to host and wait for the readiness message before returning.
-  await page.evaluate(
-    ({ hostId, token, name, waitFor }) =>
-      new Promise((resolve, reject) => {
-        window.__messages = [];
-        const peer = new window.Peer();
-        peer.on('open', () => {
-          const conn = peer.connect(hostId);
-          window.__conn = conn;
-          conn.on('open', () => {
-            conn.send(JSON.stringify({ type: 'Identify', data: { token, name } }));
-          });
-          conn.on('data', (raw) => {
-            try { window.__messages.push(JSON.parse(raw)); } catch { /* ignore */ }
-          });
-        });
-        const t = setInterval(() => {
-          if (window.__messages?.some((m) => m.type === waitFor)) {
-            clearInterval(t);
-            resolve();
-          }
-        }, 50);
-        setTimeout(() => { clearInterval(t); reject(new Error(`${waitFor} timeout (token=${token})`)); }, 15_000);
-      }),
-    { hostId, token, name, waitFor },
+  // Every transport-shaped detail of "connect" lives in transport-fixture.js
+  // — this function only owns the Playwright page lifecycle and the stable
+  // façade shape below.
+  const { send, waitForMessage, lastMessage } = await connectTestClient(
+    page,
+    hostId,
+    { token, name, waitFor },
   );
 
   const client = {
     page,
     token,
-
-    async send(type, data) {
-      await page.evaluate(
-        ({ type, data }) => {
-          const msg = data !== undefined ? { type, data } : { type };
-          window.__conn.send(JSON.stringify(msg));
-        },
-        { type, data },
-      );
-    },
-
-    async waitForMessage(type, timeout = 15_000) {
-      await page.waitForFunction(
-        (t) => window.__messages?.some((m) => m.type === t),
-        type,
-        { timeout },
-      );
-      return page.evaluate(
-        (t) => window.__messages.find((m) => m.type === t),
-        type,
-      );
-    },
-
-    async lastMessage(type) {
-      return page.evaluate(
-        (t) => {
-          const msgs = window.__messages || [];
-          return msgs.filter((m) => m.type === t).pop() ?? null;
-        },
-        type,
-      );
-    },
+    send,
+    waitForMessage,
+    lastMessage,
 
     async close() {
       await page.close();
@@ -566,18 +519,11 @@ export function readModPackManifest(name) {
   throw new Error(`mod-pack fixture ${name}.zip has no scenarios.toml`);
 }
 
-// Reads the host peer ID from the server page's QR-link href, which is set
-// after the PeerJS peer opens.
+// Reads the host's join target from the server page's QR-link href, which is
+// set after the host's transport has opened. Thin wrapper kept under its
+// original name/signature for the ~44 spec files that import it — the actual
+// scrape lives in transport-fixture.js's readHostJoinTarget, the neutral seam
+// this name delegates to.
 export async function readHostPeerId(serverPage) {
-  await serverPage.waitForFunction(
-    () => {
-      const el = document.getElementById('qr-link');
-      return el?.href?.includes('#');
-    },
-    { timeout: 20_000 },
-  );
-  return serverPage.evaluate(() => {
-    const href = document.getElementById('qr-link').href;
-    return href.split('#')[1];
-  });
+  return readHostJoinTarget(serverPage);
 }
